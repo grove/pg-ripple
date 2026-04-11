@@ -296,6 +296,16 @@ See [plans/ecosystem/datalog.md](plans/ecosystem/datalog.md) for the full design
   - Recursive rules → `WITH RECURSIVE … CYCLE`
   - Negation → `NOT EXISTS` (higher strata only)
   - All constants dictionary-encoded before SQL generation (integer joins everywhere)
+- [ ] **Arithmetic built-ins**
+  - Comparison operators (`>`, `>=`, `<`, `<=`, `=`, `!=`) → SQL `WHERE` clause expressions
+  - Arithmetic expressions (`?z IS ?x + ?y`) → SQL computed columns
+  - String functions (`STRLEN`, `REGEX`) → SQL `LENGTH`, `~` with dictionary decode join
+- [ ] **Constraint rules (integrity constraints)**
+  - Empty-head rules (`:- body .`) express patterns that must never hold
+  - Compile to existence checks; materialized mode → pg_trickle IMMEDIATE stream tables for in-transaction validation
+  - `pg_triple.check_constraints()` returns violations as JSONB
+  - `pg_triple.enforce_constraints` GUC: `'error'` / `'warn'` / `'off'`
+  - Directly complements and extends SHACL validation
 - [ ] **Built-in rule sets** (`src/datalog/builtins.rs`)
   - `pg_triple.load_rules_builtin('rdfs')` — W3C RDFS entailment (13 rules)
   - `pg_triple.load_rules_builtin('owl-rl')` — W3C OWL 2 RL profile (~80 rules)
@@ -312,11 +322,11 @@ See [plans/ecosystem/datalog.md](plans/ecosystem/datalog.md) for the full design
 - [ ] **SPARQL engine integration**
   - Derived VP tables transparent to query planner (same lookup path as base VP tables)
   - On-demand mode prepends CTEs to generated SQL
-- [ ] pg_regress: `datalog_rdfs.sql`, `datalog_owl_rl.sql`, `datalog_custom.sql`, `datalog_negation.sql`
+- [ ] pg_regress: `datalog_rdfs.sql`, `datalog_owl_rl.sql`, `datalog_custom.sql`, `datalog_negation.sql`, `datalog_arithmetic.sql`, `datalog_constraints.sql`
 
 ### Exit Criteria
 
-Users can load RDFS or OWL RL rule sets (or custom rules), and SPARQL queries return inferred triples. Both on-demand and materialized modes operational. Stratified negation correctly validated and compiled.
+Users can load RDFS or OWL RL rule sets (or custom rules), and SPARQL queries return inferred triples. Arithmetic built-ins filter correctly in rule bodies. Constraint rules detect and report violations (optionally rejecting transactions). Both on-demand and materialized modes operational. Stratified negation correctly validated and compiled.
 
 ---
 

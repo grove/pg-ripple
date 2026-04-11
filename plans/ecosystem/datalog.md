@@ -581,25 +581,107 @@ On-demand CTEs add query planning and execution overhead proportional to the num
 
 ---
 
-## 14. Limitations and Future Work
+## 14. Included in v0.8.5, Limitations, and Future Work
 
-### Initial release limitations
+### Arithmetic built-ins (v0.8.5)
 
-- **No aggregation in rule heads**: Datalog rules derive quads, not aggregated values. Aggregation is handled by SPARQL queries over derived triples.
-- **No function symbols**: standard Datalog restriction — no Skolem functions or computed terms.
+A set of built-in predicates for arithmetic comparison and computation, compiled directly to SQL operators:
+
+| Built-in | SQL mapping | Example |
+|---|---|---|
+| `?x > ?y`, `>=`, `<`, `<=`, `=`, `!=` | `>`, `>=`, `<`, `<=`, `=`, `<>` | `?age > 18` |
+| `?z IS ?x + ?y` | `?x + ?y AS z` | `?total IS ?price + ?tax` |
+| `?z IS ?x * ?y` | `?x * ?y AS z` | `?area IS ?w * ?h` |
+| `STRLEN(?s) > ?n` | `LENGTH(d.value) > ?n` | `STRLEN(?name) > 0` |
+| `REGEX(?s, ?pattern)` | `d.value ~ ?pattern` | `REGEX(?email, '@')` |
+
+Arithmetic built-ins appear only in rule bodies and compile to `WHERE` clause expressions. They do not derive new quads — they filter. Arithmetic over dictionary-encoded integers works directly (encoded literals preserve numeric sort order for `xsd:integer`, `xsd:decimal`, `xsd:double`). String functions require a dictionary decode join.
+
+Example:
+
+```prolog
+# Eligible for senior discount: type Employee, age > 60
+?x ex:seniorDiscount "true"^^xsd:boolean :- ?x rdf:type ex:Employee, ?x ex:age ?a, ?a >= 60 .
+```
+
+Compiled SQL:
+
+```sql
+INSERT INTO _pg_triple.vp_derived_88_delta (s, o, g)
+SELECT t1.s, 301, t1.g
+FROM _pg_triple.vp_7 t1      -- rdf:type
+JOIN _pg_triple.vp_55 t2 ON t2.s = t1.s   -- ex:age
+WHERE t1.o = 200              -- ex:Employee
+  AND t2.o >= 60              -- arithmetic filter
+ON CONFLICT DO NOTHING
+```
+
+### Constraint rules — integrity constraints (v0.8.5)
+
+Rules with an **empty head** express integrity constraints: fact patterns that must never hold. When the body is satisfiable, the constraint is violated.
+
+```prolog
+# A person cannot be their own manager
+:- ?x ex:manager ?x .
+
+# A resource cannot be both a class and an individual
+:- ?x rdf:type owl:Class, ?x rdf:type owl:NamedIndividual .
+
+# Disjoint classes: Cat and Dog cannot share instances
+:- ?x rdf:type ex:Cat, ?x rdf:type ex:Dog .
+```
+
+Constraint rules compile to existence checks:
+
+```sql
+-- :- ?x ex:manager ?x .
+SELECT EXISTS (
+    SELECT 1 FROM _pg_triple.vp_42 WHERE s = o  -- self-loop
+) AS violated;
+```
+
+**Execution modes**:
+
+- **Materialized (pg_trickle)**: each constraint rule becomes a stream table; any row in the table = a violation. With `IMMEDIATE` refresh, violations are caught within the same transaction as the DML. This directly complements and extends SHACL validation.
+- **On-demand**: `pg_triple.check_constraints()` runs all constraint queries and returns violations as JSONB.
+- **Enforcement**: `pg_triple.enforce_constraints = 'error' | 'warn' | 'off'` GUC controls behaviour on insert — reject the transaction (`error`), log a warning (`warn`), or do nothing (`off`).
+
+Catalog: constraint rules are stored in `_pg_triple.rules` with `head_pred = NULL` to distinguish them from derivation rules.
+
+API:
+
+```sql
+-- Check all constraints, return violations
+SELECT * FROM pg_triple.check_constraints();
+-- Returns: rule_id, rule_text, violating_subjects (BIGINT[]), violation_count
+```
+
+### Initial release limitations (v0.8.5)
+
+- **No aggregation in rule bodies** (Datalog^agg): rules cannot use `COUNT`, `SUM`, `MIN`, `MAX` in body atoms. Aggregation is handled by SPARQL queries over derived quads. Deferred to post-1.0 (requires aggregation-stratification spec).
+- **No function symbols**: standard Datalog restriction — no Skolem functions or computed terms. Existential rules (Datalog+) are deferred.
 - **No disjunction in rule heads**: one head atom per rule (standard Datalog). OWL axioms requiring disjunction (outside OWL RL) are not supported.
 - **No magic sets optimization**: full materialization or full on-demand CTE. Magic sets (goal-directed evaluation) is deferred to post-1.0.
 - **Cross-graph negation**: `NOT GRAPH ?g { … }` (negating a variable-graph pattern) is not supported in the initial release. Negation is restricted to constant-graph or default-graph body atoms.
 
 ### Future extensions
 
-| Feature | Description | Target |
-|---|---|---|
-| Magic sets | Goal-directed evaluation: only derive facts relevant to a specific query | Post-1.0 |
-| Incremental rule updates | Add/remove individual rules without recomputing the entire program | Post-1.0 |
-| Rule provenance | Track which base triples caused which derived triples (for explanation) | Post-1.0 |
-| Probabilistic rules | Weighted rules for uncertain reasoning (e.g., link prediction) | Post-1.0 |
-| SWRL integration | Semantic Web Rule Language as an alternative rule syntax | Post-1.0 |
+| Feature | Description | Tier | Target |
+|---|---|---|---|
+| Aggregation in rule bodies (Datalog^agg) | `COUNT`, `SUM`, `MIN`, `MAX` in body atoms with aggregation-stratification; `GROUP BY` semantics. Enables analytics-derived rules and graph metrics. | 1 | Post-1.0 |
+| `owl:sameAs` merging | Entity canonicalization: all facts about `?x` also apply to `?y` when `?x owl:sameAs ?y`. Pre-pass canonicalization in the SQL compiler. Completes OWL RL coverage. | 1 | Post-1.0 |
+| Rule provenance (why-provenance) | Track which base quads caused each derived quad in a parallel `_pg_triple.rule_provenance` table. `pg_triple.explain_derivation(s, p, o)` returns a derivation tree. Critical for trust and debugging. | 1 | Post-1.0 |
+| Magic sets optimization | Goal-directed evaluation: only derive facts relevant to a specific query, reducing materialization cost for large rule sets. Well-studied SQL encoding. | 1 | Post-1.0 |
+| Incremental rule updates | Add/remove individual rules without recomputing the entire program. Requires dependency-aware invalidation of affected strata only. | 1 | Post-1.0 |
+| Graph analytics rules | Shortest paths, connected components, PageRank expressed as recursive Datalog rules with aggregation. Requires Datalog^agg. Maps to `WITH RECURSIVE` + aggregate window functions. | 2 | Post-1.0 |
+| Existential rules (Datalog+/−) | Existentially quantified variables in rule heads → Skolem blank node generation. Extends coverage from OWL RL to OWL DL subset. Well-understood but non-trivial implementation. | 2 | Post-1.0 |
+| Temporal Datalog | Rules over time-stamped quads with temporal operators (`BEFORE`, `AFTER`, `DURING`). Aligns with ROADMAP v1.3 (TimescaleDB integration). | 2 | Post-1.0 |
+| Well-founded semantics | Three-valued model (true/false/unknown) for non-stratifiable programs. More permissive than stratification for cyclic ontologies with defaults. Known SQL encoding via iterative fixpoint. | 2 | Post-1.0 |
+| Multi-head rules | Syntactic sugar: single rule body → multiple head atoms. Desugars to multiple single-head rules at compile time. Low implementation cost. | 3 | Post-1.0 |
+| Rule priorities / defeasible logic | Priority ordering for contradictory derived facts. Standard in Description Logic reasoners. Complex semantics but important for ontology merging. | 3 | Post-1.0 |
+| Active rules (ECA) | Event-condition-action rules that trigger side-effects (`NOTIFY`, function calls) rather than deriving quads. Breaks pure declarative model; maps to PG `NOTIFY` + triggers. | 3 | Post-1.0 |
+| Probabilistic rules | Weighted rules for uncertain reasoning (e.g., link prediction). Requires probability propagation semantics (ProbLog-style). | 3 | Post-1.0 |
+| SWRL integration | Semantic Web Rule Language as an alternative rule syntax. Turtle-based; maps to the same IR. | 3 | Post-1.0 |
 
 ---
 
