@@ -12,7 +12,7 @@ A general-purpose Datalog engine subsumes and generalizes all of these:
 | OWL RL profile | ~80 entailment rules from the W3C spec | Fixed rule set |
 | Datalog engine | All of the above + arbitrary user-defined rules | Fully extensible |
 
-A triple `(s, p, o)` is a ternary relation; Datalog rules over ternary relations are exactly how RDFS, OWL RL, and custom domain rules are formally specified. The fit is natural.
+A quad `(s, p, o, g)` is how pg_triple actually stores data: every VP table carries `(s BIGINT, o BIGINT, g BIGINT)` where `g` is the dictionary-encoded named graph IRI (0 = default graph). Datalog rules over this quad structure are exactly how RDFS, OWL RL, and custom domain rules are formally specified. The graph dimension is first-class — rules can read from and write into specific named graphs, propagate facts across graphs, or operate graph-agnostically.
 
 ### Use cases beyond standard entailment
 
@@ -88,37 +88,68 @@ Negation-as-failure uses `NOT` before a body atom. The negated predicate must be
 ?x ex:missingEmail "true"^^xsd:boolean :- ?x rdf:type foaf:Person, NOT ?x foaf:mbox ?_ .
 ```
 
-### 3.3 Named graph scoping
+### 3.3 Named graph scoping (quad patterns)
 
-Rules can be scoped to a named graph using `GRAPH <iri> { … }` syntax around body atoms:
+`GRAPH` can appear in both head and body atoms. The graph term can be a **constant IRI** or a **variable** (`?g`), making full quad patterns possible.
+
+#### Constant graph — read from a specific named graph
 
 ```prolog
-# Derive from a specific graph
+# Derive into default graph from a trusted named graph
 ?x ex:verified "true"^^xsd:boolean :- GRAPH ex:trusted { ?x rdf:type ex:Entity } .
 ```
 
-Rules can also target a specific output graph:
+#### Constant graph — write derived triples into a named graph
 
 ```prolog
-# Write derived triples into a named graph
+# All RDFS inference output goes into ex:inferred
 GRAPH ex:inferred { ?x rdf:type ?c } :- ?x rdf:type ?b, ?b rdfs:subClassOf ?c .
 ```
 
-If no graph is specified, the default graph is used for both reading and writing.
+#### Variable graph — propagate within the same graph (graph-transparent rule)
+
+```prolog
+# Derive ex:indirectManager within the same graph the source facts live in
+GRAPH ?g { ?x ex:indirectManager ?z } :- GRAPH ?g { ?x ex:manager ?z } .
+GRAPH ?g { ?x ex:indirectManager ?z } :- GRAPH ?g { ?x ex:manager ?y }, GRAPH ?g { ?y ex:indirectManager ?z } .
+```
+
+#### Variable graph — derive provenance metadata
+
+```prolog
+# Record which named graphs an entity appears in
+?x ex:appearsIn ?g :- GRAPH ?g { ?x rdf:type ex:Entity } .
+```
+
+#### Cross-graph rules
+
+```prolog
+# Merge type assertions from all named graphs into the default graph
+?x rdf:type ?c :- GRAPH ?g { ?x rdf:type ?c } .
+```
+
+**Default behaviour when `GRAPH` is omitted**: controlled by the GUC `pg_triple.rule_graph_scope`:
+- `'default'` *(recommended)*: unscoped atoms match only the default graph (`g = 0`). Derived triples are written to the default graph.
+- `'all'`: unscoped atoms match triples in any graph. Useful for ontology-level rules that should span the whole dataset.
+
+See §7.3 for the GUC definition.
 
 ### 3.4 Grammar (informal EBNF)
 
 ```
-RuleSet    ::= (Rule)*
-Rule       ::= Head ':-' Body '.'
-Head       ::= GraphWrap? TriplePattern
-Body       ::= Literal (',' Literal)*
-Literal    ::= 'NOT'? GraphWrap? TriplePattern
-GraphWrap  ::= 'GRAPH' Term '{' ... '}'
+RuleSet       ::= (Rule)*
+Rule          ::= Head ':-' Body '.'
+Head          ::= GraphPattern? TriplePattern
+Body          ::= Literal (',' Literal)*
+Literal       ::= 'NOT'? GraphPattern? TriplePattern
+GraphPattern  ::= 'GRAPH' GraphTerm '{' '}'
+GraphTerm     ::= Variable | PrefixedIRI | FullIRI   -- variables allowed: ?g
 TriplePattern ::= Term Term Term
-Term       ::= Variable | PrefixedIRI | FullIRI | Literal
-Variable   ::= '?' [a-zA-Z_][a-zA-Z0-9_]*
+Term          ::= Variable | PrefixedIRI | FullIRI | RDFLiteral
+Variable      ::= '?' [a-zA-Z_][a-zA-Z0-9_]*
 ```
+
+Key point: `GraphTerm` admits variables, enabling full quad patterns. A `Variable` used as a graph term (`?g`) is unified across all body atoms and the head atom that share it, exactly as subject/predicate/object variables are.
 
 ---
 
@@ -140,9 +171,9 @@ struct Atom {
 }
 
 enum Term {
-    Var(String),       // ?x
+    Var(String),       // ?x — unified across the rule during compilation
     Const(i64),        // dictionary-encoded IRI/literal
-    Default,           // default graph (g = 0)
+    AnyGraph,          // unscoped atom — resolved to g = 0 or ANY g per rule_graph_scope GUC
 }
 
 enum BodyLiteral {
@@ -243,6 +274,26 @@ SELECT s, o, g FROM indirect_manager WHERE NOT is_cycle
 
 The `CYCLE … SET is_cycle USING path` clause is PostgreSQL 14+ syntax for cycle detection — mandatory to guard against circular graphs.
 
+When the graph term is a **variable** (`?g`), the `CYCLE` clause must include `g` to detect cycles within each graph independently:
+
+```sql
+-- Variable-graph transitive rule:
+-- GRAPH ?g { ?x ex:indirectManager ?z } :- GRAPH ?g { ?x ex:manager ?z } .
+-- GRAPH ?g { ?x ex:indirectManager ?z } :- GRAPH ?g { ?x ex:manager ?y }, GRAPH ?g { ?y ex:indirectManager ?z } .
+
+WITH RECURSIVE indirect_manager(s, o, g) AS (
+    SELECT s, o, g FROM _pg_triple.vp_42   -- ex:manager (all graphs)
+  UNION
+    SELECT m.s, im.o, m.g
+    FROM _pg_triple.vp_42 m
+    JOIN indirect_manager im ON im.s = m.o AND im.g = m.g  -- same graph
+)
+CYCLE s, o, g SET is_cycle USING path   -- g included: cycles are per-graph
+SELECT s, o, g FROM indirect_manager WHERE NOT is_cycle
+```
+
+If `g` is a constant (specific named graph or default graph), it is pushed into the `WHERE` clause instead and `CYCLE` only needs `(s, o)`.
+
 ### 6.3 Negation (higher strata)
 
 Negated body atoms compile to `NOT EXISTS`:
@@ -335,11 +386,17 @@ WHERE im.o = 43  -- ex:Alice (encoded)
 ### 7.3 Mode selection
 
 ```sql
--- GUC parameter (session or server level)
+-- Inference execution mode
 SET pg_triple.inference_mode = 'materialized';  -- default when pg_trickle is present
 SET pg_triple.inference_mode = 'on_demand';      -- default when pg_trickle is absent
 SET pg_triple.inference_mode = 'off';            -- disable inference entirely
+
+-- Graph scope for unscoped body atoms (atoms without an explicit GRAPH clause)
+SET pg_triple.rule_graph_scope = 'default';  -- match only g = 0 (recommended)
+SET pg_triple.rule_graph_scope = 'all';      -- match triples in any graph
 ```
+
+`rule_graph_scope = 'default'` is the safe default: rules that don't mention `GRAPH` operate only on the default graph, preventing unintended cross-graph reasoning. Set `'all'` for ontology-level rules (RDFS, OWL RL) that should span the whole dataset regardless of which named graph the facts live in.
 
 ---
 
@@ -528,10 +585,11 @@ On-demand CTEs add query planning and execution overhead proportional to the num
 
 ### Initial release limitations
 
-- **No aggregation in rule heads**: Datalog rules derive triples, not aggregated values. Aggregation is handled by SPARQL queries over derived triples.
+- **No aggregation in rule heads**: Datalog rules derive quads, not aggregated values. Aggregation is handled by SPARQL queries over derived triples.
 - **No function symbols**: standard Datalog restriction — no Skolem functions or computed terms.
 - **No disjunction in rule heads**: one head atom per rule (standard Datalog). OWL axioms requiring disjunction (outside OWL RL) are not supported.
 - **No magic sets optimization**: full materialization or full on-demand CTE. Magic sets (goal-directed evaluation) is deferred to post-1.0.
+- **Cross-graph negation**: `NOT GRAPH ?g { … }` (negating a variable-graph pattern) is not supported in the initial release. Negation is restricted to constant-graph or default-graph body atoms.
 
 ### Future extensions
 
@@ -569,6 +627,6 @@ Alternatively, the Datalog engine can fold into v0.8.0 as a sub-theme if the ser
 
 A Datalog reasoning engine over pg_triple transforms the triple store from a passive data store into an active knowledge base. Users load rules (standard RDFS/OWL RL or custom), and the engine derives new triples either on-demand (inline CTEs, no dependencies) or materialized (pg_trickle stream tables, incrementally maintained).
 
-The engine compiles rules to the same integer-join SQL that the SPARQL→SQL translator produces, so derived VP tables are indistinguishable from base VP tables to the query engine. Stratified negation is handled via standard dependency analysis, and pg_trickle's DAG scheduler automatically respects stratum ordering for materialized rules.
+The engine compiles rules to the same integer-join SQL that the SPARQL→SQL translator produces, so derived VP tables are indistinguishable from base VP tables to the query engine. Rules are fully quad-aware: the graph term (`g`) is first-class in the rule IR, SQL output, and cycle detection. Variable graph terms (`?g`) unify across body and head atoms, enabling same-graph propagation, cross-graph merging, and provenance-tracking rules. The `rule_graph_scope` GUC controls default matching behaviour for rules that omit an explicit `GRAPH` clause.
 
 The implementation is pure Rust, uses the existing dictionary encoder and VP table infrastructure, and requires no changes to the core storage engine. pg_trickle is optional (on-demand mode works without it) but recommended for production (materialized mode with incremental maintenance).
