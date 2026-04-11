@@ -2,11 +2,46 @@
 
 > From **0.1.0** (foundation) to **1.0.0** (production-ready triple store)
 
+## How to read this roadmap
+
+Each release below has two layers:
+
+- **The plain-language summary** (in the coloured box) explains *what* the release delivers and *why it matters* — no programming knowledge required.
+- **The technical deliverables** list the specific items developers will build. Feel free to skip these if you're reading for the big picture.
+
+**Effort estimates** are given as *person-weeks* — e.g. "6–8 pw" means the release would take roughly 6–8 weeks for a single full-time developer, or 3–4 weeks for a pair working together. The total estimated effort from v0.1.0 to v1.0.0 is **80–104 person-weeks** (~18–24 months for one developer; ~9–12 months for a pair).
+
+---
+
+## Overview at a glance
+
+| Version | Name | What it delivers (one sentence) | Effort |
+|---|---|---|---|
+| 0.1.0 | Foundation | Install the extension, store and retrieve facts | 6–8 pw |
+| 0.2.0 | Vertical Partitioning | Fast storage layout and bulk data import | 6–8 pw |
+| 0.3.0 | SPARQL Basic | Ask questions in the standard RDF query language | 6–8 pw |
+| 0.4.0 | SPARQL Advanced | Follow chains of relationships, compute totals, search text | 8–10 pw |
+| 0.5.0 | HTAP Architecture | Heavy reads and writes at the same time without slowdowns | 8–10 pw |
+| 0.6.0 | SHACL Core | Define data quality rules; reject bad data on insert | 4–6 pw |
+| 0.7.0 | SHACL Advanced | Complex data quality rules with background checking | 4–6 pw |
+| 0.8.0 | Serialization | Import and export data in all standard RDF file formats | 3–4 pw |
+| 0.9.0 | Datalog Reasoning | Automatically derive new facts from rules and logic | 10–12 pw |
+| 0.10.0 | SPARQL Views | Live, always-up-to-date dashboards from SPARQL queries | 4–6 pw |
+| 0.11.0 | SPARQL Update | Standard RDF write operations (add / change / delete) | 4–6 pw |
+| 0.12.0 | Performance | Speed tuning, benchmarks, production-grade throughput | 6–8 pw |
+| 0.13.0 | Admin & Security | Operations tooling, access control, docs, packaging | 4–6 pw |
+| 1.0.0 | Production Release | Standards conformance, stress testing, security audit | 6–8 pw |
+| | | **Total estimated effort** | **80–104 pw** |
+
 ---
 
 ## v0.1.0 — Foundation
 
 **Theme**: Core data model, dictionary encoding, and basic triple CRUD.
+
+> **In plain language:** This is the "hello world" release. After installing pg_triple into a PostgreSQL database, a user can store facts (called *triples* — think "subject → relationship → object", e.g. "Alice → knows → Bob") and retrieve them by pattern. No query language yet — just the basic building blocks. Internally, every piece of text (names, URLs, values) is converted to a compact number for fast storage and comparison. This release also sets up automated testing so that every future change is verified.
+>
+> **Effort estimate: 6–8 person-weeks**
 
 ### Deliverables
 
@@ -39,6 +74,10 @@ A user can install the extension, insert triples, and query them back by pattern
 ## v0.2.0 — Vertical Partitioning
 
 **Theme**: Per-predicate table layout for real performance, with Turtle and N-Triples bulk loading.
+
+> **In plain language:** This release reorganises how data is stored internally so that queries run much faster — instead of one giant table, each type of relationship (e.g. "knows", "worksAt", "hasEmail") gets its own optimised table. It also adds *bulk import*: users can load large RDF data files (in Turtle and N-Triples formats) in one go, rather than inserting facts one at a time. Named graphs (the ability to group facts into labelled collections) are introduced here too.
+>
+> **Effort estimate: 6–8 person-weeks**
 
 ### Deliverables
 
@@ -79,6 +118,10 @@ VP layout operational. Bulk loading >50K triples/sec on commodity hardware. Name
 
 **Theme**: Parse and execute SPARQL SELECT and ASK queries with basic graph patterns. N-Triples export for test verification.
 
+> **In plain language:** SPARQL is the standard language for asking questions over linked data — the same way SQL is for relational databases. This release makes pg_triple understand SPARQL, so users can write queries like *"find all people who know someone who works at Acme Corp"* using the official W3C syntax. It also adds the ability to export data back out as a file (N-Triples format), which is essential for checking results and sharing data with other tools.
+>
+> **Effort estimate: 6–8 person-weeks**
+
 ### Deliverables
 
 - [ ] **SPARQL parser integration** (`spargebra` crate)
@@ -116,6 +159,10 @@ Users can run SPARQL SELECT and ASK queries with BGPs, FILTER, OPTIONAL against 
 ## v0.4.0 — SPARQL Query Engine (Advanced)
 
 **Theme**: Property paths, UNION, aggregates, subqueries.
+
+> **In plain language:** This release teaches the query engine to handle more powerful questions. *Property paths* let you follow chains of relationships — e.g. "find everyone reachable through any number of 'knows' links" (like a social network friend-of-a-friend search). *Aggregates* let you compute totals and averages ("how many people work in each department?"). *Full-text search* lets you search through text values efficiently — e.g. "find all articles whose title contains 'climate change'". Together these cover the vast majority of real-world SPARQL queries.
+>
+> **Effort estimate: 8–10 person-weeks**
 
 ### Deliverables
 
@@ -162,6 +209,10 @@ SPARQL 1.1 Query coverage for all major features except federated queries. Prope
 
 **Theme**: Separate read and write paths for concurrent OLTP/OLAP.
 
+> **In plain language:** In a real production system, people are loading new data and running complex queries at the same time. Without special care, these two activities interfere with each other — writes block reads and vice versa. This release splits the storage into a "write inbox" and a "read-optimised archive" so both can happen simultaneously at full speed. It also adds a *change notification* system: applications can subscribe to be told whenever specific facts change (useful for triggering workflows, updating caches, or feeding dashboards). An in-memory cache makes repeated lookups much faster. Optionally, the companion pg_trickle extension enables automatically-updating live statistics.
+>
+> **Effort estimate: 8–10 person-weeks**
+
 ### Deliverables
 
 - [ ] **Delta/Main partition split**
@@ -204,6 +255,10 @@ Writes do not block reads. Merge worker operates correctly. >100K triples/sec bu
 
 **Theme**: Data integrity enforcement via W3C SHACL shapes.
 
+> **In plain language:** SHACL is a standard way to define *data quality rules* — for example, "every Person must have exactly one email address" or "an age must be a number". When these rules are loaded, pg_triple can automatically reject data that violates them the moment it is inserted, rather than discovering errors later. This is similar to how a spreadsheet can reject invalid entries in a cell. A validation report function lets you check existing data against the rules at any time.
+>
+> **Effort estimate: 4–6 person-weeks**
+
 ### Deliverables
 
 - [ ] **SHACL parser** (Turtle-based shapes)
@@ -239,6 +294,10 @@ Core SHACL constraints are enforced at insert time. Validation reports conform t
 
 **Theme**: Async validation pipeline and complex shapes.
 
+> **In plain language:** Builds on v0.6.0 by supporting more sophisticated data quality rules — for instance, "a person's address must be either a US address or a EU address (but not both)", or "if a company has more than 50 employees, it must have a compliance officer". It also adds a *background validation mode* so that checking complex rules doesn't slow down data loading — violations are flagged asynchronously and collected in a report queue.
+>
+> **Effort estimate: 4–6 person-weeks**
+
 ### Deliverables
 
 - [ ] **Asynchronous validation pipeline**
@@ -265,6 +324,10 @@ Async validation pipeline operational. Complex SHACL shapes validated correctly.
 
 **Theme**: Full RDF I/O, remaining serialization formats, and SPARQL CONSTRUCT/DESCRIBE.
 
+> **In plain language:** RDF data comes in several standard file formats (Turtle, RDF/XML, JSON-LD). This release completes the set so that pg_triple can import from and export to *all* of them — making it easy to exchange data with other tools and systems. It also adds SPARQL CONSTRUCT (generate new triples from a query) and DESCRIBE (get everything known about a given entity), completing the four standard SPARQL query forms.
+>
+> **Effort estimate: 3–4 person-weeks** *(the hardest parts — Turtle import and N-Triples export — were already delivered in v0.2.0 and v0.3.0)*
+
 *Note: Turtle import and N-Triples export were delivered in v0.2.0 and v0.3.0 respectively.*
 
 ### Deliverables
@@ -289,6 +352,10 @@ Round-trip: load Turtle → query → export Turtle. All major RDF serialization
 ## v0.9.0 — Datalog Reasoning Engine
 
 **Theme**: General-purpose rule-based inference over the triple store.
+
+> **In plain language:** This is the "intelligence layer". Users can define logical rules like *"if A manages B and B manages C, then A indirectly manages C"* — and the system will automatically figure out all the indirect management chains. It ships with two built-in rule sets covering the standard RDF and OWL vocabularies (the common language of the Semantic Web), so it can automatically derive facts like "if a Dog is a subclass of Animal, and Rex is a Dog, then Rex is also an Animal". Rules can also express *things that must never be true* — for example, "no one can be their own manager" — acting as logical integrity constraints. This is the largest single release in the roadmap.
+>
+> **Effort estimate: 10–12 person-weeks**
 
 See [plans/ecosystem/datalog.md](plans/ecosystem/datalog.md) for the full design.
 
@@ -349,6 +416,10 @@ Users can load RDFS or OWL RL rule sets (or custom rules), and SPARQL queries re
 
 **Theme**: Always-fresh materialized SPARQL queries and extended vertical partitioning via pg_trickle stream tables.
 
+> **In plain language:** Imagine pinning a SPARQL query to a dashboard and having the results update automatically whenever the underlying data changes — without re-running the query. That's what SPARQL views deliver. Under the hood, only the *changed* rows are reprocessed (not the entire dataset), so updates are nearly instantaneous. This release also adds precomputed "shortcut" tables for frequently-combined queries, making common access patterns dramatically faster. Requires the companion pg_trickle extension.
+>
+> **Effort estimate: 4–6 person-weeks**
+
 See [plans/ecosystem/pg_trickle.md § 2.2](plans/ecosystem/pg_trickle.md) for the full design.
 
 ### Deliverables
@@ -375,6 +446,10 @@ Users can create SPARQL views that stay incrementally up-to-date. SPARQL view qu
 ## v0.11.0 — SPARQL Update
 
 **Theme**: W3C SPARQL 1.1 Update support for standard-compliant write operations.
+
+> **In plain language:** Up to this point, data is loaded via bulk import or the pg_triple-specific insert functions. This release adds the *standard* way to add, change, and delete data using the SPARQL Update language — the same syntax that every other RDF tool understands. This means tools like Protégé (an ontology editor), TopBraid, and SPARQL workbenches can write data directly to pg_triple without a custom adapter. It also adds commands for managing named graphs (create, clear, drop) and loading data from a URL.
+>
+> **Effort estimate: 4–6 person-weeks**
 
 ### Deliverables
 
@@ -409,6 +484,10 @@ Standard SPARQL 1.1 Update operations work correctly. RDF tools that use SPARQL 
 ## v0.12.0 — Performance Hardening
 
 **Theme**: Optimize for production-scale workloads. Benchmark-driven improvements.
+
+> **In plain language:** This release is about *speed*. Using the Berlin SPARQL Benchmark (a standard test suite used by the RDF industry), we measure pg_triple's performance against known baselines and then tune it. Improvements include caching query plans so repeated queries skip redundant work, loading data in parallel, and teaching the system to use data quality rules (from v0.6.0/v0.7.0) as hints to avoid unnecessary work during queries. The target is simple queries answering in under 10 milliseconds on a dataset of 10 million facts, and bulk loading sustained at over 100,000 facts per second.
+>
+> **Effort estimate: 6–8 person-weeks**
 
 ### Deliverables
 
@@ -450,6 +529,10 @@ BSBM results documented. >100K triples/sec sustained bulk load. <10ms for simple
 ## v0.13.0 — Administrative & Operational Readiness
 
 **Theme**: Production operations tooling, upgrade paths, documentation.
+
+> **In plain language:** Everything a system administrator needs to run pg_triple in production. This includes maintenance commands (clean up, rebuild indexes), monitoring and diagnostics, comprehensive documentation (quickstart guide, function reference, tuning guide), and *graph-level access control* — the ability to control which database users can see or modify which named graphs. It also covers packaging (Linux packages, Docker images) so the extension is easy to install in real environments. Think of this as the "operations manual" release.
+>
+> **Effort estimate: 4–6 person-weeks**
 
 ### Deliverables
 
@@ -493,6 +576,10 @@ Extension is installable, upgradable, and documented. Operational tooling suffic
 
 **Theme**: Stability, conformance, and production certification.
 
+> **In plain language:** The 1.0 release is not about new features — it's about *confidence*. We run pg_triple against the official W3C test suites for SPARQL and SHACL to verify standards compliance. A 72-hour continuous stress test checks for memory leaks and crash recovery. A security audit reviews the code for vulnerabilities. The result is a release that organisations can rely on for production workloads with a clear API stability guarantee: the public interface will not break in future minor versions.
+>
+> **Effort estimate: 6–8 person-weeks**
+
 ### Deliverables
 
 - [ ] **SPARQL 1.1 Query conformance**
@@ -532,40 +619,44 @@ Stable, tested, documented, and published. Ready for production workloads up to 
 
 ## Post-1.0 Horizon
 
-| Version | Theme | Key Features |
-|---|---|---|
-| 1.1 | Distributed | Citus integration, subject-based sharding |
-| 1.2 | Vector + Graph | pgvector integration, hybrid semantic search |
-| 1.3 | Temporal | Bitstring versioning, TimescaleDB integration |
-| 1.4 | Extended VP | Automated workload-driven ExtVP stream tables (pg_trickle), ontology change propagation DAG |
-| 1.5 | Interop | Apache AGE bridge, GraphQL-to-SPARQL |
-| 1.6 | Federation | SPARQL SERVICE keyword for remote endpoints |
-| 1.7 | RDF-star / RDF 1.2 | Quoted triples (embedded triples as subjects/objects), `<<s p o>>` syntax in SPARQL-star, reification-as-data for provenance and annotation |
-| 1.8 | GeoSPARQL + PostGIS | `geo:asWKT` literal type backed by PostGIS `geometry`, spatial FILTER functions (`geof:sfWithin`, `geof:distance`), R-tree index on spatial VP tables |
-| 1.9 | R2RML Virtual Graphs | W3C R2RML mappings exposing relational tables as virtual RDF graphs, SPARQL queries transparently join VP tables with mapped SQL tables |
-| 1.10 | SPARQL Protocol | HTTP endpoint (`/sparql`) implementing the W3C SPARQL 1.1 Protocol, content negotiation (JSON, XML, CSV, Turtle), query parameter and POST body support |
-| 1.11 | Quad-Level Provenance | Per-quad metadata table `_pg_triple.provenance (s, p, o, g, source, timestamp, txid)`, `pg_triple.triple_history()` API, integration with Datalog rule provenance (why-provenance) |
+> **In plain language:** These are future directions that extend pg_triple beyond its initial scope. Each addresses a specific real-world need — from distributing data across multiple servers, to geographic queries, to bridging with existing relational databases. They are listed roughly in order of anticipated demand; some may be reordered or combined based on community feedback after 1.0.
+
+| Version | Theme | What it delivers | Key Technical Features |
+|---|---|---|---|
+| 1.1 | Distributed | Spread data across multiple servers for horizontal scale | Citus integration, subject-based sharding |
+| 1.2 | Vector + Graph | Combine knowledge graphs with AI-style similarity search | pgvector integration, hybrid semantic search |
+| 1.3 | Temporal | Track how data changes over time; query historical states | Bitstring versioning, TimescaleDB integration |
+| 1.4 | Extended VP | Automatically pre-compute shortcuts for frequent query patterns | Automated workload-driven ExtVP stream tables (pg_trickle), ontology change propagation DAG |
+| 1.5 | Interop | Bridge to other graph databases and GraphQL APIs | Apache AGE bridge, GraphQL-to-SPARQL |
+| 1.6 | Federation | Query remote SPARQL endpoints from within pg_triple | SPARQL SERVICE keyword for remote endpoints |
+| 1.7 | RDF-star / RDF 1.2 | Make statements *about* statements (e.g. "Alice said that Bob knows Carol") | Quoted triples (`<<s p o>>` syntax in SPARQL-star), reification-as-data for provenance and annotation |
+| 1.8 | GeoSPARQL + PostGIS | Answer geographic questions ("find all hospitals within 5 km of this point") | `geo:asWKT` literal type backed by PostGIS `geometry`, spatial FILTER functions, R-tree index on spatial VP tables |
+| 1.9 | R2RML Virtual Graphs | Expose existing database tables as if they were RDF data — no migration needed | W3C R2RML mappings, SPARQL queries transparently join VP tables with mapped SQL tables |
+| 1.10 | SPARQL Protocol | Provide a standard HTTP API so web apps and tools can query pg_triple directly | HTTP endpoint (`/sparql`) implementing the W3C SPARQL 1.1 Protocol, content negotiation (JSON, XML, CSV, Turtle) |
+| 1.11 | Quad-Level Provenance | Track where each fact came from and when it was added | Per-quad metadata table with source, timestamp, and transaction ID; integration with Datalog rule provenance (why-provenance) |
 
 ---
 
 ## Version Timeline (Estimated Cadence)
 
-| Version | Target |
-|---|---|
-| 0.1.0 | Foundation |
-| 0.2.0 | +4 weeks |
-| 0.3.0 | +4 weeks |
-| 0.4.0 | +4 weeks |
-| 0.5.0 | +4 weeks |
-| 0.6.0 | +3 weeks |
-| 0.7.0 | +3 weeks |
-| 0.8.0 | +2 weeks |
-| 0.9.0 | +4 weeks |
-| 0.10.0 | +3 weeks |
-| 0.11.0 | +3 weeks |
-| 0.12.0 | +4 weeks |
-| 0.13.0 | +3 weeks |
-| 1.0.0 | +4 weeks |
-| 1.1–1.11 | Post-1.0 (community-driven cadence) |
+> **In plain language:** The "Calendar" column shows how long after the previous release each version is expected to ship. The "Effort" column shows the total developer-time required. With two developers working together, the calendar durations are achievable; with one developer, roughly double the calendar time.
 
-*Estimates assume a small focused team (1–3 developers). Actual pace depends on contributor availability and scope adjustments discovered during implementation.*
+| Version | Calendar (pair) | Effort (person-weeks) | Cumulative effort |
+|---|---|---|---|
+| 0.1.0 | Week 0 (start) | 6–8 pw | 6–8 pw |
+| 0.2.0 | +4 weeks | 6–8 pw | 12–16 pw |
+| 0.3.0 | +4 weeks | 6–8 pw | 18–24 pw |
+| 0.4.0 | +4 weeks | 8–10 pw | 26–34 pw |
+| 0.5.0 | +4 weeks | 8–10 pw | 34–44 pw |
+| 0.6.0 | +3 weeks | 4–6 pw | 38–50 pw |
+| 0.7.0 | +3 weeks | 4–6 pw | 42–56 pw |
+| 0.8.0 | +2 weeks | 3–4 pw | 45–60 pw |
+| 0.9.0 | +5 weeks | 10–12 pw | 55–72 pw |
+| 0.10.0 | +3 weeks | 4–6 pw | 59–78 pw |
+| 0.11.0 | +3 weeks | 4–6 pw | 63–84 pw |
+| 0.12.0 | +4 weeks | 6–8 pw | 69–92 pw |
+| 0.13.0 | +3 weeks | 4–6 pw | 73–98 pw |
+| 1.0.0 | +4 weeks | 6–8 pw | **80–104 pw** |
+| 1.1–1.11 | Post-1.0 | Community-driven | — |
+
+*Estimates assume a pair of focused developers with Rust and PostgreSQL experience. "pw" = person-weeks. Calendar durations assume pair programming; a solo developer should expect roughly double the calendar time. Actual pace depends on contributor availability and scope adjustments discovered during implementation.*
