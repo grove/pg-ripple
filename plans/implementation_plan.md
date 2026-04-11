@@ -19,13 +19,16 @@
 | Layer | Technology |
 |---|---|
 | Language | Rust (Edition 2024) |
-| PG binding | pgrx 0.17 (`pg18` feature flag) |
+| PG binding | `pgrx` 0.17 (`pg18` feature flag) |
 | PostgreSQL | 18.x |
 | SPARQL parser | `spargebra` crate (W3C-compliant SPARQL 1.1 algebra) |
-| RDF parser | `rio_turtle`, `rio_xml` crates (Turtle, N-Triples, RDF/XML) |
+| RDF parsers | `rio_turtle`, `rio_xml` crates (Turtle, N-Triples, RDF/XML); `oxttl` / `oxrdf` added at v0.16.0 for RDF-star |
 | Hashing | `xxhash-rust` (XXH3-128 for dictionary collision resistance) |
-| Serialization | `serde` + `serde_json` (for SHACL reports, config) |
-| Testing | pgrx `#[pg_test]`, `cargo pgrx regress`, pgbench via `pgrx-bench` |
+| Serialization | `serde` + `serde_json` (SHACL reports, SPARQL results, config) |
+| HTTP server | `axum` (built on tokio) — SPARQL Protocol HTTP endpoint (`pg_triple_http` binary) |
+| PG client (HTTP service) | `tokio-postgres` + `deadpool-postgres` — async connection pool from HTTP service to PostgreSQL |
+| HTTP client (federation) | `reqwest` — outbound calls to remote SPARQL endpoints (SERVICE keyword) |
+| Testing | pgrx `#[pg_test]`, `cargo pgrx regress`, pgbench via `pgrx-bench`, `proptest`, `cargo-fuzz` |
 | IVM (optional) | `pg_trickle` — stream tables, incremental view maintenance ([analysis](ecosystem/pg_trickle.md)) |
 | Datalog (optional) | Built-in reasoning engine — RDFS/OWL RL entailment + user-defined rules ([design](ecosystem/datalog.md)) |
 
