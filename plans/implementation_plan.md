@@ -26,6 +26,7 @@
 | Hashing | `xxhash-rust` (XXH3-128 for dictionary collision resistance) |
 | Serialization | `serde` + `serde_json` (for SHACL reports, config) |
 | Testing | pgrx `#[pg_test]`, `cargo pgrx regress`, pgbench via `pgrx-bench` |
+| IVM (optional) | `pg_trickle` — stream tables, incremental view maintenance ([analysis](ecosystem/pg_trickle.md)) |
 
 ---
 
@@ -53,6 +54,12 @@
 ┌───────────────────▼─────────────────────────────────────┐
 │              Validation & Governance                      │
 │  SHACL → DDL constraints  │  Async CDC validation        │
+└───────────────────┬─────────────────────────────────────┘
+                    │
+┌───────────────────▼─────────────────────────────────────┐
+│        Reactivity Layer (optional — pg_trickle)          │
+│  Stream tables: ExtVP │ Inference │ Stats │ SPARQL Views │
+│  IVM engine · DAG scheduler · CDC triggers               │
 └─────────────────────────────────────────────────────────┘
 ```
 
@@ -295,6 +302,7 @@ The SPARQL→SQL translator reads loaded SHACL shapes:
 - `pg_triple.stats() RETURNS JSONB` — triple count, predicate distribution, dictionary size, cache hit ratio, delta/main partition sizes
 - Integration with `pg_stat_statements` for SPARQL query tracking
 - Custom `EXPLAIN` option (PG18 feature) to annotate SPARQL→SQL translations
+- **When pg_trickle is available**: `stats()` reads from `_pg_triple.predicate_stats` and `_pg_triple.graph_stats` stream tables (instant, no full scan) instead of re-scanning VP tables on every call. See §4.10.
 
 ### 4.9 Administrative Functions (`src/admin/`)
 
@@ -303,6 +311,66 @@ The SPARQL→SQL translator reads loaded SHACL shapes:
 - `pg_triple.dictionary_stats()` — cache hit ratio, dictionary sizes
 - `pg_triple.register_prefix(prefix TEXT, expansion TEXT)` — IRI prefix registration
 - `pg_triple.prefixes() RETURNS TABLE(prefix TEXT, expansion TEXT)`
+
+### 4.10 Ecosystem: pg_trickle Integration (`src/ecosystem/`)
+
+**Purpose**: Optional reactivity layer powered by [pg_trickle](https://github.com/grove/pg-trickle) stream tables. All features in this module require pg_trickle to be installed; core pg_triple functionality works without it. See [full analysis](ecosystem/pg_trickle.md).
+
+#### 4.10.1 Runtime Detection
+
+```rust
+fn has_pg_trickle() -> bool {
+    Spi::get_one::<bool>(
+        "SELECT EXISTS(SELECT 1 FROM pg_extension WHERE extname = 'pg_trickle')"
+    ).unwrap_or(Some(false)).unwrap_or(false)
+}
+```
+
+All stream-table features gate on this check. Functions that require pg_trickle return a clear error with install instructions when it is absent.
+
+#### 4.10.2 Live Statistics (Stream Tables)
+
+When pg_trickle is detected, `pg_triple.enable_live_statistics()` creates stream tables:
+
+- `_pg_triple.predicate_stats` — per-predicate triple count, distinct subjects/objects (refreshed every 5s)
+- `_pg_triple.graph_stats` — per-graph triple count (refreshed every 10s)
+
+`pg_triple.stats()` reads from these stream tables instead of full-scanning VP tables — 100–1000× faster.
+
+#### 4.10.3 SHACL Violation Monitors
+
+Simple SHACL constraints (cardinality, datatype, class) can be modeled as stream tables with `IMMEDIATE` refresh mode, validating within the same transaction as the DML:
+
+- `sh:minCount` violations → `NOT EXISTS` stream table
+- `sh:datatype` violations → filtered join stream table
+- Multiple shapes → pg_trickle's DAG scheduler handles refresh ordering
+
+Complex shapes (`sh:or`, `sh:and`, multi-hop) still use the procedural validation pipeline from §4.6.
+
+#### 4.10.4 Inference Materialization
+
+`pg_triple.enable_inference_materialization()` creates `WITH RECURSIVE` stream tables for RDFS/OWL entailment:
+
+- `_pg_triple.inferred_subclass` — transitive closure of `rdfs:subClassOf`
+- `_pg_triple.inferred_subproperty` — transitive closure of `rdfs:subPropertyOf`
+
+The SPARQL engine rewrites `rdfs:subClassOf*` path queries to scan the materialized closure table instead of executing recursive CTEs at query time.
+
+#### 4.10.5 SPARQL Views
+
+```sql
+pg_triple.create_sparql_view(
+    name     TEXT,
+    sparql   TEXT,
+    schedule TEXT DEFAULT '5s'
+) RETURNS VOID
+```
+
+Parses SPARQL → generates SQL → creates a pg_trickle stream table. The result is an always-fresh materialized SPARQL query: multi-join VP table scans + dictionary decoding happen once during materialization, and queries become simple table scans.
+
+#### 4.10.6 ExtVP (Extended Vertical Partitioning)
+
+Pre-computed semi-joins between frequently co-joined predicates, implemented as stream tables. The SPARQL→SQL translator rewrites queries to target ExtVP tables when available. Initially manual via `create_sparql_view()`; automated workload-driven creation is a post-1.0 goal.
 
 ---
 
@@ -432,6 +500,9 @@ pg_triple/
 │   ├── stats/
 │   │   ├── mod.rs
 │   │   └── monitoring.rs              # Statistics collection
+│   ├── ecosystem/
+│   │   ├── mod.rs
+│   │   └── trickle.rs                 # pg_trickle integration (optional)
 │   └── admin/
 │       ├── mod.rs
 │       └── maintenance.rs             # Vacuum, reindex, config
@@ -527,10 +598,11 @@ These items are documented for architectural awareness but are not in the 0.1–
 
 - **Distributed execution via Citus**: Subject-based sharding of VP tables across worker nodes
 - **pgvector integration**: Store embeddings alongside graph nodes for hybrid semantic + vector search
-- **Extended VP (ExtVP)**: Pre-computed semi-join materialized views for high-frequency query patterns
+- **Automated ExtVP**: Workload-driven analysis to automatically decide which semi-join stream tables to create (manual ExtVP via `create_sparql_view()` is in-scope for 0.x when pg_trickle is present)
 - **Temporal versioning**: Bitstring validity columns for versioned graph snapshots
 - **TimescaleDB integration**: Hypertable-backed temporal graph management
 - **Apache AGE interop**: Bidirectional projection between RDF and LPG models
 - **SPARQL Update (SPARQL 1.1 Update)**: Full INSERT DATA / DELETE DATA / DELETE WHERE support
 - **SPARQL Federation**: SERVICE keyword for federated queries across remote SPARQL endpoints
 - **GraphQL-to-SPARQL bridge**: Auto-generate GraphQL schema from SHACL shapes
+- **Ontology change propagation DAG**: When pg_trickle is present, model derived structures (ExtVP, inference, SHACL, stats) as a DAG of stream tables with automatic topological refresh on ontology changes

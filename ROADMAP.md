@@ -165,6 +165,9 @@ SPARQL 1.1 Query coverage for all major features except federated queries. Prope
   - Shared across all backends via pgrx `PgSharedMem`
 - [ ] **Statistics**
   - `pg_triple.stats()` JSONB: triple count, per-predicate counts, cache hit ratio, delta/main sizes
+- [ ] **pg_trickle integration: live statistics** *(optional, when pg_trickle is installed)*
+  - `pg_triple.enable_live_statistics()` creates `_pg_triple.predicate_stats` and `_pg_triple.graph_stats` stream tables
+  - `pg_triple.stats()` reads from stream tables instead of full-scanning VP tables (100–1000× faster)
 - [ ] Benchmark: concurrent read/write (pgbench custom scripts)
 - [ ] pg_regress: `htap_merge.sql`
 
@@ -198,6 +201,9 @@ Writes do not block reads. Merge worker operates correctly. >100K triples/sec bu
 - [ ] **SHACL management**
   - `pg_triple.list_shapes() RETURNS TABLE`
   - `pg_triple.drop_shape(shape_uri TEXT)`
+- [ ] **pg_trickle integration: SHACL violation monitors** *(optional)*
+  - Simple cardinality/datatype constraints modeled as `IMMEDIATE` mode stream tables
+  - Violations detected within the same transaction as the DML
 - [ ] pg_regress: `shacl_validation.sql`
 
 ### Exit Criteria
@@ -226,6 +232,8 @@ Core SHACL constraints are enforced at insert time. Validation reports conform t
   - `sh:minCount 1` → OPTIONAL→INNER JOIN downgrade in SPARQL→SQL
   - `sh:maxCount 1` → skip DISTINCT for single-valued properties
   - `sh:class` → VP table pruning based on target class
+- [ ] **pg_trickle integration: multi-shape DAG validation** *(optional)*
+  - Multiple SHACL shapes as a DAG of stream tables with topologically-ordered refresh
 - [ ] pg_regress: `shacl_advanced.sql`, `shacl_query_opt.sql`
 
 ### Exit Criteria
@@ -256,6 +264,9 @@ Async validation pipeline operational. Complex SHACL shapes validated correctly.
   - DESCRIBE → concentric bounded description
 - [ ] **SPARQL ASK**
   - ASK → returns BOOLEAN
+- [ ] **pg_trickle integration: inference materialization** *(optional)*
+  - `pg_triple.enable_inference_materialization()` creates `WITH RECURSIVE` stream tables for `rdfs:subClassOf` and `rdfs:subPropertyOf` transitive closures
+  - SPARQL engine rewrites `rdfs:subClassOf*` path queries to scan materialized closures
 - [ ] pg_regress: `serialization.sql`, `sparql_construct.sql`
 
 ### Exit Criteria
@@ -292,6 +303,9 @@ Round-trip: load Turtle → query → export Turtle. All major RDF serialization
 - [ ] **Bulk load optimization**
   - Parallel dictionary encoding
   - Deferred index build with `CREATE INDEX CONCURRENTLY` post-load
+- [ ] **pg_trickle integration: ExtVP and SPARQL view caching** *(optional)*
+  - `pg_triple.create_sparql_view(name, sparql, schedule)` — always-fresh materialized SPARQL queries via stream tables
+  - Manual ExtVP semi-join stream tables for high-frequency predicate pairs
 - [ ] Performance regression test suite (pgbench custom scripts)
 
 ### Exit Criteria
@@ -379,7 +393,7 @@ Stable, tested, documented, and published. Ready for production workloads up to 
 | 1.1 | Distributed | Citus integration, subject-based sharding |
 | 1.2 | Vector + Graph | pgvector integration, hybrid semantic search |
 | 1.3 | Temporal | Bitstring versioning, TimescaleDB integration |
-| 1.4 | Extended VP | Pre-computed semi-join materialized views |
+| 1.4 | Extended VP | Automated workload-driven ExtVP stream tables (pg_trickle), ontology change propagation DAG |
 | 1.5 | Interop | Apache AGE bridge, GraphQL-to-SPARQL |
 | 1.6 | Update | SPARQL 1.1 Update (INSERT/DELETE DATA) |
 | 1.7 | Federation | SPARQL SERVICE keyword for remote endpoints |
