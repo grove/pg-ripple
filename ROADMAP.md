@@ -90,7 +90,8 @@ A user can install the extension, insert triples, and query them back by pattern
   - Dual B-tree indices per VP table: `(s, o)` and `(o, s)`
 - [ ] **Rare-predicate consolidation table**
   - Predicates with fewer than `pg_triple.vp_promotion_threshold` triples (default: 1,000) are stored in a shared `_pg_triple.vp_rare (p BIGINT, s BIGINT, o BIGINT, g BIGINT)` table with a composite index on `(p, s, o)`
-  - Once a predicate crosses the threshold, its rows are migrated to a dedicated VP table and the catalog updated — transparent to callers
+  - Promotion is **deferred to end-of-statement** (not mid-batch): during a bulk load, triples accumulate in `vp_rare`; after the load completes, predicates exceeding the threshold are promoted in a single `INSERT … SELECT` + `DELETE` transaction — avoids disrupting in-flight COPY streams
+  - `pg_triple.promote_rare_predicates()` can also be called manually or by the background merge worker
   - Prevents catalog bloat for predicate-rich datasets (DBpedia ≈60K predicates, Wikidata ≈10K) — avoids hundreds of thousands of PG objects, reduces planner overhead, and cuts VACUUM cost
 - [ ] **Migrate CRUD to VP storage**
   - `insert_triple()` routes to correct VP table
@@ -229,9 +230,11 @@ SPARQL 1.1 Query coverage for all major features except federated queries. Prope
 - [ ] **Background merge worker**
   - pgrx `BackgroundWorker` implementation
   - Configurable merge threshold via `pg_triple.merge_threshold` GUC
-  - SPI-based merge: INSERT from delta → main, TRUNCATE delta
-  - BRIN index rebuild on main post-merge
+  - **Non-blocking merge via partition swap**: INSERT delta rows into a staging table, swap staging into main using `ALTER TABLE … ATTACH PARTITION` (or rename + view swap for non-partitioned tables), then TRUNCATE delta — writes to delta are never blocked during the merge
+  - BRIN index rebuild on main post-merge (concurrent where possible)
   - Shared-memory latch signaling
+  - Also triggers `pg_triple.promote_rare_predicates()` for any rare predicates that crossed the promotion threshold since the last merge
+  - Runs `ANALYZE` on merged VP tables so the PostgreSQL planner has fresh selectivity estimates
 - [ ] **Bloom filter for delta existence checks**
   - In shared memory, per VP table
   - Queries against main-only data skip delta scan
@@ -510,6 +513,7 @@ Standard SPARQL 1.1 Update operations work correctly. RDF tools that use SPARQL 
 - [ ] **Query plan caching**
   - Cache SPARQL→SQL translations keyed by query structure hash
   - `pg_triple.plan_cache_size` GUC
+  - Note: SPI-executed dynamic SQL does not benefit from PostgreSQL's built-in prepared-statement cache — the SPARQL-layer plan cache compensates for this by avoiding repeated SPARQL→SQL translation for structurally identical queries
 - [ ] **Parallel query exploitation**
   - Ensure VP table queries are parallel-safe
   - Mark SQL functions as `PARALLEL SAFE` where applicable
@@ -570,7 +574,7 @@ BSBM results documented. >100K triples/sec sustained bulk load. <10ms for simple
   - README with quickstart
   - SQL function reference
   - SPARQL feature matrix
-  - Performance tuning guide
+  - **Performance tuning guide** — includes dictionary cache sizing guidance (`dictionary_cache_size` should be large enough to hold the working set of frequently-accessed terms; at 100M+ triples with ~50M unique terms, cache hit ratio is the dominant performance factor), `shared_memory_limit` budgeting, `merge_threshold` tuning, and `vp_promotion_threshold` adjustment for predicate-rich vs predicate-sparse datasets
   - SHACL constraint mapping reference
   - Datalog rule authoring guide
 - [ ] **Graph-level Row-Level Security (RLS)**

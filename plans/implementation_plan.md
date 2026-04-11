@@ -144,6 +144,8 @@ CREATE INDEX ON _pg_triple.vp_{predicate_id} (o, s);
 **Rare-Predicate Consolidation**:
 - Predicates with fewer than `pg_triple.vp_promotion_threshold` triples (default: 1,000) are stored in a shared `_pg_triple.vp_rare (p BIGINT, s BIGINT, o BIGINT, g BIGINT)` table with a composite index on `(p, s, o)`
 - Once a predicate crosses the threshold, its rows are auto-migrated to a dedicated VP table and the catalog updated — transparent to callers
+- Promotion is **deferred to end-of-statement**: during bulk loads, triples accumulate in `vp_rare`; after the load completes (or during the next merge worker cycle), predicates exceeding the threshold are promoted in a single `INSERT … SELECT` + `DELETE` transaction
+- `pg_triple.promote_rare_predicates()` can also be called manually
 - Prevents catalog bloat for predicate-rich datasets (DBpedia ≈60K predicates, Wikidata ≈10K predicates) — avoids hundreds of thousands of PostgreSQL objects, reduces planner overhead, and cuts VACUUM cost
 
 #### 4.3.2 HTAP Dual-Partition Architecture
@@ -161,8 +163,10 @@ CREATE INDEX ON _pg_triple.vp_{predicate_id} (o, s);
 **Merge Worker** (background worker via pgrx `BackgroundWorker`):
 - Periodically merges delta into main when delta exceeds `pg_triple.merge_threshold` rows
 - Runs as a pgrx background worker with `BGWORKER_SHMEM_ACCESS`
-- Uses SPI to execute the merge as a single transaction
+- **Non-blocking merge via partition swap**: INSERT delta rows into a staging table, swap staging into main using `ALTER TABLE … ATTACH PARTITION` (or rename + view swap for non-partitioned tables), then TRUNCATE delta — writes to delta are never blocked during the merge
 - Updates BRIN summaries post-merge
+- Runs `ANALYZE` on merged VP tables so the PostgreSQL planner has fresh selectivity estimates
+- Triggers `pg_triple.promote_rare_predicates()` for any rare predicates that crossed the promotion threshold
 - Signals completion via shared-memory latch
 
 **Query Path**:
