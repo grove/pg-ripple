@@ -314,11 +314,15 @@ SELECT pgtrickle.create_stream_table(
 
 **Limitation**: Complex SHACL shapes with multi-hop validation or logical combinators (`sh:or`, `sh:and`) would still need procedural triggers. Simple cardinality, datatype, and class constraints map well to stream tables.
 
-### 2.6 Inference Materialization
+### 2.6 Inference Materialization → Datalog Engine
+
+> **Note**: This section describes the original hard-coded approach. It is **superseded** by the general Datalog reasoning engine described in [plans/ecosystem/datalog.md](datalog.md), which subsumes RDFS/OWL RL entailment and adds user-defined rules, stratified negation, and two execution modes (materialized via pg_trickle, on-demand via inline CTEs).
 
 **Problem**: RDF inference (RDFS entailment: `rdfs:subClassOf`, `rdfs:subPropertyOf`, `owl:sameAs`) requires computing the transitive closure of class/property hierarchies. This is computationally expensive at query time.
 
-**pg_trickle solution**: Materialize inferred triples as stream tables using `WITH RECURSIVE`.
+**Original pg_trickle solution** (retained as a reference for the simpler case):
+
+Materialize inferred triples as stream tables using `WITH RECURSIVE`.
 
 ```sql
 -- Materialize transitive closure of rdfs:subClassOf
@@ -339,17 +343,16 @@ SELECT pgtrickle.create_stream_table(
     $$,
     schedule => '30s'
 );
-
--- Now type queries can use the materialized closure
--- "Find all instances of Animal (including subclasses)"
--- becomes: JOIN _pg_triple.inferred_subclass ON super = :Animal_id
 ```
 
-**Benefits**:
-- pg_trickle supports `WITH RECURSIVE` in both FULL and DIFFERENTIAL modes
-- Transitive closure is recomputed incrementally when class hierarchy changes (rare event)
-- SPARQL queries involving `rdfs:subClassOf*` can query the stream table instead of running recursive CTEs at query time
-- Massive performance win for inference-heavy workloads
+**Recommended approach**: Use the Datalog engine's built-in RDFS rule set instead:
+
+```sql
+SELECT pg_triple.load_rules_builtin('rdfs');
+SELECT pg_triple.materialize_rules(schedule => '30s');
+```
+
+This generates the same `WITH RECURSIVE` stream tables automatically for all 13 RDFS entailment rules (not just `rdfs:subClassOf`), with correct stratification and dependency ordering handled by the Datalog engine and pg_trickle's DAG scheduler.
 
 ### 2.7 Ontology Change Propagation
 

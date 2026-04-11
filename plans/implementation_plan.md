@@ -27,6 +27,7 @@
 | Serialization | `serde` + `serde_json` (for SHACL reports, config) |
 | Testing | pgrx `#[pg_test]`, `cargo pgrx regress`, pgbench via `pgrx-bench` |
 | IVM (optional) | `pg_trickle` — stream tables, incremental view maintenance ([analysis](ecosystem/pg_trickle.md)) |
+| Datalog (optional) | Built-in reasoning engine — RDFS/OWL RL entailment + user-defined rules ([design](ecosystem/datalog.md)) |
 
 ---
 
@@ -54,6 +55,13 @@
 ┌───────────────────▼─────────────────────────────────────┐
 │              Validation & Governance                      │
 │  SHACL → DDL constraints  │  Async CDC validation        │
+└───────────────────┬─────────────────────────────────────┘
+                    │
+┌───────────────────▼─────────────────────────────────────┐
+│              Reasoning Layer (src/datalog/)               │
+│  Datalog parser · Stratifier · SQL compiler              │
+│  Built-in: RDFS (13 rules) · OWL RL (~80 rules)         │
+│  Modes: on-demand (inline CTEs) │ materialized (↓)       │
 └───────────────────┬─────────────────────────────────────┘
                     │
 ┌───────────────────▼─────────────────────────────────────┐
@@ -347,14 +355,17 @@ Simple SHACL constraints (cardinality, datatype, class) can be modeled as stream
 
 Complex shapes (`sh:or`, `sh:and`, multi-hop) still use the procedural validation pipeline from §4.6.
 
-#### 4.10.4 Inference Materialization
+#### 4.10.4 Inference Materialization (→ Datalog Engine)
 
-`pg_triple.enable_inference_materialization()` creates `WITH RECURSIVE` stream tables for RDFS/OWL entailment:
+> **Note**: This section is superseded by the general Datalog reasoning engine. See [plans/ecosystem/datalog.md](plans/ecosystem/datalog.md) for the full design.
 
-- `_pg_triple.inferred_subclass` — transitive closure of `rdfs:subClassOf`
-- `_pg_triple.inferred_subproperty` — transitive closure of `rdfs:subPropertyOf`
+The original plan — `pg_triple.enable_inference_materialization()` creating hard-coded `WITH RECURSIVE` stream tables for `rdfs:subClassOf` and `rdfs:subPropertyOf` — is replaced by a general-purpose Datalog engine that:
 
-The SPARQL engine rewrites `rdfs:subClassOf*` path queries to scan the materialized closure table instead of executing recursive CTEs at query time.
+- Parses user-defined and built-in rules (RDFS, OWL RL) in a Turtle-flavoured Datalog syntax
+- Stratifies rules to handle negation-as-failure correctly
+- Compiles each stratum to SQL: non-recursive → `INSERT … SELECT`, recursive → `WITH RECURSIVE … CYCLE`, negation → `NOT EXISTS`
+- Materializes derived predicates as pg_trickle stream tables (recommended) or inlines them as CTEs at query time (on-demand, no pg_trickle needed)
+- Registers derived VP tables in `_pg_triple.predicates` so the SPARQL engine treats them identically to base VP tables
 
 #### 4.10.5 SPARQL Views
 

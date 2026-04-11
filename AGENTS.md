@@ -22,6 +22,7 @@ src/lib.rs          — pgrx entry points, _PG_init, GUC parameters
 src/dictionary/     — IRI/blank-node/literal → i64 encoder (XXH3-128 + LRU cache)
 src/storage/        — VP tables, HTAP delta/main partitions, merge background worker
 src/sparql/         — SPARQL text → spargebra algebra → SQL → SPI execution → decode
+src/datalog/        — Datalog rule parser, stratifier, SQL compiler, built-in RDFS/OWL RL
 src/shacl/          — SHACL shapes → DDL constraints + async validation pipeline
 src/export/         — Turtle / N-Triples / JSON-LD serialization
 src/stats/          — Monitoring, pg_stat_statements integration

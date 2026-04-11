@@ -264,14 +264,59 @@ Async validation pipeline operational. Complex SHACL shapes validated correctly.
   - DESCRIBE → concentric bounded description
 - [ ] **SPARQL ASK**
   - ASK → returns BOOLEAN
-- [ ] **pg_trickle integration: inference materialization** *(optional)*
-  - `pg_triple.enable_inference_materialization()` creates `WITH RECURSIVE` stream tables for `rdfs:subClassOf` and `rdfs:subPropertyOf` transitive closures
-  - SPARQL engine rewrites `rdfs:subClassOf*` path queries to scan materialized closures
+- [ ] **pg_trickle integration: inference materialization** *(optional — superseded by v0.8.5 Datalog engine)*
+  - Hard-coded RDFS closures from this milestone are replaced by the general Datalog engine in v0.8.5
+  - If v0.8.5 is not yet complete, the minimal `rdfs:subClassOf` / `rdfs:subPropertyOf` stream tables serve as a stepping stone
+  - See [plans/ecosystem/datalog.md](plans/ecosystem/datalog.md)
 - [ ] pg_regress: `serialization.sql`, `sparql_construct.sql`
 
 ### Exit Criteria
 
 Round-trip: load Turtle → query → export Turtle. All major RDF serialization formats supported for both import and export.
+
+---
+
+## v0.8.5 — Datalog Reasoning Engine
+
+**Theme**: General-purpose rule-based inference over the triple store.
+
+See [plans/ecosystem/datalog.md](plans/ecosystem/datalog.md) for the full design.
+
+### Deliverables
+
+- [ ] **Rule parser** (`src/datalog/parser.rs`)
+  - Turtle-flavoured Datalog syntax: `head :- body₁, body₂, … .`
+  - Variables (`?x`), prefixed IRIs, literals, named graph scoping (`GRAPH`)
+  - Stratified negation via `NOT` keyword
+- [ ] **Stratification engine** (`src/datalog/stratify.rs`)
+  - Predicate dependency graph with positive/negative edges
+  - SCC-based stratification with clear error messages for unstratifiable programs
+- [ ] **SQL compiler** (`src/datalog/compiler.rs`)
+  - Non-recursive rules → `INSERT … SELECT … ON CONFLICT DO NOTHING`
+  - Recursive rules → `WITH RECURSIVE … CYCLE`
+  - Negation → `NOT EXISTS` (higher strata only)
+  - All constants dictionary-encoded before SQL generation (integer joins everywhere)
+- [ ] **Built-in rule sets** (`src/datalog/builtins.rs`)
+  - `pg_triple.load_rules_builtin('rdfs')` — W3C RDFS entailment (13 rules)
+  - `pg_triple.load_rules_builtin('owl-rl')` — W3C OWL 2 RL profile (~80 rules)
+- [ ] **On-demand execution mode** (no pg_trickle needed)
+  - Derived predicates compiled to inline CTEs injected into SPARQL→SQL at query time
+  - `SET pg_triple.inference_mode = 'on_demand'`
+- [ ] **Materialized execution mode** *(optional, requires pg_trickle)*
+  - `pg_triple.materialize_rules(schedule => '10s')` — derived predicates as stream tables
+  - pg_trickle DAG scheduler respects stratum ordering automatically
+- [ ] **Catalog and management**
+  - `_pg_triple.rules` catalog table
+  - Derived predicates registered in `_pg_triple.predicates` with `derived = TRUE`
+  - `pg_triple.load_rules()`, `pg_triple.list_rules()`, `pg_triple.drop_rules()`
+- [ ] **SPARQL engine integration**
+  - Derived VP tables transparent to query planner (same lookup path as base VP tables)
+  - On-demand mode prepends CTEs to generated SQL
+- [ ] pg_regress: `datalog_rdfs.sql`, `datalog_owl_rl.sql`, `datalog_custom.sql`, `datalog_negation.sql`
+
+### Exit Criteria
+
+Users can load RDFS or OWL RL rule sets (or custom rules), and SPARQL queries return inferred triples. Both on-demand and materialized modes operational. Stratified negation correctly validated and compiled.
 
 ---
 
@@ -416,6 +461,7 @@ Stable, tested, documented, and published. Ready for production workloads up to 
 | 0.6.0 | +3 weeks |
 | 0.7.0 | +3 weeks |
 | 0.8.0 | +3 weeks |
+| 0.8.5 | +3 weeks |
 | 0.9.0 | +4 weeks |
 | 0.10.0 | +3 weeks |
 | 1.0.0 | +4 weeks |
