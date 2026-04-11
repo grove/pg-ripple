@@ -113,8 +113,10 @@ CREATE UNIQUE INDEX ON _pg_triple.literal_dict (hash);
 
 - **Encoding path** (`encode()`): Hash → check in-memory cache (LRU, configurable via GUC) → check PG table → INSERT if miss → return `i64`
 - **Decoding path** (`decode()`): `i64` → LRU cache → PG lookup → return string
+- **Batch decoding** (`decode_batch()`): Collect all output `i64` IDs from a result set, resolve in a single `WHERE id = ANY(...)` query, build an in-memory `HashMap<i64, String>`, then emit decoded rows. Avoids per-row dictionary round-trips — critical for large result sets
 - **Batch encoding** (`encode_batch()`): Bulk insert with `ON CONFLICT DO NOTHING` + `RETURNING`, minimising round-trips during data load
-- **In-memory cache**: `HashMap<u128, i64>` in shared memory via pgrx `PgSharedMem`, sized by GUC
+- **In-memory cache**: `HashMap<u128, i64>` in shared memory via pgrx `PgSharedMem`, **sharded into N buckets** (default: 64) with per-shard lightweight locks to eliminate global lock contention under concurrent workloads. Sized by GUC
+- **Shared-memory budget**: `pg_triple.shared_memory_limit` GUC governs total allocation across dictionary cache, bloom filters, and merge worker buffers. Automatic eviction priority: bloom filters first, then oldest LRU dictionary entries. Back-pressure on bulk loads when utilisation exceeds 90%
 - **Prefix compression**: Common IRI prefixes (registered via `pg_triple.register_prefix()`) are stripped before hashing and stored separately, reducing storage by ~40% for typical RDF datasets
 
 ### 4.3 Storage Engine (`src/storage/`)
@@ -138,6 +140,11 @@ CREATE INDEX ON _pg_triple.vp_{predicate_id} (o, s);
 - Tables are created dynamically on first encounter of a new predicate during data ingestion
 - A catalog table `_pg_triple.predicates` maps predicate dictionary IDs to table OIDs for fast lookup
 - PG18's **skip scan** on the composite B-tree indices enables efficient lookups even when only the second column (`o`) is bound
+
+**Rare-Predicate Consolidation**:
+- Predicates with fewer than `pg_triple.vp_promotion_threshold` triples (default: 1,000) are stored in a shared `_pg_triple.vp_rare (p BIGINT, s BIGINT, o BIGINT, g BIGINT)` table with a composite index on `(p, s, o)`
+- Once a predicate crosses the threshold, its rows are auto-migrated to a dedicated VP table and the catalog updated — transparent to callers
+- Prevents catalog bloat for predicate-rich datasets (DBpedia ≈60K predicates, Wikidata ≈10K predicates) — avoids hundreds of thousands of PostgreSQL objects, reduces planner overhead, and cuts VACUUM cost
 
 #### 4.3.2 HTAP Dual-Partition Architecture
 
@@ -201,7 +208,8 @@ SQL Generator
 SPI::connect() → execute SQL → result set of i64 tuples
     │
     ▼
-Dictionary Decoder → human-readable result set
+Batch Dictionary Decoder → collect all i64 IDs → single WHERE id = ANY(...)
+    → build decode map → human-readable result set
     │
     ▼
 Return as SETOF RECORD / JSON / TABLE
@@ -231,27 +239,27 @@ pg_triple.load_ntriples(data TEXT) RETURNS BIGINT
 
 #### 4.4.4 Property Path Compilation
 
-SPARQL property paths (`+`, `*`, `?`) compile to `WITH RECURSIVE` CTEs:
+SPARQL property paths (`+`, `*`, `?`) compile to `WITH RECURSIVE` CTEs with PG18's `CYCLE` clause for hash-based cycle detection:
 
 ```sql
-WITH RECURSIVE path(s, o, depth, visited) AS (
+WITH RECURSIVE path(s, o, depth) AS (
     -- Anchor: direct one-hop
-    SELECT s, o, 1, ARRAY[s]
+    SELECT s, o, 1
     FROM _pg_triple.vp_{predicate_id}
     WHERE s = $1
   UNION ALL
     -- Recursive: extend by one hop
-    SELECT p.s, vp.o, p.depth + 1, p.visited || vp.s
+    SELECT p.s, vp.o, p.depth + 1
     FROM path p
     JOIN _pg_triple.vp_{predicate_id} vp ON p.o = vp.s
-    WHERE NOT vp.s = ANY(p.visited)  -- cycle detection
-      AND p.depth < pg_triple.max_path_depth
+    WHERE p.depth < pg_triple.max_path_depth
 )
-SELECT DISTINCT s, o FROM path;
+CYCLE o SET is_cycle USING cycle_path
+SELECT DISTINCT s, o FROM path WHERE NOT is_cycle;
 ```
 
 - Configurable `pg_triple.max_path_depth` GUC (default: 100)
-- Array-based visited tracking for cycle prevention
+- PG18 `CYCLE` clause for hash-based cycle detection (replaces array-based visited tracking — $O(1)$ membership checks instead of $O(n)$ array scans)
 - PG18's improved CTE performance benefits recursive path queries
 
 ### 4.5 Named Graph Support (`src/graph/`)
@@ -412,8 +420,8 @@ Pre-computed semi-joins between frequently co-joined predicates, implemented as 
            SELECT s, o FROM _pg_triple.vp_12_delta) AS name_tbl
        ON knows.s = name_tbl.s
 5. Execute via SPI
-6. Decode name_tbl.o → dictionary lookup → human-readable strings
-7. Return as SETOF JSONB: [{"name": "Alice"}, ...]
+6. Batch decode: collect all i64 IDs from result → single `WHERE id = ANY(...)` → build decode map
+7. Emit decoded rows as SETOF JSONB: [{"name": "Alice"}, ...]
 ```
 
 ---
@@ -425,10 +433,12 @@ Pre-computed semi-joins between frequently co-joined predicates, implemented as 
 | Insert throughput | >100K triples/sec (bulk load) | Batch COPY, deferred indexing |
 | Insert throughput | >10K triples/sec (transactional) | Delta partition, async validation |
 | Simple BGP query | <5ms (10M triples) | Integer joins, B-tree on VP tables |
-| Star query (5 patterns) | <20ms (10M triples) | Self-join elimination, co-located VP scans |
-| Property path (depth 10) | <100ms (10M triples) | Recursive CTE + cycle detection |
-| Dictionary encode | <1μs (cache hit) | LRU in shared memory |
+| Star query (5 patterns) | <20ms (10M triples) | Self-join elimination, co-located VP scans, PG parallel hash joins |
+| Property path (depth 10) | <100ms (10M triples) | Recursive CTE + `CYCLE` clause (hash-based) |
+| Dictionary encode | <1μs (cache hit) | Sharded LRU in shared memory |
 | Dictionary encode | <50μs (cache miss) | B-tree index on hash |
+| Dictionary batch decode | <1ms per 1,000 IDs | Single `WHERE id = ANY(...)` query |
+| Unbound-predicate scan | <500ms (10M triples, ≤60K predicates) | Rare-predicate consolidation table avoids scanning thousands of empty VP tables |
 
 ---
 

@@ -35,6 +35,7 @@ All user-visible objects live in the `pg_triple` schema; internal tables and VP 
 
 - **Dictionary encoding**: every IRI, blank node, and literal is mapped to `BIGINT` (i64) via XXH3-128 hash before being stored. VP tables **never** contain raw strings.
 - **VP table naming**: `_pg_triple.vp_{predicate_id}` — one table per unique predicate. Columns: `s BIGINT, o BIGINT, g BIGINT`. Dual B-tree indices on `(s, o)` and `(o, s)`.
+- **Rare-predicate consolidation**: predicates with fewer than `pg_triple.vp_promotion_threshold` triples (default: 1,000) are stored in `_pg_triple.vp_rare (p, s, o, g)` instead of a dedicated VP table. Auto-promoted when the threshold is crossed.
 - **HTAP split**: writes go to `vp_{id}_delta` (heap + B-tree); the background merge worker promotes rows to `vp_{id}_main` (BRIN-indexed). Query path is `UNION ALL` of both partitions.
 - **Default graph ID**: `0`; named graphs > 0.
 - **Predicate catalog**: `_pg_triple.predicates (id, table_oid, triple_count)` — look up the VP table OID here before any dynamic SQL.
@@ -68,7 +69,7 @@ cargo pgrx install --pg-config $(which pg_config)
 - **Integer joins everywhere**: SPARQL→SQL translation must encode all bound terms to `i64` *before* generating SQL. String comparisons in VP table queries are a bug.
 - **Filter pushdown**: encode FILTER constants at translation time; never decode and re-encode at runtime.
 - **Self-join elimination**: star patterns (same subject, multiple predicates) must be detected in the algebra optimizer and collapsed into a single scan with multiple joins — do not emit redundant subqueries.
-- **Property paths**: compile to `WITH RECURSIVE … CYCLE` — always include cycle detection to guard against circular graphs.
+- **Property paths**: compile to `WITH RECURSIVE … CYCLE` — always use PG18's `CYCLE` clause for hash-based cycle detection.
 - **SHACL hints**: if `sh:maxCount 1` is set for a predicate, the SQL generator may omit `DISTINCT`; if `sh:minCount 1`, downgrade `LEFT JOIN` to `INNER JOIN`.
 - **No dynamic SQL string concatenation for table names** — always look up the OID in `_pg_triple.predicates` and use `format_ident!`-style quoting.
 

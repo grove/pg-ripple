@@ -88,6 +88,10 @@ A user can install the extension, insert triples, and query them back by pattern
   - Auto-create `_pg_triple.vp_{predicate_id}` tables on first triple with a new predicate
   - Predicate catalog: `_pg_triple.predicates (id BIGINT, table_oid OID, triple_count BIGINT)`
   - Dual B-tree indices per VP table: `(s, o)` and `(o, s)`
+- [ ] **Rare-predicate consolidation table**
+  - Predicates with fewer than `pg_triple.vp_promotion_threshold` triples (default: 1,000) are stored in a shared `_pg_triple.vp_rare (p BIGINT, s BIGINT, o BIGINT, g BIGINT)` table with a composite index on `(p, s, o)`
+  - Once a predicate crosses the threshold, its rows are migrated to a dedicated VP table and the catalog updated — transparent to callers
+  - Prevents catalog bloat for predicate-rich datasets (DBpedia ≈60K predicates, Wikidata ≈10K) — avoids hundreds of thousands of PG objects, reduces planner overhead, and cuts VACUUM cost
 - [ ] **Migrate CRUD to VP storage**
   - `insert_triple()` routes to correct VP table
   - `delete_triple()` targets correct VP table
@@ -113,7 +117,7 @@ A user can install the extension, insert triples, and query them back by pattern
 
 ### Exit Criteria
 
-VP layout operational. Bulk loading >50K triples/sec on commodity hardware. Named graphs functional. Both N-Triples and Turtle data can be loaded.
+VP layout operational. Rare-predicate consolidation table absorbs low-frequency predicates. Bulk loading >50K triples/sec on commodity hardware. Named graphs functional. Both N-Triples and Turtle data can be loaded.
 
 ---
 
@@ -139,7 +143,7 @@ VP layout operational. Bulk loading >50K triples/sec on commodity hardware. Name
 - [ ] **Query executor**
   - `pg_triple.sparql(query TEXT) RETURNS SETOF JSONB`
   - SPI execution of generated SQL
-  - Dictionary decoding of result set
+  - **Batch dictionary decode**: collect all output i64 IDs from the result set, decode in a single `WHERE id = ANY(...)` query, build an in-memory lookup map, then emit human-readable rows — avoids per-row dictionary round-trips
 - [ ] **SPARQL ASK**
   - ASK → `SELECT EXISTS(...)` → returns BOOLEAN
   - `pg_triple.sparql_ask(query TEXT) RETURNS BOOLEAN`
@@ -176,7 +180,7 @@ Users can run SPARQL SELECT and ASK queries with BGPs, FILTER, OPTIONAL against 
   - `/` (sequence) → chained joins
   - `|` (alternative) → `UNION`
   - `^` (inverse) → swap `s`/`o`
-  - Cycle detection via visited-node array
+  - Cycle detection via PG18 `CYCLE` clause (hash-based, replaces array-based visited tracking for $O(1)$ membership checks instead of $O(n)$ array scans)
   - `pg_triple.max_path_depth` GUC
 - [ ] **UNION / MINUS**
   - UNION → SQL `UNION`
@@ -204,7 +208,7 @@ Users can run SPARQL SELECT and ASK queries with BGPs, FILTER, OPTIONAL against 
 
 ### Exit Criteria
 
-SPARQL 1.1 Query coverage for all major features except federated queries. Property path queries complete with cycle detection. Full-text search on indexed literal predicates is functional.
+SPARQL 1.1 Query coverage for all major features except federated queries. Property path queries complete with hash-based cycle detection via PG18 `CYCLE` clause. Full-text search on indexed literal predicates is functional.
 
 ---
 
@@ -234,6 +238,11 @@ SPARQL 1.1 Query coverage for all major features except federated queries. Prope
 - [ ] **Dictionary LRU cache in shared memory**
   - `pg_triple.dictionary_cache_size` GUC
   - Shared across all backends via pgrx `PgSharedMem`
+  - **Sharded lock design**: partition the hash map into N shards (default: 64), each with its own lightweight lock — eliminates global lock contention under concurrent encode/decode workloads
+- [ ] **Shared-memory budget & back-pressure**
+  - `pg_triple.shared_memory_limit` GUC — total memory budget for dictionary cache + bloom filters + merge worker buffers
+  - Automatic eviction priority: bloom filters reclaimed first, then oldest LRU dictionary entries
+  - Back-pressure on bulk loads when shared memory is >90% utilised — throttle batch size to prevent OOM
 - [ ] **Statistics**
   - `pg_triple.stats()` JSONB: triple count, per-predicate counts, cache hit ratio, delta/main sizes
 - [ ] **pg_trickle integration: live statistics** *(optional, when pg_trickle is installed)*
@@ -504,6 +513,13 @@ Standard SPARQL 1.1 Update operations work correctly. RDF tools that use SPARQL 
 - [ ] **Parallel query exploitation**
   - Ensure VP table queries are parallel-safe
   - Mark SQL functions as `PARALLEL SAFE` where applicable
+  - Generate SQL that triggers PostgreSQL parallel workers for multi-VP-table star patterns (e.g. parallel hash joins across VP tables)
+  - Verify `EXPLAIN` output shows parallel plans for queries touching 3+ VP tables
+- [ ] **Custom statistics for the PostgreSQL planner**
+  - Run `ANALYZE` on VP tables after merge operations so the planner has accurate selectivity estimates for generated SQL
+  - Provide per-predicate ndistinct and MCV statistics to guide join ordering
+  - Evaluate custom statistics objects (PG18 extended statistics) on `(s, o)` pairs for correlation-aware planning
+  - Consider prepared statements with parameter binding (instead of literal interpolation) so the planner can cache generic plans
 - [ ] **PG18 async I/O exploitation**
   - Verify BRIN scans on main partition leverage AIO
   - Tune `io_combine_limit` recommendations
@@ -525,7 +541,7 @@ Standard SPARQL 1.1 Update operations work correctly. RDF tools that use SPARQL 
 
 ### Exit Criteria
 
-BSBM results documented. >100K triples/sec sustained bulk load. <10ms for simple BGP queries at 10M triples. SHACL constraints exploited by query optimizer.
+BSBM results documented. >100K triples/sec sustained bulk load. <10ms for simple BGP queries at 10M triples. <5ms for cached repeat queries. SHACL constraints exploited by query optimizer. PostgreSQL parallel plans verified for multi-VP-table joins.
 
 ---
 
@@ -625,7 +641,7 @@ Standard SPARQL clients (YASGUI, Postman, RDF4J workbench, `curl`) can query and
 
 **Theme**: Query remote SPARQL endpoints from within pg_triple queries.
 
-> **In plain language:** Federation lets a single SPARQL query combine data from pg_triple with data from external SPARQL endpoints on the web. For example, you could ask "find all my local employees and enrich their records with data from Wikidata" — and the system will automatically fetch the remote portion, join it with local results, and return a unified answer. This is part of the SPARQL 1.1 standard (`SERVICE` keyword) and is expected by many enterprise knowledge graph workflows that integrate multiple data sources. The initial implementation is narrowly scoped: sequential execution, configurable timeouts, no cross-endpoint optimisation.
+> **In plain language:** Federation lets a single SPARQL query combine data from pg_triple with data from external SPARQL endpoints on the web. For example, you could ask "find all my local employees and enrich their records with data from Wikidata" — and the system will automatically fetch the remote portion, join it with local results, and return a unified answer. This is part of the SPARQL 1.1 standard (`SERVICE` keyword) and is expected by many enterprise knowledge graph workflows that integrate multiple data sources. Multiple remote calls execute in parallel when possible to minimise latency.
 >
 > **Effort estimate: 4–6 person-weeks**
 
@@ -640,7 +656,7 @@ Standard SPARQL clients (YASGUI, Postman, RDF4J workbench, `curl`) can query and
   - Dictionary-encode remote results into local `i64` IDs for join compatibility
 - [ ] **Join integration**
   - Remote result sets injected as inline `VALUES` clauses in the generated SQL
-  - Sequential execution: local BGPs first, then remote SERVICE calls, then join
+  - **Async parallel execution**: multiple `SERVICE` clauses in a single query execute concurrently (via `tokio::join!` in pg_triple_http, or sequential fallback in SPI context) — prevents a single slow endpoint from blocking the entire query
   - Bind-join optimisation: push bound variables from local results into remote queries to reduce remote result size
 - [ ] **Error handling and timeouts**
   - `pg_triple.federation_timeout` GUC (default: 30s per SERVICE call)
@@ -656,7 +672,7 @@ Standard SPARQL clients (YASGUI, Postman, RDF4J workbench, `curl`) can query and
 
 ### Exit Criteria
 
-SPARQL queries with `SERVICE` clauses correctly fetch and join data from registered remote endpoints. Timeouts and error handling work as configured. No SSRF risk — only allowlisted endpoints are contacted.
+SPARQL queries with `SERVICE` clauses correctly fetch and join data from registered remote endpoints. Multiple SERVICE calls execute in parallel. Timeouts and error handling work as configured. No SSRF risk — only allowlisted endpoints are contacted.
 
 ---
 
@@ -688,6 +704,7 @@ SPARQL queries with `SERVICE` clauses correctly fetch and join data from registe
   - `BIND(<< :Alice :knows :Bob >> AS ?t)` — inline quoted triple construction
   - Triple term patterns in WHERE clauses: `<< ?s :knows ?o >> :assertedBy ?who .`
   - Compile to dictionary joins: look up the quoted triple ID, then join against VP tables
+  - **Batch recursive decode for nested quoted triples**: collect all quoted-triple IDs from the result set, recursively resolve inner components in bulk via `WITH RECURSIVE` dictionary lookup, build decode map before emitting rows — avoids per-row recursive dictionary round-trips
 - [ ] **SPARQL-star in CONSTRUCT / DESCRIBE**
   - CONSTRUCT can produce quoted triples in output
   - Turtle-star and N-Triples-star serialization in export functions
