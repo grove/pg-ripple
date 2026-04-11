@@ -455,10 +455,10 @@ fn create_sparql_view(name: &str, sparql: &str, schedule: &str) -> Result<(), Pg
 
 | pg_triple Version | pg_trickle Feature | Priority |
 |---|---|---|
-| v0.5.0 (HTAP) | Real-time statistics stream tables | High |
+| v0.5.0 (HTAP) | Real-time statistics stream tables, change notification CDC triggers | High |
 | v0.6.0 (SHACL Core) | SHACL violation monitors (IMMEDIATE mode) | Medium |
 | v0.7.0 (SHACL Advanced) | Multi-shape DAG validation | Medium |
-| v0.9.0 (Datalog) | Inference materialization via Datalog rule sets | High |
+| v0.9.0 (Datalog) | Inference materialization via Datalog rule sets, SHACL-AF `sh:rule` bridge | High |
 | v0.10.0 (SPARQL Views) | ExtVP stream tables, `pg_triple.create_sparql_view()` API, SPARQL view caching | High |
 | Post-1.0 | Full ExtVP automation, ontology change propagation DAG | High |
 

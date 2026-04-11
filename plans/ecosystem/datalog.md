@@ -682,6 +682,7 @@ SELECT * FROM pg_triple.check_constraints();
 | Active rules (ECA) | Event-condition-action rules that trigger side-effects (`NOTIFY`, function calls) rather than deriving quads. Breaks pure declarative model; maps to PG `NOTIFY` + triggers. | 3 | Post-1.0 |
 | Probabilistic rules | Weighted rules for uncertain reasoning (e.g., link prediction). Requires probability propagation semantics (ProbLog-style). | 3 | Post-1.0 |
 | SWRL integration | Semantic Web Rule Language as an alternative rule syntax. Turtle-based; maps to the same IR. | 3 | Post-1.0 |
+| SHACL-AF `sh:rule` bridge | Detect `sh:rule` entries in SHACL shapes, compile to Datalog IR. Bidirectional: SHACL shapes inform Datalog constraints; derived triples visible to SHACL validation. | 1 | v0.9.0 |
 
 ---
 
@@ -698,7 +699,7 @@ The Datalog engine fits between serialization (v0.8.0) and SPARQL views (v0.10.0
 | Version | Deliverable |
 |---|---|
 | **v0.8.0** | Serialization, export, SPARQL CONSTRUCT/DESCRIBE |
-| **v0.9.0** | **Datalog reasoning engine**: rule parser, stratifier, SQL compiler, built-in RDFS/OWL RL rule sets, arithmetic built-ins, constraint rules, on-demand mode, materialized mode (pg_trickle) |
+| **v0.9.0** | **Datalog reasoning engine**: rule parser, stratifier, SQL compiler, built-in RDFS/OWL RL rule sets, arithmetic built-ins, constraint rules, SHACL-AF `sh:rule` bridge, on-demand mode, materialized mode (pg_trickle) |
 | **v0.10.0** | Incremental SPARQL views, ExtVP stream tables |
 
 ---

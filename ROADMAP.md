@@ -144,12 +144,17 @@ Users can run SPARQL SELECT and ASK queries with BGPs, FILTER, OPTIONAL against 
   - Optional-self-join elimination
   - Self-union elimination (UNION → WHERE IN)
   - Projection pushing for DISTINCT queries
+- [ ] **Full-text search on literals**
+  - `pg_triple.fts_index(predicate TEXT)` — create a GIN `tsvector` index on the literal dictionary for a predicate
+  - SPARQL `CONTAINS()` and `REGEX()` FILTERs on indexed predicates rewrite to `@@` / `LIKE` against the GIN index
+  - `pg_triple.fts_search(query TEXT, predicate TEXT) RETURNS TABLE` — direct full-text search API
+  - Index is maintained incrementally on `insert_triple()` for indexed predicates
 - [ ] Benchmark: SP2Bench subset
-- [ ] pg_regress: `property_paths.sql`, `aggregates.sql`
+- [ ] pg_regress: `property_paths.sql`, `aggregates.sql`, `fts_search.sql`
 
 ### Exit Criteria
 
-SPARQL 1.1 Query coverage for all major features except federated queries. Property path queries complete with cycle detection.
+SPARQL 1.1 Query coverage for all major features except federated queries. Property path queries complete with cycle detection. Full-text search on indexed literal predicates is functional.
 
 ---
 
@@ -180,12 +185,18 @@ SPARQL 1.1 Query coverage for all major features except federated queries. Prope
 - [ ] **pg_trickle integration: live statistics** *(optional, when pg_trickle is installed)*
   - `pg_triple.enable_live_statistics()` creates `_pg_triple.predicate_stats` and `_pg_triple.graph_stats` stream tables
   - `pg_triple.stats()` reads from stream tables instead of full-scanning VP tables (100–1000× faster)
+- [ ] **Change notification / CDC**
+  - `pg_triple.subscribe(pattern TEXT, channel TEXT)` — emit `NOTIFY` on triple changes matching a predicate/graph pattern
+  - Thin trigger-based CDC on VP delta tables; fires on INSERT/DELETE
+  - Payload: JSON with `{"op": "insert"|"delete", "s": ..., "p": ..., "o": ..., "g": ...}` (integer IDs)
+  - `pg_triple.unsubscribe(channel TEXT)` to remove subscriptions
+  - Enables downstream event-driven architectures (CDC consumers, webhooks, cache invalidation)
 - [ ] Benchmark: concurrent read/write (pgbench custom scripts)
-- [ ] pg_regress: `htap_merge.sql`
+- [ ] pg_regress: `htap_merge.sql`, `change_notification.sql`
 
 ### Exit Criteria
 
-Writes do not block reads. Merge worker operates correctly. >100K triples/sec bulk insert sustained.
+Writes do not block reads. Merge worker operates correctly. >100K triples/sec bulk insert sustained. Change notifications fire correctly for matching patterns.
 
 ---
 
@@ -321,11 +332,16 @@ See [plans/ecosystem/datalog.md](plans/ecosystem/datalog.md) for the full design
 - [ ] **SPARQL engine integration**
   - Derived VP tables transparent to query planner (same lookup path as base VP tables)
   - On-demand mode prepends CTEs to generated SQL
-- [ ] pg_regress: `datalog_rdfs.sql`, `datalog_owl_rl.sql`, `datalog_custom.sql`, `datalog_negation.sql`, `datalog_arithmetic.sql`, `datalog_constraints.sql`
+- [ ] **SHACL-AF `sh:rule` bridge**
+  - Detect `sh:rule` entries in loaded SHACL shapes that contain Datalog-compatible triple rules
+  - Compile `sh:rule` bodies to Datalog IR and register in `_pg_triple.rules`
+  - Bidirectional: SHACL shapes inform Datalog constraints; Datalog-derived triples are visible to SHACL validation
+  - `pg_triple.load_shacl()` auto-registers any `sh:rule` triples as Datalog rules when `pg_triple.inference_mode != 'off'`
+- [ ] pg_regress: `datalog_rdfs.sql`, `datalog_owl_rl.sql`, `datalog_custom.sql`, `datalog_negation.sql`, `datalog_arithmetic.sql`, `datalog_constraints.sql`, `shacl_af_rule.sql`
 
 ### Exit Criteria
 
-Users can load RDFS or OWL RL rule sets (or custom rules), and SPARQL queries return inferred triples. Arithmetic built-ins filter correctly in rule bodies. Constraint rules detect and report violations (optionally rejecting transactions). Both on-demand and materialized modes operational. Stratified negation correctly validated and compiled.
+Users can load RDFS or OWL RL rule sets (or custom rules), and SPARQL queries return inferred triples. Arithmetic built-ins filter correctly in rule bodies. Constraint rules detect and report violations (optionally rejecting transactions). Both on-demand and materialized modes operational. Stratified negation correctly validated and compiled. SHACL shapes with `sh:rule` entries are auto-compiled to Datalog rules.
 
 ---
 
@@ -455,6 +471,13 @@ BSBM results documented. >100K triples/sec sustained bulk load. <10ms for simple
   - Performance tuning guide
   - SHACL constraint mapping reference
   - Datalog rule authoring guide
+- [ ] **Graph-level Row-Level Security (RLS)**
+  - `pg_triple.enable_graph_rls()` — activate RLS policies on VP tables using the `g` column
+  - Policy driven by a mapping table: `_pg_triple.graph_access (role_name TEXT, graph_id BIGINT, permission TEXT)` — `'read'` / `'write'` / `'admin'`
+  - `pg_triple.grant_graph(role TEXT, graph TEXT, permission TEXT)` / `pg_triple.revoke_graph()`
+  - SPARQL queries automatically filter results to graphs the current role can read
+  - Write operations (`insert_triple`, SPARQL UPDATE) enforce write permission
+  - Superuser bypass via `pg_triple.rls_bypass` GUC for admin operations
 - [ ] **Packaging**
   - `cargo pgrx package` produces installable `.deb` and `.rpm`
   - Docker image with extension pre-installed
@@ -462,7 +485,7 @@ BSBM results documented. >100K triples/sec sustained bulk load. <10ms for simple
 
 ### Exit Criteria
 
-Extension is installable, upgradable, and documented. Operational tooling sufficient for production use.
+Extension is installable, upgradable, and documented. Operational tooling sufficient for production use. Graph-level RLS enforces access control per named graph.
 
 ---
 
@@ -517,6 +540,11 @@ Stable, tested, documented, and published. Ready for production workloads up to 
 | 1.4 | Extended VP | Automated workload-driven ExtVP stream tables (pg_trickle), ontology change propagation DAG |
 | 1.5 | Interop | Apache AGE bridge, GraphQL-to-SPARQL |
 | 1.6 | Federation | SPARQL SERVICE keyword for remote endpoints |
+| 1.7 | RDF-star / RDF 1.2 | Quoted triples (embedded triples as subjects/objects), `<<s p o>>` syntax in SPARQL-star, reification-as-data for provenance and annotation |
+| 1.8 | GeoSPARQL + PostGIS | `geo:asWKT` literal type backed by PostGIS `geometry`, spatial FILTER functions (`geof:sfWithin`, `geof:distance`), R-tree index on spatial VP tables |
+| 1.9 | R2RML Virtual Graphs | W3C R2RML mappings exposing relational tables as virtual RDF graphs, SPARQL queries transparently join VP tables with mapped SQL tables |
+| 1.10 | SPARQL Protocol | HTTP endpoint (`/sparql`) implementing the W3C SPARQL 1.1 Protocol, content negotiation (JSON, XML, CSV, Turtle), query parameter and POST body support |
+| 1.11 | Quad-Level Provenance | Per-quad metadata table `_pg_triple.provenance (s, p, o, g, source, timestamp, txid)`, `pg_triple.triple_history()` API, integration with Datalog rule provenance (why-provenance) |
 
 ---
 
@@ -538,5 +566,6 @@ Stable, tested, documented, and published. Ready for production workloads up to 
 | 0.12.0 | +4 weeks |
 | 0.13.0 | +3 weeks |
 | 1.0.0 | +4 weeks |
+| 1.1–1.11 | Post-1.0 (community-driven cadence) |
 
 *Estimates assume a small focused team (1–3 developers). Actual pace depends on contributor availability and scope adjustments discovered during implementation.*
