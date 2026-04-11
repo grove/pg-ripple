@@ -9,7 +9,7 @@ Each release below has two layers:
 - **The plain-language summary** (in the coloured box) explains *what* the release delivers and *why it matters* — no programming knowledge required.
 - **The technical deliverables** list the specific items developers will build. Feel free to skip these if you're reading for the big picture.
 
-**Effort estimates** are given as *person-weeks* — e.g. "6–8 pw" means the release would take roughly 6–8 weeks for a single full-time developer, or 3–4 weeks for a pair working together. The total estimated effort from v0.1.0 to v1.0.0 is **80–104 person-weeks** (~18–24 months for one developer; ~9–12 months for a pair).
+**Effort estimates** are given as *person-weeks* — e.g. "6–8 pw" means the release would take roughly 6–8 weeks for a single full-time developer, or 3–4 weeks for a pair working together. The total estimated effort from v0.1.0 to v1.0.0 is **95–122 person-weeks** (~22–28 months for one developer; ~11–14 months for a pair).
 
 ---
 
@@ -30,8 +30,11 @@ Each release below has two layers:
 | 0.11.0 | SPARQL Update | Standard RDF write operations (add / change / delete) | 4–6 pw |
 | 0.12.0 | Performance | Speed tuning, benchmarks, production-grade throughput | 6–8 pw |
 | 0.13.0 | Admin & Security | Operations tooling, access control, docs, packaging | 4–6 pw |
+| 0.14.0 | SPARQL Protocol | Standard HTTP API so web apps and tools can query directly | 3–4 pw |
+| 0.15.0 | SPARQL Federation | Query remote SPARQL endpoints alongside local data | 4–6 pw |
+| 0.16.0 | RDF-star / RDF 1.2 | Make statements about statements (provenance, annotations) | 8–10 pw |
 | 1.0.0 | Production Release | Standards conformance, stress testing, security audit | 6–8 pw |
-| | | **Total estimated effort** | **80–104 pw** |
+| | | **Total estimated effort** | **95–122 pw** |
 
 ---
 
@@ -537,7 +540,7 @@ BSBM results documented. >100K triples/sec sustained bulk load. <10ms for simple
 ### Deliverables
 
 - [ ] **Extension upgrade scripts**
-  - Tested upgrade path `0.1.0 → ... → 0.13.0`
+  - Tested upgrade path `0.1.0 → ... → 0.16.0`
   - `ALTER EXTENSION pg_triple UPDATE` works for all version transitions
 - [ ] **Administrative functions**
   - `pg_triple.vacuum()` — force merge + VACUUM on VP tables
@@ -572,6 +575,135 @@ Extension is installable, upgradable, and documented. Operational tooling suffic
 
 ---
 
+## v0.14.0 — SPARQL Protocol (HTTP Endpoint)
+
+**Theme**: Standard HTTP API for SPARQL queries and updates.
+
+> **In plain language:** Without this, the only way to talk to pg_triple is through a PostgreSQL database connection (SQL). But the entire RDF ecosystem — SPARQL notebooks, visualization tools, ontology editors, web applications — expects to query a triple store over HTTP at a `/sparql` URL. This release adds a lightweight companion service that accepts standard SPARQL HTTP requests, forwards them to pg_triple inside PostgreSQL, and returns results in all the standard formats (JSON, XML, CSV, Turtle). This is the single biggest adoption enabler: it lets pg_triple drop in as a replacement for tools like Blazegraph, Virtuoso, or Apache Fuseki without requiring any client-side changes.
+>
+> **Effort estimate: 3–4 person-weeks**
+
+### Deliverables
+
+- [ ] **Companion HTTP service** (`pg_triple_http` binary)
+  - Standalone Rust binary (not a PG background worker — avoids binding TCP ports inside PostgreSQL)
+  - Connects to PostgreSQL via standard `libpq` / `tokio-postgres`
+  - Configurable via environment variables or config file: `PG_TRIPLE_HTTP_PORT`, `PG_TRIPLE_HTTP_PG_URL`
+- [ ] **W3C SPARQL 1.1 Protocol compliance**
+  - `GET /sparql?query=...` — URL-encoded query
+  - `POST /sparql` with `application/sparql-query` body
+  - `POST /sparql` with `application/x-www-form-urlencoded` body (`query=...` / `update=...`)
+  - SPARQL Update via `POST /sparql` with `application/sparql-update` body
+- [ ] **Content negotiation**
+  - `application/sparql-results+json` (default for SELECT/ASK)
+  - `application/sparql-results+xml`
+  - `text/csv` / `text/tab-separated-values`
+  - `text/turtle` / `application/n-triples` (for CONSTRUCT/DESCRIBE)
+  - `application/ld+json` (JSON-LD, for CONSTRUCT/DESCRIBE)
+- [ ] **Connection pooling**
+  - Built-in connection pool (e.g. `deadpool-postgres`) to handle concurrent HTTP requests
+  - `PG_TRIPLE_HTTP_POOL_SIZE` configuration
+- [ ] **Security**
+  - Optional bearer token or Basic auth for access control
+  - CORS configuration for browser-based SPARQL clients
+  - Rate limiting GUC
+- [ ] **Health and metrics**
+  - `GET /health` endpoint for load balancer probes
+  - Prometheus-compatible `/metrics` endpoint (query count, latency histogram, error rate)
+- [ ] **Docker integration**
+  - Docker image bundles both PostgreSQL (with pg_triple) and the HTTP service
+  - Docker Compose example with separate PG and HTTP containers
+- [ ] pg_regress: `sparql_protocol.sql` (protocol-level tests via `curl`)
+
+### Exit Criteria
+
+Standard SPARQL clients (YASGUI, Postman, RDF4J workbench, `curl`) can query and update pg_triple over HTTP without any pg_triple-specific configuration. Content negotiation returns correct formats.
+
+---
+
+## v0.15.0 — SPARQL Federation
+
+**Theme**: Query remote SPARQL endpoints from within pg_triple queries.
+
+> **In plain language:** Federation lets a single SPARQL query combine data from pg_triple with data from external SPARQL endpoints on the web. For example, you could ask "find all my local employees and enrich their records with data from Wikidata" — and the system will automatically fetch the remote portion, join it with local results, and return a unified answer. This is part of the SPARQL 1.1 standard (`SERVICE` keyword) and is expected by many enterprise knowledge graph workflows that integrate multiple data sources. The initial implementation is narrowly scoped: sequential execution, configurable timeouts, no cross-endpoint optimisation.
+>
+> **Effort estimate: 4–6 person-weeks**
+
+### Deliverables
+
+- [ ] **SPARQL `SERVICE` keyword parsing**
+  - Parse `SERVICE <url> { ... }` clauses in SPARQL queries via `spargebra`
+  - Support both inline service IRIs and `SERVICE ?var` (variable endpoints, with VALUES binding)
+- [ ] **Remote endpoint execution**
+  - HTTP GET/POST to remote SPARQL endpoints using `reqwest` (async HTTP client)
+  - Parse `application/sparql-results+json` and `application/sparql-results+xml` responses
+  - Dictionary-encode remote results into local `i64` IDs for join compatibility
+- [ ] **Join integration**
+  - Remote result sets injected as inline `VALUES` clauses in the generated SQL
+  - Sequential execution: local BGPs first, then remote SERVICE calls, then join
+  - Bind-join optimisation: push bound variables from local results into remote queries to reduce remote result size
+- [ ] **Error handling and timeouts**
+  - `pg_triple.federation_timeout` GUC (default: 30s per SERVICE call)
+  - `pg_triple.federation_max_results` GUC (default: 10,000 rows per remote call)
+  - Graceful degradation: failed SERVICE calls return empty results with a WARNING (configurable to ERROR via `pg_triple.federation_on_error` GUC)
+- [ ] **Security**
+  - Allowlist of permitted remote endpoints: `_pg_triple.federation_endpoints (url TEXT, enabled BOOLEAN)`
+  - `pg_triple.register_endpoint()` / `pg_triple.remove_endpoint()` management API
+  - No outbound HTTP calls unless the endpoint is explicitly registered (defence against SSRF)
+- [ ] **HTTP endpoint integration**
+  - Federation works via both SQL (`pg_triple.sparql()`) and HTTP (`/sparql`) interfaces
+- [ ] pg_regress: `sparql_federation.sql`, `federation_timeout.sql`
+
+### Exit Criteria
+
+SPARQL queries with `SERVICE` clauses correctly fetch and join data from registered remote endpoints. Timeouts and error handling work as configured. No SSRF risk — only allowlisted endpoints are contacted.
+
+---
+
+## v0.16.0 — RDF-star / RDF 1.2
+
+**Theme**: Quoted triples — make statements about statements.
+
+> **In plain language:** Standard RDF can say "Alice knows Bob". But it can't directly say *"Alice said that she knows Bob"* or *"The fact that Alice knows Bob was recorded on January 5th"*. RDF-star (now part of the RDF 1.2 standard, finalised by W3C in 2024) solves this by allowing triples to be embedded inside other triples — called *quoted triples*. This is essential for provenance ("where did this fact come from?"), temporal annotations ("when was this true?"), and trust ("who asserted this?"). This is a cross-cutting change that touches parsing, storage, dictionary encoding, and the SPARQL engine, making it the largest single feature addition in the roadmap.
+>
+> **Effort estimate: 8–10 person-weeks**
+
+### Deliverables
+
+- [ ] **Quoted triple syntax in parsers**
+  - Turtle-star: `<< :Alice :knows :Bob >> :assertedBy :Carol .`
+  - N-Triples-star: `<< <http://...Alice> <http://...knows> <http://...Bob> >> <http://...assertedBy> <http://...Carol> .`
+  - Extend `rio_turtle` / `rio_xml` parsing (or use `oxrdf` crate for RDF-star support)
+- [ ] **Dictionary encoding for quoted triples**
+  - New term type in dictionary: `QUOTED_TRIPLE` — stores the triple `(s, p, o)` as a composite key
+  - XXH3-128 hash of the triple tuple for dedup
+  - `pg_triple.encode_triple(s TEXT, p TEXT, o TEXT) RETURNS BIGINT` — returns the dictionary ID of the quoted triple
+  - `pg_triple.decode_triple(id BIGINT) RETURNS JSONB` — returns `{"s": ..., "p": ..., "o": ...}`
+- [ ] **Storage**
+  - Quoted triples can appear in `s` or `o` positions of VP tables (the ID references a quoted triple in the dictionary)
+  - No structural change to VP tables — quoted triple IDs are regular `BIGINT` values
+  - Nested quoted triples supported (a quoted triple whose subject or object is itself a quoted triple)
+- [ ] **SPARQL-star query support**
+  - Parse `<< ?s ?p ?o >>` triple term patterns in SPARQL queries
+  - `BIND(<< :Alice :knows :Bob >> AS ?t)` — inline quoted triple construction
+  - Triple term patterns in WHERE clauses: `<< ?s :knows ?o >> :assertedBy ?who .`
+  - Compile to dictionary joins: look up the quoted triple ID, then join against VP tables
+- [ ] **SPARQL-star in CONSTRUCT / DESCRIBE**
+  - CONSTRUCT can produce quoted triples in output
+  - Turtle-star and N-Triples-star serialization in export functions
+- [ ] **Datalog integration**
+  - Quoted triples can appear in Datalog rule heads and bodies
+  - Enables provenance rules: `<< ?s ?p ?o >> ex:derivedBy ex:rule1 :- ?s ?p ?o, RULE(ex:rule1) .`
+- [ ] **Content negotiation updates**
+  - HTTP endpoint serves Turtle-star and JSON-LD-star for CONSTRUCT/DESCRIBE results containing quoted triples
+- [ ] pg_regress: `rdf_star_load.sql`, `sparql_star_query.sql`, `rdf_star_construct.sql`, `rdf_star_datalog.sql`
+
+### Exit Criteria
+
+Users can load RDF-star data (Turtle-star, N-Triples-star), query it with SPARQL-star triple term patterns, and export results in RDF-star formats. Quoted triples work as subjects and objects in VP tables. Datalog rules can reason over and produce quoted triples.
+
+---
+
 ## v1.0.0 — Production Release
 
 **Theme**: Stability, conformance, and production certification.
@@ -584,7 +716,9 @@ Extension is installable, upgradable, and documented. Operational tooling suffic
 
 - [ ] **SPARQL 1.1 Query conformance**
   - Pass W3C SPARQL 1.1 Query test suite (supported subset)
-  - Document unsupported features (federation, property functions)
+  - Document unsupported features (property functions)
+  - Verify conformance via both SQL and HTTP interfaces
+  - Federation (`SERVICE`) covered by v0.15.0
 - [ ] **SPARQL 1.1 Update conformance**
   - Pass W3C SPARQL 1.1 Update test suite (supported subset)
   - Document unsupported features
@@ -628,12 +762,9 @@ Stable, tested, documented, and published. Ready for production workloads up to 
 | 1.3 | Temporal | Track how data changes over time; query historical states | Bitstring versioning, TimescaleDB integration |
 | 1.4 | Extended VP | Automatically pre-compute shortcuts for frequent query patterns | Automated workload-driven ExtVP stream tables (pg_trickle), ontology change propagation DAG |
 | 1.5 | Interop | Bridge to other graph databases and GraphQL APIs | Apache AGE bridge, GraphQL-to-SPARQL |
-| 1.6 | Federation | Query remote SPARQL endpoints from within pg_triple | SPARQL SERVICE keyword for remote endpoints |
-| 1.7 | RDF-star / RDF 1.2 | Make statements *about* statements (e.g. "Alice said that Bob knows Carol") | Quoted triples (`<<s p o>>` syntax in SPARQL-star), reification-as-data for provenance and annotation |
-| 1.8 | GeoSPARQL + PostGIS | Answer geographic questions ("find all hospitals within 5 km of this point") | `geo:asWKT` literal type backed by PostGIS `geometry`, spatial FILTER functions, R-tree index on spatial VP tables |
-| 1.9 | R2RML Virtual Graphs | Expose existing database tables as if they were RDF data — no migration needed | W3C R2RML mappings, SPARQL queries transparently join VP tables with mapped SQL tables |
-| 1.10 | SPARQL Protocol | Provide a standard HTTP API so web apps and tools can query pg_triple directly | HTTP endpoint (`/sparql`) implementing the W3C SPARQL 1.1 Protocol, content negotiation (JSON, XML, CSV, Turtle) |
-| 1.11 | Quad-Level Provenance | Track where each fact came from and when it was added | Per-quad metadata table with source, timestamp, and transaction ID; integration with Datalog rule provenance (why-provenance) |
+| 1.6 | GeoSPARQL + PostGIS | Answer geographic questions ("find all hospitals within 5 km of this point") | `geo:asWKT` literal type backed by PostGIS `geometry`, spatial FILTER functions, R-tree index on spatial VP tables |
+| 1.7 | R2RML Virtual Graphs | Expose existing database tables as if they were RDF data — no migration needed | W3C R2RML mappings, SPARQL queries transparently join VP tables with mapped SQL tables |
+| 1.8 | Quad-Level Provenance | Track where each fact came from and when it was added | Per-quad metadata table with source, timestamp, and transaction ID; integration with Datalog rule provenance (why-provenance) |
 
 ---
 
@@ -656,7 +787,10 @@ Stable, tested, documented, and published. Ready for production workloads up to 
 | 0.11.0 | +3 weeks | 4–6 pw | 63–84 pw |
 | 0.12.0 | +4 weeks | 6–8 pw | 69–92 pw |
 | 0.13.0 | +3 weeks | 4–6 pw | 73–98 pw |
-| 1.0.0 | +4 weeks | 6–8 pw | **80–104 pw** |
-| 1.1–1.11 | Post-1.0 | Community-driven | — |
+| 0.14.0 | +2 weeks | 3–4 pw | 76–102 pw |
+| 0.15.0 | +3 weeks | 4–6 pw | 80–108 pw |
+| 0.16.0 | +5 weeks | 8–10 pw | 88–118 pw |
+| 1.0.0 | +4 weeks | 6–8 pw | **95–122 pw** |
+| 1.1–1.8 | Post-1.0 | Community-driven | — |
 
 *Estimates assume a pair of focused developers with Rust and PostgreSQL experience. "pw" = person-weeks. Calendar durations assume pair programming; a solo developer should expect roughly double the calendar time. Actual pace depends on contributor availability and scope adjustments discovered during implementation.*
