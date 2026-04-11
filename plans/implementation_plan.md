@@ -457,14 +457,50 @@ Pre-computed semi-joins between frequently co-joined predicates, implemented as 
 ### 8.2 Integration Tests
 
 - `cargo pgrx regress` with pg_regress test suites:
-  - `sql/triple_crud.sql` — insert, delete, query basics
+  - `sql/dictionary.sql` — encode/decode, prefix expansion, hash collision behaviour
+  - `sql/basic_crud.sql` — insert, delete, find_triples, triple_count
+  - `sql/triple_crud.sql` — insert, delete, query basics (VP storage)
   - `sql/sparql_queries.sql` — comprehensive SPARQL coverage
+  - `sql/sparql_injection.sql` — adversarial inputs (SQL metacharacters in IRIs/literals)
   - `sql/bulk_load.sql` — Turtle/N-Triples ingestion
   - `sql/shacl_validation.sql` — constraint enforcement
+  - `sql/shacl_malformed.sql` — invalid shape definitions, actionable errors
   - `sql/named_graphs.sql` — GRAPH patterns
   - `sql/property_paths.sql` — recursive traversal
+  - `sql/resource_limits.sql` — Cartesian products, unbounded paths, memory limits
+  - `sql/concurrent_write_merge.sql` — merge during concurrent writes (no data loss)
+  - `sql/admin_functions.sql` — vacuum, reindex, stats
+  - `sql/graph_rls.sql` — RLS policy enforcement, cross-role isolation
+  - `sql/upgrade_path.sql` — sequential version upgrades with data integrity checks
+  - `sql/datalog_malformed.sql` — syntax errors, unstratifiable programs
 
-### 8.3 Benchmarks
+### 8.3 Adversarial & Security Testing
+
+- **SQL injection prevention**: SPARQL queries with crafted IRIs containing SQL metacharacters (`'; DROP TABLE --`, Unicode escapes, null bytes) must be safely dictionary-encoded; generated SQL must never contain raw user strings
+- **Malformed input resilience**: invalid Turtle, truncated N-Triples, malformed SPARQL, broken SHACL shapes, invalid Datalog rules — verify clean error messages, no panics, no partial state corruption
+- **Resource exhaustion defence**: Cartesian-product queries, unbounded property paths, deeply nested subqueries — verify that `max_path_depth`, `statement_timeout`, and memory limits prevent runaway consumption
+
+### 8.4 Fuzz Testing
+
+- `cargo-fuzz` with libFuzzer on the SPARQL→SQL pipeline: feed random/mutated SPARQL strings through parser and SQL generator; verify no panics, no invalid SQL emitted, no memory safety violations
+- Fuzz targets for Turtle parser integration (complement `rio_turtle`'s own fuzz testing with pg_triple's error propagation layer)
+- Fuzz targets for Datalog rule parser
+- Run in CI nightly (time-limited: 10 minutes per target)
+
+### 8.5 Concurrency Testing
+
+- Concurrent dictionary encode: two backends encoding the same IRI must return the same i64 (verifies shard lock correctness)
+- Dictionary cache eviction: verify decode correctness after cache entries are evicted under memory pressure
+- Concurrent merge + write: bulk insert and merge worker running simultaneously with no data loss
+- Merge worker edge cases: empty delta (no-op), crash during merge (recovery), near-capacity shared memory (back-pressure)
+
+### 8.6 Performance Regression
+
+- **CI benchmark gate** (from v0.2.0): record insert throughput and point-query latency as baselines; fail CI if a commit regresses throughput by >10%
+- Baselines extended at each milestone: star queries (v0.3.0), property paths (v0.4.0), concurrent read/write (v0.5.0), BSBM full mix (v0.12.0)
+- Performance regression suite maintained as pgbench custom scripts in `sql/bench/`
+
+### 8.7 Benchmarks
 
 - pgrx-bench integration for in-process pgbench
 - Berlin SPARQL Benchmark (BSBM) adapted to SQL function calls
@@ -474,10 +510,12 @@ Pre-computed semi-joins between frequently co-joined predicates, implemented as 
   - Point queries vs star queries vs path queries
   - Concurrent read/write under HTAP workload
 
-### 8.4 Conformance
+### 8.8 Conformance
 
-- W3C SPARQL 1.1 Query test suite (subset applicable to our supported features)
-- SHACL Core test suite
+- **W3C SPARQL 1.1 Query conformance gate**: run applicable manifest tests from v0.3.0 onward; extend at each SPARQL milestone (v0.4.0, v0.8.0, v0.11.0, v0.15.0, v0.16.0) until full conformance at v1.0.0
+- W3C SPARQL 1.1 Update test suite (from v0.11.0)
+- W3C SHACL Core test suite (from v0.6.0)
+- SPARQL 1.1 Protocol conformance tests via `curl` (from v0.14.0)
 
 ---
 

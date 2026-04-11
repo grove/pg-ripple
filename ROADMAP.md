@@ -66,6 +66,7 @@ Each release below has two layers:
   - `pg_triple.find_triples(s TEXT, p TEXT, o TEXT) RETURNS TABLE` — any param can be NULL for wildcard
 - [ ] Unit tests for dictionary encode/decode round-trips
 - [ ] Integration test: insert + query cycle
+- [ ] pg_regress: `dictionary.sql` (encode/decode, prefix expansion, hash collision behaviour), `basic_crud.sql` (insert, delete, find_triples, triple_count)
 - [ ] CI pipeline (GitHub Actions)
 
 ### Exit Criteria
@@ -114,6 +115,7 @@ A user can install the extension, insert triples, and query them back by pattern
   - `pg_triple.prefixes() RETURNS TABLE`
   - Prefix expansion in encode/decode paths
 - [ ] Benchmarks: insert throughput (1M triples)
+- [ ] **Performance regression baseline**: record insert throughput and point-query latency as CI benchmark baselines; fail CI if a commit regresses throughput by >10% (maintained and extended in every subsequent milestone)
 - [ ] pg_regress test suite: `triple_crud.sql`, `named_graphs.sql`
 
 ### Exit Criteria
@@ -156,7 +158,10 @@ VP layout operational. Rare-predicate consolidation table absorbs low-frequency 
   - Self-join elimination for star patterns
   - Filter pushdown: encode FILTER constants before SQL generation
 - [ ] `pg_triple.sparql_explain(query TEXT) RETURNS TEXT` — show generated SQL
-- [ ] pg_regress: `sparql_queries.sql` (20+ test queries)
+- [ ] **SQL injection / adversarial tests**: verify that SPARQL queries containing SQL metacharacters in IRIs, literals, and prefixed names (`'; DROP TABLE --`, Unicode escapes, null bytes) are safely dictionary-encoded and never reach generated SQL as raw strings
+- [ ] **Malformed input tests**: invalid Turtle, truncated N-Triples, malformed SPARQL — verify clean error messages (no panics, no partial state)
+- [ ] **W3C SPARQL conformance gate**: run the applicable subset of the W3C SPARQL 1.1 Query manifest tests against the features delivered so far; extend this gate in every subsequent SPARQL milestone (v0.4.0, v0.8.0, v0.11.0, v0.15.0, v0.16.0) until full conformance at v1.0.0
+- [ ] pg_regress: `sparql_queries.sql` (20+ test queries), `sparql_injection.sql` (adversarial inputs)
 
 ### Exit Criteria
 
@@ -205,11 +210,13 @@ Users can run SPARQL SELECT and ASK queries with BGPs, FILTER, OPTIONAL against 
   - `pg_triple.fts_search(query TEXT, predicate TEXT) RETURNS TABLE` — direct full-text search API
   - Index is maintained incrementally on `insert_triple()` for indexed predicates
 - [ ] Benchmark: SP2Bench subset
-- [ ] pg_regress: `property_paths.sql`, `aggregates.sql`, `fts_search.sql`
+- [ ] **Resource exhaustion tests**: Cartesian-product queries, unbounded property paths on cyclic graphs, deeply nested subqueries — verify that `max_path_depth`, `statement_timeout`, and memory limits prevent runaway resource consumption
+- [ ] **Fuzz testing** (`cargo-fuzz`): continuous fuzzing of the SPARQL→SQL pipeline — feed random/mutated SPARQL strings through the parser and SQL generator; verify no panics, no invalid SQL emitted, no memory safety violations
+- [ ] pg_regress: `property_paths.sql`, `aggregates.sql`, `fts_search.sql`, `resource_limits.sql` (exhaustion tests)
 
 ### Exit Criteria
 
-SPARQL 1.1 Query coverage for all major features except federated queries. Property path queries complete with hash-based cycle detection via PG18 `CYCLE` clause. Full-text search on indexed literal predicates is functional.
+SPARQL 1.1 Query coverage for all major features except federated queries. Property path queries complete with hash-based cycle detection via PG18 `CYCLE` clause. Full-text search on indexed literal predicates is functional. Fuzz testing runs without panics or invalid SQL.
 
 ---
 
@@ -258,11 +265,19 @@ SPARQL 1.1 Query coverage for all major features except federated queries. Prope
   - `pg_triple.unsubscribe(channel TEXT)` to remove subscriptions
   - Enables downstream event-driven architectures (CDC consumers, webhooks, cache invalidation)
 - [ ] Benchmark: concurrent read/write (pgbench custom scripts)
-- [ ] pg_regress: `htap_merge.sql`, `change_notification.sql`
+- [ ] **Concurrency correctness tests**
+  - Concurrent merge + write: verify no data loss when bulk insert and merge worker run simultaneously
+  - Concurrent dictionary encode: two backends encoding the same IRI must return the same i64 (shard lock correctness)
+  - Dictionary cache eviction: verify decode correctness after cache entries are evicted under memory pressure
+- [ ] **Merge worker edge-case tests**
+  - Merge when delta is empty (no-op, no crash)
+  - Merge interrupted by `kill -9` (crash recovery: data consistent after restart)
+  - Merge when `shared_memory_limit` is near capacity (back-pressure path exercised)
+- [ ] pg_regress: `htap_merge.sql`, `change_notification.sql`, `concurrent_write_merge.sql`
 
 ### Exit Criteria
 
-Writes do not block reads. Merge worker operates correctly. >100K triples/sec bulk insert sustained. Change notifications fire correctly for matching patterns.
+Writes do not block reads. Merge worker operates correctly under concurrent writes and crash scenarios. >100K triples/sec bulk insert sustained. Change notifications fire correctly for matching patterns.
 
 ---
 
@@ -297,11 +312,11 @@ Writes do not block reads. Merge worker operates correctly. >100K triples/sec bu
 - [ ] **pg_trickle integration: SHACL violation monitors** *(optional)*
   - Simple cardinality/datatype constraints modeled as `IMMEDIATE` mode stream tables
   - Violations detected within the same transaction as the DML
-- [ ] pg_regress: `shacl_validation.sql`
+- [ ] pg_regress: `shacl_validation.sql`, `shacl_malformed.sql` (invalid shape definitions, circular references, undefined target classes — verify clean error messages)
 
 ### Exit Criteria
 
-Core SHACL constraints are enforced at insert time. Validation reports conform to SHACL spec.
+Core SHACL constraints are enforced at insert time. Validation reports conform to SHACL spec. Malformed shapes are rejected with actionable error messages.
 
 ---
 
@@ -419,7 +434,7 @@ See [plans/ecosystem/datalog.md](plans/ecosystem/datalog.md) for the full design
   - Compile `sh:rule` bodies to Datalog IR and register in `_pg_triple.rules`
   - Bidirectional: SHACL shapes inform Datalog constraints; Datalog-derived triples are visible to SHACL validation
   - `pg_triple.load_shacl()` auto-registers any `sh:rule` triples as Datalog rules when `pg_triple.inference_mode != 'off'`
-- [ ] pg_regress: `datalog_rdfs.sql`, `datalog_owl_rl.sql`, `datalog_custom.sql`, `datalog_negation.sql`, `datalog_arithmetic.sql`, `datalog_constraints.sql`, `shacl_af_rule.sql`
+- [ ] pg_regress: `datalog_rdfs.sql`, `datalog_owl_rl.sql`, `datalog_custom.sql`, `datalog_negation.sql`, `datalog_arithmetic.sql`, `datalog_constraints.sql`, `shacl_af_rule.sql`, `datalog_malformed.sql` (syntax errors, unstratifiable programs, unbound variables, cyclic rule dependencies — verify clear error messages)
 
 ### Exit Criteria
 
@@ -588,6 +603,7 @@ BSBM results documented. >100K triples/sec sustained bulk load. <10ms for simple
   - `cargo pgrx package` produces installable `.deb` and `.rpm`
   - Docker image with extension pre-installed
   - PGXN metadata
+- [ ] pg_regress: `admin_functions.sql` (vacuum, reindex, dictionary_stats, predicate_stats), `graph_rls.sql` (RLS policy enforcement, cross-role isolation, superuser bypass), `upgrade_path.sql` (install v0.1.0 → load data → sequential upgrade to current version → verify data integrity and query correctness at each step)
 
 ### Exit Criteria
 
