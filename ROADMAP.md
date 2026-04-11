@@ -304,8 +304,12 @@ Round-trip: load Turtle → query → export Turtle. All major RDF serialization
   - Parallel dictionary encoding
   - Deferred index build with `CREATE INDEX CONCURRENTLY` post-load
 - [ ] **pg_trickle integration: ExtVP and SPARQL view caching** *(optional)*
-  - `pg_triple.create_sparql_view(name, sparql, schedule)` — always-fresh materialized SPARQL queries via stream tables
+  - `pg_triple.create_sparql_view(name, sparql, schedule, decode)` — compile a SPARQL SELECT query into an always-fresh, incrementally-maintained stream table; `decode => FALSE` (recommended) keeps integer IDs in the stream table with a thin decoding view on top, minimising CDC surface
+  - `pg_triple.drop_sparql_view(name)` and `pg_triple.list_sparql_views()` for lifecycle management
+  - `_pg_triple.sparql_views` catalog table: records original SPARQL text, generated SQL, schedule, decode mode, and stream table OID
+  - Refresh mode heuristics: `IMMEDIATE` for constraint-style queries, `DIFFERENTIAL` + schedule for dashboards, `FULL` + long schedule for heavy analytics and transitive-closure property paths
   - Manual ExtVP semi-join stream tables for high-frequency predicate pairs
+  - See detailed design in [plans/ecosystem/pg_trickle.md § 2.2](plans/ecosystem/pg_trickle.md)
 - [ ] Performance regression test suite (pgbench custom scripts)
 
 ### Exit Criteria

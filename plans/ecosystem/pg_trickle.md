@@ -47,47 +47,162 @@ SELECT pgtrickle.create_stream_table(
 
 **Impact**: Brings ExtVP from "post-1.0" to achievable within the 0.x roadmap without building custom materialized view infrastructure.
 
-### 2.2 SPARQL Query Result Caching
+### 2.2 Incremental SPARQL Views (Live SPARQL Results)
 
-**Problem**: Frequently-executed SPARQL queries (e.g., dashboard queries, API-backing queries) re-execute the same SQL each time, including dictionary decoding.
+**Problem**: Frequently-executed SPARQL queries — dashboard queries, API-backing queries, materialized reasoning steps — re-execute the full multi-join SQL each time, including dictionary decoding. As the graph grows the latency grows with it.
 
-**pg_trickle solution**: Wrap high-frequency SPARQL queries as stream tables that stay current automatically.
+**pg_trickle solution**: Compile a SPARQL SELECT query into a pg_trickle stream table. The query becomes an always-fresh, incrementally-maintained result set. Reading results is a simple table scan; pg_trickle's IVM engine handles incremental updates as triples are inserted or deleted.
+
+#### Compilation pipeline
+
+```
+SPARQL SELECT query
+    │
+    ▼  (existing spargebra parser)
+Algebra IR
+    │
+    ▼  (existing SQL generator — with named column aliases added)
+SQL with SPARQL variables as column aliases (?person → AS person)
+    │
+    ▼
+pgtrickle.create_stream_table(name, query, schedule / refresh_mode)
+    │
+    ▼
+Stream table: always-fresh, incrementally maintained SPARQL result set
+```
+
+The SPARQL→SQL compiler is already the hard part. The only additional requirement is that the generated SQL emits **named column aliases** matching SPARQL variable names (`?person → AS person`, `?email → AS email`) so the stream table schema is readable.
+
+#### Design decision: dictionary decode inside or outside the stream table?
+
+**Option A — decode inside** (strings materialized, simplest read path):
 
 ```sql
--- A "live" SPARQL result: always-fresh materialized SPARQL query
-SELECT pgtrickle.create_stream_table(
-    name  => 'active_person_emails',
-    query => $$
-        SELECT r1.value AS person, r2.value AS email
-        FROM _pg_triple.vp_7 t          -- rdf:type
-        JOIN _pg_triple.resource_dict r1 ON r1.id = t.s
-        JOIN _pg_triple.vp_15 e          -- foaf:mbox
-          ON e.s = t.s
-        JOIN _pg_triple.resource_dict r2 ON r2.id = e.o
-        WHERE t.o = 42                   -- foaf:Person
+-- Stream table stores decoded TEXT values
+SELECT r1.value AS person, r2.value AS email
+FROM _pg_triple.vp_7 t          -- rdf:type
+JOIN _pg_triple.resource_dict r1 ON r1.id = t.s
+JOIN _pg_triple.vp_15 e         -- foaf:mbox
+  ON e.s = t.s
+JOIN _pg_triple.resource_dict r2 ON r2.id = e.o
+WHERE t.o = 42                  -- foaf:Person (integer-encoded)
+```
+
+Reading is `SELECT * FROM active_person_emails` — fully decoded, no joins. The downside: every `resource_dict` insert (triggered by any new triple load) can wake up the CDC engine even when no relevant rows changed.
+
+**Option B — decode outside** *(recommended)* (integers in stream table, thin view on top):
+
+```sql
+-- Stream table stores i64 IDs only — minimal CDC surface
+SELECT t.s AS person_id, e.o AS email_id
+FROM _pg_triple.vp_7 t
+JOIN _pg_triple.vp_15 e ON e.s = t.s
+WHERE t.o = 42
+```
+
+A companion decoding view sits on top and is exposed to users:
+
+```sql
+CREATE VIEW pg_triple.active_person_emails AS
+SELECT r1.value AS person, r2.value AS email
+FROM _pg_triple.sparql_view_active_person_emails v
+JOIN _pg_triple.resource_dict r1 ON r1.id = v.person_id
+JOIN _pg_triple.resource_dict r2 ON r2.id = v.email_id;
+```
+
+Option B is the better default: narrower CDC surface (only VP tables matter), smaller stream table (BIGINTs vs TEXT), dictionary decode still happens once per changed row rather than on every read.
+
+#### Handling SPARQL language features
+
+| SPARQL feature | SQL mapping | IVM notes |
+|---|---|---|
+| SELECT DISTINCT | `SELECT DISTINCT` | pg_trickle handles DISTINCT diff correctly |
+| OPTIONAL | `LEFT JOIN` | Supported in IVM |
+| FILTER | `WHERE` (pre-encoded constants) | Filter pushdown — no runtime encode |
+| UNION | `UNION` | Supported |
+| GROUP BY + aggregates | `GROUP BY` with COUNT/SUM/AVG | pg_trickle's strongest differential case |
+| Property paths (`+`, `*`) | `WITH RECURSIVE … CYCLE` | pg_trickle supports recursive CTEs; transitive closure recomputed incrementally |
+| VALUES | SQL `VALUES` | Treated as inline constant table |
+| BIND | Column alias expression | Passthrough |
+
+#### Refresh mode selection
+
+| Query characteristics | Recommended mode | Rationale |
+|---|---|---|
+| Constraint / ASK-style monitoring | `IMMEDIATE` | Violation detected within same transaction |
+| Dashboard queries, API results | `schedule => '1s'` with `DIFFERENTIAL` | Sub-second freshness, efficient delta |
+| Heavy analytics (infrequent updates) | `schedule => '30s'` with `FULL` | Full recompute cheap when data is stable |
+| Property path / transitive closure | `schedule => '30s'` | Transitive closure is bulk-compute; DIFFERENTIAL is less effective here |
+
+#### Parameterized queries
+
+SPARQL queries with runtime variable bindings cannot become stream tables directly (stream tables have no parameters). Two approaches:
+
+- **Require fully-bound queries**: all FILTER constants and class restrictions must be statically known at creation time. This is the initial API surface.
+- **Binding table pattern** (future): `WHERE t.o = (SELECT id FROM sparql_view_params WHERE view_name = 'active_people' AND param = 'type')` — indirection via a small parameters table that itself CDC-tracked.
+
+#### Supported query forms (initial release)
+
+`SELECT` queries only. `CONSTRUCT`, `DESCRIBE`, and `ASK` are deferred:
+- `ASK` could map to a `BOOLEAN` stream table backed by `EXISTS(…)`, but adds schema complexity.
+- `CONSTRUCT` / `DESCRIBE` return triples, not tabular results; stream tables are relational.
+
+#### Catalog table
+
+A new catalog table tracks all registered SPARQL views:
+
+```sql
+CREATE TABLE _pg_triple.sparql_views (
+    name          TEXT PRIMARY KEY,
+    sparql        TEXT NOT NULL,         -- original SPARQL text
+    generated_sql TEXT NOT NULL,         -- SQL sent to pg_trickle
+    schedule      TEXT NOT NULL,         -- e.g. '1s' or 'IMMEDIATE'
+    decode        BOOLEAN NOT NULL,      -- TRUE = Option A, FALSE = Option B
+    stream_table  TEXT NOT NULL,         -- fully qualified stream table name
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+```
+
+#### API surface
+
+```sql
+-- Create a named, live-updating SPARQL result set
+SELECT pg_triple.create_sparql_view(
+    name     => 'active_people',
+    sparql   => $$
+        SELECT ?person ?email WHERE {
+            ?person a foaf:Person ;
+                    foaf:mbox ?email .
+        }
     $$,
-    schedule => '1s'
+    schedule => '1s',       -- or 'IMMEDIATE', '30s', etc.
+    decode   => FALSE        -- FALSE (recommended): keep integer IDs in stream table
 );
 
--- Query is now a simple table scan — sub-millisecond
-SELECT * FROM active_person_emails WHERE person LIKE '%Alice%';
+-- Results are always fresh — simple table scan, sub-millisecond
+SELECT * FROM active_people WHERE email LIKE '%@example.org';
+
+-- Drop when no longer needed
+SELECT pg_triple.drop_sparql_view('active_people');
+
+-- List all registered SPARQL views
+SELECT name, sparql, schedule, created_at
+FROM pg_triple.list_sparql_views();
 ```
+
+Internally `create_sparql_view` runs:
+1. Parse SPARQL → algebra IR
+2. Encode all FILTER constants to `i64` (reuse existing dictionary encoder)
+3. Generate SQL with named column aliases
+4. Register entry in `_pg_triple.sparql_views`
+5. Call `pgtrickle.create_stream_table(name => …, query => …, schedule => …)`
 
 **Benefits**:
 - Converts multi-join SPARQL-generated SQL (VP table joins + dictionary decodes) into a simple table scan
 - pg_trickle's differential mode processes only the triples that changed, not the full join
-- Dictionary decoding happens once during materialization, not on every query
+- Dictionary decoding happens once during materialization (Option A) or once per changed row (Option B), not on every query
 - Particularly powerful for star queries and analytical dashboards
-
-**API surface**: A new pg_triple function:
-```sql
-pg_triple.create_sparql_view(
-    name     TEXT,
-    sparql   TEXT,
-    schedule TEXT DEFAULT '5s'
-) RETURNS VOID
-```
-This would: parse SPARQL → generate SQL → create a pg_trickle stream table.
+- Property path closures (expensive recursive CTEs) become pre-materialized — 5–20× faster at read time
 
 ### 2.3 HTAP Delta→Main Merge Replacement
 
