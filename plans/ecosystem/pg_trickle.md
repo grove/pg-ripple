@@ -456,11 +456,10 @@ fn create_sparql_view(name: &str, sparql: &str, schedule: &str) -> Result<(), Pg
 | pg_triple Version | pg_trickle Feature | Priority |
 |---|---|---|
 | v0.5.0 (HTAP) | Real-time statistics stream tables | High |
-| v0.6.0 (SHACL) | SHACL violation monitors (IMMEDIATE mode) | Medium |
+| v0.6.0 (SHACL Core) | SHACL violation monitors (IMMEDIATE mode) | Medium |
 | v0.7.0 (SHACL Advanced) | Multi-shape DAG validation | Medium |
-| v0.8.0 (Serialization) | Inference materialization (WITH RECURSIVE) | High |
-| v0.9.0 (Performance) | ExtVP stream tables, SPARQL view caching | High |
-| v0.10.0 (Admin) | `pg_triple.create_sparql_view()` API | Medium |
+| v0.9.0 (Datalog) | Inference materialization via Datalog rule sets | High |
+| v0.10.0 (SPARQL Views) | ExtVP stream tables, `pg_triple.create_sparql_view()` API, SPARQL view caching | High |
 | Post-1.0 | Full ExtVP automation, ontology change propagation DAG | High |
 
 ---
@@ -575,9 +574,9 @@ spec:
 
 1. **Start with statistics** (v0.5.0): The lowest-risk, highest-value integration point. Create stream tables for `predicate_stats` and `graph_stats` when pg_trickle is detected. This validates the integration pattern with minimal complexity.
 
-2. **Add SPARQL views** (v0.9.0): The `pg_triple.create_sparql_view()` function is the user-facing killer feature. It combines pg_triple's SPARQL→SQL translation with pg_trickle's IVM to give users always-fresh materialized SPARQL query results.
+2. **Add SPARQL views** (v0.10.0): The `pg_triple.create_sparql_view()` function is the user-facing killer feature. It combines pg_triple's SPARQL→SQL translation with pg_trickle's IVM to give users always-fresh materialized SPARQL query results.
 
-3. **Materialize inference** (v0.8.0): RDFS/OWL inference via `WITH RECURSIVE` stream tables is a differentiator no other PostgreSQL-based triple store offers. pg_trickle's recursive CTE IVM support makes this feasible.
+3. **Materialize inference** (v0.9.0): RDFS/OWL inference via the Datalog engine's built-in rule sets, materialized as `WITH RECURSIVE` stream tables — a differentiator no other PostgreSQL-based triple store offers.
 
 4. **Defer ExtVP automation** (post-1.0): While stream tables are the right mechanism for ExtVP, the query workload analysis needed to *decide which* semi-joins to pre-compute is complex. Start with manual `create_sparql_view()` and automate later.
 

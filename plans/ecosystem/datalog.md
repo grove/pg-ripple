@@ -581,9 +581,9 @@ On-demand CTEs add query planning and execution overhead proportional to the num
 
 ---
 
-## 14. Included in v0.8.5, Limitations, and Future Work
+## 14. Included in v0.9.0, Limitations, and Future Work
 
-### Arithmetic built-ins (v0.8.5)
+### Arithmetic built-ins (v0.9.0)
 
 A set of built-in predicates for arithmetic comparison and computation, compiled directly to SQL operators:
 
@@ -616,7 +616,7 @@ WHERE t1.o = 200              -- ex:Employee
 ON CONFLICT DO NOTHING
 ```
 
-### Constraint rules — integrity constraints (v0.8.5)
+### Constraint rules — integrity constraints (v0.9.0)
 
 Rules with an **empty head** express integrity constraints: fact patterns that must never hold. When the body is satisfiable, the constraint is violated.
 
@@ -656,7 +656,7 @@ SELECT * FROM pg_triple.check_constraints();
 -- Returns: rule_id, rule_text, violating_subjects (BIGINT[]), violation_count
 ```
 
-### Initial release limitations (v0.8.5)
+### Initial release limitations (v0.9.0)
 
 - **No aggregation in rule bodies** (Datalog^agg): rules cannot use `COUNT`, `SUM`, `MIN`, `MAX` in body atoms. Aggregation is handled by SPARQL queries over derived quads. Deferred to post-1.0 (requires aggregation-stratification spec).
 - **No function symbols**: standard Datalog restriction — no Skolem functions or computed terms. Existential rules (Datalog+) are deferred.
@@ -693,15 +693,13 @@ This document **supersedes** pg_trickle.md §2.6 ("Inference Materialization"). 
 
 ## 16. Roadmap Placement
 
-The Datalog engine fits between serialization (v0.8.0) and performance hardening (v0.9.0):
+The Datalog engine fits between serialization (v0.8.0) and SPARQL views (v0.10.0):
 
 | Version | Deliverable |
 |---|---|
-| **v0.8.0** | Serialization, export, SPARQL CONSTRUCT/DESCRIBE/ASK |
-| **v0.8.5** | **Datalog reasoning engine**: rule parser, stratifier, SQL compiler, built-in RDFS/OWL RL rule sets, on-demand mode, materialized mode (pg_trickle) |
-| **v0.9.0** | Performance hardening, SPARQL views, ExtVP |
-
-Alternatively, the Datalog engine can fold into v0.8.0 as a sub-theme if the serialization work completes ahead of schedule.
+| **v0.8.0** | Serialization, export, SPARQL CONSTRUCT/DESCRIBE |
+| **v0.9.0** | **Datalog reasoning engine**: rule parser, stratifier, SQL compiler, built-in RDFS/OWL RL rule sets, arithmetic built-ins, constraint rules, on-demand mode, materialized mode (pg_trickle) |
+| **v0.10.0** | Incremental SPARQL views, ExtVP stream tables |
 
 ---
 

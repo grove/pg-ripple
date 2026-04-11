@@ -38,7 +38,7 @@ A user can install the extension, insert triples, and query them back by pattern
 
 ## v0.2.0 — Vertical Partitioning
 
-**Theme**: Per-predicate table layout for real performance.
+**Theme**: Per-predicate table layout for real performance, with Turtle and N-Triples bulk loading.
 
 ### Deliverables
 
@@ -57,6 +57,11 @@ A user can install the extension, insert triples, and query them back by pattern
   - `pg_triple.load_ntriples(data TEXT) RETURNS BIGINT`
   - Streaming parser via `rio_turtle` crate
   - Batch encoding + COPY for throughput
+- [ ] **Bulk loader** (Turtle)
+  - `pg_triple.load_turtle(data TEXT) RETURNS BIGINT`
+  - Prefix declarations auto-registered
+  - Blank node scoping per load operation
+  - `rio_turtle` crate already handles both formats — incremental parser work
 - [ ] **IRI prefix management**
   - `pg_triple.register_prefix(prefix TEXT, expansion TEXT)`
   - `pg_triple.prefixes() RETURNS TABLE`
@@ -66,18 +71,18 @@ A user can install the extension, insert triples, and query them back by pattern
 
 ### Exit Criteria
 
-VP layout operational. Bulk loading >50K triples/sec on commodity hardware. Named graphs functional.
+VP layout operational. Bulk loading >50K triples/sec on commodity hardware. Named graphs functional. Both N-Triples and Turtle data can be loaded.
 
 ---
 
 ## v0.3.0 — SPARQL Query Engine (Basic)
 
-**Theme**: Parse and execute SPARQL SELECT queries with basic graph patterns.
+**Theme**: Parse and execute SPARQL SELECT and ASK queries with basic graph patterns. N-Triples export for test verification.
 
 ### Deliverables
 
 - [ ] **SPARQL parser integration** (`spargebra` crate)
-  - Parse SPARQL SELECT queries into algebra tree
+  - Parse SPARQL SELECT and ASK queries into algebra tree
   - Support: Basic Graph Patterns (BGP), FILTER, OPTIONAL, LIMIT, OFFSET, ORDER BY, DISTINCT
 - [ ] **SQL generator** (initial)
   - BGP → JOIN across VP tables (integer equality)
@@ -89,6 +94,13 @@ VP layout operational. Bulk loading >50K triples/sec on commodity hardware. Name
   - `pg_triple.sparql(query TEXT) RETURNS SETOF JSONB`
   - SPI execution of generated SQL
   - Dictionary decoding of result set
+- [ ] **SPARQL ASK**
+  - ASK → `SELECT EXISTS(...)` → returns BOOLEAN
+  - `pg_triple.sparql_ask(query TEXT) RETURNS BOOLEAN`
+- [ ] **N-Triples export** (basic)
+  - `pg_triple.export_ntriples(graph TEXT DEFAULT NULL) RETURNS TEXT`
+  - Streaming variant returning `SETOF TEXT` for large graphs
+  - Essential for test verification and debugging
 - [ ] **Join optimizations** (phase 1)
   - Self-join elimination for star patterns
   - Filter pushdown: encode FILTER constants before SQL generation
@@ -97,7 +109,7 @@ VP layout operational. Bulk loading >50K triples/sec on commodity hardware. Name
 
 ### Exit Criteria
 
-Users can run SPARQL SELECT queries with BGPs, FILTER, OPTIONAL against data loaded via bulk load. Queries return correct results.
+Users can run SPARQL SELECT and ASK queries with BGPs, FILTER, OPTIONAL against data loaded via bulk load. Queries return correct results. Data can be exported as N-Triples for verification.
 
 ---
 
@@ -212,9 +224,9 @@ Core SHACL constraints are enforced at insert time. Validation reports conform t
 
 ---
 
-## v0.7.0 — SHACL Advanced & Query Optimization
+## v0.7.0 — SHACL Advanced
 
-**Theme**: Async validation, complex shapes, SHACL-driven query optimization.
+**Theme**: Async validation pipeline and complex shapes.
 
 ### Deliverables
 
@@ -228,46 +240,33 @@ Core SHACL constraints are enforced at insert time. Validation reports conform t
   - `sh:node` — nested shape references
   - `sh:or` / `sh:and` / `sh:not` — logical constraint combinators
   - `sh:qualifiedValueShape` — qualified cardinality
-- [ ] **SHACL-driven query optimization**
-  - `sh:minCount 1` → OPTIONAL→INNER JOIN downgrade in SPARQL→SQL
-  - `sh:maxCount 1` → skip DISTINCT for single-valued properties
-  - `sh:class` → VP table pruning based on target class
 - [ ] **pg_trickle integration: multi-shape DAG validation** *(optional)*
   - Multiple SHACL shapes as a DAG of stream tables with topologically-ordered refresh
-- [ ] pg_regress: `shacl_advanced.sql`, `shacl_query_opt.sql`
+- [ ] pg_regress: `shacl_advanced.sql`
 
 ### Exit Criteria
 
-Async validation pipeline operational. Complex SHACL shapes validated correctly. Query optimizer exploits SHACL constraints.
+Async validation pipeline operational. Complex SHACL shapes validated correctly.
 
 ---
 
 ## v0.8.0 — Serialization, Export & Interop
 
-**Theme**: Full RDF I/O, multiple serialization formats, and Turtle bulk loading.
+**Theme**: Full RDF I/O, remaining serialization formats, and SPARQL CONSTRUCT/DESCRIBE.
+
+*Note: Turtle import and N-Triples export were delivered in v0.2.0 and v0.3.0 respectively.*
 
 ### Deliverables
 
-- [ ] **Turtle parser for bulk load**
-  - `pg_triple.load_turtle(data TEXT) RETURNS BIGINT`
-  - Prefix declarations auto-registered
-  - Blank node scoping per load operation
 - [ ] **RDF/XML parser**
   - `pg_triple.load_rdfxml(data TEXT) RETURNS BIGINT`
 - [ ] **Export functions**
   - `pg_triple.export_turtle(graph TEXT DEFAULT NULL) RETURNS TEXT`
-  - `pg_triple.export_ntriples(graph TEXT DEFAULT NULL) RETURNS TEXT`
   - `pg_triple.export_jsonld(graph TEXT DEFAULT NULL) RETURNS JSONB`
   - Streaming variants returning `SETOF TEXT` for large graphs
 - [ ] **SPARQL CONSTRUCT / DESCRIBE**
   - CONSTRUCT → returns triples as Turtle or JSONB
   - DESCRIBE → concentric bounded description
-- [ ] **SPARQL ASK**
-  - ASK → returns BOOLEAN
-- [ ] **pg_trickle integration: inference materialization** *(optional — superseded by v0.8.5 Datalog engine)*
-  - Hard-coded RDFS closures from this milestone are replaced by the general Datalog engine in v0.8.5
-  - If v0.8.5 is not yet complete, the minimal `rdfs:subClassOf` / `rdfs:subPropertyOf` stream tables serve as a stepping stone
-  - See [plans/ecosystem/datalog.md](plans/ecosystem/datalog.md)
 - [ ] pg_regress: `serialization.sql`, `sparql_construct.sql`
 
 ### Exit Criteria
@@ -276,7 +275,7 @@ Round-trip: load Turtle → query → export Turtle. All major RDF serialization
 
 ---
 
-## v0.8.5 — Datalog Reasoning Engine
+## v0.9.0 — Datalog Reasoning Engine
 
 **Theme**: General-purpose rule-based inference over the triple store.
 
@@ -330,7 +329,68 @@ Users can load RDFS or OWL RL rule sets (or custom rules), and SPARQL queries re
 
 ---
 
-## v0.9.0 — Performance Hardening
+## v0.10.0 — Incremental SPARQL Views & ExtVP
+
+**Theme**: Always-fresh materialized SPARQL queries and extended vertical partitioning via pg_trickle stream tables.
+
+See [plans/ecosystem/pg_trickle.md § 2.2](plans/ecosystem/pg_trickle.md) for the full design.
+
+### Deliverables
+
+- [ ] **SPARQL views** *(requires pg_trickle)*
+  - `pg_triple.create_sparql_view(name, sparql, schedule, decode)` — compile a SPARQL SELECT query into an always-fresh, incrementally-maintained stream table
+  - `decode => FALSE` (recommended) keeps integer IDs in the stream table with a thin decoding view on top, minimising CDC surface
+  - `pg_triple.drop_sparql_view(name)` and `pg_triple.list_sparql_views()` for lifecycle management
+  - `_pg_triple.sparql_views` catalog table: records original SPARQL text, generated SQL, schedule, decode mode, and stream table OID
+  - Refresh mode heuristics: `IMMEDIATE` for constraint-style queries, `DIFFERENTIAL` + schedule for dashboards, `FULL` + long schedule for heavy analytics and transitive-closure property paths
+- [ ] **ExtVP semi-join stream tables** *(requires pg_trickle)*
+  - Manual creation of pre-computed semi-joins between frequently co-joined predicate pairs
+  - SPARQL→SQL translator rewrites queries to target ExtVP tables when available
+- [ ] **SPARQL views over derived predicates**
+  - SPARQL views can reference Datalog-derived VP tables; pg_trickle DAG handles refresh ordering
+- [ ] pg_regress: `sparql_views.sql`, `extvp.sql`
+
+### Exit Criteria
+
+Users can create SPARQL views that stay incrementally up-to-date. SPARQL view queries are sub-millisecond table scans. ExtVP semi-joins improve multi-predicate star-pattern performance.
+
+---
+
+## v0.11.0 — SPARQL Update
+
+**Theme**: W3C SPARQL 1.1 Update support for standard-compliant write operations.
+
+### Deliverables
+
+- [ ] **INSERT DATA**
+  - Parse and execute `INSERT DATA { … }` statements
+  - Route through dictionary encoder + VP table insert path
+  - Named graph support: `INSERT DATA { GRAPH <g> { … } }`
+- [ ] **DELETE DATA**
+  - Parse and execute `DELETE DATA { … }` statements
+  - Exact-match triple deletion from VP tables
+  - Named graph support
+- [ ] **DELETE/INSERT WHERE** (graph update)
+  - Pattern-based update: `DELETE { … } INSERT { … } WHERE { … }`
+  - Compile WHERE clause via existing SPARQL→SQL engine
+  - Transactional: delete + insert in single statement
+- [ ] **LOAD / CLEAR / DROP / CREATE**
+  - `LOAD <url>` — fetch and load remote RDF data (HTTP GET + parser)
+  - `CLEAR GRAPH <g>` — delete all triples in a named graph
+  - `DROP GRAPH <g>` — clear + remove graph from registry
+  - `CREATE GRAPH <g>` — register a new empty named graph
+- [ ] **SPARQL Update executor**
+  - `pg_triple.sparql_update(query TEXT) RETURNS BIGINT` — returns count of affected triples
+  - Reuse existing SPARQL parser (`spargebra` supports SPARQL Update algebra)
+- [ ] pg_regress: `sparql_insert_data.sql`, `sparql_delete_data.sql`, `sparql_update_where.sql`, `sparql_graph_management.sql`
+
+### Exit Criteria
+
+Standard SPARQL 1.1 Update operations work correctly. RDF tools that use SPARQL Update (Protégé, TopBraid, SPARQL workbenches) can interact with pg_triple without a custom adapter.
+
+---
+
+## v0.12.0 — Performance Hardening
 
 **Theme**: Optimize for production-scale workloads. Benchmark-driven improvements.
 
@@ -358,29 +418,27 @@ Users can load RDFS or OWL RL rule sets (or custom rules), and SPARQL queries re
 - [ ] **Bulk load optimization**
   - Parallel dictionary encoding
   - Deferred index build with `CREATE INDEX CONCURRENTLY` post-load
-- [ ] **pg_trickle integration: ExtVP and SPARQL view caching** *(optional)*
-  - `pg_triple.create_sparql_view(name, sparql, schedule, decode)` — compile a SPARQL SELECT query into an always-fresh, incrementally-maintained stream table; `decode => FALSE` (recommended) keeps integer IDs in the stream table with a thin decoding view on top, minimising CDC surface
-  - `pg_triple.drop_sparql_view(name)` and `pg_triple.list_sparql_views()` for lifecycle management
-  - `_pg_triple.sparql_views` catalog table: records original SPARQL text, generated SQL, schedule, decode mode, and stream table OID
-  - Refresh mode heuristics: `IMMEDIATE` for constraint-style queries, `DIFFERENTIAL` + schedule for dashboards, `FULL` + long schedule for heavy analytics and transitive-closure property paths
-  - Manual ExtVP semi-join stream tables for high-frequency predicate pairs
-  - See detailed design in [plans/ecosystem/pg_trickle.md § 2.2](plans/ecosystem/pg_trickle.md)
+- [ ] **SHACL-driven query optimization**
+  - `sh:minCount 1` → OPTIONAL→INNER JOIN downgrade in SPARQL→SQL
+  - `sh:maxCount 1` → skip DISTINCT for single-valued properties
+  - `sh:class` → VP table pruning based on target class
 - [ ] Performance regression test suite (pgbench custom scripts)
+- [ ] pg_regress: `shacl_query_opt.sql`
 
 ### Exit Criteria
 
-BSBM results documented. >100K triples/sec sustained bulk load. <10ms for simple BGP queries at 10M triples.
+BSBM results documented. >100K triples/sec sustained bulk load. <10ms for simple BGP queries at 10M triples. SHACL constraints exploited by query optimizer.
 
 ---
 
-## v0.10.0 — Administrative & Operational Readiness
+## v0.13.0 — Administrative & Operational Readiness
 
 **Theme**: Production operations tooling, upgrade paths, documentation.
 
 ### Deliverables
 
 - [ ] **Extension upgrade scripts**
-  - Tested upgrade path `0.1.0 → ... → 0.10.0`
+  - Tested upgrade path `0.1.0 → ... → 0.13.0`
   - `ALTER EXTENSION pg_triple UPDATE` works for all version transitions
 - [ ] **Administrative functions**
   - `pg_triple.vacuum()` — force merge + VACUUM on VP tables
@@ -396,6 +454,7 @@ BSBM results documented. >100K triples/sec sustained bulk load. <10ms for simple
   - SPARQL feature matrix
   - Performance tuning guide
   - SHACL constraint mapping reference
+  - Datalog rule authoring guide
 - [ ] **Packaging**
   - `cargo pgrx package` produces installable `.deb` and `.rpm`
   - Docker image with extension pre-installed
@@ -416,6 +475,9 @@ Extension is installable, upgradable, and documented. Operational tooling suffic
 - [ ] **SPARQL 1.1 Query conformance**
   - Pass W3C SPARQL 1.1 Query test suite (supported subset)
   - Document unsupported features (federation, property functions)
+- [ ] **SPARQL 1.1 Update conformance**
+  - Pass W3C SPARQL 1.1 Update test suite (supported subset)
+  - Document unsupported features
 - [ ] **SHACL Core conformance**
   - Pass W3C SHACL Core test suite (supported subset)
   - Document unsupported constraints
@@ -454,8 +516,7 @@ Stable, tested, documented, and published. Ready for production workloads up to 
 | 1.3 | Temporal | Bitstring versioning, TimescaleDB integration |
 | 1.4 | Extended VP | Automated workload-driven ExtVP stream tables (pg_trickle), ontology change propagation DAG |
 | 1.5 | Interop | Apache AGE bridge, GraphQL-to-SPARQL |
-| 1.6 | Update | SPARQL 1.1 Update (INSERT/DELETE DATA) |
-| 1.7 | Federation | SPARQL SERVICE keyword for remote endpoints |
+| 1.6 | Federation | SPARQL SERVICE keyword for remote endpoints |
 
 ---
 
@@ -470,10 +531,12 @@ Stable, tested, documented, and published. Ready for production workloads up to 
 | 0.5.0 | +4 weeks |
 | 0.6.0 | +3 weeks |
 | 0.7.0 | +3 weeks |
-| 0.8.0 | +3 weeks |
-| 0.8.5 | +3 weeks |
+| 0.8.0 | +2 weeks |
 | 0.9.0 | +4 weeks |
 | 0.10.0 | +3 weeks |
+| 0.11.0 | +3 weeks |
+| 0.12.0 | +4 weeks |
+| 0.13.0 | +3 weeks |
 | 1.0.0 | +4 weeks |
 
 *Estimates assume a small focused team (1–3 developers). Actual pace depends on contributor availability and scope adjustments discovered during implementation.*
