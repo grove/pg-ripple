@@ -83,7 +83,9 @@
 
 - pgrx `#[pg_extern]` entry points
 - `_PG_init()` hook for shared memory registration and background worker startup
-- GUC parameters: `pg_triple.default_graph`, `pg_triple.dictionary_cache_size`, `pg_triple.merge_threshold`, `pg_triple.enable_shacl`
+- GUC parameters: `pg_triple.default_graph`, `pg_triple.dictionary_cache_size`, `pg_triple.merge_threshold`, `pg_triple.enable_shacl`, `pg_triple.named_graph_optimized` (adds G-leading index on each VP table; off by default)
+- **GUC-gated lazy initialization**: the merge worker, SHACL validator, and reasoning engine are only started when their respective GUCs (`pg_triple.merge_threshold`, `pg_triple.enable_shacl`, `pg_triple.enable_reasoning`) are non-zero/true. `_PG_init` never starts subsystems the user has not enabled.
+- **Shared-memory slot versioning**: the first 16 bytes of every `PgSharedMem` slot are a fixed magic number (`0x70675f74726970_00` = `p g _ t r i p l e \0`) followed by a 4-byte layout version integer. On startup the extension checks both; a mismatch (e.g. after an in-place upgrade) triggers a controlled re-initialization rather than a silent crash.
 - Extension SQL: `CREATE EXTENSION pg_triple` creates core schema and catalog tables
 
 ### 4.2 Dictionary Encoder (`src/dictionary/`)
@@ -119,6 +121,7 @@ CREATE UNIQUE INDEX ON _pg_triple.literal_dict (hash);
 - **Decoding path** (`decode()`): `i64` → LRU cache → PG lookup → return string
 - **Batch decoding** (`decode_batch()`): Collect all output `i64` IDs from a result set, resolve in a single `WHERE id = ANY(...)` query, build an in-memory `HashMap<i64, String>`, then emit decoded rows. Avoids per-row dictionary round-trips — critical for large result sets
 - **Batch encoding** (`encode_batch()`): Bulk insert with `ON CONFLICT DO NOTHING` + `RETURNING`, minimising round-trips during data load
+- **Per-query `EncodingCache`** (`src/dictionary/query_cache.rs`): A short-lived `HashMap<&str, i64>` allocated at the start of each SPARQL query and discarded when the query exits. Constants appearing multiple times in a pattern (e.g. the same IRI in multiple BGPs) are encoded once and reused within the same query without hitting the shared-memory LRU or the database. Distinct from `encode_batch()` which is used during data load.
 - **In-memory cache**: `HashMap<u128, i64>` in shared memory via pgrx `PgSharedMem`, **sharded into N buckets** (default: 64) with per-shard lightweight locks to eliminate global lock contention under concurrent workloads. Sized by GUC
 - **Shared-memory budget**: `pg_triple.shared_memory_limit` GUC governs total allocation across dictionary cache, bloom filters, and merge worker buffers. Automatic eviction priority: bloom filters first, then oldest LRU dictionary entries. Back-pressure on bulk loads when utilisation exceeds 90%
 - **Prefix compression**: Common IRI prefixes (registered via `pg_triple.register_prefix()`) are stripped before hashing and stored separately, reducing storage by ~40% for typical RDF datasets
@@ -136,17 +139,22 @@ Each unique predicate `p` gets its own table:
 
 ```sql
 CREATE TABLE _pg_triple.vp_{predicate_id} (
-    s   BIGINT NOT NULL,  -- subject dictionary ID
-    o   BIGINT NOT NULL,  -- object dictionary ID
-    g   BIGINT NOT NULL DEFAULT 0  -- named graph ID (0 = default)
+    s       BIGINT NOT NULL,  -- subject dictionary ID
+    o       BIGINT NOT NULL,  -- object dictionary ID
+    g       BIGINT NOT NULL DEFAULT 0,  -- named graph ID (0 = default)
+    source  SMALLINT NOT NULL DEFAULT 0  -- 0 = explicit triple; 1 = rule-derived (v0.9.0)
 );
 CREATE INDEX ON _pg_triple.vp_{predicate_id} (s, o);
 CREATE INDEX ON _pg_triple.vp_{predicate_id} (o, s);
+-- Created only when pg_triple.named_graph_optimized = true:
+-- CREATE INDEX ON _pg_triple.vp_{predicate_id} (g, s, o);
 ```
 
 - Tables are created dynamically on first encounter of a new predicate during data ingestion
 - A catalog table `_pg_triple.predicates` maps predicate dictionary IDs to table OIDs for fast lookup
 - PG18's **skip scan** on the composite B-tree indices enables efficient lookups even when only the second column (`o`) is bound
+- **`source` column** (v0.9.0): `SMALLINT DEFAULT 0` — `0` = explicit triple asserted by the user; `1` = derived triple produced by the Datalog/RDFS/OWL RL reasoning engine. Queries can pass `include_derived := false` to filter to `WHERE source = 0` only. Because the column is added as part of the v0.9.0 migration script, it has zero cost before reasoning is enabled.
+- **Named-graph index** (`pg_triple.named_graph_optimized = true`): when enabled, each VP table gains an additional `(g, s, o)` index supporting `GRAPH ?g { ... }` patterns without a full-table scan. Off by default to avoid index bloat for single-graph users.
 
 **Rare-Predicate Consolidation**:
 - Predicates with fewer than `pg_triple.vp_promotion_threshold` triples (default: 1,000) are stored in a shared `_pg_triple.vp_rare (p BIGINT, s BIGINT, o BIGINT, g BIGINT)` table with three secondary indices:
@@ -184,6 +192,7 @@ CREATE INDEX ON _pg_triple.vp_{predicate_id} (o, s);
 - Runs `ANALYZE` on merged VP tables so the PostgreSQL planner has fresh selectivity estimates
 - Triggers `pg_triple.promote_rare_predicates()` for any rare predicates that crossed the promotion threshold
 - Signals completion via shared-memory latch
+- **Commit-hook early trigger**: a PostgreSQL `ProcessUtility` hook (or `ExecutorEnd` hook) detects when a write transaction commits more than `pg_triple.latch_trigger_threshold` rows (default: 10,000) and pokes the merge worker's shared-memory latch immediately — avoiding the full polling interval wait for bursty workloads. Implemented as an `ExecutorEnd_hook` in `src/storage/merge.rs`.
 
 **Query Path**:
 - `UNION ALL` of main + delta, with bloom filter for fast existence checks
@@ -232,11 +241,19 @@ sparopt::Optimizer::optimize()  (v0.3.0+)
     (upstream algebra pass: filter pushdown, constant folding, empty-pattern elimination)
     │
     ▼
+Algebrizer (src/sparql/algebra.rs)
+    - Reads loaded SHACL shapes + predicate catalog BEFORE building join tree
+      (sh:minCount, sh:maxCount, sh:class available at plan time → used in optimizer below)
+    - Per-query EncodingCache: encode all constant IRIs/literals once, reuse across BGPs
+    │
+    ▼
 Algebra Optimizer (Rust)  — pg_triple-specific second pass
     - Self-join elimination
     - Optional-to-inner downgrade (with SHACL hints)
     - Filter pushdown (pre-decode)
     - UNION folding → WHERE IN
+    - BGP join reordering: uses `pg_stats.n_distinct` + `pg_class.reltuples` for each
+      VP table to estimate selectivity; reorders BGPs cheapest-first
     │
     ▼
 SQL Generator
@@ -247,6 +264,9 @@ SQL Generator
     - DISTINCT projection pushing
     - `ORDER BY` on join-variable CTEs when the variable matches the VP table primary index sort key — enables PostgreSQL merge-join planning for large intermediate results
     - `SERVICE <local:view-name>` → reference to a PostgreSQL `MATERIALIZED VIEW` of the same name (zero extension code; automatic query-planner reuse)
+    - Join-order hints: `<http://pg-triple.io/hints/join-order>` in query prologue
+      emits `SET LOCAL join_collapse_limit = 1` around the generated SQL
+    - `no-inference` hint: appends `AND source = 0` on all VP table scans
     │
     ▼
 SPI::connect() → execute SQL → result set of i64 tuples
@@ -256,6 +276,12 @@ Batch Dictionary Decoder → collect all i64 IDs → single WHERE id = ANY(...)
     → build decode map → human-readable result set
     │
     ▼
+Projector (src/sparql/projector.rs)
+    - Maps decoded row columns to named SPARQL variables
+    - Applies SELECT expressions, BIND, computed values
+    - Emits SETOF RECORD / JSON / TABLE
+    │
+    ▼
 Return as SETOF RECORD / JSON / TABLE
 ```
 
@@ -263,8 +289,9 @@ Return as SETOF RECORD / JSON / TABLE
 
 ```sql
 -- Primary query interface
-pg_triple.sparql(query TEXT) RETURNS SETOF JSONB
-pg_triple.sparql_explain(query TEXT) RETURNS TEXT
+pg_triple.sparql(query TEXT, include_derived BOOL DEFAULT true) RETURNS SETOF JSONB
+pg_triple.sparql_explain(query TEXT, analyze BOOL DEFAULT false) RETURNS TEXT
+  -- analyze := true wraps the generated SQL in EXPLAIN (ANALYZE, BUFFERS) and returns the plan
 
 -- Data manipulation
 pg_triple.insert_triple(s TEXT, p TEXT, o TEXT, g TEXT DEFAULT NULL)
@@ -286,6 +313,9 @@ pg_triple.compact(keep_old BOOL DEFAULT false) RETURNS VOID  -- trigger immediat
 4. **Projection pushing**: `SELECT DISTINCT ?p` queries enumerate the `_pg_triple.predicates` catalog instead of scanning all VP tables
 5. **Filter pushdown**: SPARQL `FILTER` clauses operating on bound IRIs are resolved to integer IDs *before* generating SQL, ensuring B-tree index usage. For typed numeric/date literals, the inline-encoded i64 range (see §4.2.2) enables `BETWEEN $lo AND $hi` range scans with no decode step.
 6. **Merge-join enablement**: When the join variable matches the `s` sort key of a VP table's `(s, o, g)` primary index, the emitter wraps the CTE in `ORDER BY s`. The PostgreSQL planner then considers a merge join rather than a hash join, reducing memory pressure for large intermediate results.
+7. **BGP join reordering** (v0.12.0): The algebra optimizer reads `pg_stats.n_distinct` and `pg_class.reltuples` for each VP table involved in the query and reorders BGPs cheapest-first (most selective predicate scanned first). This provides a statistics-driven complement to `sparopt`'s structural rewrites.
+8. **Join-order hints**: A `<http://pg-triple.io/hints/join-order>` pragma in the SPARQL prologue (e.g. `PREFIX hint: <http://pg-triple.io/hints/>`) causes the SQL generator to emit `SET LOCAL join_collapse_limit = 1` around the generated SQL, locking in the BGP-reordered join sequence and preventing the PG planner from re-ordering it.
+9. **`no-inference` hint**: Adding `hint:no-inference true` to the query prologue appends `AND source = 0` on every VP table scan, restricting results to explicitly asserted triples only (v0.9.0+).
 
 #### 4.4.4 Property Path Compilation
 
@@ -426,6 +456,13 @@ The original plan — `pg_triple.enable_inference_materialization()` creating ha
 - Compiles each stratum to SQL: non-recursive → `INSERT … SELECT`, recursive → `WITH RECURSIVE … CYCLE`, negation → `NOT EXISTS`
 - Materializes derived predicates as pg_trickle stream tables (recommended) or inlines them as CTEs at query time (on-demand, no pg_trickle needed)
 - Registers derived VP tables in `_pg_triple.predicates` so the SPARQL engine treats them identically to base VP tables
+- Multi-head rules: each head atom may target a different predicate and carry an optional named graph ID
+- **Incremental materialization phases** (inspired by RDFox): each materialization cycle runs three phases in order:
+  1. *Addition* — derive and insert new triples produced by rules applied to newly asserted facts; write with `source = 1`
+  2. *Deletion* — identify derived triples whose support has been retracted; remove them from VP tables
+  3. *BwdChain* — re-derive any derived triple that was deleted but is still entailed by surviving facts (avoids over-deletion)
+- **Rule set catalog**: `_pg_triple.rule_sets (name TEXT, graph_ids BIGINT[], rule_hash BIGINT)` stores named rule sets. `rule_hash` is the XXH3-64 hash of the canonicalized rule text; the materialization worker skips re-computation when the hash is unchanged. Rule set caches are keyed on this hash so a re-activated rule set resumes from its previous derived state.
+- **Named rule sets**: `pg_triple.load_rules(name TEXT, rules TEXT)` registers a rule set; `pg_triple.enable_rule_set(name TEXT)` activates it for a given set of named graphs.
 
 #### 4.10.5 SPARQL Views
 
@@ -584,6 +621,7 @@ pg_triple/
 │   │   ├── mod.rs
 │   │   ├── encoder.rs                 # Encode/decode logic
 │   │   ├── cache.rs                   # LRU shared-memory cache
+│   │   ├── query_cache.rs             # Per-query EncodingCache (short-lived HashMap, discarded after each query)
 │   │   ├── inline.rs                  # Type-tagged inline i64 encoding for numerics, dates, booleans (v0.3.0)
 │   │   ├── hot.rs                     # Tiered hot/cold dictionary tables (v0.9.0)
 │   │   └── prefix.rs                  # IRI prefix compression
@@ -597,9 +635,10 @@ pg_triple/
 │   ├── sparql/
 │   │   ├── mod.rs
 │   │   ├── parser.rs                  # spargebra + sparopt integration
-│   │   ├── algebra.rs                 # IR and pg_triple-specific optimizations
+│   │   ├── algebra.rs                 # IR and pg_triple-specific optimizations; reads SHACL catalog before join-tree construction
 │   │   ├── sql_gen.rs                 # Algebra → SQL text
 │   │   ├── property_path.rs           # Recursive CTE generation
+│   │   ├── projector.rs               # Maps decoded i64 rows → named SPARQL variables; applies SELECT expressions, BIND, computed values
 │   │   ├── executor.rs               # SPI execution + decoding
 │   │   └── functions/
 │   │       └── geo.rs                 # GeoSPARQL → PostGIS translation (v0.8.0; gated on PostGIS presence)
