@@ -68,6 +68,12 @@ Each release below has two layers:
 - [ ] Integration test: insert + query cycle
 - [ ] pg_regress: `dictionary.sql` (encode/decode, prefix expansion, hash collision behaviour), `basic_crud.sql` (insert, delete, find_triples, triple_count)
 - [ ] CI pipeline (GitHub Actions)
+- [ ] **GUC-gated lazy initialization**
+  - Merge worker, SHACL engine, and reasoning engine only start when their respective GUCs are enabled (`pg_triple.merge_enabled`, `pg_triple.shacl_enabled`, `pg_triple.inference_mode != 'off'`)
+  - Reduces resource overhead for deployments that use only a subset of features
+- [ ] **Shared-memory slot versioning**
+  - Each `PgSharedMem` slot carries a magic number + 4-byte layout version at its head
+  - Version mismatch at `_PG_init` triggers a controlled re-initialization of the slot rather than corrupting state — essential for safe in-place upgrades
 
 ### Exit Criteria
 
@@ -90,7 +96,7 @@ A user can install the extension, insert triples, and query them back by pattern
   - Predicate catalog: `_pg_triple.predicates (id BIGINT, table_oid OID, triple_count BIGINT)`
   - Dual B-tree indices per VP table: `(s, o)` and `(o, s)`
 - [ ] **Rare-predicate consolidation table**
-  - Predicates with fewer than `pg_triple.vp_promotion_threshold` triples (default: 1,000) are stored in a shared `_pg_triple.vp_rare (p BIGINT, s BIGINT, o BIGINT, g BIGINT)` table with a composite index on `(p, s, o)`
+  - Predicates with fewer than `pg_triple.vp_promotion_threshold` triples (default: 1,000) are stored in a shared `_pg_triple.vp_rare (p BIGINT, s BIGINT, o BIGINT, g BIGINT)` table with a primary composite index on `(p, s, o)` and two secondary indices: `(s, p)` for DESCRIBE queries and `(g, p, s, o)` for efficient graph-drop bulk-delete
   - Promotion is **deferred to end-of-statement** (not mid-batch): during a bulk load, triples accumulate in `vp_rare`; after the load completes, predicates exceeding the threshold are promoted in a single `INSERT … SELECT` + `DELETE` transaction — avoids disrupting in-flight COPY streams
   - `pg_triple.promote_rare_predicates()` can also be called manually or by the background merge worker
   - Prevents catalog bloat for predicate-rich datasets (DBpedia ≈60K predicates, Wikidata ≈10K) — avoids hundreds of thousands of PG objects, reduces planner overhead, and cuts VACUUM cost
@@ -101,6 +107,9 @@ A user can install the extension, insert triples, and query them back by pattern
 - [ ] **Named graph support** (basic)
   - `g` column in VP tables
   - `pg_triple.create_graph()`, `pg_triple.drop_graph()`, `pg_triple.list_graphs()`
+- [ ] **`pg_triple.named_graph_optimized` GUC** (default: `off`)
+  - When enabled, adds an optional `(g, s, o)` index per dedicated VP table (and equivalent coverage on `vp_rare`) to accelerate graph-scoped queries (e.g. list all triples in graph G, drop a named graph)
+  - Off by default to avoid index bloat for workloads that do not use named graphs heavily
 - [ ] **Bulk loader** (N-Triples)
   - `pg_triple.load_ntriples(data TEXT) RETURNS BIGINT`
   - Streaming parser via `rio_turtle` crate
@@ -134,9 +143,18 @@ VP layout operational. Rare-predicate consolidation table absorbs low-frequency 
 
 ### Deliverables
 
+- [ ] **`sparopt` first-pass algebra optimizer** (`sparopt` crate)
+  - Sits between the `spargebra` parse tree and pg_triple's own algebra pass
+  - Performs filter pushdown, constant folding, and empty-pattern elimination before SQL generation — reduces the surface area that pg_triple's pass needs to handle
 - [ ] **SPARQL parser integration** (`spargebra` crate)
   - Parse SPARQL SELECT and ASK queries into algebra tree
   - Support: Basic Graph Patterns (BGP), FILTER, OPTIONAL, LIMIT, OFFSET, ORDER BY, DISTINCT
+- [ ] **Inline value encoding** (`src/dictionary/inline.rs`)
+  - Type-tagged `i64` encoding for xsd:integer, xsd:boolean, xsd:dateTime, xsd:date, and xsd:double — FILTER comparisons on these types require zero dictionary round-trips
+  - IDs allocated in monotonically increasing semantic order so range FILTERs (`>`, `<`, `BETWEEN`) compile directly to SQL numeric comparisons on the raw `i64` column
+- [ ] **Per-query `EncodingCache`** (`src/dictionary/query_cache.rs`)
+  - Short-lived `HashMap` for IRIs and literals seen within a single SPARQL query
+  - Avoids repeated SPI dictionary look-ups for constants that appear multiple times in one query
 - [ ] **SQL generator** (initial)
   - BGP → JOIN across VP tables (integer equality)
   - FILTER → WHERE clause on integer-encoded values
@@ -147,6 +165,7 @@ VP layout operational. Rare-predicate consolidation table absorbs low-frequency 
   - `pg_triple.sparql(query TEXT) RETURNS SETOF JSONB`
   - SPI execution of generated SQL
   - **Batch dictionary decode**: collect all output i64 IDs from the result set, decode in a single `WHERE id = ANY(...)` query, build an in-memory lookup map, then emit human-readable rows — avoids per-row dictionary round-trips
+  - **`projector.rs`** as a distinct final pipeline stage: variable mapping, SELECT expressions, BIND computations, and computed values are resolved here before SQL emission — keeps the SQL generator focused on join structure
 - [ ] **SPARQL ASK**
   - ASK → `SELECT EXISTS(...)` → returns BOOLEAN
   - `pg_triple.sparql_ask(query TEXT) RETURNS BOOLEAN`
@@ -157,7 +176,7 @@ VP layout operational. Rare-predicate consolidation table absorbs low-frequency 
 - [ ] **Join optimizations** (phase 1)
   - Self-join elimination for star patterns
   - Filter pushdown: encode FILTER constants before SQL generation
-- [ ] `pg_triple.sparql_explain(query TEXT) RETURNS TEXT` — show generated SQL
+- [ ] `pg_triple.sparql_explain(query TEXT, analyze BOOL DEFAULT false) RETURNS TEXT` — show generated SQL; `analyze := true` executes the query and augments the output with actual row counts
 - [ ] **SQL injection / adversarial tests**: verify that SPARQL queries containing SQL metacharacters in IRIs, literals, and prefixed names (`'; DROP TABLE --`, Unicode escapes, null bytes) are safely dictionary-encoded and never reach generated SQL as raw strings
 - [ ] **Malformed input tests**: invalid Turtle, truncated N-Triples, malformed SPARQL — verify clean error messages (no panics, no partial state)
 - [ ] **W3C SPARQL conformance gate**: run the applicable subset of the W3C SPARQL 1.1 Query manifest tests against the features delivered so far; extend this gate in every subsequent SPARQL milestone (v0.4.0, v0.8.0, v0.11.0, v0.15.0, v0.16.0) until full conformance at v1.0.0
@@ -204,6 +223,10 @@ Users can run SPARQL SELECT and ASK queries with BGPs, FILTER, OPTIONAL against 
   - Optional-self-join elimination
   - Self-union elimination (UNION → WHERE IN)
   - Projection pushing for DISTINCT queries
+- [ ] **`subject_patterns` lookup table**
+  - `_pg_triple.subject_patterns(s BIGINT, predicates BIGINT[])` with a GIN index on `predicates`
+  - Maintained incrementally by `insert_triple()` / `delete_triple()`
+  - Enables fast "which predicates does subject X have?" look-up for DESCRIBE queries and star-pattern rewriting in the algebra optimizer
 - [ ] **Full-text search on literals**
   - `pg_triple.fts_index(predicate TEXT)` — create a GIN `tsvector` index on the literal dictionary for a predicate
   - SPARQL `CONTAINS()` and `REGEX()` FILTERs on indexed predicates rewrite to `@@` / `LIKE` against the GIN index
@@ -237,11 +260,14 @@ SPARQL 1.1 Query coverage for all major features except federated queries. Prope
 - [ ] **Background merge worker**
   - pgrx `BackgroundWorker` implementation
   - Configurable merge threshold via `pg_triple.merge_threshold` GUC
-  - **Non-blocking merge via partition swap**: INSERT delta rows into a staging table, swap staging into main using `ALTER TABLE … ATTACH PARTITION` (or rename + view swap for non-partitioned tables), then TRUNCATE delta — writes to delta are never blocked during the merge
+  - **Fresh-table generation merge**: rather than inserting into an existing `_main` table, create `vp_{id}_main_new`, insert delta rows in sort order (ensuring BRIN pages are physically ordered), then atomically rename it to replace `_main` and TRUNCATE delta — writes to delta are never blocked during the merge and BRIN indexing is maximally effective because rows arrive in sorted order at table-creation time
   - BRIN index rebuild on main post-merge (concurrent where possible)
   - Shared-memory latch signaling
   - Also triggers `pg_triple.promote_rare_predicates()` for any rare predicates that crossed the promotion threshold since the last merge
   - Runs `ANALYZE` on merged VP tables so the PostgreSQL planner has fresh selectivity estimates
+- [ ] **`ExecutorEnd_hook` latch-poke**
+  - When a write transaction commits more than `pg_triple.latch_trigger_threshold` rows (default: 1,000), the hook immediately pokes the merge worker’s latch to trigger an early merge
+  - Prevents unbounded delta growth during bursty write workloads without requiring a polling loop
 - [ ] **Bloom filter for delta existence checks**
   - In shared memory, per VP table
   - Queries against main-only data skip delta scan
@@ -395,6 +421,16 @@ See [plans/ecosystem/datalog.md](plans/ecosystem/datalog.md) for the full design
   - Turtle-flavoured Datalog syntax: `head :- body₁, body₂, … .`
   - Variables (`?x`), prefixed IRIs, literals, named graph scoping (`GRAPH`)
   - Stratified negation via `NOT` keyword
+  - Multi-head rules (`h₁, h₂ :- body .`) compiled to separate `INSERT … SELECT` statements within the same stratum
+- [ ] **`source` column in VP tables**
+  - `source SMALLINT DEFAULT 0` added to every VP table in the v0.9.0 migration
+  - `0` = explicitly asserted; `1` = derived (inferred by Datalog rules)
+  - Enables filtering out inferred triples at scan time without a join
+- [ ] **Tiered hot/cold dictionary** (`src/dictionary/hot.rs`)
+  - `_pg_triple.resources_hot` (UNLOGGED) holds IRIs ≤512B and all predicate/prefix IRIs — the working set that fits in shared buffers
+  - Full `resources` table unchanged; encoder checks hot table first
+  - `pg_prewarm` warms the hot table at server start via `_PG_init`
+  - Dramatically reduces random I/O for the most-accessed terms at large scale (100M+ triples)
 - [ ] **Stratification engine** (`src/datalog/stratify.rs`)
   - Predicate dependency graph with positive/negative edges
   - SCC-based stratification with clear error messages for unstratifiable programs
@@ -424,11 +460,14 @@ See [plans/ecosystem/datalog.md](plans/ecosystem/datalog.md) for the full design
   - pg_trickle DAG scheduler respects stratum ordering automatically
 - [ ] **Catalog and management**
   - `_pg_triple.rules` catalog table
+  - `_pg_triple.rule_sets` catalog: groups named rules with a `rule_hash BYTEA` (XXH3-64) for cache invalidation — re-activating a rule set with an unchanged hash resumes from prior derived state without re-derivation
   - Derived predicates registered in `_pg_triple.predicates` with `derived = TRUE`
   - `pg_triple.load_rules()`, `pg_triple.list_rules()`, `pg_triple.drop_rules()`
+  - `pg_triple.enable_rule_set(name TEXT)` / `pg_triple.disable_rule_set(name TEXT)` — activate or deactivate a named rule set without dropping it
 - [ ] **SPARQL engine integration**
-  - Derived VP tables transparent to query planner (same lookup path as base VP tables)
+  - Derived VP tables transparent to query planner (same look-up path as base VP tables)
   - On-demand mode prepends CTEs to generated SQL
+  - `pg_triple.sparql(query TEXT, include_derived BOOL DEFAULT true)` — when `false`, appends `AND source = 0` to all VP table scans to exclude inferred triples (no-inference mode)
 - [ ] **SHACL-AF `sh:rule` bridge**
   - Detect `sh:rule` entries in loaded SHACL shapes that contain Datalog-compatible triple rules
   - Compile `sh:rule` bodies to Datalog IR and register in `_pg_triple.rules`
@@ -525,6 +564,11 @@ Standard SPARQL 1.1 Update operations work correctly. RDF tools that use SPARQL 
   - Data generator adapted for pg_triple bulk load
   - Full query mix execution with timing
   - Comparison baselines documented
+- [ ] **BGP join reordering**
+  - At plan time, read `pg_stats.n_distinct` and `pg_class.reltuples` for the target VP tables to estimate the selectivity of each triple pattern
+  - Place the most selective pattern first in the join tree to minimize intermediate result sizes
+  - Emit `SET LOCAL join_collapse_limit = 1` before the generated SQL to lock the PostgreSQL planner into the computed join order
+  - When join columns are already sorted (e.g. after a range scan on an ordered `i64` column), emit `SET LOCAL enable_mergejoin = on` to exploit merge-join (strategy #6)
 - [ ] **Query plan caching**
   - Cache SPARQL→SQL translations keyed by query structure hash
   - `pg_triple.plan_cache_size` GUC
@@ -552,6 +596,7 @@ Standard SPARQL 1.1 Update operations work correctly. RDF tools that use SPARQL 
   - Parallel dictionary encoding
   - Deferred index build with `CREATE INDEX CONCURRENTLY` post-load
 - [ ] **SHACL-driven query optimization**
+  - The algebrizer reads loaded SHACL shapes and the predicate catalog before building the join tree, making shape constraints available as plan-time hints
   - `sh:minCount 1` → OPTIONAL→INNER JOIN downgrade in SPARQL→SQL
   - `sh:maxCount 1` → skip DISTINCT for single-valued properties
   - `sh:class` → VP table pruning based on target class
@@ -580,6 +625,8 @@ BSBM results documented. >100K triples/sec sustained bulk load. <10ms for simple
 - [ ] **Administrative functions**
   - `pg_triple.vacuum()` — force merge + VACUUM on VP tables
   - `pg_triple.reindex()` — rebuild all VP table indices
+  - `pg_triple.compact(keep_old BOOL DEFAULT false)` — trigger an immediate full merge across all VP tables; `keep_old := false` drops the previous generation's `_main` table immediately after the atomic rename
+  - `pg_triple.vacuum_dictionary()` — remove dictionary entries for IRIs and literals no longer referenced by any VP table row (orphaned after bulk deletes)
   - `pg_triple.dictionary_stats()` — detailed cache metrics
   - `pg_triple.predicate_stats()` — per-predicate triple count, table sizes
 - [ ] **Logging & diagnostics**
@@ -686,6 +733,10 @@ Standard SPARQL clients (YASGUI, Postman, RDF4J workbench, `curl`) can query and
   - Allowlist of permitted remote endpoints: `_pg_triple.federation_endpoints (url TEXT, enabled BOOLEAN)`
   - `pg_triple.register_endpoint()` / `pg_triple.remove_endpoint()` management API
   - No outbound HTTP calls unless the endpoint is explicitly registered (defence against SSRF)
+- [ ] **`SERVICE` → Materialized View rewrite**
+  - When a `SERVICE <url>` clause references an endpoint backed by a local SPARQL view (created via `pg_triple.create_sparql_view()`), rewrite the remote call to a direct scan of the pre-materialized stream table
+  - Registered via a `local_view_name` column on `_pg_triple.federation_endpoints` — set automatically when a SPARQL view is also registered as an endpoint
+  - Eliminates HTTP overhead and enables the PostgreSQL planner to optimize the join with accurate statistics from the stream table
 - [ ] **HTTP endpoint integration**
   - Federation works via both SQL (`pg_triple.sparql()`) and HTTP (`/sparql`) interfaces
 - [ ] pg_regress: `sparql_federation.sql`, `federation_timeout.sql`
