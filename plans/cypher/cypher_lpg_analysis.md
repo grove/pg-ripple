@@ -287,3 +287,5 @@ These should be resolved before committing Cypher support to the roadmap:
 - W3C RDF 1.2 (formalises RDF-star): https://www.w3.org/TR/rdf12-concepts/
 - Apache AGE: https://age.apache.org/
 - RDF→LPG mapping: https://www.w3.org/TR/rdf-star-use-cases/
+- **Prior art survey** — eight graph systems analysed in detail:
+  [plans/cypher/prior_art_graph_systems.md](prior_art_graph_systems.md)
