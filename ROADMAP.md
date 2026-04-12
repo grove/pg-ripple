@@ -791,6 +791,8 @@ Stable, tested, documented, and published. Ready for production workloads up to 
 ## Post-1.0 Horizon
 
 > **In plain language:** These are future directions that extend pg_triple beyond its initial scope. Each addresses a specific real-world need — from distributing data across multiple servers, to geographic queries, to bridging with existing relational databases. They are listed roughly in order of anticipated demand; some may be reordered or combined based on community feedback after 1.0.
+>
+> **v1.6 Cypher/GQL** has a dedicated exploratory analysis in [plans/cypher/](plans/cypher/). The core finding: VP tables already encode all LPG structural elements; a standalone `cypher-algebra` crate (openCypher + GQL grammar, unified SQL-emitting algebra IR) is the correct architecture. Full write support requires v0.16.0 (RDF-star) for edge properties. Gremlin is explicitly out of scope.
 
 | Version | Theme | What it delivers | Key Technical Features |
 |---|---|---|---|
@@ -798,10 +800,11 @@ Stable, tested, documented, and published. Ready for production workloads up to 
 | 1.2 | Vector + Graph | Combine knowledge graphs with AI-style similarity search | pgvector integration, hybrid semantic search |
 | 1.3 | Temporal | Track how data changes over time; query historical states | Bitstring versioning, TimescaleDB integration |
 | 1.4 | Extended VP | Automatically pre-compute shortcuts for frequent query patterns | Automated workload-driven ExtVP stream tables (pg_trickle), ontology change propagation DAG |
-| 1.5 | Interop | Bridge to other graph databases and GraphQL APIs | Apache AGE bridge, GraphQL-to-SPARQL |
-| 1.6 | GeoSPARQL + PostGIS | Answer geographic questions ("find all hospitals within 5 km of this point") | `geo:asWKT` literal type backed by PostGIS `geometry`, spatial FILTER functions, R-tree index on spatial VP tables |
-| 1.7 | R2RML Virtual Graphs | Expose existing database tables as if they were RDF data — no migration needed | W3C R2RML mappings, SPARQL queries transparently join VP tables with mapped SQL tables |
-| 1.8 | Quad-Level Provenance | Track where each fact came from and when it was added | Per-quad metadata table with source, timestamp, and transaction ID; integration with Datalog rule provenance (why-provenance) |
+| 1.5 | Interop | Bridge to GraphQL APIs and expose LPG views for visualization tools | GraphQL-to-SPARQL auto-generation from SHACL shapes, stable LPG view layer for visualization tooling |
+| 1.6 | Cypher / GQL | Query and write data using the industry-standard graph query languages | `cypher-algebra` standalone crate (openCypher + GQL grammar, same IR); `pg_triple.cypher()` SQL function; `CREATE`, `MERGE`, `SET`, `DELETE` via VP write path; openCypher TCK ≥80%; requires v0.16.0 RDF-star for edge properties |
+| 1.7 | GeoSPARQL + PostGIS | Answer geographic questions ("find all hospitals within 5 km of this point") | `geo:asWKT` literal type backed by PostGIS `geometry`, spatial FILTER functions, R-tree index on spatial VP tables |
+| 1.8 | R2RML Virtual Graphs | Expose existing database tables as if they were RDF data — no migration needed | W3C R2RML mappings, SPARQL queries transparently join VP tables with mapped SQL tables |
+| 1.9 | Quad-Level Provenance | Track where each fact came from and when it was added | Per-quad metadata table with source, timestamp, and transaction ID; integration with Datalog rule provenance (why-provenance) |
 
 ---
 
@@ -828,6 +831,6 @@ Stable, tested, documented, and published. Ready for production workloads up to 
 | 0.15.0 | +3 weeks | 4–6 pw | 80–108 pw |
 | 0.16.0 | +5 weeks | 8–10 pw | 88–118 pw |
 | 1.0.0 | +4 weeks | 6–8 pw | **95–122 pw** |
-| 1.1–1.8 | Post-1.0 | Community-driven | — |
+| 1.1–1.9 | Post-1.0 | Community-driven | — |
 
 *Estimates assume a pair of focused developers with Rust and PostgreSQL experience. "pw" = person-weeks. Calendar durations assume pair programming; a solo developer should expect roughly double the calendar time. Actual pace depends on contributor availability and scope adjustments discovered during implementation.*
