@@ -428,6 +428,9 @@ Inline value encoding eliminates dictionary lookups for numeric and date FILTER 
 - [ ] **pg_trickle integration: live statistics** *(optional, when pg_trickle is installed)*
   - `pg_ripple.enable_live_statistics()` creates `_pg_ripple.predicate_stats` and `_pg_ripple.graph_stats` stream tables
   - `pg_ripple.stats()` reads from stream tables instead of full-scanning VP tables (100–1000× faster)
+  - `_pg_ripple.rare_predicate_candidates` stream table (`IMMEDIATE` mode) replaces merge-worker GROUP BY polling for VP promotion detection ([§2.8](plans/ecosystem/pg_trickle.md))
+  - `_pg_ripple.vp_cardinality` stream table provides live per-predicate row counts for BGP join reordering without waiting for ANALYZE ([§2.10](plans/ecosystem/pg_trickle.md))
+  - `_pg_ripple.subject_patterns` managed as a stream table — stays current between merge cycles for DESCRIBE and GIN queries ([§2.12](plans/ecosystem/pg_trickle.md))
 - [ ] **Change notification / CDC**
   - `pg_ripple.subscribe(pattern TEXT, channel TEXT)` — emit `NOTIFY` on triple changes matching a predicate/graph pattern
   - Thin trigger-based CDC on VP delta tables; fires on INSERT/DELETE
@@ -482,6 +485,7 @@ Writes do not block reads. Merge worker operates correctly under concurrent writ
 - [ ] **pg_trickle integration: SHACL violation monitors** *(optional)*
   - Simple cardinality/datatype constraints modeled as `IMMEDIATE` mode stream tables
   - Violations detected within the same transaction as the DML
+  - `_pg_ripple.violation_summary` stream table aggregates dead-letter queue by shape/severity; feeds `/metrics` Prometheus endpoint without full queue scans ([§2.13](plans/ecosystem/pg_trickle.md))
 - [ ] pg_regress: `shacl_validation.sql`, `shacl_malformed.sql` (invalid shape definitions, circular references, undefined target classes — verify clean error messages)
 
 ### Exit Criteria
@@ -512,6 +516,7 @@ Core SHACL constraints are enforced at insert time. Validation reports conform t
   - `sh:qualifiedValueShape` — qualified cardinality
 - [ ] **pg_trickle integration: multi-shape DAG validation** *(optional)*
   - Multiple SHACL shapes as a DAG of stream tables with topologically-ordered refresh
+  - `violation_summary` DAG leaf node automatically clears counts when upstream shape violations resolve ([§2.13](plans/ecosystem/pg_trickle.md))
 - [ ] pg_regress: `shacl_advanced.sql`
 
 ### Exit Criteria
@@ -603,6 +608,9 @@ See [plans/ecosystem/datalog.md](plans/ecosystem/datalog.md) for the full design
 - [ ] **On-demand execution mode** (no pg_trickle needed)
   - Derived predicates compiled to inline CTEs injected into SPARQL→SQL at query time
   - `SET pg_ripple.inference_mode = 'on_demand'`
+- [ ] **`dictionary_hot` incremental maintenance** *(optional, when pg_trickle is installed)*
+  - Model `_pg_ripple.dictionary_hot` as a stream table over `dictionary` filtered to hot-eligible IRIs
+  - New predicate and prefix-registry IRIs appear in the hot table within 30s of being encoded — no manual rebuild ([§2.9](plans/ecosystem/pg_trickle.md))
 - [ ] **Materialized execution mode** *(optional, requires pg_trickle)*
   - `pg_ripple.materialize_rules(schedule => '10s')` — derived predicates as stream tables
   - pg_trickle DAG scheduler respects stratum ordering automatically
@@ -751,6 +759,10 @@ Full SPARQL 1.1 Update operations work correctly. Pattern-based updates compile 
   - `sh:minCount 1` → OPTIONAL→INNER JOIN downgrade in SPARQL→SQL
   - `sh:maxCount 1` → skip DISTINCT for single-valued properties
   - `sh:class` → VP table pruning based on target class
+- [ ] **pg_trickle integration: ExtVP workload advisor** *(optional, when pg_trickle is installed)*
+  - `_pg_ripple.extvp_candidates` stream table aggregates predicate co-occurrence from the SPARQL query log over a rolling 1-hour window
+  - Admin function `pg_ripple.recommend_extvp()` reads the stream table and lists the top N predicate pairs to pre-compute
+  - `pg_ripple.sparql_explain()` surfaces recommendations inline when a query would benefit from an ExtVP ([§2.14](plans/ecosystem/pg_trickle.md))
 - [ ] Performance regression test suite (pgbench custom scripts)
 - [ ] pg_regress: `shacl_query_opt.sql`
 
@@ -773,6 +785,10 @@ BSBM results documented. >100K triples/sec sustained bulk load. <10ms for simple
 - [ ] **Extension upgrade scripts**
   - Tested upgrade path `0.1.0 → ... → 0.16.0`
   - `ALTER EXTENSION pg_ripple UPDATE` works for all version transitions
+- [ ] **pg_trickle integration: live schema extraction** *(optional, when pg_trickle is installed)*
+  - `_pg_ripple.inferred_schema` stream table maintains a live class→property→cardinality summary
+  - Exposed as `pg_ripple.schema_summary()` for tooling and SPARQL IDE auto-completion (v0.15.0 HTTP endpoint)
+  - Serves as a starting point for automatic SHACL shape inference ([§2.15](plans/ecosystem/pg_trickle.md))
 - [ ] **Administrative functions**
   - `pg_ripple.vacuum()` — force merge + VACUUM on VP tables
   - `pg_ripple.reindex()` — rebuild all VP table indices
@@ -885,6 +901,10 @@ Standard SPARQL clients (YASGUI, Postman, RDF4J workbench, `curl`) can query and
   - Allowlist of permitted remote endpoints: `_pg_ripple.federation_endpoints (url TEXT, enabled BOOLEAN)`
   - `pg_ripple.register_endpoint()` / `pg_ripple.remove_endpoint()` management API
   - No outbound HTTP calls unless the endpoint is explicitly registered (defence against SSRF)
+- [ ] **pg_trickle integration: federation health monitoring** *(optional, when pg_trickle is installed)*
+  - `_pg_ripple.federation_health` stream table aggregates a rolling 5-minute probe log per endpoint
+  - Executor skips endpoints with `success_rate < 0.1` without waiting for timeout
+  - `/metrics` Prometheus endpoint reads directly from `federation_health` ([§2.11](plans/ecosystem/pg_trickle.md))
 - [ ] **`SERVICE` → Materialized View rewrite**
   - When a `SERVICE <url>` clause references an endpoint backed by a local SPARQL view (created via `pg_ripple.create_sparql_view()`), rewrite the remote call to a direct scan of the pre-materialized stream table
   - Registered via a `local_view_name` column on `_pg_ripple.federation_endpoints` — set automatically when a SPARQL view is also registered as an endpoint
