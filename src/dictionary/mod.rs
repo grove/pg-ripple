@@ -4,10 +4,9 @@
 //! being stored in a VP table.  The encoding is:
 //!
 //! 1. Compute XXH3-128 of the UTF-8 bytes of the term string.
-//! 2. Cast the high 64 bits to `i64` (the low 64 bits are stored as the
-//!    `hash` column for collision detection).
-//! 3. Attempt `INSERT INTO _pg_ripple.dictionary … ON CONFLICT DO NOTHING`.
-//! 4. Return the `id` column (which equals the XXH3-128 high half).
+//! 2. Use the high 64 bits cast to `i64` as the identifier.
+//! 3. Insert into `_pg_ripple.dictionary` via `ON CONFLICT DO NOTHING`.
+//! 4. Return the inserted (or existing) `id`.
 //!
 //! # Term kinds
 //!
@@ -25,15 +24,14 @@
 //! A shared-memory dictionary cache is introduced in v0.6.0.
 
 use lru::LruCache;
+use pgrx::datum::DatumWithOid;
 use pgrx::prelude::*;
 use std::cell::RefCell;
 use std::num::NonZeroUsize;
 use xxhash_rust::xxh3::xxh3_128;
 
-/// Maximum number of entries in the backend-local decode cache.
 const CACHE_CAPACITY: usize = 16_384;
 
-/// Encode a term kind integer into a PostgreSQL SMALLINT.
 pub const KIND_IRI: i16 = 0;
 pub const KIND_BLANK: i16 = 1;
 pub const KIND_LITERAL: i16 = 2;
@@ -49,10 +47,8 @@ thread_local! {
 /// Encode `term` to its dictionary `i64` identifier.
 ///
 /// Creates a new dictionary row if `term` has not been seen before.
-/// Returns the `id` (XXH3-128 high 64 bits cast to i64).
 pub fn encode(term: &str, kind: i16) -> i64 {
     let hash128 = xxh3_128(term.as_bytes());
-    // Use the high 64 bits as the ID.
     let id = (hash128 >> 64) as i64;
     let low = hash128 as i64;
 
@@ -60,16 +56,15 @@ pub fn encode(term: &str, kind: i16) -> i64 {
         "INSERT INTO _pg_ripple.dictionary (id, hash, value, kind) \
          VALUES ($1, $2, $3, $4) \
          ON CONFLICT (id) DO NOTHING",
-        Some(vec![
-            (PgBuiltInOids::INT8OID.oid(), id.into_datum()),
-            (PgBuiltInOids::INT8OID.oid(), low.into_datum()),
-            (PgBuiltInOids::TEXTOID.oid(), term.into_datum()),
-            (PgBuiltInOids::INT2OID.oid(), kind.into_datum()),
-        ]),
+        &[
+            DatumWithOid::from(id),
+            DatumWithOid::from(low),
+            DatumWithOid::from(term),
+            DatumWithOid::from(kind),
+        ],
     )
     .unwrap_or_else(|e| pgrx::error!("dictionary encode SPI error: {e}"));
 
-    // Warm the decode cache.
     DECODE_CACHE.with(|c| {
         c.borrow_mut().put(id, term.to_owned());
     });
@@ -81,14 +76,13 @@ pub fn encode(term: &str, kind: i16) -> i64 {
 ///
 /// Returns `None` if the id is not found in the dictionary.
 pub fn decode(id: i64) -> Option<String> {
-    // Check the backend-local cache first.
     if let Some(value) = DECODE_CACHE.with(|c| c.borrow_mut().get(&id).cloned()) {
         return Some(value);
     }
 
     let value = Spi::get_one_with_args::<String>(
         "SELECT value FROM _pg_ripple.dictionary WHERE id = $1",
-        vec![(PgBuiltInOids::INT8OID.oid(), id.into_datum())],
+        &[DatumWithOid::from(id)],
     )
     .unwrap_or_else(|e| pgrx::error!("dictionary decode SPI error: {e}"));
 

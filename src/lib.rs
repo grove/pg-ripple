@@ -8,6 +8,7 @@
 //! are parsed with `spargebra`, compiled to SQL, and executed via SPI
 //! (see `src/sparql/`).
 
+use pgrx::guc::{GucContext, GucFlags, GucRegistry};
 use pgrx::prelude::*;
 
 mod dictionary;
@@ -17,24 +18,22 @@ mod storage;
 pgrx::pg_module_magic!();
 
 /// GUC: default named-graph identifier (empty string → default graph 0).
-static DEFAULT_GRAPH: pgrx::GucSetting<Option<&'static std::ffi::CStr>> =
-    pgrx::GucSetting::new(None);
+static DEFAULT_GRAPH: pgrx::GucSetting<Option<std::ffi::CString>> =
+    pgrx::GucSetting::<Option<std::ffi::CString>>::new(None);
 
 /// Called once when the extension shared library is loaded.
 #[allow(non_snake_case)]
 #[pg_guard]
-pub extern "C" fn _PG_init() {
+pub extern "C-unwind" fn _PG_init() {
     // Register GUC parameters before any backend connects.
-    unsafe {
-        pgrx::GucRegistry::define_string_guc(
-            c"pg_ripple.default_graph",
-            c"IRI of the default named graph (empty = built-in default graph)",
-            c"",
-            &DEFAULT_GRAPH,
-            GucContext::Userset,
-            GucFlags::default(),
-        );
-    }
+    pgrx::GucRegistry::define_string_guc(
+        c"pg_ripple.default_graph",
+        c"IRI of the default named graph (empty = built-in default graph)",
+        c"",
+        &DEFAULT_GRAPH,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
     // Note: the merge background worker, SHACL engine, and Datalog reasoner
     // are NOT started here.  They are started lazily based on GUC values
     // (pg_ripple.merge_threshold, pg_ripple.shacl_mode, pg_ripple.inference_mode),

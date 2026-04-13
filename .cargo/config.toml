@@ -1,7 +1,7 @@
 # https://docs.rs/pgrx/latest/pgrx/
-[target.'cfg(target_os = "linux")'.linker]
+[target.'cfg(target_os = "linux")']
 linker = "clang"
 rustflags = ["-C", "link-arg=-Wl,-undefined,dynamic_lookup"]
 
-[target.'cfg(target_os = "macos")'.linker]
+[target.'cfg(target_os = "macos")']
 rustflags = ["-C", "link-arg=-Wl,-undefined,dynamic_lookup"]
