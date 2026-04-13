@@ -823,7 +823,7 @@ DQL only (read queries). The openCypher subset is explicit:
 
 **Lesson 24**: NebulaGraph's hybrid approach is a viable phased strategy for
 pg_triple. Phase 1: implement Cypher DQL (read-only `MATCH`/`RETURN`/`WITH`/`WHERE`).
-Phase 2 (requires RDF-star v0.16.0): add Cypher DML (`CREATE`, `MERGE`, `SET`,
+Phase 2 (requires RDF-star v0.4.0): add Cypher DML (`CREATE`, `MERGE`, `SET`,
 `DELETE`). This maps to the ROADMAP boundary and avoids blocking the initial
 release on write semantics.
 
@@ -1037,7 +1037,7 @@ Based on all eight systems, the following implementation order is recommended:
    - Star-pattern optimization (same subject, multiple predicates → single join chain)
 3. openCypher TCK pass rate target: ≥80% of `Match` and `Return` feature files.
 
-### Phase 2: Write Cypher (requires RDF-star, v0.16.0)
+### Phase 2: Write Cypher (requires RDF-star, v0.4.0)
 
 4. `src/cypher/writer.rs`: `CREATE`, `MERGE` (with advisory lock), `SET`, `REMOVE`, `DELETE`, `DETACH DELETE`.
 5. Edge property support via RDF-star annotation VP tables.

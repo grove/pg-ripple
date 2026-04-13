@@ -392,7 +392,7 @@ workloads — exactly the split pg_triple's HTAP architecture prevents.
 The synthesis: **implement the minimal edge-property extension now** using a
 `triple_hash`-keyed side table, design its external API to match emerging RDF 1.2
 semantics, and plan a migration to native RDF-star VP tables when the W3C standard
-finalizes and pgrx/oxrdf provide stable support (planned in pg_triple v0.16.0).
+finalizes and pgrx/oxrdf provide stable support (planned in pg_triple v0.4.0).
 
 The Stardog deprecation is a warning not to over-commit to a specific RDF-star
 surface syntax before RDF 1.2 finalizes. The AnzoGraph experience confirms that
@@ -444,7 +444,7 @@ Based on all three hybrid systems:
 3. **Cypher edge properties** require a single schema addition:
    `_pg_triple.edge_props(triple_hash BIGINT, prop_id BIGINT, val BIGINT, g BIGINT)`
    with an index on `(triple_hash, prop_id)`. This is a net-new table with no
-   impact on existing VP tables. Defer until v0.16.0 (RDF-star release) or a
+   impact on existing VP tables. Defer until v0.4.0 (RDF-star release) or a
    confirmed use-case requirement.
 
 4. **Never build a parallel LPG store.** Neptune proves this is a dead end.

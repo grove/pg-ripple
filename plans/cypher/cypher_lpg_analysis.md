@@ -59,7 +59,7 @@ CREATE (alice)-[:KNOWS {since: 2020, weight: 0.9}]->(bob)
 VP tables store `(s, o)` integer pairs. There is no natural slot for `since` or `weight` on the
 edge. This is the one genuine storage gap.
 
-**RDF-star** (planned for v0.16.0) resolves this cleanly:
+**RDF-star** (planned for v0.4.0) resolves this cleanly:
 
 ```turtle
 <<:alice :knows :bob>> :since 2020 .
@@ -74,7 +74,7 @@ hash of the inner triple `(s, p, o)`. This maps to an edge property without any 
 | `CREATE (a)-[:KNOWS {since: 2020}]->(b)` | `<<:a :knows :b>> :since 2020` | `vp_since(s=hash(a,knows,b), o=2020_id)` |
 | `MATCH ()-[r:KNOWS]-() RETURN r.since` | `?s :since ?v . FILTER EXISTS { <<:a :knows :b>> }` | standard VP scan |
 
-The conclusion: **v0.16.0 (RDF-star) is the enabling dependency for full Cypher write support**.
+The conclusion: **v0.4.0 (RDF-star) is the enabling dependency for full Cypher write support**.
 Before that release, read-only Cypher (`MATCH … RETURN`) on triples-without-edge-properties is
 feasible; write support for edge-property edges (`CREATE`/`SET` with `[r:TYPE {prop: val}]`) is
 not.
@@ -88,7 +88,7 @@ Cypher has a full mutation surface — it is not read-only:
 | Cypher clause | Meaning | Maps to |
 |---|---|---|
 | `CREATE (n:Label {k: v})` | Create node with properties | `insert_triple(n, rdf:type, Label)` + `insert_triple(n, k, v)` |
-| `CREATE (a)-[:TYPE {k: v}]->(b)` | Create edge with properties | RDF-star annotation triples (requires v0.16.0) |
+| `CREATE (a)-[:TYPE {k: v}]->(b)` | Create edge with properties | RDF-star annotation triples (requires v0.4.0) |
 | `MERGE (n:Label {k: v})` | Upsert | `ON CONFLICT DO NOTHING` + conditional insert |
 | `SET n.prop = val` | Update property | delete old `vp_prop(n, ?)` row + insert new one |
 | `REMOVE n.prop` | Delete property | delete `vp_prop(n, ?)` row |
@@ -195,7 +195,7 @@ VP table DML (INSERT / DELETE)  ←  same functions as SPARQL Update writer
 | HTAP write path | `src/storage/insert_triple()` | same |
 | Merge worker | `src/storage/merge.rs` | same |
 | SHACL validation | `src/shacl/` | same (node/edge schema constraints) |
-| RDF-star (edge props) | v0.16.0 | same — required for edge properties |
+| RDF-star (edge props) | v0.4.0 | same — required for edge properties |
 
 The Cypher→SQL compiler is the only genuinely new component. Everything else is reused.
 
@@ -233,8 +233,8 @@ Recommended sequencing:
    (`insert_triple`, `delete_triple`, VP table selector, dictionary encoder) is stable and
    well-tested — this becomes the write-path contract that the Cypher compiler will target.
 
-2. **v0.16.0 (RDF-star)**: This is the enabling dependency for edge properties. It should be
-   completed before Cypher write support is designed in detail.
+2. **v0.4.0 (RDF-star)**: This is the enabling dependency for edge properties. It is now
+   available early in the roadmap, well before Cypher write support is needed.
 
 3. **Parallel / post-1.0**: Begin `cypher-algebra` as an independent crate in the workspace.
    The grammar and AST work does not depend on pg_triple's internals and can proceed in parallel

@@ -23,7 +23,7 @@
 | PostgreSQL | 18.x |
 | SPARQL parser | `spargebra` crate (W3C-compliant SPARQL 1.1 algebra) |
 | SPARQL optimizer | `sparopt` crate (Apache-2.0/MIT; first-pass algebra optimizer fed from `spargebra` output; adds filter pushdown, constant folding, empty-pattern elimination before pg_triple's own pass; v0.3.0+) |
-| RDF parsers | `rio_turtle`, `rio_xml` crates (Turtle, N-Triples, RDF/XML); `oxttl` / `oxrdf` added at v0.16.0 for RDF-star |
+| RDF parsers | `rio_turtle`, `rio_xml` crates (Turtle, N-Triples, RDF/XML); `oxttl` / `oxrdf` added at v0.4.0 for RDF-star |
 | Hashing | `xxhash-rust` (XXH3-128 for dictionary collision resistance) |
 | Serialization | `serde` + `serde_json` (SHACL reports, SPARQL results, config) |
 | HTTP server | `axum` (built on tokio) — SPARQL Protocol HTTP endpoint (`pg_triple_http` binary) |
@@ -127,7 +127,7 @@ CREATE UNIQUE INDEX ON _pg_triple.literal_dict (hash);
 - **Prefix compression**: Common IRI prefixes (registered via `pg_triple.register_prefix()`) are stripped before hashing and stored separately, reducing storage by ~40% for typical RDF datasets
 - **Inline value encoding** (`src/dictionary/inline.rs`, v0.3.0): Type-tagged i64 values for `xsd:integer`, `xsd:boolean`, `xsd:dateTime`, `xsd:date`, `xsd:double`. Bit 63 set signals an inline value; bits 56–62 hold a 7-bit type code; bits 0–55 hold the encoded value. FILTER comparisons on these types require zero dictionary round-trips — the SPARQL→SQL translator encodes constants at translation time and emits a plain B-tree range condition on the VP column.
 - **ID ordering** (v0.3.0): Typed-literal IDs are allocated in monotonically increasing semantic order within each type (integers by numeric value, dates chronologically). This enables FILTER range conditions to compile to `BETWEEN $lo AND $hi` scans on the raw i64 column without decoding. The integer and date ranges are disjoint from IRI ranges via the type-tag bits.
-- **Tiered dictionary** (`src/dictionary/hot.rs`, v0.9.0): `_pg_triple.resources_hot` (UNLOGGED, stays in `shared_buffers`) holds IRIs ≤512 bytes, all prefix-registry IRIs, and all predicate IRIs. `_pg_triple.resources_cold` (heap) holds long literals and infrequently-accessed IRIs. The encoder checks hot first; `pg_prewarm` warms `resources_hot` at server start via `_PG_init`. At Wikidata scale (3B vocabulary entries, 190 GB uncompressed), this keeps the hot lookup path I/O-free for the overwhelming majority of query-time decodes.
+- **Tiered dictionary** (`src/dictionary/hot.rs`, v0.10.0): `_pg_triple.resources_hot` (UNLOGGED, stays in `shared_buffers`) holds IRIs ≤512 bytes, all prefix-registry IRIs, and all predicate IRIs. `_pg_triple.resources_cold` (heap) holds long literals and infrequently-accessed IRIs. The encoder checks hot first; `pg_prewarm` warms `resources_hot` at server start via `_PG_init`. At Wikidata scale (3B vocabulary entries, 190 GB uncompressed), this keeps the hot lookup path I/O-free for the overwhelming majority of query-time decodes.
 
 ### 4.3 Storage Engine (`src/storage/`)
 
@@ -142,7 +142,8 @@ CREATE TABLE _pg_triple.vp_{predicate_id} (
     s       BIGINT NOT NULL,  -- subject dictionary ID
     o       BIGINT NOT NULL,  -- object dictionary ID
     g       BIGINT NOT NULL DEFAULT 0,  -- named graph ID (0 = default)
-    source  SMALLINT NOT NULL DEFAULT 0  -- 0 = explicit triple; 1 = rule-derived (v0.9.0)
+    i       BIGINT GENERATED ALWAYS AS IDENTITY,  -- statement identifier (SID); LPG-ready from v0.2.0
+    source  SMALLINT NOT NULL DEFAULT 0  -- 0 = explicit triple; 1 = rule-derived (v0.10.0)
 );
 CREATE INDEX ON _pg_triple.vp_{predicate_id} (s, o);
 CREATE INDEX ON _pg_triple.vp_{predicate_id} (o, s);
@@ -153,11 +154,12 @@ CREATE INDEX ON _pg_triple.vp_{predicate_id} (o, s);
 - Tables are created dynamically on first encounter of a new predicate during data ingestion
 - A catalog table `_pg_triple.predicates` maps predicate dictionary IDs to table OIDs for fast lookup
 - PG18's **skip scan** on the composite B-tree indices enables efficient lookups even when only the second column (`o`) is bound
-- **`source` column** (v0.9.0): `SMALLINT DEFAULT 0` — `0` = explicit triple asserted by the user; `1` = derived triple produced by the Datalog/RDFS/OWL RL reasoning engine. Queries can pass `include_derived := false` to filter to `WHERE source = 0` only. Because the column is added as part of the v0.9.0 migration script, it has zero cost before reasoning is enabled.
+- **`i` column (Statement Identifier)** (v0.2.0): Every statement gets a unique `BIGINT` identity via `GENERATED ALWAYS AS IDENTITY`. This makes the storage schema SPOI-compatible (inspired by the OneGraph 1G model). SIDs are used by RDF-star (v0.4.0) for edge properties and meta-statements: the SID of a statement can appear in the `s` or `o` position of another VP table row, enabling statements about statements without structural changes. A `_pg_triple.statements` catalog view maps SIDs to their containing VP table for cross-table SID lookups.
+- **`source` column** (v0.10.0): `SMALLINT DEFAULT 0` — `0` = explicit triple asserted by the user; `1` = derived triple produced by the Datalog/RDFS/OWL RL reasoning engine. Queries can pass `include_derived := false` to filter to `WHERE source = 0` only. Because the column is added as part of the v0.10.0 migration script, it has zero cost before reasoning is enabled.
 - **Named-graph index** (`pg_triple.named_graph_optimized = true`): when enabled, each VP table gains an additional `(g, s, o)` index supporting `GRAPH ?g { ... }` patterns without a full-table scan. Off by default to avoid index bloat for single-graph users.
 
 **Rare-Predicate Consolidation**:
-- Predicates with fewer than `pg_triple.vp_promotion_threshold` triples (default: 1,000) are stored in a shared `_pg_triple.vp_rare (p BIGINT, s BIGINT, o BIGINT, g BIGINT)` table with three secondary indices:
+- Predicates with fewer than `pg_triple.vp_promotion_threshold` triples (default: 1,000) are stored in a shared `_pg_triple.vp_rare (p BIGINT, s BIGINT, o BIGINT, g BIGINT, i BIGINT GENERATED ALWAYS AS IDENTITY)` table with three secondary indices:
   - `(p, s, o)` — primary access pattern: all triples for a given predicate
   - `(s, p)` — DESCRIBE queries: enumerate all predicates for a given subject without a full-table scan
   - `(g, p, s, o)` — graph-drop: enumerate and bulk-delete all triples in a named graph
@@ -181,7 +183,7 @@ CREATE INDEX ON _pg_triple.vp_{predicate_id} (o, s);
 **Merge Worker** (background worker via pgrx `BackgroundWorker`):
 - Periodically merges delta into main when delta exceeds `pg_triple.merge_threshold` rows
 - Runs as a pgrx background worker with `BGWORKER_SHMEM_ACCESS`
-- **Fresh-table generation merge** (v0.5.0): each merge cycle creates a *new* `vp_{id}_main_new` table rather than inserting incrementally into the existing one (incremental inserts degrade BRIN effectiveness because BRIN requires physically sorted data):
+- **Fresh-table generation merge** (v0.6.0): each merge cycle creates a *new* `vp_{id}_main_new` table rather than inserting incrementally into the existing one (incremental inserts degrade BRIN effectiveness because BRIN requires physically sorted data):
   1. `CREATE TABLE _pg_triple.vp_{id}_main_new` (heap)
   2. `INSERT … SELECT … ORDER BY s` from delta into the new table
   3. `CLUSTER vp_{id}_main_new USING (s, o, g)` — physically sorts rows for BRIN
@@ -206,7 +208,7 @@ CREATE INDEX ON _pg_triple.vp_{predicate_id} (o, s);
 - Disables index updates during load; rebuilds at end
 - Uses PG18 `COPY ... REJECT_LIMIT` for fault tolerance
 
-#### 4.3.4 Subject Patterns (`_pg_triple.subject_patterns`, v0.4.0)
+#### 4.3.4 Subject Patterns (`_pg_triple.subject_patterns`, v0.5.0)
 
 Precomputed index mapping each subject to the sorted array of all its predicate IDs:
 
@@ -298,7 +300,7 @@ pg_triple.insert_triple(s TEXT, p TEXT, o TEXT, g TEXT DEFAULT NULL)
 pg_triple.delete_triple(s TEXT, p TEXT, o TEXT, g TEXT DEFAULT NULL)
 pg_triple.load_turtle(data TEXT) RETURNS BIGINT  -- returns count
 pg_triple.load_ntriples(data TEXT) RETURNS BIGINT
-pg_triple.expand_template(iri TEXT, query TEXT) RETURNS BIGINT  -- OTTR-style DataFrame→RDF bulk load (v0.8.0)
+pg_triple.expand_template(iri TEXT, query TEXT) RETURNS BIGINT  -- OTTR-style DataFrame→RDF bulk load (v0.9.0)
 
 -- Maintenance
 pg_triple.vacuum_dictionary() RETURNS BIGINT  -- removes unreferenced dictionary entries; safe to run any time
@@ -313,9 +315,9 @@ pg_triple.compact(keep_old BOOL DEFAULT false) RETURNS VOID  -- trigger immediat
 4. **Projection pushing**: `SELECT DISTINCT ?p` queries enumerate the `_pg_triple.predicates` catalog instead of scanning all VP tables
 5. **Filter pushdown**: SPARQL `FILTER` clauses operating on bound IRIs are resolved to integer IDs *before* generating SQL, ensuring B-tree index usage. For typed numeric/date literals, the inline-encoded i64 range (see §4.2.2) enables `BETWEEN $lo AND $hi` range scans with no decode step.
 6. **Merge-join enablement**: When the join variable matches the `s` sort key of a VP table's `(s, o, g)` primary index, the emitter wraps the CTE in `ORDER BY s`. The PostgreSQL planner then considers a merge join rather than a hash join, reducing memory pressure for large intermediate results.
-7. **BGP join reordering** (v0.12.0): The algebra optimizer reads `pg_stats.n_distinct` and `pg_class.reltuples` for each VP table involved in the query and reorders BGPs cheapest-first (most selective predicate scanned first). This provides a statistics-driven complement to `sparopt`'s structural rewrites.
+7. **BGP join reordering** (v0.13.0): The algebra optimizer reads `pg_stats.n_distinct` and `pg_class.reltuples` for each VP table involved in the query and reorders BGPs cheapest-first (most selective predicate scanned first). This provides a statistics-driven complement to `sparopt`'s structural rewrites.
 8. **Join-order hints**: A `<http://pg-triple.io/hints/join-order>` pragma in the SPARQL prologue (e.g. `PREFIX hint: <http://pg-triple.io/hints/>`) causes the SQL generator to emit `SET LOCAL join_collapse_limit = 1` around the generated SQL, locking in the BGP-reordered join sequence and preventing the PG planner from re-ordering it.
-9. **`no-inference` hint**: Adding `hint:no-inference true` to the query prologue appends `AND source = 0` on every VP table scan, restricting results to explicitly asserted triples only (v0.9.0+).
+9. **`no-inference` hint**: Adding `hint:no-inference true` to the query prologue appends `AND source = 0` on every VP table scan, restricting results to explicitly asserted triples only (v0.10.0+).
 
 #### 4.4.4 Property Path Compilation
 
@@ -584,7 +586,7 @@ Pre-computed semi-joins between frequently co-joined predicates, implemented as 
 ### 8.6 Performance Regression
 
 - **CI benchmark gate** (from v0.2.0): record insert throughput and point-query latency as baselines; fail CI if a commit regresses throughput by >10%
-- Baselines extended at each milestone: star queries (v0.3.0), property paths (v0.4.0), concurrent read/write (v0.5.0), BSBM full mix (v0.12.0)
+- Baselines extended at each milestone: star queries (v0.3.0), property paths (v0.5.0), concurrent read/write (v0.6.0), BSBM full mix (v0.13.0)
 - Performance regression suite maintained as pgbench custom scripts in `sql/bench/`
 
 ### 8.7 Benchmarks
@@ -599,10 +601,10 @@ Pre-computed semi-joins between frequently co-joined predicates, implemented as 
 
 ### 8.8 Conformance
 
-- **W3C SPARQL 1.1 Query conformance gate**: run applicable manifest tests from v0.3.0 onward; extend at each SPARQL milestone (v0.4.0, v0.8.0, v0.11.0, v0.15.0, v0.16.0) until full conformance at v1.0.0
-- W3C SPARQL 1.1 Update test suite (from v0.11.0)
-- W3C SHACL Core test suite (from v0.6.0)
-- SPARQL 1.1 Protocol conformance tests via `curl` (from v0.14.0)
+- **W3C SPARQL 1.1 Query conformance gate**: run applicable manifest tests from v0.3.0 onward; extend at each SPARQL milestone (v0.4.0, v0.5.0, v0.9.0, v0.12.0, v0.16.0) until full conformance at v1.0.0
+- W3C SPARQL 1.1 Update test suite (from v0.12.0)
+- W3C SHACL Core test suite (from v0.7.0)
+- SPARQL 1.1 Protocol conformance tests via `curl` (from v0.15.0)
 
 ---
 

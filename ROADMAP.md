@@ -18,21 +18,21 @@ Each release below has two layers:
 | Version | Name | What it delivers (one sentence) | Effort |
 |---|---|---|---|
 | 0.1.0 | Foundation | Install the extension, store and retrieve facts | 6–8 pw |
-| 0.2.0 | Vertical Partitioning | Fast storage layout and bulk data import | 6–8 pw |
+| 0.2.0 | Vertical Partitioning | Fast storage layout, bulk data import, statement identifiers | 6–8 pw |
 | 0.3.0 | SPARQL Basic | Ask questions in the standard RDF query language | 6–8 pw |
-| 0.4.0 | SPARQL Advanced | Follow chains of relationships, compute totals, search text | 8–10 pw |
-| 0.5.0 | HTAP Architecture | Heavy reads and writes at the same time without slowdowns | 8–10 pw |
-| 0.6.0 | SHACL Core | Define data quality rules; reject bad data on insert | 4–6 pw |
-| 0.7.0 | SHACL Advanced | Complex data quality rules with background checking | 4–6 pw |
-| 0.8.0 | Serialization | Import and export data in all standard RDF file formats | 3–4 pw |
-| 0.9.0 | Datalog Reasoning | Automatically derive new facts from rules and logic | 10–12 pw |
-| 0.10.0 | SPARQL Views | Live, always-up-to-date dashboards from SPARQL queries | 4–6 pw |
-| 0.11.0 | SPARQL Update | Standard RDF write operations (add / change / delete) | 4–6 pw |
-| 0.12.0 | Performance | Speed tuning, benchmarks, production-grade throughput | 6–8 pw |
-| 0.13.0 | Admin & Security | Operations tooling, access control, docs, packaging | 4–6 pw |
-| 0.14.0 | SPARQL Protocol | Standard HTTP API so web apps and tools can query directly | 3–4 pw |
-| 0.15.0 | SPARQL Federation | Query remote SPARQL endpoints alongside local data | 4–6 pw |
-| 0.16.0 | RDF-star / RDF 1.2 | Make statements about statements (provenance, annotations) | 8–10 pw |
+| 0.4.0 | RDF-star / Statement IDs | Make statements about statements; LPG-ready storage | 8–10 pw |
+| 0.5.0 | SPARQL Advanced | Follow chains of relationships, compute totals, search text | 8–10 pw |
+| 0.6.0 | HTAP Architecture | Heavy reads and writes at the same time without slowdowns | 8–10 pw |
+| 0.7.0 | SHACL Core | Define data quality rules; reject bad data on insert | 4–6 pw |
+| 0.8.0 | SHACL Advanced | Complex data quality rules with background checking | 4–6 pw |
+| 0.9.0 | Serialization | Import and export data in all standard RDF file formats | 3–4 pw |
+| 0.10.0 | Datalog Reasoning | Automatically derive new facts from rules and logic | 10–12 pw |
+| 0.11.0 | SPARQL Views | Live, always-up-to-date dashboards from SPARQL queries | 4–6 pw |
+| 0.12.0 | SPARQL Update | Standard RDF write operations (add / change / delete) | 4–6 pw |
+| 0.13.0 | Performance | Speed tuning, benchmarks, production-grade throughput | 6–8 pw |
+| 0.14.0 | Admin & Security | Operations tooling, access control, docs, packaging | 4–6 pw |
+| 0.15.0 | SPARQL Protocol | Standard HTTP API so web apps and tools can query directly | 3–4 pw |
+| 0.16.0 | SPARQL Federation | Query remote SPARQL endpoints alongside local data | 4–6 pw |
 | 1.0.0 | Production Release | Standards conformance, stress testing, security audit | 6–8 pw |
 | | | **Total estimated effort** | **95–122 pw** |
 
@@ -83,9 +83,9 @@ A user can install the extension, insert triples, and query them back by pattern
 
 ## v0.2.0 — Vertical Partitioning
 
-**Theme**: Per-predicate table layout for real performance, with Turtle and N-Triples bulk loading.
+**Theme**: Per-predicate table layout for real performance, with Turtle and N-Triples bulk loading. Statement identifiers from day one.
 
-> **In plain language:** This release reorganises how data is stored internally so that queries run much faster — instead of one giant table, each type of relationship (e.g. "knows", "worksAt", "hasEmail") gets its own optimised table. It also adds *bulk import*: users can load large RDF data files (in Turtle and N-Triples formats) in one go, rather than inserting facts one at a time. Named graphs (the ability to group facts into labelled collections) are introduced here too.
+> **In plain language:** This release reorganises how data is stored internally so that queries run much faster — instead of one giant table, each type of relationship (e.g. "knows", "worksAt", "hasEmail") gets its own optimised table. It also adds *bulk import*: users can load large RDF data files (in Turtle and N-Triples formats) in one go, rather than inserting facts one at a time. Named graphs (the ability to group facts into labelled collections) are introduced here too. Crucially, every stored statement gets a unique *statement identifier* — this is the foundation for RDF-star (v0.4.0) and future LPG/Cypher support, where edges can carry properties.
 >
 > **Effort estimate: 6–8 person-weeks**
 
@@ -95,8 +95,14 @@ A user can install the extension, insert triples, and query them back by pattern
   - Auto-create `_pg_triple.vp_{predicate_id}` tables on first triple with a new predicate
   - Predicate catalog: `_pg_triple.predicates (id BIGINT, table_oid OID, triple_count BIGINT)`
   - Dual B-tree indices per VP table: `(s, o)` and `(o, s)`
+- [ ] **Statement identifier (`i` column) in VP tables**
+  - Every VP table includes `i BIGINT GENERATED ALWAYS AS IDENTITY` — a unique statement identifier (SID)
+  - `vp_rare` table also includes `i BIGINT GENERATED ALWAYS AS IDENTITY`
+  - SIDs are not exposed to users in v0.2.0 but are available for internal use from the start
+  - This makes the storage schema SPOI-compatible (inspired by the OneGraph 1G model) and LPG-ready: once RDF-star lands in v0.4.0, SIDs enable edge properties, meta-edges, and provenance annotations without a storage migration
+  - `_pg_triple.statements` catalog view: maps SID → (predicate_id, VP table OID) for SID-based lookups
 - [ ] **Rare-predicate consolidation table**
-  - Predicates with fewer than `pg_triple.vp_promotion_threshold` triples (default: 1,000) are stored in a shared `_pg_triple.vp_rare (p BIGINT, s BIGINT, o BIGINT, g BIGINT)` table with a primary composite index on `(p, s, o)` and two secondary indices: `(s, p)` for DESCRIBE queries and `(g, p, s, o)` for efficient graph-drop bulk-delete
+  - Predicates with fewer than `pg_triple.vp_promotion_threshold` triples (default: 1,000) are stored in a shared `_pg_triple.vp_rare (p BIGINT, s BIGINT, o BIGINT, g BIGINT, i BIGINT)` table with a primary composite index on `(p, s, o)` and two secondary indices: `(s, p)` for DESCRIBE queries and `(g, p, s, o)` for efficient graph-drop bulk-delete
   - Promotion is **deferred to end-of-statement** (not mid-batch): during a bulk load, triples accumulate in `vp_rare`; after the load completes, predicates exceeding the threshold are promoted in a single `INSERT … SELECT` + `DELETE` transaction — avoids disrupting in-flight COPY streams
   - `pg_triple.promote_rare_predicates()` can also be called manually or by the background merge worker
   - Prevents catalog bloat for predicate-rich datasets (DBpedia ≈60K predicates, Wikidata ≈10K) — avoids hundreds of thousands of PG objects, reduces planner overhead, and cuts VACUUM cost
@@ -179,7 +185,7 @@ VP layout operational. Rare-predicate consolidation table absorbs low-frequency 
 - [ ] `pg_triple.sparql_explain(query TEXT, analyze BOOL DEFAULT false) RETURNS TEXT` — show generated SQL; `analyze := true` executes the query and augments the output with actual row counts
 - [ ] **SQL injection / adversarial tests**: verify that SPARQL queries containing SQL metacharacters in IRIs, literals, and prefixed names (`'; DROP TABLE --`, Unicode escapes, null bytes) are safely dictionary-encoded and never reach generated SQL as raw strings
 - [ ] **Malformed input tests**: invalid Turtle, truncated N-Triples, malformed SPARQL — verify clean error messages (no panics, no partial state)
-- [ ] **W3C SPARQL conformance gate**: run the applicable subset of the W3C SPARQL 1.1 Query manifest tests against the features delivered so far; extend this gate in every subsequent SPARQL milestone (v0.4.0, v0.8.0, v0.11.0, v0.15.0, v0.16.0) until full conformance at v1.0.0
+- [ ] **W3C SPARQL conformance gate**: run the applicable subset of the W3C SPARQL 1.1 Query manifest tests against the features delivered so far; extend this gate in every subsequent SPARQL milestone (v0.4.0, v0.5.0, v0.9.0, v0.12.0, v0.16.0) until full conformance at v1.0.0
 - [ ] pg_regress: `sparql_queries.sql` (20+ test queries), `sparql_injection.sql` (adversarial inputs)
 
 ### Exit Criteria
@@ -188,7 +194,59 @@ Users can run SPARQL SELECT and ASK queries with BGPs, FILTER, OPTIONAL against 
 
 ---
 
-## v0.4.0 — SPARQL Query Engine (Advanced)
+## v0.4.0 — RDF-star / Statement Identifiers
+
+**Theme**: Quoted triples, statement-level metadata, and LPG-ready storage — make statements about statements.
+
+> **In plain language:** Standard RDF can say "Alice knows Bob". But it can't directly say *"Alice said that she knows Bob"* or *"The fact that Alice knows Bob was recorded on January 5th"*. RDF-star (now part of the RDF 1.2 standard) solves this by allowing triples to be embedded inside other triples — called *quoted triples*. This is essential for provenance ("where did this fact come from?"), temporal annotations ("when was this true?"), and trust ("who asserted this?"). By delivering this immediately after basic SPARQL, pg_triple becomes **LPG-ready from the start**: Labeled Property Graph edges with properties (e.g. `[:KNOWS {since: 2020}]`) map directly to RDF-star annotations over statement identifiers already present in the VP tables since v0.2.0. This is a cross-cutting change that touches parsing, storage, dictionary encoding, and the SPARQL engine.
+>
+> **Effort estimate: 8–10 person-weeks**
+
+### Design rationale — why so early?
+
+The OneGraph (1G) research initiative (Lassila et al., 2023; Poseidon engine, AWS Neptune Analytics) demonstrates that a unified SPOI (Subject, Predicate, Object, statement-Identifier) storage model is the foundation for breaking the "graph model lock-in" between RDF and LPG. By introducing statement identifiers in v0.2.0 (storage) and RDF-star in v0.4.0 (query), pg_triple achieves 1G-compatible storage before any advanced features are built on top. Every subsequent milestone (SHACL, Datalog, SPARQL Update, Cypher/GQL) benefits from statement IDs being available from the start.
+
+**Patent clearance**: RDF-star is a W3C standard developed under the [W3C Patent Policy](https://www.w3.org/Consortium/Patent-Policy/) (Royalty-Free). Statement identifiers are well-established prior art (RDF reification, 2004; Named Graphs, 2005; RDF-star Community Group, 2014). The 1G abstract data model is published academic research (Semantic Web Journal, doi:10.3233/SW-223273), not patented technology. Poseidon's proprietary implementation details (P8APL, PAX pages, lock-free adjacency lists) are specific to Amazon's in-memory engine and are not replicated here — pg_triple uses PostgreSQL's native heap/WAL/MVCC storage.
+
+### Deliverables
+
+- [ ] **Quoted triple syntax in parsers**
+  - Turtle-star: `<< :Alice :knows :Bob >> :assertedBy :Carol .`
+  - N-Triples-star: `<< <http://...Alice> <http://...knows> <http://...Bob> >> <http://...assertedBy> <http://...Carol> .`
+  - Use `oxttl` / `oxrdf` crates for RDF-star support (complement existing `rio_turtle` / `rio_xml`)
+- [ ] **Dictionary encoding for quoted triples**
+  - New term type in dictionary: `QUOTED_TRIPLE` — stores the triple `(s, p, o)` as a composite key
+  - XXH3-128 hash of the triple tuple for dedup
+  - `pg_triple.encode_triple(s TEXT, p TEXT, o TEXT) RETURNS BIGINT` — returns the dictionary ID of the quoted triple
+  - `pg_triple.decode_triple(id BIGINT) RETURNS JSONB` — returns `{"s": ..., "p": ..., "o": ...}`
+- [ ] **Statement identifier activation**
+  - The `i` column (introduced in v0.2.0 VP tables) is now actively used: `insert_triple()` returns the SID
+  - `pg_triple.insert_triple(s TEXT, p TEXT, o TEXT, g TEXT DEFAULT NULL) RETURNS BIGINT` — returns the statement identifier
+  - `pg_triple.get_statement(i BIGINT) RETURNS JSONB` — look up a statement by its SID
+  - SIDs can appear in `s` or `o` positions of VP tables (the ID references a statement, enabling edge properties and meta-statements)
+- [ ] **Storage for edge properties via SIDs**
+  - Annotation triples use the SID of the annotated statement as their subject: `vp_since(s=SID_of(alice,knows,bob), o=2020_id)`
+  - No structural change to VP tables — SIDs and quoted triple IDs are regular `BIGINT` values
+  - Nested quoted triples supported (a quoted triple whose subject or object is itself a quoted triple)
+- [ ] **SPARQL-star query support**
+  - Parse `<< ?s ?p ?o >>` triple term patterns in SPARQL queries
+  - `BIND(<< :Alice :knows :Bob >> AS ?t)` — inline quoted triple construction
+  - Triple term patterns in WHERE clauses: `<< ?s :knows ?o >> :assertedBy ?who .`
+  - Compile to dictionary joins: look up the quoted triple ID, then join against VP tables
+  - **Batch recursive decode for nested quoted triples**: collect all quoted-triple IDs from the result set, recursively resolve inner components in bulk via `WITH RECURSIVE` dictionary lookup, build decode map before emitting rows — avoids per-row recursive dictionary round-trips
+- [ ] **Bulk load support for RDF-star data**
+  - `pg_triple.load_turtle()` and `pg_triple.load_ntriples()` now accept Turtle-star / N-Triples-star input
+  - Quoted triples in bulk load data are dictionary-encoded and stored with stable SIDs
+- [ ] **W3C SPARQL-star conformance gate**: run the applicable subset of SPARQL-star tests; extend in subsequent milestones
+- [ ] pg_regress: `rdf_star_load.sql`, `sparql_star_query.sql`, `statement_identifiers.sql` (SID lifecycle, edge property patterns, nested quoted triples)
+
+### Exit Criteria
+
+Users can load RDF-star data (Turtle-star, N-Triples-star), query it with SPARQL-star triple term patterns, and use statement identifiers to model edge properties. SIDs are returned from insert operations and can be used as subjects/objects in subsequent triples. The storage layer is LPG-ready.
+
+---
+
+## v0.5.0 — SPARQL Query Engine (Advanced)
 
 **Theme**: Property paths, UNION, aggregates, subqueries.
 
@@ -243,7 +301,7 @@ SPARQL 1.1 Query coverage for all major features except federated queries. Prope
 
 ---
 
-## v0.5.0 — HTAP Architecture
+## v0.6.0 — HTAP Architecture
 
 **Theme**: Separate read and write paths for concurrent OLTP/OLAP.
 
@@ -307,7 +365,7 @@ Writes do not block reads. Merge worker operates correctly under concurrent writ
 
 ---
 
-## v0.6.0 — SHACL Validation (Core)
+## v0.7.0 — SHACL Validation (Core)
 
 **Theme**: Data integrity enforcement via W3C SHACL shapes.
 
@@ -346,11 +404,11 @@ Core SHACL constraints are enforced at insert time. Validation reports conform t
 
 ---
 
-## v0.7.0 — SHACL Advanced
+## v0.8.0 — SHACL Advanced
 
 **Theme**: Async validation pipeline and complex shapes.
 
-> **In plain language:** Builds on v0.6.0 by supporting more sophisticated data quality rules — for instance, "a person's address must be either a US address or a EU address (but not both)", or "if a company has more than 50 employees, it must have a compliance officer". It also adds a *background validation mode* so that checking complex rules doesn't slow down data loading — violations are flagged asynchronously and collected in a report queue.
+> **In plain language:** Builds on v0.7.0 by supporting more sophisticated data quality rules — for instance, "a person's address must be either a US address or a EU address (but not both)", or "if a company has more than 50 employees, it must have a compliance officer". It also adds a *background validation mode* so that checking complex rules doesn't slow down data loading — violations are flagged asynchronously and collected in a report queue.
 >
 > **Effort estimate: 4–6 person-weeks**
 
@@ -376,7 +434,7 @@ Async validation pipeline operational. Complex SHACL shapes validated correctly.
 
 ---
 
-## v0.8.0 — Serialization, Export & Interop
+## v0.9.0 — Serialization, Export & Interop
 
 **Theme**: Full RDF I/O, remaining serialization formats, and SPARQL CONSTRUCT/DESCRIBE.
 
@@ -397,7 +455,10 @@ Async validation pipeline operational. Complex SHACL shapes validated correctly.
 - [ ] **SPARQL CONSTRUCT / DESCRIBE**
   - CONSTRUCT → returns triples as Turtle or JSONB
   - DESCRIBE → concentric bounded description
-- [ ] pg_regress: `serialization.sql`, `sparql_construct.sql`
+- [ ] **SPARQL-star in CONSTRUCT / DESCRIBE** *(builds on v0.4.0 RDF-star)*
+  - CONSTRUCT can produce quoted triples in output
+  - Turtle-star and N-Triples-star serialization in export functions
+- [ ] pg_regress: `serialization.sql`, `sparql_construct.sql`, `rdf_star_construct.sql`
 
 ### Exit Criteria
 
@@ -405,7 +466,7 @@ Round-trip: load Turtle → query → export Turtle. All major RDF serialization
 
 ---
 
-## v0.9.0 — Datalog Reasoning Engine
+## v0.10.0 — Datalog Reasoning Engine
 
 **Theme**: General-purpose rule-based inference over the triple store.
 
@@ -423,7 +484,7 @@ See [plans/ecosystem/datalog.md](plans/ecosystem/datalog.md) for the full design
   - Stratified negation via `NOT` keyword
   - Multi-head rules (`h₁, h₂ :- body .`) compiled to separate `INSERT … SELECT` statements within the same stratum
 - [ ] **`source` column in VP tables**
-  - `source SMALLINT DEFAULT 0` added to every VP table in the v0.9.0 migration
+  - `source SMALLINT DEFAULT 0` added to every VP table in the v0.10.0 migration
   - `0` = explicitly asserted; `1` = derived (inferred by Datalog rules)
   - Enables filtering out inferred triples at scan time without a join
 - [ ] **Tiered hot/cold dictionary** (`src/dictionary/hot.rs`)
@@ -473,7 +534,11 @@ See [plans/ecosystem/datalog.md](plans/ecosystem/datalog.md) for the full design
   - Compile `sh:rule` bodies to Datalog IR and register in `_pg_triple.rules`
   - Bidirectional: SHACL shapes inform Datalog constraints; Datalog-derived triples are visible to SHACL validation
   - `pg_triple.load_shacl()` auto-registers any `sh:rule` triples as Datalog rules when `pg_triple.inference_mode != 'off'`
-- [ ] pg_regress: `datalog_rdfs.sql`, `datalog_owl_rl.sql`, `datalog_custom.sql`, `datalog_negation.sql`, `datalog_arithmetic.sql`, `datalog_constraints.sql`, `shacl_af_rule.sql`, `datalog_malformed.sql` (syntax errors, unstratifiable programs, unbound variables, cyclic rule dependencies — verify clear error messages)
+- [ ] **RDF-star integration in Datalog** *(builds on v0.4.0 RDF-star)*
+  - Quoted triples can appear in Datalog rule heads and bodies
+  - Enables provenance rules: `<< ?s ?p ?o >> ex:derivedBy ex:rule1 :- ?s ?p ?o, RULE(ex:rule1) .`
+  - Statement identifiers (SIDs) can be used in rule bodies to annotate derived triples
+- [ ] pg_regress: `datalog_rdfs.sql`, `datalog_owl_rl.sql`, `datalog_custom.sql`, `datalog_negation.sql`, `datalog_arithmetic.sql`, `datalog_constraints.sql`, `shacl_af_rule.sql`, `datalog_malformed.sql` (syntax errors, unstratifiable programs, unbound variables, cyclic rule dependencies — verify clear error messages), `rdf_star_datalog.sql`
 
 ### Exit Criteria
 
@@ -481,7 +546,7 @@ Users can load RDFS or OWL RL rule sets (or custom rules), and SPARQL queries re
 
 ---
 
-## v0.10.0 — Incremental SPARQL Views & ExtVP
+## v0.11.0 — Incremental SPARQL Views & ExtVP
 
 **Theme**: Always-fresh materialized SPARQL queries and extended vertical partitioning via pg_trickle stream tables.
 
@@ -512,7 +577,7 @@ Users can create SPARQL views that stay incrementally up-to-date. SPARQL view qu
 
 ---
 
-## v0.11.0 — SPARQL Update
+## v0.12.0 — SPARQL Update
 
 **Theme**: W3C SPARQL 1.1 Update support for standard-compliant write operations.
 
@@ -550,11 +615,11 @@ Standard SPARQL 1.1 Update operations work correctly. RDF tools that use SPARQL 
 
 ---
 
-## v0.12.0 — Performance Hardening
+## v0.13.0 — Performance Hardening
 
 **Theme**: Optimize for production-scale workloads. Benchmark-driven improvements.
 
-> **In plain language:** This release is about *speed*. Using the Berlin SPARQL Benchmark (a standard test suite used by the RDF industry), we measure pg_triple's performance against known baselines and then tune it. Improvements include caching query plans so repeated queries skip redundant work, loading data in parallel, and teaching the system to use data quality rules (from v0.6.0/v0.7.0) as hints to avoid unnecessary work during queries. The target is simple queries answering in under 10 milliseconds on a dataset of 10 million facts, and bulk loading sustained at over 100,000 facts per second.
+> **In plain language:** This release is about *speed*. Using the Berlin SPARQL Benchmark (a standard test suite used by the RDF industry), we measure pg_triple's performance against known baselines and then tune it. Improvements include caching query plans so repeated queries skip redundant work, loading data in parallel, and teaching the system to use data quality rules (from v0.7.0/v0.8.0) as hints to avoid unnecessary work during queries. The target is simple queries answering in under 10 milliseconds on a dataset of 10 million facts, and bulk loading sustained at over 100,000 facts per second.
 >
 > **Effort estimate: 6–8 person-weeks**
 
@@ -609,7 +674,7 @@ BSBM results documented. >100K triples/sec sustained bulk load. <10ms for simple
 
 ---
 
-## v0.13.0 — Administrative & Operational Readiness
+## v0.14.0 — Administrative & Operational Readiness
 
 **Theme**: Production operations tooling, upgrade paths, documentation.
 
@@ -658,7 +723,7 @@ Extension is installable, upgradable, and documented. Operational tooling suffic
 
 ---
 
-## v0.14.0 — SPARQL Protocol (HTTP Endpoint)
+## v0.15.0 — SPARQL Protocol (HTTP Endpoint)
 
 **Theme**: Standard HTTP API for SPARQL queries and updates.
 
@@ -683,6 +748,7 @@ Extension is installable, upgradable, and documented. Operational tooling suffic
   - `text/csv` / `text/tab-separated-values`
   - `text/turtle` / `application/n-triples` (for CONSTRUCT/DESCRIBE)
   - `application/ld+json` (JSON-LD, for CONSTRUCT/DESCRIBE)
+  - **RDF-star content types** *(builds on v0.4.0 RDF-star)*: Turtle-star and JSON-LD-star for CONSTRUCT/DESCRIBE results containing quoted triples
 - [ ] **Connection pooling**
   - Built-in connection pool (e.g. `deadpool-postgres`) to handle concurrent HTTP requests
   - `PG_TRIPLE_HTTP_POOL_SIZE` configuration
@@ -704,7 +770,7 @@ Standard SPARQL clients (YASGUI, Postman, RDF4J workbench, `curl`) can query and
 
 ---
 
-## v0.15.0 — SPARQL Federation
+## v0.16.0 — SPARQL Federation
 
 **Theme**: Query remote SPARQL endpoints from within pg_triple queries.
 
@@ -747,51 +813,6 @@ SPARQL queries with `SERVICE` clauses correctly fetch and join data from registe
 
 ---
 
-## v0.16.0 — RDF-star / RDF 1.2
-
-**Theme**: Quoted triples — make statements about statements.
-
-> **In plain language:** Standard RDF can say "Alice knows Bob". But it can't directly say *"Alice said that she knows Bob"* or *"The fact that Alice knows Bob was recorded on January 5th"*. RDF-star (now part of the RDF 1.2 standard, finalised by W3C in 2024) solves this by allowing triples to be embedded inside other triples — called *quoted triples*. This is essential for provenance ("where did this fact come from?"), temporal annotations ("when was this true?"), and trust ("who asserted this?"). This is a cross-cutting change that touches parsing, storage, dictionary encoding, and the SPARQL engine, making it the largest single feature addition in the roadmap.
->
-> **Effort estimate: 8–10 person-weeks**
-
-### Deliverables
-
-- [ ] **Quoted triple syntax in parsers**
-  - Turtle-star: `<< :Alice :knows :Bob >> :assertedBy :Carol .`
-  - N-Triples-star: `<< <http://...Alice> <http://...knows> <http://...Bob> >> <http://...assertedBy> <http://...Carol> .`
-  - Extend `rio_turtle` / `rio_xml` parsing (or use `oxrdf` crate for RDF-star support)
-- [ ] **Dictionary encoding for quoted triples**
-  - New term type in dictionary: `QUOTED_TRIPLE` — stores the triple `(s, p, o)` as a composite key
-  - XXH3-128 hash of the triple tuple for dedup
-  - `pg_triple.encode_triple(s TEXT, p TEXT, o TEXT) RETURNS BIGINT` — returns the dictionary ID of the quoted triple
-  - `pg_triple.decode_triple(id BIGINT) RETURNS JSONB` — returns `{"s": ..., "p": ..., "o": ...}`
-- [ ] **Storage**
-  - Quoted triples can appear in `s` or `o` positions of VP tables (the ID references a quoted triple in the dictionary)
-  - No structural change to VP tables — quoted triple IDs are regular `BIGINT` values
-  - Nested quoted triples supported (a quoted triple whose subject or object is itself a quoted triple)
-- [ ] **SPARQL-star query support**
-  - Parse `<< ?s ?p ?o >>` triple term patterns in SPARQL queries
-  - `BIND(<< :Alice :knows :Bob >> AS ?t)` — inline quoted triple construction
-  - Triple term patterns in WHERE clauses: `<< ?s :knows ?o >> :assertedBy ?who .`
-  - Compile to dictionary joins: look up the quoted triple ID, then join against VP tables
-  - **Batch recursive decode for nested quoted triples**: collect all quoted-triple IDs from the result set, recursively resolve inner components in bulk via `WITH RECURSIVE` dictionary lookup, build decode map before emitting rows — avoids per-row recursive dictionary round-trips
-- [ ] **SPARQL-star in CONSTRUCT / DESCRIBE**
-  - CONSTRUCT can produce quoted triples in output
-  - Turtle-star and N-Triples-star serialization in export functions
-- [ ] **Datalog integration**
-  - Quoted triples can appear in Datalog rule heads and bodies
-  - Enables provenance rules: `<< ?s ?p ?o >> ex:derivedBy ex:rule1 :- ?s ?p ?o, RULE(ex:rule1) .`
-- [ ] **Content negotiation updates**
-  - HTTP endpoint serves Turtle-star and JSON-LD-star for CONSTRUCT/DESCRIBE results containing quoted triples
-- [ ] pg_regress: `rdf_star_load.sql`, `sparql_star_query.sql`, `rdf_star_construct.sql`, `rdf_star_datalog.sql`
-
-### Exit Criteria
-
-Users can load RDF-star data (Turtle-star, N-Triples-star), query it with SPARQL-star triple term patterns, and export results in RDF-star formats. Quoted triples work as subjects and objects in VP tables. Datalog rules can reason over and produce quoted triples.
-
----
-
 ## v1.0.0 — Production Release
 
 **Theme**: Stability, conformance, and production certification.
@@ -806,7 +827,7 @@ Users can load RDF-star data (Turtle-star, N-Triples-star), query it with SPARQL
   - Pass W3C SPARQL 1.1 Query test suite (supported subset)
   - Document unsupported features (property functions)
   - Verify conformance via both SQL and HTTP interfaces
-  - Federation (`SERVICE`) covered by v0.15.0
+  - Federation (`SERVICE`) covered by v0.16.0
 - [ ] **SPARQL 1.1 Update conformance**
   - Pass W3C SPARQL 1.1 Update test suite (supported subset)
   - Document unsupported features
@@ -843,7 +864,7 @@ Stable, tested, documented, and published. Ready for production workloads up to 
 
 > **In plain language:** These are future directions that extend pg_triple beyond its initial scope. Each addresses a specific real-world need — from distributing data across multiple servers, to geographic queries, to bridging with existing relational databases. They are listed roughly in order of anticipated demand; some may be reordered or combined based on community feedback after 1.0.
 >
-> **v1.6 Cypher/GQL** has a dedicated exploratory analysis in [plans/cypher/](plans/cypher/). The core finding: VP tables already encode all LPG structural elements; a standalone `cypher-algebra` crate (openCypher + GQL grammar, unified SQL-emitting algebra IR) is the correct architecture. Full write support requires v0.16.0 (RDF-star) for edge properties. Gremlin is explicitly out of scope.
+> **v1.6 Cypher/GQL** has a dedicated exploratory analysis in [plans/cypher/](plans/cypher/). The core finding: VP tables already encode all LPG structural elements; a standalone `cypher-algebra` crate (openCypher + GQL grammar, unified SQL-emitting algebra IR) is the correct architecture. Full write support requires v0.4.0 (RDF-star) for edge properties — already available. Gremlin is explicitly out of scope.
 
 | Version | Theme | What it delivers | Key Technical Features |
 |---|---|---|---|
@@ -852,7 +873,7 @@ Stable, tested, documented, and published. Ready for production workloads up to 
 | 1.3 | Temporal | Track how data changes over time; query historical states | Bitstring versioning, TimescaleDB integration |
 | 1.4 | Extended VP | Automatically pre-compute shortcuts for frequent query patterns | Automated workload-driven ExtVP stream tables (pg_trickle), ontology change propagation DAG |
 | 1.5 | Interop | Bridge to GraphQL APIs and expose LPG views for visualization tools | GraphQL-to-SPARQL auto-generation from SHACL shapes, stable LPG view layer for visualization tooling |
-| 1.6 | Cypher / GQL | Query and write data using the industry-standard graph query languages | `cypher-algebra` standalone crate (openCypher + GQL grammar, same IR); `pg_triple.cypher()` SQL function; `CREATE`, `MERGE`, `SET`, `DELETE` via VP write path; openCypher TCK ≥80%; requires v0.16.0 RDF-star for edge properties |
+| 1.6 | Cypher / GQL | Query and write data using the industry-standard graph query languages | `cypher-algebra` standalone crate (openCypher + GQL grammar, same IR); `pg_triple.cypher()` SQL function; `CREATE`, `MERGE`, `SET`, `DELETE` via VP write path; openCypher TCK ≥80%; edge properties available since v0.4.0 (RDF-star) |
 | 1.7 | GeoSPARQL + PostGIS | Answer geographic questions ("find all hospitals within 5 km of this point") | `geo:asWKT` literal type backed by PostGIS `geometry`, spatial FILTER functions, R-tree index on spatial VP tables |
 | 1.8 | R2RML Virtual Graphs | Expose existing database tables as if they were RDF data — no migration needed | W3C R2RML mappings, SPARQL queries transparently join VP tables with mapped SQL tables |
 | 1.9 | Quad-Level Provenance | Track where each fact came from and when it was added | Per-quad metadata table with source, timestamp, and transaction ID; integration with Datalog rule provenance (why-provenance) |
@@ -868,19 +889,19 @@ Stable, tested, documented, and published. Ready for production workloads up to 
 | 0.1.0 | Week 0 (start) | 6–8 pw | 6–8 pw |
 | 0.2.0 | +4 weeks | 6–8 pw | 12–16 pw |
 | 0.3.0 | +4 weeks | 6–8 pw | 18–24 pw |
-| 0.4.0 | +4 weeks | 8–10 pw | 26–34 pw |
+| 0.4.0 | +5 weeks | 8–10 pw | 26–34 pw |
 | 0.5.0 | +4 weeks | 8–10 pw | 34–44 pw |
-| 0.6.0 | +3 weeks | 4–6 pw | 38–50 pw |
-| 0.7.0 | +3 weeks | 4–6 pw | 42–56 pw |
-| 0.8.0 | +2 weeks | 3–4 pw | 45–60 pw |
-| 0.9.0 | +5 weeks | 10–12 pw | 55–72 pw |
-| 0.10.0 | +3 weeks | 4–6 pw | 59–78 pw |
-| 0.11.0 | +3 weeks | 4–6 pw | 63–84 pw |
-| 0.12.0 | +4 weeks | 6–8 pw | 69–92 pw |
-| 0.13.0 | +3 weeks | 4–6 pw | 73–98 pw |
-| 0.14.0 | +2 weeks | 3–4 pw | 76–102 pw |
-| 0.15.0 | +3 weeks | 4–6 pw | 80–108 pw |
-| 0.16.0 | +5 weeks | 8–10 pw | 88–118 pw |
+| 0.6.0 | +4 weeks | 8–10 pw | 42–54 pw |
+| 0.7.0 | +3 weeks | 4–6 pw | 46–60 pw |
+| 0.8.0 | +3 weeks | 4–6 pw | 50–66 pw |
+| 0.9.0 | +2 weeks | 3–4 pw | 53–70 pw |
+| 0.10.0 | +5 weeks | 10–12 pw | 63–82 pw |
+| 0.11.0 | +3 weeks | 4–6 pw | 67–88 pw |
+| 0.12.0 | +3 weeks | 4–6 pw | 71–94 pw |
+| 0.13.0 | +4 weeks | 6–8 pw | 77–102 pw |
+| 0.14.0 | +3 weeks | 4–6 pw | 81–108 pw |
+| 0.15.0 | +2 weeks | 3–4 pw | 84–112 pw |
+| 0.16.0 | +3 weeks | 4–6 pw | 88–118 pw |
 | 1.0.0 | +4 weeks | 6–8 pw | **95–122 pw** |
 | 1.1–1.9 | Post-1.0 | Community-driven | — |
 
