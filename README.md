@@ -21,6 +21,8 @@ SELECT pg_triple.load_turtle('
 
 -- Query with SPARQL
 SELECT * FROM pg_triple.sparql('
+  PREFIX ex:   <http://example.org/>
+  PREFIX foaf: <http://xmlns.com/foaf/0.1/>
   SELECT ?name WHERE {
     ex:Alice foaf:knows+ ?person .
     ?person foaf:name ?name .
@@ -44,6 +46,8 @@ This means you get:
 - **Familiar operations** — any DBA who knows PostgreSQL can operate pg_triple
 
 ### How it compares
+
+> **Note**: pg_triple features marked "Yes" are *planned* across v0.1.0–v1.0.0; see the [Roadmap](ROADMAP.md) for delivery versions. Competitor capabilities reflect publicly documented feature sets.
 
 | Capability | pg_triple | Blazegraph | Virtuoso | Apache Fuseki |
 |---|---|---|---|---|
@@ -83,6 +87,8 @@ Full SPARQL 1.1 support — SELECT, ASK, CONSTRUCT, DESCRIBE, property paths, ag
 ```sql
 -- Find everyone Alice can reach through "knows" links (any depth)
 SELECT * FROM pg_triple.sparql('
+  PREFIX ex:   <http://example.org/>
+  PREFIX foaf: <http://xmlns.com/foaf/0.1/>
   SELECT ?person ?name WHERE {
     ex:Alice foaf:knows+ ?person .
     ?person foaf:name ?name .
@@ -138,6 +144,8 @@ Query remote SPARQL endpoints from within pg_triple queries using the standard `
 
 ```sql
 SELECT * FROM pg_triple.sparql('
+  PREFIX ex:  <http://example.org/>
+  PREFIX dbo: <http://dbpedia.org/ontology/>
   SELECT ?person ?abstract WHERE {
     ?person ex:worksAt ex:AcmeCorp .
     SERVICE <https://dbpedia.org/sparql> {
@@ -154,6 +162,9 @@ Make statements about statements — essential for provenance, temporal annotati
 
 ```sql
 SELECT pg_triple.load_turtle('
+  @prefix ex:  <http://example.org/> .
+  @prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+
   << ex:Alice ex:knows ex:Bob >> ex:assertedBy ex:Carol ;
                                   ex:assertedOn "2024-01-15"^^xsd:date .
 ');
@@ -175,7 +186,10 @@ Pin a SPARQL query as a live view that updates incrementally when the underlying
 ```sql
 SELECT pg_triple.create_sparql_view(
   'active_employees',
-  'SELECT ?name ?dept WHERE {
+  'PREFIX rdf:  <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+   PREFIX ex:   <http://example.org/>
+   PREFIX foaf: <http://xmlns.com/foaf/0.1/>
+   SELECT ?name ?dept WHERE {
      ?p rdf:type ex:Employee .
      ?p foaf:name ?name .
      ?p ex:department ?dept .
@@ -269,6 +283,8 @@ pg_triple is built from the ground up for performance:
 | PG client (HTTP service) | [tokio-postgres](https://crates.io/crates/tokio-postgres) + [deadpool-postgres](https://crates.io/crates/deadpool-postgres) — async connection pool from HTTP service to PostgreSQL |
 | HTTP client (federation) | [reqwest](https://crates.io/crates/reqwest) — outbound calls to remote SPARQL endpoints (SERVICE keyword) |
 | IVM / stream tables | [pg_trickle](https://github.com/grove/pg-trickle) *(optional companion extension)* — incremental SPARQL views, ExtVP, live statistics |
+| Dictionary cache | [lru](https://crates.io/crates/lru) — backend-local LRU cache (v0.1.0–v0.5.1); replaced by sharded shared-memory map in v0.6.0 |
+| Error handling | [thiserror](https://crates.io/crates/thiserror) — typed error enums with PT error code constants (PT001–PT799) |
 | Testing | pgrx `#[pg_test]`, `cargo pgrx regress`, [proptest](https://crates.io/crates/proptest), [cargo-fuzz](https://crates.io/crates/cargo-fuzz) |
 
 ---

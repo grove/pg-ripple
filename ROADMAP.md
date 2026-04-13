@@ -78,7 +78,7 @@ Each release below has two layers:
   - `thiserror`-based error types with PT error code constants
   - Initial ranges: dictionary errors (PT001–PT099) and storage errors (PT100–PT199)
   - PostgreSQL-style formatting: lowercase first word, no trailing period
-  - Extended in subsequent milestones as new subsystems are added
+  - Extended in subsequent milestones as new subsystems are added (see §13.6 of the [Implementation Plan](plans/implementation_plan.md) for the complete PT001–PT799 range table)
 
 > **Shared memory note**: v0.1.0 through v0.5.1 use a **backend-local** `lru::LruCache` for the dictionary cache. This avoids requiring `shared_preload_libraries` for the "hello world" release and defers the pgrx shared-memory complexity to v0.6.0 when the HTAP architecture actually needs it. The shared-memory dictionary cache, bloom filters, slot versioning, and `pg_triple.shared_memory_size` startup GUC are all introduced in v0.6.0.
 
@@ -104,9 +104,10 @@ A user can install the extension, insert triples (routed to per-predicate VP tab
   - Promotion is **deferred to end-of-statement** (not mid-batch): during a bulk load, triples accumulate in `vp_rare`; after the load completes, predicates exceeding the threshold are promoted in a single `INSERT … SELECT` + `DELETE` transaction — avoids disrupting in-flight COPY streams
   - `pg_triple.promote_rare_predicates()` can also be called manually or by the background merge worker
   - Prevents catalog bloat for predicate-rich datasets (DBpedia ≈60K predicates, Wikidata ≈10K) — avoids hundreds of thousands of PG objects, reduces planner overhead, and cuts VACUUM cost
-- [ ] **`_pg_triple.statements` catalog view**
-  - Maps SID → (predicate_id, VP table OID) for SID-based cross-table lookups
-  - Required for v0.4.0 RDF-star where SIDs appear as subjects/objects in other VP tables
+- [ ] **`_pg_triple.statements` range-mapping catalog**
+  - Maintained by the merge worker; stores `(sid_min, sid_max, predicate_id, table_oid)` range rows rather than one row per statement — resolved via binary search in *O(log n)* with no full-table scans
+  - After each merge cycle the worker inserts one range row per VP table covering the SIDs allocated since the last merge; because SIDs are drawn from a monotonically-increasing sequence, ranges are non-overlapping
+  - Required for v0.4.0 RDF-star where SIDs appear as subjects/objects in other VP tables and must be unambiguously resolved to their owning VP table
 - [ ] **Named graph support** (basic)
   - `g` column in VP tables
   - `pg_triple.create_graph()`, `pg_triple.drop_graph()`, `pg_triple.list_graphs()`
@@ -117,7 +118,7 @@ A user can install the extension, insert triples (routed to per-predicate VP tab
   - Each bulk load operation is assigned a monotonically-increasing `load_generation` counter from a shared sequence
   - Blank nodes are hashed as `"{generation}:{label}"` — so `_:b0` from two different load calls yields two distinct dictionary IDs
   - Prevents incorrect merging of blank nodes across document boundaries, which would corrupt data in multi-file loads
-  - Also applies to `INSERT DATA` (SPARQL Update, v0.5.0+) which always gets its own generation
+  - Also applies to `INSERT DATA` (SPARQL Update, v0.5.1+) which always gets its own generation
 - [ ] **Bulk loader** (N-Triples)
   - `pg_triple.load_ntriples(data TEXT) RETURNS BIGINT`
   - Streaming parser via `rio_turtle` crate
@@ -173,12 +174,15 @@ Rare-predicate consolidation table absorbs low-frequency predicates. Bulk loadin
 >
 > **Effort estimate: 6–8 person-weeks**
 
+### Prerequisites
+
+- **`sparopt` availability check** *(must be resolved before beginning v0.3.0)*: verify that `sparopt` is published to crates.io with a stable, usable API and pin the version. If unavailable or API-unstable, absorb its filter-pushdown and constant-folding work directly into pg_triple's own algebra optimizer pass (`src/sparql/algebra.rs`) before starting v0.3.0 — do not begin v0.3.0 development without resolving this gate.
+
 ### Deliverables
 
 - [ ] **`sparopt` first-pass algebra optimizer** (`sparopt` crate)
   - Sits between the `spargebra` parse tree and pg_triple's own algebra pass
   - Performs filter pushdown, constant folding, and empty-pattern elimination before SQL generation — reduces the surface area that pg_triple's pass needs to handle
-  - **Pre-v0.3.0 task**: verify that `sparopt` is published to crates.io with a stable, usable API and pin the version. If unavailable or API-unstable, absorb its filter-pushdown and constant-folding work into pg_triple's own algebra optimizer pass (`src/sparql/algebra.rs`) before beginning v0.3.0 — do not block the release on an upstream crate.
 - [ ] **SPARQL parser integration** (`spargebra` crate)
   - Parse SPARQL SELECT and ASK queries into algebra tree
   - Support: Basic Graph Patterns (BGP), FILTER, OPTIONAL, LIMIT, OFFSET, ORDER BY, DISTINCT
@@ -396,6 +400,7 @@ Inline value encoding eliminates dictionary lookups for numeric and date FILTER 
   - Shared-memory latch signaling
   - Also triggers `pg_triple.promote_rare_predicates()` for any rare predicates that crossed the promotion threshold since the last merge
   - Runs `ANALYZE` on merged VP tables so the PostgreSQL planner has fresh selectivity estimates
+  - **Watchdog**: if the merge worker heartbeat stalls for longer than `pg_triple.merge_watchdog_timeout` (default: 300 s), `_PG_init` on the next backend connection logs a WARNING and attempts a restart
 - [ ] **`ExecutorEnd_hook` latch-poke**
   - When a write transaction commits more than `pg_triple.latch_trigger_threshold` rows (default: 10,000), the hook immediately pokes the merge worker's latch to trigger an early merge
   - Prevents unbounded delta growth during bursty write workloads without requiring a polling loop
