@@ -76,9 +76,9 @@ SELECT pg_triple.insert_triple(
 );
 ```
 
-### SPARQL query engine *(planned — v0.3.0 basic, v0.5.0 advanced)*
+### SPARQL query engine *(planned — v0.3.0 basic, v0.5.0–v0.5.1 advanced)*
 
-Full SPARQL 1.1 support — SELECT, ASK, CONSTRUCT, DESCRIBE, property paths, aggregates, subqueries, UNION, OPTIONAL, FILTER, BIND, VALUES, and full-text search.
+Full SPARQL 1.1 support — SELECT, ASK, CONSTRUCT, DESCRIBE, property paths, aggregates, subqueries, UNION, OPTIONAL, FILTER, BIND, VALUES, and full-text search. Basic graph patterns, FILTER, and OPTIONAL land in v0.3.0; property paths, aggregates, and subqueries in v0.5.0; inline value encoding, CONSTRUCT/DESCRIBE, full-text search, and basic write support in v0.5.1.
 
 ```sql
 -- Find everyone Alice can reach through "knows" links (any depth)
@@ -91,9 +91,9 @@ SELECT * FROM pg_triple.sparql('
 ');
 ```
 
-### SPARQL Update *(planned — v0.12.0)*
+### SPARQL Update *(planned — v0.5.1 basic, v0.12.0 advanced)*
 
-Standard write operations — INSERT DATA, DELETE DATA, DELETE/INSERT WHERE, LOAD, CLEAR, DROP, CREATE — so existing RDF tools (Protégé, TopBraid, SPARQL workbenches) work without adapters.
+Basic write operations (INSERT DATA, DELETE DATA) land in v0.5.1, enabling standard RDF tools to write to pg_triple. Pattern-based updates (DELETE/INSERT WHERE), LOAD, CLEAR, DROP, and CREATE complete the full SPARQL 1.1 Update specification in v0.12.0.
 
 ### SHACL data quality *(planned — v0.7.0 core, v0.8.0 advanced)*
 
@@ -261,6 +261,7 @@ pg_triple is built from the ground up for performance:
 | PostgreSQL binding | [pgrx](https://github.com/pgcentralfoundation/pgrx) 0.17 |
 | PostgreSQL version | 18.x |
 | SPARQL parser | [spargebra](https://crates.io/crates/spargebra) — W3C-compliant SPARQL 1.1 algebra |
+| SPARQL optimizer | [sparopt](https://crates.io/crates/sparopt) — first-pass algebra optimizer (filter pushdown, constant folding) |
 | RDF parsers | [rio_turtle](https://crates.io/crates/rio_turtle), [rio_xml](https://crates.io/crates/rio_xml) — Turtle, N-Triples, RDF/XML; [oxttl](https://crates.io/crates/oxttl) / [oxrdf](https://crates.io/crates/oxrdf) added at v0.4.0 for RDF-star (Turtle-star, N-Triples-star) |
 | Hashing | [xxhash-rust](https://crates.io/crates/xxhash-rust) (XXH3-128) — fast non-cryptographic hash for dictionary dedup |
 | Serialization | [serde](https://crates.io/crates/serde) + [serde_json](https://crates.io/crates/serde_json) — SHACL reports, SPARQL results, config |
@@ -345,29 +346,29 @@ SELECT * FROM pg_triple.sparql('
 
 ## Roadmap
 
-pg_triple is planned as 17 incremental releases from v0.1.0 to v1.0.0:
+pg_triple is planned as 18 incremental releases from v0.1.0 to v1.0.0 (~98–131 person-weeks):
 
 | Phase | Versions | What you get |
 |---|---|---|
-| **Foundation** | 0.1.0 – 0.2.0 | Store triples, bulk import, vertical partitioning, statement identifiers |
-| **Query (Basic)** | 0.3.0 | SPARQL SELECT and ASK with BGPs, FILTER, OPTIONAL |
+| **Foundation** | 0.1.0 – 0.2.0 | Store triples, bulk import, VP storage, named graphs, statement identifiers |
+| **Query (Basic)** | 0.3.0 | SPARQL SELECT and ASK with BGPs, FILTER, OPTIONAL, GRAPH patterns |
 | **RDF-star** | 0.4.0 | Quoted triples, statement-level metadata, LPG-ready storage |
-| **Query (Advanced)** | 0.5.0 | Property paths, aggregates, subqueries, full-text search |
-| **Concurrency** | 0.6.0 | HTAP architecture — reads and writes at full speed |
-| **Data quality** | 0.7.0 – 0.8.0 | SHACL validation (sync + async) |
-| **Interop** | 0.9.0 | All standard RDF file formats, CONSTRUCT, DESCRIBE |
-| **Intelligence** | 0.10.0 | Datalog reasoning (RDFS, OWL RL, custom rules) |
-| **Reactivity** | 0.11.0 | Incremental SPARQL & Datalog views, ExtVP |
-| **Writes** | 0.12.0 | Standard SPARQL Update operations |
-| **Production** | 0.13.0 – 0.14.0 | Performance tuning, admin tools, security, docs |
-| **Ecosystem** | 0.15.0 – 0.16.0 | HTTP SPARQL protocol, federation |
+| **Query (Advanced)** | 0.5.0 – 0.5.1 | Property paths, aggregates, subqueries, inline encoding, CONSTRUCT/DESCRIBE, INSERT DATA/DELETE DATA, full-text search |
+| **Concurrency** | 0.6.0 | HTAP architecture — reads and writes at full speed, shared-memory cache |
+| **Data quality** | 0.7.0 – 0.8.0 | SHACL validation (sync + async), complex shapes |
+| **Interop** | 0.9.0 | RDF/XML import, Turtle/JSON-LD export, RDF-star serialization |
+| **Intelligence** | 0.10.0 | Datalog reasoning (RDFS, OWL RL, custom rules), constraint rules |
+| **Reactivity** | 0.11.0 | Incremental SPARQL & Datalog views, ExtVP (requires pg_trickle) |
+| **Writes (Advanced)** | 0.12.0 | Pattern-based SPARQL Update — DELETE/INSERT WHERE, LOAD, CLEAR, DROP |
+| **Production** | 0.13.0 – 0.14.0 | Performance tuning, BSBM benchmarks, admin tools, graph-level RLS, docs |
+| **Ecosystem** | 0.15.0 – 0.16.0 | HTTP SPARQL Protocol, SPARQL Federation |
 | **Release** | 1.0.0 | W3C conformance, stress testing, security audit |
 
 See the full [Roadmap](ROADMAP.md) for details on every release.
 
 ### Beyond 1.0
 
-Planned future directions include distributed storage (Citus), vector + graph hybrid search (pgvector), temporal queries (TimescaleDB), GeoSPARQL (PostGIS), and R2RML virtual graphs.
+Planned future directions include distributed storage (Citus), vector + graph hybrid search (pgvector), temporal queries (TimescaleDB), GeoSPARQL (PostGIS), Cypher/GQL query language, and R2RML virtual graphs. See the [Roadmap](ROADMAP.md) for the full post-1.0 horizon.
 
 ---
 
@@ -394,6 +395,7 @@ pg_triple aims for production-grade quality:
 | [Implementation Plan](plans/implementation_plan.md) | Detailed technical architecture, module breakdown, and data flow |
 | [Datalog Design](plans/ecosystem/datalog.md) | Reasoning engine: syntax, stratification, SQL compilation, built-in rules |
 | [pg_trickle Integration](plans/ecosystem/pg_trickle.md) | IVM, SPARQL views, ExtVP, and live statistics via stream tables |
+| [Cypher/GQL Analysis](plans/cypher/) | Exploratory analysis for post-1.0 Cypher/GQL query language support |
 
 ---
 
