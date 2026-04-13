@@ -122,29 +122,46 @@ A user can install the extension, insert triples (routed to per-predicate VP tab
   - `pg_triple.load_ntriples(data TEXT) RETURNS BIGINT`
   - Streaming parser via `rio_turtle` crate
   - Batch encoding + COPY for throughput
+- [ ] **Bulk loader** (N-Quads)
+  - `pg_triple.load_nquads(data TEXT) RETURNS BIGINT`
+  - Standard format for named-graph quads (`<s> <p> <o> <g> .`); same `rio_turtle` parser path as N-Triples
+  - Route quads to the appropriate named graph (`g` column) automatically
 - [ ] **Bulk loader** (Turtle)
   - `pg_triple.load_turtle(data TEXT) RETURNS BIGINT`
   - Prefix declarations auto-registered
   - Blank node scoping per load operation
   - `rio_turtle` crate already handles both formats — incremental parser work
+- [ ] **Bulk loader** (TriG)
+  - `pg_triple.load_trig(data TEXT) RETURNS BIGINT`
+  - Turtle with named graph blocks (`GRAPH <g> { … }`) — the standard interchange format for named-graph Turtle data
+  - Uses the same `rio_turtle` streaming parser; named graph IRI is dictionary-encoded and stored in the `g` column
+- [ ] **File-path bulk load variants**
+  - `pg_triple.load_turtle_file(path TEXT) RETURNS BIGINT`
+  - `pg_triple.load_ntriples_file(path TEXT) RETURNS BIGINT`
+  - `pg_triple.load_nquads_file(path TEXT) RETURNS BIGINT`
+  - `pg_triple.load_trig_file(path TEXT) RETURNS BIGINT`
+  - Reads via `pg_read_file()` with superuser privilege check — prevents unauthorized file access
+  - Essential for datasets larger than ~1 GB where passing data as a TEXT parameter exceeds PostgreSQL's TEXT size limit and imposes significant memory overhead
+  - Returns count of loaded triples; otherwise identical behaviour to the inline TEXT variants
 - [ ] **IRI prefix management**
   - `pg_triple.register_prefix(prefix TEXT, expansion TEXT)`
   - `pg_triple.prefixes() RETURNS TABLE`
   - Prefix expansion in encode/decode paths
 - [ ] **ANALYZE after bulk loads**
-  - `load_turtle()` and `load_ntriples()` run `ANALYZE` on affected VP tables after the load completes
+  - All inline and file-path load functions run `ANALYZE` on affected VP tables after load completes
   - Ensures the PostgreSQL planner has accurate selectivity estimates for generated SQL — critical for good join plans in v0.3.0+
 - [ ] Benchmarks: insert throughput (1M triples)
 - [ ] **Performance regression baseline**: record insert throughput and point-query latency as CI benchmark baselines; fail CI if a commit regresses throughput by >10% (maintained and extended in every subsequent milestone)
-- [ ] **N-Triples export** (basic)
+- [ ] **N-Triples / N-Quads export** (basic)
   - `pg_triple.export_ntriples(graph TEXT DEFAULT NULL) RETURNS TEXT`
-  - Streaming variant returning `SETOF TEXT` for large graphs
+  - `pg_triple.export_nquads(graph TEXT DEFAULT NULL) RETURNS TEXT` — exports all named graphs as NQuads when `graph` is NULL; a single graph when specified
+  - Streaming variants returning `SETOF TEXT` for large graphs
   - Essential for verifying bulk load round-trips in v0.2.0 testing
-- [ ] pg_regress test suite: `triple_crud.sql`, `named_graphs.sql`, `export_ntriples.sql`
+- [ ] pg_regress test suite: `triple_crud.sql`, `named_graphs.sql`, `export_ntriples.sql`, `nquads_trig.sql` (N-Quads round-trip, TriG named-graph import, file-path loaders)
 
 ### Exit Criteria
 
-Rare-predicate consolidation table absorbs low-frequency predicates. Bulk loading >50K triples/sec on commodity hardware. Named graphs functional. Both N-Triples and Turtle data can be loaded and round-tripped via export. VP tables have current planner statistics after bulk load.
+Rare-predicate consolidation table absorbs low-frequency predicates. Bulk loading >50K triples/sec on commodity hardware. Named graphs functional. All four inline formats (N-Triples, N-Quads, Turtle, TriG) and their file-path counterparts load correctly. Multi-graph data can be loaded via N-Quads/TriG and round-tripped via N-Quads export. VP tables have current planner statistics after bulk load.
 
 ---
 
@@ -161,6 +178,7 @@ Rare-predicate consolidation table absorbs low-frequency predicates. Bulk loadin
 - [ ] **`sparopt` first-pass algebra optimizer** (`sparopt` crate)
   - Sits between the `spargebra` parse tree and pg_triple's own algebra pass
   - Performs filter pushdown, constant folding, and empty-pattern elimination before SQL generation — reduces the surface area that pg_triple's pass needs to handle
+  - **Pre-v0.3.0 task**: verify that `sparopt` is published to crates.io with a stable, usable API and pin the version. If unavailable or API-unstable, absorb its filter-pushdown and constant-folding work into pg_triple's own algebra optimizer pass (`src/sparql/algebra.rs`) before beginning v0.3.0 — do not block the release on an upstream crate.
 - [ ] **SPARQL parser integration** (`spargebra` crate)
   - Parse SPARQL SELECT and ASK queries into algebra tree
   - Support: Basic Graph Patterns (BGP), FILTER, OPTIONAL, LIMIT, OFFSET, ORDER BY, DISTINCT
@@ -312,7 +330,8 @@ SPARQL 1.1 Query coverage for property paths, UNION/MINUS, aggregates, subquerie
   - **Note**: `xsd:double` is stored in the dictionary rather than inline-encoded — truncating IEEE 754 doubles to 56 bits produces undefined precision/range behaviour; dictionary storage is safe and range comparisons on doubles are uncommon in SPARQL
 - [ ] **SPARQL CONSTRUCT / DESCRIBE** (JSONB output)
   - CONSTRUCT → returns triples as JSONB (Turtle/JSON-LD serialization deferred to v0.9.0)
-  - DESCRIBE → Concise Bounded Description (CBD) as default algorithm; `pg_triple.describe_strategy` GUC to select alternatives (CBD, SCBD, simple s/o expansion)
+  - DESCRIBE → Concise Bounded Description (CBD) as default algorithm
+  - `pg_triple.describe_strategy` GUC (values: `'cbd'` / `'scbd'` / `'simple'`): selects the DESCRIBE expansion algorithm. Introduced here alongside DESCRIBE so the GUC is available from the first release that uses it.
   - Completes the four standard SPARQL query forms, making pg_triple usable as an entity browser
 - [ ] **Basic SPARQL Update** (`INSERT DATA` / `DELETE DATA`)
   - Parse and execute `INSERT DATA { … }` statements via `spargebra` (already supports Update algebra)
@@ -545,10 +564,11 @@ See [plans/ecosystem/datalog.md](plans/ecosystem/datalog.md) for the full design
   - Variables (`?x`), prefixed IRIs, literals, named graph scoping (`GRAPH`)
   - Stratified negation via `NOT` keyword
   - Multi-head rules (`h₁, h₂ :- body .`) compiled to separate `INSERT … SELECT` statements within the same stratum
-- [ ] **`source` column in VP tables**
-  - `source SMALLINT DEFAULT 0` added to every VP table in the v0.10.0 migration
+- [ ] **`source` column in VP tables and `vp_rare`**
+  - `source SMALLINT DEFAULT 0` added to every dedicated VP table **and to `_pg_triple.vp_rare`** in the v0.10.0 migration
   - `0` = explicitly asserted; `1` = derived (inferred by Datalog rules)
   - Enables filtering out inferred triples at scan time without a join
+  - Migration script uses `ALTER TABLE … ADD COLUMN source SMALLINT NOT NULL DEFAULT 0` for each VP table and for `vp_rare`; zero-downtime because PostgreSQL fast-path adds the column with the stored default without rewriting the table
 - [ ] **Tiered hot/cold dictionary** (`src/dictionary/hot.rs`)
   - `_pg_triple.resources_hot` (UNLOGGED) holds IRIs ≤512B and all predicate/prefix IRIs — the working set that fits in shared buffers
   - Full `resources` table unchanged; encoder checks hot table first
@@ -615,6 +635,8 @@ Users can load RDFS or OWL RL rule sets (or custom rules), and SPARQL queries re
 > **In plain language:** Imagine pinning a SPARQL query — or a set of Datalog reasoning rules — to a dashboard and having the results update automatically whenever the underlying data changes, without re-running the query. That's what SPARQL views and Datalog views deliver. Under the hood, only the *changed* rows are reprocessed (not the entire dataset), so updates are nearly instantaneous. Datalog views go one step further: they bundle rules and a goal pattern into a single self-contained artifact, materializing only the facts relevant to the goal. This release also adds precomputed "shortcut" tables for frequently-combined queries, making common access patterns dramatically faster. Requires the companion pg_trickle extension.
 >
 > **Effort estimate: 5–7 person-weeks**
+>
+> ⚠️ **Dependency risk**: This entire release depends on [pg_trickle](https://github.com/grove/pg-trickle) being production-ready. If pg_trickle has not reached a stable release by the time v0.10.0 ships, v0.11.0 should be **deferred** and v0.12.0 (SPARQL Update Advanced) brought forward in its place. A simpler fallback for incrementally-maintained views — using standard PostgreSQL `MATERIALIZED VIEW` with a `pg_triple.refresh_sparql_view(name)` helper and a pg_cron schedule — can be offered as a non-IVM interim. Evaluate pg_trickle maturity at v0.10.0 exit and decide before committing to v0.11.0 scope.
 
 See [plans/ecosystem/pg_trickle.md § 2.2](plans/ecosystem/pg_trickle.md) for the SPARQL views design and [plans/ecosystem/datalog.md § 15](plans/ecosystem/datalog.md) for the Datalog views design.
 

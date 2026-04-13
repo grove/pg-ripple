@@ -22,7 +22,7 @@
 | PG binding | `pgrx` 0.17 (`pg18` feature flag) |
 | PostgreSQL | 18.x |
 | SPARQL parser | `spargebra` crate (W3C-compliant SPARQL 1.1 algebra) |
-| SPARQL optimizer | `sparopt` crate (Apache-2.0/MIT; first-pass algebra optimizer fed from `spargebra` output; adds filter pushdown, constant folding, empty-pattern elimination before pg_triple's own pass; v0.3.0+) |
+| SPARQL optimizer | `sparopt` crate (Apache-2.0/MIT; first-pass algebra optimizer fed from `spargebra` output; adds filter pushdown, constant folding, empty-pattern elimination before pg_triple's own pass; v0.3.0+) — **verify crates.io availability and API stability before v0.3.0 begins; fallback: inline these optimizations into `src/sparql/algebra.rs`** |
 | RDF parsers | `rio_turtle`, `rio_xml` crates (Turtle, N-Triples, RDF/XML); `oxttl` / `oxrdf` added at v0.4.0 for RDF-star |
 | Hashing | `xxhash-rust` (XXH3-128 for dictionary collision resistance) |
 | Serialization | `serde` + `serde_json` (SHACL reports, SPARQL results, config) |
@@ -126,7 +126,7 @@ CREATE UNIQUE INDEX ON _pg_triple.dictionary (hash);
   - **v0.1.0–v0.5.1**: backend-local `lru::LruCache<u128, i64>` — simple, no shared memory required, no `shared_preload_libraries` dependency. Each backend has its own cache; cache misses hit the dictionary tables via SPI.
   - **v0.6.0+**: `HashMap<u128, i64>` in shared memory via pgrx `PgSharedMem`, **sharded into N buckets** (default: 64) with per-shard lightweight locks to eliminate global lock contention under concurrent workloads. Sized by GUC.
 - **Shared-memory budget** (v0.6.0+): `pg_triple.cache_budget` GUC governs the *utilization cap* of the pre-allocated shared memory block — it is enforced in Rust and does not cause PostgreSQL to allocate additional memory. The complementary startup GUC `pg_triple.shared_memory_size` (set in `postgresql.conf`) declares the actual block size to PostgreSQL in `_PG_init`; it must be ≥ `cache_budget` and cannot be changed without a postmaster restart. Automatic eviction priority: bloom filters first, then oldest LRU dictionary entries. Back-pressure on bulk loads when utilisation exceeds 90% of `cache_budget`.
-- **Prefix compression**: Common IRI prefixes (registered via `pg_triple.register_prefix()`) are stripped before hashing and stored separately, reducing storage by ~40% for typical RDF datasets
+- **Prefix compression**: Common IRI prefixes (registered via `pg_triple.register_prefix()`) are stripped from the `value` column before storage and the expansion is held separately in the prefix registry. The stored `value` contains only the local part (e.g. `"Person"` rather than `"http://xmlns.com/foaf/0.1/Person"`). The XXH3-128 **hash is computed over the full expanded IRI** to maintain globally unique collision-resistant IDs — not over the compressed form. The benefit is storage compression (~40% reduction in `value` column size for typical prefix-heavy RDF datasets), not hash-space compression. Decoding reconstructs the full IRI by joining the local part with the registered expansion.
 - **Inline value encoding** (`src/dictionary/inline.rs`, v0.5.1): Type-tagged i64 values for `xsd:integer`, `xsd:boolean`, `xsd:dateTime`, `xsd:date`. Deferred from v0.3.0 to keep the initial SPARQL engine focused on a single ID space; the dual-space model is introduced once the query engine is stable (v0.5.1, after v0.5.0 completes query-engine work). Bit 63 set signals an inline value; bits 56–62 hold a 7-bit type code; bits 0–55 hold the encoded value. FILTER comparisons on these types require zero dictionary round-trips — the SPARQL→SQL translator encodes constants at translation time and emits a plain B-tree range condition on the VP column.
 
   **Assigned inline type codes**:
@@ -161,8 +161,8 @@ CREATE TABLE _pg_triple.vp_{predicate_id} (
     s       BIGINT NOT NULL,  -- subject dictionary ID
     o       BIGINT NOT NULL,  -- object dictionary ID
     g       BIGINT NOT NULL DEFAULT 0,  -- named graph ID (0 = default)
-    i       BIGINT NOT NULL DEFAULT nextval('_pg_triple.statement_id_seq'),  -- globally-unique statement identifier (SID)
-    source  SMALLINT NOT NULL DEFAULT 0  -- 0 = explicit triple; 1 = rule-derived (v0.10.0)
+    i       BIGINT NOT NULL DEFAULT nextval('_pg_triple.statement_id_seq')  -- globally-unique statement identifier (SID)
+    -- source SMALLINT NOT NULL DEFAULT 0 added by v0.10.0 migration
 );
 CREATE INDEX ON _pg_triple.vp_{predicate_id} (s, o);
 CREATE INDEX ON _pg_triple.vp_{predicate_id} (o, s);
@@ -175,8 +175,22 @@ CREATE INDEX ON _pg_triple.vp_{predicate_id} (o, s);
 - Tables are created dynamically on first encounter of a new predicate during data ingestion
 - A catalog table `_pg_triple.predicates` maps predicate dictionary IDs to table OIDs for fast lookup
 - PG18's **skip scan** on the composite B-tree indices enables efficient lookups even when only the second column (`o`) is bound
-- **`i` column (Statement Identifier)** (v0.1.0): Every statement gets a globally-unique `BIGINT` drawn from the shared `_pg_triple.statement_id_seq` sequence. Using a shared sequence (rather than per-table `GENERATED ALWAYS AS IDENTITY`) guarantees that no two rows across any VP table or `vp_rare` share the same SID — a prerequisite for RDF-star (v0.4.0), where a SID can appear in the `s` or `o` column of any other VP table and must be unambiguously resolvable. This makes the storage schema SPOI-compatible (inspired by the OneGraph 1G model). A `_pg_triple.statements` catalog view (v0.2.0) maps SIDs to their containing VP table OID for cross-table SID lookups.
-- **`source` column** (v0.10.0): `SMALLINT DEFAULT 0` — `0` = explicit triple asserted by the user; `1` = derived triple produced by the Datalog/RDFS/OWL RL reasoning engine. Queries can pass `include_derived := false` to filter to `WHERE source = 0` only. Because the column is added as part of the v0.10.0 migration script, it has zero cost before reasoning is enabled.
+- **`i` column (Statement Identifier)** (v0.1.0): Every statement gets a globally-unique `BIGINT` drawn from the shared `_pg_triple.statement_id_seq` sequence. Using a shared sequence (rather than per-table `GENERATED ALWAYS AS IDENTITY`) guarantees that no two rows across any VP table or `vp_rare` share the same SID — a prerequisite for RDF-star (v0.4.0), where a SID can appear in the `s` or `o` column of any other VP table and must be unambiguously resolvable. This makes the storage schema SPOI-compatible (inspired by the OneGraph 1G model).
+
+  **`_pg_triple.statements` catalog** (v0.2.0): A lightweight **range-mapping table** — not a view unioning all VP table rows — is maintained by the merge worker to support SID lookups:
+
+  ```sql
+  CREATE TABLE _pg_triple.statements (
+      sid_min     BIGINT NOT NULL,
+      sid_max     BIGINT NOT NULL,
+      predicate_id BIGINT NOT NULL,
+      table_oid   OID NOT NULL,
+      PRIMARY KEY (sid_min)
+  );
+  ```
+
+  After each merge cycle the worker inserts one range row per VP table covering the SIDs allocated since the last merge. Because SIDs are drawn from a monotonically increasing sequence, ranges are non-overlapping and a binary search on `sid_min` resolves any SID to its owning VP table in $O(\log n)$ with no full-table scans. Rows in `vp_rare` are also covered: since `vp_rare` does not split, its SIDs span multiple ranges but the predicate is stored inline per `vp_rare` row, so a fallback `SELECT predicate_id FROM _pg_triple.vp_rare WHERE i = $1` is used for unmatched ranges (rare, as `vp_rare` rows are eventually promoted).
+- **`source` column** (v0.10.0): `SMALLINT DEFAULT 0` — `0` = explicit triple asserted by the user; `1` = derived triple produced by the Datalog/RDFS/OWL RL reasoning engine. Added to every dedicated VP table **and to `_pg_triple.vp_rare`** via `ALTER TABLE … ADD COLUMN source SMALLINT NOT NULL DEFAULT 0` in the v0.10.0 migration script. This is a zero-downtime fast-path column addition in PostgreSQL — no table rewrite. Queries can pass `include_derived := false` to filter to `WHERE source = 0` only. Because the column is added as part of the v0.10.0 migration script, it has zero cost before reasoning is enabled.
 - **Named-graph index** (`pg_triple.named_graph_optimized = true`): when enabled, each VP table gains an additional `(g, s, o)` index supporting `GRAPH ?g { ... }` patterns without a full-table scan. Off by default to avoid index bloat for single-graph users.
 
 **Rare-Predicate Consolidation**:
@@ -233,8 +247,9 @@ CREATE INDEX ON _pg_triple.vp_{predicate_id} (o, s);
 
 #### 4.3.3 Bulk Loading
 
-- `pg_triple.load_turtle(data TEXT)` / `pg_triple.load_ntriples(data TEXT)` — inline data (not file paths; avoids `pg_read_file()` privilege requirements and SSRF surface)
-- Parses via `rio_turtle` / `rio_api` crates in streaming fashion
+- Inline TEXT variants: `pg_triple.load_turtle(data TEXT)`, `pg_triple.load_ntriples(data TEXT)`, `pg_triple.load_nquads(data TEXT)` (v0.2.0), `pg_triple.load_trig(data TEXT)` (v0.2.0)
+- File-path variants: `pg_triple.load_turtle_file(path TEXT)`, `pg_triple.load_ntriples_file(path TEXT)`, `pg_triple.load_nquads_file(path TEXT)`, `pg_triple.load_trig_file(path TEXT)` (v0.2.0) — read via `pg_read_file()` with superuser privilege check; essential for datasets exceeding the ~1 GB TEXT parameter limit
+- Parses via `rio_turtle` / `rio_api` crates in streaming fashion; `oxttl` / `oxrdf` for RDF-star variants (v0.4.0+)
 - Batches of 10,000 triples: dictionary-encode → `COPY` into VP tables (delta partition from v0.6.0+)
 - Disables index updates during load; rebuilds at end
 - Malformed RDF is caught in the `rio_turtle` / `rio_api` streaming parser layer before data reaches `COPY`; no PostgreSQL-level fault tolerance needed (note: `COPY ... REJECT_LIMIT` is a Greenplum/Cloudberry feature, not stock PostgreSQL; PG17+ offers `ON_ERROR ignore` but it is unnecessary here since parsing happens in Rust)
