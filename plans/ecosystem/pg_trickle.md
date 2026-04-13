@@ -371,6 +371,130 @@ Ontology triples (base)
 
 pg_trickle's DAG-aware scheduler automatically refreshes these in topological order when ontology triples change. Diamond-shaped dependencies (e.g., two views both depending on `rdf:type` and feeding into a summary) are handled atomically.
 
+### 2.8 Rare-Predicate Auto-Promotion Trigger
+
+**Problem**: `vp_rare` promotion — migrating a predicate's rows to a dedicated VP table when its triple count crosses `pg_ripple.vp_promotion_threshold` — is currently driven by the merge worker polling `COUNT(*) GROUP BY p` after each cycle. The detection lag equals the merge interval (default: when delta exceeds 100K rows), meaning a predicate that crosses the threshold between merges keeps accumulating in `vp_rare`, inflating full-table scans.
+
+**pg_trickle solution**: An `IMMEDIATE` stream table watching `vp_rare` row counts fires the moment a predicate crosses the threshold within the same transaction:
+
+```sql
+SELECT pgtrickle.create_stream_table(
+    name         => '_pg_ripple.rare_predicate_candidates',
+    query        => $$
+        SELECT p, COUNT(*) AS triple_count
+        FROM _pg_ripple.vp_rare
+        GROUP BY p
+        HAVING COUNT(*) >= current_setting('pg_ripple.vp_promotion_threshold')::int
+    $$,
+    refresh_mode => 'IMMEDIATE'
+);
+```
+
+Any row appearing in `_pg_ripple.rare_predicate_candidates` is a promotion candidate. The merge worker's promotion check becomes `SELECT p FROM _pg_ripple.rare_predicate_candidates` — a fast index scan on an almost-always-empty table — instead of a GROUP BY aggregate over all of `vp_rare`.
+
+**Benefits**:
+- Zero polling delay: promotion is triggered in the same transaction that crossed the threshold
+- The merge worker's CPU spend on vp_rare promotion polling is eliminated
+- The stream table is empty in steady state (prompting zero CDC overhead after promotion)
+
+### 2.9 Incremental `dictionary_hot` Maintenance
+
+**Problem**: The tiered dictionary (v0.10.0) uses `_pg_ripple.dictionary_hot` — an UNLOGGED table pre-warmed at startup via `pg_prewarm` — to keep the most-accessed IRIs in `shared_buffers`. After large data loads, newly-encoded predicate IRIs and prefix-registry IRIs are not in `dictionary_hot`, leading to cache misses on the hot decode path until the next manual rebuild.
+
+**pg_trickle solution**: Model `dictionary_hot` itself as a stream table over `dictionary` filtered to hot-eligible terms:
+
+```sql
+SELECT pgtrickle.create_stream_table(
+    name     => '_pg_ripple.dictionary_hot',
+    query    => $$
+        SELECT id, hash, value, kind, datatype, lang
+        FROM _pg_ripple.dictionary
+        WHERE kind = 0  -- IRIs only
+          AND (
+              length(value) <= 512
+              OR id IN (SELECT iri_id FROM _pg_ripple.prefix_registry)
+              OR id IN (SELECT id  FROM _pg_ripple.predicates)
+          )
+    $$,
+    schedule => '30s'
+);
+```
+
+The `dictionary_hot` table is no longer a static snapshot but a continuously-maintained projection. New predicate IRIs and prefix-registry entries appear in `dictionary_hot` within 30 seconds of being encoded, without any manual rebuild call.
+
+**Benefits**:
+- Dictionary hot-path cache miss rate stays low after bulk loads — no manual intervention
+- `pg_prewarm` at startup still warms the table; pg_trickle's incremental refresh keeps it current thereafter
+- pg_trickle's differential mode only processes new `dictionary` rows, not the full table — negligible overhead
+
+### 2.10 VP Table Cardinality for BGP Join Reordering
+
+**Problem**: The SPARQL algebra optimizer's BGP join reorderer (v0.13.0) reads `pg_class.reltuples` for VP table cardinality estimates. Those statistics are only updated by `ANALYZE`, which runs post-merge. Between merges — which may be many minutes apart on write-heavy workloads — the delta partition accumulates rows but `reltuples` stays at its last-merge value. The reorderer therefore makes sub-optimal join ordering decisions during high-write windows.
+
+**pg_trickle solution**: A live per-predicate row count stream table updated more frequently than `ANALYZE` cycle time:
+
+```sql
+SELECT pgtrickle.create_stream_table(
+    name     => '_pg_ripple.vp_cardinality',
+    query    => $$
+        SELECT p AS predicate_id, COUNT(*) AS approx_count
+        FROM _pg_ripple.all_triples_view  -- UNION ALL of delta + main for every VP table
+        GROUP BY p
+    $$,
+    schedule => '5s'
+);
+```
+
+The SPARQL algebrizer checks `_pg_ripple.vp_cardinality` first when `pg_ripple.pg_trickle_available()` is true; it falls back to `pg_class.reltuples` otherwise. Because the stream table is maintained differentially, it tracks delta inserts in near-real-time without requiring a full VP table scan.
+
+**Benefits**:
+- Join ordering remains accurate during write-heavy bursts between `ANALYZE` cycles
+- Complements the existing statistics infrastructure — does not replace `ANALYZE`
+- An existing `predicate_stats` stream table (§2.4) could serve the same purpose; `vp_cardinality` is a lighter, faster alternative (no distinct subject/object counts)
+
+> **Note**: `_pg_ripple.predicate_stats` (§2.4) already tracks `triple_count` per predicate. If that stream table is enabled, `vp_cardinality` is redundant — the algebrizer should read `predicate_stats.triple_count` directly instead of creating a second stream table.
+
+### 2.11 Federation Endpoint Health Monitoring
+
+**Problem**: The SPARQL federation module (v0.16.0) has an `_pg_ripple.federation_endpoints` allow-list but no live health tracking. The executor currently attempts every registered endpoint regardless of recent error history, meaning a single unreachable endpoint can block query execution for the full `pg_ripple.federation_timeout` duration on every query.
+
+**pg_trickle solution**: A stream table aggregating a probe log by endpoint provides a live health view:
+
+```sql
+-- Base table populated by a lightweight probe worker or after each SERVICE call
+CREATE TABLE _pg_ripple.federation_probe_log (
+    endpoint_url  TEXT NOT NULL,
+    success       BOOLEAN NOT NULL,
+    latency_ms    INT,
+    probed_at     TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+SELECT pgtrickle.create_stream_table(
+    name     => '_pg_ripple.federation_health',
+    query    => $$
+        SELECT endpoint_url,
+               COUNT(*) FILTER (WHERE success)     AS success_count,
+               COUNT(*) FILTER (WHERE NOT success) AS error_count,
+               AVG(latency_ms)                     AS avg_latency_ms,
+               MAX(probed_at)                      AS last_probe_at,
+               (COUNT(*) FILTER (WHERE success)::float /
+                NULLIF(COUNT(*), 0))               AS success_rate
+        FROM _pg_ripple.federation_probe_log
+        WHERE probed_at > now() - interval '5 minutes'
+        GROUP BY endpoint_url
+    $$,
+    schedule => '10s'
+);
+```
+
+The federation executor does a fast `SELECT success_rate FROM _pg_ripple.federation_health WHERE endpoint_url = $1` pre-flight check. Endpoints with `success_rate < 0.1` are skipped immediately (or downgraded to WARNING) without waiting for timeout. The `/metrics` Prometheus endpoint reads directly from `federation_health` — no aggregate scan required.
+
+**Benefits**:
+- Unhealthy endpoints are detected within 10 seconds of consistent failures
+- Pre-flight health check avoids per-query timeout waits on dead endpoints
+- The stream table doubles as a federation performance dashboard
+- pg_trickle's window-aggregation support keeps the rolling 5-minute window maintenance efficient
+
 ---
 
 ## 3. Integration Architecture
@@ -488,11 +612,12 @@ This lets applications and tooling test availability before calling without catc
 
 | pg_ripple Version | pg_trickle Feature | Priority |
 |---|---|---|
-| v0.6.0 (HTAP) | Real-time statistics stream tables, change notification CDC triggers | High |
+| v0.6.0 (HTAP) | Real-time statistics stream tables (`predicate_stats`, `graph_stats`); rare-predicate auto-promotion trigger (`rare_predicate_candidates`); live VP cardinality for join reordering (`vp_cardinality`) | High |
 | v0.7.0 (SHACL Core) | SHACL violation monitors (IMMEDIATE mode) | Medium |
 | v0.8.0 (SHACL Advanced) | Multi-shape DAG validation | Medium |
-| v0.10.0 (Datalog) | Inference materialization via Datalog rule sets, SHACL-AF `sh:rule` bridge | High |
+| v0.10.0 (Datalog) | Inference materialization via Datalog rule sets, SHACL-AF `sh:rule` bridge; incremental `dictionary_hot` maintenance | High |
 | v0.11.0 (SPARQL & Datalog Views) | ExtVP stream tables, `pg_ripple.create_sparql_view()` API, Datalog views, SPARQL view caching | High |
+| v0.16.0 (Federation) | Federation endpoint health monitoring (`federation_health`) | Medium |
 | Post-1.0 | Full ExtVP automation, ontology change propagation DAG | High |
 
 ---
