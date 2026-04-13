@@ -296,11 +296,10 @@ pg_triple.sparql_explain(query TEXT, analyze BOOL DEFAULT false) RETURNS TEXT
   -- analyze := true wraps the generated SQL in EXPLAIN (ANALYZE, BUFFERS) and returns the plan
 
 -- Data manipulation
-pg_triple.insert_triple(s TEXT, p TEXT, o TEXT, g TEXT DEFAULT NULL)
+pg_triple.insert_triple(s TEXT, p TEXT, o TEXT, g TEXT DEFAULT NULL) RETURNS BIGINT  -- returns SID from v0.4.0
 pg_triple.delete_triple(s TEXT, p TEXT, o TEXT, g TEXT DEFAULT NULL)
 pg_triple.load_turtle(data TEXT) RETURNS BIGINT  -- returns count
 pg_triple.load_ntriples(data TEXT) RETURNS BIGINT
-pg_triple.expand_template(iri TEXT, query TEXT) RETURNS BIGINT  -- OTTR-style DataFrame→RDF bulk load (v0.9.0)
 
 -- Maintenance
 pg_triple.vacuum_dictionary() RETURNS BIGINT  -- removes unreferenced dictionary entries; safe to run any time
@@ -642,14 +641,14 @@ pg_triple/
 │   │   ├── cache.rs                   # LRU shared-memory cache
 │   │   ├── query_cache.rs             # Per-query EncodingCache (short-lived HashMap, discarded after each query)
 │   │   ├── inline.rs                  # Type-tagged inline i64 encoding for numerics, dates, booleans (v0.3.0)
-│   │   ├── hot.rs                     # Tiered hot/cold dictionary tables (v0.9.0)
+│   │   ├── hot.rs                     # Tiered hot/cold dictionary tables (v0.10.0)
 │   │   └── prefix.rs                  # IRI prefix compression
 │   ├── storage/
 │   │   ├── mod.rs
 │   │   ├── vp_table.rs                # VP table DDL management
 │   │   ├── delta.rs                   # Delta partition operations
 │   │   ├── merge.rs                   # Delta→Main generation merge logic
-│   │   ├── subject_patterns.rs        # Subject→predicate-set index (v0.4.0)
+│   │   ├── subject_patterns.rs        # Subject→predicate-set index (v0.5.0)
 │   │   └── bulk_load.rs               # Streaming parsers + COPY
 │   ├── sparql/
 │   │   ├── mod.rs
@@ -659,8 +658,15 @@ pg_triple/
 │   │   ├── property_path.rs           # Recursive CTE generation
 │   │   ├── projector.rs               # Maps decoded i64 rows → named SPARQL variables; applies SELECT expressions, BIND, computed values
 │   │   ├── executor.rs               # SPI execution + decoding
-│   │   └── functions/
-│   │       └── geo.rs                 # GeoSPARQL → PostGIS translation (v0.8.0; gated on PostGIS presence)
+│   │   ├── update.rs                  # SPARQL 1.1 Update parsing + execution (v0.12.0)
+│   │   └── federation.rs              # SERVICE keyword: remote endpoint execution + result injection (v0.16.0)
+│   ├── datalog/
+│   │   ├── mod.rs                     # Public API (#[pg_extern] functions)
+│   │   ├── parser.rs                  # Rule text → Rule IR
+│   │   ├── stratify.rs                # Dependency graph, stratification, cycle detection
+│   │   ├── compiler.rs                # Rule IR → SQL (per stratum)
+│   │   ├── builtins.rs                # Built-in rule sets (RDFS, OWL RL)
+│   │   └── catalog.rs                 # _pg_triple.rules table CRUD
 │   ├── graph/
 │   │   ├── mod.rs
 │   │   └── named_graph.rs             # Named graph CRUD
@@ -682,9 +688,6 @@ pg_triple/
 │   └── admin/
 │       ├── mod.rs
 │       └── maintenance.rs             # Vacuum, reindex, compact, config
-│   └── template/
-│       ├── mod.rs
-│       └── expand.rs                  # OTTR-style expand_template() bulk load (v0.8.0)
 ├── tests/
 │   ├── integration_tests.rs
 │   └── sparql_conformance.rs
@@ -697,10 +700,16 @@ pg_triple/
 ├── plans/
 │   ├── postgresql-triplestore-deep-dive.md
 │   └── implementation_plan.md         # This document
+├── pg_triple_http/                    # Companion HTTP binary (Cargo workspace member, v0.15.0)
+│   ├── Cargo.toml
+│   └── src/
+│       └── main.rs                    # axum HTTP server, connection pool, content negotiation
 ├── ROADMAP.md
 ├── README.md
 └── LICENSE
 ```
+
+> **Note**: At v0.15.0, the project becomes a Cargo workspace with two members: the extension crate (`pg_triple/`) and the HTTP binary (`pg_triple_http/`). Planning for this workspace structure from the start avoids a disruptive restructuring later.
 
 ---
 
@@ -781,8 +790,54 @@ These items are documented for architectural awareness but are not in the 0.1–
 - **Automated ExtVP**: Workload-driven analysis to automatically decide which semi-join stream tables to create (manual ExtVP via `create_sparql_view()` is in-scope for 0.x when pg_trickle is present)
 - **Temporal versioning**: Bitstring validity columns for versioned graph snapshots
 - **TimescaleDB integration**: Hypertable-backed temporal graph management
-- **Apache AGE interop**: Bidirectional projection between RDF and LPG models
-- **SPARQL Update (SPARQL 1.1 Update)**: Full INSERT DATA / DELETE DATA / DELETE WHERE support
-- **SPARQL Federation**: SERVICE keyword for federated queries across remote SPARQL endpoints
+- **Cypher / GQL**: Query and write data using industry-standard graph query languages via a standalone `cypher-algebra` crate (see ROADMAP v1.6)
 - **GraphQL-to-SPARQL bridge**: Auto-generate GraphQL schema from SHACL shapes
+- **GeoSPARQL + PostGIS**: `geo:asWKT` literal type backed by PostGIS `geometry`, spatial FILTER functions, R-tree index on spatial VP tables (see ROADMAP v1.7)
+- **OTTR template expansion**: `pg_triple.expand_template(iri TEXT, query TEXT)` for OTTR-style DataFrame→RDF bulk load (see [prior_art_commercial.md](ecosystem/prior_art_commercial.md))
 - **Ontology change propagation DAG**: When pg_trickle is present, model derived structures (ExtVP, inference, SHACL, stats) as a DAG of stream tables with automatic topological refresh on ontology changes
+
+---
+
+## 13. Operational Considerations
+
+### 13.1 Merge Worker Health
+
+- The merge worker registers a heartbeat timestamp in shared memory, updated on each cycle
+- If the heartbeat stalls for longer than `pg_triple.merge_watchdog_timeout` (default: 5 minutes), `_PG_init` on the next backend connection logs a `WARNING` and attempts to restart the worker
+- `pg_triple.stats()` includes `merge_worker_status` (`running` / `stalled` / `disabled`) and `merge_worker_last_heartbeat`
+
+### 13.2 Shared-Memory Cache Lifecycle
+
+- The dictionary LRU cache resides in `PgSharedMem` and survives individual backend crashes
+- The cache is cleared on postmaster restart (standard PostgreSQL shared-memory lifecycle)
+- Slot versioning (§4.1) detects layout mismatches after an in-place extension upgrade and re-initializes gracefully
+
+### 13.3 `pg_upgrade` Behaviour
+
+- Extension tables (`_pg_triple.*`) migrate with standard `pg_upgrade` — no special handling required
+- Shared-memory state (dictionary cache, bloom filters) is rebuilt from on-disk tables at the first `_PG_init` after the upgrade
+- The slot versioning mechanism (§4.1) ensures safe re-initialization if the shared-memory layout changed between versions
+
+### 13.4 Extension Downgrades
+
+- Downgrades are **not supported** (standard for PostgreSQL extensions)
+- Users should test upgrades on a staging instance and rely on `pg_dump`/`pg_restore` for rollback
+
+### 13.5 Dictionary Vacuum Concurrency
+
+- `pg_triple.vacuum_dictionary()` acquires an `ADVISORY LOCK` to prevent concurrent runs
+- Concurrent inserts are safe: the vacuum only deletes dictionary entries with zero references across all VP tables, checked via `NOT EXISTS` subqueries within a single snapshot
+- Running `vacuum_dictionary()` during heavy bulk loads is discouraged but safe — it may miss newly-orphaned entries which will be cleaned on the next run
+
+### 13.6 Error Code Taxonomy
+
+Extension error messages use PostgreSQL-style formatting (lowercase first word, no trailing period). Error codes use the `PT` prefix:
+
+| Range | Category |
+|---|---|
+| `PT001`–`PT099` | Dictionary errors (encoding failures, hash collisions, cache overflow) |
+| `PT100`–`PT199` | Storage errors (VP table creation, merge failures, bulk load errors) |
+| `PT200`–`PT299` | SPARQL errors (parse failures, unsupported features, query timeout) |
+| `PT300`–`PT399` | SHACL errors (shape parse failures, validation violations) |
+| `PT400`–`PT499` | Datalog errors (rule parse failures, stratification errors, constraint violations) |
+| `PT500`–`PT599` | Admin errors (vacuum, reindex, upgrade) |

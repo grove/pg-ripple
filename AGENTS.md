@@ -10,7 +10,8 @@
 | PG binding | pgrx 0.17 (`pg18` feature flag) |
 | PostgreSQL target | 18.x only |
 | SPARQL parser | `spargebra` |
-| RDF parsers | `rio_turtle`, `rio_xml` |
+| SPARQL optimizer | `sparopt` (first-pass algebra optimizer) |
+| RDF parsers | `rio_turtle`, `rio_xml`; `oxttl` / `oxrdf` added at v0.4.0 for RDF-star |
 | Hashing | `xxhash-rust` (XXH3-128) |
 | Serialization | `serde` + `serde_json` |
 | Tests | `#[pg_test]`, `cargo pgrx regress`, `pgbench` via `pgrx-bench` |
@@ -34,8 +35,8 @@ All user-visible objects live in the `pg_triple` schema; internal tables and VP 
 ## Storage Conventions
 
 - **Dictionary encoding**: every IRI, blank node, and literal is mapped to `BIGINT` (i64) via XXH3-128 hash before being stored. VP tables **never** contain raw strings.
-- **VP table naming**: `_pg_triple.vp_{predicate_id}` — one table per unique predicate. Columns: `s BIGINT, o BIGINT, g BIGINT`. Dual B-tree indices on `(s, o)` and `(o, s)`.
-- **Rare-predicate consolidation**: predicates with fewer than `pg_triple.vp_promotion_threshold` triples (default: 1,000) are stored in `_pg_triple.vp_rare (p, s, o, g)` instead of a dedicated VP table. Auto-promoted when the threshold is crossed.
+- **VP table naming**: `_pg_triple.vp_{predicate_id}` — one table per unique predicate. Columns: `s BIGINT, o BIGINT, g BIGINT, i BIGINT GENERATED ALWAYS AS IDENTITY, source SMALLINT DEFAULT 0`. Dual B-tree indices on `(s, o)` and `(o, s)`. The `i` column is a statement identifier (SID) introduced in v0.2.0; the `source` column (v0.10.0) distinguishes explicit (`0`) from inferred (`1`) triples.
+- **Rare-predicate consolidation**: predicates with fewer than `pg_triple.vp_promotion_threshold` triples (default: 1,000) are stored in `_pg_triple.vp_rare (p, s, o, g, i, source)` instead of a dedicated VP table. Auto-promoted when the threshold is crossed.
 - **HTAP split**: writes go to `vp_{id}_delta` (heap + B-tree); the background merge worker promotes rows to `vp_{id}_main` (BRIN-indexed). Query path is `UNION ALL` of both partitions.
 - **Default graph ID**: `0`; named graphs > 0.
 - **Predicate catalog**: `_pg_triple.predicates (id, table_oid, triple_count)` — look up the VP table OID here before any dynamic SQL.

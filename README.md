@@ -64,7 +64,7 @@ This means you get:
 
 ## Key Features
 
-### Standard RDF storage
+### Standard RDF storage *(planned — v0.1.0)*
 
 Store triples and quads using the standard RDF data model. Every IRI, blank node, and literal is dictionary-encoded to a compact 64-bit integer for fast joins and minimal storage.
 
@@ -76,7 +76,7 @@ SELECT pg_triple.insert_triple(
 );
 ```
 
-### SPARQL query engine
+### SPARQL query engine *(planned — v0.3.0 basic, v0.5.0 advanced)*
 
 Full SPARQL 1.1 support — SELECT, ASK, CONSTRUCT, DESCRIBE, property paths, aggregates, subqueries, UNION, OPTIONAL, FILTER, BIND, VALUES, and full-text search.
 
@@ -91,11 +91,11 @@ SELECT * FROM pg_triple.sparql('
 ');
 ```
 
-### SPARQL Update
+### SPARQL Update *(planned — v0.12.0)*
 
 Standard write operations — INSERT DATA, DELETE DATA, DELETE/INSERT WHERE, LOAD, CLEAR, DROP, CREATE — so existing RDF tools (Protégé, TopBraid, SPARQL workbenches) work without adapters.
 
-### SHACL data quality
+### SHACL data quality *(planned — v0.7.0 core, v0.8.0 advanced)*
 
 Define data integrity rules using the W3C SHACL standard. Constraints are enforced at insert time (synchronous mode) or checked in the background (asynchronous mode).
 
@@ -115,7 +115,7 @@ SELECT pg_triple.load_shacl('
 ');
 ```
 
-### Datalog reasoning
+### Datalog reasoning *(planned — v0.10.0)*
 
 Automatically derive new facts from rules and logic. Ships with built-in RDFS (13 rules) and OWL 2 RL (~80 rules) entailment. Write your own rules in a Turtle-flavoured Datalog syntax.
 
@@ -128,11 +128,11 @@ SELECT pg_triple.load_rules_builtin('rdfs');
 -- then Rex rdf:type Animal is inferred
 ```
 
-### SPARQL Protocol (HTTP)
+### SPARQL Protocol (HTTP) *(planned — v0.15.0)*
 
 A companion HTTP service (`pg_triple_http`) exposes a standard W3C SPARQL 1.1 Protocol endpoint, so web applications, YASGUI, Postman, and any SPARQL client can query pg_triple over HTTP with full content negotiation.
 
-### SPARQL Federation
+### SPARQL Federation *(planned — v0.16.0)*
 
 Query remote SPARQL endpoints from within pg_triple queries using the standard `SERVICE` keyword. Multiple remote calls execute in parallel.
 
@@ -148,7 +148,7 @@ SELECT * FROM pg_triple.sparql('
 ');
 ```
 
-### RDF-star / RDF 1.2
+### RDF-star / RDF 1.2 *(planned — v0.4.0)*
 
 Make statements about statements — essential for provenance, temporal annotations, and trust.
 
@@ -159,7 +159,7 @@ SELECT pg_triple.load_turtle('
 ');
 ```
 
-### Named graphs with access control
+### Named graphs with access control *(planned — v0.2.0 graphs, v0.14.0 RLS)*
 
 Organise facts into named graphs, then control access per graph using PostgreSQL's Row-Level Security.
 
@@ -168,7 +168,7 @@ SELECT pg_triple.grant_graph('analyst_role', 'http://example.org/public-data', '
 SELECT pg_triple.grant_graph('admin_role', 'http://example.org/internal', 'admin');
 ```
 
-### Incremental SPARQL views
+### Incremental SPARQL views *(planned — v0.11.0)*
 
 Pin a SPARQL query as a live view that updates incrementally when the underlying data changes — no full recomputation. Requires the companion [pg_trickle](https://github.com/grove/pg-trickle) extension.
 
@@ -349,16 +349,18 @@ pg_triple is planned as 17 incremental releases from v0.1.0 to v1.0.0:
 
 | Phase | Versions | What you get |
 |---|---|---|
-| **Foundation** | 0.1.0 – 0.2.0 | Store triples, bulk import, vertical partitioning |
-| **Query** | 0.3.0 – 0.4.0 | Full SPARQL 1.1 querying (BGPs, paths, aggregates, FTS) |
-| **Concurrency** | 0.5.0 | HTAP architecture — reads and writes at full speed |
-| **Data quality** | 0.6.0 – 0.7.0 | SHACL validation (sync + async) |
-| **Interop** | 0.8.0 | All standard RDF file formats |
-| **Intelligence** | 0.9.0 | Datalog reasoning (RDFS, OWL RL, custom rules) |
-| **Reactivity** | 0.10.0 | Incremental SPARQL views |
-| **Writes** | 0.11.0 | Standard SPARQL Update operations |
-| **Production** | 0.12.0 – 0.13.0 | Performance tuning, admin tools, security, docs |
-| **Ecosystem** | 0.14.0 – 0.16.0 | HTTP protocol, federation, RDF-star |
+| **Foundation** | 0.1.0 – 0.2.0 | Store triples, bulk import, vertical partitioning, statement identifiers |
+| **Query (Basic)** | 0.3.0 | SPARQL SELECT and ASK with BGPs, FILTER, OPTIONAL |
+| **RDF-star** | 0.4.0 | Quoted triples, statement-level metadata, LPG-ready storage |
+| **Query (Advanced)** | 0.5.0 | Property paths, aggregates, subqueries, full-text search |
+| **Concurrency** | 0.6.0 | HTAP architecture — reads and writes at full speed |
+| **Data quality** | 0.7.0 – 0.8.0 | SHACL validation (sync + async) |
+| **Interop** | 0.9.0 | All standard RDF file formats, CONSTRUCT, DESCRIBE |
+| **Intelligence** | 0.10.0 | Datalog reasoning (RDFS, OWL RL, custom rules) |
+| **Reactivity** | 0.11.0 | Incremental SPARQL & Datalog views, ExtVP |
+| **Writes** | 0.12.0 | Standard SPARQL Update operations |
+| **Production** | 0.13.0 – 0.14.0 | Performance tuning, admin tools, security, docs |
+| **Ecosystem** | 0.15.0 – 0.16.0 | HTTP SPARQL protocol, federation |
 | **Release** | 1.0.0 | W3C conformance, stress testing, security audit |
 
 See the full [Roadmap](ROADMAP.md) for details on every release.

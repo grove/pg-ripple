@@ -581,9 +581,9 @@ On-demand CTEs add query planning and execution overhead proportional to the num
 
 ---
 
-## 14. Included in v0.9.0, Limitations, and Future Work
+## 14. Included in v0.10.0, Limitations, and Future Work
 
-### Arithmetic built-ins (v0.9.0)
+### Arithmetic built-ins (v0.10.0)
 
 A set of built-in predicates for arithmetic comparison and computation, compiled directly to SQL operators:
 
@@ -616,7 +616,7 @@ WHERE t1.o = 200              -- ex:Employee
 ON CONFLICT DO NOTHING
 ```
 
-### Constraint rules — integrity constraints (v0.9.0)
+### Constraint rules — integrity constraints (v0.10.0)
 
 Rules with an **empty head** express integrity constraints: fact patterns that must never hold. When the body is satisfiable, the constraint is violated.
 
@@ -656,7 +656,7 @@ SELECT * FROM pg_triple.check_constraints();
 -- Returns: rule_id, rule_text, violating_subjects (BIGINT[]), violation_count
 ```
 
-### Initial release limitations (v0.9.0)
+### Initial release limitations (v0.10.0)
 
 - **No aggregation in rule bodies** (Datalog^agg): rules cannot use `COUNT`, `SUM`, `MIN`, `MAX` in body atoms. Aggregation is handled by SPARQL queries over derived quads. Deferred to post-1.0 (requires aggregation-stratification spec).
 - **No function symbols**: standard Datalog restriction — no Skolem functions or computed terms. Existential rules (Datalog+) are deferred.
@@ -677,13 +677,77 @@ SELECT * FROM pg_triple.check_constraints();
 | Existential rules (Datalog+/−) | Existentially quantified variables in rule heads → Skolem blank node generation. Extends coverage from OWL RL to OWL DL subset. Well-understood but non-trivial implementation. | 2 | Post-1.0 |
 | Temporal Datalog | Rules over time-stamped quads with temporal operators (`BEFORE`, `AFTER`, `DURING`). Aligns with ROADMAP v1.3 (TimescaleDB integration). | 2 | Post-1.0 |
 | Well-founded semantics | Three-valued model (true/false/unknown) for non-stratifiable programs. More permissive than stratification for cyclic ontologies with defaults. Known SQL encoding via iterative fixpoint. | 2 | Post-1.0 |
-| Multi-head rules | Syntactic sugar: single rule body → multiple head atoms. Desugars to multiple single-head rules at compile time. Low implementation cost. | 3 | Post-1.0 |
+| Multi-head rules | Syntactic sugar: single rule body → multiple head atoms. Desugars to multiple single-head rules at compile time. Low implementation cost. | — | v0.10.0 |
 | Rule priorities / defeasible logic | Priority ordering for contradictory derived facts. Standard in Description Logic reasoners. Complex semantics but important for ontology merging. | 3 | Post-1.0 |
 | Active rules (ECA) | Event-condition-action rules that trigger side-effects (`NOTIFY`, function calls) rather than deriving quads. Breaks pure declarative model; maps to PG `NOTIFY` + triggers. | 3 | Post-1.0 |
 | Probabilistic rules | Weighted rules for uncertain reasoning (e.g., link prediction). Requires probability propagation semantics (ProbLog-style). | 3 | Post-1.0 |
 | SWRL integration | Semantic Web Rule Language as an alternative rule syntax. Turtle-based; maps to the same IR. | 3 | Post-1.0 |
-| SHACL-AF `sh:rule` bridge | Detect `sh:rule` entries in SHACL shapes, compile to Datalog IR. Bidirectional: SHACL shapes inform Datalog constraints; derived triples visible to SHACL validation. | 1 | v0.9.0 |
+| SHACL-AF `sh:rule` bridge | Detect `sh:rule` entries in SHACL shapes, compile to Datalog IR. Bidirectional: SHACL shapes inform Datalog constraints; derived triples visible to SHACL validation. | 1 | v0.10.0 |
 | Datalog views | Incremental stream tables for Datalog rule sets with a goal pattern. Bundles rules + query as one self-contained artifact. | 1 | v0.11.0 |
+
+---
+
+## 14.1 RDF-star Integration in Datalog (v0.10.0)
+
+Builds on RDF-star / statement identifiers delivered in v0.4.0. Quoted triples and SIDs can appear in Datalog rule heads and bodies, enabling provenance rules, annotation propagation, and meta-reasoning.
+
+### Quoted triples in rule bodies
+
+```prolog
+# Find all assertions made by Carol
+?s ?p ?o :- << ?s ?p ?o >> ex:assertedBy ex:Carol .
+```
+
+The quoted triple `<< ?s ?p ?o >>` is resolved via the dictionary: the encoder looks up (or creates) a composite dictionary entry for the triple tuple, and the SQL compiler joins against the `_pg_triple.quoted_triples` dictionary table to bind `?s`, `?p`, `?o`.
+
+### Quoted triples in rule heads
+
+```prolog
+# Annotate every derived triple with its provenance rule
+<< ?s ?p ?o >> ex:derivedBy ex:transitiveManagerRule :- ?s ex:indirectManager ?o .
+```
+
+The head's quoted triple `<< ?s ?p ?o >>` is dictionary-encoded at materialization time. The derived annotation triple uses the quoted triple's dictionary ID as its subject.
+
+### Statement identifiers in rule bodies
+
+```prolog
+# Copy confidence annotations from base statements to derived statements
+<< ?s ex:indirectManager ?z >> ex:confidence ?c :-
+    ?s ex:manager ?y,
+    << ?y ex:manager ?z >> ex:confidence ?c .
+```
+
+SIDs from the `i` column of VP tables can be referenced implicitly through quoted triple patterns. The SQL compiler resolves `<< ?y ex:manager ?z >>` to a dictionary lookup of the quoted triple, then joins against the annotation VP table.
+
+### SQL compilation
+
+Quoted triple patterns in rule bodies compile to a join against the quoted-triple dictionary:
+
+```sql
+-- << ?s ?p ?o >> ex:assertedBy ex:Carol
+SELECT qt.s_id, qt.p_id, qt.o_id
+FROM _pg_triple.quoted_triple_dict qt
+JOIN _pg_triple.vp_{assertedBy_id} ann ON ann.s = qt.id
+WHERE ann.o = {carol_id}
+```
+
+Quoted triple patterns in rule heads compile to a dictionary encode step before the VP table insert:
+
+```sql
+-- Encode the quoted triple, then insert the annotation
+WITH new_qt AS (
+    INSERT INTO _pg_triple.quoted_triple_dict (s_id, p_id, o_id, hash)
+    SELECT s, {indirectManager_id}, o, xxh3_128(s, {indirectManager_id}, o)
+    FROM _pg_triple.vp_{indirectManager_id}
+    ON CONFLICT DO NOTHING
+    RETURNING id, s_id, o_id
+)
+INSERT INTO _pg_triple.vp_{derivedBy_id}_delta (s, o, g, source)
+SELECT qt.id, {ruleIRI_id}, 0, 1
+FROM new_qt qt
+ON CONFLICT DO NOTHING
+```
 
 ---
 
