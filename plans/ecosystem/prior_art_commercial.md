@@ -10,7 +10,7 @@
 >   or referenced.
 >
 > This document records design insights drawn from public documentation.
-> No code is copied; the analysis is used solely to inform pg_triple's architecture.
+> No code is copied; the analysis is used solely to inform pg_ripple's architecture.
 
 ---
 
@@ -27,7 +27,7 @@ mode added in v7, and a predicate-clustered index scheme that directly inspired 
 
 Virtuoso is the most battle-tested open-source triple store and its published performance-tuning
 documentation (`VirtRDFPerformanceTuning`) contains direct evidence of which index layouts and
-storage decisions actually matter at production scale. pg_triple's VP tables and `vp_rare` fallback
+storage decisions actually matter at production scale. pg_ripple's VP tables and `vp_rare` fallback
 table solve the same access-pattern problem via a different strategy.
 
 ### 1.2 Lessons
@@ -53,20 +53,20 @@ CREATE DISTINCT NO PRIMARY KEY REF BITMAP INDEX RDF_QUAD_GS ON RDF_QUAD (G, S);
 The key insight documented in their performance guide: **the design deliberately clusters by
 predicate**. A page read from disk contains only entries for the same predicate, so consecutive
 accesses in a property-valued scan have very high cache hit rates. This is exactly the same
-intuition behind pg_triple's VP (Vertical Partitioning) tables — one table per predicate — but
+intuition behind pg_ripple's VP (Vertical Partitioning) tables — one table per predicate — but
 Virtuoso achieves it through index construction rather than physical table partitioning.
 
 The partial `SP`, `OP`, and `GS` indices are allowed to go stale (entries are never deleted from
 them). A stale entry is harmless because every lookup always validates against the full PSOG or
 POGS index. This scheme saves 60–70% of space compared to four full-coverage quad indices.
 
-**Implications for pg_triple's `vp_rare` fallback table**:
+**Implications for pg_ripple's `vp_rare` fallback table**:
 - `vp_rare (p, s, o, g)` needs at minimum a `(p, s, o)` primary key and a `(p, o, s)` secondary
   index — the predicate-leading equivalent of PSOG + POGS.
 - A `(g, s)` partial index on `vp_rare` would support graph-drop operations (drop all triples
   in a named graph) efficiently; this is an O(n) table scan without it.
 - When a rare predicate is promoted to its own VP table (triple count crosses
-  `pg_triple.vp_promotion_threshold`), the `vp_rare` entries survive until the background
+  `pg_ripple.vp_promotion_threshold`), the `vp_rare` entries survive until the background
   merge worker cleans them up — exactly the stale-entry tolerance Virtuoso documents.
 
 #### 1.2.2 Column-wise mode reduces storage to one-third
@@ -74,12 +74,12 @@ POGS index. This scheme saves 60–70% of space compared to four full-coverage q
 From Virtuoso v7 onward, the same `RDF_QUAD` table is stored in column-wise mode by default. The
 documentation reports this reduces storage to ~1/3 of the row-wise equivalent.
 
-pg_triple's HTAP design already has this distinction: the delta partition uses heap (row store) for
+pg_ripple's HTAP design already has this distinction: the delta partition uses heap (row store) for
 fast individual inserts, while the main partition is intended for read-optimised bulk access. The
 Virtuoso evidence confirms that the main partition should be built with BRIN indices
 (range-based block-level indexing) rather than full B-trees, and that a column-store option for
 the main partition (via PostgreSQL's `columnar` access method from pg_columnar, or a future
-pg_triple column-store extension) would be architecturally sound at v1.0.
+pg_ripple column-store extension) would be architecturally sound at v1.0.
 
 #### 1.2.3 `sql:select-option "order"` as an escape hatch for cost model errors
 
@@ -88,9 +88,9 @@ Virtuoso's performance guide describes a SPARQL query annotation (`DEFINE sql:se
 cost model. This is intentionally a sharp tool — it is very easy to produce an unworkable plan —
 but it is the only recourse when the optimizer makes a radically wrong cardinality estimate.
 
-**Implication for pg_triple's SPARQL query hint mechanism**: pg_triple already plans a
-`http://pg-triple.io/hints/` IRI prefix for query hints (via `FROM`/`GRAPH` clauses). One concrete
-hint should be `<http://pg-triple.io/hints/join-order>` which, when present, appends
+**Implication for pg_ripple's SPARQL query hint mechanism**: pg_ripple already plans a
+`http://pg-ripple.io/hints/` IRI prefix for query hints (via `FROM`/`GRAPH` clauses). One concrete
+hint should be `<http://pg-ripple.io/hints/join-order>` which, when present, appends
 `/*+ ORDERED */` (or a SET LOCAL `join_collapse_limit = 1`) to the generated PostgreSQL query.
 This gives power users the same escape hatch Virtuoso documents without requiring a separate
 syntax extension.
@@ -107,15 +107,15 @@ DROP INDEX RDF_QUAD_GS;
 CREATE COLUMN INDEX RDF_QUAD_GPSO ON RDF_QUAD (G, P, S, O);
 ```
 
-pg_triple will face this same workload split:
+pg_ripple will face this same workload split:
 
-| Workload | Optimal layout | Default for pg_triple |
+| Workload | Optimal layout | Default for pg_ripple |
 |---|---|---|
 | Few large graphs (DBpedia-style) | Predicate-partitioned VP tables, G as filter | Yes — VP tables |
 | Named-graph access control (many small graphs) | G-leading index on `vp_rare` | Needs `(g, p, s, o)` index added |
 | Graph federation (GRAPH {...} dominant) | G-first on all VP tables | Optional GUC from v0.13.0 |
 
-A GUC `pg_triple.named_graph_optimized` (default `off`) that, when enabled, adds a `(g, s, o)` B-tree index on every VP table would address the many-small-graphs case without incurring cost in the default workload.
+A GUC `pg_ripple.named_graph_optimized` (default `off`) that, when enabled, adds a `(g, s, o)` B-tree index on every VP table would address the many-small-graphs case without incurring cost in the default workload.
 
 ---
 
@@ -130,8 +130,8 @@ Python data science pipelines. SHACL and Datalog are not open-source in the curr
 
 ### 2.1 Relevance
 
-maplib is the closest open-source counterpart to pg_triple in the Rust ecosystem. Both are Rust
-systems operating on RDF data; maplib targets the analytics pipeline (Polars/Arrow) where pg_triple
+maplib is the closest open-source counterpart to pg_ripple in the Rust ecosystem. Both are Rust
+systems operating on RDF data; maplib targets the analytics pipeline (Polars/Arrow) where pg_ripple
 targets the operational database. The overlap makes maplib the best source of Rust API patterns
 for bulk load and for returning structured query results efficiently.
 
@@ -155,7 +155,7 @@ AS {
 }
 
 -- Bulk expand against a SQL table:
-SELECT pg_triple.expand_template(
+SELECT pg_ripple.expand_template(
     :'http://example.org/Person',
     'SELECT iri(?id) AS id, name, dob FROM employees'
 ) AS triple_count;
@@ -167,15 +167,15 @@ encode all argument values once via a batch SPI call, then bulk-insert into VP t
 
 **Implication for `src/sparql/` or a new `src/template/` module (v0.8.0 Serialisation + Import)**:
 
-Implement `pg_triple.expand_template(template_iri TEXT, query TEXT) RETURNS BIGINT` as a
+Implement `pg_ripple.expand_template(template_iri TEXT, query TEXT) RETURNS BIGINT` as a
 `#[pg_extern]` that:
-1. Looks up the template definition in `_pg_triple.templates (iri, pattern)`.
+1. Looks up the template definition in `_pg_ripple.templates (iri, pattern)`.
 2. Executes `query` via `SpiClient::run`.
 3. Encodes all distinct IRI/literal values in the result set with a single batch
-   `ON CONFLICT DO NOTHING RETURNING` into `_pg_triple.resources`.
+   `ON CONFLICT DO NOTHING RETURNING` into `_pg_ripple.resources`.
 4. Bulk-inserts the generated triples into the appropriate VP tables or `vp_rare`.
 
-The template catalog table (`_pg_triple.templates`) should store the OTTR pattern as a JSON
+The template catalog table (`_pg_ripple.templates`) should store the OTTR pattern as a JSON
 structure, not raw Turtle, so the Rust code can deserialise it without a full Turtle parser round-trip.
 
 #### 2.2.2 Arrow RecordBatch as SPARQL result container
@@ -184,20 +184,20 @@ maplib returns SPARQL query results as Arrow `RecordBatch` objects transferred z
 Rust into Python via Arrow IPC. Each SPARQL variable maps to an Arrow column; each row is a
 solution binding.
 
-pg_triple's current plan returns SPARQL results as PostgreSQL `SETOF RECORD` rows via SPI —
+pg_ripple's current plan returns SPARQL results as PostgreSQL `SETOF RECORD` rows via SPI —
 one `HeapTuple` allocation per row. For large result sets (millions of bindings) this is the
 dominant overhead.
 
 **Implication for a post-v1.0 optimization** (worth noting in the roadmap now):
 
 The PostgreSQL `COPY TO` protocol can stream rows as raw binary. An Arrow IPC stream is a strict
-superset of binary tabular data. Exposing `pg_triple.sparql_to_arrow(query TEXT) RETURNS bytea`
+superset of binary tabular data. Exposing `pg_ripple.sparql_to_arrow(query TEXT) RETURNS bytea`
 that returns the full result set as an Arrow IPC buffer would allow Python/Rust clients using
 `pyarrow`, `polars`, or `arrow-rs` to consume results without individual row deserialization.
 
-The prerequisite is that pg_triple's result decode path be refactored to produce `Vec<i64>` column
+The prerequisite is that pg_ripple's result decode path be refactored to produce `Vec<i64>` column
 arrays (one per projected variable) rather than row-oriented `Vec<Datum>`. The i64 arrays can then
-be dictionary-decoded in a single bulk `SELECT id, value FROM _pg_triple.resources WHERE id = ANY($1)`
+be dictionary-decoded in a single bulk `SELECT id, value FROM _pg_ripple.resources WHERE id = ANY($1)`
 call, producing Arrow `Utf8Array` / `LargeUtf8Array` columns directly.
 
 #### 2.2.3 Zero-copy batch dictionary decode
@@ -206,13 +206,13 @@ maplib decodes encoded integer IDs back to string form using Polars join operati
 dictionary, which is itself a Polars DataFrame. The join is vectorized and runs in parallel across
 CPU cores.
 
-pg_triple's decode path currently does individual `SPI_execute` calls. The vectorized equivalent
+pg_ripple's decode path currently does individual `SPI_execute` calls. The vectorized equivalent
 in PostgreSQL is:
 
 ```sql
 SELECT r.id, r.value
 FROM unnest($1::BIGINT[]) WITH ORDINALITY AS u(id, ord)
-JOIN _pg_triple.resources r ON r.id = u.id
+JOIN _pg_ripple.resources r ON r.id = u.id
 ORDER BY u.ord;
 ```
 
@@ -237,7 +237,7 @@ materialization), and entity resolution.
 
 Stardog's architecture represents the current state of the art in commercial SPARQL deployment.
 Its `How does reasoning work?` documentation section contains an unusually frank comparison of
-query-time reasoning (rewriting) vs. materialization that directly affects pg_triple's design
+query-time reasoning (rewriting) vs. materialization that directly affects pg_ripple's design
 decisions.
 
 ### 3.2 Lessons
@@ -262,7 +262,7 @@ list four specific disadvantages of materialization that query rewriting avoids:
 - **Fixed schema**: rewriting supports multiple schemas per database; materialization locks to one.
 - **Truth maintenance cost**: deletion propagation in materialized systems is expensive.
 
-pg_triple's datalog.md plans **both**: on-demand CTE mode (equivalent to query rewriting) and
+pg_ripple's datalog.md plans **both**: on-demand CTE mode (equivalent to query rewriting) and
 materialised mode (via pg_trickle IVM). The on-demand CTE mode is correct and should be the
 default. The RDFox section below shows why materialization can still be justified at scale.
 
@@ -289,10 +289,10 @@ $ stardog reasoning schema --list myDB
 Each query can specify which schema to use with `--schema employeeSchema`. This is directly useful
 for multi-tenant SaaS deployments where different tenants need different inference rules.
 
-**Implication for `_pg_triple.rule_sets`**: The rule catalog should support named rule sets, not
-just a flat list of rules. Schema: `_pg_triple.rule_sets (id BIGSERIAL, name TEXT UNIQUE, graph_ids BIGINT[])`.
+**Implication for `_pg_ripple.rule_sets`**: The rule catalog should support named rule sets, not
+just a flat list of rules. Schema: `_pg_ripple.rule_sets (id BIGSERIAL, name TEXT UNIQUE, graph_ids BIGINT[])`.
 The `graph_ids` column points to named graph identifiers in the dictionary; rules loaded from those
-graphs form the named rule set. The `pg_triple.sparql(query, rule_set := 'employeeSchema')` API
+graphs form the named rule set. The `pg_ripple.sparql(query, rule_set := 'employeeSchema')` API
 should then accept an optional rule set name, defaulting to `'default'`.
 
 #### 3.2.3 Schema versioning via 64-bit hash for reasoner invalidation
@@ -301,13 +301,13 @@ Stardog 10 added schema versioning: a 64-bit hash is computed from the contents 
 graph. When a schema graph is updated (INSERT/DELETE to that named graph), the hash changes and
 the reasoner's internal compiled representation is invalidated and recompiled on next use.
 
-pg_triple's on-demand Datalog CTE compiler caches the compiled SQL for each rule set. The cache
+pg_ripple's on-demand Datalog CTE compiler caches the compiled SQL for each rule set. The cache
 must be invalidated when the rule set changes. The Stardog mechanism is clean: hash the rule set
 contents at compilation time, store the hash alongside the cached SQL, and recompile when the
 hash changes at query time.
 
 **Implication for `src/datalog/catalog.rs`**: Store compiled CTE SQL alongside a `rules_hash
-BIGINT` in `_pg_triple.compiled_rule_sets`. At query time, recompute the hash of the active rules
+BIGINT` in `_pg_ripple.compiled_rule_sets`. At query time, recompute the hash of the active rules
 and compare. If different, recompile and update. The hash can be XXH3-128 truncated to 64 bits
 (reusing the existing `xxhash-rust` dependency).
 
@@ -316,21 +316,21 @@ and compare. If different, recompile and update. The hash can be XXH3-128 trunca
 Stardog enforces access control at the named graph level. Both Stardog and Virtuoso treat named
 graphs as security principals — graph-level ACL is the observed industry norm.
 
-pg_triple can implement this more elegantly than any standalone triple store by leveraging
+pg_ripple can implement this more elegantly than any standalone triple store by leveraging
 PostgreSQL's row-level security (RLS):
 
 ```sql
 -- Policy: a user can only see triples in their allowed graphs
-CREATE POLICY view_graph ON _pg_triple.vp_7
-    USING (g = ANY(pg_triple.allowed_graph_ids()));
+CREATE POLICY view_graph ON _pg_ripple.vp_7
+    USING (g = ANY(pg_ripple.allowed_graph_ids()));
 ```
 
-Where `pg_triple.allowed_graph_ids()` is a `SECURITY DEFINER` function reading a
-`_pg_triple.graph_acl (role_name TEXT, graph_id BIGINT)` table. This delegates enforcement to
+Where `pg_ripple.allowed_graph_ids()` is a `SECURITY DEFINER` function reading a
+`_pg_ripple.graph_acl (role_name TEXT, graph_id BIGINT)` table. This delegates enforcement to
 PostgreSQL's proven security implementation rather than requiring application-level filtering.
 
 **This should be the primary access-control mechanism from v0.13.0 (Admin & Security), rather than
-inventing a pg_triple-specific ACL model.** The RLS approach also works transparently with
+inventing a pg_ripple-specific ACL model.** The RLS approach also works transparently with
 existing PostgreSQL tooling (pg_dump includes RLS policies; pgBouncer and connection poolers are
 unaffected).
 
@@ -344,7 +344,7 @@ The PostgreSQL-native equivalent is a Foreign Data Wrapper (FDW). A VP-shaped FD
 external SQL table:
 
 ```sql
-CREATE FOREIGN TABLE _pg_triple.vp_12345_remote (s BIGINT, o BIGINT, g BIGINT)
+CREATE FOREIGN TABLE _pg_ripple.vp_12345_remote (s BIGINT, o BIGINT, g BIGINT)
     SERVER remote_hr_db
     OPTIONS (table_name 'employee_graph_view');
 ```
@@ -353,7 +353,7 @@ would make the remote table appear as a named graph in SPARQL queries via `UNION
 local VP tables. No triple materialization is needed.
 
 This is a post-v1.0 feature but the FDW hook is the correct mechanism and should be noted in the
-roadmap. The architecture is compatible with pg_triple's predicate-based table lookup because the
+roadmap. The architecture is compatible with pg_ripple's predicate-based table lookup because the
 FDW can be created for a specific predicate ID, making it a first-class member of the VP table
 family.
 
@@ -373,7 +373,7 @@ April 2025).
 ### 4.1 Relevance
 
 GraphDB's most distinctive user-facing features — its FTS connectors, `onto:disable-sameAs` query
-hints, and SPARQL explain plan — are directly implementable in pg_triple with less effort than in
+hints, and SPARQL explain plan — are directly implementable in pg_ripple with less effort than in
 a standalone triple store, because PostgreSQL provides the infrastructure. The contrast is
 instructive.
 
@@ -394,12 +394,12 @@ SELECT ?s WHERE {
 The connector intercepts the magic predicate and fires an external Lucene/Elasticsearch query,
 then merges results back into the SPARQL result set.
 
-pg_triple can provide better FTS natively, because PostgreSQL's `tsvector`/`tsquery` is
+pg_ripple can provide better FTS natively, because PostgreSQL's `tsvector`/`tsquery` is
 built into the engine. There are two integration points:
 
-1. **Dictionary FTS index**: Add `pg_triple_fts tsvector GENERATED ALWAYS AS (to_tsvector('english', value)) STORED` to `_pg_triple.resources`. A GIN index on that column allows literal-value text search directly in SQL.
+1. **Dictionary FTS index**: Add `pg_ripple_fts tsvector GENERATED ALWAYS AS (to_tsvector('english', value)) STORED` to `_pg_ripple.resources`. A GIN index on that column allows literal-value text search directly in SQL.
 
-2. **SPARQL FILTER extension function**: Expose a SPARQL extension function `bif:contains(literal, query)` (Virtuoso-compatible spelling) or `pg_triple:fts(literal, query)` that translates to a `@@` operator against the dictionary FTS index in the generated SQL. Filter pushdown means the FTS lookup happens before the triple join, not after.
+2. **SPARQL FILTER extension function**: Expose a SPARQL extension function `bif:contains(literal, query)` (Virtuoso-compatible spelling) or `pg_ripple:fts(literal, query)` that translates to a `@@` operator against the dictionary FTS index in the generated SQL. Filter pushdown means the FTS lookup happens before the triple join, not after.
 
 This is implementable from v0.4.0 (SPARQL Advanced) and avoids the complexity of an external
 connector architecture.
@@ -411,19 +411,19 @@ optimizer hint. Including this graph in a `FROM NAMED` clause disables `owl:same
 that query without a separate syntax extension. The hint is SPARQL-compatible and invisible to
 non-GraphDB clients (they simply see it as a normal named graph name).
 
-This is the right pattern for pg_triple's query hint system. The reserved IRI prefix approach
+This is the right pattern for pg_ripple's query hint system. The reserved IRI prefix approach
 planned in AGENTS.md is validated here:
 
 ```sparql
 -- Disable inference for this query
 SELECT ?s ?p ?o WHERE {
-    FROM <http://pg-triple.io/hints/no-inference>
+    FROM <http://pg-ripple.io/hints/no-inference>
     GRAPH ?g { ?s ?p ?o }
 }
 
 -- Force loop join (override planner)
 SELECT ?s WHERE {
-    FROM <http://pg-triple.io/hints/join-order>
+    FROM <http://pg-ripple.io/hints/join-order>
     { ?s :knows ?x . ?x :knows ?y }
 }
 ```
@@ -431,7 +431,7 @@ SELECT ?s WHERE {
 The hint IRI is extracted during `src/sparql/algebrizer.rs` FROM clause processing and converted
 into optimizer flags that are propagated through the `JoinPlan` to `src/sparql/emitter.rs`.
 
-The reserved prefix should be `http://pg-triple.io/hints/` (consistent with AGENTS.md). Define
+The reserved prefix should be `http://pg-ripple.io/hints/` (consistent with AGENTS.md). Define
 at minimum:
 - `no-inference` — skip all Datalog CTE injection for this query
 - `join-order` — set `SET LOCAL join_collapse_limit = 1` for this query
@@ -443,11 +443,11 @@ GraphDB provides a `SPARQL EXPLAIN` variant (accessible via the query UI or HTTP
 the query plan rather than results. The plan shows estimated cardinalities, index choices, and join
 order decisions — exactly the information a developer needs to debug a slow query.
 
-pg_triple should expose this as a SQL function from v0.12.0 (Performance):
+pg_ripple should expose this as a SQL function from v0.12.0 (Performance):
 
 ```sql
 -- Returns the PostgreSQL EXPLAIN ANALYZE output for the generated SQL
-SELECT pg_triple.sparql_explain(
+SELECT pg_ripple.sparql_explain(
     'SELECT ?s ?p WHERE { ?s :type :Person . ?s :name ?n }',
     analyze := true
 );
@@ -465,16 +465,16 @@ GraphDB's `in-memory-literal-properties` configuration caches language-tagged li
 to accelerate `langMatches()` filter performance. Without a cache, every `FILTER langMatches(?x,
 "en")` requires scanning the dictionary for all literals with an `en` language tag.
 
-pg_triple's dictionary encodes IRIs and literals alike as `i64` IDs. Language-tagged literals are
+pg_ripple's dictionary encodes IRIs and literals alike as `i64` IDs. Language-tagged literals are
 stored as `"value"@lang` strings. The lookup problem is: given a language tag pattern, find all
 dictionary IDs whose string form matches.
 
-A secondary GIN index on a `lang_tag TEXT GENERATED ALWAYS AS (...)` column of `_pg_triple.resources`
+A secondary GIN index on a `lang_tag TEXT GENERATED ALWAYS AS (...)` column of `_pg_ripple.resources`
 (extracting the `@lang` suffix) would make `langMatches()` a pure index scan rather than a
 sequential dictionary scan. The expression:
 
 ```sql
-CREATE INDEX resources_lang_tag ON _pg_triple.resources (lang_tag)
+CREATE INDEX resources_lang_tag ON _pg_ripple.resources (lang_tag)
     WHERE lang_tag IS NOT NULL;
 ```
 
@@ -490,7 +490,7 @@ operation: everything after the last `@` in a literal string.
 **What it is**: An in-memory RDF triple store with the highest-performance incremental Datalog
 reasoning engine in the industry (2–3 million inferences/second in published benchmarks). Developed
 at the University of Oxford; commercialised by Oxford Semantic Technologies; acquired by Samsung
-in 2024. Not on-disk like pg_triple — RDFox trades persistence for reasoning throughput.
+in 2024. Not on-disk like pg_ripple — RDFox trades persistence for reasoning throughput.
 
 **Source for this analysis**: RDFox documentation v7.5 (docs.oxfordsemantic.tech, accessed April
 2025).
@@ -499,7 +499,7 @@ in 2024. Not on-disk like pg_triple — RDFox trades persistence for reasoning t
 
 RDFox's public documentation is unusually detailed about its reasoning algorithms. It is the
 best-documented example of incremental materialization-based reasoning with support for deletion,
-which is the hardest part of pg_triple's planned Datalog materialized mode.
+which is the hardest part of pg_ripple's planned Datalog materialized mode.
 
 ### 5.2 Lessons
 
@@ -531,7 +531,7 @@ When a triple is deleted:
 3. If no derivation survives, delete the derived fact and recurse (in case derived-from-derived
    chains exist).
 
-This is expensive enough that pg_triple's materialized mode should be optional and explicitly
+This is expensive enough that pg_ripple's materialized mode should be optional and explicitly
 documented as not supporting high-frequency individual-triple deletes. The on-demand CTE mode
 does not have this limitation and should be the default.
 
@@ -541,16 +541,16 @@ RDFox provides `query.fact-domain explicit` to query only explicitly asserted fa
 derived triples. This is the RDFox equivalent of querying the base table in a materialized view
 scenario.
 
-pg_triple should implement this as a SPARQL hint:
+pg_ripple should implement this as a SPARQL hint:
 
 ```sparql
 SELECT ?s WHERE {
-    FROM <http://pg-triple.io/hints/explicit-only>
+    FROM <http://pg-ripple.io/hints/explicit-only>
     { ?s rdf:type :Person }
 }
 ```
 
-Or as a SQL function parameter: `pg_triple.sparql(query, include_derived := false)`.
+Or as a SQL function parameter: `pg_ripple.sparql(query, include_derived := false)`.
 
 The storage mechanism: if VP tables carry a `source SMALLINT` column (0 = explicit, rule_id > 0
 = derived by rule N), then `include_derived := false` adds a `WHERE source = 0` filter to every
@@ -574,7 +574,7 @@ RDFox supports rules with multiple head atoms that write to different named grap
 This rule reads from the `:HR` named graph and writes to `:Payroll`, joining across named graphs in
 a single rule. Each head atom can target a different named graph.
 
-pg_triple's rule IR in `src/datalog/` should support multi-head rules from the start. The `Rule`
+pg_ripple's rule IR in `src/datalog/` should support multi-head rules from the start. The `Rule`
 struct should hold `Vec<HeadAtom>`, not a single `HeadAtom`, and each `HeadAtom` should carry an
 optional graph ID binding (defaulting to the default graph, ID 0). The SQL emitter generates one
 `INSERT INTO vp_{id} (s, o, g)` per head atom, all within the same transaction.
@@ -625,40 +625,40 @@ to:
 All three are addressed the same way in rules. This is RDFox's equivalent of PostgreSQL's
 **Foreign Data Wrapper** plus **materialized/regular tables** accessed via a uniform SQL interface.
 
-pg_triple already achieves this implicitly:
+pg_ripple already achieves this implicitly:
 - VP tables and `vp_rare` = in-memory quads (PostgreSQL heap tables)
 - FDW-backed VP tables = external data sources (see Stardog virtual graphs section)
-- `_pg_triple.resources` = built-in lookup table
+- `_pg_ripple.resources` = built-in lookup table
 
 The missing piece is making the **SPARQL-layer** treat FDW-backed VP tables transparently. The
-predicate catalog (`_pg_triple.predicates`) already maps predicate IDs to `table_oid`. An FDW
+predicate catalog (`_pg_ripple.predicates`) already maps predicate IDs to `table_oid`. An FDW
 table has a valid OID; the SPARQL SQL emitter needs no special case — it queries by OID like any
 other. The transparency falls out naturally from the existing architecture.
 
 **Document this design property explicitly in the implementation plan**: foreign VP tables registered
-via `pg_triple.register_foreign_graph(predicate_iri, server_name, remote_table)` will appear
+via `pg_ripple.register_foreign_graph(predicate_iri, server_name, remote_table)` will appear
 automatically in SPARQL queries. No query layer changes are required.
 
 ---
 
-## 6. Summary: Changes to pg_triple Architecture
+## 6. Summary: Changes to pg_ripple Architecture
 
 | Source | Lesson | Target module | Roadmap version |
 |---|---|---|---|
 | Virtuoso | Add `(g, p, s, o)` index to `vp_rare` for graph-drop performance | `src/storage/` migration | v0.1.0 / v0.5.0 |
-| Virtuoso | `<http://pg-triple.io/hints/join-order>` hint → `SET LOCAL join_collapse_limit=1` | `src/sparql/emitter.rs` | v0.12.0 |
-| Virtuoso | GUC `pg_triple.named_graph_optimized` adds G-leading index to all VP tables | `src/admin/` | v0.13.0 |
-| maplib | `pg_triple.expand_template(iri, query)` for OTTR-style DataFrame→RDF bulk load | `src/template/` (new) | v0.8.0 |
+| Virtuoso | `<http://pg-ripple.io/hints/join-order>` hint → `SET LOCAL join_collapse_limit=1` | `src/sparql/emitter.rs` | v0.12.0 |
+| Virtuoso | GUC `pg_ripple.named_graph_optimized` adds G-leading index to all VP tables | `src/admin/` | v0.13.0 |
+| maplib | `pg_ripple.expand_template(iri, query)` for OTTR-style DataFrame→RDF bulk load | `src/template/` (new) | v0.8.0 |
 | maplib | Batch dictionary decode via `unnest($ids) JOIN resources` in `decode.rs` | `src/sparql/decode.rs` | v0.3.0 |
 | maplib | Columnar Arrow IPC result stream `sparql_to_arrow()` | post-v1.0 roadmap | post-v1.0 |
 | Stardog | On-demand Datalog CTE mode as default; materialized mode as opt-in | `src/datalog/compiler.rs` | v0.9.0 |
-| Stardog | Named rule sets in `_pg_triple.rule_sets (name, graph_ids[])` catalog | `src/datalog/catalog.rs` | v0.9.0 |
+| Stardog | Named rule sets in `_pg_ripple.rule_sets (name, graph_ids[])` catalog | `src/datalog/catalog.rs` | v0.9.0 |
 | Stardog | Rule set cache keyed on XXH3-64 hash of compiled rules | `src/datalog/catalog.rs` | v0.9.0 |
 | Stardog | Graph-level ACL via PostgreSQL RLS on `g` column | `src/admin/` | v0.13.0 |
 | Stardog | FDW-backed VP tables as virtual named graphs | `src/admin/` | post-v1.0 |
-| GraphDB | FTS via GIN index on `_pg_triple.resources.lang_tag` + `bif:contains` filter fn | `src/sparql/`, migration | v0.4.0 |
-| GraphDB | `<http://pg-triple.io/hints/no-inference>` FROM hint | `src/sparql/algebrizer.rs` | v0.9.0 |
-| GraphDB | `pg_triple.sparql_explain(query, analyze)` wraps generated SQL in EXPLAIN | `src/sparql/mod.rs` | v0.12.0 |
+| GraphDB | FTS via GIN index on `_pg_ripple.resources.lang_tag` + `bif:contains` filter fn | `src/sparql/`, migration | v0.4.0 |
+| GraphDB | `<http://pg-ripple.io/hints/no-inference>` FROM hint | `src/sparql/algebrizer.rs` | v0.9.0 |
+| GraphDB | `pg_ripple.sparql_explain(query, analyze)` wraps generated SQL in EXPLAIN | `src/sparql/mod.rs` | v0.12.0 |
 | RDFox | Addition/Deletion/BwdChain phases for incremental materialization | `src/datalog/materializer.rs` (new) | v0.9.0 |
 | RDFox | `source SMALLINT` column on VP tables (0=explicit, rule_id=derived) | `src/storage/` schema | v0.9.0 |
 | RDFox | `include_derived := false` param and `explicit-only` hint | `src/sparql/mod.rs` | v0.9.0 |

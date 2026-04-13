@@ -1,17 +1,17 @@
-# pg_trickle Integration Analysis for pg_triple
+# pg_trickle Integration Analysis for pg_ripple
 
 ## 1. What Is pg_trickle?
 
 [pg_trickle](https://github.com/grove/pg-trickle) is a PostgreSQL 18 extension (Rust/pgrx 0.17) that provides **declarative, automatically-refreshing materialized views** — called *stream tables* — powered by Incremental View Maintenance (IVM). When a base table changes, pg_trickle computes only the delta (changed rows), not the full result set. It supports the full SQL surface: JOINs, aggregates, window functions, CTEs (including `WITH RECURSIVE`), subqueries, LATERAL, and TopK.
 
-Key capabilities relevant to pg_triple:
+Key capabilities relevant to pg_ripple:
 
 - **Incremental View Maintenance**: Only changed rows are processed (5–90× faster than full recomputation at 1% change rate)
 - **DAG-aware scheduling**: Stream tables can depend on other stream tables; refreshed in topological order
 - **Trigger-based and WAL-based CDC**: Hybrid change data capture with automatic mode selection
 - **IMMEDIATE mode**: In-transaction IVM — stream table updated within the same transaction as the DML
 - **Full SQL coverage**: GROUP BY, JOIN, WINDOW, WITH RECURSIVE, EXISTS, LATERAL, all expression types
-- **Same tech stack**: PostgreSQL 18, Rust, pgrx 0.17 — identical to pg_triple
+- **Same tech stack**: PostgreSQL 18, Rust, pgrx 0.17 — identical to pg_ripple
 
 ---
 
@@ -26,12 +26,12 @@ Key capabilities relevant to pg_triple:
 ```sql
 -- Pre-computed semi-join: subjects that have both foaf:knows AND foaf:name
 SELECT pgtrickle.create_stream_table(
-    name  => '_pg_triple.extvp_knows_name_ss',
+    name  => '_pg_ripple.extvp_knows_name_ss',
     query => $$
         SELECT k.s, k.o AS knows_obj
-        FROM _pg_triple.vp_7 k  -- foaf:knows
+        FROM _pg_ripple.vp_7 k  -- foaf:knows
         WHERE EXISTS (
-            SELECT 1 FROM _pg_triple.vp_12 n  -- foaf:name
+            SELECT 1 FROM _pg_ripple.vp_12 n  -- foaf:name
             WHERE n.s = k.s
         )
     $$,
@@ -80,11 +80,11 @@ The SPARQL→SQL compiler is already the hard part. The only additional requirem
 ```sql
 -- Stream table stores decoded TEXT values
 SELECT r1.value AS person, r2.value AS email
-FROM _pg_triple.vp_7 t          -- rdf:type
-JOIN _pg_triple.dictionary r1 ON r1.id = t.s
-JOIN _pg_triple.vp_15 e         -- foaf:mbox
+FROM _pg_ripple.vp_7 t          -- rdf:type
+JOIN _pg_ripple.dictionary r1 ON r1.id = t.s
+JOIN _pg_ripple.vp_15 e         -- foaf:mbox
   ON e.s = t.s
-JOIN _pg_triple.dictionary r2 ON r2.id = e.o
+JOIN _pg_ripple.dictionary r2 ON r2.id = e.o
 WHERE t.o = 42                  -- foaf:Person (integer-encoded)
 ```
 
@@ -95,19 +95,19 @@ Reading is `SELECT * FROM active_person_emails` — fully decoded, no joins. The
 ```sql
 -- Stream table stores i64 IDs only — minimal CDC surface
 SELECT t.s AS person_id, e.o AS email_id
-FROM _pg_triple.vp_7 t
-JOIN _pg_triple.vp_15 e ON e.s = t.s
+FROM _pg_ripple.vp_7 t
+JOIN _pg_ripple.vp_15 e ON e.s = t.s
 WHERE t.o = 42
 ```
 
 A companion decoding view sits on top and is exposed to users:
 
 ```sql
-CREATE VIEW pg_triple.active_person_emails AS
+CREATE VIEW pg_ripple.active_person_emails AS
 SELECT r1.value AS person, r2.value AS email
-FROM _pg_triple.sparql_view_active_person_emails v
-JOIN _pg_triple.dictionary r1 ON r1.id = v.person_id
-JOIN _pg_triple.dictionary r2 ON r2.id = v.email_id;
+FROM _pg_ripple.sparql_view_active_person_emails v
+JOIN _pg_ripple.dictionary r1 ON r1.id = v.person_id
+JOIN _pg_ripple.dictionary r2 ON r2.id = v.email_id;
 ```
 
 Option B is the better default: narrower CDC surface (only VP tables matter), smaller stream table (BIGINTs vs TEXT), dictionary decode still happens once per changed row rather than on every read.
@@ -152,7 +152,7 @@ SPARQL queries with runtime variable bindings cannot become stream tables direct
 A new catalog table tracks all registered SPARQL views:
 
 ```sql
-CREATE TABLE _pg_triple.sparql_views (
+CREATE TABLE _pg_ripple.sparql_views (
     name          TEXT PRIMARY KEY,
     sparql        TEXT NOT NULL,         -- original SPARQL text
     generated_sql TEXT NOT NULL,         -- SQL sent to pg_trickle
@@ -167,7 +167,7 @@ CREATE TABLE _pg_triple.sparql_views (
 
 ```sql
 -- Create a named, live-updating SPARQL result set
-SELECT pg_triple.create_sparql_view(
+SELECT pg_ripple.create_sparql_view(
     name     => 'active_people',
     sparql   => $$
         SELECT ?person ?email WHERE {
@@ -183,18 +183,18 @@ SELECT pg_triple.create_sparql_view(
 SELECT * FROM active_people WHERE email LIKE '%@example.org';
 
 -- Drop when no longer needed
-SELECT pg_triple.drop_sparql_view('active_people');
+SELECT pg_ripple.drop_sparql_view('active_people');
 
 -- List all registered SPARQL views
 SELECT name, sparql, schedule, created_at
-FROM pg_triple.list_sparql_views();
+FROM pg_ripple.list_sparql_views();
 ```
 
 Internally `create_sparql_view` runs:
 1. Parse SPARQL → algebra IR
 2. Encode all FILTER constants to `i64` (reuse existing dictionary encoder)
 3. Generate SQL with named column aliases
-4. Register entry in `_pg_triple.sparql_views`
+4. Register entry in `_pg_ripple.sparql_views`
 5. Call `pgtrickle.create_stream_table(name => …, query => …, schedule => …)`
 
 **Benefits**:
@@ -214,9 +214,9 @@ Internally `create_sparql_view` runs:
 -- The delta table is the source of truth (base table)
 -- The main table is a stream table that mirrors it
 SELECT pgtrickle.create_stream_table(
-    name  => '_pg_triple.vp_7_main',
+    name  => '_pg_ripple.vp_7_main',
     query => $$
-        SELECT s, o, g FROM _pg_triple.vp_7_delta
+        SELECT s, o, g FROM _pg_ripple.vp_7_delta
     $$,
     schedule     => '30s',
     refresh_mode => 'DIFFERENTIAL'
@@ -237,22 +237,22 @@ SELECT pgtrickle.create_stream_table(
 
 ### 2.4 Real-Time Analytics & Statistics
 
-**Problem**: `pg_triple.stats()` currently re-scans catalog tables on every call. Predicate distribution, triple counts, and graph sizes need to be fresh but shouldn't require full scans.
+**Problem**: `pg_ripple.stats()` currently re-scans catalog tables on every call. Predicate distribution, triple counts, and graph sizes need to be fresh but shouldn't require full scans.
 
 **pg_trickle solution**: Stream tables for live operational metrics.
 
 ```sql
 -- Per-predicate triple count, always current
 SELECT pgtrickle.create_stream_table(
-    name  => '_pg_triple.predicate_stats',
+    name  => '_pg_ripple.predicate_stats',
     query => $$
         SELECT p.id AS predicate_id,
                p.iri,
                COUNT(*) AS triple_count,
                COUNT(DISTINCT t.s) AS distinct_subjects,
                COUNT(DISTINCT t.o) AS distinct_objects
-        FROM _pg_triple.predicates p
-        JOIN _pg_triple.all_triples_view t ON t.p = p.id
+        FROM _pg_ripple.predicates p
+        JOIN _pg_ripple.all_triples_view t ON t.p = p.id
         GROUP BY p.id, p.iri
     $$,
     schedule => '5s'
@@ -260,13 +260,13 @@ SELECT pgtrickle.create_stream_table(
 
 -- Graph-level statistics
 SELECT pgtrickle.create_stream_table(
-    name  => '_pg_triple.graph_stats',
+    name  => '_pg_ripple.graph_stats',
     query => $$
         SELECT g AS graph_id,
                r.value AS graph_iri,
                COUNT(*) AS triple_count
-        FROM _pg_triple.all_triples_view t
-        JOIN _pg_triple.dictionary r ON r.id = t.g
+        FROM _pg_ripple.all_triples_view t
+        JOIN _pg_ripple.dictionary r ON r.id = t.g
         GROUP BY g, r.value
     $$,
     schedule => '10s'
@@ -274,7 +274,7 @@ SELECT pgtrickle.create_stream_table(
 ```
 
 **Benefits**:
-- `pg_triple.stats()` becomes a simple `SELECT * FROM _pg_triple.predicate_stats` — instant
+- `pg_ripple.stats()` becomes a simple `SELECT * FROM _pg_ripple.predicate_stats` — instant
 - Aggregate maintenance is algebraic (COUNT/SUM) — pg_trickle's strongest differential case
 - No custom counting infrastructure needed
 
@@ -287,15 +287,15 @@ SELECT pgtrickle.create_stream_table(
 ```sql
 -- Cardinality violation detection: subjects missing a required property
 SELECT pgtrickle.create_stream_table(
-    name  => '_pg_triple.shacl_violations_min_count',
+    name  => '_pg_ripple.shacl_violations_min_count',
     query => $$
         -- Subjects of type foaf:Person (pred 7 = rdf:type, obj 42 = foaf:Person)
         -- that are missing foaf:name (pred 12)
         SELECT t.s AS subject_id, 12 AS required_predicate
-        FROM _pg_triple.vp_7 t
+        FROM _pg_ripple.vp_7 t
         WHERE t.o = 42  -- foaf:Person
           AND NOT EXISTS (
-              SELECT 1 FROM _pg_triple.vp_12 n WHERE n.s = t.s
+              SELECT 1 FROM _pg_ripple.vp_12 n WHERE n.s = t.s
           )
     $$,
     refresh_mode => 'IMMEDIATE'  -- validate in same transaction
@@ -327,17 +327,17 @@ Materialize inferred triples as stream tables using `WITH RECURSIVE`.
 ```sql
 -- Materialize transitive closure of rdfs:subClassOf
 SELECT pgtrickle.create_stream_table(
-    name  => '_pg_triple.inferred_subclass',
+    name  => '_pg_ripple.inferred_subclass',
     query => $$
         WITH RECURSIVE closure(sub, super) AS (
             -- Direct subclass relationships
             SELECT s AS sub, o AS super
-            FROM _pg_triple.vp_99  -- rdfs:subClassOf
+            FROM _pg_ripple.vp_99  -- rdfs:subClassOf
           UNION
             -- Transitive closure
             SELECT c.sub, sc.o AS super
             FROM closure c
-            JOIN _pg_triple.vp_99 sc ON sc.s = c.super
+            JOIN _pg_ripple.vp_99 sc ON sc.s = c.super
         )
         SELECT sub, super FROM closure
     $$,
@@ -348,8 +348,8 @@ SELECT pgtrickle.create_stream_table(
 **Recommended approach**: Use the Datalog engine's built-in RDFS rule set instead:
 
 ```sql
-SELECT pg_triple.load_rules_builtin('rdfs');
-SELECT pg_triple.materialize_rules(schedule => '30s');
+SELECT pg_ripple.load_rules_builtin('rdfs');
+SELECT pg_ripple.materialize_rules(schedule => '30s');
 ```
 
 This generates the same `WITH RECURSIVE` stream tables automatically for all 13 RDFS entailment rules (not just `rdfs:subClassOf`), with correct stratification and dependency ordering handled by the Datalog engine and pg_trickle's DAG scheduler.
@@ -377,7 +377,7 @@ pg_trickle's DAG-aware scheduler automatically refreshes these in topological or
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                      pg_triple                               │
+│                      pg_ripple                               │
 │                                                              │
 │  ┌──────────┐  ┌──────────┐  ┌───────────┐  ┌───────────┐  │
 │  │Dictionary│  │VP Tables │  │  SPARQL   │  │  SHACL    │  │
@@ -406,22 +406,22 @@ pg_trickle's DAG-aware scheduler automatically refreshes these in topological or
 
 ### Extension Dependency
 
-pg_trickle would be an **optional dependency** of pg_triple:
+pg_trickle would be an **optional dependency** of pg_ripple:
 
 ```sql
--- pg_triple.control
+-- pg_ripple.control
 requires = ''  -- pg_trickle is optional
 
 -- When pg_trickle is available, enable advanced features
 DO $$
 BEGIN
     IF EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'pg_trickle') THEN
-        PERFORM pg_triple._enable_stream_table_features();
+        PERFORM pg_ripple._enable_stream_table_features();
     END IF;
 END $$;
 ```
 
-pg_triple functions that create stream tables check for pg_trickle's presence:
+pg_ripple functions that create stream tables check for pg_trickle's presence:
 
 ```rust
 #[pg_extern]
@@ -453,13 +453,13 @@ fn create_sparql_view(name: &str, sparql: &str, schedule: &str) -> Result<(), Pg
 
 ## 4. Roadmap Integration
 
-| pg_triple Version | pg_trickle Feature | Priority |
+| pg_ripple Version | pg_trickle Feature | Priority |
 |---|---|---|
 | v0.6.0 (HTAP) | Real-time statistics stream tables, change notification CDC triggers | High |
 | v0.7.0 (SHACL Core) | SHACL violation monitors (IMMEDIATE mode) | Medium |
 | v0.8.0 (SHACL Advanced) | Multi-shape DAG validation | Medium |
 | v0.10.0 (Datalog) | Inference materialization via Datalog rule sets, SHACL-AF `sh:rule` bridge | High |
-| v0.11.0 (SPARQL & Datalog Views) | ExtVP stream tables, `pg_triple.create_sparql_view()` API, Datalog views, SPARQL view caching | High |
+| v0.11.0 (SPARQL & Datalog Views) | ExtVP stream tables, `pg_ripple.create_sparql_view()` API, Datalog views, SPARQL view caching | High |
 | Post-1.0 | Full ExtVP automation, ontology change propagation DAG | High |
 
 ---
@@ -470,7 +470,7 @@ fn create_sparql_view(name: &str, sparql: &str, schedule: &str) -> Result<(), Pg
 
 | Scenario | Without pg_trickle | With pg_trickle | Improvement |
 |---|---|---|---|
-| `pg_triple.stats()` | Full scan of all VP tables | Read from `predicate_stats` stream table | 100–1000× |
+| `pg_ripple.stats()` | Full scan of all VP tables | Read from `predicate_stats` stream table | 100–1000× |
 | Star query (cached) | 5-way VP join + dict decode | Single table scan | 10–50× |
 | `rdfs:subClassOf*` traversal | Recursive CTE at query time | Read materialized closure | 5–20× |
 | ExtVP semi-join | Not available (full VP join) | Pre-computed stream table | 2–10× |
@@ -483,7 +483,7 @@ fn create_sparql_view(name: &str, sparql: &str, schedule: &str) -> Result<(), Pg
 | Write-path overhead (CDC triggers) | pg_trickle's hybrid CDC: 20–55 µs/row trigger, ~5 µs/row WAL mode. Acceptable given VP tables are already I/O-bound on inserts. |
 | Memory for stream table storage | Stream tables are heap tables — standard PG memory management. ExtVP views are subsets of VP tables, so storage is bounded. |
 | Scheduler CPU | pg_trickle's zero-change overhead is 3.2ms average. With 10–20 stream tables, scheduling adds <100ms/sec total CPU. |
-| Extension coupling | pg_trickle is optional; all core pg_triple features work without it. |
+| Extension coupling | pg_trickle is optional; all core pg_ripple features work without it. |
 
 ---
 
@@ -491,7 +491,7 @@ fn create_sparql_view(name: &str, sparql: &str, schedule: &str) -> Result<(), Pg
 
 Both extensions share the identical technology foundation:
 
-| Aspect | pg_triple | pg_trickle |
+| Aspect | pg_ripple | pg_trickle |
 |---|---|---|
 | Language | Rust (Edition 2024) | Rust (Edition 2024) |
 | PG binding | pgrx 0.17 | pgrx 0.17 |
@@ -510,34 +510,34 @@ This means:
 
 ## 7. Deployment Model
 
-### Minimal (pg_triple only)
+### Minimal (pg_ripple only)
 
 ```ini
 # postgresql.conf
-shared_preload_libraries = 'pg_triple'
+shared_preload_libraries = 'pg_ripple'
 ```
 
 ```sql
-CREATE EXTENSION pg_triple;
+CREATE EXTENSION pg_ripple;
 -- Full triple store, no stream tables
 ```
 
-### Enhanced (pg_triple + pg_trickle)
+### Enhanced (pg_ripple + pg_trickle)
 
 ```ini
 # postgresql.conf
-shared_preload_libraries = 'pg_trickle, pg_triple'
+shared_preload_libraries = 'pg_trickle, pg_ripple'
 max_worker_processes = 16
 ```
 
 ```sql
 CREATE EXTENSION pg_trickle;
-CREATE EXTENSION pg_triple;
+CREATE EXTENSION pg_ripple;
 
 -- Now these work:
-SELECT pg_triple.create_sparql_view('my_view', 'SELECT ?s ?name WHERE { ... }');
-SELECT pg_triple.enable_inference_materialization();
-SELECT pg_triple.enable_live_statistics();
+SELECT pg_ripple.create_sparql_view('my_view', 'SELECT ?s ?name WHERE { ... }');
+SELECT pg_ripple.enable_inference_materialization();
+SELECT pg_ripple.enable_live_statistics();
 ```
 
 ### Docker / CNPG
@@ -547,14 +547,14 @@ Both extensions ship as OCI images for CloudNativePG, making combined deployment
 ```yaml
 spec:
   postgresql:
-    shared_preload_libraries: [pg_trickle, pg_triple]
+    shared_preload_libraries: [pg_trickle, pg_ripple]
     extensions:
       - name: pg-trickle
         image:
           reference: ghcr.io/grove/pg_trickle-ext:0.17.0
-      - name: pg-triple
+      - name: pg-ripple
         image:
-          reference: ghcr.io/grove/pg_triple-ext:1.0.0
+          reference: ghcr.io/grove/pg-ripple-ext:1.0.0
 ```
 
 ---
@@ -563,10 +563,10 @@ spec:
 
 | Risk | Likelihood | Impact | Mitigation |
 |---|---|---|---|
-| pg_trickle API changes (pre-1.0) | Medium | Medium | Pin to specific pg_trickle version; abstract calls behind pg_triple wrapper functions |
-| CDC trigger conflicts (both extensions adding triggers) | Low | High | pg_triple's VP tables are internal (`_pg_triple` schema); pg_trickle CDC triggers are per-table and non-conflicting. Verify in integration tests. |
-| Background worker slot exhaustion | Low | Medium | Document `max_worker_processes` sizing: pg_trickle needs 2–3, pg_triple merge worker needs 1, plus custom needs |
-| Shared memory contention | Low | Low | Different shared memory segments; no overlap. pg_trickle uses its own shmem for DAG state; pg_triple uses its own for dictionary cache |
+| pg_trickle API changes (pre-1.0) | Medium | Medium | Pin to specific pg_trickle version; abstract calls behind pg_ripple wrapper functions |
+| CDC trigger conflicts (both extensions adding triggers) | Low | High | pg_ripple's VP tables are internal (`_pg_ripple` schema); pg_trickle CDC triggers are per-table and non-conflicting. Verify in integration tests. |
+| Background worker slot exhaustion | Low | Medium | Document `max_worker_processes` sizing: pg_trickle needs 2–3, pg_ripple merge worker needs 1, plus custom needs |
+| Shared memory contention | Low | Low | Different shared memory segments; no overlap. pg_trickle uses its own shmem for DAG state; pg_ripple uses its own for dictionary cache |
 
 ---
 
@@ -574,7 +574,7 @@ spec:
 
 1. **Start with statistics** (v0.6.0): The lowest-risk, highest-value integration point. Create stream tables for `predicate_stats` and `graph_stats` when pg_trickle is detected. This validates the integration pattern with minimal complexity.
 
-2. **Add SPARQL views** (v0.11.0): The `pg_triple.create_sparql_view()` function is the user-facing killer feature. It combines pg_triple's SPARQL→SQL translation with pg_trickle's IVM to give users always-fresh materialized SPARQL query results.
+2. **Add SPARQL views** (v0.11.0): The `pg_ripple.create_sparql_view()` function is the user-facing killer feature. It combines pg_ripple's SPARQL→SQL translation with pg_trickle's IVM to give users always-fresh materialized SPARQL query results.
 
 3. **Materialize inference** (v0.10.0): RDFS/OWL inference via the Datalog engine's built-in rule sets, materialized as `WITH RECURSIVE` stream tables — a differentiator no other PostgreSQL-based triple store offers.
 
@@ -586,8 +586,8 @@ spec:
 
 ## 10. Summary
 
-pg_trickle is a natural complement to pg_triple. Where pg_triple provides the storage model (dictionary encoding + vertical partitioning) and query language (SPARQL→SQL), pg_trickle provides the *reactivity layer* — keeping derived views, statistics, inference materializations, and cached query results incrementally up-to-date as the underlying graph changes.
+pg_trickle is a natural complement to pg_ripple. Where pg_ripple provides the storage model (dictionary encoding + vertical partitioning) and query language (SPARQL→SQL), pg_trickle provides the *reactivity layer* — keeping derived views, statistics, inference materializations, and cached query results incrementally up-to-date as the underlying graph changes.
 
-The shared technology stack (Rust, pgrx 0.17, PostgreSQL 18) eliminates integration friction. pg_trickle's strong SQL coverage — including JOINs, aggregates, EXISTS, and `WITH RECURSIVE` — aligns precisely with the SQL patterns that pg_triple's SPARQL translator generates.
+The shared technology stack (Rust, pgrx 0.17, PostgreSQL 18) eliminates integration friction. pg_trickle's strong SQL coverage — including JOINs, aggregates, EXISTS, and `WITH RECURSIVE` — aligns precisely with the SQL patterns that pg_ripple's SPARQL translator generates.
 
 The recommended integration path is progressive: start with live statistics (low risk, high value), add SPARQL views (user-facing feature), then layer in inference materialization and eventually automated ExtVP. At every stage pg_trickle remains optional, and the core triple store stands alone.

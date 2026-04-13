@@ -2,7 +2,7 @@
 
 > All three projects are released under the **Apache License 2.0**.
 > This document records design insights drawn from reading their public source code and documentation.
-> No code is copied; the analysis is used solely to inform pg_triple's architecture.
+> No code is copied; the analysis is used solely to inform pg_ripple's architecture.
 
 ---
 
@@ -14,7 +14,7 @@
 
 ### 1.1 Relevance
 
-Logica is the most direct prior art for `src/datalog/compiler.rs`. It solves exactly the problem pg_triple must solve: compile Datalog rules (including aggregation and stratified negation) to correct, readable SQL.
+Logica is the most direct prior art for `src/datalog/compiler.rs`. It solves exactly the problem pg_ripple must solve: compile Datalog rules (including aggregation and stratified negation) to correct, readable SQL.
 
 ### 1.2 Lessons
 
@@ -54,7 +54,7 @@ Without this distinction every disjunctive rule generates an unnecessary `UNION`
 
 #### 1.2.4 C++ parser performance note
 
-Logica recently added a C++ parser alongside the Python one for speed. For pg_triple's use case (rules parsed once and cached in `_pg_triple.rules`) this is not needed — but the move signals that Logica's Python parser is slow enough to matter at scale. pg_triple's Rust `nom`/`pest` parser avoids this concern from day one.
+Logica recently added a C++ parser alongside the Python one for speed. For pg_ripple's use case (rules parsed once and cached in `_pg_ripple.rules`) this is not needed — but the move signals that Logica's Python parser is slow enough to matter at scale. pg_ripple's Rust `nom`/`pest` parser avoids this concern from day one.
 
 ---
 
@@ -63,11 +63,11 @@ Logica recently added a C++ parser alongside the Python one for speed. For pg_tr
 **Repository**: https://github.com/mozilla/mentat  
 **License**: Apache 2.0  
 **Status**: Archived (unmaintained since September 2018)  
-**What it is**: A Datomic-inspired, Datalog-queryable quad store implemented in Rust over SQLite. Structurally the closest antecedent to pg_triple: same language (Rust), same data model (entity–attribute–value quads), same approach (Datalog→SQL via a multi-phase query compiler). Originally written in ClojureScript as "Datomish"; ported to Rust for embedding in Firefox and mobile.
+**What it is**: A Datomic-inspired, Datalog-queryable quad store implemented in Rust over SQLite. Structurally the closest antecedent to pg_ripple: same language (Rust), same data model (entity–attribute–value quads), same approach (Datalog→SQL via a multi-phase query compiler). Originally written in ClojureScript as "Datomish"; ported to Rust for embedding in Firefox and mobile.
 
 ### 2.1 Relevance
 
-Mentat's query pipeline is a worked example of every hard problem pg_triple's `src/sparql/` must solve. The codebase pre-dates pgrx and targets SQLite rather than PostgreSQL, but the algebraic structure is directly applicable.
+Mentat's query pipeline is a worked example of every hard problem pg_ripple's `src/sparql/` must solve. The codebase pre-dates pgrx and targets SQLite rather than PostgreSQL, but the algebraic structure is directly applicable.
 
 ### 2.2 Lessons
 
@@ -91,7 +91,7 @@ mentat_query_sql IR (ColumnOrExpression, GroupBy, …)
 SQL text + bound parameters
 ```
 
-pg_triple's current plan collapses this to two steps: `spargebra Algebra → SQL`. The missing layer is a **`JoinPlan` IR** — a typed Rust struct tree representing joins, filters, bound variables, and projections before any SQL string is built. Optimization passes (star-pattern collapsing, filter pushdown, OPTIONAL→LEFT JOIN decisions) should operate on `JoinPlan`, not on SQL strings or on `spargebra`'s algebra directly.
+pg_ripple's current plan collapses this to two steps: `spargebra Algebra → SQL`. The missing layer is a **`JoinPlan` IR** — a typed Rust struct tree representing joins, filters, bound variables, and projections before any SQL string is built. Optimization passes (star-pattern collapsing, filter pushdown, OPTIONAL→LEFT JOIN decisions) should operate on `JoinPlan`, not on SQL strings or on `spargebra`'s algebra directly.
 
 Suggested module split for `src/sparql/`:
 
@@ -114,7 +114,7 @@ Mentat's algebrizer is handed the live attribute schema (value types, cardinalit
 - `cardinality/one` attribute → omit `DISTINCT` from the emitted SQL
 - `unique/identity` attribute → downgrade `LEFT JOIN` to `INNER JOIN` when that predicate is used as a join key
 
-pg_triple already plans to use SHACL hints the same way (see AGENTS.md "SHACL hints"). Mentat shows the exact mechanism: the algebrizer reads the attribute catalog **before** building the join tree, and the hint is embedded into the `JoinNode` at construction time — it does not require a separate rewrite pass. Both approaches are valid; the key point is that the catalog lookup must happen during algebrization, before the SQL is emitted.
+pg_ripple already plans to use SHACL hints the same way (see AGENTS.md "SHACL hints"). Mentat shows the exact mechanism: the algebrizer reads the attribute catalog **before** building the join tree, and the hint is embedded into the `JoinNode` at construction time — it does not require a separate rewrite pass. Both approaches are valid; the key point is that the catalog lookup must happen during algebrization, before the SQL is emitted.
 
 #### 2.2.3 `InternSet` for encoding-time constant deduplication
 
@@ -142,16 +142,16 @@ Mentat's `tolstoy` sync module (described as structurally analogous to a transac
 
 ### 3.1 Relevance
 
-Omnigres is not a triple store or a reasoning engine — it is the most sophisticated example of production-grade pgrx/C extension architecture available. The three sub-systems most relevant to pg_triple are `omni_worker` (background worker pool), `omni_shmem` (named shared memory slots), and `pg_yregress` (YAML-based regression testing).
+Omnigres is not a triple store or a reasoning engine — it is the most sophisticated example of production-grade pgrx/C extension architecture available. The three sub-systems most relevant to pg_ripple are `omni_worker` (background worker pool), `omni_shmem` (named shared memory slots), and `pg_yregress` (YAML-based regression testing).
 
 ### 3.2 Lessons
 
 #### 3.2.1 `omni_worker` message-queue pattern for the HTAP merge worker
 
-`omni_worker` provides a worker pool where backends post `WorkItem` messages to a shared queue; worker processes claim items and execute them within their own backend context. The architecture solves the hard problems pg_triple's merge worker also faces:
+`omni_worker` provides a worker pool where backends post `WorkItem` messages to a shared queue; worker processes claim items and execute them within their own backend context. The architecture solves the hard problems pg_ripple's merge worker also faces:
 
 - **Crash-safe queue**: messages are durable until acknowledged; a crashed worker leaves the item for a sibling to retry.
-- **Backpressure**: if all workers are busy the queue depth is visible to the poster; pg_triple's merge worker should similarly expose a `pg_triple.merge_queue_depth` GUC-limited metric.
+- **Backpressure**: if all workers are busy the queue depth is visible to the poster; pg_ripple's merge worker should similarly expose a `pg_ripple.merge_queue_depth` GUC-limited metric.
 - **Graceful shutdown**: workers listen for `SIGTERM` via `BackgroundWorker::wait_latch` and finish their current batch before exiting.
 
 **Implication for `src/storage/merge.rs`**: Implement the merge worker loop as:
@@ -173,9 +173,9 @@ The latch should be poke-able from the transaction commit hook (via `pgstat_repo
 
 `omni_shmem` gives each extension a named, version-tagged slot in the shared memory segment. Versioning is critical: if the cache struct layout changes (e.g., `dictionary_cache_size` GUC changes at restart, or a new hash collision list field is added), the slot version is bumped and all backends reattach cleanly rather than reading stale memory with a different layout.
 
-pg_triple's `PgSharedMem` dictionary cache is currently planned as a single flat allocation. Two concrete risks:
+pg_ripple's `PgSharedMem` dictionary cache is currently planned as a single flat allocation. Two concrete risks:
 
-1. **GUC resize across restart**: if `pg_triple.dictionary_cache_size` is changed in `postgresql.conf` and the server restarts, the shmem segment size changes. Without versioning, old backends that haven't restarted will read a truncated or oversized buffer.
+1. **GUC resize across restart**: if `pg_ripple.dictionary_cache_size` is changed in `postgresql.conf` and the server restarts, the shmem segment size changes. Without versioning, old backends that haven't restarted will read a truncated or oversized buffer.
 2. **Future struct evolution**: adding collision chain pointers or a bloom filter to the cache struct changes its binary layout silently.
 
 **Implication for `src/dictionary/cache.rs`**: Store a magic number and a layout version as the first 16 bytes of the shmem slot. At attach time, check the version; if mismatched, clear and reinitialise. The version should be a compile-time constant derived from the struct size.
@@ -184,10 +184,10 @@ pg_triple's `PgSharedMem` dictionary cache is currently planned as a single flat
 
 Omnigres uses YAML test files where each test case is a document with `query` and `result` fields. The regression runner compares results structurally (not as raw text), making tests resilient to column-order changes and whitespace differences.
 
-The pg_triple regression suite currently plans `.sql` + `.expected` pairs via `cargo pgrx regress`. This works for v0.1–v0.3 where outputs are simple. From v0.3.0 (SPARQL Basic) onwards, SPARQL result sets are JSON tables whose column order is non-deterministic. YAML-structured tests that compare result sets as unordered bags of rows would eliminate most false failures.
+The pg_ripple regression suite currently plans `.sql` + `.expected` pairs via `cargo pgrx regress`. This works for v0.1–v0.3 where outputs are simple. From v0.3.0 (SPARQL Basic) onwards, SPARQL result sets are JSON tables whose column order is non-deterministic. YAML-structured tests that compare result sets as unordered bags of rows would eliminate most false failures.
 
 **Options** (in order of effort):
-1. **Adopt `pg_yregress` directly** — requires adding it as a dev dependency; works immediately since pg_triple targets PostgreSQL 18.
+1. **Adopt `pg_yregress` directly** — requires adding it as a dev dependency; works immediately since pg_ripple targets PostgreSQL 18.
 2. **Write a thin YAML harness in Rust** — a small `tests/regress.rs` that reads `tests/sparql/*.yaml` and drives `pgrx::Spi`.
 3. **Sort output in `.expected` files** — low effort; works until result metadata (variable names, types) also needs structural comparison.
 
@@ -195,19 +195,19 @@ For v0.3.0–v0.5.0, option 3 is pragmatic. Option 1 should be evaluated at v0.6
 
 #### 3.2.4 Incremental adoption: GUC-gated subsystem initialization
 
-Omnigres's design principle — each extension is independently adoptable, paying no cost for unused features — directly applies to pg_triple's optional subsystems:
+Omnigres's design principle — each extension is independently adoptable, paying no cost for unused features — directly applies to pg_ripple's optional subsystems:
 
 | Subsystem | Current plan | Omnigres-inspired change |
 |---|---|---|
-| Datalog reasoner | Always initialized in `_PG_init` | Only if `pg_triple.enable_reasoner = on` (default off until v0.9.0) |
-| HTAP merge worker | Always registered | Only if `pg_triple.htap_enabled = on` |
+| Datalog reasoner | Always initialized in `_PG_init` | Only if `pg_ripple.enable_reasoner = on` (default off until v0.9.0) |
+| HTAP merge worker | Always registered | Only if `pg_ripple.htap_enabled = on` |
 | SHACL validator | Background worker always present | Only if at least one shape graph is loaded |
 
 Lazy initialization reduces startup latency for databases that only need basic SPARQL and storage.
 
 ---
 
-## 4. Summary: Changes to pg_triple Architecture
+## 4. Summary: Changes to pg_ripple Architecture
 
 The following table maps each lesson to a concrete change in the implementation plan or codebase structure.
 

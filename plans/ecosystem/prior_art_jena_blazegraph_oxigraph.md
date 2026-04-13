@@ -9,7 +9,7 @@
 >   Blazegraph is effectively a historical reference system; no future development is expected.
 >
 > This document records design insights drawn from public source code and documentation.
-> No GPL code is copied; the analysis is used solely to inform pg_triple's architecture.
+> No GPL code is copied; the analysis is used solely to inform pg_ripple's architecture.
 
 ---
 
@@ -27,7 +27,7 @@ the ASF.
 
 Jena/TDB2 is the reference implementation for SPARQL query optimization in an open-source triple
 store. Its statistics-based BGP (Basic Graph Pattern) optimizer and its inline-value NodeId
-encoding are both directly applicable to pg_triple.
+encoding are both directly applicable to pg_ripple.
 
 ### 1.2 Lessons
 
@@ -44,7 +44,7 @@ Each index is a **full-covering** B+Tree — all four components of the quad are
 key, so a single index lookup returns the complete quad with no join back to a primary table. The
 trade-off: 6× storage overhead compared to storing each quad once.
 
-pg_triple's VP table approach sidesteps this differently: predicate partitioning means that within
+pg_ripple's VP table approach sidesteps this differently: predicate partitioning means that within
 a single VP table `vp_{id}(s, o, g)`, the predicate dimension is already fixed — the table name
 encodes it. We need only two indices per VP table: `(s, o, g)` and `(o, s, g)`. This is
 structurally analogous to TDB's `SPO` and `OSP` for a single predicate, but without the storage
@@ -53,8 +53,8 @@ fallback.
 
 **The key tension**: TDB's full-covering approach makes it straightforward to add SPARQL queries
 that ask "which predicates does subject X have?" — the `SP` or `SPOG` index answers it directly.
-In pg_triple, the equivalent is `SELECT DISTINCT p FROM _pg_triple.predicates JOIN vp_rare ...
-UNION SELECT unnest(...)` — more expensive. The `_pg_triple.predicates` catalog partially
+In pg_ripple, the equivalent is `SELECT DISTINCT p FROM _pg_ripple.predicates JOIN vp_rare ...
+UNION SELECT unnest(...)` — more expensive. The `_pg_ripple.predicates` catalog partially
 addresses this for common predicates, but a `(s, p)` secondary index on `vp_rare` is needed
 for DESCRIBE queries' subject-to-predicate enumeration.
 
@@ -76,7 +76,7 @@ into the remaining 63 bits, covering:
 For these types, no dictionary lookup is ever needed — the value is fully contained in the i64.
 String literals still go to the node table.
 
-pg_triple currently encodes all literals as i64 IDs via XXH3-128, requiring a dictionary lookup to
+pg_ripple currently encodes all literals as i64 IDs via XXH3-128, requiring a dictionary lookup to
 decode any literal to its string form. This is correct but unnecessarily expensive for numeric
 and boolean literals which appear as FILTER constants and in BIND expressions frequently.
 
@@ -128,7 +128,7 @@ lower (more selective) than patterns with all-variable positions. The file is ge
 `tdbstats` and can be manually edited to add semantic hints (e.g., marking a property as
 approximately inverse-functional).
 
-pg_triple already has better data for this purpose: every VP table is a genuine PostgreSQL table
+pg_ripple already has better data for this purpose: every VP table is a genuine PostgreSQL table
 with live `pg_statistic` entries updated by `AUTOVACUUM`. PostgreSQL's `n_distinct`, histogram
 bounds, and correlation statistics are exactly what the BGP optimizer needs to estimate pattern
 cardinalities.
@@ -139,7 +139,7 @@ The join reordering pass should use `pg_catalog.pg_stats` and `pg_catalog.pg_cla
 estimate cardinality for each triple pattern. The order of operations:
 
 1. For each triple pattern in the BGP, compute an estimated row count:
-   - If predicate is known: look up `reltuples` from `pg_class` for `_pg_triple.vp_{id}`.
+   - If predicate is known: look up `reltuples` from `pg_class` for `_pg_ripple.vp_{id}`.
    - If subject is bound: multiply by `1/n_distinct_subject` from `pg_stats`.
    - If object is bound: multiply by `1/n_distinct_object` from `pg_stats`.
 2. Sort patterns by ascending estimated row count.
@@ -164,7 +164,7 @@ generations are retained until manually deleted. This gives:
   being built.
 - **Historical retention**: older generations can be retained briefly for backup purposes.
 
-pg_triple's HTAP merge worker moves rows from `vp_{id}_delta` to `vp_{id}_main`. The analogous
+pg_ripple's HTAP merge worker moves rows from `vp_{id}_delta` to `vp_{id}_main`. The analogous
 compaction pattern is: at a configurable interval, create a new `vp_{id}_main` table, bulk-insert
 the current delta into it, CLUSTER by the primary index, then atomically `ALTER TABLE RENAME` to
 replace the old main table. This allows:
@@ -173,7 +173,7 @@ replace the old main table. This allows:
    effective than incremental inserts into an existing BRIN).
 2. Zero-downtime because queries use `UNION ALL delta + main`; the rename is a catalog-only
    operation visible instantly.
-3. The old main table is retained briefly for a configurable `pg_triple.merge_retention_seconds`
+3. The old main table is retained briefly for a configurable `pg_ripple.merge_retention_seconds`
    before `DROP TABLE`.
 
 The current plan to `INSERT INTO ... SELECT` incrementally into the existing main partition
@@ -210,7 +210,7 @@ the original authors moved on and Wikidata's query load grew, there was no commu
 maintaining the custom storage layer. Bugs accumulated, SPARQL compliance gaps remained, and the
 cost of adding features (aggregation push-down, property path optimisation) was too high.
 
-**Lesson for pg_triple**: do not build custom storage. pg_triple's VP tables are PostgreSQL heap
+**Lesson for pg_ripple**: do not build custom storage. pg_ripple's VP tables are PostgreSQL heap
 tables with standard B-tree and BRIN indices. Every PostgreSQL DBA knows how to maintain them;
 every PostgreSQL release improves them; `pg_dump`/`pg_restore`, VACUUM, REINDEX all work without
 extension-specific tooling. This is the right choice and Blazegraph's demise confirms it.
@@ -222,13 +222,13 @@ overwritten in place. Each transaction appends new versions of modified pages. T
 therefore inherently crash-safe — there is no partial write that can corrupt existing data, only
 an incomplete append that will be truncated at recovery.
 
-The architectural equivalent in pg_triple is PostgreSQL's WAL. The WAL is also append-only. The
+The architectural equivalent in pg_ripple is PostgreSQL's WAL. The WAL is also append-only. The
 implication: **VP table writes are already crash-safe** by virtue of being PostgreSQL heap writes.
 No additional journaling layer is needed for the delta partition. The one case where this is
-non-obvious is the dictionary: `_pg_triple.resources (id, value)` insertions are also WAL-backed
+non-obvious is the dictionary: `_pg_ripple.resources (id, value)` insertions are also WAL-backed
 and crash-safe.
 
-The Blazegraph lesson is a negative one — a confirmation that pg_triple's decision to use
+The Blazegraph lesson is a negative one — a confirmation that pg_ripple's decision to use
 PostgreSQL as the storage layer is correct, not an alternative design to adopt.
 
 #### 2.2.3 Namespace API as a multi-tenancy primitive
@@ -238,9 +238,9 @@ process, each with their own SPARQL endpoint at `/blazegraph/namespace/NAME/spar
 is logical (separate B-Trees), not security-level (the auth documentation explicitly warns that
 namespace isolation does not provide security, only logical partitioning).
 
-pg_triple's natural multi-tenancy model is PostgreSQL schemas. Each tenant gets:
+pg_ripple's natural multi-tenancy model is PostgreSQL schemas. Each tenant gets:
 - `CREATE SCHEMA tenant_a;`
-- VP tables created as `tenant_a.vp_{id}` rather than `_pg_triple.vp_{id}`
+- VP tables created as `tenant_a.vp_{id}` rather than `_pg_ripple.vp_{id}`
 - Per-schema predicates catalog and resource dictionary
 
 This is both more flexible (PostgreSQL schema isolation is used by every major SaaS multi-tenant
@@ -261,7 +261,7 @@ release: v0.5.6 (March 2026). Approximately 1.6k GitHub stars.
 
 **Critical shared dependency**: Oxigraph publishes `spargebra` (SPARQL parser), `oxrdf` (RDF data
 structures), `oxttl` (Turtle/TriG parser), `oxrdfxml`, `oxjsonld`, `sparopt` (optimizer), and
-`sparesults` — all of which pg_triple either already uses or plans to use. We are downstream
+`sparesults` — all of which pg_ripple either already uses or plans to use. We are downstream
 dependents of Oxigraph's published crates.
 
 ### 3.1 Relevance
@@ -292,7 +292,7 @@ only with a key-sorted layout. Having all six permutations means any triple acce
 a sorted range scan. Without multiple permutations, a lookup like "find all triples with object X"
 would require a full table scan.
 
-pg_triple's VP tables avoid this trade-off: within a VP table for predicate P, the `(s, o, g)`
+pg_ripple's VP tables avoid this trade-off: within a VP table for predicate P, the `(s, o, g)`
 B-tree handles O-first and S-first lookups efficiently through different scan strategies. And
 since each VP table only contains triples for a single predicate, the predicate dimension is
 collapsed. This eliminates the P-leading indices (POSG, POGS) that Oxigraph needs for predicate
@@ -309,10 +309,10 @@ Oxigraph hashes IRIs and string literals to 128-bit SipHash-2-4 IDs. The hash is
 term representation in all indices — there is no separate "IRI to ID" lookup table. The `id2str`
 table maps 128-bit ID → string for decode, but the encode path is just `hash(iri_string)`.
 
-pg_triple uses XXH3-128 truncated to 63 bits (fitting a signed i64, leaving room for the inline
+pg_ripple uses XXH3-128 truncated to 63 bits (fitting a signed i64, leaving room for the inline
 type tag from §1.2.2). The functional design is the same; the differences are:
 
-| Aspect | Oxigraph (SipHash-2-4-128) | pg_triple (XXH3-128→i63) |
+| Aspect | Oxigraph (SipHash-2-4-128) | pg_ripple (XXH3-128→i63) |
 |---|---|---|
 | Speed | ~1.5 GB/s (seeded) | ~30–50 GB/s (unseeded) |
 | Collision resistance | Designed for adversarial inputs | Non-adversarial only |
@@ -320,13 +320,13 @@ type tag from §1.2.2). The functional design is the same; the differences are:
 | Storage | 16 bytes | 8 bytes (fits PostgreSQL BIGINT) |
 
 The per-process random seed in Oxigraph means the same IRI gets a different ID in different
-server runs — IDs cannot be compared across process restarts. pg_triple's fixed XXH3-128 seed
+server runs — IDs cannot be compared across process restarts. pg_ripple's fixed XXH3-128 seed
 means IDs are deterministic across restarts, which is important for `pg_dump`/`pg_restore`
 compatibility: a restored database has the same IDs as the original.
 
 **One Oxigraph concern to learn from**: their wiki notes "No collision found on 2019 Wikidata
-dump". pg_triple should add the same validation: a CI test that encodes the full Wikidata dump
-(or a representative large dataset) and checks for any collision in `_pg_triple.resources`.
+dump". pg_ripple should add the same validation: a CI test that encodes the full Wikidata dump
+(or a representative large dataset) and checks for any collision in `_pg_ripple.resources`.
 
 #### 3.2.3 Dictionary GC is an unsolved problem — design for it now
 
@@ -340,7 +340,7 @@ This is a known correctness/space deficiency: deleting all triples that referenc
 literal does not free the `id2str` entry. Over time (especially with workloads that generate
 many blank nodes or temporary IRIs) the dictionary grows without bound.
 
-pg_triple faces exactly the same problem with `_pg_triple.resources`. The fix requires either:
+pg_ripple faces exactly the same problem with `_pg_ripple.resources`. The fix requires either:
 
 1. **Reference counting**: `resources (id, value, refcount)`. Increment on encode, decrement on
    delete. When `refcount = 0`, the entry is eligible for deletion. Problem: tracking refcounts
@@ -349,9 +349,9 @@ pg_triple faces exactly the same problem with `_pg_triple.resources`. The fix re
 
 2. **Periodic GC scan**: A background worker (separate from the merge worker) periodically runs:
    ```sql
-   DELETE FROM _pg_triple.resources r
+   DELETE FROM _pg_ripple.resources r
    WHERE NOT EXISTS (
-       SELECT 1 FROM _pg_triple.all_vp_ids WHERE id = r.id
+       SELECT 1 FROM _pg_ripple.all_vp_ids WHERE id = r.id
    )
    ```
    This is O(dictionary_size) but can run as a low-priority background job. The `all_vp_ids`
@@ -362,14 +362,14 @@ pg_triple faces exactly the same problem with `_pg_triple.resources`. The fix re
    datasets).
 
 **Recommendation**: Option 3 is acceptable for v0.1–v0.8. Option 2 (periodic GC scan) should be
-implemented in v0.11.0 (Maintenance) as `pg_triple.vacuum_dictionary()` and called from the
+implemented in v0.11.0 (Maintenance) as `pg_ripple.vacuum_dictionary()` and called from the
 admin vacuum routine. Option 1 (refcounting) is too complex relative to its benefit for a
 PostgreSQL-backed store.
 
 #### 3.2.4 `sparopt` crate: a shared SPARQL optimizer to track and potentially contribute to
 
 Oxigraph's `sparopt` crate is a standalone SPARQL optimizer that operates on the `spargebra`
-algebra IR. It is dual Apache-2.0/MIT. pg_triple already uses `spargebra` for parsing — `sparopt`
+algebra IR. It is dual Apache-2.0/MIT. pg_ripple already uses `spargebra` for parsing — `sparopt`
 is the natural next step in the pipeline.
 
 `sparopt` currently implements:
@@ -377,28 +377,28 @@ is the natural next step in the pipeline.
 - Basic greedy join reordering by decreasing triple pattern selectivity
 - Filter pushdown
 
-These are exactly the optimizations pg_triple needs in `src/sparql/optimizer.rs`.
+These are exactly the optimizations pg_ripple needs in `src/sparql/optimizer.rs`.
 
 **Options:**
 
 1. **Use `sparopt` directly as a dependency**: Call `sparopt::Optimizer::optimize(algebra)` to
    get a rewritten algebra, then translate to SQL. The output is a `spargebra`-compatible algebra
-   tree, so no IR bridging is needed. This gives pg_triple the optimizer for free and contributes
+   tree, so no IR bridging is needed. This gives pg_ripple the optimizer for free and contributes
    usage/feedback to the Oxigraph project.
 
-2. **Implement independently**: pg_triple's optimizer has access to PostgreSQL statistics that are
+2. **Implement independently**: pg_ripple's optimizer has access to PostgreSQL statistics that are
    unavailable to `sparopt` (which is storage-agnostic and uses heuristics, not statistics).
-   A pg_triple-specific optimizer can use `pg_stats.n_distinct` and `pg_class.reltuples` for
+   A pg_ripple-specific optimizer can use `pg_stats.n_distinct` and `pg_class.reltuples` for
    far better cardinality estimates than `sparopt`'s heuristics.
 
 **Recommendation**: Start with option 1 (`sparopt` as a dependency) for v0.3.0 to get a working
-optimizer quickly. Add a pg_triple-specific statistics pass in v0.12.0 that post-processes
+optimizer quickly. Add a pg_ripple-specific statistics pass in v0.12.0 that post-processes
 `sparopt`'s output using live `pg_stats` data. Contribute that statistics interface back to
 `sparopt` if it can be made storage-agnostic (difficult but possible via a callback trait).
 
 The relationship with the Oxigraph project should be monitored and a contribution strategy
 established. As a downstream user of `spargebra`, `oxttl`, `oxrdfxml`, `oxrdf`, and potentially
-`sparopt`, pg_triple benefits from their maintenance. Filing issues and opening PRs is the right
+`sparopt`, pg_ripple benefits from their maintenance. Filing issues and opening PRs is the right
 form of reciprocity.
 
 #### 3.2.5 Volcano iterator model: single-threaded, simple, proven
@@ -407,16 +407,16 @@ Oxigraph's query evaluation uses the Volcano (pull-based iterator) model. Each o
 `Filter`, `Project`, `Sort`, `Distinct`) implements an iterator interface. Query plans are trees
 of iterators; results are pulled one at a time from the root. Single-threaded.
 
-This is the same model PostgreSQL uses internally for query execution. pg_triple's SPARQL→SQL
+This is the same model PostgreSQL uses internally for query execution. pg_ripple's SPARQL→SQL
 translation effectively delegates the execution model to PostgreSQL's executor, which is also
 Volcano-based. There is no benefit in implementing a separate SPARQL-level Volcano executor —
 PostgreSQL already provides one.
 
-The practical implication: **SPARQL query evaluation in pg_triple should always go through
+The practical implication: **SPARQL query evaluation in pg_ripple should always go through
 PostgreSQL's executor** (via the generated SQL and SPI), not through a Rust-level iterator tree.
 This is already the plan. Oxigraph's development confirms it: they have a full
 Volcano-in-Rust implementation and note it is "currently single-threaded for simplicity" with a
-TODO for multi-threading. PostgreSQL's executor is already parallel-capable where pg_triple
+TODO for multi-threading. PostgreSQL's executor is already parallel-capable where pg_ripple
 benefits from that automatically by emitting appropriate SQL (e.g., `/*+ parallel(none) */` or
 leaving it to the planner).
 
@@ -426,23 +426,23 @@ Oxigraph chose RocksDB (LSMT) for its excellent write performance. LSMT writes a
 appends to memtables (WAL + sorted file), giving O(1) amortised write cost per key-value pair.
 Read performance degrades as levels accumulate; compaction trades CPU for read performance.
 
-pg_triple's VP table delta partition uses PostgreSQL heap (row store), which is random-access
+pg_ripple's VP table delta partition uses PostgreSQL heap (row store), which is random-access
 B-tree insertion. For very high-frequency individual-triple inserts, this has higher per-insert
 cost than RocksDB's memtable append.
 
-However, pg_triple's HTAP architecture already addresses this: the delta partition absorbs
+However, pg_ripple's HTAP architecture already addresses this: the delta partition absorbs
 random writes, and the merge worker amortises the B-tree insertion cost into bulk batches. The
 main partition receives data in sorted order during merge, giving exactly the same sequential-write
 pattern that makes LSMT efficient.
 
 **The key lesson from Oxigraph's LSMT use**: bulk-load performance matters more than single-triple
-insert performance for triple stores. The `pg_triple.load_turtle(path)` bulk loader should bypass
+insert performance for triple stores. The `pg_ripple.load_turtle(path)` bulk loader should bypass
 individual `INSERT` statements and use `COPY` into the delta partition, achieving the same
 sequential-write throughput as LSMT's memtable flush.
 
 ---
 
-## 4. Summary: Changes to pg_triple Architecture
+## 4. Summary: Changes to pg_ripple Architecture
 
 | Source | Lesson | Target module | Roadmap version |
 |---|---|---|---|
@@ -454,7 +454,7 @@ sequential-write throughput as LSMT's memtable flush.
 | Blazegraph | Custom storage stack = maintenance trap — keep pg heap, no custom B-Tree | architecture principle | ongoing |
 | Blazegraph | PostgreSQL schema per tenant as multi-tenancy primitive | `src/admin/` | v0.13.0 |
 | Oxigraph | `sparopt` as v0.3.0 optimizer dependency; replace with stats-based optimizer at v0.12.0 | `src/sparql/optimizer.rs` | v0.3.0 / v0.12.0 |
-| Oxigraph | CI test: encode large dataset, assert zero hash collisions in `_pg_triple.resources` | `tests/` | v0.2.0 |
-| Oxigraph | Dictionary GC: `pg_triple.vacuum_dictionary()` periodic scan removes unreferenced entries | `src/admin/` | v0.11.0 |
+| Oxigraph | CI test: encode large dataset, assert zero hash collisions in `_pg_ripple.resources` | `tests/` | v0.2.0 |
+| Oxigraph | Dictionary GC: `pg_ripple.vacuum_dictionary()` periodic scan removes unreferenced entries | `src/admin/` | v0.11.0 |
 | Oxigraph | Bulk load via `COPY` into delta partition (not individual INSERTs) | `src/storage/loader.rs` (new) | v0.2.0 |
 | Oxigraph | Monitor `spargebra`/`oxttl`/`oxrdf` upstream; maintain contribution strategy | dependency policy | ongoing |

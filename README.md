@@ -1,15 +1,15 @@
-# pg_triple
+# pg_ripple
 
 **A high-performance RDF triple store inside PostgreSQL.**
 
-pg_triple is a PostgreSQL 18 extension that turns your database into a fully-featured knowledge graph. Store RDF data, query it with SPARQL, enforce data quality with SHACL, and reason over it with Datalog — all without leaving PostgreSQL.
+pg_ripple is a PostgreSQL 18 extension that turns your database into a fully-featured knowledge graph. Store RDF data, query it with SPARQL, enforce data quality with SHACL, and reason over it with Datalog — all without leaving PostgreSQL.
 
 ```sql
 -- Install and start using
-CREATE EXTENSION pg_triple;
+CREATE EXTENSION pg_ripple;
 
 -- Load some data
-SELECT pg_triple.load_turtle('
+SELECT pg_ripple.load_turtle('
   @prefix ex: <http://example.org/> .
   @prefix foaf: <http://xmlns.com/foaf/0.1/> .
 
@@ -20,7 +20,7 @@ SELECT pg_triple.load_turtle('
 ');
 
 -- Query with SPARQL
-SELECT * FROM pg_triple.sparql('
+SELECT * FROM pg_ripple.sparql('
   PREFIX ex:   <http://example.org/>
   PREFIX foaf: <http://xmlns.com/foaf/0.1/>
   SELECT ?name WHERE {
@@ -34,22 +34,22 @@ SELECT * FROM pg_triple.sparql('
 
 ---
 
-## Why pg_triple?
+## Why pg_ripple?
 
-Most RDF triple stores are standalone systems — separate processes, separate storage, separate administration. pg_triple takes a different approach: it brings the triple store *into* PostgreSQL.
+Most RDF triple stores are standalone systems — separate processes, separate storage, separate administration. pg_ripple takes a different approach: it brings the triple store *into* PostgreSQL.
 
 This means you get:
 
 - **One database** for both your relational data and your knowledge graph
 - **PostgreSQL's full toolbox** — MVCC, WAL replication, `pg_dump`/`pg_restore`, `EXPLAIN`, monitoring, connection pooling — all work out of the box
 - **No data movement** — your RDF data lives alongside your existing tables; SPARQL queries can coexist with SQL in the same transaction
-- **Familiar operations** — any DBA who knows PostgreSQL can operate pg_triple
+- **Familiar operations** — any DBA who knows PostgreSQL can operate pg_ripple
 
 ### How it compares
 
-> **Note**: pg_triple features marked "Yes" are *planned* across v0.1.0–v1.0.0; see the [Roadmap](ROADMAP.md) for delivery versions. Competitor capabilities reflect publicly documented feature sets.
+> **Note**: pg_ripple features marked "Yes" are *planned* across v0.1.0–v1.0.0; see the [Roadmap](ROADMAP.md) for delivery versions. Competitor capabilities reflect publicly documented feature sets.
 
-| Capability | pg_triple | Blazegraph | Virtuoso | Apache Fuseki |
+| Capability | pg_ripple | Blazegraph | Virtuoso | Apache Fuseki |
 |---|---|---|---|---|
 | Runs inside PostgreSQL | Yes | No | No | No |
 | SPARQL 1.1 Query | Yes | Yes | Yes | Yes |
@@ -73,7 +73,7 @@ This means you get:
 Store triples and quads using the standard RDF data model. Every IRI, blank node, and literal is dictionary-encoded to a compact 64-bit integer for fast joins and minimal storage.
 
 ```sql
-SELECT pg_triple.insert_triple(
+SELECT pg_ripple.insert_triple(
   'http://example.org/Alice',
   'http://xmlns.com/foaf/0.1/knows',
   'http://example.org/Bob'
@@ -86,7 +86,7 @@ Full SPARQL 1.1 support — SELECT, ASK, CONSTRUCT, DESCRIBE, property paths, ag
 
 ```sql
 -- Find everyone Alice can reach through "knows" links (any depth)
-SELECT * FROM pg_triple.sparql('
+SELECT * FROM pg_ripple.sparql('
   PREFIX ex:   <http://example.org/>
   PREFIX foaf: <http://xmlns.com/foaf/0.1/>
   SELECT ?person ?name WHERE {
@@ -99,7 +99,7 @@ SELECT * FROM pg_triple.sparql('
 
 ### SPARQL Update *(planned — v0.5.1 basic, v0.12.0 advanced)*
 
-Basic write operations (INSERT DATA, DELETE DATA) land in v0.5.1, enabling standard RDF tools to write to pg_triple. Pattern-based updates (DELETE/INSERT WHERE), LOAD, CLEAR, DROP, and CREATE complete the full SPARQL 1.1 Update specification in v0.12.0.
+Basic write operations (INSERT DATA, DELETE DATA) land in v0.5.1, enabling standard RDF tools to write to pg_ripple. Pattern-based updates (DELETE/INSERT WHERE), LOAD, CLEAR, DROP, and CREATE complete the full SPARQL 1.1 Update specification in v0.12.0.
 
 ### SHACL data quality *(planned — v0.7.0 core, v0.8.0 advanced)*
 
@@ -107,7 +107,7 @@ Define data integrity rules using the W3C SHACL standard. Constraints are enforc
 
 ```sql
 -- Load a shape that requires every Person to have exactly one email
-SELECT pg_triple.load_shacl('
+SELECT pg_ripple.load_shacl('
   @prefix sh: <http://www.w3.org/ns/shacl#> .
   @prefix ex: <http://example.org/> .
 
@@ -127,7 +127,7 @@ Automatically derive new facts from rules and logic. Ships with built-in RDFS (1
 
 ```sql
 -- Load RDFS entailment rules
-SELECT pg_triple.load_rules_builtin('rdfs');
+SELECT pg_ripple.load_rules_builtin('rdfs');
 
 -- Now SPARQL queries automatically infer subclass relationships:
 -- If Dog rdfs:subClassOf Animal, and Rex rdf:type Dog,
@@ -136,14 +136,14 @@ SELECT pg_triple.load_rules_builtin('rdfs');
 
 ### SPARQL Protocol (HTTP) *(planned — v0.15.0)*
 
-A companion HTTP service (`pg_triple_http`) exposes a standard W3C SPARQL 1.1 Protocol endpoint, so web applications, YASGUI, Postman, and any SPARQL client can query pg_triple over HTTP with full content negotiation.
+A companion HTTP service (`pg_ripple_http`) exposes a standard W3C SPARQL 1.1 Protocol endpoint, so web applications, YASGUI, Postman, and any SPARQL client can query pg_ripple over HTTP with full content negotiation.
 
 ### SPARQL Federation *(planned — v0.16.0)*
 
-Query remote SPARQL endpoints from within pg_triple queries using the standard `SERVICE` keyword. Multiple remote calls execute in parallel.
+Query remote SPARQL endpoints from within pg_ripple queries using the standard `SERVICE` keyword. Multiple remote calls execute in parallel.
 
 ```sql
-SELECT * FROM pg_triple.sparql('
+SELECT * FROM pg_ripple.sparql('
   PREFIX ex:  <http://example.org/>
   PREFIX dbo: <http://dbpedia.org/ontology/>
   SELECT ?person ?abstract WHERE {
@@ -161,7 +161,7 @@ SELECT * FROM pg_triple.sparql('
 Make statements about statements — essential for provenance, temporal annotations, and trust.
 
 ```sql
-SELECT pg_triple.load_turtle('
+SELECT pg_ripple.load_turtle('
   @prefix ex:  <http://example.org/> .
   @prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
 
@@ -175,8 +175,8 @@ SELECT pg_triple.load_turtle('
 Organise facts into named graphs, then control access per graph using PostgreSQL's Row-Level Security.
 
 ```sql
-SELECT pg_triple.grant_graph('analyst_role', 'http://example.org/public-data', 'read');
-SELECT pg_triple.grant_graph('admin_role', 'http://example.org/internal', 'admin');
+SELECT pg_ripple.grant_graph('analyst_role', 'http://example.org/public-data', 'read');
+SELECT pg_ripple.grant_graph('admin_role', 'http://example.org/internal', 'admin');
 ```
 
 ### Incremental SPARQL views *(planned — v0.11.0)*
@@ -184,7 +184,7 @@ SELECT pg_triple.grant_graph('admin_role', 'http://example.org/internal', 'admin
 Pin a SPARQL query as a live view that updates incrementally when the underlying data changes — no full recomputation. Requires the companion [pg_trickle](https://github.com/grove/pg-trickle) extension.
 
 ```sql
-SELECT pg_triple.create_sparql_view(
+SELECT pg_ripple.create_sparql_view(
   'active_employees',
   'PREFIX rdf:  <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
    PREFIX ex:   <http://example.org/>
@@ -198,21 +198,21 @@ SELECT pg_triple.create_sparql_view(
 );
 
 -- Queries against the view are sub-millisecond table scans
-SELECT * FROM _pg_triple.sparql_view_active_employees;
+SELECT * FROM _pg_ripple.sparql_view_active_employees;
 ```
 
 ---
 
 ## Architecture
 
-pg_triple is built from the ground up for performance:
+pg_ripple is built from the ground up for performance:
 
 ```
  SPARQL Query / Update                   HTTP API
         │                                   │
         ▼                                   ▼
  ┌─────────────────┐              ┌──────────────────┐
- │  SPARQL Parser   │              │  pg_triple_http   │
+ │  SPARQL Parser   │              │  pg_ripple_http   │
  │  (spargebra)     │              │  (Rust binary)    │
  └────────┬────────┘              └────────┬─────────┘
           │                                │
@@ -250,7 +250,7 @@ pg_triple is built from the ground up for performance:
 ### Storage design
 
 - **Dictionary encoding**: Every IRI, blank node, and literal is mapped to a 64-bit integer via XXH3-128 hashing. All joins operate on integers — no string comparisons in the hot path.
-- **Vertical partitioning**: Each predicate gets its own table (`_pg_triple.vp_{id}`) with columns `(s, o, g)`. This means queries that bind a predicate touch only one compact, heavily-indexed table.
+- **Vertical partitioning**: Each predicate gets its own table (`_pg_ripple.vp_{id}`) with columns `(s, o, g)`. This means queries that bind a predicate touch only one compact, heavily-indexed table.
 - **Rare-predicate consolidation**: Predicates with fewer than 1,000 triples share a single table to avoid catalog bloat on predicate-rich datasets.
 - **HTAP architecture**: Writes go to a small delta partition (B-tree indexed); a background worker asynchronously merges deltas into the read-optimised main partition (BRIN indexed). Reads and writes never block each other.
 
@@ -279,7 +279,7 @@ pg_triple is built from the ground up for performance:
 | RDF parsers | [rio_turtle](https://crates.io/crates/rio_turtle), [rio_xml](https://crates.io/crates/rio_xml) — Turtle, N-Triples, RDF/XML; [oxttl](https://crates.io/crates/oxttl) / [oxrdf](https://crates.io/crates/oxrdf) added at v0.4.0 for RDF-star (Turtle-star, N-Triples-star) |
 | Hashing | [xxhash-rust](https://crates.io/crates/xxhash-rust) (XXH3-128) — fast non-cryptographic hash for dictionary dedup |
 | Serialization | [serde](https://crates.io/crates/serde) + [serde_json](https://crates.io/crates/serde_json) — SHACL reports, SPARQL results, config |
-| HTTP server | [axum](https://crates.io/crates/axum) (built on [tokio](https://tokio.rs/)) — SPARQL Protocol HTTP endpoint (`pg_triple_http` binary) |
+| HTTP server | [axum](https://crates.io/crates/axum) (built on [tokio](https://tokio.rs/)) — SPARQL Protocol HTTP endpoint (`pg_ripple_http` binary) |
 | PG client (HTTP service) | [tokio-postgres](https://crates.io/crates/tokio-postgres) + [deadpool-postgres](https://crates.io/crates/deadpool-postgres) — async connection pool from HTTP service to PostgreSQL |
 | HTTP client (federation) | [reqwest](https://crates.io/crates/reqwest) — outbound calls to remote SPARQL endpoints (SERVICE keyword) |
 | IVM / stream tables | [pg_trickle](https://github.com/grove/pg-trickle) *(optional companion extension)* — incremental SPARQL views, ExtVP, live statistics |
@@ -291,7 +291,7 @@ pg_triple is built from the ground up for performance:
 
 ## Project Status
 
-pg_triple is in the **design and planning phase**. No code has been written yet. The architecture, roadmap, and implementation plan are documented and ready for development.
+pg_ripple is in the **design and planning phase**. No code has been written yet. The architecture, roadmap, and implementation plan are documented and ready for development.
 
 See the [Roadmap](ROADMAP.md) for the full release plan (v0.1.0 through v1.0.0) and the [Implementation Plan](plans/implementation_plan.md) for detailed technical design.
 
@@ -299,7 +299,7 @@ See the [Roadmap](ROADMAP.md) for the full release plan (v0.1.0 through v1.0.0) 
 
 ## Getting Started
 
-> **Note**: pg_triple is not yet released. The instructions below describe the intended installation workflow.
+> **Note**: pg_ripple is not yet released. The instructions below describe the intended installation workflow.
 
 ### Prerequisites
 
@@ -311,8 +311,8 @@ See the [Roadmap](ROADMAP.md) for the full release plan (v0.1.0 through v1.0.0) 
 
 ```bash
 # Clone the repository
-git clone https://github.com/grove/pg_triple.git
-cd pg_triple
+git clone https://github.com/grove/pg-ripple.git
+cd pg_ripple
 
 # Initialise pgrx for PostgreSQL 18
 cargo pgrx init --pg18 $(which pg_config)
@@ -327,13 +327,13 @@ cargo pgrx install --pg-config $(which pg_config)
 ### Enable the extension
 
 ```sql
-CREATE EXTENSION pg_triple;
+CREATE EXTENSION pg_ripple;
 ```
 
 ### Load some data
 
 ```sql
-SELECT pg_triple.load_turtle('
+SELECT pg_ripple.load_turtle('
   @prefix ex: <http://example.org/> .
   @prefix foaf: <http://xmlns.com/foaf/0.1/> .
 
@@ -349,7 +349,7 @@ SELECT pg_triple.load_turtle('
 ### Query with SPARQL
 
 ```sql
-SELECT * FROM pg_triple.sparql('
+SELECT * FROM pg_ripple.sparql('
   PREFIX foaf: <http://xmlns.com/foaf/0.1/>
   SELECT ?name WHERE {
     ?person a foaf:Person .
@@ -362,7 +362,7 @@ SELECT * FROM pg_triple.sparql('
 
 ## Roadmap
 
-pg_triple is planned as 18 incremental releases from v0.1.0 to v1.0.0 (~98–131 person-weeks):
+pg_ripple is planned as 18 incremental releases from v0.1.0 to v1.0.0 (~98–131 person-weeks):
 
 | Phase | Versions | What you get |
 |---|---|---|
@@ -390,7 +390,7 @@ Planned future directions include distributed storage (Citus), vector + graph hy
 
 ## Quality & Testing
 
-pg_triple aims for production-grade quality:
+pg_ripple aims for production-grade quality:
 
 - **Unit tests** — pgrx `#[pg_test]` for every SQL-exposed function, property-based testing with `proptest`
 - **Integration tests** — 30+ pg_regress test files covering every feature
@@ -417,7 +417,7 @@ pg_triple aims for production-grade quality:
 
 ## Contributing
 
-pg_triple is in early development. Contributions, feedback, and design discussions are welcome. Please open an issue to discuss before submitting a pull request.
+pg_ripple is in early development. Contributions, feedback, and design discussions are welcome. Please open an issue to discuss before submitting a pull request.
 
 ---
 

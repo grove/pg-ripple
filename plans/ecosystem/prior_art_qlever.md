@@ -14,7 +14,7 @@ machine — the largest published demo has over one trillion triples. Active dev
 release v0.5.45 (February 2026, commits from April 12, 2026). 814 stars.
 
 **Notable deployments**: Wikidata (17B triples), UniProt (94B triples), OpenStreetMap (10B+
-geometries), DBLP, PubChem. These are the exact benchmark datasets pg_triple should target.
+geometries), DBLP, PubChem. These are the exact benchmark datasets pg_ripple should target.
 
 **Against Oxigraph on DBLP (390M triples)**:
 
@@ -56,11 +56,11 @@ This is the architectural explanation for QLever's performance numbers:
 - "All papers with their title" (7M rows, simple join) takes **4.2s in QLever vs 44–132s for
   others** — because the join compiles to two merge joins over PSO permutations.
 
-Compare this to pg_triple: VP tables are already predicate-partitioned (equivalent to QLever's P
+Compare this to pg_ripple: VP tables are already predicate-partitioned (equivalent to QLever's P
 being fixed), and within each VP table the `(s, o, g)` B-tree gives O(log n) single-key lookups.
 PostgreSQL's planner can sometimes choose a merge join when both sides are sorted, but this
 requires that the index provides a sorted scan order that matches the join column — which is only
-guaranteed in pg_triple's case for the primary index key.
+guaranteed in pg_ripple's case for the primary index key.
 
 **Implication for `src/sparql/emitter.rs`**: When emitting SQL for a BGP join where the join
 variable is the sort key of the VP table's primary index (i.e., subject-to-subject or
@@ -69,14 +69,14 @@ PostgreSQL planner considers a merge join. The planner already does this when in
 are met, but explicit ordering in subqueries can help avoid sort operations for multi-join BGPs.
 
 More broadly: QLever's performance advantage is structural — flat, sorted, compressed index files
-vs. B-trees with random-access overhead. pg_triple cannot match QLever's throughput on bulk
+vs. B-trees with random-access overhead. pg_ripple cannot match QLever's throughput on bulk
 sequential scans (aggregate all triples of predicate P) because PostgreSQL B-trees carry per-node
-overhead. This is a known architectural trade-off: pg_triple pays per-triple overhead to get
+overhead. This is a known architectural trade-off: pg_ripple pays per-triple overhead to get
 transactional writes, concurrent access, and the full PostgreSQL ecosystem. The benchmark numbers
 are the quantification of that trade-off.
 
 **Document this trade-off explicitly** in `implementation_plan.md` with the QLever DBLP numbers
-as the reference benchmark. pg_triple's North Star for bulk-scan performance should be within 5×
+as the reference benchmark. pg_ripple's North Star for bulk-scan performance should be within 5×
 of QLever (achievable through BRIN-indexed main partitions and parallel seq-scan SQL).
 
 #### 1.2.2 Two-tier vocabulary: RAM for hot IRIs, disk for cold literals
@@ -100,18 +100,18 @@ dates another, and so on. This means:
    At Wikidata scale: 3 billion vocabulary entries, 190 GB uncompressed. Only a few GB are needed
    in RAM for typical query workloads; the rest lives on SSD.
 
-pg_triple's `_pg_triple.resources (id BIGINT, value TEXT)` is a single-tier table — all entries
+pg_ripple's `_pg_ripple.resources (id BIGINT, value TEXT)` is a single-tier table — all entries
 are PostgreSQL heap pages, all subject to the global `shared_buffers` eviction policy. For
 Wikidata-scale workloads where the dictionary approaches tens of billions of entries, the vast
 majority of `resources` lookups will be cold page reads.
 
-**Implication for v0.9.0 (Scale)**: Implement a QLever-style tiered dictionary in pg_triple:
+**Implication for v0.9.0 (Scale)**: Implement a QLever-style tiered dictionary in pg_ripple:
 
-1. **Hot tier** (UNLOGGED TABLE, `_pg_triple.resources_hot`): IRIs shorter than a GUC-controlled
+1. **Hot tier** (UNLOGGED TABLE, `_pg_ripple.resources_hot`): IRIs shorter than a GUC-controlled
    threshold (default 512 bytes), all prefixes in the prefix registry, all predicate IRIs. These
    fit in `shared_buffers` and are always warm.
 
-2. **Cold tier** (HEAP TABLE, `_pg_triple.resources_cold`): Everything else — long literals,
+2. **Cold tier** (HEAP TABLE, `_pg_ripple.resources_cold`): Everything else — long literals,
    infrequently-used IRIs. Accessed via OS cache; tolerate I/O latency.
 
 3. The dictionary encoder checks the hot tier first (in-process LRU cache → shared memory →
@@ -144,26 +144,26 @@ This structure is used for:
 3. **Statistics queries**: "how many subjects have the predicate `schema:birthDate`?" — answered
    via pattern aggregation.
 
-pg_triple has no equivalent. The current approach for DESCRIBE is to query each VP table for
+pg_ripple has no equivalent. The current approach for DESCRIBE is to query each VP table for
 subject X separately — N queries for N predicates. For `vp_rare`, all triples for X are in one
 table but still require a full scan filtered by s = X.
 
-**Implication for v0.4.0 (SPARQL Completeness)**: Create `_pg_triple.subject_patterns`:
+**Implication for v0.4.0 (SPARQL Completeness)**: Create `_pg_ripple.subject_patterns`:
 
 ```sql
-CREATE TABLE _pg_triple.subject_patterns (
+CREATE TABLE _pg_ripple.subject_patterns (
     s        BIGINT NOT NULL,
     pattern  BIGINT[] NOT NULL,  -- sorted array of predicate IDs
     PRIMARY KEY (s)
 );
-CREATE INDEX ON _pg_triple.subject_patterns USING GIN (pattern);
+CREATE INDEX ON _pg_ripple.subject_patterns USING GIN (pattern);
 ```
 
 The `pattern` column contains a sorted array of all predicate IDs for subject `s`. This enables:
 - `DESCRIBE <iri>`: SELECT pattern FROM subject_patterns WHERE s = encode('<iri>')
   → then query each VP table in the pattern array.
 - "predicates by popularity": GROUP BY unnest(pattern) ORDER BY count(*) — directly.
-- SPARQL autocompletion for a pg_triple SQL API extension.
+- SPARQL autocompletion for a pg_ripple SQL API extension.
 
 The table is updated by the merge worker after each delta→main promotion, not on every INSERT
 (too expensive). The GIN index allows "which subjects have both predicate P1 and predicate P2?"
@@ -181,18 +181,18 @@ The view is sorted by the first three columns; joining on the first column is O(
 The access syntax is `SERVICE view:VIEWNAME { ... }` — the SERVICE keyword repurposed for
 local sub-graph access.
 
-pg_triple's equivalent is **PostgreSQL's native `CREATE MATERIALIZED VIEW`**:
+pg_ripple's equivalent is **PostgreSQL's native `CREATE MATERIALIZED VIEW`**:
 
 ```sql
-CREATE MATERIALIZED VIEW pg_triple.person_facts AS
+CREATE MATERIALIZED VIEW pg_ripple.person_facts AS
 SELECT
-    pg_triple.decode(s.s) AS subject,
-    pg_triple.decode(bd.o) AS birth_date,
-    pg_triple.decode(n.o)  AS name
-FROM _pg_triple.vp_birthDate bd
-JOIN _pg_triple.vp_name n USING (s)
-JOIN _pg_triple.vp_type t USING (s)
-WHERE t.o = pg_triple.encode('schema:Person');
+    pg_ripple.decode(s.s) AS subject,
+    pg_ripple.decode(bd.o) AS birth_date,
+    pg_ripple.decode(n.o)  AS name
+FROM _pg_ripple.vp_birthDate bd
+JOIN _pg_ripple.vp_name n USING (s)
+JOIN _pg_ripple.vp_type t USING (s)
+WHERE t.o = pg_ripple.encode('schema:Person');
 ```
 
 This is more powerful than QLever's materialized views (no limitations on column count, supports
@@ -201,7 +201,7 @@ for automatic use), and requires zero new extension code.
 
 **Implication**: Document in `src/sparql/` that `SERVICE <local:view-name>` in SPARQL queries
 should be translated to a reference to a PostgreSQL materialized view of the corresponding name.
-This makes pg_triple's equivalent of QLever's materialized views available at v0.3.0 essentially
+This makes pg_ripple's equivalent of QLever's materialized views available at v0.3.0 essentially
 for free, since PostgreSQL already has this feature.
 
 #### 1.2.5 Index rebuild vs. HTAP: QLever's update weakness
@@ -211,21 +211,21 @@ QLever requires a **full index rebuild** when the dataset changes significantly.
 index files are largely immutable once built. The QLever docs say: "Rebuild index: this is needed
 after a significant number of updates."
 
-This is pg_triple's most significant architectural advantage over QLever:
+This is pg_ripple's most significant architectural advantage over QLever:
 
-- pg_triple supports concurrent transactional writes (INSERT/DELETE/UPDATE via SPI) without any
+- pg_ripple supports concurrent transactional writes (INSERT/DELETE/UPDATE via SPI) without any
   index rebuild, because VP tables are ordinary PostgreSQL tables with live B-tree indexes.
 - The merge worker promotes delta→main in the background without interrupting queries.
 - SPARQL 1.1 Update is a first-class operation, not an afterthought.
 
-**Implication**: The pg_triple marketing / documentation framing should explicitly contrast the
+**Implication**: The pg_ripple marketing / documentation framing should explicitly contrast the
 HTAP architecture with QLever's rebuild requirement. For workloads with frequent updates (streaming
-data, live knowledge graphs, versioned datasets), pg_triple is architecturally superior. For
+data, live knowledge graphs, versioned datasets), pg_ripple is architecturally superior. For
 workloads with infrequent bulk loads and intensive read queries (Wikidata-style), QLever's
 flat-file permutations give a 10–100× raw query throughput advantage.
 
 This is the fundamental design trade-off to document: **QLever = fast bulk reads, update requires
-rebuild; pg_triple = transactional reads + writes, slightly slower bulk scans**.
+rebuild; pg_ripple = transactional reads + writes, slightly slower bulk scans**.
 
 #### 1.2.6 GeoSPARQL performance comparison with PostgreSQL+PostGIS
 
@@ -235,9 +235,9 @@ into the index. The comparison covers spatial joins at OpenStreetMap scale (10B+
 
 This paper is directly relevant because:
 1. It provides a quantified benchmark of QLever vs. PostgreSQL for spatial RDF data.
-2. pg_triple runs inside PostgreSQL and can use PostGIS natively — the spatial extension is
+2. pg_ripple runs inside PostgreSQL and can use PostGIS natively — the spatial extension is
    already present and indexes are already built if the deployment uses it.
-3. A SPARQL extension `geof:distance`, `geof:within`, `geof:intersects` in pg_triple can compile
+3. A SPARQL extension `geof:distance`, `geof:within`, `geof:intersects` in pg_ripple can compile
    to `ST_Distance`, `ST_Within`, `ST_Intersects` SQL calls, leveraging existing PostGIS GIST
    indexes directly. No custom R-tree needed.
 
@@ -251,7 +251,7 @@ query. Cite the SIGSPATIAL'25 paper as the motivation.
 
 ---
 
-## 2. Summary: Changes to pg_triple Architecture
+## 2. Summary: Changes to pg_ripple Architecture
 
 | Source | Lesson | Target module | Roadmap version |
 |---|---|---|---|
@@ -259,7 +259,7 @@ query. Cite the SIGSPATIAL'25 paper as the motivation.
 | QLever | DBLP/Wikidata/UniProt as reference benchmarks; document 5× QLever gap as accepted trade-off | `implementation_plan.md` | v0.2.0 |
 | QLever | Tiered dictionary: hot (UNLOGGED) + cold (HEAP) with pg_prewarm warm-up | `src/dictionary/` | v0.9.0 |
 | QLever | ID ordering: allocate typed-literal IDs monotonically within type for range-scan compilation | `src/dictionary/` | v0.3.0 |
-| QLever | `_pg_triple.subject_patterns (s, pattern BIGINT[])` with GIN index for DESCRIBE + autocomplete | `src/storage/` | v0.4.0 |
+| QLever | `_pg_ripple.subject_patterns (s, pattern BIGINT[])` with GIN index for DESCRIBE + autocomplete | `src/storage/` | v0.4.0 |
 | QLever | `SERVICE <local:view>` → PostgreSQL `MATERIALIZED VIEW` translation in SPARQL compiler | `src/sparql/` | v0.3.0 |
 | QLever | Document HTAP-vs-rebuild trade-off explicitly vs. QLever | `implementation_plan.md` | v0.1.0 |
 | QLever | GeoSPARQL → PostGIS translation; detect PostGIS at `_PG_init`; cite SIGSPATIAL'25 | `src/sparql/functions/geo.rs` | v0.8.0 |

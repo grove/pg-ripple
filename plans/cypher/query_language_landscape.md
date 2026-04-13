@@ -37,14 +37,14 @@ Having). This algebra is expressive enough to represent all the operators in
 openCypher's and GQL's read path. Stardog's Cypher endpoint, before it was
 deprecated, compiled Cypher → SPARQL algebra → execute. This is technically viable.
 
-However, the right framing for pg_triple is **not** "transpile to SPARQL" but
+However, the right framing for pg_ripple is **not** "transpile to SPARQL" but
 rather "transpile to a common graph algebra IR that maps to VP-table SQL." Whether
-that IR is literally SPARQL algebra or pg_triple's own defined algebra is an
+that IR is literally SPARQL algebra or pg_ripple's own defined algebra is an
 implementation choice, not a correctness requirement. The SQL/SPI layer is the
 true common target.
 
 Using SPARQL algebra as the canonical IR has one concrete advantage: spargebra
-already exists, is well-tested, and pg_triple's `src/sparql/` pipeline already
+already exists, is well-tested, and pg_ripple's `src/sparql/` pipeline already
 lowers it to SQL. A Cypher/GQL front-end that produces SPARQL algebra IR would
 reuse the entire SQL emission path at zero extra cost.
 
@@ -115,7 +115,7 @@ core — is documented by the standards committee to be "essentially identical" 
 GPM in SQL/PGQ. Neo4j designed Cypher 25 to be GQL-compatible; the openCypher
 project stopped independent releases and defers to GQL going forward.
 
-For pg_triple: a `cypher-algebra` parser written against the GQL grammar will
+For pg_ripple: a `cypher-algebra` parser written against the GQL grammar will
 accept all openCypher queries without modification for the GPM subset, which
 covers ~90% of practical read workloads.
 
@@ -156,9 +156,9 @@ FROM GRAPH_TABLE(
 ```
 
 This is **native SQL**, and PostgreSQL 18 may eventually implement it. For
-pg_triple, `GRAPH_TABLE()` over a view layer on VP tables is a plausible future
-path. It is not a query language pg_triple needs to implement (PostgreSQL itself
-would handle it), but it is relevant to how pg_triple exposes its LPG structure.
+pg_ripple, `GRAPH_TABLE()` over a view layer on VP tables is a plausible future
+path. It is not a query language pg_ripple needs to implement (PostgreSQL itself
+would handle it), but it is relevant to how pg_ripple exposes its LPG structure.
 
 SQL/PGQ is worth tracking but not implementing. It is mentioned here for
 completeness.
@@ -247,7 +247,7 @@ partial Gremlin frontend is not justified relative to the value.
 If a Gremlin-compatible interface is ever needed, the correct implementation path
 is a **Gremlin→GQL compiler** (translate the declarative Gremlin subset to GQL
 patterns, then use the GQL pipeline) — not a Gremlin→SQL compiler built directly
-into pg_triple. This is a separate external project.
+into pg_ripple. This is a separate external project.
 
 ---
 
@@ -364,13 +364,13 @@ fundamental correctness gaps in the untranslatable features. Not worth it.
 | **SPARQL** | Yes | Core feature; already planned | v0.3.0 onward |
 | **openCypher** | Yes | Practical dialect; most tooling targets it | Post-1.0, Phase 1 |
 | **GQL** | Yes, together with openCypher | Same crate, 2 grammar branches, trivial marginal cost | Post-1.0, Phase 1 |
-| **SQL/PGQ** | Tracking only | PostgreSQL will implement; pg_triple should ensure VP tables are exposable as PGQ graph views | V2.x |
+| **SQL/PGQ** | Tracking only | PostgreSQL will implement; pg_ripple should ensure VP tables are exposable as PGQ graph views | V2.x |
 | **Gremlin** | No | Imperative model; untranslatable features; user base migrating to openCypher | Never / external tool |
 
 The answer to "can all be transpiled to SPARQL" is: **openCypher and GQL can be
 compiled to a superset of SPARQL algebra, and that IR lowers to the same VP-table
 SQL.** The phrase "transpile to SPARQL" is correct directionally but the precise
-answer is "translate to the unified graph algebra IR that pg_triple's SQL emitter
+answer is "translate to the unified graph algebra IR that pg_ripple's SQL emitter
 already understands, with a small number of new operators added."
 
 Gremlin cannot be faithfully transpiled to any declarative algebra due to its
@@ -387,14 +387,14 @@ per-path state (`sack`, `store`, `cap`) and side-effect model.
    more future-proof.
 
 2. **`MERGE` in GQL**: GQL's ISO standard does not include MERGE in the core
-   language (it is implementation-defined). Should pg_triple support `MERGE` as an
+   language (it is implementation-defined). Should pg_ripple support `MERGE` as an
    openCypher compatibility feature but mark it as non-standard in GQL mode?
 
 3. **SQL/PGQ `GRAPH_TABLE()` integration**: PostgreSQL 18 may add `GRAPH_TABLE()`
-   in a future point release. Should pg_triple expose VP tables as PGQ graphs via
-   a DDL helper (`pg_triple.create_pgq_graph(graph_name TEXT)`)? This would give
-   users SQL/PGQ support for free without pg_triple implementing a GQL parser at
-   all — worth evaluating if PostgreSQL adds support before pg_triple's Cypher work
+   in a future point release. Should pg_ripple expose VP tables as PGQ graphs via
+   a DDL helper (`pg_ripple.create_pgq_graph(graph_name TEXT)`)? This would give
+   users SQL/PGQ support for free without pg_ripple implementing a GQL parser at
+   all — worth evaluating if PostgreSQL adds support before pg_ripple's Cypher work
    starts.
 
 4. **TCK compliance target for GQL**: The openCypher TCK has ~2000 scenarios.

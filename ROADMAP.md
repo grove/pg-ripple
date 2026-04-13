@@ -1,4 +1,4 @@
-# pg_triple — Roadmap
+# pg_ripple — Roadmap
 
 > From **0.1.0** (foundation) to **1.0.0** (production-ready triple store)
 
@@ -43,36 +43,36 @@ Each release below has two layers:
 
 **Theme**: Core data model, dictionary encoding, and basic triple CRUD.
 
-> **In plain language:** This is the "hello world" release. After installing pg_triple into a PostgreSQL database, a user can store facts (called *triples* — think "subject → relationship → object", e.g. "Alice → knows → Bob") and retrieve them by pattern. No query language yet — just the basic building blocks. Internally, every piece of text (names, URLs, values) is converted to a compact number for fast storage and comparison. This release also sets up automated testing so that every future change is verified.
+> **In plain language:** This is the "hello world" release. After installing pg_ripple into a PostgreSQL database, a user can store facts (called *triples* — think "subject → relationship → object", e.g. "Alice → knows → Bob") and retrieve them by pattern. No query language yet — just the basic building blocks. Internally, every piece of text (names, URLs, values) is converted to a compact number for fast storage and comparison. This release also sets up automated testing so that every future change is verified.
 >
 > **Effort estimate: 6–8 person-weeks**
 
 ### Deliverables
 
 - [ ] pgrx 0.17 project scaffolding targeting PostgreSQL 18
-- [ ] Extension bootstrap: `CREATE EXTENSION pg_triple` creates `_pg_triple` schema
+- [ ] Extension bootstrap: `CREATE EXTENSION pg_ripple` creates `_pg_ripple` schema
 - [ ] **Dictionary encoder**
   - Unified dictionary table (IRIs, blank nodes, literals in a single table with `kind` discriminator — avoids ID space collision between separate resource/literal tables)
   - XXH3-128 hash-based dedup
-  - Encode/decode SQL functions: `pg_triple.encode_iri()`, `pg_triple.decode_id()`
+  - Encode/decode SQL functions: `pg_ripple.encode_iri()`, `pg_ripple.decode_id()`
 - [ ] **Vertical Partitioning from day one**
-  - Dynamic VP table management: auto-create `_pg_triple.vp_{predicate_id}` tables on first triple with a new predicate
-  - Predicate catalog: `_pg_triple.predicates (id BIGINT, table_oid OID, triple_count BIGINT)`
+  - Dynamic VP table management: auto-create `_pg_ripple.vp_{predicate_id}` tables on first triple with a new predicate
+  - Predicate catalog: `_pg_ripple.predicates (id BIGINT, table_oid OID, triple_count BIGINT)`
   - Dual B-tree indices per VP table: `(s, o)` and `(o, s)`
-  - Global statement identifier sequence: `_pg_triple.statement_id_seq` — every VP table row gets a globally-unique SID via `i BIGINT NOT NULL DEFAULT nextval('statement_id_seq')`
+  - Global statement identifier sequence: `_pg_ripple.statement_id_seq` — every VP table row gets a globally-unique SID via `i BIGINT NOT NULL DEFAULT nextval('statement_id_seq')`
   - SIDs are not exposed to users in v0.1.0 but are available for internal use from the start (prerequisite for RDF-star in v0.4.0)
 - [ ] **Basic triple CRUD**
-  - `pg_triple.insert_triple(s TEXT, p TEXT, o TEXT)`
-  - `pg_triple.delete_triple(s TEXT, p TEXT, o TEXT)`
-  - `pg_triple.triple_count() RETURNS BIGINT`
+  - `pg_ripple.insert_triple(s TEXT, p TEXT, o TEXT)`
+  - `pg_ripple.delete_triple(s TEXT, p TEXT, o TEXT)`
+  - `pg_ripple.triple_count() RETURNS BIGINT`
 - [ ] **Basic querying** (SQL-level, no SPARQL yet)
-  - `pg_triple.find_triples(s TEXT, p TEXT, o TEXT) RETURNS TABLE (s TEXT, p TEXT, o TEXT, g TEXT)` — any param can be NULL for wildcard; returns decoded string values
+  - `pg_ripple.find_triples(s TEXT, p TEXT, o TEXT) RETURNS TABLE (s TEXT, p TEXT, o TEXT, g TEXT)` — any param can be NULL for wildcard; returns decoded string values
 - [ ] Unit tests for dictionary encode/decode round-trips
 - [ ] Integration test: insert + query cycle
 - [ ] pg_regress: `dictionary.sql` (encode/decode, prefix expansion, hash collision behaviour), `basic_crud.sql` (insert, delete, find_triples, triple_count)
 - [ ] CI pipeline (GitHub Actions)
 - [ ] **GUC-gated lazy initialization**
-  - Merge worker, SHACL engine, and reasoning engine only start when their respective GUCs are enabled (`pg_triple.merge_threshold > 0`, `pg_triple.shacl_mode != 'off'`, `pg_triple.inference_mode != 'off'`)
+  - Merge worker, SHACL engine, and reasoning engine only start when their respective GUCs are enabled (`pg_ripple.merge_threshold > 0`, `pg_ripple.shacl_mode != 'off'`, `pg_ripple.inference_mode != 'off'`)
   - Reduces resource overhead for deployments that use only a subset of features
 - [ ] **Error taxonomy module** (`src/error.rs`)
   - `thiserror`-based error types with PT error code constants
@@ -80,7 +80,7 @@ Each release below has two layers:
   - PostgreSQL-style formatting: lowercase first word, no trailing period
   - Extended in subsequent milestones as new subsystems are added (see §13.6 of the [Implementation Plan](plans/implementation_plan.md) for the complete PT001–PT799 range table)
 
-> **Shared memory note**: v0.1.0 through v0.5.1 use a **backend-local** `lru::LruCache` for the dictionary cache. This avoids requiring `shared_preload_libraries` for the "hello world" release and defers the pgrx shared-memory complexity to v0.6.0 when the HTAP architecture actually needs it. The shared-memory dictionary cache, bloom filters, slot versioning, and `pg_triple.shared_memory_size` startup GUC are all introduced in v0.6.0.
+> **Shared memory note**: v0.1.0 through v0.5.1 use a **backend-local** `lru::LruCache` for the dictionary cache. This avoids requiring `shared_preload_libraries` for the "hello world" release and defers the pgrx shared-memory complexity to v0.6.0 when the HTAP architecture actually needs it. The shared-memory dictionary cache, bloom filters, slot versioning, and `pg_ripple.shared_memory_size` startup GUC are all introduced in v0.6.0.
 
 ### Exit Criteria
 
@@ -100,18 +100,18 @@ A user can install the extension, insert triples (routed to per-predicate VP tab
 ### Deliverables
 
 - [ ] **Rare-predicate consolidation table**
-  - Predicates with fewer than `pg_triple.vp_promotion_threshold` triples (default: 1,000) are stored in a shared `_pg_triple.vp_rare (p BIGINT, s BIGINT, o BIGINT, g BIGINT, i BIGINT)` table with a primary composite index on `(p, s, o)` and two secondary indices: `(s, p)` for DESCRIBE queries and `(g, p, s, o)` for efficient graph-drop bulk-delete
+  - Predicates with fewer than `pg_ripple.vp_promotion_threshold` triples (default: 1,000) are stored in a shared `_pg_ripple.vp_rare (p BIGINT, s BIGINT, o BIGINT, g BIGINT, i BIGINT)` table with a primary composite index on `(p, s, o)` and two secondary indices: `(s, p)` for DESCRIBE queries and `(g, p, s, o)` for efficient graph-drop bulk-delete
   - Promotion is **deferred to end-of-statement** (not mid-batch): during a bulk load, triples accumulate in `vp_rare`; after the load completes, predicates exceeding the threshold are promoted in a single `INSERT … SELECT` + `DELETE` transaction — avoids disrupting in-flight COPY streams
-  - `pg_triple.promote_rare_predicates()` can also be called manually or by the background merge worker
+  - `pg_ripple.promote_rare_predicates()` can also be called manually or by the background merge worker
   - Prevents catalog bloat for predicate-rich datasets (DBpedia ≈60K predicates, Wikidata ≈10K) — avoids hundreds of thousands of PG objects, reduces planner overhead, and cuts VACUUM cost
-- [ ] **`_pg_triple.statements` range-mapping catalog**
+- [ ] **`_pg_ripple.statements` range-mapping catalog**
   - Maintained by the merge worker; stores `(sid_min, sid_max, predicate_id, table_oid)` range rows rather than one row per statement — resolved via binary search in *O(log n)* with no full-table scans
   - After each merge cycle the worker inserts one range row per VP table covering the SIDs allocated since the last merge; because SIDs are drawn from a monotonically-increasing sequence, ranges are non-overlapping
   - Required for v0.4.0 RDF-star where SIDs appear as subjects/objects in other VP tables and must be unambiguously resolved to their owning VP table
 - [ ] **Named graph support** (basic)
   - `g` column in VP tables
-  - `pg_triple.create_graph()`, `pg_triple.drop_graph()`, `pg_triple.list_graphs()`
-- [ ] **`pg_triple.named_graph_optimized` GUC** (default: `off`)
+  - `pg_ripple.create_graph()`, `pg_ripple.drop_graph()`, `pg_ripple.list_graphs()`
+- [ ] **`pg_ripple.named_graph_optimized` GUC** (default: `off`)
   - When enabled, adds an optional `(g, s, o)` index per dedicated VP table (and equivalent coverage on `vp_rare`) to accelerate graph-scoped queries (e.g. list all triples in graph G, drop a named graph)
   - Off by default to avoid index bloat for workloads that do not use named graphs heavily
 - [ ] **Blank node document-scoping**
@@ -120,33 +120,33 @@ A user can install the extension, insert triples (routed to per-predicate VP tab
   - Prevents incorrect merging of blank nodes across document boundaries, which would corrupt data in multi-file loads
   - Also applies to `INSERT DATA` (SPARQL Update, v0.5.1+) which always gets its own generation
 - [ ] **Bulk loader** (N-Triples)
-  - `pg_triple.load_ntriples(data TEXT) RETURNS BIGINT`
+  - `pg_ripple.load_ntriples(data TEXT) RETURNS BIGINT`
   - Streaming parser via `rio_turtle` crate
   - Batch encoding + COPY for throughput
 - [ ] **Bulk loader** (N-Quads)
-  - `pg_triple.load_nquads(data TEXT) RETURNS BIGINT`
+  - `pg_ripple.load_nquads(data TEXT) RETURNS BIGINT`
   - Standard format for named-graph quads (`<s> <p> <o> <g> .`); same `rio_turtle` parser path as N-Triples
   - Route quads to the appropriate named graph (`g` column) automatically
 - [ ] **Bulk loader** (Turtle)
-  - `pg_triple.load_turtle(data TEXT) RETURNS BIGINT`
+  - `pg_ripple.load_turtle(data TEXT) RETURNS BIGINT`
   - Prefix declarations auto-registered
   - Blank node scoping per load operation
   - `rio_turtle` crate already handles both formats — incremental parser work
 - [ ] **Bulk loader** (TriG)
-  - `pg_triple.load_trig(data TEXT) RETURNS BIGINT`
+  - `pg_ripple.load_trig(data TEXT) RETURNS BIGINT`
   - Turtle with named graph blocks (`GRAPH <g> { … }`) — the standard interchange format for named-graph Turtle data
   - Uses the same `rio_turtle` streaming parser; named graph IRI is dictionary-encoded and stored in the `g` column
 - [ ] **File-path bulk load variants**
-  - `pg_triple.load_turtle_file(path TEXT) RETURNS BIGINT`
-  - `pg_triple.load_ntriples_file(path TEXT) RETURNS BIGINT`
-  - `pg_triple.load_nquads_file(path TEXT) RETURNS BIGINT`
-  - `pg_triple.load_trig_file(path TEXT) RETURNS BIGINT`
+  - `pg_ripple.load_turtle_file(path TEXT) RETURNS BIGINT`
+  - `pg_ripple.load_ntriples_file(path TEXT) RETURNS BIGINT`
+  - `pg_ripple.load_nquads_file(path TEXT) RETURNS BIGINT`
+  - `pg_ripple.load_trig_file(path TEXT) RETURNS BIGINT`
   - Reads via `pg_read_file()` with superuser privilege check — prevents unauthorized file access
   - Essential for datasets larger than ~1 GB where passing data as a TEXT parameter exceeds PostgreSQL's TEXT size limit and imposes significant memory overhead
   - Returns count of loaded triples; otherwise identical behaviour to the inline TEXT variants
 - [ ] **IRI prefix management**
-  - `pg_triple.register_prefix(prefix TEXT, expansion TEXT)`
-  - `pg_triple.prefixes() RETURNS TABLE`
+  - `pg_ripple.register_prefix(prefix TEXT, expansion TEXT)`
+  - `pg_ripple.prefixes() RETURNS TABLE`
   - Prefix expansion in encode/decode paths
 - [ ] **ANALYZE after bulk loads**
   - All inline and file-path load functions run `ANALYZE` on affected VP tables after load completes
@@ -154,8 +154,8 @@ A user can install the extension, insert triples (routed to per-predicate VP tab
 - [ ] Benchmarks: insert throughput (1M triples)
 - [ ] **Performance regression baseline**: record insert throughput and point-query latency as CI benchmark baselines; fail CI if a commit regresses throughput by >10% (maintained and extended in every subsequent milestone)
 - [ ] **N-Triples / N-Quads export** (basic)
-  - `pg_triple.export_ntriples(graph TEXT DEFAULT NULL) RETURNS TEXT`
-  - `pg_triple.export_nquads(graph TEXT DEFAULT NULL) RETURNS TEXT` — exports all named graphs as NQuads when `graph` is NULL; a single graph when specified
+  - `pg_ripple.export_ntriples(graph TEXT DEFAULT NULL) RETURNS TEXT`
+  - `pg_ripple.export_nquads(graph TEXT DEFAULT NULL) RETURNS TEXT` — exports all named graphs as NQuads when `graph` is NULL; a single graph when specified
   - Streaming variants returning `SETOF TEXT` for large graphs
   - Essential for verifying bulk load round-trips in v0.2.0 testing
 - [ ] pg_regress test suite: `triple_crud.sql`, `named_graphs.sql`, `export_ntriples.sql`, `nquads_trig.sql` (N-Quads round-trip, TriG named-graph import, file-path loaders)
@@ -170,19 +170,19 @@ Rare-predicate consolidation table absorbs low-frequency predicates. Bulk loadin
 
 **Theme**: Parse and execute SPARQL SELECT and ASK queries with basic graph patterns, named graph querying, and initial join optimizations.
 
-> **In plain language:** SPARQL is the standard language for asking questions over linked data — the same way SQL is for relational databases. This release makes pg_triple understand SPARQL, so users can write queries like *"find all people who know someone who works at Acme Corp"* using the official W3C syntax. It also enables querying across named graphs (created in v0.2.0) using the standard SPARQL `GRAPH` keyword.
+> **In plain language:** SPARQL is the standard language for asking questions over linked data — the same way SQL is for relational databases. This release makes pg_ripple understand SPARQL, so users can write queries like *"find all people who know someone who works at Acme Corp"* using the official W3C syntax. It also enables querying across named graphs (created in v0.2.0) using the standard SPARQL `GRAPH` keyword.
 >
 > **Effort estimate: 6–8 person-weeks**
 
 ### Prerequisites
 
-- **`sparopt` availability check** *(must be resolved before beginning v0.3.0)*: verify that `sparopt` is published to crates.io with a stable, usable API and pin the version. If unavailable or API-unstable, absorb its filter-pushdown and constant-folding work directly into pg_triple's own algebra optimizer pass (`src/sparql/algebra.rs`) before starting v0.3.0 — do not begin v0.3.0 development without resolving this gate.
+- **`sparopt` availability check** *(must be resolved before beginning v0.3.0)*: verify that `sparopt` is published to crates.io with a stable, usable API and pin the version. If unavailable or API-unstable, absorb its filter-pushdown and constant-folding work directly into pg_ripple's own algebra optimizer pass (`src/sparql/algebra.rs`) before starting v0.3.0 — do not begin v0.3.0 development without resolving this gate.
 
 ### Deliverables
 
 - [ ] **`sparopt` first-pass algebra optimizer** (`sparopt` crate)
-  - Sits between the `spargebra` parse tree and pg_triple's own algebra pass
-  - Performs filter pushdown, constant folding, and empty-pattern elimination before SQL generation — reduces the surface area that pg_triple's pass needs to handle
+  - Sits between the `spargebra` parse tree and pg_ripple's own algebra pass
+  - Performs filter pushdown, constant folding, and empty-pattern elimination before SQL generation — reduces the surface area that pg_ripple's pass needs to handle
 - [ ] **SPARQL parser integration** (`spargebra` crate)
   - Parse SPARQL SELECT and ASK queries into algebra tree
   - Support: Basic Graph Patterns (BGP), FILTER, OPTIONAL, LIMIT, OFFSET, ORDER BY, DISTINCT
@@ -197,17 +197,17 @@ Rare-predicate consolidation table absorbs low-frequency predicates. Bulk loadin
   - LIMIT/OFFSET/ORDER BY passthrough
   - DISTINCT → SQL DISTINCT
 - [ ] **Query executor**
-  - `pg_triple.sparql(query TEXT) RETURNS SETOF JSONB`
+  - `pg_ripple.sparql(query TEXT) RETURNS SETOF JSONB`
   - SPI execution of generated SQL
   - **Batch dictionary decode**: collect all output i64 IDs from the result set, decode in a single `WHERE id = ANY(...)` query, build an in-memory lookup map, then emit human-readable rows — avoids per-row dictionary round-trips
   - **`projector.rs`** as a distinct final pipeline stage: variable mapping, SELECT expressions, BIND computations, and computed values are resolved here before SQL emission — keeps the SQL generator focused on join structure
 - [ ] **SPARQL ASK**
   - ASK → `SELECT EXISTS(...)` → returns BOOLEAN
-  - `pg_triple.sparql_ask(query TEXT) RETURNS BOOLEAN`
+  - `pg_ripple.sparql_ask(query TEXT) RETURNS BOOLEAN`
 - [ ] **Join optimizations** (phase 1)
   - Self-join elimination for star patterns
   - Filter pushdown: encode FILTER constants before SQL generation
-- [ ] `pg_triple.sparql_explain(query TEXT, analyze BOOL DEFAULT false) RETURNS TEXT` — show generated SQL; `analyze := true` executes the query and augments the output with actual row counts
+- [ ] `pg_ripple.sparql_explain(query TEXT, analyze BOOL DEFAULT false) RETURNS TEXT` — show generated SQL; `analyze := true` executes the query and augments the output with actual row counts
 - [ ] **SQL injection / adversarial tests**: verify that SPARQL queries containing SQL metacharacters in IRIs, literals, and prefixed names (`'; DROP TABLE --`, Unicode escapes, null bytes) are safely dictionary-encoded and never reach generated SQL as raw strings
 - [ ] **Malformed input tests**: invalid Turtle, truncated N-Triples, malformed SPARQL — verify clean error messages (no panics, no partial state)
 - [ ] **W3C SPARQL conformance gate**: run the applicable subset of the W3C SPARQL 1.1 Query manifest tests against the features delivered so far; extend this gate in every subsequent SPARQL milestone (v0.4.0, v0.5.0, v0.5.1, v0.9.0, v0.12.0, v0.16.0) until full conformance at v1.0.0
@@ -223,15 +223,15 @@ Users can run SPARQL SELECT and ASK queries with BGPs, FILTER, OPTIONAL, and GRA
 
 **Theme**: Quoted triples, statement-level metadata, and LPG-ready storage — make statements about statements.
 
-> **In plain language:** Standard RDF can say "Alice knows Bob". But it can't directly say *"Alice said that she knows Bob"* or *"The fact that Alice knows Bob was recorded on January 5th"*. RDF-star (now part of the RDF 1.2 standard) solves this by allowing triples to be embedded inside other triples — called *quoted triples*. This is essential for provenance ("where did this fact come from?"), temporal annotations ("when was this true?"), and trust ("who asserted this?"). By delivering this immediately after basic SPARQL, pg_triple becomes **LPG-ready from the start**: Labeled Property Graph edges with properties (e.g. `[:KNOWS {since: 2020}]`) map directly to RDF-star annotations over statement identifiers already present in the VP tables since v0.1.0. This is a cross-cutting change that touches parsing, storage, dictionary encoding, and the SPARQL engine.
+> **In plain language:** Standard RDF can say "Alice knows Bob". But it can't directly say *"Alice said that she knows Bob"* or *"The fact that Alice knows Bob was recorded on January 5th"*. RDF-star (now part of the RDF 1.2 standard) solves this by allowing triples to be embedded inside other triples — called *quoted triples*. This is essential for provenance ("where did this fact come from?"), temporal annotations ("when was this true?"), and trust ("who asserted this?"). By delivering this immediately after basic SPARQL, pg_ripple becomes **LPG-ready from the start**: Labeled Property Graph edges with properties (e.g. `[:KNOWS {since: 2020}]`) map directly to RDF-star annotations over statement identifiers already present in the VP tables since v0.1.0. This is a cross-cutting change that touches parsing, storage, dictionary encoding, and the SPARQL engine.
 >
 > **Effort estimate: 8–10 person-weeks**
 
 ### Design rationale — why so early?
 
-The OneGraph (1G) research initiative (Lassila et al., 2023; Poseidon engine, AWS Neptune Analytics) demonstrates that a unified SPOI (Subject, Predicate, Object, statement-Identifier) storage model is the foundation for breaking the "graph model lock-in" between RDF and LPG. By introducing statement identifiers in v0.1.0 (storage) and RDF-star in v0.4.0 (query), pg_triple achieves 1G-compatible storage before any advanced features are built on top. Every subsequent milestone (SHACL, Datalog, SPARQL Update, Cypher/GQL) benefits from statement IDs being available from the start.
+The OneGraph (1G) research initiative (Lassila et al., 2023; Poseidon engine, AWS Neptune Analytics) demonstrates that a unified SPOI (Subject, Predicate, Object, statement-Identifier) storage model is the foundation for breaking the "graph model lock-in" between RDF and LPG. By introducing statement identifiers in v0.1.0 (storage) and RDF-star in v0.4.0 (query), pg_ripple achieves 1G-compatible storage before any advanced features are built on top. Every subsequent milestone (SHACL, Datalog, SPARQL Update, Cypher/GQL) benefits from statement IDs being available from the start.
 
-**Patent clearance**: RDF-star is a W3C standard developed under the [W3C Patent Policy](https://www.w3.org/Consortium/Patent-Policy/) (Royalty-Free). Statement identifiers are well-established prior art (RDF reification, 2004; Named Graphs, 2005; RDF-star Community Group, 2014). The 1G abstract data model is published academic research (Semantic Web Journal, doi:10.3233/SW-223273), not patented technology. Poseidon's proprietary implementation details (P8APL, PAX pages, lock-free adjacency lists) are specific to Amazon's in-memory engine and are not replicated here — pg_triple uses PostgreSQL's native heap/WAL/MVCC storage.
+**Patent clearance**: RDF-star is a W3C standard developed under the [W3C Patent Policy](https://www.w3.org/Consortium/Patent-Policy/) (Royalty-Free). Statement identifiers are well-established prior art (RDF reification, 2004; Named Graphs, 2005; RDF-star Community Group, 2014). The 1G abstract data model is published academic research (Semantic Web Journal, doi:10.3233/SW-223273), not patented technology. Poseidon's proprietary implementation details (P8APL, PAX pages, lock-free adjacency lists) are specific to Amazon's in-memory engine and are not replicated here — pg_ripple uses PostgreSQL's native heap/WAL/MVCC storage.
 
 ### Deliverables
 
@@ -242,12 +242,12 @@ The OneGraph (1G) research initiative (Lassila et al., 2023; Poseidon engine, AW
 - [ ] **Dictionary encoding for quoted triples**
   - New term type in dictionary: `QUOTED_TRIPLE` — stores the triple `(s, p, o)` as a composite key
   - XXH3-128 hash of the triple tuple for dedup
-  - `pg_triple.encode_triple(s TEXT, p TEXT, o TEXT) RETURNS BIGINT` — returns the dictionary ID of the quoted triple
-  - `pg_triple.decode_triple(id BIGINT) RETURNS JSONB` — returns `{"s": ..., "p": ..., "o": ...}`
+  - `pg_ripple.encode_triple(s TEXT, p TEXT, o TEXT) RETURNS BIGINT` — returns the dictionary ID of the quoted triple
+  - `pg_ripple.decode_triple(id BIGINT) RETURNS JSONB` — returns `{"s": ..., "p": ..., "o": ...}`
 - [ ] **Statement identifier activation**
   - The `i` column (introduced in v0.2.0 VP tables) is now actively used: `insert_triple()` returns the SID
-  - `pg_triple.insert_triple(s TEXT, p TEXT, o TEXT, g TEXT DEFAULT NULL) RETURNS BIGINT` — returns the statement identifier
-  - `pg_triple.get_statement(i BIGINT) RETURNS JSONB` — look up a statement by its SID
+  - `pg_ripple.insert_triple(s TEXT, p TEXT, o TEXT, g TEXT DEFAULT NULL) RETURNS BIGINT` — returns the statement identifier
+  - `pg_ripple.get_statement(i BIGINT) RETURNS JSONB` — look up a statement by its SID
   - SIDs can appear in `s` or `o` positions of VP tables (the ID references a statement, enabling edge properties and meta-statements)
 - [ ] **Storage for edge properties via SIDs**
   - Annotation triples use the SID of the annotated statement as their subject: `vp_since(s=SID_of(alice,knows,bob), o=2020_id)`
@@ -260,7 +260,7 @@ The OneGraph (1G) research initiative (Lassila et al., 2023; Poseidon engine, AW
   - Compile to dictionary joins: look up the quoted triple ID, then join against VP tables
   - **Batch recursive decode for nested quoted triples**: collect all quoted-triple IDs from the result set, recursively resolve inner components in bulk via `WITH RECURSIVE` dictionary lookup, build decode map before emitting rows — avoids per-row recursive dictionary round-trips
 - [ ] **Bulk load support for RDF-star data**
-  - `pg_triple.load_turtle()` and `pg_triple.load_ntriples()` now accept Turtle-star / N-Triples-star input
+  - `pg_ripple.load_turtle()` and `pg_ripple.load_ntriples()` now accept Turtle-star / N-Triples-star input
   - Quoted triples in bulk load data are dictionary-encoded and stored with stable SIDs
 - [ ] **W3C SPARQL-star conformance gate**: run the applicable subset of SPARQL-star tests; extend in subsequent milestones
 - [ ] pg_regress: `rdf_star_load.sql`, `sparql_star_query.sql`, `statement_identifiers.sql` (SID lifecycle, edge property patterns, nested quoted triples)
@@ -289,7 +289,7 @@ Users can load RDF-star data (Turtle-star, N-Triples-star), query it with SPARQL
   - `|` (alternative) → `UNION`
   - `^` (inverse) → swap `s`/`o`
   - Cycle detection via PG18 `CYCLE` clause (hash-based, replaces array-based visited tracking for $O(1)$ membership checks instead of $O(n)$ array scans)
-  - `pg_triple.max_path_depth` GUC
+  - `pg_ripple.max_path_depth` GUC
 - [ ] **UNION / MINUS**
   - UNION → SQL `UNION`
   - MINUS → SQL `EXCEPT`
@@ -321,7 +321,7 @@ SPARQL 1.1 Query coverage for property paths, UNION/MINUS, aggregates, subquerie
 
 **Theme**: Inline value encoding, CONSTRUCT/DESCRIBE, INSERT DATA/DELETE DATA, and full-text search.
 
-> **In plain language:** This release introduces *inline value encoding* — a performance optimization that eliminates dictionary lookups for numeric and date comparisons. It changes the fundamental ID space model (introducing a dual-space interpretation), which is why it is separated from the pure query-engine work in v0.5.0. It also adds the two simplest SPARQL Update forms (`INSERT DATA` / `DELETE DATA`) so standard RDF tools can write to pg_triple, *CONSTRUCT* and *DESCRIBE* to complete the four standard SPARQL query forms, and *full-text search* for efficient text matching.
+> **In plain language:** This release introduces *inline value encoding* — a performance optimization that eliminates dictionary lookups for numeric and date comparisons. It changes the fundamental ID space model (introducing a dual-space interpretation), which is why it is separated from the pure query-engine work in v0.5.0. It also adds the two simplest SPARQL Update forms (`INSERT DATA` / `DELETE DATA`) so standard RDF tools can write to pg_ripple, *CONSTRUCT* and *DESCRIBE* to complete the four standard SPARQL query forms, and *full-text search* for efficient text matching.
 >
 > **Effort estimate: 6–8 person-weeks**
 
@@ -335,20 +335,20 @@ SPARQL 1.1 Query coverage for property paths, UNION/MINUS, aggregates, subquerie
 - [ ] **SPARQL CONSTRUCT / DESCRIBE** (JSONB output)
   - CONSTRUCT → returns triples as JSONB (Turtle/JSON-LD serialization deferred to v0.9.0)
   - DESCRIBE → Concise Bounded Description (CBD) as default algorithm
-  - `pg_triple.describe_strategy` GUC (values: `'cbd'` / `'scbd'` / `'simple'`): selects the DESCRIBE expansion algorithm. Introduced here alongside DESCRIBE so the GUC is available from the first release that uses it.
-  - Completes the four standard SPARQL query forms, making pg_triple usable as an entity browser
+  - `pg_ripple.describe_strategy` GUC (values: `'cbd'` / `'scbd'` / `'simple'`): selects the DESCRIBE expansion algorithm. Introduced here alongside DESCRIBE so the GUC is available from the first release that uses it.
+  - Completes the four standard SPARQL query forms, making pg_ripple usable as an entity browser
 - [ ] **Basic SPARQL Update** (`INSERT DATA` / `DELETE DATA`)
   - Parse and execute `INSERT DATA { … }` statements via `spargebra` (already supports Update algebra)
   - Route through dictionary encoder + VP table insert path
   - Named graph support: `INSERT DATA { GRAPH <g> { … } }`
   - Parse and execute `DELETE DATA { … }` statements — exact-match triple deletion from VP tables
-  - `pg_triple.sparql_update(query TEXT) RETURNS BIGINT` — returns count of affected triples
+  - `pg_ripple.sparql_update(query TEXT) RETURNS BIGINT` — returns count of affected triples
   - Pattern-based updates (`DELETE/INSERT WHERE`), `LOAD`, `CLEAR`, `DROP`, `CREATE` deferred to v0.12.0
-  - Enables standard RDF tools (Protégé, TopBraid, SPARQL workbenches) to write to pg_triple without a custom adapter
+  - Enables standard RDF tools (Protégé, TopBraid, SPARQL workbenches) to write to pg_ripple without a custom adapter
 - [ ] **Full-text search on literals**
-  - `pg_triple.fts_index(predicate TEXT)` — create a GIN `tsvector` index on the dictionary for a predicate
+  - `pg_ripple.fts_index(predicate TEXT)` — create a GIN `tsvector` index on the dictionary for a predicate
   - SPARQL `CONTAINS()` and `REGEX()` FILTERs on indexed predicates rewrite to `@@` / `LIKE` against the GIN index
-  - `pg_triple.fts_search(query TEXT, predicate TEXT) RETURNS TABLE` — direct full-text search API
+  - `pg_ripple.fts_search(query TEXT, predicate TEXT) RETURNS TABLE` — direct full-text search API
   - Index is maintained incrementally on `insert_triple()` for indexed predicates
 - [ ] pg_regress: `fts_search.sql`, `sparql_construct.sql`, `sparql_insert_data.sql`, `sparql_delete_data.sql`, `inline_encoding.sql`
 
@@ -364,7 +364,7 @@ Inline value encoding eliminates dictionary lookups for numeric and date FILTER 
 
 > **In plain language:** In a real production system, people are loading new data and running complex queries at the same time. Without special care, these two activities interfere with each other — writes block reads and vice versa. This release splits the storage into a "write inbox" and a "read-optimised archive" so both can happen simultaneously at full speed. It also adds a *change notification* system: applications can subscribe to be told whenever specific facts change (useful for triggering workflows, updating caches, or feeding dashboards). An in-memory cache shared across all database connections makes repeated lookups much faster. Optionally, the companion pg_trickle extension enables automatically-updating live statistics.
 >
-> **Note**: This release introduces `shared_preload_libraries` as a requirement — v0.1.0–v0.5.1 do not require it because they use a backend-local dictionary cache. The `pg_triple.shared_memory_size` startup GUC must be set in `postgresql.conf` before starting PostgreSQL.
+> **Note**: This release introduces `shared_preload_libraries` as a requirement — v0.1.0–v0.5.1 do not require it because they use a backend-local dictionary cache. The `pg_ripple.shared_memory_size` startup GUC must be set in `postgresql.conf` before starting PostgreSQL.
 >
 > **Effort estimate: 8–10 person-weeks**
 
@@ -372,18 +372,18 @@ Inline value encoding eliminates dictionary lookups for numeric and date FILTER 
 
 - [ ] **Delta/Main partition split — schema migration**
   - Each VP table is migrated from its flat single-table form (v0.1.0–v0.5.1) to a dual-partition form:
-    1. `CREATE TABLE _pg_triple.vp_{id}_delta AS SELECT * FROM _pg_triple.vp_{id}` (copy existing rows to delta)
-    2. `CREATE TABLE _pg_triple.vp_{id}_main (LIKE _pg_triple.vp_{id})` (empty main, BRIN-indexed)
-    3. `ALTER TABLE _pg_triple.vp_{id} RENAME TO vp_{id}_pre_htap` (keep old table as backup)
-    4. Update `_pg_triple.predicates` catalog with new table OIDs
+    1. `CREATE TABLE _pg_ripple.vp_{id}_delta AS SELECT * FROM _pg_ripple.vp_{id}` (copy existing rows to delta)
+    2. `CREATE TABLE _pg_ripple.vp_{id}_main (LIKE _pg_ripple.vp_{id})` (empty main, BRIN-indexed)
+    3. `ALTER TABLE _pg_ripple.vp_{id} RENAME TO vp_{id}_pre_htap` (keep old table as backup)
+    4. Update `_pg_ripple.predicates` catalog with new table OIDs
     5. Run an immediate merge cycle to promote rows from delta to main in sorted order
     6. Drop `vp_{id}_pre_htap` after merge completes successfully
-  - The migration runs inside the `ALTER EXTENSION pg_triple UPDATE` upgrade script — zero downtime during migration because rows still exist in delta until the merge completes and the query path immediately switches to `UNION ALL` of `_main` and `_delta`
+  - The migration runs inside the `ALTER EXTENSION pg_ripple UPDATE` upgrade script — zero downtime during migration because rows still exist in delta until the merge completes and the query path immediately switches to `UNION ALL` of `_main` and `_delta`
   - `vp_rare` is **not** split (see vp_rare HTAP exemption below); all reads and writes target the single `vp_rare` table throughout
   - All writes target `_delta`; `_main` is append-only / read-optimized
   - Query path: `UNION ALL` of `_main` and `_delta`
 - [ ] **Tombstone table for cross-partition deletes**
-  - When deleting a triple that may exist in `_main`, the delete is recorded in `_pg_triple.vp_{id}_tombstones (s BIGINT, o BIGINT, g BIGINT)`
+  - When deleting a triple that may exist in `_main`, the delete is recorded in `_pg_ripple.vp_{id}_tombstones (s BIGINT, o BIGINT, g BIGINT)`
   - Query path becomes: `(main EXCEPT tombstones) UNION ALL delta`
   - The merge worker applies tombstones against main during each generation merge, then truncates the tombstone table
   - Necessary because `_main` is read-only between merges — a DELETE targeting a main-resident triple cannot modify `_main` directly
@@ -394,45 +394,45 @@ Inline value encoding eliminates dictionary lookups for numeric and date FILTER 
   - The bloom filter treats `vp_rare` conservatively (always queries it, no delta-skip shortcut)
 - [ ] **Background merge worker**
   - pgrx `BackgroundWorker` implementation
-  - Configurable merge threshold via `pg_triple.merge_threshold` GUC
+  - Configurable merge threshold via `pg_ripple.merge_threshold` GUC
   - **Fresh-table generation merge**: rather than inserting into an existing `_main` table, create `vp_{id}_main_new`, insert *all* rows from both `_main` and `_delta` (minus tombstones) in sort order (ensuring BRIN pages are physically ordered), then atomically rename it to replace `_main` and TRUNCATE both `_delta` and `_tombstones` — writes to delta are never blocked during the merge and BRIN indexing is maximally effective because rows arrive in sorted order at table-creation time
   - BRIN index rebuild on main post-merge (concurrent where possible)
   - Shared-memory latch signaling
-  - Also triggers `pg_triple.promote_rare_predicates()` for any rare predicates that crossed the promotion threshold since the last merge
+  - Also triggers `pg_ripple.promote_rare_predicates()` for any rare predicates that crossed the promotion threshold since the last merge
   - Runs `ANALYZE` on merged VP tables so the PostgreSQL planner has fresh selectivity estimates
-  - **Watchdog**: if the merge worker heartbeat stalls for longer than `pg_triple.merge_watchdog_timeout` (default: 300 s), `_PG_init` on the next backend connection logs a WARNING and attempts a restart
+  - **Watchdog**: if the merge worker heartbeat stalls for longer than `pg_ripple.merge_watchdog_timeout` (default: 300 s), `_PG_init` on the next backend connection logs a WARNING and attempts a restart
 - [ ] **`ExecutorEnd_hook` latch-poke**
-  - When a write transaction commits more than `pg_triple.latch_trigger_threshold` rows (default: 10,000), the hook immediately pokes the merge worker's latch to trigger an early merge
+  - When a write transaction commits more than `pg_ripple.latch_trigger_threshold` rows (default: 10,000), the hook immediately pokes the merge worker's latch to trigger an early merge
   - Prevents unbounded delta growth during bursty write workloads without requiring a polling loop
 - [ ] **Bloom filter for delta existence checks**
   - In shared memory, per VP table
   - Queries against main-only data skip delta scan
 - [ ] **Dictionary LRU cache in shared memory**
-  - `pg_triple.dictionary_cache_size` GUC
+  - `pg_ripple.dictionary_cache_size` GUC
   - Shared across all backends via pgrx `PgSharedMem`
   - **Sharded lock design**: partition the hash map into N shards (default: 64), each with its own lightweight lock — eliminates global lock contention under concurrent encode/decode workloads
 - [ ] **Shared-memory budget & back-pressure**
-  - `pg_triple.cache_budget` GUC — utilization cap for the pre-allocated shared memory block (dictionary cache + bloom filters + merge worker buffers)
+  - `pg_ripple.cache_budget` GUC — utilization cap for the pre-allocated shared memory block (dictionary cache + bloom filters + merge worker buffers)
   - Automatic eviction priority: bloom filters reclaimed first, then oldest LRU dictionary entries
   - Back-pressure on bulk loads when shared memory is >90% of `cache_budget` — throttle batch size to prevent OOM
 - [ ] **Shared-memory slot versioning**
   - Each shared memory slot (declared via pgrx 0.17's `pg_shmem_init!` macro) carries a `[u8; 8]` magic constant (e.g. `*b"pg_tripl"`) followed by a `u32` layout version at its head
   - Version mismatch at `_PG_init` triggers a controlled re-initialization of the slot rather than corrupting state — essential for safe in-place upgrades
-  - **pgrx 0.17 API note**: all shared memory sizes must be declared statically in `_PG_init`. The `pg_triple.shared_memory_size` startup GUC determines the block size; it cannot be changed at runtime. Use the pgrx 0.17 `PgSharedObject` / `PgSharedMem::new_object` API (not the old `PgSharedMem` from ≤0.14) — verify against the [pgrx 0.17 shmem examples](https://github.com/pgcentralfoundation/pgrx/tree/develop/pgrx-examples/shmem)
+  - **pgrx 0.17 API note**: all shared memory sizes must be declared statically in `_PG_init`. The `pg_ripple.shared_memory_size` startup GUC determines the block size; it cannot be changed at runtime. Use the pgrx 0.17 `PgSharedObject` / `PgSharedMem::new_object` API (not the old `PgSharedMem` from ≤0.14) — verify against the [pgrx 0.17 shmem examples](https://github.com/pgcentralfoundation/pgrx/tree/develop/pgrx-examples/shmem)
 - [ ] **`subject_patterns` lookup table**
-  - `_pg_triple.subject_patterns(s BIGINT, predicates BIGINT[])` with a GIN index on `predicates`
+  - `_pg_ripple.subject_patterns(s BIGINT, predicates BIGINT[])` with a GIN index on `predicates`
   - Maintained by the merge worker after each generation merge (not on individual INSERTs — amortized cost)
   - Enables fast "which predicates does subject X have?" look-up for DESCRIBE queries and star-pattern rewriting in the algebra optimizer
 - [ ] **Statistics**
-  - `pg_triple.stats()` JSONB: triple count, per-predicate counts, cache hit ratio, delta/main sizes
+  - `pg_ripple.stats()` JSONB: triple count, per-predicate counts, cache hit ratio, delta/main sizes
 - [ ] **pg_trickle integration: live statistics** *(optional, when pg_trickle is installed)*
-  - `pg_triple.enable_live_statistics()` creates `_pg_triple.predicate_stats` and `_pg_triple.graph_stats` stream tables
-  - `pg_triple.stats()` reads from stream tables instead of full-scanning VP tables (100–1000× faster)
+  - `pg_ripple.enable_live_statistics()` creates `_pg_ripple.predicate_stats` and `_pg_ripple.graph_stats` stream tables
+  - `pg_ripple.stats()` reads from stream tables instead of full-scanning VP tables (100–1000× faster)
 - [ ] **Change notification / CDC**
-  - `pg_triple.subscribe(pattern TEXT, channel TEXT)` — emit `NOTIFY` on triple changes matching a predicate/graph pattern
+  - `pg_ripple.subscribe(pattern TEXT, channel TEXT)` — emit `NOTIFY` on triple changes matching a predicate/graph pattern
   - Thin trigger-based CDC on VP delta tables; fires on INSERT/DELETE
   - Payload: JSON with `{"op": "insert"|"delete", "s": ..., "p": ..., "o": ..., "g": ...}` (integer IDs)
-  - `pg_triple.unsubscribe(channel TEXT)` to remove subscriptions
+  - `pg_ripple.unsubscribe(channel TEXT)` to remove subscriptions
   - Enables downstream event-driven architectures (CDC consumers, webhooks, cache invalidation)
 - [ ] Benchmark: concurrent read/write (pgbench custom scripts)
 - [ ] **Concurrency correctness tests**
@@ -455,15 +455,15 @@ Writes do not block reads. Merge worker operates correctly under concurrent writ
 
 **Theme**: Data integrity enforcement via W3C SHACL shapes.
 
-> **In plain language:** SHACL is a standard way to define *data quality rules* — for example, "every Person must have exactly one email address" or "an age must be a number". When these rules are loaded, pg_triple can automatically reject data that violates them the moment it is inserted, rather than discovering errors later. This is similar to how a spreadsheet can reject invalid entries in a cell. A validation report function lets you check existing data against the rules at any time.
+> **In plain language:** SHACL is a standard way to define *data quality rules* — for example, "every Person must have exactly one email address" or "an age must be a number". When these rules are loaded, pg_ripple can automatically reject data that violates them the moment it is inserted, rather than discovering errors later. This is similar to how a spreadsheet can reject invalid entries in a cell. A validation report function lets you check existing data against the rules at any time.
 >
 > **Effort estimate: 4–6 person-weeks**
 
 ### Deliverables
 
 - [ ] **SHACL parser** (Turtle-based shapes)
-  - `pg_triple.load_shacl(data TEXT)` — parse and store shapes
-  - Internal shape IR stored in `_pg_triple.shacl_shapes`
+  - `pg_ripple.load_shacl(data TEXT)` — parse and store shapes
+  - Internal shape IR stored in `_pg_ripple.shacl_shapes`
 - [ ] **Static constraint compilation**
   - `sh:minCount` → NOT NULL / CHECK trigger
   - `sh:maxCount` → UNIQUE index
@@ -471,14 +471,14 @@ Writes do not block reads. Merge worker operates correctly under concurrent writ
   - `sh:in` → CHECK with allowed values
   - `sh:pattern` → regex CHECK
 - [ ] **Synchronous validation mode**
-  - Triggered on `insert_triple()` when `pg_triple.shacl_mode = 'sync'`
+  - Triggered on `insert_triple()` when `pg_ripple.shacl_mode = 'sync'`
   - Returns validation error immediately on constraint violation
 - [ ] **Validation report**
-  - `pg_triple.validate(graph TEXT DEFAULT NULL) RETURNS JSONB`
+  - `pg_ripple.validate(graph TEXT DEFAULT NULL) RETURNS JSONB`
   - Full SHACL validation report as JSON
 - [ ] **SHACL management**
-  - `pg_triple.list_shapes() RETURNS TABLE`
-  - `pg_triple.drop_shape(shape_uri TEXT)`
+  - `pg_ripple.list_shapes() RETURNS TABLE`
+  - `pg_ripple.drop_shape(shape_uri TEXT)`
 - [ ] **pg_trickle integration: SHACL violation monitors** *(optional)*
   - Simple cardinality/datatype constraints modeled as `IMMEDIATE` mode stream tables
   - Violations detected within the same transaction as the DML
@@ -501,10 +501,10 @@ Core SHACL constraints are enforced at insert time. Validation reports conform t
 ### Deliverables
 
 - [ ] **Asynchronous validation pipeline**
-  - Validation queue table: `_pg_triple.validation_queue`
+  - Validation queue table: `_pg_ripple.validation_queue`
   - Background worker processes queue in batches
   - Dead letter queue for invalid triples with violation reports
-  - `pg_triple.shacl_mode = 'async'` GUC mode
+  - `pg_ripple.shacl_mode = 'async'` GUC mode
 - [ ] **Complex shape support**
   - `sh:class` — type constraint via `rdf:type` lookup
   - `sh:node` — nested shape references
@@ -524,7 +524,7 @@ Async validation pipeline operational. Complex SHACL shapes validated correctly.
 
 **Theme**: Full RDF I/O, remaining serialization formats, and Turtle/JSON-LD serialization for CONSTRUCT/DESCRIBE.
 
-> **In plain language:** RDF data comes in several standard file formats (Turtle, RDF/XML, JSON-LD). This release completes the set so that pg_triple can import from and export to *all* of them — making it easy to exchange data with other tools and systems. It also adds Turtle and JSON-LD output formats for SPARQL CONSTRUCT and DESCRIBE queries (which returned JSONB since v0.5.1), and RDF-star serialization support.
+> **In plain language:** RDF data comes in several standard file formats (Turtle, RDF/XML, JSON-LD). This release completes the set so that pg_ripple can import from and export to *all* of them — making it easy to exchange data with other tools and systems. It also adds Turtle and JSON-LD output formats for SPARQL CONSTRUCT and DESCRIBE queries (which returned JSONB since v0.5.1), and RDF-star serialization support.
 >
 > **Effort estimate: 3–4 person-weeks** *(the hardest parts — Turtle import, N-Triples export, and CONSTRUCT/DESCRIBE JSONB — were already delivered in v0.2.0, v0.3.0, and v0.5.0)*
 
@@ -533,10 +533,10 @@ Async validation pipeline operational. Complex SHACL shapes validated correctly.
 ### Deliverables
 
 - [ ] **RDF/XML parser**
-  - `pg_triple.load_rdfxml(data TEXT) RETURNS BIGINT`
+  - `pg_ripple.load_rdfxml(data TEXT) RETURNS BIGINT`
 - [ ] **Export functions**
-  - `pg_triple.export_turtle(graph TEXT DEFAULT NULL) RETURNS TEXT`
-  - `pg_triple.export_jsonld(graph TEXT DEFAULT NULL) RETURNS JSONB`
+  - `pg_ripple.export_turtle(graph TEXT DEFAULT NULL) RETURNS TEXT`
+  - `pg_ripple.export_jsonld(graph TEXT DEFAULT NULL) RETURNS JSONB`
   - Streaming variants returning `SETOF TEXT` for large graphs
 - [ ] **SPARQL CONSTRUCT / DESCRIBE serialization formats**
   - CONSTRUCT → returns triples as Turtle or JSON-LD (in addition to JSONB from v0.5.1)
@@ -570,12 +570,12 @@ See [plans/ecosystem/datalog.md](plans/ecosystem/datalog.md) for the full design
   - Stratified negation via `NOT` keyword
   - Multi-head rules (`h₁, h₂ :- body .`) compiled to separate `INSERT … SELECT` statements within the same stratum
 - [ ] **`source` column in VP tables and `vp_rare`**
-  - `source SMALLINT DEFAULT 0` added to every dedicated VP table **and to `_pg_triple.vp_rare`** in the v0.10.0 migration
+  - `source SMALLINT DEFAULT 0` added to every dedicated VP table **and to `_pg_ripple.vp_rare`** in the v0.10.0 migration
   - `0` = explicitly asserted; `1` = derived (inferred by Datalog rules)
   - Enables filtering out inferred triples at scan time without a join
   - Migration script uses `ALTER TABLE … ADD COLUMN source SMALLINT NOT NULL DEFAULT 0` for each VP table and for `vp_rare`; zero-downtime because PostgreSQL fast-path adds the column with the stored default without rewriting the table
 - [ ] **Tiered hot/cold dictionary** (`src/dictionary/hot.rs`)
-  - `_pg_triple.resources_hot` (UNLOGGED) holds IRIs ≤512B and all predicate/prefix IRIs — the working set that fits in shared buffers
+  - `_pg_ripple.resources_hot` (UNLOGGED) holds IRIs ≤512B and all predicate/prefix IRIs — the working set that fits in shared buffers
   - Full `resources` table unchanged; encoder checks hot table first
   - `pg_prewarm` warms the hot table at server start via `_PG_init`
   - Dramatically reduces random I/O for the most-accessed terms at large scale (100M+ triples)
@@ -594,33 +594,33 @@ See [plans/ecosystem/datalog.md](plans/ecosystem/datalog.md) for the full design
 - [ ] **Constraint rules (integrity constraints)**
   - Empty-head rules (`:- body .`) express patterns that must never hold
   - Compile to existence checks; materialized mode → pg_trickle IMMEDIATE stream tables for in-transaction validation
-  - `pg_triple.check_constraints()` returns violations as JSONB
-  - `pg_triple.enforce_constraints` GUC: `'error'` / `'warn'` / `'off'`
+  - `pg_ripple.check_constraints()` returns violations as JSONB
+  - `pg_ripple.enforce_constraints` GUC: `'error'` / `'warn'` / `'off'`
   - Directly complements and extends SHACL validation
 - [ ] **Built-in rule sets** (`src/datalog/builtins.rs`)
-  - `pg_triple.load_rules_builtin('rdfs')` — W3C RDFS entailment (13 rules)
-  - `pg_triple.load_rules_builtin('owl-rl')` — W3C OWL 2 RL profile (~80 rules)
+  - `pg_ripple.load_rules_builtin('rdfs')` — W3C RDFS entailment (13 rules)
+  - `pg_ripple.load_rules_builtin('owl-rl')` — W3C OWL 2 RL profile (~80 rules)
 - [ ] **On-demand execution mode** (no pg_trickle needed)
   - Derived predicates compiled to inline CTEs injected into SPARQL→SQL at query time
-  - `SET pg_triple.inference_mode = 'on_demand'`
+  - `SET pg_ripple.inference_mode = 'on_demand'`
 - [ ] **Materialized execution mode** *(optional, requires pg_trickle)*
-  - `pg_triple.materialize_rules(schedule => '10s')` — derived predicates as stream tables
+  - `pg_ripple.materialize_rules(schedule => '10s')` — derived predicates as stream tables
   - pg_trickle DAG scheduler respects stratum ordering automatically
 - [ ] **Catalog and management**
-  - `_pg_triple.rules` catalog table
-  - `_pg_triple.rule_sets` catalog: groups named rules with a `rule_hash BYTEA` (XXH3-64) for cache invalidation — re-activating a rule set with an unchanged hash resumes from prior derived state without re-derivation
-  - Derived predicates registered in `_pg_triple.predicates` with `derived = TRUE`
-  - `pg_triple.load_rules()`, `pg_triple.list_rules()`, `pg_triple.drop_rules()`
-  - `pg_triple.enable_rule_set(name TEXT)` / `pg_triple.disable_rule_set(name TEXT)` — activate or deactivate a named rule set without dropping it
+  - `_pg_ripple.rules` catalog table
+  - `_pg_ripple.rule_sets` catalog: groups named rules with a `rule_hash BYTEA` (XXH3-64) for cache invalidation — re-activating a rule set with an unchanged hash resumes from prior derived state without re-derivation
+  - Derived predicates registered in `_pg_ripple.predicates` with `derived = TRUE`
+  - `pg_ripple.load_rules()`, `pg_ripple.list_rules()`, `pg_ripple.drop_rules()`
+  - `pg_ripple.enable_rule_set(name TEXT)` / `pg_ripple.disable_rule_set(name TEXT)` — activate or deactivate a named rule set without dropping it
 - [ ] **SPARQL engine integration**
   - Derived VP tables transparent to query planner (same look-up path as base VP tables)
   - On-demand mode prepends CTEs to generated SQL
-  - `pg_triple.sparql(query TEXT, include_derived BOOL DEFAULT true)` — when `false`, appends `AND source = 0` to all VP table scans to exclude inferred triples (no-inference mode)
+  - `pg_ripple.sparql(query TEXT, include_derived BOOL DEFAULT true)` — when `false`, appends `AND source = 0` to all VP table scans to exclude inferred triples (no-inference mode)
 - [ ] **SHACL-AF `sh:rule` bridge**
   - Detect `sh:rule` entries in loaded SHACL shapes that contain Datalog-compatible triple rules
-  - Compile `sh:rule` bodies to Datalog IR and register in `_pg_triple.rules`
+  - Compile `sh:rule` bodies to Datalog IR and register in `_pg_ripple.rules`
   - Bidirectional: SHACL shapes inform Datalog constraints; Datalog-derived triples are visible to SHACL validation
-  - `pg_triple.load_shacl()` auto-registers any `sh:rule` triples as Datalog rules when `pg_triple.inference_mode != 'off'`
+  - `pg_ripple.load_shacl()` auto-registers any `sh:rule` triples as Datalog rules when `pg_ripple.inference_mode != 'off'`
 - [ ] **RDF-star integration in Datalog** *(builds on v0.4.0 RDF-star)*
   - Quoted triples can appear in Datalog rule heads and bodies
   - Enables provenance rules: `<< ?s ?p ?o >> ex:derivedBy ex:rule1 :- ?s ?p ?o, RULE(ex:rule1) .`
@@ -641,24 +641,24 @@ Users can load RDFS or OWL RL rule sets (or custom rules), and SPARQL queries re
 >
 > **Effort estimate: 5–7 person-weeks**
 >
-> ⚠️ **Dependency risk**: This entire release depends on [pg_trickle](https://github.com/grove/pg-trickle) being production-ready. If pg_trickle has not reached a stable release by the time v0.10.0 ships, v0.11.0 should be **deferred** and v0.12.0 (SPARQL Update Advanced) brought forward in its place. A simpler fallback for incrementally-maintained views — using standard PostgreSQL `MATERIALIZED VIEW` with a `pg_triple.refresh_sparql_view(name)` helper and a pg_cron schedule — can be offered as a non-IVM interim. Evaluate pg_trickle maturity at v0.10.0 exit and decide before committing to v0.11.0 scope.
+> ⚠️ **Dependency risk**: This entire release depends on [pg_trickle](https://github.com/grove/pg-trickle) being production-ready. If pg_trickle has not reached a stable release by the time v0.10.0 ships, v0.11.0 should be **deferred** and v0.12.0 (SPARQL Update Advanced) brought forward in its place. A simpler fallback for incrementally-maintained views — using standard PostgreSQL `MATERIALIZED VIEW` with a `pg_ripple.refresh_sparql_view(name)` helper and a pg_cron schedule — can be offered as a non-IVM interim. Evaluate pg_trickle maturity at v0.10.0 exit and decide before committing to v0.11.0 scope.
 
 See [plans/ecosystem/pg_trickle.md § 2.2](plans/ecosystem/pg_trickle.md) for the SPARQL views design and [plans/ecosystem/datalog.md § 15](plans/ecosystem/datalog.md) for the Datalog views design.
 
 ### Deliverables
 
 - [ ] **SPARQL views** *(requires pg_trickle)*
-  - `pg_triple.create_sparql_view(name, sparql, schedule, decode)` — compile a SPARQL SELECT query into an always-fresh, incrementally-maintained stream table
+  - `pg_ripple.create_sparql_view(name, sparql, schedule, decode)` — compile a SPARQL SELECT query into an always-fresh, incrementally-maintained stream table
   - `decode => FALSE` (recommended) keeps integer IDs in the stream table with a thin decoding view on top, minimising CDC surface
-  - `pg_triple.drop_sparql_view(name)` and `pg_triple.list_sparql_views()` for lifecycle management
-  - `_pg_triple.sparql_views` catalog table: records original SPARQL text, generated SQL, schedule, decode mode, and stream table OID
+  - `pg_ripple.drop_sparql_view(name)` and `pg_ripple.list_sparql_views()` for lifecycle management
+  - `_pg_ripple.sparql_views` catalog table: records original SPARQL text, generated SQL, schedule, decode mode, and stream table OID
   - Refresh mode heuristics: `IMMEDIATE` for constraint-style queries, `DIFFERENTIAL` + schedule for dashboards, `FULL` + long schedule for heavy analytics and transitive-closure property paths
 - [ ] **Datalog views** *(requires pg_trickle)*
-  - `pg_triple.create_datalog_view(name, rules, goal, schedule, decode)` — bundle a Datalog rule set with a goal pattern into an always-fresh, incrementally-maintained stream table
-  - Alternative: `pg_triple.create_datalog_view(name, rule_set, goal, schedule, decode)` — reference a loaded rule set by name instead of inline rules
+  - `pg_ripple.create_datalog_view(name, rules, goal, schedule, decode)` — bundle a Datalog rule set with a goal pattern into an always-fresh, incrementally-maintained stream table
+  - Alternative: `pg_ripple.create_datalog_view(name, rule_set, goal, schedule, decode)` — reference a loaded rule set by name instead of inline rules
   - `decode => FALSE` (recommended) keeps integer IDs in the stream table with a thin decoding view on top
-  - `pg_triple.drop_datalog_view(name)` and `pg_triple.list_datalog_views()` for lifecycle management
-  - `_pg_triple.datalog_views` catalog table: records original rule text, goal pattern, generated SQL, schedule, decode mode, and stream table OID
+  - `pg_ripple.drop_datalog_view(name)` and `pg_ripple.list_datalog_views()` for lifecycle management
+  - `_pg_ripple.datalog_views` catalog table: records original rule text, goal pattern, generated SQL, schedule, decode mode, and stream table OID
   - Constraint monitoring: constraint rules (empty-head) automatically synthesize a goal; any row in the stream table is a violation. `IMMEDIATE` mode catches violations within the same transaction
   - Goal-filtered materialization: only facts relevant to the goal pattern are derived and stored, reducing write amplification compared to full-closure materialized rules
 - [ ] **ExtVP semi-join stream tables** *(requires pg_trickle)*
@@ -705,14 +705,14 @@ Full SPARQL 1.1 Update operations work correctly. Pattern-based updates compile 
 
 **Theme**: Optimize for production-scale workloads. Benchmark-driven improvements.
 
-> **In plain language:** This release is about *speed*. Using the Berlin SPARQL Benchmark (a standard test suite used by the RDF industry), we measure pg_triple's performance against known baselines and then tune it. Improvements include caching query plans so repeated queries skip redundant work, loading data in parallel, and teaching the system to use data quality rules (from v0.7.0/v0.8.0) as hints to avoid unnecessary work during queries. The target is simple queries answering in under 10 milliseconds on a dataset of 10 million facts, and bulk loading sustained at over 100,000 facts per second.
+> **In plain language:** This release is about *speed*. Using the Berlin SPARQL Benchmark (a standard test suite used by the RDF industry), we measure pg_ripple's performance against known baselines and then tune it. Improvements include caching query plans so repeated queries skip redundant work, loading data in parallel, and teaching the system to use data quality rules (from v0.7.0/v0.8.0) as hints to avoid unnecessary work during queries. The target is simple queries answering in under 10 milliseconds on a dataset of 10 million facts, and bulk loading sustained at over 100,000 facts per second.
 >
 > **Effort estimate: 6–8 person-weeks**
 
 ### Deliverables
 
 - [ ] **Berlin SPARQL Benchmark (BSBM)** integration
-  - Data generator adapted for pg_triple bulk load
+  - Data generator adapted for pg_ripple bulk load
   - Full query mix execution with timing
   - Comparison baselines documented
 - [ ] **BGP join reordering**
@@ -722,7 +722,7 @@ Full SPARQL 1.1 Update operations work correctly. Pattern-based updates compile 
   - When join columns are already sorted (e.g. after a range scan on an ordered `i64` column), emit `SET LOCAL enable_mergejoin = on` to exploit merge-join (strategy #6)
 - [ ] **Query plan caching**
   - Cache SPARQL→SQL translations keyed by query structure hash
-  - `pg_triple.plan_cache_size` GUC
+  - `pg_ripple.plan_cache_size` GUC
   - Note: SPI-executed dynamic SQL does not benefit from PostgreSQL's built-in prepared-statement cache — the SPARQL-layer plan cache compensates for this by avoiding repeated SPARQL→SQL translation for structurally identical queries
 - [ ] **Parallel query exploitation**
   - Ensure VP table queries are parallel-safe
@@ -764,7 +764,7 @@ BSBM results documented. >100K triples/sec sustained bulk load. <10ms for simple
 
 **Theme**: Production operations tooling, upgrade paths, documentation.
 
-> **In plain language:** Everything a system administrator needs to run pg_triple in production. This includes maintenance commands (clean up, rebuild indexes), monitoring and diagnostics, comprehensive documentation (quickstart guide, function reference, tuning guide), and *graph-level access control* — the ability to control which database users can see or modify which named graphs. It also covers packaging (Linux packages, Docker images) so the extension is easy to install in real environments. Think of this as the "operations manual" release.
+> **In plain language:** Everything a system administrator needs to run pg_ripple in production. This includes maintenance commands (clean up, rebuild indexes), monitoring and diagnostics, comprehensive documentation (quickstart guide, function reference, tuning guide), and *graph-level access control* — the ability to control which database users can see or modify which named graphs. It also covers packaging (Linux packages, Docker images) so the extension is easy to install in real environments. Think of this as the "operations manual" release.
 >
 > **Effort estimate: 4–6 person-weeks**
 
@@ -772,14 +772,14 @@ BSBM results documented. >100K triples/sec sustained bulk load. <10ms for simple
 
 - [ ] **Extension upgrade scripts**
   - Tested upgrade path `0.1.0 → ... → 0.16.0`
-  - `ALTER EXTENSION pg_triple UPDATE` works for all version transitions
+  - `ALTER EXTENSION pg_ripple UPDATE` works for all version transitions
 - [ ] **Administrative functions**
-  - `pg_triple.vacuum()` — force merge + VACUUM on VP tables
-  - `pg_triple.reindex()` — rebuild all VP table indices
-  - `pg_triple.compact(keep_old BOOL DEFAULT false)` — trigger an immediate full merge across all VP tables; `keep_old := false` drops the previous generation's `_main` table immediately after the atomic rename
-  - `pg_triple.vacuum_dictionary()` — remove dictionary entries for IRIs and literals no longer referenced by any VP table row (orphaned after bulk deletes)
-  - `pg_triple.dictionary_stats()` — detailed cache metrics
-  - `pg_triple.predicate_stats()` — per-predicate triple count, table sizes
+  - `pg_ripple.vacuum()` — force merge + VACUUM on VP tables
+  - `pg_ripple.reindex()` — rebuild all VP table indices
+  - `pg_ripple.compact(keep_old BOOL DEFAULT false)` — trigger an immediate full merge across all VP tables; `keep_old := false` drops the previous generation's `_main` table immediately after the atomic rename
+  - `pg_ripple.vacuum_dictionary()` — remove dictionary entries for IRIs and literals no longer referenced by any VP table row (orphaned after bulk deletes)
+  - `pg_ripple.dictionary_stats()` — detailed cache metrics
+  - `pg_ripple.predicate_stats()` — per-predicate triple count, table sizes
 - [ ] **Logging & diagnostics**
   - Structured logging for merge operations, validation results
   - Custom `EXPLAIN` option showing SPARQL→SQL mapping (PG18 extension EXPLAIN)
@@ -791,12 +791,12 @@ BSBM results documented. >100K triples/sec sustained bulk load. <10ms for simple
   - SHACL constraint mapping reference
   - Datalog rule authoring guide
 - [ ] **Graph-level Row-Level Security (RLS)**
-  - `pg_triple.enable_graph_rls()` — activate RLS policies on VP tables using the `g` column
-  - Policy driven by a mapping table: `_pg_triple.graph_access (role_name TEXT, graph_id BIGINT, permission TEXT)` — `'read'` / `'write'` / `'admin'`
-  - `pg_triple.grant_graph(role TEXT, graph TEXT, permission TEXT)` / `pg_triple.revoke_graph()`
+  - `pg_ripple.enable_graph_rls()` — activate RLS policies on VP tables using the `g` column
+  - Policy driven by a mapping table: `_pg_ripple.graph_access (role_name TEXT, graph_id BIGINT, permission TEXT)` — `'read'` / `'write'` / `'admin'`
+  - `pg_ripple.grant_graph(role TEXT, graph TEXT, permission TEXT)` / `pg_ripple.revoke_graph()`
   - SPARQL queries automatically filter results to graphs the current role can read
   - Write operations (`insert_triple`, SPARQL UPDATE) enforce write permission
-  - Superuser bypass via `pg_triple.rls_bypass` GUC for admin operations
+  - Superuser bypass via `pg_ripple.rls_bypass` GUC for admin operations
 - [ ] **Packaging**
   - `cargo pgrx package` produces installable `.deb` and `.rpm`
   - Docker image with extension pre-installed
@@ -813,13 +813,13 @@ Extension is installable, upgradable, and documented. Operational tooling suffic
 
 **Theme**: Standard HTTP API for SPARQL queries and updates.
 
-> **In plain language:** Without this, the only way to talk to pg_triple is through a PostgreSQL database connection (SQL). But the entire RDF ecosystem — SPARQL notebooks, visualization tools, ontology editors, web applications — expects to query a triple store over HTTP at a `/sparql` URL. This release adds a lightweight companion service that accepts standard SPARQL HTTP requests, forwards them to pg_triple inside PostgreSQL, and returns results in all the standard formats (JSON, XML, CSV, Turtle). This is the single biggest adoption enabler: it lets pg_triple drop in as a replacement for tools like Blazegraph, Virtuoso, or Apache Fuseki without requiring any client-side changes.
+> **In plain language:** Without this, the only way to talk to pg_ripple is through a PostgreSQL database connection (SQL). But the entire RDF ecosystem — SPARQL notebooks, visualization tools, ontology editors, web applications — expects to query a triple store over HTTP at a `/sparql` URL. This release adds a lightweight companion service that accepts standard SPARQL HTTP requests, forwards them to pg_ripple inside PostgreSQL, and returns results in all the standard formats (JSON, XML, CSV, Turtle). This is the single biggest adoption enabler: it lets pg_ripple drop in as a replacement for tools like Blazegraph, Virtuoso, or Apache Fuseki without requiring any client-side changes.
 >
 > **Effort estimate: 3–4 person-weeks**
 
 ### Deliverables
 
-- [ ] **Companion HTTP service** (`pg_triple_http` binary)
+- [ ] **Companion HTTP service** (`pg_ripple_http` binary)
   - Standalone Rust binary (not a PG background worker — avoids binding TCP ports inside PostgreSQL)
   - Connects to PostgreSQL via standard `libpq` / `tokio-postgres`
   - Configurable via environment variables or config file: `PG_TRIPLE_HTTP_PORT`, `PG_TRIPLE_HTTP_PG_URL`
@@ -846,21 +846,21 @@ Extension is installable, upgradable, and documented. Operational tooling suffic
   - `GET /health` endpoint for load balancer probes
   - Prometheus-compatible `/metrics` endpoint (query count, latency histogram, error rate)
 - [ ] **Docker integration**
-  - Docker image bundles both PostgreSQL (with pg_triple) and the HTTP service
+  - Docker image bundles both PostgreSQL (with pg_ripple) and the HTTP service
   - Docker Compose example with separate PG and HTTP containers
 - [ ] pg_regress: `sparql_protocol.sql` (protocol-level tests via `curl`)
 
 ### Exit Criteria
 
-Standard SPARQL clients (YASGUI, Postman, RDF4J workbench, `curl`) can query and update pg_triple over HTTP without any pg_triple-specific configuration. Content negotiation returns correct formats.
+Standard SPARQL clients (YASGUI, Postman, RDF4J workbench, `curl`) can query and update pg_ripple over HTTP without any pg_ripple-specific configuration. Content negotiation returns correct formats.
 
 ---
 
 ## v0.16.0 — SPARQL Federation
 
-**Theme**: Query remote SPARQL endpoints from within pg_triple queries.
+**Theme**: Query remote SPARQL endpoints from within pg_ripple queries.
 
-> **In plain language:** Federation lets a single SPARQL query combine data from pg_triple with data from external SPARQL endpoints on the web. For example, you could ask "find all my local employees and enrich their records with data from Wikidata" — and the system will automatically fetch the remote portion, join it with local results, and return a unified answer. This is part of the SPARQL 1.1 standard (`SERVICE` keyword) and is expected by many enterprise knowledge graph workflows that integrate multiple data sources. Multiple remote calls execute in parallel when possible to minimise latency.
+> **In plain language:** Federation lets a single SPARQL query combine data from pg_ripple with data from external SPARQL endpoints on the web. For example, you could ask "find all my local employees and enrich their records with data from Wikidata" — and the system will automatically fetch the remote portion, join it with local results, and return a unified answer. This is part of the SPARQL 1.1 standard (`SERVICE` keyword) and is expected by many enterprise knowledge graph workflows that integrate multiple data sources. Multiple remote calls execute in parallel when possible to minimise latency.
 >
 > **Effort estimate: 4–6 person-weeks**
 
@@ -875,22 +875,22 @@ Standard SPARQL clients (YASGUI, Postman, RDF4J workbench, `curl`) can query and
   - Dictionary-encode remote results into local `i64` IDs for join compatibility
 - [ ] **Join integration**
   - Remote result sets injected as inline `VALUES` clauses in the generated SQL
-  - **Async parallel execution**: multiple `SERVICE` clauses in a single query execute concurrently (via `tokio::join!` in pg_triple_http, or sequential fallback in SPI context) — prevents a single slow endpoint from blocking the entire query
+  - **Async parallel execution**: multiple `SERVICE` clauses in a single query execute concurrently (via `tokio::join!` in pg_ripple_http, or sequential fallback in SPI context) — prevents a single slow endpoint from blocking the entire query
   - Bind-join optimisation: push bound variables from local results into remote queries to reduce remote result size
 - [ ] **Error handling and timeouts**
-  - `pg_triple.federation_timeout` GUC (default: 30s per SERVICE call)
-  - `pg_triple.federation_max_results` GUC (default: 10,000 rows per remote call)
-  - Graceful degradation: failed SERVICE calls return empty results with a WARNING (configurable to ERROR via `pg_triple.federation_on_error` GUC)
+  - `pg_ripple.federation_timeout` GUC (default: 30s per SERVICE call)
+  - `pg_ripple.federation_max_results` GUC (default: 10,000 rows per remote call)
+  - Graceful degradation: failed SERVICE calls return empty results with a WARNING (configurable to ERROR via `pg_ripple.federation_on_error` GUC)
 - [ ] **Security**
-  - Allowlist of permitted remote endpoints: `_pg_triple.federation_endpoints (url TEXT, enabled BOOLEAN)`
-  - `pg_triple.register_endpoint()` / `pg_triple.remove_endpoint()` management API
+  - Allowlist of permitted remote endpoints: `_pg_ripple.federation_endpoints (url TEXT, enabled BOOLEAN)`
+  - `pg_ripple.register_endpoint()` / `pg_ripple.remove_endpoint()` management API
   - No outbound HTTP calls unless the endpoint is explicitly registered (defence against SSRF)
 - [ ] **`SERVICE` → Materialized View rewrite**
-  - When a `SERVICE <url>` clause references an endpoint backed by a local SPARQL view (created via `pg_triple.create_sparql_view()`), rewrite the remote call to a direct scan of the pre-materialized stream table
-  - Registered via a `local_view_name` column on `_pg_triple.federation_endpoints` — set automatically when a SPARQL view is also registered as an endpoint
+  - When a `SERVICE <url>` clause references an endpoint backed by a local SPARQL view (created via `pg_ripple.create_sparql_view()`), rewrite the remote call to a direct scan of the pre-materialized stream table
+  - Registered via a `local_view_name` column on `_pg_ripple.federation_endpoints` — set automatically when a SPARQL view is also registered as an endpoint
   - Eliminates HTTP overhead and enables the PostgreSQL planner to optimize the join with accurate statistics from the stream table
 - [ ] **HTTP endpoint integration**
-  - Federation works via both SQL (`pg_triple.sparql()`) and HTTP (`/sparql`) interfaces
+  - Federation works via both SQL (`pg_ripple.sparql()`) and HTTP (`/sparql`) interfaces
 - [ ] pg_regress: `sparql_federation.sql`, `federation_timeout.sql`
 
 ### Exit Criteria
@@ -903,7 +903,7 @@ SPARQL queries with `SERVICE` clauses correctly fetch and join data from registe
 
 **Theme**: Stability, conformance, and production certification.
 
-> **In plain language:** The 1.0 release is not about new features — it's about *confidence*. We run pg_triple against the official W3C test suites for SPARQL and SHACL to verify standards compliance. A 72-hour continuous stress test checks for memory leaks and crash recovery. A security audit reviews the code for vulnerabilities. The result is a release that organisations can rely on for production workloads with a clear API stability guarantee: the public interface will not break in future minor versions.
+> **In plain language:** The 1.0 release is not about new features — it's about *confidence*. We run pg_ripple against the official W3C test suites for SPARQL and SHACL to verify standards compliance. A 72-hour continuous stress test checks for memory leaks and crash recovery. A security audit reviews the code for vulnerabilities. The result is a release that organisations can rely on for production workloads with a clear API stability guarantee: the public interface will not break in future minor versions.
 >
 > **Effort estimate: 6–8 person-weeks**
 
@@ -929,8 +929,8 @@ SPARQL queries with `SERVICE` clauses correctly fetch and join data from registe
   - Review shared memory usage for race conditions
   - Review dictionary cache for timing side-channels
 - [ ] **API stability guarantee**
-  - All `pg_triple.*` SQL functions considered stable API
-  - `_pg_triple.*` internal schema reserved for internal use
+  - All `pg_ripple.*` SQL functions considered stable API
+  - `_pg_ripple.*` internal schema reserved for internal use
   - Semantic versioning contract: breaking changes only in major versions
 - [ ] **Final benchmarks**
   - BSBM at 100M triples
@@ -948,7 +948,7 @@ Stable, tested, documented, and published. Ready for production workloads up to 
 
 ## Post-1.0 Horizon
 
-> **In plain language:** These are future directions that extend pg_triple beyond its initial scope. Each addresses a specific real-world need — from distributing data across multiple servers, to geographic queries, to bridging with existing relational databases. They are listed roughly in order of anticipated demand; some may be reordered or combined based on community feedback after 1.0.
+> **In plain language:** These are future directions that extend pg_ripple beyond its initial scope. Each addresses a specific real-world need — from distributing data across multiple servers, to geographic queries, to bridging with existing relational databases. They are listed roughly in order of anticipated demand; some may be reordered or combined based on community feedback after 1.0.
 >
 > **v1.6 Cypher/GQL** has a dedicated exploratory analysis in [plans/cypher/](plans/cypher/). The core finding: VP tables already encode all LPG structural elements; a standalone `cypher-algebra` crate (openCypher + GQL grammar, unified SQL-emitting algebra IR) is the correct architecture. Full write support requires v0.4.0 (RDF-star) for edge properties — already available. Gremlin is explicitly out of scope.
 
@@ -959,7 +959,7 @@ Stable, tested, documented, and published. Ready for production workloads up to 
 | 1.3 | Temporal | Track how data changes over time; query historical states | Bitstring versioning, TimescaleDB integration |
 | 1.4 | Extended VP | Automatically pre-compute shortcuts for frequent query patterns | Automated workload-driven ExtVP stream tables (pg_trickle), ontology change propagation DAG |
 | 1.5 | Interop | Bridge to GraphQL APIs and expose LPG views for visualization tools | GraphQL-to-SPARQL auto-generation from SHACL shapes, stable LPG view layer for visualization tooling |
-| 1.6 | Cypher / GQL | Query and write data using the industry-standard graph query languages | `cypher-algebra` standalone crate (openCypher + GQL grammar, same IR); `pg_triple.cypher()` SQL function; `CREATE`, `MERGE`, `SET`, `DELETE` via VP write path; openCypher TCK ≥80%; edge properties available since v0.4.0 (RDF-star) |
+| 1.6 | Cypher / GQL | Query and write data using the industry-standard graph query languages | `cypher-algebra` standalone crate (openCypher + GQL grammar, same IR); `pg_ripple.cypher()` SQL function; `CREATE`, `MERGE`, `SET`, `DELETE` via VP write path; openCypher TCK ≥80%; edge properties available since v0.4.0 (RDF-star) |
 | 1.7 | GeoSPARQL + PostGIS | Answer geographic questions ("find all hospitals within 5 km of this point") | `geo:asWKT` literal type backed by PostGIS `geometry`, spatial FILTER functions, R-tree index on spatial VP tables |
 | 1.8 | R2RML Virtual Graphs | Expose existing database tables as if they were RDF data — no migration needed | W3C R2RML mappings, SPARQL queries transparently join VP tables with mapped SQL tables |
 | 1.9 | Quad-Level Provenance | Track where each fact came from and when it was added | Per-quad metadata table with source, timestamp, and transaction ID; integration with Datalog rule provenance (why-provenance) |

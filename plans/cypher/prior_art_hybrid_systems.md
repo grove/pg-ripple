@@ -4,7 +4,7 @@
 > and LPG/Cypher on shared or closely coupled storage. Written April 2026.
 > These systems are distinct from the pure LPG systems covered in
 > [prior_art_graph_systems.md](prior_art_graph_systems.md) because they had to
-> solve the same core problem pg_triple faces: how do you expose two graph models
+> solve the same core problem pg_ripple faces: how do you expose two graph models
 > without duplicating data?
 
 ---
@@ -28,14 +28,14 @@
 Stardog's canonical storage layer is a **custom persistent quad store** (S, P, O, G)
 backed by **six full-permutation B-tree indices** (SPOG, SOPR, OPSG, POSG, GPOS,
 GOPS). Every IRI, blank node, and literal is dictionary-encoded to a 64-bit
-integer ID at ingest time — conceptually identical to pg_triple's XXH3-128
+integer ID at ingest time — conceptually identical to pg_ripple's XXH3-128
 dictionary encoding. The store writes quads as four integer columns; string
 payloads exist only in the dictionary. There is **no VP (vertical partitioning)
 by predicate** — Stardog uses full permutation indices so any access pattern
 (by S, by P, by O, by G, or combination) is efficient.
 
 A differential index layer holds uncommitted/recent writes separately from the
-main compacted index — architecturally analogous to pg_triple's planned HTAP
+main compacted index — architecturally analogous to pg_ripple's planned HTAP
 delta/main split.
 
 ### Dual-model approach
@@ -84,17 +84,17 @@ stored in a separate structure keyed by that hash.
   and is **not recommended for new projects**." They are waiting for the finalized
   RDF 1.2 / SPARQL 1.2 standard before committing to a permanent implementation.
 
-### Lessons for pg_triple
+### Lessons for pg_ripple
 
 **Lesson S1 — Single unified store beats parallel stores.**
 Stardog's approach of compiling Cypher to SPARQL and executing against one quad
-store eliminates dual-write overhead and keeps one optimizer. For pg_triple,
+store eliminates dual-write overhead and keeps one optimizer. For pg_ripple,
 implementing Cypher as a translation layer onto VP tables is strictly better than
 maintaining a parallel LPG storage path.
 
 **Lesson S2 — Cypher as a native execution target is expensive to sustain; translation is viable.**
 Stardog dropped its native Cypher endpoint. The Cypher → SPARQL algebra translation
-path proved more maintainable. For pg_triple, a standalone `cypher-algebra` crate
+path proved more maintainable. For pg_ripple, a standalone `cypher-algebra` crate
 that lowers to the same SPARQL-derived SQL the `sparql/` pipeline uses is
 architecturally sound and has the precedent of a production system validating the
 approach.
@@ -102,22 +102,22 @@ approach.
 **Lesson S3 — RDF-star via TID side store is feasible but costly; defer until RDF 1.2 finalizes.**
 Stardog's TID-keyed side store requires a different transaction conflict resolution
 strategy (ABORT_ON_CONFLICT) that limits write concurrency — a significant
-regression. For pg_triple, the pragmatic path is a dedicated
-`_pg_triple.edge_props(triple_hash BIGINT, prop_id BIGINT, val BIGINT, g BIGINT)`
+regression. For pg_ripple, the pragmatic path is a dedicated
+`_pg_ripple.edge_props(triple_hash BIGINT, prop_id BIGINT, val BIGINT, g BIGINT)`
 table with an index on `triple_hash`, deferring full RDF 1.2 annotation semantics
 until the W3C standard finalizes and Stardog's own second attempt is observable.
 
 **Lesson S4 — Immutable storage flags signal correctness requirements, not arbitrary constraints.**
 Stardog requires `edge.properties` at creation time because enabling it mid-life
 would require rewriting the conflict-resolution strategy for already-committed
-transactions. For pg_triple, the analogous decision is to document that enabling
-`pg_triple.enable_edge_props` after data has been loaded requires a migration
+transactions. For pg_ripple, the analogous decision is to document that enabling
+`pg_ripple.enable_edge_props` after data has been loaded requires a migration
 step — it should never silently alter the behavior of existing VP tables.
 
 **Lesson S5 — ICV guard mode is SHACL at commit time, not a separate system.**
 Stardog's Integrity Constraint Validation stores SHACL constraints as RDF data and
 runs a reduced validation pass against the write delta before the commit completes.
-For pg_triple's SHACL module, this maps to: generate deferred trigger functions
+For pg_ripple's SHACL module, this maps to: generate deferred trigger functions
 (or `CHECK` constraints via `CONSTRAINT TRIGGER`) from `sh:NodeShape` definitions,
 evaluated within the same transaction as the write.
 
@@ -164,7 +164,7 @@ The duality is entirely at the query interface level.
 
 The predicate catalog must be pre-populated before Cypher data loads
 (`auto_predicate` mode); node labels must be registered as predicates (analogous
-to `_pg_triple.predicates`) before VP routing can work.
+to `_pg_ripple.predicates`) before VP routing can work.
 
 ### Edge property handling
 
@@ -191,32 +191,32 @@ antithetical to MPP analytics architecture.
 
 Bulk loading via flat files is the primary write path for large datasets.
 
-### Lessons for pg_triple
+### Lessons for pg_ripple
 
 **Lesson A1 — RDF* as the unified canonical format is the cleanest architecture.**
 AnzoGraph's mapping of all Cypher constructs to RDF* means exactly one storage
-model to maintain, optimize, and index. For pg_triple, the mapping is already
+model to maintain, optimize, and index. For pg_ripple, the mapping is already
 complete for nodes and edges; the only gap is edge properties, which map to
-RDF*-annotated triples. The `_pg_triple.edge_props` side table (Lesson S3) is the
+RDF*-annotated triples. The `_pg_ripple.edge_props` side table (Lesson S3) is the
 minimal implementation of this pattern.
 
 **Lesson A2 — Predicate catalog registration must be explicit on the write path.**
 AnzoGraph's `auto_predicate` mode registers Cypher labels as predicates in the
-catalog before data loads. For pg_triple, when Cypher `CREATE (n:Person)` arrives,
-the label must be resolved to a predicate ID and registered in `_pg_triple.predicates`
+catalog before data loads. For pg_ripple, when Cypher `CREATE (n:Person)` arrives,
+the label must be resolved to a predicate ID and registered in `_pg_ripple.predicates`
 before VP table routing occurs. This should be an explicit step, not silent
 fallback to `vp_rare`.
 
 **Lesson A3 — No MERGE in MPP analytical systems confirms PostgreSQL's structural advantage.**
 AnzoGraph omits MERGE because distributed OCC is expensive over columnar storage.
-pg_triple's VP tables use PostgreSQL MVCC: `INSERT ... ON CONFLICT DO NOTHING ...
+pg_ripple's VP tables use PostgreSQL MVCC: `INSERT ... ON CONFLICT DO NOTHING ...
 RETURNING` is atomic at zero extra cost. This is a concrete reason to keep Cypher
 writes within the PostgreSQL SPI execution path rather than delegating to an
 external graph engine.
 
 **Lesson A4 — Columnar storage is analytically faster but OLTP-restricted.**
 AnzoGraph's MPP columnar format outperforms row-store triple stores on aggregation
-workloads but cannot handle transactional write patterns. pg_triple's HTAP split
+workloads but cannot handle transactional write patterns. pg_ripple's HTAP split
 (delta heap + BRIN main + merge worker) is the hybrid that achieves both. Cypher
 analytics workloads will naturally benefit from the merge worker having consolidated
 rows into the BRIN-indexed main partition.
@@ -224,8 +224,8 @@ rows into the BRIN-indexed main partition.
 **Lesson A5 — Separate Bolt and SPARQL endpoints over shared storage is the right UX.**
 AnzoGraph demonstrates that users accept two separate protocol endpoints (one for
 analysts running SPARQL, one for developers running Cypher) as long as the data
-is the same. pg_triple should expose `pg_triple.sparql(...)` and
-`pg_triple.cypher(...)` as separate SQL functions with the same storage backing —
+is the same. pg_ripple should expose `pg_ripple.sparql(...)` and
+`pg_ripple.cypher(...)` as separate SQL functions with the same storage backing —
 no need for a unified query language.
 
 ---
@@ -306,26 +306,26 @@ Neptune's MERGE implementation under concurrent writes is production-hardened.
 How Neptune implements MERGE concurrency safety is not publicly documented, but
 the feature is confirmed reliable by AWS customer case studies.
 
-### Lessons for pg_triple
+### Lessons for pg_ripple
 
 **Lesson N1 — Two-store parallel architectures are an architectural dead end for unified semantics.**
 Neptune's customers who want to reason over both their RDF knowledge graph and their
-LPG social graph must ETL. For pg_triple, a single unified VP table layer (where
+LPG social graph must ETL. For pg_ripple, a single unified VP table layer (where
 Cypher edges are simply triples/quads) avoids this permanently. The decision to
 use RDF as the canonical form must be made at the foundation and never revisited.
 
 **Lesson N2 — Neptune Analytics vs Neptune Database is a lesson in OLTP/OLAP separation.**
 Neptune Analytics (in-memory, columnar, algorithm-optimized) is a separate product
 because the Neptune Database engine cannot efficiently execute analytical workloads
-at scale. pg_triple's HTAP split mirrors this separation within a single PostgreSQL
+at scale. pg_ripple's HTAP split mirrors this separation within a single PostgreSQL
 instance: delta tables handle OLTP, BRIN-indexed main tables handle analytics.
 The merge worker is what makes both efficient — it is not optional.
 
 **Lesson N3 — Native LPG edge properties are structurally cheaper than RDF-star.**
 Neptune's property graph store carries edge properties at zero extra cost (edges
-have their own identity and property bags). If pg_triple receives write-heavy
+have their own identity and property bags). If pg_ripple receives write-heavy
 Cypher workloads with dense edge properties, a dedicated
-`_pg_triple.edge_props(triple_hash BIGINT, prop_id BIGINT, val BIGINT, g BIGINT)`
+`_pg_ripple.edge_props(triple_hash BIGINT, prop_id BIGINT, val BIGINT, g BIGINT)`
 table with an index on `triple_hash` may be more efficient than routing through
 RDF-star annotation VP tables, because it separates the index structures from the
 base triple scan.
@@ -333,13 +333,13 @@ base triple scan.
 **Lesson N4 — Neptune ML's export–external-compute–reimport pattern is the template for future ML integration.**
 Neptune ML exports the property graph to SageMaker in DGL/PyTorch Geometric format,
 trains node/link prediction models, and imports predictions back as vertex/edge
-properties. For pg_triple, this maps to: reserve a named graph (e.g., `g_id` for
+properties. For pg_ripple, this maps to: reserve a named graph (e.g., `g_id` for
 the ML-derived graph) for imported prediction triples, keeping them queryable
 alongside the base knowledge graph without polluting the explicit triple store.
 
 **Lesson N5 — "openCypher, Gremlin, and SPARQL on the same cluster" does not mean "on the same data."**
 Neptune's marketing suggests multi-model capability, but the implementation is
-three separate query engines over two isolated stores. Any future pg_triple
+three separate query engines over two isolated stores. Any future pg_ripple
 documentation of Cypher support should be explicit: **SPARQL and Cypher are two
 interfaces to the same VP table data**, not two separate databases cohabiting a
 server. This is a fundamental architectural differentiator from Neptune.
@@ -356,7 +356,7 @@ blank nodes, and literals to integer IDs before storage. This is not accidental.
 Integer joins are 2–4× faster than string joins at the storage layer; all three
 systems measured this and arrived at the same conclusion.
 
-pg_triple's XXH3-128 dictionary encoding is validated by all three production
+pg_ripple's XXH3-128 dictionary encoding is validated by all three production
 systems as the baseline correct design.
 
 ### 4.2 The consensus on unified vs. parallel storage
@@ -378,7 +378,7 @@ Neptune is the counter-evidence: parallel stores give operational isolation but
 create a permanent semantic barrier. The fact that Neptune Analytics was built as
 a *separate product* to handle analytics that Neptune Database cannot do is an
 implicit admission that the property graph store was never enough for analytical
-workloads — exactly the split pg_triple's HTAP architecture prevents.
+workloads — exactly the split pg_ripple's HTAP architecture prevents.
 
 ### 4.3 RDF-star: necessary but not yet stable
 
@@ -392,7 +392,7 @@ workloads — exactly the split pg_triple's HTAP architecture prevents.
 The synthesis: **implement the minimal edge-property extension now** using a
 `triple_hash`-keyed side table, design its external API to match emerging RDF 1.2
 semantics, and plan a migration to native RDF-star VP tables when the W3C standard
-finalizes and pgrx/oxrdf provide stable support (planned in pg_triple v0.4.0).
+finalizes and pgrx/oxrdf provide stable support (planned in pg_ripple v0.4.0).
 
 The Stardog deprecation is a warning not to over-commit to a specific RDF-star
 surface syntax before RDF 1.2 finalizes. The AnzoGraph experience confirms that
@@ -404,9 +404,9 @@ the underlying storage concept (edge annotation via triple identity) is sound.
 |---|---|---|
 | Cypher → SPARQL algebra → execute | Stardog (historically) | Maintainable; operator-sharing; Stardog chose this |
 | Cypher → native execution engine | Neo4j, Memgraph | Highest performance; highest maintenance cost |
-| Cypher → SQL via algebra IR | pg_triple (proposed) | Viable; validated by Stardog's choice; PostgreSQL optimizer replaces both algebraic optimizer AND execution engine |
+| Cypher → SQL via algebra IR | pg_ripple (proposed) | Viable; validated by Stardog's choice; PostgreSQL optimizer replaces both algebraic optimizer AND execution engine |
 
-For pg_triple, the translation path (Cypher algebra → SQL → PostgreSQL executor)
+For pg_ripple, the translation path (Cypher algebra → SQL → PostgreSQL executor)
 is architecturally equivalent to Stardog's Cypher → SPARQL → execute path, but
 targets SQL instead of SPARQL. This is strictly less work than a native Cypher
 executor and shares the PostgreSQL optimizer's full power (join reordering,
@@ -416,7 +416,7 @@ statistics, parallel query, AIO) at no extra cost.
 algebra IR; `src/cypher/translator.rs` lowers it to SQL. This is validated by
 two production systems as the correct separation.**
 
-### 4.5 What these systems regret — avoid in pg_triple
+### 4.5 What these systems regret — avoid in pg_ripple
 
 | Anti-pattern | Seen in | Why to avoid |
 |---|---|---|
@@ -427,7 +427,7 @@ two production systems as the correct separation.**
 | Columnar-first storage without row-oriented write path | AnzoGraph | MERGE becomes unsupportable; bulk-load-only write model |
 | `auto_predicate` silent fallback on unknown predicates | AnzoGraph | Silently drops data to vp_rare instead of failing; correctness hazard |
 
-### 4.6 Recommended sequence for pg_triple dual-model support
+### 4.6 Recommended sequence for pg_ripple dual-model support
 
 Based on all three hybrid systems:
 
@@ -442,7 +442,7 @@ Based on all three hybrid systems:
    validated by AnzoGraph's RDF-first unified store approach.
 
 3. **Cypher edge properties** require a single schema addition:
-   `_pg_triple.edge_props(triple_hash BIGINT, prop_id BIGINT, val BIGINT, g BIGINT)`
+   `_pg_ripple.edge_props(triple_hash BIGINT, prop_id BIGINT, val BIGINT, g BIGINT)`
    with an index on `(triple_hash, prop_id)`. This is a net-new table with no
    impact on existing VP tables. Defer until v0.4.0 (RDF-star release) or a
    confirmed use-case requirement.

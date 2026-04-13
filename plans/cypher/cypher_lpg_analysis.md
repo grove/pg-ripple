@@ -1,4 +1,4 @@
-# Cypher / LPG Support on the pg_triple Foundation
+# Cypher / LPG Support on the pg_ripple Foundation
 
 > **Status**: Exploratory analysis — not yet committed to the roadmap.
 > This document captures the architectural reasoning from the initial design session (April 2026).
@@ -8,16 +8,16 @@
 
 ## 1. The Question
 
-pg_triple is being built as an RDF triple store with SPARQL query support. RDF Knowledge Graphs
+pg_ripple is being built as an RDF triple store with SPARQL query support. RDF Knowledge Graphs
 (KGs) and Labeled Property Graphs (LPGs) have historically been distinct models, but the boundary
-is dissolving. The question is: should pg_triple also expose a Cypher / GQL interface, and if so,
+is dissolving. The question is: should pg_ripple also expose a Cypher / GQL interface, and if so,
 how?
 
 ---
 
 ## 2. What the Storage Layer Already Provides
 
-pg_triple's VP table layout turns out to be structurally close to LPG storage in surprising ways:
+pg_ripple's VP table layout turns out to be structurally close to LPG storage in surprising ways:
 
 | LPG concept | VP table mapping |
 |---|---|
@@ -96,7 +96,7 @@ Cypher has a full mutation surface — it is not read-only:
 
 Every write operation must route through the dictionary encoder (string → `i64`) and the VP table
 selector (predicate ID → table OID lookup). A separate `pg_cypher` extension that calls into
-these internals is, in practice, so tightly coupled to pg_triple that the extension boundary
+these internals is, in practice, so tightly coupled to pg_ripple that the extension boundary
 provides no real separation. This is the primary argument for keeping Cypher support within the
 same Cargo workspace rather than a truly independent project.
 
@@ -124,9 +124,9 @@ A standalone `cypher-algebra` crate, modelled on `spargebra`'s design, would:
 
 1. Be independently valuable and publishable to crates.io
 2. Fill an actual gap in the Rust graph-database ecosystem
-3. Give pg_triple a well-tested, separable frontend component
+3. Give pg_ripple a well-tested, separable frontend component
 
-The parser work is substantial but the resulting crate is reusable far beyond pg_triple.
+The parser work is substantial but the resulting crate is reusable far beyond pg_ripple.
 
 ---
 
@@ -135,7 +135,7 @@ The parser work is substantial but the resulting crate is reusable far beyond pg
 ### 6.1 Cargo workspace structure
 
 ```
-pg-triple/  (workspace root)
+pg-ripple/  (workspace root)
   crates/
     cypher-algebra/        ← standalone crate, independently published
     │   src/
@@ -145,7 +145,7 @@ pg-triple/  (workspace root)
     │                         Create, Merge, Set, Remove, Delete)
     │     normalize.rs     — AST → algebra lowering
     │
-    pg_triple/             ← pgrx extension
+    pg_ripple/             ← pgrx extension
         src/
           sparql/          — existing SPARQL→SQL pipeline
           cypher/          — Cypher algebra → SQL (new; mirrors sparql/)
@@ -162,7 +162,7 @@ Cypher text
     ▼  cypher-algebra (standalone crate)
 CypherAlgebra IR
     │
-    ▼  src/cypher/translator.rs  (pg_triple)
+    ▼  src/cypher/translator.rs  (pg_ripple)
 Encode constants via dictionary encoder
     │
     ▼
@@ -208,17 +208,17 @@ to "Cypher on the same infrastructure."
 
 **AGE does not query SQL views.** AGE has its own internal storage in `_ag_label_*` heap tables
 using its `agtype` binary format. `cypher('graph', $$ MATCH (n) RETURN n $$)` scans AGE's own
-tables, not pg_triple's VP tables.
+tables, not pg_ripple's VP tables.
 
-Using AGE alongside pg_triple would require an ETL sync step (VP tables → AGE internal storage),
+Using AGE alongside pg_ripple would require an ETL sync step (VP tables → AGE internal storage),
 resulting in:
 - Duplicate data storage
-- Stale Cypher reads (lag behind pg_triple writes)
+- Stale Cypher reads (lag behind pg_ripple writes)
 - Loss of dictionary encoding benefits
 - No shared transaction boundary
 
 **Conclusion**: AGE interop via ETL copy is a reporting sidecar, not a live query path. It is not
-a substitute for native Cypher support in pg_triple.
+a substitute for native Cypher support in pg_ripple.
 
 ---
 
@@ -229,7 +229,7 @@ in that scope.
 
 Recommended sequencing:
 
-1. **v0.x – v1.0.0**: Build pg_triple as planned. No Cypher scope. Ensure the storage API
+1. **v0.x – v1.0.0**: Build pg_ripple as planned. No Cypher scope. Ensure the storage API
    (`insert_triple`, `delete_triple`, VP table selector, dictionary encoder) is stable and
    well-tested — this becomes the write-path contract that the Cypher compiler will target.
 
@@ -237,10 +237,10 @@ Recommended sequencing:
    available early in the roadmap, well before Cypher write support is needed.
 
 3. **Parallel / post-1.0**: Begin `cypher-algebra` as an independent crate in the workspace.
-   The grammar and AST work does not depend on pg_triple's internals and can proceed in parallel
+   The grammar and AST work does not depend on pg_ripple's internals and can proceed in parallel
    with later 0.x releases.
 
-4. **Post-1.0**: Integrate `cypher-algebra` into pg_triple as `src/cypher/`. Add `cypher()`
+4. **Post-1.0**: Integrate `cypher-algebra` into pg_ripple as `src/cypher/`. Add `cypher()`
    SQL function mirroring `sparql()`.
 
 ### Rough effort estimate (post-1.0 work)

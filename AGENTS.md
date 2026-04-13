@@ -1,6 +1,6 @@
-# pg_triple — Agent Guidelines
+# pg_ripple — Agent Guidelines
 
-**pg_triple** is a PostgreSQL 18 extension written in Rust (pgrx 0.17) that implements a high-performance RDF triple store with native SPARQL query execution. See [plans/implementation_plan.md](plans/implementation_plan.md) for the full architecture and [ROADMAP.md](ROADMAP.md) for the phased delivery plan.
+**pg_ripple** is a PostgreSQL 18 extension written in Rust (pgrx 0.17) that implements a high-performance RDF triple store with native SPARQL query execution. See [plans/implementation_plan.md](plans/implementation_plan.md) for the full architecture and [ROADMAP.md](ROADMAP.md) for the phased delivery plan.
 
 ## Tech Stack
 
@@ -30,23 +30,23 @@ src/stats/          — Monitoring, pg_stat_statements integration
 src/admin/          — vacuum, reindex, prefix registry
 ```
 
-All user-visible objects live in the `pg_triple` schema; internal tables and VP tables live in `_pg_triple`.
+All user-visible objects live in the `pg_ripple` schema; internal tables and VP tables live in `_pg_ripple`.
 
 ## Storage Conventions
 
-- **Dictionary encoding**: every IRI, blank node, and literal is mapped to `BIGINT` (i64) via XXH3-128 hash before being stored in the unified `_pg_triple.dictionary` table. VP tables **never** contain raw strings.
-- **VP table naming**: `_pg_triple.vp_{predicate_id}` — one table per unique predicate. Columns: `s BIGINT, o BIGINT, g BIGINT, i BIGINT NOT NULL DEFAULT nextval('statement_id_seq'), source SMALLINT DEFAULT 0`. Dual B-tree indices on `(s, o)` and `(o, s)`. The `i` column is a globally-unique statement identifier (SID) from a shared sequence introduced in v0.1.0; the `source` column (v0.10.0) distinguishes explicit (`0`) from inferred (`1`) triples.
-- **Rare-predicate consolidation**: predicates with fewer than `pg_triple.vp_promotion_threshold` triples (default: 1,000) are stored in `_pg_triple.vp_rare (p, s, o, g, i, source)` instead of a dedicated VP table. Auto-promoted when the threshold is crossed.
+- **Dictionary encoding**: every IRI, blank node, and literal is mapped to `BIGINT` (i64) via XXH3-128 hash before being stored in the unified `_pg_ripple.dictionary` table. VP tables **never** contain raw strings.
+- **VP table naming**: `_pg_ripple.vp_{predicate_id}` — one table per unique predicate. Columns: `s BIGINT, o BIGINT, g BIGINT, i BIGINT NOT NULL DEFAULT nextval('statement_id_seq'), source SMALLINT DEFAULT 0`. Dual B-tree indices on `(s, o)` and `(o, s)`. The `i` column is a globally-unique statement identifier (SID) from a shared sequence introduced in v0.1.0; the `source` column (v0.10.0) distinguishes explicit (`0`) from inferred (`1`) triples.
+- **Rare-predicate consolidation**: predicates with fewer than `pg_ripple.vp_promotion_threshold` triples (default: 1,000) are stored in `_pg_ripple.vp_rare (p, s, o, g, i, source)` instead of a dedicated VP table. Auto-promoted when the threshold is crossed.
 - **HTAP split** (v0.6.0+): writes go to `vp_{id}_delta` (heap + B-tree); deletes of main-resident triples go to `vp_{id}_tombstones`; the background merge worker combines main + delta (minus tombstones) into a fresh `vp_{id}_main` (BRIN-indexed). Query path is `(main EXCEPT tombstones) UNION ALL delta`. In v0.1.0–v0.5.1, each VP table is a single flat table with no delta/main split.
 - **Default graph ID**: `0`; named graphs > 0.
-- **Predicate catalog**: `_pg_triple.predicates (id, table_oid, triple_count)` — look up the VP table OID here before any dynamic SQL.
+- **Predicate catalog**: `_pg_ripple.predicates (id, table_oid, triple_count)` — look up the VP table OID here before any dynamic SQL.
 
 ## Code Conventions
 
 - **Safe Rust only**; `unsafe` is permitted solely at required FFI boundaries — always add a `// SAFETY:` comment.
 - Expose SQL functions via `#[pg_extern]`; never write raw `PG_FUNCTION_INFO_V1` C macros.
 - Use `pgrx::SpiClient` for all SQL executed inside extension code.
-- Shared memory state uses `pgrx::PgSharedMem` — size driven by GUC `pg_triple.dictionary_cache_size`.
+- Shared memory state uses `pgrx::PgSharedMem` — size driven by GUC `pg_ripple.dictionary_cache_size`.
 - Background workers use `pgrx::BackgroundWorker` with `BGWORKER_SHMEM_ACCESS`.
 - All batch dictionary operations use `ON CONFLICT DO NOTHING … RETURNING` rather than SELECT-then-INSERT.
 - Error messages follow PostgreSQL style: lowercase first word, no trailing period.
@@ -72,7 +72,7 @@ cargo pgrx install --pg-config $(which pg_config)
 - **Self-join elimination**: star patterns (same subject, multiple predicates) must be detected in the algebra optimizer and collapsed into a single scan with multiple joins — do not emit redundant subqueries.
 - **Property paths**: compile to `WITH RECURSIVE … CYCLE` — always use PG18's `CYCLE` clause for hash-based cycle detection.
 - **SHACL hints**: if `sh:maxCount 1` is set for a predicate, the SQL generator may omit `DISTINCT`; if `sh:minCount 1`, downgrade `LEFT JOIN` to `INNER JOIN`.
-- **No dynamic SQL string concatenation for table names** — always look up the OID in `_pg_triple.predicates` and use `format_ident!`-style quoting.
+- **No dynamic SQL string concatenation for table names** — always look up the OID in `_pg_ripple.predicates` and use `format_ident!`-style quoting.
 
 ## Git & GitHub Workflow
 

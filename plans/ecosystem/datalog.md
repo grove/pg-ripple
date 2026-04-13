@@ -1,4 +1,4 @@
-# Datalog Reasoning Engine for pg_triple
+# Datalog Reasoning Engine for pg_ripple
 
 ## 1. Motivation
 
@@ -12,7 +12,7 @@ A general-purpose Datalog engine subsumes and generalizes all of these:
 | OWL RL profile | ~80 entailment rules from the W3C spec | Fixed rule set |
 | Datalog engine | All of the above + arbitrary user-defined rules | Fully extensible |
 
-A quad `(s, p, o, g)` is how pg_triple actually stores data: every VP table carries `(s BIGINT, o BIGINT, g BIGINT)` where `g` is the dictionary-encoded named graph IRI (0 = default graph). Datalog rules over this quad structure are exactly how RDFS, OWL RL, and custom domain rules are formally specified. The graph dimension is first-class — rules can read from and write into specific named graphs, propagate facts across graphs, or operate graph-agnostically.
+A quad `(s, p, o, g)` is how pg_ripple actually stores data: every VP table carries `(s BIGINT, o BIGINT, g BIGINT)` where `g` is the dictionary-encoded named graph IRI (0 = default graph). Datalog rules over this quad structure are exactly how RDFS, OWL RL, and custom domain rules are formally specified. The graph dimension is first-class — rules can read from and write into specific named graphs, propagate facts across graphs, or operate graph-agnostically.
 
 ### Use cases beyond standard entailment
 
@@ -56,14 +56,14 @@ src/datalog/
     stratify.rs     — dependency graph, stratification, cycle detection
     compiler.rs     — Rule IR → SQL (per stratum)
     builtins.rs     — built-in rule sets (RDFS, OWL RL)
-    catalog.rs      — _pg_triple.rules table CRUD
+    catalog.rs      — _pg_ripple.rules table CRUD
 ```
 
 ---
 
 ## 3. Rule Syntax
 
-A Turtle-flavoured Datalog notation that reuses the prefix registry already in pg_triple. Each rule is a line of the form `head :- body .` where head and body are triple patterns with variables (`?x`) and constants (prefixed IRIs or literals).
+A Turtle-flavoured Datalog notation that reuses the prefix registry already in pg_ripple. Each rule is a line of the form `head :- body .` where head and body are triple patterns with variables (`?x`) and constants (prefixed IRIs or literals).
 
 ### 3.1 Basic rules
 
@@ -128,7 +128,7 @@ GRAPH ?g { ?x ex:indirectManager ?z } :- GRAPH ?g { ?x ex:manager ?y }, GRAPH ?g
 ?x rdf:type ?c :- GRAPH ?g { ?x rdf:type ?c } .
 ```
 
-**Default behaviour when `GRAPH` is omitted**: controlled by the GUC `pg_triple.rule_graph_scope`:
+**Default behaviour when `GRAPH` is omitted**: controlled by the GUC `pg_ripple.rule_graph_scope`:
 - `'default'` *(recommended)*: unscoped atoms match only the default graph (`g = 0`). Derived triples are written to the default graph.
 - `'all'`: unscoped atoms match triples in any graph. Useful for ontology-level rules that should span the whole dataset.
 
@@ -230,7 +230,7 @@ HINT: remove the negation cycle or split into separate rule sets
 
 ## 6. SQL Compilation
 
-All SQL generation follows pg_triple's core design constraint: **integer joins everywhere**. All constants in rule bodies are dictionary-encoded before SQL generation. Derived VP tables use the same `(s BIGINT, o BIGINT, g BIGINT)` schema as base VP tables.
+All SQL generation follows pg_ripple's core design constraint: **integer joins everywhere**. All constants in rule bodies are dictionary-encoded before SQL generation. Derived VP tables use the same `(s BIGINT, o BIGINT, g BIGINT)` schema as base VP tables.
 
 ### 6.1 Non-recursive rules
 
@@ -239,10 +239,10 @@ Each rule compiles to a single `INSERT … SELECT`:
 ```sql
 -- Rule: ?y ?p ?x :- ?x ?p ?y, ?p rdf:type owl:SymmetricProperty .
 -- (where rdf:type = 7, owl:SymmetricProperty = 201)
-INSERT INTO _pg_triple.vp_{p_id}_delta (s, o, g)
+INSERT INTO _pg_ripple.vp_{p_id}_delta (s, o, g)
 SELECT t1.o, t1.s, t1.g
-FROM _pg_triple.vp_{p_id} t1
-JOIN _pg_triple.vp_7 t2 ON t2.s = t1.p AND t2.o = 201
+FROM _pg_ripple.vp_{p_id} t1
+JOIN _pg_ripple.vp_7 t2 ON t2.s = t1.p AND t2.o = 201
 ON CONFLICT DO NOTHING
 ```
 
@@ -261,11 +261,11 @@ Recursive rules in the same stratum compile to `WITH RECURSIVE … CYCLE`:
 WITH RECURSIVE indirect_manager(s, o, g) AS (
     -- Base case: direct manager
     SELECT s, o, g
-    FROM _pg_triple.vp_42           -- ex:manager
+    FROM _pg_ripple.vp_42           -- ex:manager
   UNION
     -- Recursive step
     SELECT m.s, im.o, m.g
-    FROM _pg_triple.vp_42 m         -- ex:manager
+    FROM _pg_ripple.vp_42 m         -- ex:manager
     JOIN indirect_manager im ON im.s = m.o
 )
 CYCLE s, o SET is_cycle USING path
@@ -282,10 +282,10 @@ When the graph term is a **variable** (`?g`), the `CYCLE` clause must include `g
 -- GRAPH ?g { ?x ex:indirectManager ?z } :- GRAPH ?g { ?x ex:manager ?y }, GRAPH ?g { ?y ex:indirectManager ?z } .
 
 WITH RECURSIVE indirect_manager(s, o, g) AS (
-    SELECT s, o, g FROM _pg_triple.vp_42   -- ex:manager (all graphs)
+    SELECT s, o, g FROM _pg_ripple.vp_42   -- ex:manager (all graphs)
   UNION
     SELECT m.s, im.o, m.g
-    FROM _pg_triple.vp_42 m
+    FROM _pg_ripple.vp_42 m
     JOIN indirect_manager im ON im.s = m.o AND im.g = m.g  -- same graph
 )
 CYCLE s, o, g SET is_cycle USING path   -- g included: cycles are per-graph
@@ -302,12 +302,12 @@ Negated body atoms compile to `NOT EXISTS`:
 -- Rule: ?x ex:missingEmail "true"^^xsd:boolean :- ?x rdf:type foaf:Person, NOT ?x foaf:mbox ?_ .
 -- (where rdf:type = 7, foaf:Person = 99, foaf:mbox = 15, ex:missingEmail = derived_50, "true"^^xsd:boolean = 301)
 
-INSERT INTO _pg_triple.vp_derived_50_delta (s, o, g)
+INSERT INTO _pg_ripple.vp_derived_50_delta (s, o, g)
 SELECT t.s, 301, t.g
-FROM _pg_triple.vp_7 t
+FROM _pg_ripple.vp_7 t
 WHERE t.o = 99                    -- foaf:Person
   AND NOT EXISTS (
-      SELECT 1 FROM _pg_triple.vp_15 m WHERE m.s = t.s
+      SELECT 1 FROM _pg_ripple.vp_15 m WHERE m.s = t.s
   )
 ON CONFLICT DO NOTHING
 ```
@@ -319,8 +319,8 @@ When multiple body atoms share the same subject variable, the compiler generates
 ```sql
 -- Rule: ?x ex:eligible "true" :- ?x rdf:type ex:Employee, ?x ex:age ?a, ?a > 18 .
 SELECT t1.s, 501, t1.g
-FROM _pg_triple.vp_7 t1             -- rdf:type
-JOIN _pg_triple.vp_55 t2 ON t2.s = t1.s   -- ex:age
+FROM _pg_ripple.vp_7 t1             -- rdf:type
+JOIN _pg_ripple.vp_55 t2 ON t2.s = t1.s   -- ex:age
 WHERE t1.o = 200                    -- ex:Employee
   AND t2.o > 18                     -- FILTER (integer-encoded comparison)
 ```
@@ -336,7 +336,7 @@ Each derived predicate becomes a pg_trickle stream table that is incrementally m
 ```sql
 -- Derived predicate ex:indirectManager → stream table
 SELECT pgtrickle.create_stream_table(
-    name     => '_pg_triple.vp_derived_43',
+    name     => '_pg_ripple.vp_derived_43',
     query    => $$ WITH RECURSIVE indirect_manager(s, o, g) AS ( … ) SELECT … $$,
     schedule => '10s'
 );
@@ -360,10 +360,10 @@ Rules are compiled to inline CTEs that the SPARQL→SQL generator inserts when a
 -- On-demand mode: the CTE is inlined into the query
 
 WITH RECURSIVE indirect_manager(s, o, g) AS (
-    SELECT s, o, g FROM _pg_triple.vp_42
+    SELECT s, o, g FROM _pg_ripple.vp_42
   UNION
     SELECT m.s, im.o, m.g
-    FROM _pg_triple.vp_42 m
+    FROM _pg_ripple.vp_42 m
     JOIN indirect_manager im ON im.s = m.o
 )
 CYCLE s, o SET is_cycle USING path
@@ -387,13 +387,13 @@ WHERE im.o = 43  -- ex:Alice (encoded)
 
 ```sql
 -- Inference execution mode
-SET pg_triple.inference_mode = 'materialized';  -- default when pg_trickle is present
-SET pg_triple.inference_mode = 'on_demand';      -- default when pg_trickle is absent
-SET pg_triple.inference_mode = 'off';            -- disable inference entirely
+SET pg_ripple.inference_mode = 'materialized';  -- default when pg_trickle is present
+SET pg_ripple.inference_mode = 'on_demand';      -- default when pg_trickle is absent
+SET pg_ripple.inference_mode = 'off';            -- disable inference entirely
 
 -- Graph scope for unscoped body atoms (atoms without an explicit GRAPH clause)
-SET pg_triple.rule_graph_scope = 'default';  -- match only g = 0 (recommended)
-SET pg_triple.rule_graph_scope = 'all';      -- match triples in any graph
+SET pg_ripple.rule_graph_scope = 'default';  -- match only g = 0 (recommended)
+SET pg_ripple.rule_graph_scope = 'all';      -- match triples in any graph
 ```
 
 `rule_graph_scope = 'default'` is the safe default: rules that don't mention `GRAPH` operate only on the default graph, preventing unintended cross-graph reasoning. Set `'all'` for ontology-level rules (RDFS, OWL RL) that should span the whole dataset regardless of which named graph the facts live in.
@@ -442,13 +442,13 @@ The W3C OWL 2 RL profile is the subset of OWL that can be implemented as Datalog
 
 ```sql
 -- Load RDFS rules
-SELECT pg_triple.load_rules_builtin('rdfs');
+SELECT pg_ripple.load_rules_builtin('rdfs');
 
 -- Load OWL RL rules (includes RDFS as stratum 0)
-SELECT pg_triple.load_rules_builtin('owl-rl');
+SELECT pg_ripple.load_rules_builtin('owl-rl');
 
 -- View loaded rules
-SELECT * FROM pg_triple.list_rules();
+SELECT * FROM pg_ripple.list_rules();
 ```
 
 ---
@@ -458,7 +458,7 @@ SELECT * FROM pg_triple.list_rules();
 ### 9.1 Rule storage
 
 ```sql
-CREATE TABLE _pg_triple.rules (
+CREATE TABLE _pg_ripple.rules (
     id            BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     rule_set      TEXT NOT NULL,             -- e.g. 'rdfs', 'owl-rl', 'custom'
     rule_text     TEXT NOT NULL,             -- original Datalog text
@@ -471,11 +471,11 @@ CREATE TABLE _pg_triple.rules (
 
 ### 9.2 Derived predicate registry
 
-Derived predicates are registered alongside base predicates in `_pg_triple.predicates` with a `derived` flag:
+Derived predicates are registered alongside base predicates in `_pg_ripple.predicates` with a `derived` flag:
 
 ```sql
-ALTER TABLE _pg_triple.predicates ADD COLUMN derived BOOLEAN NOT NULL DEFAULT FALSE;
-ALTER TABLE _pg_triple.predicates ADD COLUMN rule_set TEXT;
+ALTER TABLE _pg_ripple.predicates ADD COLUMN derived BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE _pg_ripple.predicates ADD COLUMN rule_set TEXT;
 ```
 
 This allows the SPARQL engine to look up derived VP tables the same way it looks up base VP tables — no special handling in the query planner.
@@ -486,26 +486,26 @@ This allows the SPARQL engine to look up derived VP tables the same way it looks
 
 ```sql
 -- Load rules from Datalog text
-SELECT pg_triple.load_rules(rules TEXT, rule_set TEXT DEFAULT 'custom');
+SELECT pg_ripple.load_rules(rules TEXT, rule_set TEXT DEFAULT 'custom');
 
 -- Load a built-in rule set
-SELECT pg_triple.load_rules_builtin(name TEXT);  -- 'rdfs' | 'owl-rl'
+SELECT pg_ripple.load_rules_builtin(name TEXT);  -- 'rdfs' | 'owl-rl'
 
 -- Materialize all derived predicates as pg_trickle stream tables
-SELECT pg_triple.materialize_rules(schedule TEXT DEFAULT '10s');
+SELECT pg_ripple.materialize_rules(schedule TEXT DEFAULT '10s');
 
 -- List active rules
-SELECT * FROM pg_triple.list_rules();
+SELECT * FROM pg_ripple.list_rules();
 -- Returns: id, rule_set, rule_text, head_pred_iri, stratum, is_recursive, created_at
 
 -- Drop rules by rule set name
-SELECT pg_triple.drop_rules(rule_set TEXT);
+SELECT pg_ripple.drop_rules(rule_set TEXT);
 
 -- Drop all rules and derived tables
-SELECT pg_triple.drop_all_rules();
+SELECT pg_ripple.drop_all_rules();
 
 -- Set inference mode
-SET pg_triple.inference_mode = 'materialized' | 'on_demand' | 'off';
+SET pg_ripple.inference_mode = 'materialized' | 'on_demand' | 'off';
 ```
 
 ---
@@ -514,7 +514,7 @@ SET pg_triple.inference_mode = 'materialized' | 'on_demand' | 'off';
 
 ### 11.1 SPARQL engine
 
-The query translation engine needs one addition: when `pg_triple.inference_mode != 'off'` and a query references a derived predicate:
+The query translation engine needs one addition: when `pg_ripple.inference_mode != 'off'` and a query references a derived predicate:
 
 - **Materialized mode**: the predicate's VP table is a stream table — no change needed, the existing join generation works as-is.
 - **On-demand mode**: the compiler prepends the derived predicate's CTE to the generated SQL. Multiple derived predicates in one query → multiple CTEs. The CTE names are the derived VP table names.
@@ -546,7 +546,7 @@ pg_trickle's DAG scheduler automatically respects stratum ordering because strea
 
 ### 11.4 SPARQL views (§2.2 of pg_trickle.md)
 
-A SPARQL view created via `pg_triple.create_sparql_view()` can reference derived predicates. If the derived predicates are materialized, the SPARQL view's stream table depends on them in pg_trickle's DAG — refresh order is automatic. If on-demand, the SPARQL view's SQL includes the inlined CTEs.
+A SPARQL view created via `pg_ripple.create_sparql_view()` can reference derived predicates. If the derived predicates are materialized, the SPARQL view's stream table depends on them in pg_trickle's DAG — refresh order is automatic. If on-demand, the SPARQL view's SQL includes the inlined CTEs.
 
 ---
 
@@ -607,10 +607,10 @@ Example:
 Compiled SQL:
 
 ```sql
-INSERT INTO _pg_triple.vp_derived_88_delta (s, o, g)
+INSERT INTO _pg_ripple.vp_derived_88_delta (s, o, g)
 SELECT t1.s, 301, t1.g
-FROM _pg_triple.vp_7 t1      -- rdf:type
-JOIN _pg_triple.vp_55 t2 ON t2.s = t1.s   -- ex:age
+FROM _pg_ripple.vp_7 t1      -- rdf:type
+JOIN _pg_ripple.vp_55 t2 ON t2.s = t1.s   -- ex:age
 WHERE t1.o = 200              -- ex:Employee
   AND t2.o >= 60              -- arithmetic filter
 ON CONFLICT DO NOTHING
@@ -636,23 +636,23 @@ Constraint rules compile to existence checks:
 ```sql
 -- :- ?x ex:manager ?x .
 SELECT EXISTS (
-    SELECT 1 FROM _pg_triple.vp_42 WHERE s = o  -- self-loop
+    SELECT 1 FROM _pg_ripple.vp_42 WHERE s = o  -- self-loop
 ) AS violated;
 ```
 
 **Execution modes**:
 
 - **Materialized (pg_trickle)**: each constraint rule becomes a stream table; any row in the table = a violation. With `IMMEDIATE` refresh, violations are caught within the same transaction as the DML. This directly complements and extends SHACL validation.
-- **On-demand**: `pg_triple.check_constraints()` runs all constraint queries and returns violations as JSONB.
-- **Enforcement**: `pg_triple.enforce_constraints = 'error' | 'warn' | 'off'` GUC controls behaviour on insert — reject the transaction (`error`), log a warning (`warn`), or do nothing (`off`).
+- **On-demand**: `pg_ripple.check_constraints()` runs all constraint queries and returns violations as JSONB.
+- **Enforcement**: `pg_ripple.enforce_constraints = 'error' | 'warn' | 'off'` GUC controls behaviour on insert — reject the transaction (`error`), log a warning (`warn`), or do nothing (`off`).
 
-Catalog: constraint rules are stored in `_pg_triple.rules` with `head_pred = NULL` to distinguish them from derivation rules.
+Catalog: constraint rules are stored in `_pg_ripple.rules` with `head_pred = NULL` to distinguish them from derivation rules.
 
 API:
 
 ```sql
 -- Check all constraints, return violations
-SELECT * FROM pg_triple.check_constraints();
+SELECT * FROM pg_ripple.check_constraints();
 -- Returns: rule_id, rule_text, violating_subjects (BIGINT[]), violation_count
 ```
 
@@ -670,7 +670,7 @@ SELECT * FROM pg_triple.check_constraints();
 |---|---|---|---|
 | Aggregation in rule bodies (Datalog^agg) | `COUNT`, `SUM`, `MIN`, `MAX` in body atoms with aggregation-stratification; `GROUP BY` semantics. Enables analytics-derived rules and graph metrics. | 1 | Post-1.0 |
 | `owl:sameAs` merging | Entity canonicalization: all facts about `?x` also apply to `?y` when `?x owl:sameAs ?y`. Pre-pass canonicalization in the SQL compiler. Completes OWL RL coverage. | 1 | Post-1.0 |
-| Rule provenance (why-provenance) | Track which base quads caused each derived quad in a parallel `_pg_triple.rule_provenance` table. `pg_triple.explain_derivation(s, p, o)` returns a derivation tree. Critical for trust and debugging. | 1 | Post-1.0 |
+| Rule provenance (why-provenance) | Track which base quads caused each derived quad in a parallel `_pg_ripple.rule_provenance` table. `pg_ripple.explain_derivation(s, p, o)` returns a derivation tree. Critical for trust and debugging. | 1 | Post-1.0 |
 | Magic sets optimization | Goal-directed evaluation: only derive facts relevant to a specific query, reducing materialization cost for large rule sets. Well-studied SQL encoding. | 1 | Post-1.0 |
 | Incremental rule updates | Add/remove individual rules without recomputing the entire program. Requires dependency-aware invalidation of affected strata only. | 1 | Post-1.0 |
 | Graph analytics rules | Shortest paths, connected components, PageRank expressed as recursive Datalog rules with aggregation. Requires Datalog^agg. Maps to `WITH RECURSIVE` + aggregate window functions. | 2 | Post-1.0 |
@@ -698,7 +698,7 @@ Builds on RDF-star / statement identifiers delivered in v0.4.0. Quoted triples a
 ?s ?p ?o :- << ?s ?p ?o >> ex:assertedBy ex:Carol .
 ```
 
-The quoted triple `<< ?s ?p ?o >>` is resolved via the dictionary: the encoder looks up (or creates) a composite dictionary entry for the triple tuple, and the SQL compiler joins against the `_pg_triple.quoted_triples` dictionary table to bind `?s`, `?p`, `?o`.
+The quoted triple `<< ?s ?p ?o >>` is resolved via the dictionary: the encoder looks up (or creates) a composite dictionary entry for the triple tuple, and the SQL compiler joins against the `_pg_ripple.quoted_triples` dictionary table to bind `?s`, `?p`, `?o`.
 
 ### Quoted triples in rule heads
 
@@ -727,8 +727,8 @@ Quoted triple patterns in rule bodies compile to a join against the quoted-tripl
 ```sql
 -- << ?s ?p ?o >> ex:assertedBy ex:Carol
 SELECT qt.s_id, qt.p_id, qt.o_id
-FROM _pg_triple.quoted_triple_dict qt
-JOIN _pg_triple.vp_{assertedBy_id} ann ON ann.s = qt.id
+FROM _pg_ripple.quoted_triple_dict qt
+JOIN _pg_ripple.vp_{assertedBy_id} ann ON ann.s = qt.id
 WHERE ann.o = {carol_id}
 ```
 
@@ -737,13 +737,13 @@ Quoted triple patterns in rule heads compile to a dictionary encode step before 
 ```sql
 -- Encode the quoted triple, then insert the annotation
 WITH new_qt AS (
-    INSERT INTO _pg_triple.quoted_triple_dict (s_id, p_id, o_id, hash)
+    INSERT INTO _pg_ripple.quoted_triple_dict (s_id, p_id, o_id, hash)
     SELECT s, {indirectManager_id}, o, xxh3_128(s, {indirectManager_id}, o)
-    FROM _pg_triple.vp_{indirectManager_id}
+    FROM _pg_ripple.vp_{indirectManager_id}
     ON CONFLICT DO NOTHING
     RETURNING id, s_id, o_id
 )
-INSERT INTO _pg_triple.vp_{derivedBy_id}_delta (s, o, g, source)
+INSERT INTO _pg_ripple.vp_{derivedBy_id}_delta (s, o, g, source)
 SELECT qt.id, {ruleIRI_id}, 0, 1
 FROM new_qt qt
 ON CONFLICT DO NOTHING
@@ -794,7 +794,7 @@ The SQL compiler already produces the recursive CTE for a rule set (§6.2). The 
 
 ```sql
 -- Create a named, live-updating Datalog query result set
-SELECT pg_triple.create_datalog_view(
+SELECT pg_ripple.create_datalog_view(
     name     => 'alice_managers',
     rules    => $$
         ?x ex:indirectManager ?z :- ?x ex:manager ?z .
@@ -809,10 +809,10 @@ SELECT pg_triple.create_datalog_view(
 SELECT * FROM alice_managers;
 
 -- Drop when no longer needed
-SELECT pg_triple.drop_datalog_view('alice_managers');
+SELECT pg_ripple.drop_datalog_view('alice_managers');
 
 -- List all registered Datalog views
-SELECT * FROM pg_triple.list_datalog_views();
+SELECT * FROM pg_ripple.list_datalog_views();
 ```
 
 Internally `create_datalog_view` runs:
@@ -821,13 +821,13 @@ Internally `create_datalog_view` runs:
 3. Parse goal pattern → goal Atom
 4. Dictionary-encode all constants in rules and goal (integer joins everywhere)
 5. Compile rules to SQL, append goal filter as `WHERE` clause
-6. Register entry in `_pg_triple.datalog_views`
+6. Register entry in `_pg_ripple.datalog_views`
 7. Call `pgtrickle.create_stream_table(name => …, query => …, schedule => …)`
 
 ### 15.4 Catalog Table
 
 ```sql
-CREATE TABLE _pg_triple.datalog_views (
+CREATE TABLE _pg_ripple.datalog_views (
     name          TEXT PRIMARY KEY,
     rules_text    TEXT NOT NULL,          -- original Datalog rule text
     goal_text     TEXT NOT NULL,          -- original goal pattern text
@@ -857,10 +857,10 @@ Instead of providing inline rules, a Datalog view can reference a loaded rule se
 
 ```sql
 -- First, load the built-in RDFS rules (if not already loaded)
-SELECT pg_triple.load_rules_builtin('rdfs');
+SELECT pg_ripple.load_rules_builtin('rdfs');
 
 -- Create a view over RDFS-inferred types for a specific class
-SELECT pg_triple.create_datalog_view(
+SELECT pg_ripple.create_datalog_view(
     name     => 'all_persons',
     rule_set => 'rdfs',              -- reference loaded rule set
     goal     => '?x rdf:type foaf:Person .',
@@ -868,7 +868,7 @@ SELECT pg_triple.create_datalog_view(
 );
 ```
 
-When `rule_set` is provided, the `rules` parameter is omitted; the engine reads rules from `_pg_triple.rules` for the named set.
+When `rule_set` is provided, the `rules` parameter is omitted; the engine reads rules from `_pg_ripple.rules` for the named set.
 
 ### 15.7 Constraint Monitoring Views
 
@@ -876,7 +876,7 @@ Constraint rules (empty-head rules, §6.3 / §14) combine naturally with Datalog
 
 ```sql
 -- Live violation monitor: people who are their own manager
-SELECT pg_triple.create_datalog_view(
+SELECT pg_ripple.create_datalog_view(
     name     => 'self_manager_violations',
     rules    => $$
         :- ?x ex:manager ?x .
@@ -919,7 +919,7 @@ SPARQL views and Datalog views share the same underlying infrastructure (pg_tric
 | Typical user | Query authors, dashboard builders | Ontology engineers, rule authors |
 | Rule bundling | Separate from inference rules | Self-contained: rules + query in one artifact |
 
-Both view types are listed together via `pg_triple.list_sparql_views()` and `pg_triple.list_datalog_views()` and can coexist in the same pg_trickle DAG.
+Both view types are listed together via `pg_ripple.list_sparql_views()` and `pg_ripple.list_datalog_views()` and can coexist in the same pg_trickle DAG.
 
 ### 15.10 Future: Magic Sets Integration
 
@@ -947,7 +947,7 @@ The Datalog engine fits between serialization (v0.9.0) and views (v0.11.0):
 
 ## 18. Summary
 
-A Datalog reasoning engine over pg_triple transforms the triple store from a passive data store into an active knowledge base. Users load rules (standard RDFS/OWL RL or custom), and the engine derives new triples either on-demand (inline CTEs, no dependencies) or materialized (pg_trickle stream tables, incrementally maintained).
+A Datalog reasoning engine over pg_ripple transforms the triple store from a passive data store into an active knowledge base. Users load rules (standard RDFS/OWL RL or custom), and the engine derives new triples either on-demand (inline CTEs, no dependencies) or materialized (pg_trickle stream tables, incrementally maintained).
 
 The engine compiles rules to the same integer-join SQL that the SPARQL→SQL translator produces, so derived VP tables are indistinguishable from base VP tables to the query engine. Rules are fully quad-aware: the graph term (`g`) is first-class in the rule IR, SQL output, and cycle detection. Variable graph terms (`?g`) unify across body and head atoms, enabling same-graph propagation, cross-graph merging, and provenance-tracking rules. The `rule_graph_scope` GUC controls default matching behaviour for rules that omit an explicit `GRAPH` clause.
 

@@ -1,7 +1,7 @@
 # Graph System Prior Art — Cypher/LPG Architectural Lessons
 
 > **Scope**: Architectural lessons extracted from eight graph databases for
-> implementing Cypher/LPG query support on top of pg_triple's dictionary-encoded
+> implementing Cypher/LPG query support on top of pg_ripple's dictionary-encoded
 > integer VP table storage. Written April 2026.
 >
 > Each section follows the same structure: storage model → Cypher compilation
@@ -82,9 +82,9 @@ Result rows
 `EXPLAIN` outputs the logical plan tree; `PROFILE` runs the physical plan and
 reports actual rows and database hits per operator.
 
-Key operators relevant to pg_triple:
+Key operators relevant to pg_ripple:
 
-| Operator | Meaning | pg_triple equivalent |
+| Operator | Meaning | pg_ripple equivalent |
 |---|---|---|
 | `NodeByLabelScan` | Full scan of token lookup index for label | `SELECT s FROM vp_rdf_type WHERE o = label_id` |
 | `NodeIndexSeek` | Point lookup in a property index | B-tree seek on a VP table |
@@ -125,7 +125,7 @@ Neo4j exposes three distinct operator variants for MERGE depending on context:
 3. **`MergeUniqueNode`** — used when a property uniqueness constraint covers the
    MERGE key: delegates to the constraint violation path, which is inherently safe.
 
-**Lesson 1**: pg_triple's MERGE implementation should follow the same three-tier
+**Lesson 1**: pg_ripple's MERGE implementation should follow the same three-tier
 approach. The equivalent of `MergeUniqueNode` is an `ON CONFLICT DO NOTHING … RETURNING`
 pattern against a VP table with a `UNIQUE(s, o)` constraint; this is the safe,
 non-racy path. When no uniqueness constraint covers the MERGE key, the extension
@@ -143,12 +143,12 @@ if no property predicate can be pushed into a property index. With a predicate
 `WHERE n.age > 30`, the planner chooses between `NodeByLabelScan + Filter` vs
 `NodeIndexSeek` depending on estimated selectivity.
 
-**Lesson 2**: In pg_triple, `rdf:type` VP table is the label index. For
+**Lesson 2**: In pg_ripple, `rdf:type` VP table is the label index. For
 `MATCH (n:Person)`:
 
 ```sql
 SELECT s AS node_id
-FROM _pg_triple.vp_rdf_type   -- or vp_rare if below threshold
+FROM _pg_ripple.vp_rdf_type   -- or vp_rare if below threshold
 WHERE o = @Person_id
 ```
 
@@ -157,8 +157,8 @@ compiles to a JOIN between `vp_rdf_type` and `vp_age`:
 
 ```sql
 SELECT t.s
-FROM _pg_triple.vp_rdf_type t
-JOIN _pg_triple.vp_age a ON t.s = a.s
+FROM _pg_ripple.vp_rdf_type t
+JOIN _pg_ripple.vp_age a ON t.s = a.s
 WHERE t.o = @Person_id
   AND a.o = @30_id
 ```
@@ -190,7 +190,7 @@ Neo4j is the reference implementation. The openCypher TCK (Technology
 Compatibility Kit) test suite at https://github.com/opencypher/openCypher contains
 ~2000 Gherkin scenarios. Neo4j passes all of them by definition.
 
-**Lesson 4**: The TCK is the ground truth. The pg_triple Cypher compiler should
+**Lesson 4**: The TCK is the ground truth. The pg_ripple Cypher compiler should
 target TCK compliance incrementally: start with the `Match` and `Create` feature
 files, then add `Merge`, `Delete`, `Set`, and `With`. Tracking TCK pass rate
 publicly provides a credible signal of completeness.
@@ -201,7 +201,7 @@ publicly provides a credible signal of completeness.
 
 Kuzu is an embeddable analytical graph database (C++, Apache-2.0). It is the
 most carefully engineered open-source graph database from a query compiler
-standpoint and the closest academic analog to what pg_triple needs.
+standpoint and the closest academic analog to what pg_ripple needs.
 
 ### Storage model
 
@@ -215,9 +215,9 @@ Kuzu uses **columnar chunked storage**:
 - **Chunked array format**: columns stored in fixed-size chunks (2^16 rows by
   default). This enables vectorized scans and SIMD comparisons.
 
-Structural comparison to pg_triple VP tables:
+Structural comparison to pg_ripple VP tables:
 
-| Kuzu concept | pg_triple equivalent |
+| Kuzu concept | pg_ripple equivalent |
 |---|---|
 | Node table `Person(name: STRING, age: INT64)` | `vp_rdf_type(s, o)` + `vp_name(s, o)` + `vp_age(s, o)` |
 | Edge table `KNOWS(src: Person, dst: Person, since: INT64)` | `vp_knows(s, o)` + `vp_since(s=triple_hash, o)` via RDF-star |
@@ -225,9 +225,9 @@ Structural comparison to pg_triple VP tables:
 | Backward CSR adjacency | B-tree index on `(o, s)` in each VP table (already present) |
 
 **Key difference**: Kuzu's node table has a fixed, declared schema per label.
-pg_triple's VP layout is schema-free — a "Person" node can have any predicates.
+pg_ripple's VP layout is schema-free — a "Person" node can have any predicates.
 This difference manifests in how MATCH patterns compile: Kuzu can emit a single
-columnar scan with typed projection; pg_triple must JOIN multiple VP tables.
+columnar scan with typed projection; pg_ripple must JOIN multiple VP tables.
 
 ### Cypher compilation
 
@@ -257,20 +257,20 @@ Operators include: `TableScan`, `IndexScan`, `HashJoin`, `HashAggregate`,
 `RecursiveJoin` (for `[*m..n]` paths), `ShortestPathScan`, `FilterProject`.
 
 **Lesson 5**: Kuzu's clean binder/planner/executor separation is the right
-architecture. The analog for pg_triple is:
+architecture. The analog for pg_ripple is:
 
 ```
 cypher-algebra crate (standalone)
   parse → AST → algebra IR (schema-generic)
       ↓
-pg_triple src/cypher/translator.rs
+pg_ripple src/cypher/translator.rs
   algebra IR + schema binding (dictionary lookup for constanted IRIs, VP table OIDs)
   → SQL text emitted via SPI
 ```
 
 The schema binding step (resolving variable names to VP table OIDs and encoding
 literal constants) is analogous to Kuzu's binder. This step belongs in the
-pg_triple layer, not in the standalone `cypher-algebra` crate.
+pg_ripple layer, not in the standalone `cypher-algebra` crate.
 
 ### MERGE semantics
 
@@ -284,7 +284,7 @@ Kuzu's node tables have a mandatory primary key (unlike Neo4j where uniqueness
 constraints are optional). This means every MERGE in Kuzu is implicitly backed
 by the `MergeUniqueNode` pattern — the safe path.
 
-**Lesson 6**: pg_triple should require that any `MERGE (n:Label {key: val})`
+**Lesson 6**: pg_ripple should require that any `MERGE (n:Label {key: val})`
 pattern have a uniqueness constraint on `(label, key)` to be safe under
 concurrent writes. Without it, warn the user (similar to how Neo4j warns that
 Merge without a constraint is not concurrency-safe in its documentation).
@@ -296,7 +296,7 @@ dedicated `RecursiveJoin` physical operator that executes iterative BFS/DFS
 internally, storing the frontier and path state in buffers. This avoids the
 overhead of the SQL engine's CTE recursion infrastructure.
 
-For pg_triple — which delegates to PostgreSQL's execution engine — `WITH RECURSIVE`
+For pg_ripple — which delegates to PostgreSQL's execution engine — `WITH RECURSIVE`
 is the correct translation. But the bounded-depth optimization matters: `[*1..3]`
 should produce a CTE with a depth counter that terminates at 3 hops, not an
 unbounded recursion with a LIMIT on output rows.
@@ -349,10 +349,10 @@ function in Cypher. Before this, string values were stored as separate heap
 objects; after `intern()`, all identical strings share a single memory instance.
 Equality checks on interned strings become O(1) pointer comparisons.
 
-**Lesson 8 (direct validation)**: pg_triple's dictionary encoder (XXH3-128 hash,
+**Lesson 8 (direct validation)**: pg_ripple's dictionary encoder (XXH3-128 hash,
 LRU cache) is architecturally equivalent to FalkorDB's `intern()` but automatic
 and always-on. Every string is encoded before storage; equality is integer
-comparison. pg_triple's approach is strictly stronger: FalkorDB requires the user
+comparison. pg_ripple's approach is strictly stronger: FalkorDB requires the user
 to call `intern()` explicitly, meaning un-interned strings get no benefit.
 
 The FalkorDB pattern confirms that dictionary encoding at insert time (not query
@@ -369,7 +369,7 @@ operations**:
   label vector.
 - Filters on properties → property dictionary lookups.
 
-This is not directly applicable to pg_triple — pg_triple will compile to SQL
+This is not directly applicable to pg_ripple — pg_ripple will compile to SQL
 joins, not matrix multiplications. However, the conceptual mapping is analogous:
 VP tables are the same abstraction as FalkorDB's per-edge-type matrices (one
 relation/matrix per predicate).
@@ -377,16 +377,16 @@ relation/matrix per predicate).
 **Lesson 9**: The analogy between VP tables and adjacency matrices holds cleanly.
 Both are predicate-partitioned edge stores. The traversal algebra that works for
 FalkorDB (expand one hop = one table access; multi-hop = recursive) is exactly
-what the pg_triple Cypher→SQL compiler should produce.
+what the pg_ripple Cypher→SQL compiler should produce.
 
 ### MERGE semantics
 
 FalkorDB does not fully document its MERGE concurrency model (it inherits Redis's
 single-threaded command execution within a global lock, making TOCTOU impossible
-by construction — a luxury pg_triple does not have).
+by construction — a luxury pg_ripple does not have).
 
 **Lesson 10**: The single-threaded Redis execution model conceals many concurrency
-bugs that will manifest in pg_triple's multi-backend PostgreSQL environment.
+bugs that will manifest in pg_ripple's multi-backend PostgreSQL environment.
 Do not borrow FalkorDB's MERGE design without accounting for concurrent SPI access
 under PostgreSQL MVCC.
 
@@ -397,7 +397,7 @@ For `[*m..n]`, FalkorDB accumulates results between iteration `m` and `n`.
 For directed traversal, the forward adjacency matrix is used; for undirected, a
 symmetrized matrix (OR of the forward and transposed matrices).
 
-The undirected path `(a)-[*1..3]-(b)` in pg_triple requires a UNION of the
+The undirected path `(a)-[*1..3]-(b)` in pg_ripple requires a UNION of the
 forward VP scan and the reverse VP scan at each recursion step:
 
 ```sql
@@ -449,14 +449,14 @@ Memgraph uses a **delta-based in-memory storage** model:
 **Lesson 12**: Memgraph's three-tier access model maps cleanly to PostgreSQL's
 lock granularity:
 
-| Memgraph | pg_triple equivalent |
+| Memgraph | pg_ripple equivalent |
 |---|---|
 | Shared access (read) | SELECT on VP tables — no explicit lock needed, MVCC handles it |
 | Shared access (write) | INSERT/UPDATE/DELETE on VP tables — row-level locks via MVCC |
 | Read-only access | `SET TRANSACTION READ ONLY` |
 | Unique access | `LOCK TABLE vp_… IN EXCLUSIVE MODE` or advisory locks |
 
-For MERGE under pg_triple: use shared write access (the default), plus a
+For MERGE under pg_ripple: use shared write access (the default), plus a
 targeted advisory lock on `(predicate_id, subject_encoded_id)` if no uniqueness
 constraint covers the MERGE key (see Lesson 1).
 
@@ -472,19 +472,19 @@ CREATE INDEX ON :Person(surname);     -- label + property compound index
 Label-only indexes map `label_token → [vertex_ptr, …]` in sorted order.
 Label-property indexes additionally filter and sort by property value.
 
-**Key for pg_triple**: Memgraph's label-only index is exactly `vp_rdf_type` with
+**Key for pg_ripple**: Memgraph's label-only index is exactly `vp_rdf_type` with
 a B-tree on `(o, s)` — the index that maps label_id → set of subject IDs. The
 label-property compound index is a JOIN between `vp_rdf_type` and `vp_{property}`
 where the PostgreSQL planner can choose the join order based on statistics.
 
 Memgraph explicitly does NOT create indexes automatically when creating
 constraints (unlike Neo4j, which creates a range index on `CREATE INDEX …`).
-pg_triple follows the same discipline — constraints and indexes are separately
+pg_ripple follows the same discipline — constraints and indexes are separately
 managed.
 
 **Lesson 13**: For the read-path, the `rdf:type` VP table is both the label
-catalog and the label scan index. The ANALYZE GRAPH equivalent in pg_triple is
-`ANALYZE _pg_triple.vp_rdf_type` — this should be called periodically (or
+catalog and the label scan index. The ANALYZE GRAPH equivalent in pg_ripple is
+`ANALYZE _pg_ripple.vp_rdf_type` — this should be called periodically (or
 triggered by the merge background worker) to keep the planner's row estimates
 accurate.
 
@@ -508,7 +508,7 @@ therefore commonly omitted in openCypher implementations):
 - `shortestPath` function directly in MATCH patterns (workaround: `MATCH p = (a)-[*BFS]-(b)`)
 - Multi-value WHEN in CASE (`WHEN 'a', 'b' THEN …`)
 
-These are also potential deferred features for pg_triple's first release.
+These are also potential deferred features for pg_ripple's first release.
 
 ### MERGE concurrency
 
@@ -552,11 +552,11 @@ pairs. This means:
   properties without additional expression indexes.
 - Identity is a 64-bit `graphid` = packed (label_id, sequence_number).
 
-### Why pg_triple cannot simply query AGE views
+### Why pg_ripple cannot simply query AGE views
 
-AGE's `agtype` blob properties are the opposite of pg_triple's VP table design.
+AGE's `agtype` blob properties are the opposite of pg_ripple's VP table design.
 In AGE, all properties of a node are stored together in one JSONB cell. In
-pg_triple, each property is a separate row in its own VP table.
+pg_ripple, each property is a separate row in its own VP table.
 
 A conceptual Cypher `MATCH (n:Person) WHERE n.age > 30 RETURN n.name` would
 translate in AGE to:
@@ -567,22 +567,22 @@ FROM new_graph."Person"
 WHERE (properties->>'age')::int > 30;
 ```
 
-And in pg_triple to:
+And in pg_ripple to:
 
 ```sql
 SELECT dict_decode(vn.o) AS name
-FROM _pg_triple.vp_name vn
+FROM _pg_ripple.vp_name vn
 WHERE vn.s IN (
-    SELECT t.s FROM _pg_triple.vp_rdf_type t WHERE t.o = @Person_id
+    SELECT t.s FROM _pg_ripple.vp_rdf_type t WHERE t.o = @Person_id
 )
 AND EXISTS (
-    SELECT 1 FROM _pg_triple.vp_age va
+    SELECT 1 FROM _pg_ripple.vp_age va
     WHERE va.s = vn.s AND va.o > @30_encoded_id
 );
 ```
 
-These are fundamentally different storage shapes. AGE cannot query pg_triple
-views, and pg_triple cannot query AGE tables, without a translation layer that
+These are fundamentally different storage shapes. AGE cannot query pg_ripple
+views, and pg_ripple cannot query AGE tables, without a translation layer that
 crosses the `agtype` ↔ `integer-dictionary` boundary.
 
 **Lesson 15**: AGE's `agtype` approach is a design dead-end for performance. Storing
@@ -591,7 +591,7 @@ all properties as a JSON blob prevents:
 - Efficient cardinality estimation (the planner cannot see inside the JSON blob).
 - Typed arithmetic pushdown (all math must be done after JSON extraction).
 
-pg_triple's VP table design is strictly superior for analytical queries. The
+pg_ripple's VP table design is strictly superior for analytical queries. The
 `cypher-algebra` crate must target the VP table model, not `agtype`.
 
 ### MERGE semantics
@@ -624,15 +624,15 @@ The `cypher()` function is a SQL set-returning function. This means:
 - Result materialization happens at the `cypher()` boundary — the result set
   is fully materialized before being joined to any SQL.
 
-pg_triple's Cypher→SQL compiler will NOT use this pattern. Instead, it generates
+pg_ripple's Cypher→SQL compiler will NOT use this pattern. Instead, it generates
 native SQL that the PostgreSQL planner can optimize holistically. This is a
 fundamental architectural advantage over AGE.
 
-**Lesson 17**: The key design decision that separates pg_triple from AGE is:
+**Lesson 17**: The key design decision that separates pg_ripple from AGE is:
 *translate Cypher to SQL before the planner sees the query, not at execution time*.
-AGE parses and "executes" Cypher inside a SQL function call. pg_triple translates
+AGE parses and "executes" Cypher inside a SQL function call. pg_ripple translates
 Cypher to SQL text, which PostgreSQL's optimizer then plans and executes. This
-gives pg_triple access to:
+gives pg_ripple access to:
 - Index selection based on VP table statistics.
 - Join order optimization across multiple VP tables.
 - Predicate pushdown from outer SQL into the generated inner SQL.
@@ -657,7 +657,7 @@ JanusGraph stores graphs as **adjacency lists in a Bigtable-model**:
 
 This is the complete opposite of VP tables:
 
-| JanusGraph | pg_triple VP tables |
+| JanusGraph | pg_ripple VP tables |
 |---|---|
 | Vertex-centric: all edges leave one row | Predicate-centric: all edges of one type in one table |
 | Edge lookup by vertex = row scan | Edge lookup by predicate = table scan |
@@ -668,7 +668,7 @@ This is the complete opposite of VP tables:
 to what VP tables provide. A vertex-centric index in JanusGraph is a sorted
 ordering of a vertex's adjacency list by (edge label, property value) — allowing
 efficient range queries such as "find all KNOWS edges from Alice where `since > 2020`".
-In pg_triple, this is:
+In pg_ripple, this is:
 ```sql
 SELECT * FROM vp_knows WHERE s = alice_id;  -- already efficient via B-tree(s,o)
 -- Filter on edge property (requires RDF-star)
@@ -709,7 +709,7 @@ mgmt.buildEdgeIndex(knows, 'knowsByDate', Direction.OUT,
 With this index: find all KNOWS edges from Alice since 2020 = O(log n) scan of
 Alice's sorted KNOWS list.
 
-**Lesson 20**: In pg_triple, the dual B-tree indexes on each VP table (one on `(s, o)`,
+**Lesson 20**: In pg_ripple, the dual B-tree indexes on each VP table (one on `(s, o)`,
 one on `(o, s)`) already provide O(log n) forward and backward edge lookup. For
 edge property filtering (via RDF-star), a compound index on the annotation VP table:
 `CREATE INDEX ON vp_since (s, o)` — where `s = edge_hash` — provides the same
@@ -738,28 +738,28 @@ index:
 - **This is exactly what VP tables are.**
 
 Dgraph encodes all subject and object IRIs/values as 64-bit UIDs using a hash
-function — **exactly what pg_triple's XXH3-128 dictionary encoder does**.
+function — **exactly what pg_ripple's XXH3-128 dictionary encoder does**.
 
 **Lesson 21 (direct validation)**: Dgraph independently arrived at the same
-storage architecture as pg_triple: dictionary-encoded integer IDs + vertical
+storage architecture as pg_ripple: dictionary-encoded integer IDs + vertical
 partitioning by predicate. This is strong architectural validation. The VP table
 design is not novel; it is the convergent solution to the graph storage
 problem that multiple systems have independently discovered.
 
 Dgraph's posting list corresponds to:
 ```
-vp_{predicate}(s BIGINT, o BIGINT)  -- pg_triple VP table
+vp_{predicate}(s BIGINT, o BIGINT)  -- pg_ripple VP table
 ```
 
 The primary difference: Dgraph stores posting lists as sorted byte arrays
-(delta-compressed UIDs) in a RocksDB KV store, while pg_triple stores them as
+(delta-compressed UIDs) in a RocksDB KV store, while pg_ripple stores them as
 heap rows in PostgreSQL with B-tree indexes. The access patterns are the same;
 the physical representation differs.
 
 ### Concurrency
 
 Dgraph uses distributed MVCC (based on Raft consensus + timestamped transactions).
-Not directly applicable to single-node pg_triple, but confirms that the
+Not directly applicable to single-node pg_ripple, but confirms that the
 dictionary-encoded VP approach scales to distributed settings.
 
 ---
@@ -782,14 +782,14 @@ NebulaGraph uses a **strong-schema partitioned** model:
   vertex are co-located with the vertex's shard.
 - Backend: RocksDB per storage node.
 
-VID-based sharding is analogous to pg_triple's subject-based dictionary grouping.
+VID-based sharding is analogous to pg_ripple's subject-based dictionary grouping.
 The critical difference: VIDs are user-visible and structural (used in edge
-definitions directly). pg_triple's dictionary IDs are internal and transparent.
+definitions directly). pg_ripple's dictionary IDs are internal and transparent.
 
 **Lesson 22**: NebulaGraph's experience with VID-based sharding shows that using
-the encoded integer as the primary routing key works well for locality. pg_triple's
-dictionary IDs are already integers. If distributed pg_triple were built on top of
-pg_triple partitioning, the subject dictionary ID would be a natural shard key —
+the encoded integer as the primary routing key works well for locality. pg_ripple's
+dictionary IDs are already integers. If distributed pg_ripple were built on top of
+pg_ripple partitioning, the subject dictionary ID would be a natural shard key —
 consistent with NebulaGraph's validated approach.
 
 ### Schema and label indexing
@@ -807,9 +807,9 @@ This is critically different from Neo4j's model where labels are always indexed
 via the token lookup index.
 
 **Lesson 23**: NebulaGraph's separation of schema type (TAG) from label index is
-a useful model for pg_triple's schema layer. A SHACL NodeShape defines the vertex
+a useful model for pg_ripple's schema layer. A SHACL NodeShape defines the vertex
 type (analogous to TAG); the `rdf:type` VP table serves as the label index.
-`MATCH (n:Person)` always works in pg_triple because `vp_rdf_type` is always
+`MATCH (n:Person)` always works in pg_ripple because `vp_rdf_type` is always
 present and indexed. No separate label index creation step is required.
 
 ### nGQL vs openCypher compatibility
@@ -822,7 +822,7 @@ DQL only (read queries). The openCypher subset is explicit:
   use native nGQL `INSERT VERTEX`, `UPSERT VERTEX`, etc.
 
 **Lesson 24**: NebulaGraph's hybrid approach is a viable phased strategy for
-pg_triple. Phase 1: implement Cypher DQL (read-only `MATCH`/`RETURN`/`WITH`/`WHERE`).
+pg_ripple. Phase 1: implement Cypher DQL (read-only `MATCH`/`RETURN`/`WITH`/`WHERE`).
 Phase 2 (requires RDF-star v0.4.0): add Cypher DML (`CREATE`, `MERGE`, `SET`,
 `DELETE`). This maps to the ROADMAP boundary and avoids blocking the initial
 release on write semantics.
@@ -835,10 +835,10 @@ used for multi-temporal edges (e.g., multiple employment periods at the same
 company).
 
 In RDF, this corresponds to named graphs or RDF-star reification with a
-timestamp property. pg_triple's quad store (`s, p, o, g`) already supports named
+timestamp property. pg_ripple's quad store (`s, p, o, g`) already supports named
 graphs (the `g BIGINT` column), which covers the rank use case.
 
-**Lesson 25**: Edge rank in NebulaGraph = named graph in pg_triple. The `g` column
+**Lesson 25**: Edge rank in NebulaGraph = named graph in pg_ripple. The `g` column
 in VP quads maps naturally to this. A Cypher edge with an explicit rank property:
 ```cypher
 MATCH (a)-[r:WORKED_AT {year: 2022}]->(c)
@@ -869,28 +869,28 @@ label-keyed index (or a predicate-partitioned structure) that maps
 | AGE | Per-label PostgreSQL table (child of `_ag_label_vertex`) |
 | JanusGraph | Global vertex index: `(label, vertex_id)` in external index store |
 | NebulaGraph | TAG lookup by VID hash + explicit native index for range queries |
-| pg_triple | `vp_rdf_type(s, o)` with B-tree on `(o, s)` — already present |
+| pg_ripple | `vp_rdf_type(s, o)` with B-tree on `(o, s)` — already present |
 
-**pg_triple is already correct.** No new label index infrastructure is needed.
+**pg_ripple is already correct.** No new label index infrastructure is needed.
 The `MATCH (n:Person)` pattern compiles to:
 ```sql
-SELECT s FROM _pg_triple.vp_rdf_type WHERE o = @Person_id
+SELECT s FROM _pg_ripple.vp_rdf_type WHERE o = @Person_id
 ```
 and benefits from the existing `(o, s)` B-tree.
 
 For multi-label intersection (`n:A:B`): JOIN `vp_rdf_type` twice:
 ```sql
 SELECT t1.s
-FROM _pg_triple.vp_rdf_type t1
-JOIN _pg_triple.vp_rdf_type t2 ON t1.s = t2.s
+FROM _pg_ripple.vp_rdf_type t1
+JOIN _pg_ripple.vp_rdf_type t2 ON t1.s = t2.s
 WHERE t1.o = @A_id AND t2.o = @B_id
 ```
 
 For multi-label union (`n:A|B`): UNION:
 ```sql
-SELECT s FROM _pg_triple.vp_rdf_type WHERE o = @A_id
+SELECT s FROM _pg_ripple.vp_rdf_type WHERE o = @A_id
 UNION
-SELECT s FROM _pg_triple.vp_rdf_type WHERE o = @B_id
+SELECT s FROM _pg_ripple.vp_rdf_type WHERE o = @B_id
 ```
 
 ### 9.2 MERGE under concurrent writes — the consensus
@@ -899,11 +899,11 @@ Every system that operates under concurrent write access (Neo4j, Memgraph,
 Dgraph, NebulaGraph) independently documents that MERGE without a uniqueness
 constraint is not safe.
 
-The safe patterns, ranked by preference for pg_triple:
+The safe patterns, ranked by preference for pg_ripple:
 
 1. **Uniqueness constraint on the MERGE key** → translate to:
    ```sql
-   INSERT INTO _pg_triple.vp_{predicate}(s, g, o)
+   INSERT INTO _pg_ripple.vp_{predicate}(s, g, o)
    VALUES (@s, @g, @o)
    ON CONFLICT (s, g) DO NOTHING
    RETURNING s;
@@ -931,22 +931,22 @@ The safe patterns, ranked by preference for pg_triple:
 | Memgraph | Built-in DFS/BFS traversal (`*BFS`, `*DFS`) |
 | AGE | Compiled to SQL recursive CTE (via `cypher()` function) |
 | JanusGraph | TinkerPop `repeat().times(n)` → Gremlin traversal steps |
-| pg_triple | `WITH RECURSIVE … CYCLE` (PostgreSQL 18 native) |
+| pg_ripple | `WITH RECURSIVE … CYCLE` (PostgreSQL 18 native) |
 
 The consensus is that purpose-built traversal engines (Neo4j, Kuzu, Memgraph,
 FalkorDB) outperform SQL recursion for deep traversals (depth > 5-6).
-**For pg_triple, this means bounded short paths (`[*1..3]`) will be efficient;
+**For pg_ripple, this means bounded short paths (`[*1..3]`) will be efficient;
 deep traversals (`[*1..50]`) will be slower than a native graph engine.**
 
 This is an acceptable tradeoff for an RDF/SPARQL-first system that also
 supports Cypher. Document this limitation explicitly.
 
-**pg_triple's CTE template for `(a)-[*m..n:TYPE]->(b)`**:
+**pg_ripple's CTE template for `(a)-[*m..n:TYPE]->(b)`**:
 ```sql
 WITH RECURSIVE rpath(n, depth) AS (
   -- base case
   SELECT o AS n, 1 AS depth
-  FROM _pg_triple.vp_{type_id}
+  FROM _pg_ripple.vp_{type_id}
   WHERE s = @a_encoded
 
   UNION ALL
@@ -954,7 +954,7 @@ WITH RECURSIVE rpath(n, depth) AS (
   -- recursive case
   SELECT vp.o AS n, rp.depth + 1 AS depth
   FROM rpath rp
-  JOIN _pg_triple.vp_{type_id} vp ON rp.n = vp.s
+  JOIN _pg_ripple.vp_{type_id} vp ON rp.n = vp.s
   WHERE rp.depth < @n_bound
 )
 CYCLE n SET is_cycle USING path
@@ -974,7 +974,7 @@ WHERE depth >= @m_bound
 | FalkorDB | Parser tightly coupled to GraphBLAS execution model | Do not do this |
 | Memgraph | openCypher parser + plan tree (C++ separate modules) | Readable reference for operator model |
 | AGE | Parser in C, plan in PostgreSQL SRF context (tightly coupled) | Do not do this |
-| pg_triple (proposed) | `cypher-algebra` crate (pure algebra, no storage) + `src/cypher/` (SQL emission) | Clean separation confirmed as correct |
+| pg_ripple (proposed) | `cypher-algebra` crate (pure algebra, no storage) + `src/cypher/` (SQL emission) | Clean separation confirmed as correct |
 
 The universal lesson is: **the algebraic layer must be storage-agnostic**. Storage
 details (which VP table, which OID, encoded constants) belong in the binding/translation
@@ -984,7 +984,7 @@ layer, not in the parser or the algebra representation.
 
 All eight systems confirm the same convergence observation:
 
-| LPG concept | RDF equivalent in pg_triple |
+| LPG concept | RDF equivalent in pg_ripple |
 |---|---|
 | Node label | `rdf:type` triple |
 | Node property | VP table row `(node_id, property_value_id)` |
@@ -1006,7 +1006,7 @@ properties uses a dedicated edge identity mechanism:
 - NebulaGraph: `(src, dst, type, rank)` composite key
 
 All of these are logically equivalent to `hash(s, predicate_id, o)` = the
-RDF-star edge identifier used by pg_triple.
+RDF-star edge identifier used by pg_ripple.
 
 ### 9.6 Systems NOT to emulate
 
@@ -1022,7 +1022,7 @@ The following anti-patterns should be explicitly avoided:
 
 ---
 
-## 10. Implications for pg_triple implementation priorities
+## 10. Implications for pg_ripple implementation priorities
 
 Based on all eight systems, the following implementation order is recommended:
 
