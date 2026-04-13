@@ -9,7 +9,7 @@ Each release below has two layers:
 - **The plain-language summary** (in the coloured box) explains *what* the release delivers and *why it matters* — no programming knowledge required.
 - **The technical deliverables** list the specific items developers will build. Feel free to skip these if you're reading for the big picture.
 
-**Effort estimates** are given as *person-weeks* — e.g. "6–8 pw" means the release would take roughly 6–8 weeks for a single full-time developer, or 3–4 weeks for a pair working together. The total estimated effort from v0.1.0 to v1.0.0 is **96–127 person-weeks** (~22–30 months for one developer; ~11–15 months for a pair).
+**Effort estimates** are given as *person-weeks* — e.g. "6–8 pw" means the release would take roughly 6–8 weeks for a single full-time developer, or 3–4 weeks for a pair working together. The total estimated effort from v0.1.0 to v1.0.0 is **98–131 person-weeks** (~23–30 months for one developer; ~11–15 months for a pair).
 
 ---
 
@@ -35,7 +35,7 @@ Each release below has two layers:
 | 0.15.0 | SPARQL Protocol | Standard HTTP API so web apps and tools can query directly | 3–4 pw |
 | 0.16.0 | SPARQL Federation | Query remote SPARQL endpoints alongside local data | 4–6 pw |
 | 1.0.0 | Production Release | Standards conformance, stress testing, security audit | 6–8 pw |
-| | | **Total estimated effort** | **98–133 pw** |
+| | | **Total estimated effort** | **98–131 pw** |
 
 ---
 
