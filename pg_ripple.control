@@ -6,6 +6,4 @@ default_version = '0.1.0'
 module_pathname = '$libdir/pg_ripple'
 relocatable = false
 superuser = false
-trusted = true
 requires = ''
-schema = 'pg_ripple'

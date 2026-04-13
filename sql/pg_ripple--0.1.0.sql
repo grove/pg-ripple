@@ -7,6 +7,9 @@
 -- Guard against double-installation.
 DO $$
 BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_catalog.pg_namespace WHERE nspname = 'pg_ripple') THEN
+        CREATE SCHEMA pg_ripple;
+    END IF;
     IF NOT EXISTS (SELECT 1 FROM pg_catalog.pg_namespace WHERE nspname = '_pg_ripple') THEN
         CREATE SCHEMA _pg_ripple;
     END IF;

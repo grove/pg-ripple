@@ -39,17 +39,97 @@ fn strip_angle_brackets(term: &str) -> &str {
     }
 }
 
+/// Initialize the extension's base schemas and tables.
+/// Called once from _PG_init to ensure all base infrastructure exists.
+pub fn initialize_schema() {
+    // Create the internal schema if it doesn't exist.
+    Spi::run_with_args(
+        "CREATE SCHEMA IF NOT EXISTS _pg_ripple",
+        &[],
+    )
+    .unwrap_or_else(|e| pgrx::error!("_pg_ripple schema creation error: {e}"));
+
+    // Create the dictionary table.
+    Spi::run_with_args(
+        "CREATE TABLE IF NOT EXISTS _pg_ripple.dictionary ( \
+             id       BIGINT  NOT NULL, \
+             hash     BIGINT  NOT NULL, \
+             value    TEXT    NOT NULL, \
+             kind     SMALLINT NOT NULL DEFAULT 0, \
+             datatype TEXT, \
+             lang     TEXT, \
+             PRIMARY KEY (id) \
+         )",
+        &[],
+    )
+    .unwrap_or_else(|e| pgrx::error!("dictionary table creation error: {e}"));
+
+    // Create indexes on dictionary table
+    Spi::run_with_args(
+        "CREATE INDEX IF NOT EXISTS idx_dictionary_value_kind \
+         ON _pg_ripple.dictionary (value, kind)",
+        &[],
+    )
+    .unwrap_or_else(|e| pgrx::error!("dictionary index creation error: {e}"));
+
+    // Create the statement ID sequence.
+    Spi::run_with_args(
+        "CREATE SEQUENCE IF NOT EXISTS _pg_ripple.statement_id_seq \
+         START 1 INCREMENT 1 CACHE 64 NO CYCLE",
+        &[],
+    )
+    .unwrap_or_else(|e| pgrx::error!("statement sequence creation error: {e}"));
+
+    // Create the predicates catalog.
+    Spi::run_with_args(
+        "CREATE TABLE IF NOT EXISTS _pg_ripple.predicates ( \
+             id           BIGINT      NOT NULL PRIMARY KEY, \
+             table_oid    OID, \
+             triple_count BIGINT      NOT NULL DEFAULT 0 \
+         )",
+        &[],
+    )
+    .unwrap_or_else(|e| pgrx::error!("predicates catalog creation error: {e}"));
+
+    // Create the rare predicates consolidation table.
+    Spi::run_with_args(
+        "CREATE TABLE IF NOT EXISTS _pg_ripple.vp_rare ( \
+             p      BIGINT      NOT NULL, \
+             s      BIGINT      NOT NULL, \
+             o      BIGINT      NOT NULL, \
+             g      BIGINT      NOT NULL DEFAULT 0, \
+             i      BIGINT      NOT NULL DEFAULT nextval('_pg_ripple.statement_id_seq'), \
+             source SMALLINT    NOT NULL DEFAULT 0 \
+         )",
+        &[],
+    )
+    .unwrap_or_else(|e| pgrx::error!("vp_rare table creation error: {e}"));
+
+    // Create indexes on vp_rare table
+    Spi::run_with_args(
+        "CREATE INDEX IF NOT EXISTS idx_vp_rare_p_s_o \
+         ON _pg_ripple.vp_rare (p, s, o); \
+         CREATE INDEX IF NOT EXISTS idx_vp_rare_p_o_s \
+         ON _pg_ripple.vp_rare (p, o, s)",
+        &[],
+    )
+    .unwrap_or_else(|e| pgrx::error!("vp_rare indexes creation error: {e}"));
+}
+
 /// Ensure a dedicated VP table exists for `predicate_id`.
 ///
 /// Returns the fully-qualified table name `_pg_ripple.vp_{id}`.
 fn ensure_vp_table(predicate_id: i64) -> String {
     // Check whether a dedicated table already exists.
-    let existing = Spi::get_one_with_args::<String>(
+    let existing = match Spi::get_one_with_args::<String>(
         "SELECT '_pg_ripple.vp_' || id::text \
          FROM _pg_ripple.predicates WHERE id = $1 AND table_oid IS NOT NULL",
         &[DatumWithOid::from(predicate_id)],
-    )
-    .unwrap_or_else(|e| pgrx::error!("predicate lookup SPI error: {e}"));
+    ) {
+        Ok(Some(table)) => Some(table),
+        Ok(None) => None,
+        Err(_) => None, // Query returned no rows or SPI error; treat as non-existent
+    };
 
     if let Some(table) = existing {
         return table;
@@ -65,13 +145,26 @@ fn ensure_vp_table(predicate_id: i64) -> String {
                  g      BIGINT NOT NULL DEFAULT 0, \
                  i      BIGINT NOT NULL DEFAULT nextval('_pg_ripple.statement_id_seq'), \
                  source SMALLINT NOT NULL DEFAULT 0 \
-             ); \
-             CREATE INDEX IF NOT EXISTS ON {table} (s, o); \
-             CREATE INDEX IF NOT EXISTS ON {table} (o, s)"
+             )"
         ),
         &[],
     )
     .unwrap_or_else(|e| pgrx::error!("VP table creation SPI error: {e}"));
+
+    // Create indexes separately
+    Spi::run_with_args(
+        &format!("CREATE INDEX IF NOT EXISTS idx_vp_{predicate_id}_s_o \
+         ON {table} (s, o)"),
+        &[],
+    )
+    .unwrap_or_else(|e| pgrx::error!("VP table index 1 SPI error: {e}"));
+
+    Spi::run_with_args(
+        &format!("CREATE INDEX IF NOT EXISTS idx_vp_{predicate_id}_o_s \
+         ON {table} (o, s)"),
+        &[],
+    )
+    .unwrap_or_else(|e| pgrx::error!("VP table index 2 SPI error: {e}"));
 
     Spi::run_with_args(
         "INSERT INTO _pg_ripple.predicates (id, table_oid, triple_count) \

@@ -38,46 +38,51 @@ pub extern "C-unwind" fn _PG_init() {
     // are NOT started here.  They are started lazily based on GUC values
     // (pg_ripple.merge_threshold, pg_ripple.shacl_mode, pg_ripple.inference_mode),
     // which are introduced in their respective milestone releases.
+
+    // Initialize schemas and base tables at extension load time.
+    // This ensures that all operations that depend on _pg_ripple.dictionary
+    // and other base tables will not fail due to missing infrastructure.
+    storage::initialize_schema();
 }
 
 // ─── Public SQL-callable functions (v0.1.0) ───────────────────────────────────
 
 /// Encode a text IRI/blank-node/literal to its dictionary `i64` identifier.
 /// Creates a new entry if the term has not been seen before.
-#[pg_extern(schema = "pg_ripple")]
+#[pg_extern]
 fn encode_term(term: &str, kind: i16) -> i64 {
     dictionary::encode(term, kind)
 }
 
 /// Decode a dictionary `i64` back to its original text value.
 /// Returns `None` when the identifier is not present in the dictionary.
-#[pg_extern(schema = "pg_ripple")]
+#[pg_extern]
 fn decode_id(id: i64) -> Option<String> {
     dictionary::decode(id)
 }
 
 /// Insert a triple into the appropriate VP table.
 /// `s`, `p`, and `o` are N-Triples-formatted string representations.
-#[pg_extern(schema = "pg_ripple")]
+#[pg_extern]
 fn insert_triple(s: &str, p: &str, o: &str) -> i64 {
     storage::insert_triple(s, p, o, 0_i64)
 }
 
 /// Delete a triple.  Returns the number of rows removed (0 or 1).
-#[pg_extern(schema = "pg_ripple")]
+#[pg_extern]
 fn delete_triple(s: &str, p: &str, o: &str) -> i64 {
     storage::delete_triple(s, p, o, 0_i64)
 }
 
 /// Return the total number of triples across all VP tables.
-#[pg_extern(schema = "pg_ripple")]
+#[pg_extern]
 fn triple_count() -> i64 {
     storage::total_triple_count()
 }
 
 /// Pattern-match triples; any argument may be NULL to act as a wildcard.
 /// Returns decoded `(s, p, o, g)` text tuples.
-#[pg_extern(schema = "pg_ripple")]
+#[pg_extern]
 fn find_triples(
     s: Option<&str>,
     p: Option<&str>,
