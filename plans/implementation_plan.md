@@ -82,11 +82,13 @@
 ### 4.1 Extension Bootstrap (`src/lib.rs`)
 
 - pgrx `#[pg_extern]` entry points
-- `_PG_init()` hook for shared memory registration and background worker startup
+- `_PG_init()` hook for background worker startup (v0.6.0+: also shared memory registration)
 - GUC parameters: `pg_triple.default_graph`, `pg_triple.dictionary_cache_size`, `pg_triple.merge_threshold`, `pg_triple.shacl_mode`, `pg_triple.inference_mode`, `pg_triple.named_graph_optimized` (adds G-leading index on each VP table; off by default) — see §4.11 for the full canonical GUC reference
 - **GUC-gated lazy initialization**: the merge worker, SHACL validator, and reasoning engine are only started when their respective GUCs (`pg_triple.merge_threshold > 0`, `pg_triple.shacl_mode != 'off'`, `pg_triple.inference_mode != 'off'`) are active. `_PG_init` never starts subsystems the user has not enabled. See §4.11 for the full canonical GUC reference.
-- **Shared-memory slot versioning**: the first 16 bytes of every `PgSharedMem` slot are a fixed magic number followed by a 4-byte layout version integer. On startup the extension checks both; a mismatch (e.g. after an in-place upgrade) triggers a controlled re-initialization rather than a silent crash.
-- **pgrx 0.17 shared memory API**: the shared memory surface in pgrx 0.17 uses the `PgSharedObject` trait and `PgSharedMem::new_array` / `PgSharedMem::new_object` constructors — a substantial redesign from the `PgSharedMem` API used in pgrx ≤0.14. The implementation must follow the [pgrx 0.17 shared memory examples](https://github.com/pgcentralfoundation/pgrx/tree/develop/pgrx-examples/shmem) and declare all allocation sizes at `_PG_init` time via the `pg_shmem_init!` macro. Shared memory block size is determined at postmaster start by the `pg_triple.shared_memory_size` GUC (a startup GUC in `postgresql.conf`); it cannot be grown at runtime. The `pg_triple.shared_memory_limit` GUC is a utilization cap enforced in Rust, not a re-allocation signal.
+- **Error taxonomy module** (`src/error.rs`, v0.1.0): `thiserror`-based error types with PT error code constants. Initial ranges: dictionary errors (PT001–PT099) and storage errors (PT100–PT199). PostgreSQL-style formatting: lowercase first word, no trailing period. Extended in subsequent milestones as new subsystems are added (see §13.6 for the complete range table).
+- **Dictionary cache phasing**: v0.1.0–v0.5.1 use a **backend-local** `lru::LruCache` for the dictionary cache — no `shared_preload_libraries` required. The shared-memory dictionary cache, bloom filters, slot versioning, and `pg_triple.shared_memory_size` startup GUC are all introduced in v0.6.0 when the HTAP architecture requires cross-backend coordination. This significantly simplifies the first 6 releases and defers the most complex pgrx API surface to when it is actually needed.
+- **Shared-memory slot versioning** (v0.6.0+): the first 16 bytes of every `PgSharedMem` slot are a fixed magic number followed by a 4-byte layout version integer. On startup the extension checks both; a mismatch (e.g. after an in-place upgrade) triggers a controlled re-initialization rather than a silent crash.
+- **pgrx 0.17 shared memory API** (v0.6.0+): the shared memory surface in pgrx 0.17 uses the `PgSharedObject` trait and `PgSharedMem::new_array` / `PgSharedMem::new_object` constructors — a substantial redesign from the `PgSharedMem` API used in pgrx ≤0.14. The implementation must follow the [pgrx 0.17 shared memory examples](https://github.com/pgcentralfoundation/pgrx/tree/develop/pgrx-examples/shmem) and declare all allocation sizes at `_PG_init` time via the `pg_shmem_init!` macro. Shared memory block size is determined at postmaster start by the `pg_triple.shared_memory_size` GUC (a startup GUC in `postgresql.conf`); it cannot be grown at runtime. The `pg_triple.cache_budget` GUC is a utilization cap enforced in Rust, not a re-allocation signal.
 - Extension SQL: `CREATE EXTENSION pg_triple` creates core schema and catalog tables
 
 ### 4.2 Dictionary Encoder (`src/dictionary/`)
@@ -95,26 +97,22 @@
 
 #### 4.2.1 Schema
 
-```sql
--- Resource dictionary (IRIs and blank nodes)
-CREATE TABLE _pg_triple.resource_dict (
-    id        BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    hash      BYTEA NOT NULL,          -- XXH3-128 of the IRI/bnode
-    value     TEXT NOT NULL,
-    kind      SMALLINT NOT NULL         -- 0=IRI, 1=blank node
-);
-CREATE UNIQUE INDEX ON _pg_triple.resource_dict (hash);
+A single unified dictionary table holds all term types (IRIs, blank nodes, and literals). Using one table with one sequence guarantees that every dictionary ID is globally unique — the decode path can always resolve an `i64` to exactly one term without ambiguity. This is the approach used by RDF4J, Blazegraph, and Oxigraph.
 
--- Literal dictionary (typed values)
-CREATE TABLE _pg_triple.literal_dict (
+```sql
+-- Unified dictionary (IRIs, blank nodes, and literals)
+CREATE TABLE _pg_triple.dictionary (
     id        BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    hash      BYTEA NOT NULL,
+    hash      BYTEA NOT NULL,          -- XXH3-128 of the term
     value     TEXT NOT NULL,
-    datatype  BIGINT REFERENCES _pg_triple.resource_dict(id),
-    lang      TEXT
+    kind      SMALLINT NOT NULL,        -- 0=IRI, 1=blank node, 2=literal
+    datatype  BIGINT,                   -- for literals: FK to dictionary(id)
+    lang      TEXT                      -- for language-tagged literals
 );
-CREATE UNIQUE INDEX ON _pg_triple.literal_dict (hash);
+CREATE UNIQUE INDEX ON _pg_triple.dictionary (hash);
 ```
+
+> **Design note**: Earlier iterations considered separate `resource_dict` and `literal_dict` tables, each with their own `GENERATED ALWAYS AS IDENTITY` sequence. This creates an ID space collision — `resource_dict.id = 42` and `literal_dict.id = 42` can both exist, making the decode path ambiguous. A unified table eliminates this class of bugs at zero performance cost (lookups are by `id` primary key or `hash` unique index — both $O(1)$ regardless of table size). The `kind` column adds negligible overhead. For literals, `datatype` and `lang` are NULL for non-literal terms.
 
 #### 4.2.2 Implementation
 
@@ -124,10 +122,12 @@ CREATE UNIQUE INDEX ON _pg_triple.literal_dict (hash);
 - **Batch encoding** (`encode_batch()`): Bulk insert with `ON CONFLICT DO NOTHING` + `RETURNING`, minimising round-trips during data load
 - **Blank node document-scoping** (`src/dictionary/bnode.rs`): Each bulk load call (and each `INSERT DATA` statement) is assigned a monotonically-increasing `load_generation BIGINT` from another shared sequence. Blank node labels are hashed as `"{generation}:{label}"` rather than `"{label}"` — so `_:b0` from load call #5 hashes as `"5:b0"` and `_:b0` from load call #6 hashes as `"6:b0"`, yielding distinct dictionary IDs. This isolation is mandatory for correct multi-file RDF loading and is in effect from v0.2.0. The `load_generation` is stored in a thread-local / SPI-session context and advanced at the start of each top-level load operation.
 - **Per-query `EncodingCache`** (`src/dictionary/query_cache.rs`): A short-lived `HashMap<&str, i64>` allocated at the start of each SPARQL query and discarded when the query exits. Constants appearing multiple times in a pattern (e.g. the same IRI in multiple BGPs) are encoded once and reused within the same query without hitting the shared-memory LRU or the database. Distinct from `encode_batch()` which is used during data load.
-- **In-memory cache**: `HashMap<u128, i64>` in shared memory via pgrx `PgSharedMem`, **sharded into N buckets** (default: 64) with per-shard lightweight locks to eliminate global lock contention under concurrent workloads. Sized by GUC
-- **Shared-memory budget**: `pg_triple.shared_memory_limit` GUC governs the *utilization cap* of the pre-allocated shared memory block — it is enforced in Rust and does not cause PostgreSQL to allocate additional memory. The complementary startup GUC `pg_triple.shared_memory_size` (set in `postgresql.conf`) declares the actual block size to PostgreSQL in `_PG_init`; it must be ≥ `shared_memory_limit` and cannot be changed without a postmaster restart. Automatic eviction priority: bloom filters first, then oldest LRU dictionary entries. Back-pressure on bulk loads when utilisation exceeds 90% of `shared_memory_limit`.
+- **In-memory cache** (phased implementation):
+  - **v0.1.0–v0.5.1**: backend-local `lru::LruCache<u128, i64>` — simple, no shared memory required, no `shared_preload_libraries` dependency. Each backend has its own cache; cache misses hit the dictionary tables via SPI.
+  - **v0.6.0+**: `HashMap<u128, i64>` in shared memory via pgrx `PgSharedMem`, **sharded into N buckets** (default: 64) with per-shard lightweight locks to eliminate global lock contention under concurrent workloads. Sized by GUC.
+- **Shared-memory budget** (v0.6.0+): `pg_triple.cache_budget` GUC governs the *utilization cap* of the pre-allocated shared memory block — it is enforced in Rust and does not cause PostgreSQL to allocate additional memory. The complementary startup GUC `pg_triple.shared_memory_size` (set in `postgresql.conf`) declares the actual block size to PostgreSQL in `_PG_init`; it must be ≥ `cache_budget` and cannot be changed without a postmaster restart. Automatic eviction priority: bloom filters first, then oldest LRU dictionary entries. Back-pressure on bulk loads when utilisation exceeds 90% of `cache_budget`.
 - **Prefix compression**: Common IRI prefixes (registered via `pg_triple.register_prefix()`) are stripped before hashing and stored separately, reducing storage by ~40% for typical RDF datasets
-- **Inline value encoding** (`src/dictionary/inline.rs`, v0.3.0): Type-tagged i64 values for `xsd:integer`, `xsd:boolean`, `xsd:dateTime`, `xsd:date`, `xsd:double`. Bit 63 set signals an inline value; bits 56–62 hold a 7-bit type code; bits 0–55 hold the encoded value. FILTER comparisons on these types require zero dictionary round-trips — the SPARQL→SQL translator encodes constants at translation time and emits a plain B-tree range condition on the VP column.
+- **Inline value encoding** (`src/dictionary/inline.rs`, v0.5.1): Type-tagged i64 values for `xsd:integer`, `xsd:boolean`, `xsd:dateTime`, `xsd:date`. Deferred from v0.3.0 to keep the initial SPARQL engine focused on a single ID space; the dual-space model is introduced once the query engine is stable (v0.5.1, after v0.5.0 completes query-engine work). Bit 63 set signals an inline value; bits 56–62 hold a 7-bit type code; bits 0–55 hold the encoded value. FILTER comparisons on these types require zero dictionary round-trips — the SPARQL→SQL translator encodes constants at translation time and emits a plain B-tree range condition on the VP column.
 
   **Assigned inline type codes**:
 
@@ -135,14 +135,15 @@ CREATE UNIQUE INDEX ON _pg_triple.literal_dict (hash);
   |---|---|---|
   | `0` | `xsd:integer` | Two's complement signed 56-bit integer |
   | `1` | `xsd:boolean` | `0` = false, `1` = true |
-  | `2` | `xsd:double` | IEEE 754 double (lower 56 bits; exponent truncated — approximate range only) |
-  | `3` | `xsd:dateTime` | Microseconds since Unix epoch (UTC) |
-  | `4` | `xsd:date` | Days since Unix epoch |
-  | `5`–`127` | Reserved | For future typed literals (decimal, duration, etc.) |
+  | `2` | `xsd:dateTime` | Microseconds since Unix epoch (UTC) |
+  | `3` | `xsd:date` | Days since Unix epoch |
+  | `4`–`127` | Reserved | For future typed literals (decimal, double, duration, etc.) |
+
+  > **Why no `xsd:double`?** Truncating IEEE 754 binary64 to 56 bits (removing 8 exponent/mantissa bits) produces undefined precision and range limits. Since range comparisons on doubles are uncommon in SPARQL, `xsd:double` values are stored in the dictionary table where lossless encoding is guaranteed. If inline double support is needed in the future, code `4` could use IEEE 754 binary32 (float) in 32 of the 56 available bits, giving well-understood 7-digit precision.
 
   IRI-based dictionary IDs always have bit 63 = 0, so the inline and non-inline ranges are disjoint.
-- **ID ordering** (v0.3.0): Typed-literal IDs are allocated in monotonically increasing semantic order within each type (integers by numeric value, dates chronologically). This enables FILTER range conditions to compile to `BETWEEN $lo AND $hi` scans on the raw i64 column without decoding. The integer and date ranges are disjoint from IRI ranges via the type-tag bits.
-- **Tiered dictionary** (`src/dictionary/hot.rs`, v0.10.0): `_pg_triple.resources_hot` (UNLOGGED, stays in `shared_buffers`) holds IRIs ≤512 bytes, all prefix-registry IRIs, and all predicate IRIs. `_pg_triple.resources_cold` (heap) holds long literals and infrequently-accessed IRIs. The encoder checks hot first; `pg_prewarm` warms `resources_hot` at server start via `_PG_init`. At Wikidata scale (3B vocabulary entries, 190 GB uncompressed), this keeps the hot lookup path I/O-free for the overwhelming majority of query-time decodes.
+- **ID ordering** (v0.5.1): Typed-literal IDs are allocated in monotonically increasing semantic order within each type (integers by numeric value, dates chronologically). This enables FILTER range conditions to compile to `BETWEEN $lo AND $hi` scans on the raw i64 column without decoding. The integer and date ranges are disjoint from IRI ranges via the type-tag bits.
+- **Tiered dictionary** (`src/dictionary/hot.rs`, v0.10.0): `_pg_triple.dictionary_hot` (UNLOGGED, stays in `shared_buffers`) holds IRIs ≤512 bytes, all prefix-registry IRIs, and all predicate IRIs. `_pg_triple.dictionary` (heap) remains the full table; the encoder checks the hot table first. `pg_prewarm` warms `dictionary_hot` at server start via `_PG_init`. At Wikidata scale (3B vocabulary entries, 190 GB uncompressed), this keeps the hot lookup path I/O-free for the overwhelming majority of query-time decodes.
 
 ### 4.3 Storage Engine (`src/storage/`)
 
@@ -153,7 +154,7 @@ CREATE UNIQUE INDEX ON _pg_triple.literal_dict (hash);
 Each unique predicate `p` gets its own table:
 
 ```sql
--- Created once at extension bootstrap (v0.2.0+):
+-- Created once at extension bootstrap (v0.1.0+):
 CREATE SEQUENCE _pg_triple.statement_id_seq;
 
 CREATE TABLE _pg_triple.vp_{predicate_id} (
@@ -191,7 +192,7 @@ CREATE INDEX ON _pg_triple.vp_{predicate_id} (o, s);
 
 #### 4.3.2 HTAP Dual-Partition Architecture
 
-> **Version note**: The delta/main split is introduced in **v0.6.0** via a schema migration (see ROADMAP v0.6.0). Versions v0.2.0–v0.5.0 use a single flat VP table per predicate — all reads and writes target that same table. The architecture described below is the v0.6.0+ steady-state. The `UNION ALL delta + main` query path, bloom filter, and background merge worker are all v0.6.0 deliverables.
+> **Version note**: The delta/main split is introduced in **v0.6.0** via a schema migration (see ROADMAP v0.6.0). Versions v0.1.0–v0.5.1 use a single flat VP table per predicate — all reads and writes target that same table. The architecture described below is the v0.6.0+ steady-state. The `UNION ALL delta + main` query path, bloom filter, and background merge worker are all v0.6.0 deliverables.
 
 **Delta Partition** (write-optimized):
 - Standard heap tables with B-tree indices
@@ -199,18 +200,24 @@ CREATE INDEX ON _pg_triple.vp_{predicate_id} (o, s);
 - Small enough to remain in `shared_buffers`
 
 **Main Partition** (read-optimized):
-- BRIN-indexed, `CLUSTER`-ed by subject for sequential access
+- BRIN-indexed, physically sorted by subject via `INSERT ... ORDER BY` during generation merge
 - Populated by the background merge worker
 - Uses PG18 async I/O for faster sequential scans
+
+**Tombstone Table** (v0.6.0+):
+- When deleting a triple that may exist in `_main`, the delete is recorded in `_pg_triple.vp_{id}_tombstones (s BIGINT, o BIGINT, g BIGINT)`
+- Query path becomes: `(main EXCEPT tombstones) UNION ALL delta`
+- The merge worker applies tombstones against main during each generation merge, then truncates the tombstone table
+- Necessary because `_main` is read-only between merges — a DELETE targeting a main-resident triple cannot modify `_main` directly
 
 **Merge Worker** (background worker via pgrx `BackgroundWorker`):
 - Periodically merges delta into main when delta exceeds `pg_triple.merge_threshold` rows
 - Runs as a pgrx background worker with `BGWORKER_SHMEM_ACCESS`
 - **Fresh-table generation merge** (v0.6.0): each merge cycle creates a *new* `vp_{id}_main_new` table rather than inserting incrementally into the existing one (incremental inserts degrade BRIN effectiveness because BRIN requires physically sorted data):
   1. `CREATE TABLE _pg_triple.vp_{id}_main_new` (heap)
-  2. `INSERT … SELECT … ORDER BY s` from delta into the new table
-  3. `CLUSTER vp_{id}_main_new USING (s, o, g)` — physically sorts rows for BRIN
-  4. `ALTER TABLE … RENAME` to atomically replace the old main (catalog-only, zero query downtime since queries read `UNION ALL delta + main`)
+  2. `INSERT … SELECT … ORDER BY s FROM (SELECT * FROM vp_{id}_main EXCEPT SELECT * FROM vp_{id}_tombstones UNION ALL SELECT * FROM vp_{id}_delta)` — combines existing main (minus tombstones) with new delta rows; `ORDER BY s` on a freshly created heap produces physically sorted pages so BRIN works correctly without a separate `CLUSTER` step
+  3. `ALTER TABLE … RENAME` to atomically replace the old main (catalog-only, zero query downtime since queries read `UNION ALL delta + main`)
+  4. `TRUNCATE vp_{id}_delta, vp_{id}_tombstones` — clear delta and tombstones
   5. Old main retained for `pg_triple.merge_retention_seconds` (GUC, default 60s) then `DROP TABLE`
 - `pg_triple.compact(keep_old BOOL DEFAULT false)` triggers an immediate full merge across all VP tables; `keep_old := false` drops previous generations immediately
 - Updates BRIN summaries post-merge
@@ -220,18 +227,20 @@ CREATE INDEX ON _pg_triple.vp_{predicate_id} (o, s);
 - **Commit-hook early trigger**: a PostgreSQL `ProcessUtility` hook (or `ExecutorEnd` hook) detects when a write transaction commits more than `pg_triple.latch_trigger_threshold` rows (default: 10,000) and pokes the merge worker's shared-memory latch immediately — avoiding the full polling interval wait for bursty workloads. Implemented as an `ExecutorEnd_hook` in `src/storage/merge.rs`.
 
 **Query Path**:
-- `UNION ALL` of main + delta, with bloom filter for fast existence checks
+- `(main EXCEPT tombstones) UNION ALL delta`, with bloom filter for fast existence checks
+- When tombstones table is empty (common case between merges for insert-heavy workloads), simplifies to `UNION ALL` of main + delta
 - For queries touching only historical data, the delta scan is skipped
 
 #### 4.3.3 Bulk Loading
 
-- `pg_triple.load_turtle(path TEXT)` / `pg_triple.load_ntriples(path TEXT)`
+- `pg_triple.load_turtle(data TEXT)` / `pg_triple.load_ntriples(data TEXT)` — inline data (not file paths; avoids `pg_read_file()` privilege requirements and SSRF surface)
 - Parses via `rio_turtle` / `rio_api` crates in streaming fashion
-- Batches of 10,000 triples: dictionary-encode → `COPY` into delta VP tables
+- Batches of 10,000 triples: dictionary-encode → `COPY` into VP tables (delta partition from v0.6.0+)
 - Disables index updates during load; rebuilds at end
-- Uses PG18 `COPY ... REJECT_LIMIT` for fault tolerance
+- Malformed RDF is caught in the `rio_turtle` / `rio_api` streaming parser layer before data reaches `COPY`; no PostgreSQL-level fault tolerance needed (note: `COPY ... REJECT_LIMIT` is a Greenplum/Cloudberry feature, not stock PostgreSQL; PG17+ offers `ON_ERROR ignore` but it is unnecessary here since parsing happens in Rust)
+- Runs `ANALYZE` on affected VP tables after load completes (from v0.2.0; ensures PostgreSQL planner has accurate selectivity estimates)
 
-#### 4.3.4 Subject Patterns (`_pg_triple.subject_patterns`, v0.5.0)
+#### 4.3.4 Subject Patterns (`_pg_triple.subject_patterns`, v0.6.0)
 
 Precomputed index mapping each subject to the sorted array of all its predicate IDs:
 
@@ -318,11 +327,21 @@ pg_triple.sparql(query TEXT, include_derived BOOL DEFAULT true) RETURNS SETOF JS
 pg_triple.sparql_explain(query TEXT, analyze BOOL DEFAULT false) RETURNS TEXT
   -- analyze := true wraps the generated SQL in EXPLAIN (ANALYZE, BUFFERS) and returns the plan
 
+-- Basic querying (v0.1.0, SQL-level, no SPARQL)
+pg_triple.find_triples(s TEXT, p TEXT, o TEXT) RETURNS TABLE (s TEXT, p TEXT, o TEXT, g TEXT)
+  -- any param can be NULL for wildcard; returns decoded string values
+
 -- Data manipulation
 pg_triple.insert_triple(s TEXT, p TEXT, o TEXT, g TEXT DEFAULT NULL) RETURNS BIGINT  -- returns SID from v0.4.0
 pg_triple.delete_triple(s TEXT, p TEXT, o TEXT, g TEXT DEFAULT NULL)
 pg_triple.load_turtle(data TEXT) RETURNS BIGINT  -- returns count
 pg_triple.load_ntriples(data TEXT) RETURNS BIGINT
+
+-- SPARQL DESCRIBE strategy (v0.5.1)
+pg_triple.describe_strategy GUC  -- 'cbd' (default), 'scbd', 'simple'
+  -- CBD: Concise Bounded Description (follow outgoing arcs + blank node closures)
+  -- SCBD: Symmetric CBD (follow both incoming and outgoing arcs)
+  -- simple: one-hop subject/object expansion only
 
 -- Maintenance
 pg_triple.vacuum_dictionary() RETURNS BIGINT  -- removes unreferenced dictionary entries; safe to run any time
@@ -338,7 +357,7 @@ Optimizations fall into two categories: **structural rewrites** that are applied
 2. **Optional-self-join elimination**: When SHACL declares `sh:minCount 1`, OPTIONAL → INNER JOIN
 3. **Self-union elimination**: Multiple triple patterns binding the same variable to different predicates are rewritten to `WHERE predicate_id IN (...)`
 4. **Projection pushing**: `SELECT DISTINCT ?p` queries enumerate the `_pg_triple.predicates` catalog instead of scanning all VP tables
-5. **Filter pushdown**: SPARQL `FILTER` clauses operating on bound IRIs are resolved to integer IDs *before* generating SQL, ensuring B-tree index usage. For typed numeric/date literals, the inline-encoded i64 range (see §4.2.2) enables `BETWEEN $lo AND $hi` range scans with no decode step.
+5. **Filter pushdown**: SPARQL `FILTER` clauses operating on bound IRIs are resolved to integer IDs *before* generating SQL, ensuring B-tree index usage. From v0.5.1, typed numeric/date literals use the inline-encoded i64 range (see §4.2.2) to enable `BETWEEN $lo AND $hi` range scans with no decode step. Prior to v0.5.1, FILTER comparisons on typed literals use a dictionary-join decode approach.
 6. **Merge-join enablement**: When the join variable matches the `s` sort key of a VP table's `(s, o, g)` primary index, the emitter wraps the CTE in `ORDER BY s`. The PostgreSQL planner then considers a merge join rather than a hash join, reducing memory pressure for large intermediate results.
 
 **Statistics-driven rewrites (v0.13.0+)**:
@@ -535,7 +554,9 @@ All GUC parameters exposed by pg_triple, listed alphabetically. GUCs marked **st
 | GUC Name | Type | Default | Valid Values / Range | Introduced | Notes |
 |---|---|---|---|---|---|
 | `pg_triple.default_graph` | `TEXT` | `''` | Any IRI string | v0.1.0 | Graph ID used when `g` is not specified on insert |
-| `pg_triple.dictionary_cache_size` | `INT` | `65536` | 1 – 1,000,000 | v0.1.0 | Number of entries in the sharded in-memory LRU dictionary cache per shard (64 shards) |
+| `pg_triple.describe_strategy` | `ENUM` | `'cbd'` | `'cbd'`, `'scbd'`, `'simple'` | v0.5.1 | DESCRIBE algorithm: `'cbd'` = Concise Bounded Description (outgoing arcs + blank node closure); `'scbd'` = Symmetric CBD (incoming + outgoing arcs); `'simple'` = one-hop s/o expansion |
+| `pg_triple.dictionary_cache_size` | `INT` | `65536` | 1 – 1,000,000 | v0.1.0 | Number of entries in the LRU dictionary cache. v0.1.0–v0.5.1: per-backend local cache. v0.6.0+: per-shard in shared memory (64 shards) |
+| `pg_triple.enforce_constraints` | `ENUM` | `'warn'` | `'error'`, `'warn'`, `'off'` | v0.10.0 | Controls behavior when Datalog constraint rules (empty-head rules) detect violations |
 | `pg_triple.federation_max_results` | `INT` | `10000` | 1 – 1,000,000 | v0.16.0 | Maximum rows accepted from a single remote `SERVICE` call |
 | `pg_triple.federation_on_error` | `ENUM` | `'warn'` | `'warn'`, `'error'`, `'ignore'` | v0.16.0 | How to handle a failed remote `SERVICE` call |
 | `pg_triple.federation_timeout` | `INT` | `30` | 1 – 3600 (seconds) | v0.16.0 | Per-`SERVICE` HTTP timeout |
@@ -544,15 +565,17 @@ All GUC parameters exposed by pg_triple, listed alphabetically. GUCs marked **st
 | `pg_triple.max_path_depth` | `INT` | `100` | 1 – 10,000 | v0.5.0 | Maximum recursion depth for property path (`+`, `*`) queries |
 | `pg_triple.merge_retention_seconds` | `INT` | `60` | 0 – 3600 | v0.6.0 | Seconds to keep the previous `_main` table generation after an atomic rename before dropping it |
 | `pg_triple.merge_threshold` | `INT` | `100000` | 0 – 1,000,000,000 | v0.6.0 | Delta row count that triggers a background merge; `0` disables the merge worker entirely |
+| `pg_triple.merge_watchdog_timeout` | `INT` | `300` | 60 – 3600 (seconds) | v0.6.0 | If the merge worker heartbeat stalls for longer than this, `_PG_init` on the next backend connection logs a WARNING and attempts restart |
 | `pg_triple.named_graph_optimized` | `BOOL` | `off` | `on`, `off` | v0.2.0 | When `on`, adds a `(g, s, o)` index per VP table; increases write overhead; useful for heavy named-graph workloads |
 | `pg_triple.plan_cache_size` | `INT` | `1024` | 0 – 100,000 | v0.13.0 | Number of SPARQL→SQL translation results cached per session; `0` disables |
 | `pg_triple.rls_bypass` | `BOOL` | `off` | `on`, `off` | v0.14.0 | Superuser override to bypass graph-level Row-Level Security policies |
+| `pg_triple.rule_graph_scope` | `ENUM` | `'default'` | `'default'`, `'all'` | v0.10.0 | Controls whether unscoped Datalog rule atoms operate on the default graph only or all graphs |
 | `pg_triple.shacl_mode` | `ENUM` | `'off'` | `'off'`, `'sync'`, `'async'` | v0.7.0 | Controls SHACL validation; `'sync'` rejects bad triples inline; `'async'` queues for background validation |
-| `pg_triple.shared_memory_limit` | `INT` | `134217728` | 1 MB – system limit (bytes) | v0.6.0 | Utilization cap for the pre-allocated shared memory block (dictionary cache + bloom filters + merge worker buffers); back-pressure activates at 90% |
-| `pg_triple.shared_memory_size` | `INT` | `268435456` | 1 MB – system limit (bytes) | v0.1.0 | **Startup.** Size of the shared memory block declared to PostgreSQL in `_PG_init`. Must be ≥ `shared_memory_limit`. Cannot be changed at runtime — set in `postgresql.conf` |
+| `pg_triple.cache_budget` | `INT` | `134217728` | 1 MB – system limit (bytes) | v0.6.0 | Utilization cap for the pre-allocated shared memory block (dictionary cache + bloom filters + merge worker buffers); back-pressure activates at 90%. Renamed from `shared_memory_limit` to avoid confusion with `shared_memory_size` |
+| `pg_triple.shared_memory_size` | `INT` | `268435456` | 1 MB – system limit (bytes) | v0.6.0 | **Startup.** Size of the shared memory block declared to PostgreSQL in `_PG_init`. Must be ≥ `cache_budget`. Cannot be changed at runtime — set in `postgresql.conf`. Not needed before v0.6.0 (backend-local cache is used in v0.1.0–v0.5.1) |
 | `pg_triple.vp_promotion_threshold` | `INT` | `1000` | 1 – 1,000,000 | v0.2.0 | Triples per predicate below which rows are stored in `vp_rare` instead of a dedicated VP table |
 
-> **`shared_memory_size` vs `shared_memory_limit`**: `shared_memory_size` is a *startup* GUC that declares the total shared memory block to PostgreSQL at postmaster start — it cannot be changed without a restart. `shared_memory_limit` is a *runtime* cap that controls how much of that pre-allocated block pg_triple is allowed to use. Setting `shared_memory_limit > shared_memory_size` is an error caught at `_PG_init`.
+> **`shared_memory_size` vs `cache_budget`**: `shared_memory_size` is a *startup* GUC that declares the total shared memory block to PostgreSQL at postmaster start — it cannot be changed without a restart. `cache_budget` is a *runtime* cap that controls how much of that pre-allocated block pg_triple is allowed to use. Setting `cache_budget > shared_memory_size` is an error caught at `_PG_init`.
 
 ---
 
@@ -593,7 +616,7 @@ All GUC parameters exposed by pg_triple, listed alphabetically. GUCs marked **st
 
 > **Calibration reference**: QLever (C++, Apache-2.0) on DBLP (390M triples) loads at 1.7M triples/s, produces an 8 GB index, and answers benchmark queries in 0.7s average. QLever's flat pre-sorted permutation files make every SPARQL join a merge join with zero random I/O. pg_triple's B-tree/heap design pays ~5× overhead on bulk sequential scans in exchange for transactional concurrent writes, MVCC, and the full PostgreSQL ecosystem. The targets below reflect this accepted trade-off.
 
-> **Pre-HTAP baseline (v0.2.0–v0.5.0)**: Before the HTAP split lands in v0.6.0, all reads and writes target a single flat VP table. The CI performance gate during these releases uses a lower baseline (>30K triples/sec bulk insert) which improves to >100K after the delta/main split and BRIN indexing are in place.
+> **Pre-HTAP baseline (v0.1.0–v0.5.1)**: Before the HTAP split lands in v0.6.0, all reads and writes target a single flat VP table. The CI performance gate during these releases uses a lower baseline (>30K triples/sec bulk insert) which improves to >100K after the delta/main split and BRIN indexing are in place.
 
 | Metric | Target | Approach |
 |---|---|---|
@@ -705,7 +728,7 @@ pg_triple/                             # Cargo workspace root
 │       │   ├── cache.rs                   # LRU shared-memory cache (sharded)
 │       │   ├── query_cache.rs             # Per-query EncodingCache (short-lived HashMap, discarded after each query)
 │       │   ├── bnode.rs                   # Blank node document-scoping (load_generation counter, label namespacing)
-│       │   ├── inline.rs                  # Type-tagged inline i64 encoding for numerics, dates, booleans (v0.3.0)
+│       │   ├── inline.rs                  # Type-tagged inline i64 encoding for numerics, dates, booleans (v0.5.1)
 │       │   ├── hot.rs                     # Tiered hot/cold dictionary tables (v0.10.0)
 │       │   └── prefix.rs                  # IRI prefix compression
 │       ├── storage/
@@ -713,7 +736,7 @@ pg_triple/                             # Cargo workspace root
 │       │   ├── vp_table.rs                # VP table DDL management
 │       │   ├── delta.rs                   # Delta partition operations (v0.6.0+)
 │       │   ├── merge.rs                   # Delta→Main generation merge logic (v0.6.0+)
-│       │   ├── subject_patterns.rs        # Subject→predicate-set index (v0.5.0)
+│       │   ├── subject_patterns.rs        # Subject→predicate-set index (v0.6.0)
 │       │   └── bulk_load.rs               # Streaming parsers + COPY
 │       ├── sparql/
 │       │   ├── mod.rs
@@ -723,7 +746,7 @@ pg_triple/                             # Cargo workspace root
 │       │   ├── property_path.rs           # Recursive CTE generation
 │       │   ├── projector.rs               # Maps decoded i64 rows → named SPARQL variables; applies SELECT expressions, BIND, computed values
 │       │   ├── executor.rs                # SPI execution + decoding
-│       │   ├── update.rs                  # SPARQL 1.1 Update parsing + execution (v0.12.0)
+│       │   ├── update.rs                  # SPARQL 1.1 Update parsing + execution (INSERT DATA/DELETE DATA v0.5.1; advanced v0.12.0)
 │       │   └── federation.rs              # SERVICE keyword: remote endpoint execution + result injection (v0.16.0)
 │       ├── datalog/
 │       │   ├── mod.rs                     # Public API (#[pg_extern] functions)
@@ -869,13 +892,13 @@ comment = 'High-performance RDF triple store with native SPARQL query support'
 schema = 'pg_triple'
 relocatable = false
 superuser = false
-trusted = false
+trusted = true
 ```
 
 Key fields:
 - `schema = 'pg_triple'` — all user-visible objects are created in the `pg_triple` schema; internal tables go in `_pg_triple` (created explicitly in the SQL scripts, not governed by this field)
 - `relocatable = false` — VP tables use schema-qualified names that cannot be relocated
-- `trusted = false` — the extension requires superuser to install (it creates background workers and uses `PgSharedMem`)
+- `trusted = true` — v0.1.0–v0.5.1 use no shared memory, background workers, or hooks, so any user with `CREATE` privilege can install the extension. **Changed to `trusted = false` in v0.6.0** when the HTAP architecture introduces `PgSharedMem` and background workers.
 
 ---
 
@@ -950,3 +973,5 @@ Extension error messages use PostgreSQL-style formatting (lowercase first word, 
 | `PT300`–`PT399` | SHACL errors (shape parse failures, validation violations) |
 | `PT400`–`PT499` | Datalog errors (rule parse failures, stratification errors, constraint violations) |
 | `PT500`–`PT599` | Admin errors (vacuum, reindex, upgrade) |
+| `PT600`–`PT699` | Federation / HTTP errors (endpoint unreachable, SSRF rejection, timeout) |
+| `PT700`–`PT799` | Serialization / export errors (format errors, encoding failures) |

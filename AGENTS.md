@@ -34,10 +34,10 @@ All user-visible objects live in the `pg_triple` schema; internal tables and VP 
 
 ## Storage Conventions
 
-- **Dictionary encoding**: every IRI, blank node, and literal is mapped to `BIGINT` (i64) via XXH3-128 hash before being stored. VP tables **never** contain raw strings.
-- **VP table naming**: `_pg_triple.vp_{predicate_id}` — one table per unique predicate. Columns: `s BIGINT, o BIGINT, g BIGINT, i BIGINT GENERATED ALWAYS AS IDENTITY, source SMALLINT DEFAULT 0`. Dual B-tree indices on `(s, o)` and `(o, s)`. The `i` column is a statement identifier (SID) introduced in v0.2.0; the `source` column (v0.10.0) distinguishes explicit (`0`) from inferred (`1`) triples.
+- **Dictionary encoding**: every IRI, blank node, and literal is mapped to `BIGINT` (i64) via XXH3-128 hash before being stored in the unified `_pg_triple.dictionary` table. VP tables **never** contain raw strings.
+- **VP table naming**: `_pg_triple.vp_{predicate_id}` — one table per unique predicate. Columns: `s BIGINT, o BIGINT, g BIGINT, i BIGINT NOT NULL DEFAULT nextval('statement_id_seq'), source SMALLINT DEFAULT 0`. Dual B-tree indices on `(s, o)` and `(o, s)`. The `i` column is a globally-unique statement identifier (SID) from a shared sequence introduced in v0.1.0; the `source` column (v0.10.0) distinguishes explicit (`0`) from inferred (`1`) triples.
 - **Rare-predicate consolidation**: predicates with fewer than `pg_triple.vp_promotion_threshold` triples (default: 1,000) are stored in `_pg_triple.vp_rare (p, s, o, g, i, source)` instead of a dedicated VP table. Auto-promoted when the threshold is crossed.
-- **HTAP split**: writes go to `vp_{id}_delta` (heap + B-tree); the background merge worker promotes rows to `vp_{id}_main` (BRIN-indexed). Query path is `UNION ALL` of both partitions.
+- **HTAP split** (v0.6.0+): writes go to `vp_{id}_delta` (heap + B-tree); deletes of main-resident triples go to `vp_{id}_tombstones`; the background merge worker combines main + delta (minus tombstones) into a fresh `vp_{id}_main` (BRIN-indexed). Query path is `(main EXCEPT tombstones) UNION ALL delta`. In v0.1.0–v0.5.1, each VP table is a single flat table with no delta/main split.
 - **Default graph ID**: `0`; named graphs > 0.
 - **Predicate catalog**: `_pg_triple.predicates (id, table_oid, triple_count)` — look up the VP table OID here before any dynamic SQL.
 

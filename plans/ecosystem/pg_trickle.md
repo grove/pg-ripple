@@ -81,14 +81,14 @@ The SPARQL→SQL compiler is already the hard part. The only additional requirem
 -- Stream table stores decoded TEXT values
 SELECT r1.value AS person, r2.value AS email
 FROM _pg_triple.vp_7 t          -- rdf:type
-JOIN _pg_triple.resource_dict r1 ON r1.id = t.s
+JOIN _pg_triple.dictionary r1 ON r1.id = t.s
 JOIN _pg_triple.vp_15 e         -- foaf:mbox
   ON e.s = t.s
-JOIN _pg_triple.resource_dict r2 ON r2.id = e.o
+JOIN _pg_triple.dictionary r2 ON r2.id = e.o
 WHERE t.o = 42                  -- foaf:Person (integer-encoded)
 ```
 
-Reading is `SELECT * FROM active_person_emails` — fully decoded, no joins. The downside: every `resource_dict` insert (triggered by any new triple load) can wake up the CDC engine even when no relevant rows changed.
+Reading is `SELECT * FROM active_person_emails` — fully decoded, no joins. The downside: every `dictionary` insert (triggered by any new triple load) can wake up the CDC engine even when no relevant rows changed.
 
 **Option B — decode outside** *(recommended)* (integers in stream table, thin view on top):
 
@@ -106,8 +106,8 @@ A companion decoding view sits on top and is exposed to users:
 CREATE VIEW pg_triple.active_person_emails AS
 SELECT r1.value AS person, r2.value AS email
 FROM _pg_triple.sparql_view_active_person_emails v
-JOIN _pg_triple.resource_dict r1 ON r1.id = v.person_id
-JOIN _pg_triple.resource_dict r2 ON r2.id = v.email_id;
+JOIN _pg_triple.dictionary r1 ON r1.id = v.person_id
+JOIN _pg_triple.dictionary r2 ON r2.id = v.email_id;
 ```
 
 Option B is the better default: narrower CDC surface (only VP tables matter), smaller stream table (BIGINTs vs TEXT), dictionary decode still happens once per changed row rather than on every read.
@@ -266,7 +266,7 @@ SELECT pgtrickle.create_stream_table(
                r.value AS graph_iri,
                COUNT(*) AS triple_count
         FROM _pg_triple.all_triples_view t
-        JOIN _pg_triple.resource_dict r ON r.id = t.g
+        JOIN _pg_triple.dictionary r ON r.id = t.g
         GROUP BY g, r.value
     $$,
     schedule => '10s'
