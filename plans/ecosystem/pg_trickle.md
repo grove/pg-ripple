@@ -406,48 +406,81 @@ pg_trickle's DAG-aware scheduler automatically refreshes these in topological or
 
 ### Extension Dependency
 
-pg_trickle would be an **optional dependency** of pg_ripple:
+pg_trickle is an **optional dependency** of pg_ripple. The control file declares no hard requirement:
 
-```sql
--- pg_ripple.control
-requires = ''  -- pg_trickle is optional
-
--- When pg_trickle is available, enable advanced features
-DO $$
-BEGIN
-    IF EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'pg_trickle') THEN
-        PERFORM pg_ripple._enable_stream_table_features();
-    END IF;
-END $$;
+```ini
+# pg_ripple.control
+requires = ''  # pg_trickle is optional; detected at call time
 ```
 
-pg_ripple functions that create stream tables check for pg_trickle's presence:
+#### Soft detection at call time
+
+pg_ripple never checks for pg_trickle during `_PG_init`. Functions that require it probe `pg_catalog.pg_extension` at the moment they are called and raise `ERRCODE_FEATURE_NOT_SUPPORTED` with a clear install hint if it is absent:
 
 ```rust
-#[pg_extern]
-fn create_sparql_view(name: &str, sparql: &str, schedule: &str) -> Result<(), PgTripleError> {
-    // Check if pg_trickle is installed
-    let has_trickle = Spi::get_one::<bool>(
-        "SELECT EXISTS(SELECT 1 FROM pg_extension WHERE extname = 'pg_trickle')"
-    )?.unwrap_or(false);
+fn require_pg_trickle(feature: &str) {
+    let installed = Spi::get_one::<bool>(
+        "SELECT EXISTS(SELECT 1 FROM pg_catalog.pg_extension WHERE extname = 'pg_trickle')"
+    )
+    .unwrap_or(Some(false))
+    .unwrap_or(false);
 
-    if !has_trickle {
-        return Err(PgTripleError::MissingDependency(
-            "pg_trickle extension required for SPARQL views. Install with: CREATE EXTENSION pg_trickle"
-        ));
+    if !installed {
+        ereport!(
+            PgLogLevel::ERROR,
+            PgSqlErrorCode::ERRCODE_FEATURE_NOT_SUPPORTED,
+            &format!("{} requires the pg_trickle extension", feature),
+            "Install it with: CREATE EXTENSION pg_trickle"
+        );
     }
+}
+
+#[pg_extern]
+fn create_sparql_view(name: &str, sparql: &str, schedule: &str, decode: bool) {
+    require_pg_trickle("create_sparql_view");
 
     // Parse SPARQL → SQL
-    let sql = sparql_to_sql(sparql)?;
+    let sql = sparql_to_sql(sparql);
+
+    // Register in catalog
+    Spi::run_with_args(
+        "INSERT INTO _pg_ripple.sparql_views \
+         (name, sparql, generated_sql, schedule, decode, stream_table, created_at) \
+         VALUES ($1, $2, $3, $4, $5, $1, now())",
+        &[name.into(), sparql.into(), sql.into(), schedule.into(), decode.into()],
+    );
 
     // Create stream table via pg_trickle
-    Spi::run(&format!(
+    Spi::run_with_args(
         "SELECT pgtrickle.create_stream_table($1, $2, schedule => $3)",
-    ), &[name.into(), sql.into(), schedule.into()])?;
-
-    Ok(())
+        &[name.into(), sql.into(), schedule.into()],
+    );
 }
 ```
+
+#### User-visible availability check
+
+```sql
+-- Returns TRUE when pg_trickle is installed, FALSE otherwise — never errors
+SELECT pg_ripple.pg_trickle_available();
+```
+
+This lets applications and tooling test availability before calling without catching exceptions.
+
+#### Capability table
+
+| Feature | Without pg_trickle | With pg_trickle |
+|---|---|---|
+| SPARQL SELECT / ASK / CONSTRUCT / DESCRIBE | Full | Full |
+| Triple load and SPARQL Update | Full | Full |
+| Datalog on-demand mode | Full | Full |
+| SHACL validation (synchronous) | Full | Full |
+| `pg_ripple.stats()` | Catalog scan on every call | Read from `predicate_stats` stream table |
+| `create_sparql_view()` | `ERROR` with install hint | Available |
+| `create_datalog_view()` | `ERROR` with install hint | Available |
+| ExtVP semi-join tables | Not available | Available |
+| Inference materialised mode | Not available | Differential refresh |
+| SHACL violation monitors (async) | Not available | `IMMEDIATE` in-transaction |
 
 ---
 
@@ -563,7 +596,7 @@ spec:
 
 | Risk | Likelihood | Impact | Mitigation |
 |---|---|---|---|
-| pg_trickle API changes (pre-1.0) | Medium | Medium | Pin to specific pg_trickle version; abstract calls behind pg_ripple wrapper functions |
+| pg_trickle API changes (pre-1.0) | Low | Medium | All pg_trickle calls are isolated behind `require_pg_trickle` + thin Spi wrappers. Pin to a tested pg_trickle version in `Cargo.toml`; update and re-run integration tests when bumping. |
 | CDC trigger conflicts (both extensions adding triggers) | Low | High | pg_ripple's VP tables are internal (`_pg_ripple` schema); pg_trickle CDC triggers are per-table and non-conflicting. Verify in integration tests. |
 | Background worker slot exhaustion | Low | Medium | Document `max_worker_processes` sizing: pg_trickle needs 2–3, pg_ripple merge worker needs 1, plus custom needs |
 | Shared memory contention | Low | Low | Different shared memory segments; no overlap. pg_trickle uses its own shmem for DAG state; pg_ripple uses its own for dictionary cache |

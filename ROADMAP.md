@@ -641,7 +641,7 @@ Users can load RDFS or OWL RL rule sets (or custom rules), and SPARQL queries re
 >
 > **Effort estimate: 5–7 person-weeks**
 >
-> ⚠️ **Dependency risk**: This entire release depends on [pg_trickle](https://github.com/grove/pg-trickle) being production-ready. If pg_trickle has not reached a stable release by the time v0.10.0 ships, v0.11.0 should be **deferred** and v0.12.0 (SPARQL Update Advanced) brought forward in its place. A simpler fallback for incrementally-maintained views — using standard PostgreSQL `MATERIALIZED VIEW` with a `pg_ripple.refresh_sparql_view(name)` helper and a pg_cron schedule — can be offered as a non-IVM interim. Evaluate pg_trickle maturity at v0.10.0 exit and decide before committing to v0.11.0 scope.
+> **pg_trickle dependency**: This release requires [pg_trickle](https://github.com/grove/pg-trickle) to be installed. pg_trickle is a production-ready companion extension (same Rust/pgrx 0.17 / PostgreSQL 18 stack) available today. pg_ripple never hard-requires pg_trickle at load time — feature parity for the core triple store is preserved without it. Functions in this release that depend on pg_trickle (`create_sparql_view`, `create_datalog_view`, ExtVP setup, etc.) detect its presence at call time and return a clear error with an install hint if it is absent. The `pg_ripple.pg_trickle_available()` function lets users and tooling check availability before calling. See [plans/ecosystem/pg_trickle.md § 3](plans/ecosystem/pg_trickle.md) for the soft-detection design.
 
 See [plans/ecosystem/pg_trickle.md § 2.2](plans/ecosystem/pg_trickle.md) for the SPARQL views design and [plans/ecosystem/datalog.md § 15](plans/ecosystem/datalog.md) for the Datalog views design.
 
