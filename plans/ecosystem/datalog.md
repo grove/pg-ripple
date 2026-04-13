@@ -683,28 +683,205 @@ SELECT * FROM pg_triple.check_constraints();
 | Probabilistic rules | Weighted rules for uncertain reasoning (e.g., link prediction). Requires probability propagation semantics (ProbLog-style). | 3 | Post-1.0 |
 | SWRL integration | Semantic Web Rule Language as an alternative rule syntax. Turtle-based; maps to the same IR. | 3 | Post-1.0 |
 | SHACL-AF `sh:rule` bridge | Detect `sh:rule` entries in SHACL shapes, compile to Datalog IR. Bidirectional: SHACL shapes inform Datalog constraints; derived triples visible to SHACL validation. | 1 | v0.9.0 |
+| Datalog views | Incremental stream tables for Datalog rule sets with a goal pattern. Bundles rules + query as one self-contained artifact. | 1 | v0.11.0 |
 
 ---
 
-## 15. Relationship to pg_trickle.md §2.6
+## 15. Datalog Views (Stream Tables for Datalog Queries)
+
+The materialized execution mode (§7.1) creates one stream table per derived predicate, materializing the *full closure* of every rule. SPARQL views (pg_trickle.md §2.2) materialize the result of a SPARQL SELECT query. **Datalog views** fill the gap between these: they bundle a Datalog rule set with a goal pattern into a single, incrementally-maintained stream table that materializes only the facts relevant to the goal.
+
+### 15.1 Motivation
+
+| Approach | Scope | Write amplification | Read path |
+|---|---|---|---|
+| Materialized rules (§7.1) | Full closure — all derived triples | High for large rule sets | SPARQL over derived VP tables |
+| SPARQL view over derived predicates | One SPARQL query | Low (only query result) | Table scan |
+| **Datalog view** | Rules + goal — only relevant derivations | Low (goal-filtered) | Table scan |
+
+Datalog views are the natural choice when:
+
+- The user thinks in rules, not SPARQL — no context-switch needed
+- Only a subset of the full closure is needed (goal-directed)
+- Rules and query should be versioned and managed as one artifact
+- Constraint monitoring needs a live violation stream from a specific rule set
+
+### 15.2 Compilation Pipeline
+
+```
+Datalog rules + goal pattern
+    │
+    ▼  (existing rule parser → Rule IR)
+Stratified program + goal atom
+    │
+    ▼  (existing SQL compiler — §6)
+Goal-filtered SQL (WITH RECURSIVE + joins + WHERE for goal bindings)
+    │
+    ▼
+pgtrickle.create_stream_table(name, query, schedule)
+    │
+    ▼
+Stream table: incrementally maintained Datalog query result
+```
+
+The SQL compiler already produces the recursive CTE for a rule set (§6.2). The only addition is appending a `WHERE` clause that filters the outermost `SELECT` to the goal pattern's bound constants, and projecting only the goal's variables as named columns.
+
+### 15.3 API Surface
+
+```sql
+-- Create a named, live-updating Datalog query result set
+SELECT pg_triple.create_datalog_view(
+    name     => 'alice_managers',
+    rules    => $$
+        ?x ex:indirectManager ?z :- ?x ex:manager ?z .
+        ?x ex:indirectManager ?z :- ?x ex:manager ?y, ?y ex:indirectManager ?z .
+    $$,
+    goal     => '?who ex:indirectManager ex:Alice .',
+    schedule => '10s',
+    decode   => FALSE  -- FALSE (recommended): keep integer IDs, thin decode view on top
+);
+
+-- Always-fresh result — simple table scan
+SELECT * FROM alice_managers;
+
+-- Drop when no longer needed
+SELECT pg_triple.drop_datalog_view('alice_managers');
+
+-- List all registered Datalog views
+SELECT * FROM pg_triple.list_datalog_views();
+```
+
+Internally `create_datalog_view` runs:
+1. Parse rules → Rule IR (existing parser)
+2. Stratify → StratifiedProgram (existing stratifier)
+3. Parse goal pattern → goal Atom
+4. Dictionary-encode all constants in rules and goal (integer joins everywhere)
+5. Compile rules to SQL, append goal filter as `WHERE` clause
+6. Register entry in `_pg_triple.datalog_views`
+7. Call `pgtrickle.create_stream_table(name => …, query => …, schedule => …)`
+
+### 15.4 Catalog Table
+
+```sql
+CREATE TABLE _pg_triple.datalog_views (
+    name          TEXT PRIMARY KEY,
+    rules_text    TEXT NOT NULL,          -- original Datalog rule text
+    goal_text     TEXT NOT NULL,          -- original goal pattern text
+    rule_set      TEXT,                   -- optional rule set reference
+    generated_sql TEXT NOT NULL,          -- SQL sent to pg_trickle
+    schedule      TEXT NOT NULL,          -- e.g. '10s' or 'IMMEDIATE'
+    decode        BOOLEAN NOT NULL,       -- TRUE = store decoded strings, FALSE = integer IDs
+    stream_table  TEXT NOT NULL,          -- fully qualified stream table name
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+```
+
+### 15.5 Goal Pattern Semantics
+
+The goal pattern is a single triple (or quad) pattern in the same Datalog syntax as rule bodies:
+
+- `?who ex:indirectManager ex:Alice .` — bound object, project subject
+- `ex:Bob ex:indirectManager ?whom .` — bound subject, project object
+- `?x ex:indirectManager ?y .` — fully unbound, project both (equivalent to materializing the full derived predicate)
+- `GRAPH ex:trusted { ?x rdf:type ?c } .` — goal scoped to a named graph
+
+Bound constants are dictionary-encoded and pushed into the `WHERE` clause of the outermost `SELECT`. Unbound variables become named columns in the stream table.
+
+### 15.6 Using Built-in Rule Sets
+
+Instead of providing inline rules, a Datalog view can reference a loaded rule set by name:
+
+```sql
+-- First, load the built-in RDFS rules (if not already loaded)
+SELECT pg_triple.load_rules_builtin('rdfs');
+
+-- Create a view over RDFS-inferred types for a specific class
+SELECT pg_triple.create_datalog_view(
+    name     => 'all_persons',
+    rule_set => 'rdfs',              -- reference loaded rule set
+    goal     => '?x rdf:type foaf:Person .',
+    schedule => '10s'
+);
+```
+
+When `rule_set` is provided, the `rules` parameter is omitted; the engine reads rules from `_pg_triple.rules` for the named set.
+
+### 15.7 Constraint Monitoring Views
+
+Constraint rules (empty-head rules, §6.3 / §14) combine naturally with Datalog views. The goal is implicit — any satisfying assignment is a violation:
+
+```sql
+-- Live violation monitor: people who are their own manager
+SELECT pg_triple.create_datalog_view(
+    name     => 'self_manager_violations',
+    rules    => $$
+        :- ?x ex:manager ?x .
+    $$,
+    schedule => 'IMMEDIATE'  -- catch violations within the same transaction
+);
+
+-- Any row in this table = a violation
+SELECT * FROM self_manager_violations;
+```
+
+For constraint rules the goal is synthesized automatically: the body variables become the projected columns, and any satisfying row represents a violation.
+
+### 15.8 Interaction with pg_trickle DAG
+
+Datalog views participate in pg_trickle's DAG alongside SPARQL views and materialized derived predicates:
+
+```
+Base VP tables (CDC-tracked)
+    │
+    ├── Materialized derived VP tables (§7.1, if active)
+    │       │
+    │       ├── SPARQL views over derived predicates
+    │       └── Datalog views referencing derived predicates
+    │
+    └── Datalog views over base predicates only
+```
+
+The DAG scheduler ensures correct refresh ordering: a Datalog view that references a materialized derived predicate refreshes after that predicate's stream table.
+
+### 15.9 Relationship to SPARQL Views
+
+SPARQL views and Datalog views share the same underlying infrastructure (pg_trickle stream tables, dictionary encode/decode, catalog management). The key difference is the input language:
+
+| | SPARQL view | Datalog view |
+|---|---|---|
+| Input | SPARQL SELECT query | Datalog rules + goal pattern |
+| Recursion | Explicit property paths (`+`, `*`) | Implicit via recursive rules |
+| Negation | `NOT EXISTS` / `MINUS` | Stratified `NOT` |
+| Typical user | Query authors, dashboard builders | Ontology engineers, rule authors |
+| Rule bundling | Separate from inference rules | Self-contained: rules + query in one artifact |
+
+Both view types are listed together via `pg_triple.list_sparql_views()` and `pg_triple.list_datalog_views()` and can coexist in the same pg_trickle DAG.
+
+### 15.10 Future: Magic Sets Integration
+
+When magic sets optimization is added (post-1.0), Datalog views become the natural integration point. A goal pattern provides exactly the "query" that magic sets needs to generate a goal-directed rewriting of the rule program. This would reduce materialization cost from full-closure to only the facts reachable from the goal — a significant improvement for large rule sets with selective goals.
+
+---
+
+## 16. Relationship to pg_trickle.md §2.6
 
 This document **supersedes** pg_trickle.md §2.6 ("Inference Materialization"). The hard-coded `WITH RECURSIVE` stream tables for RDFS closures described there are a special case of the general Datalog engine described here. Section 2.6 should be updated to reference this document and note that built-in RDFS/OWL RL rule sets are the recommended approach.
 
 ---
 
-## 16. Roadmap Placement
+## 17. Roadmap Placement
 
-The Datalog engine fits between serialization (v0.8.0) and SPARQL views (v0.10.0):
+The Datalog engine fits between serialization (v0.9.0) and views (v0.11.0):
 
 | Version | Deliverable |
 |---|---|
-| **v0.8.0** | Serialization, export, SPARQL CONSTRUCT/DESCRIBE |
-| **v0.9.0** | **Datalog reasoning engine**: rule parser, stratifier, SQL compiler, built-in RDFS/OWL RL rule sets, arithmetic built-ins, constraint rules, SHACL-AF `sh:rule` bridge, on-demand mode, materialized mode (pg_trickle) |
-| **v0.10.0** | Incremental SPARQL views, ExtVP stream tables |
+| **v0.9.0** | Serialization, export, SPARQL CONSTRUCT/DESCRIBE |
+| **v0.10.0** | **Datalog reasoning engine**: rule parser, stratifier, SQL compiler, built-in RDFS/OWL RL rule sets, arithmetic built-ins, constraint rules, SHACL-AF `sh:rule` bridge, on-demand mode, materialized mode (pg_trickle) |
+| **v0.11.0** | Incremental SPARQL views, **Datalog views**, ExtVP stream tables |
 
 ---
 
-## 17. Summary
+## 18. Summary
 
 A Datalog reasoning engine over pg_triple transforms the triple store from a passive data store into an active knowledge base. Users load rules (standard RDFS/OWL RL or custom), and the engine derives new triples either on-demand (inline CTEs, no dependencies) or materialized (pg_trickle stream tables, incrementally maintained).
 

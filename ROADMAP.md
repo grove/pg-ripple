@@ -9,7 +9,7 @@ Each release below has two layers:
 - **The plain-language summary** (in the coloured box) explains *what* the release delivers and *why it matters* — no programming knowledge required.
 - **The technical deliverables** list the specific items developers will build. Feel free to skip these if you're reading for the big picture.
 
-**Effort estimates** are given as *person-weeks* — e.g. "6–8 pw" means the release would take roughly 6–8 weeks for a single full-time developer, or 3–4 weeks for a pair working together. The total estimated effort from v0.1.0 to v1.0.0 is **95–122 person-weeks** (~22–28 months for one developer; ~11–14 months for a pair).
+**Effort estimates** are given as *person-weeks* — e.g. "6–8 pw" means the release would take roughly 6–8 weeks for a single full-time developer, or 3–4 weeks for a pair working together. The total estimated effort from v0.1.0 to v1.0.0 is **96–123 person-weeks** (~22–28 months for one developer; ~11–14 months for a pair).
 
 ---
 
@@ -27,14 +27,14 @@ Each release below has two layers:
 | 0.8.0 | SHACL Advanced | Complex data quality rules with background checking | 4–6 pw |
 | 0.9.0 | Serialization | Import and export data in all standard RDF file formats | 3–4 pw |
 | 0.10.0 | Datalog Reasoning | Automatically derive new facts from rules and logic | 10–12 pw |
-| 0.11.0 | SPARQL Views | Live, always-up-to-date dashboards from SPARQL queries | 4–6 pw |
+| 0.11.0 | SPARQL & Datalog Views | Live, always-up-to-date dashboards from SPARQL and Datalog queries | 5–7 pw |
 | 0.12.0 | SPARQL Update | Standard RDF write operations (add / change / delete) | 4–6 pw |
 | 0.13.0 | Performance | Speed tuning, benchmarks, production-grade throughput | 6–8 pw |
 | 0.14.0 | Admin & Security | Operations tooling, access control, docs, packaging | 4–6 pw |
 | 0.15.0 | SPARQL Protocol | Standard HTTP API so web apps and tools can query directly | 3–4 pw |
 | 0.16.0 | SPARQL Federation | Query remote SPARQL endpoints alongside local data | 4–6 pw |
 | 1.0.0 | Production Release | Standards conformance, stress testing, security audit | 6–8 pw |
-| | | **Total estimated effort** | **95–122 pw** |
+| | | **Total estimated effort** | **96–123 pw** |
 
 ---
 
@@ -546,15 +546,15 @@ Users can load RDFS or OWL RL rule sets (or custom rules), and SPARQL queries re
 
 ---
 
-## v0.11.0 — Incremental SPARQL Views & ExtVP
+## v0.11.0 — Incremental SPARQL Views, Datalog Views & ExtVP
 
-**Theme**: Always-fresh materialized SPARQL queries and extended vertical partitioning via pg_trickle stream tables.
+**Theme**: Always-fresh materialized SPARQL and Datalog queries, plus extended vertical partitioning, via pg_trickle stream tables.
 
-> **In plain language:** Imagine pinning a SPARQL query to a dashboard and having the results update automatically whenever the underlying data changes — without re-running the query. That's what SPARQL views deliver. Under the hood, only the *changed* rows are reprocessed (not the entire dataset), so updates are nearly instantaneous. This release also adds precomputed "shortcut" tables for frequently-combined queries, making common access patterns dramatically faster. Requires the companion pg_trickle extension.
+> **In plain language:** Imagine pinning a SPARQL query — or a set of Datalog reasoning rules — to a dashboard and having the results update automatically whenever the underlying data changes, without re-running the query. That's what SPARQL views and Datalog views deliver. Under the hood, only the *changed* rows are reprocessed (not the entire dataset), so updates are nearly instantaneous. Datalog views go one step further: they bundle rules and a goal pattern into a single self-contained artifact, materializing only the facts relevant to the goal. This release also adds precomputed "shortcut" tables for frequently-combined queries, making common access patterns dramatically faster. Requires the companion pg_trickle extension.
 >
-> **Effort estimate: 4–6 person-weeks**
+> **Effort estimate: 5–7 person-weeks**
 
-See [plans/ecosystem/pg_trickle.md § 2.2](plans/ecosystem/pg_trickle.md) for the full design.
+See [plans/ecosystem/pg_trickle.md § 2.2](plans/ecosystem/pg_trickle.md) for the SPARQL views design and [plans/ecosystem/datalog.md § 15](plans/ecosystem/datalog.md) for the Datalog views design.
 
 ### Deliverables
 
@@ -564,16 +564,24 @@ See [plans/ecosystem/pg_trickle.md § 2.2](plans/ecosystem/pg_trickle.md) for th
   - `pg_triple.drop_sparql_view(name)` and `pg_triple.list_sparql_views()` for lifecycle management
   - `_pg_triple.sparql_views` catalog table: records original SPARQL text, generated SQL, schedule, decode mode, and stream table OID
   - Refresh mode heuristics: `IMMEDIATE` for constraint-style queries, `DIFFERENTIAL` + schedule for dashboards, `FULL` + long schedule for heavy analytics and transitive-closure property paths
+- [ ] **Datalog views** *(requires pg_trickle)*
+  - `pg_triple.create_datalog_view(name, rules, goal, schedule, decode)` — bundle a Datalog rule set with a goal pattern into an always-fresh, incrementally-maintained stream table
+  - Alternative: `pg_triple.create_datalog_view(name, rule_set, goal, schedule, decode)` — reference a loaded rule set by name instead of inline rules
+  - `decode => FALSE` (recommended) keeps integer IDs in the stream table with a thin decoding view on top
+  - `pg_triple.drop_datalog_view(name)` and `pg_triple.list_datalog_views()` for lifecycle management
+  - `_pg_triple.datalog_views` catalog table: records original rule text, goal pattern, generated SQL, schedule, decode mode, and stream table OID
+  - Constraint monitoring: constraint rules (empty-head) automatically synthesize a goal; any row in the stream table is a violation. `IMMEDIATE` mode catches violations within the same transaction
+  - Goal-filtered materialization: only facts relevant to the goal pattern are derived and stored, reducing write amplification compared to full-closure materialized rules
 - [ ] **ExtVP semi-join stream tables** *(requires pg_trickle)*
   - Manual creation of pre-computed semi-joins between frequently co-joined predicate pairs
   - SPARQL→SQL translator rewrites queries to target ExtVP tables when available
-- [ ] **SPARQL views over derived predicates**
-  - SPARQL views can reference Datalog-derived VP tables; pg_trickle DAG handles refresh ordering
-- [ ] pg_regress: `sparql_views.sql`, `extvp.sql`
+- [ ] **Views over derived predicates**
+  - Both SPARQL views and Datalog views can reference Datalog-derived VP tables; pg_trickle DAG handles refresh ordering
+- [ ] pg_regress: `sparql_views.sql`, `datalog_views.sql`, `extvp.sql`
 
 ### Exit Criteria
 
-Users can create SPARQL views that stay incrementally up-to-date. SPARQL view queries are sub-millisecond table scans. ExtVP semi-joins improve multi-predicate star-pattern performance.
+Users can create SPARQL views and Datalog views that stay incrementally up-to-date. View queries are sub-millisecond table scans. Datalog views with goal patterns materialize only goal-relevant facts. Constraint monitoring views detect violations in real time. ExtVP semi-joins improve multi-predicate star-pattern performance.
 
 ---
 

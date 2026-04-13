@@ -478,6 +478,23 @@ pg_triple.create_sparql_view(
 
 Parses SPARQL → generates SQL → creates a pg_trickle stream table. The result is an always-fresh materialized SPARQL query: multi-join VP table scans + dictionary decoding happen once during materialization, and queries become simple table scans.
 
+#### 4.10.5.1 Datalog Views
+
+```sql
+pg_triple.create_datalog_view(
+    name     TEXT,
+    rules    TEXT DEFAULT NULL,     -- inline Datalog rules (NULL when using rule_set)
+    rule_set TEXT DEFAULT NULL,     -- reference a loaded rule set by name
+    goal     TEXT,                  -- goal pattern: '?x ex:indirectManager ex:Alice .'
+    schedule TEXT DEFAULT '10s',
+    decode   BOOLEAN DEFAULT FALSE
+) RETURNS VOID
+```
+
+Bundles a Datalog rule set with a goal pattern into a single pg_trickle stream table. The existing rule parser, stratifier, and SQL compiler (§4.10.4) produce the recursive CTE; the goal pattern's bound constants are dictionary-encoded and pushed into a `WHERE` clause on the outermost `SELECT`. Unbound goal variables become named columns in the stream table. See [plans/ecosystem/datalog.md § 15](plans/ecosystem/datalog.md) for the full design.
+
+Constraint rules (empty-head) work as a special case: the body variables become projected columns and any row in the stream table represents a violation. `IMMEDIATE` mode catches violations within the same transaction.
+
 #### 4.10.6 ExtVP (Extended Vertical Partitioning)
 
 Pre-computed semi-joins between frequently co-joined predicates, implemented as stream tables. The SPARQL→SQL translator rewrites queries to target ExtVP tables when available. Initially manual via `create_sparql_view()`; automated workload-driven creation is a post-1.0 goal.
