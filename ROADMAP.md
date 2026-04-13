@@ -69,11 +69,12 @@ Each release below has two layers:
 - [ ] pg_regress: `dictionary.sql` (encode/decode, prefix expansion, hash collision behaviour), `basic_crud.sql` (insert, delete, find_triples, triple_count)
 - [ ] CI pipeline (GitHub Actions)
 - [ ] **GUC-gated lazy initialization**
-  - Merge worker, SHACL engine, and reasoning engine only start when their respective GUCs are enabled (`pg_triple.merge_enabled`, `pg_triple.shacl_enabled`, `pg_triple.inference_mode != 'off'`)
+  - Merge worker, SHACL engine, and reasoning engine only start when their respective GUCs are enabled (`pg_triple.merge_threshold > 0`, `pg_triple.shacl_mode != 'off'`, `pg_triple.inference_mode != 'off'`)
   - Reduces resource overhead for deployments that use only a subset of features
 - [ ] **Shared-memory slot versioning**
-  - Each `PgSharedMem` slot carries a magic number + 4-byte layout version at its head
+  - Each shared memory slot (declared via pgrx 0.17's `pg_shmem_init!` macro) carries a `[u8; 8]` magic constant (e.g. `*b"pg_tripl"`) followed by a `u32` layout version at its head
   - Version mismatch at `_PG_init` triggers a controlled re-initialization of the slot rather than corrupting state — essential for safe in-place upgrades
+  - **pgrx 0.17 API note**: all shared memory sizes must be declared statically in `_PG_init`. The `pg_triple.shared_memory_size` startup GUC determines the block size; it cannot be changed at runtime. Use the pgrx 0.17 `PgSharedObject` / `PgSharedMem::new_object` API (not the old `PgSharedMem` from ≤0.14) — verify against the [pgrx 0.17 shmem examples](https://github.com/pgcentralfoundation/pgrx/tree/develop/pgrx-examples/shmem)
 
 ### Exit Criteria
 
@@ -87,6 +88,7 @@ A user can install the extension, insert triples, and query them back by pattern
 
 > **In plain language:** This release reorganises how data is stored internally so that queries run much faster — instead of one giant table, each type of relationship (e.g. "knows", "worksAt", "hasEmail") gets its own optimised table. It also adds *bulk import*: users can load large RDF data files (in Turtle and N-Triples formats) in one go, rather than inserting facts one at a time. Named graphs (the ability to group facts into labelled collections) are introduced here too. Crucially, every stored statement gets a unique *statement identifier* — this is the foundation for RDF-star (v0.4.0) and future LPG/Cypher support, where edges can carry properties.
 >
+> **Storage partition note**: In v0.2.0 through v0.5.0, each VP table is a *single flat table* — there is no delta/main split yet. All reads and writes target the same table. The HTAP dual-partition architecture (separate `_delta` and `_main` tables with a background merge worker) is introduced in v0.6.0 via an explicit schema migration that renames existing VP tables and creates the initial `_main` partition.
 > **Effort estimate: 6–8 person-weeks**
 
 ### Deliverables
@@ -95,17 +97,30 @@ A user can install the extension, insert triples, and query them back by pattern
   - Auto-create `_pg_triple.vp_{predicate_id}` tables on first triple with a new predicate
   - Predicate catalog: `_pg_triple.predicates (id BIGINT, table_oid OID, triple_count BIGINT)`
   - Dual B-tree indices per VP table: `(s, o)` and `(o, s)`
-- [ ] **Statement identifier (`i` column) in VP tables**
-  - Every VP table includes `i BIGINT GENERATED ALWAYS AS IDENTITY` — a unique statement identifier (SID)
-  - `vp_rare` table also includes `i BIGINT GENERATED ALWAYS AS IDENTITY`
+- [ ] **Global statement identifier sequence**
+  - `CREATE SEQUENCE _pg_triple.statement_id_seq` — created once at bootstrap; shared across all VP tables and `vp_rare`
+  - Every VP table includes `i BIGINT NOT NULL DEFAULT nextval('_pg_triple.statement_id_seq')` — a **globally-unique** statement identifier (SID)
+  - `vp_rare` table also uses `DEFAULT nextval('_pg_triple.statement_id_seq')` for the same reason
+  - A shared sequence is mandatory: per-table `GENERATED ALWAYS AS IDENTITY` would give each table its own private sequence, causing two different VP tables to produce identical SIDs — making `_pg_triple.statements` lookups ambiguous and breaking v0.4.0 RDF-star
   - SIDs are not exposed to users in v0.2.0 but are available for internal use from the start
   - This makes the storage schema SPOI-compatible (inspired by the OneGraph 1G model) and LPG-ready: once RDF-star lands in v0.4.0, SIDs enable edge properties, meta-edges, and provenance annotations without a storage migration
-  - `_pg_triple.statements` catalog view: maps SID → (predicate_id, VP table OID) for SID-based lookups
+  - `_pg_triple.statements` catalog view: maps SID → (predicate_id, VP table OID) for SID-based cross-table lookups
 - [ ] **Rare-predicate consolidation table**
   - Predicates with fewer than `pg_triple.vp_promotion_threshold` triples (default: 1,000) are stored in a shared `_pg_triple.vp_rare (p BIGINT, s BIGINT, o BIGINT, g BIGINT, i BIGINT)` table with a primary composite index on `(p, s, o)` and two secondary indices: `(s, p)` for DESCRIBE queries and `(g, p, s, o)` for efficient graph-drop bulk-delete
   - Promotion is **deferred to end-of-statement** (not mid-batch): during a bulk load, triples accumulate in `vp_rare`; after the load completes, predicates exceeding the threshold are promoted in a single `INSERT … SELECT` + `DELETE` transaction — avoids disrupting in-flight COPY streams
   - `pg_triple.promote_rare_predicates()` can also be called manually or by the background merge worker
   - Prevents catalog bloat for predicate-rich datasets (DBpedia ≈60K predicates, Wikidata ≈10K) — avoids hundreds of thousands of PG objects, reduces planner overhead, and cuts VACUUM cost
+- [ ] **Upgrade script `pg_triple--0.1.0--0.2.0.sql`** — flat table → VP migration
+  - v0.1.0 stores all triples in `_pg_triple.triples (s BIGINT, p BIGINT, o BIGINT, g BIGINT)`
+  - The upgrade script must:
+    1. Create `_pg_triple.statement_id_seq` (the global SID sequence)
+    2. For each distinct predicate `p` in `_pg_triple.triples`, call the VP table creation path to create `_pg_triple.vp_{p}` with the new schema (including `i DEFAULT nextval('statement_id_seq')`)
+    3. Migrate rows: `INSERT INTO _pg_triple.vp_{p} (s, o, g) SELECT s, o, g FROM _pg_triple.triples WHERE p = {p}`
+    4. Drop `_pg_triple.triples` (or rename to `_pg_triple.triples_pre_vp` for a two-step safe upgrade)
+    5. Create the `_pg_triple.vp_rare` table
+    6. Update `_pg_triple.predicates` catalog
+  - The migration runs transactionally; if any step fails, the entire upgrade rolls back and v0.1.0 remains intact
+  - pg_regress: `upgrade_0_1_to_0_2.sql` — insert triples in v0.1.0, upgrade, verify all triples are queryable in v0.2.0 layout
 - [ ] **Migrate CRUD to VP storage**
   - `insert_triple()` routes to correct VP table
   - `delete_triple()` targets correct VP table
@@ -116,6 +131,11 @@ A user can install the extension, insert triples, and query them back by pattern
 - [ ] **`pg_triple.named_graph_optimized` GUC** (default: `off`)
   - When enabled, adds an optional `(g, s, o)` index per dedicated VP table (and equivalent coverage on `vp_rare`) to accelerate graph-scoped queries (e.g. list all triples in graph G, drop a named graph)
   - Off by default to avoid index bloat for workloads that do not use named graphs heavily
+- [ ] **Blank node document-scoping**
+  - Each bulk load operation is assigned a monotonically-increasing `load_generation` counter from a shared sequence
+  - Blank nodes are hashed as `"{generation}:{label}"` — so `_:b0` from two different load calls yields two distinct dictionary IDs
+  - Prevents incorrect merging of blank nodes across document boundaries, which would corrupt data in multi-file loads
+  - Also applies to `INSERT DATA` (SPARQL Update, v0.12.0) which always gets its own generation
 - [ ] **Bulk loader** (N-Triples)
   - `pg_triple.load_ntriples(data TEXT) RETURNS BIGINT`
   - Streaming parser via `rio_turtle` crate
@@ -311,10 +331,23 @@ SPARQL 1.1 Query coverage for all major features except federated queries. Prope
 
 ### Deliverables
 
-- [ ] **Delta/Main partition split**
-  - Each VP table gets `_delta` and `_main` suffixes
+- [ ] **Delta/Main partition split — schema migration**
+  - Each VP table is migrated from its flat single-table form (v0.2.0–v0.5.0) to a dual-partition form:
+    1. `CREATE TABLE _pg_triple.vp_{id}_delta AS SELECT * FROM _pg_triple.vp_{id}` (copy existing rows to delta)
+    2. `CREATE TABLE _pg_triple.vp_{id}_main (LIKE _pg_triple.vp_{id})` (empty main, BRIN-indexed)
+    3. `ALTER TABLE _pg_triple.vp_{id} RENAME TO vp_{id}_pre_htap` (keep old table as backup)
+    4. Update `_pg_triple.predicates` catalog with new table OIDs
+    5. Run an immediate merge cycle to promote rows from delta to main in sorted order
+    6. Drop `vp_{id}_pre_htap` after merge completes successfully
+  - The migration runs inside the `ALTER EXTENSION pg_triple UPDATE` upgrade script — zero downtime during migration because rows still exist in delta until the merge completes and the query path immediately switches to `UNION ALL` of `_main` and `_delta`
+  - `vp_rare` is **not** split (see vp_rare HTAP exemption below); all reads and writes target the single `vp_rare` table throughout
   - All writes target `_delta`; `_main` is append-only / read-optimized
   - Query path: `UNION ALL` of `_main` and `_delta`
+- [ ] **`vp_rare` HTAP exemption**
+  - `vp_rare` is **not** given a delta/main split — it remains a single flat table
+  - Rare predicates see few writes by definition; delta/main overhead would exceed the benefit
+  - Concurrent reads and writes on `vp_rare` are safe via PostgreSQL standard heap row-level locking
+  - The bloom filter treats `vp_rare` conservatively (always queries it, no delta-skip shortcut)
 - [ ] **Background merge worker**
   - pgrx `BackgroundWorker` implementation
   - Configurable merge threshold via `pg_triple.merge_threshold` GUC
@@ -385,7 +418,7 @@ Writes do not block reads. Merge worker operates correctly under concurrent writ
   - `sh:in` → CHECK with allowed values
   - `sh:pattern` → regex CHECK
 - [ ] **Synchronous validation mode**
-  - Triggered on `insert_triple()` when `pg_triple.enable_shacl = 'sync'`
+  - Triggered on `insert_triple()` when `pg_triple.shacl_mode = 'sync'`
   - Returns validation error immediately on constraint violation
 - [ ] **Validation report**
   - `pg_triple.validate(graph TEXT DEFAULT NULL) RETURNS JSONB`
@@ -418,7 +451,7 @@ Core SHACL constraints are enforced at insert time. Validation reports conform t
   - Validation queue table: `_pg_triple.validation_queue`
   - Background worker processes queue in batches
   - Dead letter queue for invalid triples with violation reports
-  - `pg_triple.enable_shacl = 'async'` GUC mode
+  - `pg_triple.shacl_mode = 'async'` GUC mode
 - [ ] **Complex shape support**
   - `sh:class` — type constraint via `rdf:type` lookup
   - `sh:node` — nested shape references
