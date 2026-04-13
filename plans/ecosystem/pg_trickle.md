@@ -495,6 +495,138 @@ The federation executor does a fast `SELECT success_rate FROM _pg_ripple.federat
 - The stream table doubles as a federation performance dashboard
 - pg_trickle's window-aggregation support keeps the rolling 5-minute window maintenance efficient
 
+### 2.12 Incremental `subject_patterns` Maintenance
+
+**Problem**: The `_pg_ripple.subject_patterns` table (v0.6.0) maps each subject to a sorted `BIGINT[]` of all its predicate IDs. It powers DESCRIBE queries (look up a subject's predicates in one index seek instead of probing every VP table) and GIN-based "subject has both P1 and P2" scans. Currently maintained by the merge worker post-merge only — between merges, newly inserted triples are invisible to the pattern index, forcing fallback to full VP table enumeration.
+
+**pg_trickle solution**: A stream table maintaining the per-subject predicate array incrementally:
+
+```sql
+SELECT pgtrickle.create_stream_table(
+    name     => '_pg_ripple.subject_patterns',
+    query    => $$
+        SELECT s,
+               array_agg(DISTINCT p ORDER BY p) AS pattern
+        FROM _pg_ripple.all_triples_view
+        GROUP BY s
+    $$,
+    schedule => '10s'
+);
+CREATE INDEX ON _pg_ripple.subject_patterns USING GIN (pattern);
+```
+
+pg_trickle's GROUP BY + `array_agg` differential maintenance handles this efficiently: only subjects whose predicate set changed since the last refresh are recomputed. The GIN index is updated incrementally by PostgreSQL on each stream table refresh.
+
+**Benefits**:
+- DESCRIBE queries see predicates from delta-resident triples without waiting for a merge cycle
+- GIN-based "subjects with predicates P1 AND P2" queries stay current during high-write windows
+- Merge worker no longer needs dedicated subject-pattern rebuild logic — pg_trickle handles it
+- The stream table replaces the static table entirely; no data duplication
+
+### 2.13 SHACL Dead-Letter Queue Violation Summary
+
+**Problem**: The async SHACL validation pipeline (§4.6.2 in the implementation plan) dumps complex-shape violations into `_pg_ripple.dead_letter_queue` with per-violation JSONB reports. Answering "how many violations of each shape are there right now?" requires a full `GROUP BY` scan of the queue. As the queue grows (large initial loads often produce millions of violations before cleanup), this query dominates monitoring latency.
+
+**pg_trickle solution**: A stream table aggregating the dead-letter queue by shape and violation type:
+
+```sql
+SELECT pgtrickle.create_stream_table(
+    name     => '_pg_ripple.violation_summary',
+    query    => $$
+        SELECT dlq.report ->> 'sourceShape'     AS shape_iri,
+               dlq.report ->> 'resultSeverity'   AS severity,
+               (dlq.report ->> 'graph_id')::bigint AS graph_id,
+               COUNT(*)                           AS violation_count,
+               MAX(dlq.queued_at)                 AS last_seen
+        FROM _pg_ripple.dead_letter_queue dlq
+        GROUP BY 1, 2, 3
+    $$,
+    schedule => '5s'
+);
+```
+
+The v0.15.0 HTTP endpoint's `/metrics` Prometheus exporter reads `violation_summary` directly — one index scan on a small aggregate table instead of a full GROUP BY over potentially millions of violation rows.
+
+**Benefits**:
+- Monitoring dashboards get sub-second violation counts without full queue scans
+- Prometheus `/metrics` exporter stays cheap even with millions of queued violations
+- `JSONB ->>` field extraction is evaluated only for changed rows — pg_trickle's differential mode avoids re-aggregating the entire queue
+- Feeds into the ontology change propagation DAG (§2.7): violations that disappear after a schema change are automatically cleared from the summary
+
+### 2.14 Automatic ExtVP Recommendation
+
+**Problem**: ExtVP (§2.1) pre-computes semi-joins between frequently co-joined predicates for 2–10× star-pattern speedups. But deciding *which* predicate pairs to pre-compute requires workload analysis. The current plan (v0.11.0) leaves this entirely manual — users must guess which pairs to `create_sparql_view()` for.
+
+**pg_trickle solution**: A stream table aggregating co-occurring predicate pairs from the SPARQL query execution log, surfacing the top N ExtVP candidates automatically:
+
+```sql
+-- Base: the SPARQL query engine logs BGP predicate arrays on each execution
+CREATE TABLE _pg_ripple.query_predicate_log (
+    bgp_predicates BIGINT[] NOT NULL,
+    query_time_ms  INT NOT NULL,
+    executed_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+SELECT pgtrickle.create_stream_table(
+    name     => '_pg_ripple.extvp_candidates',
+    query    => $$
+        SELECT p1, p2,
+               COUNT(*)            AS cooccurrence_count,
+               AVG(query_time_ms)  AS avg_query_ms
+        FROM _pg_ripple.query_predicate_log,
+             LATERAL unnest(bgp_predicates) AS p1,
+             LATERAL unnest(bgp_predicates) AS p2
+        WHERE p1 < p2
+          AND executed_at > now() - interval '1 hour'
+        GROUP BY p1, p2
+        HAVING COUNT(*) > 10
+    $$,
+    schedule => '30s'
+);
+```
+
+A periodic admin function or the merge worker reads `extvp_candidates` and auto-creates ExtVP stream tables for the top predicate pairs. Users get workload-adaptive performance tuning with zero manual intervention.
+
+**Benefits**:
+- Removes guesswork from ExtVP configuration
+- Adapts to changing workloads — predicate pairs that fall out of the 1-hour window are automatically de-prioritised
+- Feeds into `pg_ripple.explain_sparql()` recommendations: "This query would benefit from an ExtVP on (P1, P2) — run `pg_ripple.create_extvp(P1, P2)` to speed it up"
+
+### 2.15 Incremental Ontology / Schema Extraction
+
+**Problem**: Knowledge graph users need to understand the schema: "What classes exist? What properties does each class have? What are the cardinalities?" This currently requires manual exploration or external tooling. There is no live, queryable schema summary inside pg_ripple.
+
+**pg_trickle solution**: A stream table continuously inferring a queryable class–property schema from the data itself:
+
+```sql
+SELECT pgtrickle.create_stream_table(
+    name     => '_pg_ripple.inferred_schema',
+    query    => $$
+        -- Per-class property usage
+        SELECT type_vp.o                           AS class_id,
+               prop.p                              AS property_id,
+               COUNT(DISTINCT prop.s)              AS instance_count,
+               COUNT(*)                            AS triple_count,
+               COUNT(DISTINCT prop.o)              AS distinct_values
+        FROM _pg_ripple.all_triples_view type_vp   -- rdf:type triples
+        JOIN _pg_ripple.all_triples_view prop
+          ON prop.s = type_vp.s
+        WHERE type_vp.p = (SELECT id FROM _pg_ripple.predicates
+                           WHERE iri_id = encode('http://www.w3.org/1999/02/22-rdf-syntax-ns#type'))
+        GROUP BY type_vp.o, prop.p
+    $$,
+    schedule => '30s'
+);
+```
+
+Applications query `_pg_ripple.inferred_schema` (decoded via a thin view) to discover the graph's structure. SPARQL IDE UIs can use it for auto-completion. SHACL shape generation tools can read it as a starting point. The stream table stays incrementally current as new triples flow in.
+
+**Benefits**:
+- Queryable schema summary with zero manual maintenance
+- Auto-completion for SPARQL editors connected via the HTTP endpoint (v0.15.0)
+- Feed for automatic SHACL shape inference tooling
+- pg_trickle's differential GROUP BY maintenance makes this near-zero cost at low change rates
+
 ---
 
 ## 3. Integration Architecture
@@ -612,13 +744,15 @@ This lets applications and tooling test availability before calling without catc
 
 | pg_ripple Version | pg_trickle Feature | Priority |
 |---|---|---|
-| v0.6.0 (HTAP) | Real-time statistics stream tables (`predicate_stats`, `graph_stats`); rare-predicate auto-promotion trigger (`rare_predicate_candidates`); live VP cardinality for join reordering (`vp_cardinality`) | High |
-| v0.7.0 (SHACL Core) | SHACL violation monitors (IMMEDIATE mode) | Medium |
+| v0.6.0 (HTAP) | Real-time statistics (`predicate_stats`, `graph_stats`); rare-predicate auto-promotion (`rare_predicate_candidates`); live VP cardinality (`vp_cardinality`); incremental `subject_patterns` | High |
+| v0.7.0 (SHACL Core) | SHACL violation monitors (IMMEDIATE mode); dead-letter queue violation summary (`violation_summary`) | Medium |
 | v0.8.0 (SHACL Advanced) | Multi-shape DAG validation | Medium |
 | v0.10.0 (Datalog) | Inference materialization via Datalog rule sets, SHACL-AF `sh:rule` bridge; incremental `dictionary_hot` maintenance | High |
 | v0.11.0 (SPARQL & Datalog Views) | ExtVP stream tables, `pg_ripple.create_sparql_view()` API, Datalog views, SPARQL view caching | High |
+| v0.13.0 (Performance) | Automatic ExtVP recommendation (`extvp_candidates`) | Medium |
+| v0.14.0 (Admin) | Incremental ontology / schema extraction (`inferred_schema`) | Medium |
 | v0.16.0 (Federation) | Federation endpoint health monitoring (`federation_health`) | Medium |
-| Post-1.0 | Full ExtVP automation, ontology change propagation DAG | High |
+| Post-1.0 | Full ExtVP automation driven by `extvp_candidates`, ontology change propagation DAG | High |
 
 ---
 
