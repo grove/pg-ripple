@@ -42,54 +42,117 @@ Every IRI, blank node, and literal is dictionary-encoded to a compact integer fo
 
 ## Where we're headed
 
-Each future release adds a self-contained layer of capability:
+Each release adds a self-contained layer of capability, building toward a complete knowledge graph platform inside PostgreSQL.
+
+### v0.2.0 — Bulk loading & named graphs
+
+Stop inserting one triple at a time. Load entire RDF files in Turtle, N-Triples, N-Quads, or TriG format. Named graphs let you organise facts into labelled collections and query or drop them as a unit.
 
 ```sql
--- v0.2.0: bulk import from files
 SELECT pg_ripple.load_turtle('
   @prefix foaf: <http://xmlns.com/foaf/0.1/> .
   <http://example.org/Alice> foaf:knows <http://example.org/Bob> .
   <http://example.org/Bob>   foaf:name  "Bob" .
 ');
+-- Returns: number of triples loaded
+```
 
--- v0.3.0: ask questions in SPARQL
+### v0.3.0 — SPARQL query engine
+
+Ask questions in SPARQL — the standard W3C query language for RDF, analogous to SQL for relational data. Supports SELECT, ASK, basic graph patterns, FILTER, OPTIONAL, and named graph queries.
+
+```sql
 SELECT * FROM pg_ripple.sparql('
   PREFIX foaf: <http://xmlns.com/foaf/0.1/>
-  SELECT ?name WHERE {
+  SELECT ?person ?name WHERE {
     <http://example.org/Alice> foaf:knows ?person .
     ?person foaf:name ?name .
   }
 ');
+```
 
--- v0.5.0: property paths — follow chains of any length
+### v0.4.0 — RDF-star
+
+Make statements *about* statements. Standard RDF can say "Alice knows Bob" — RDF-star lets you also say "Alice told us she knows Bob, on January 5th". Essential for provenance tracking, temporal annotations, and trust metadata.
+
+```sql
+SELECT pg_ripple.load_turtle('
+  @prefix ex:  <http://example.org/> .
+  @prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+
+  << ex:Alice ex:knows ex:Bob >>
+      ex:assertedBy ex:Carol ;
+      ex:assertedOn "2024-01-15"^^xsd:date .
+');
+```
+
+### v0.5.0 — Advanced SPARQL queries
+
+Property paths, aggregates, subqueries, and UNION. Property paths let you follow relationship chains of arbitrary length — find all colleagues reachable through any number of "works with" links, or count how many steps separate two people.
+
+```sql
+-- Find everyone Alice can reach through "knows" (any depth)
 SELECT * FROM pg_ripple.sparql('
   PREFIX foaf: <http://xmlns.com/foaf/0.1/>
-  SELECT ?name WHERE {
+  SELECT ?name (COUNT(?hop) AS ?distance) WHERE {
     <http://example.org/Alice> foaf:knows+ ?person .
     ?person foaf:name ?name .
   }
+  GROUP BY ?name ORDER BY ?distance
 ');
--- Returns everyone reachable through "knows" links
+```
 
--- v0.7.0: data quality rules with SHACL
+### v0.6.0 — HTAP architecture
+
+Concurrent heavy reads and writes without blocking each other. Writes land in a small, fast delta partition; a background worker merges them into a read-optimised main partition. A shared-memory dictionary cache cuts lookup latency to microseconds.
+
+### v0.7.0–v0.8.0 — SHACL data quality
+
+Define data integrity rules using the W3C SHACL standard and reject bad data on insert. Synchronous validation blocks writes that violate constraints; an async pipeline catches violations in bulk-loaded data without blocking imports.
+
+```sql
 SELECT pg_ripple.load_shacl('
   @prefix sh: <http://www.w3.org/ns/shacl#> .
   <http://example.org/PersonShape> a sh:NodeShape ;
     sh:targetClass <http://example.org/Person> ;
-    sh:property [ sh:path <http://xmlns.com/foaf/0.1/name> ;
-                  sh:minCount 1 ] .
+    sh:property [
+      sh:path <http://xmlns.com/foaf/0.1/name> ;
+      sh:minCount 1 ;
+      sh:maxCount 1 ;
+      sh:datatype <http://www.w3.org/2001/XMLSchema#string>
+    ] .
 ');
+-- Every Person must now have exactly one foaf:name string
+```
 
--- v0.10.0: reasoning — derive new facts automatically
+### v0.10.0 — Datalog reasoning
+
+Automatically derive new facts from rules. Built-in rulesets cover RDFS (13 rules) and OWL 2 RL (~80 rules). You can also write custom rules. Once enabled, SPARQL queries see both explicit and inferred facts transparently.
+
+```sql
 SELECT pg_ripple.load_rules_builtin('rdfs');
--- Queries now infer transitive subclass relationships
+-- If :Dog rdfs:subClassOf :Animal, and :Rex rdf:type :Dog,
+-- then pg_ripple automatically infers :Rex rdf:type :Animal
+```
 
--- v0.16.0: federate queries across remote SPARQL endpoints
+### v0.15.0 — SPARQL Protocol (HTTP)
+
+A companion `pg_ripple_http` service exposes a standard W3C SPARQL 1.1 Protocol endpoint so browsers, dashboards (YASGUI, Metaphacts), and any SPARQL client can query over HTTP — no PostgreSQL driver needed.
+
+### v0.16.0 — SPARQL Federation
+
+Query remote SPARQL endpoints alongside local data in a single query using the standard `SERVICE` keyword. Remote calls execute in parallel.
+
+```sql
 SELECT * FROM pg_ripple.sparql('
-  SELECT ?abstract WHERE {
-    <http://example.org/Alice> <http://example.org/worksAt> ?org .
+  PREFIX ex:  <http://example.org/>
+  PREFIX dbo: <http://dbpedia.org/ontology/>
+  SELECT ?name ?abstract WHERE {
+    ?person ex:worksAt ex:AcmeCorp ;
+            ex:name    ?name .
     SERVICE <https://dbpedia.org/sparql> {
-      ?org <http://dbpedia.org/ontology/abstract> ?abstract .
+      ?person dbo:abstract ?abstract .
+      FILTER(LANG(?abstract) = "en")
     }
   }
 ');
