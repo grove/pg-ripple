@@ -1,0 +1,73 @@
+-- pg_regress test: N-Triples bulk load and export round-trip
+-- Load a small N-Triples dataset
+SELECT pg_ripple.load_ntriples(
+    '<https://example.org/alice> <https://example.org/knows> <https://example.org/bob> .' || chr(10) ||
+    '<https://example.org/bob> <https://example.org/knows> <https://example.org/carol> .' || chr(10) ||
+    '<https://example.org/alice> <https://example.org/age> "30"^^<http://www.w3.org/2001/XMLSchema#integer> .' || chr(10)
+) = 3 AS loaded_three_triples;
+ loaded_three_triples 
+----------------------
+ t
+(1 row)
+
+-- Verify count
+SELECT pg_ripple.triple_count() >= 3 AS count_at_least_three;
+ count_at_least_three 
+----------------------
+ t
+(1 row)
+
+-- Verify find_triples works after load
+SELECT count(*) >= 1 AS alice_knows_found
+FROM pg_ripple.find_triples('<https://example.org/alice>', '<https://example.org/knows>', NULL);
+ alice_knows_found 
+-------------------
+ t
+(1 row)
+
+-- Export default graph as N-Triples; verify it contains expected content
+SELECT pg_ripple.export_ntriples(NULL) LIKE '%<https://example.org/alice>%' AS export_contains_alice;
+ export_contains_alice 
+-----------------------
+ t
+(1 row)
+
+SELECT pg_ripple.export_ntriples(NULL) LIKE '%<https://example.org/knows>%' AS export_contains_knows;
+ export_contains_knows 
+-----------------------
+ t
+(1 row)
+
+-- Turtle load test
+SELECT pg_ripple.load_turtle(
+    '@prefix ex: <https://example.org/> .' || chr(10) ||
+    'ex:dave ex:friendOf ex:eve .' || chr(10)
+) = 1 AS turtle_loaded;
+ turtle_loaded 
+---------------
+ t
+(1 row)
+
+SELECT count(*) >= 1 AS dave_found
+FROM pg_ripple.find_triples('<https://example.org/dave>', NULL, NULL);
+ dave_found 
+------------
+ t
+(1 row)
+
+-- Language-tagged literal load
+SELECT pg_ripple.load_turtle(
+    '<https://example.org/alice> <https://example.org/label> "Alice"@en .' || chr(10)
+) = 1 AS lang_literal_loaded;
+ lang_literal_loaded 
+---------------------
+ t
+(1 row)
+
+SELECT count(*) >= 1 AS lang_literal_found
+FROM pg_ripple.find_triples('<https://example.org/alice>', '<https://example.org/label>', NULL);
+ lang_literal_found 
+--------------------
+ t
+(1 row)
+

@@ -121,6 +121,171 @@ pub fn encode(term: &str, kind: i16) -> i64 {
     id
 }
 
+/// Encode a typed literal (`"value"^^<datatype>`) into the dictionary.
+///
+/// The hash is computed over `kind_le_bytes || value_utf8 || "^^<" || datatype_utf8 || ">"`,
+/// so two literals with the same value but different datatypes always map to distinct IDs.
+pub fn encode_typed_literal(value: &str, datatype: &str) -> i64 {
+    // Build canonical form for hashing.
+    let canonical = format!("\"{}\"^^<{}>", value, datatype);
+    let hash128 = term_hash(&canonical, KIND_TYPED_LITERAL);
+
+    if let Some(id) = ENCODE_CACHE.with(|c| c.borrow_mut().get(&hash128).copied()) {
+        return id;
+    }
+
+    let hash_bytes = hash128.to_be_bytes();
+
+    let id: i64 = Spi::get_one_with_args::<i64>(
+        "WITH ins AS ( \
+             INSERT INTO _pg_ripple.dictionary (hash, value, kind, datatype) \
+             VALUES ($1, $2, $3, $4) \
+             ON CONFLICT (hash) DO NOTHING \
+             RETURNING id \
+         ) \
+         SELECT COALESCE( \
+             (SELECT id FROM ins), \
+             (SELECT id FROM _pg_ripple.dictionary WHERE hash = $1) \
+         )",
+        &[
+            DatumWithOid::from(hash_bytes.as_slice()),
+            DatumWithOid::from(value),
+            DatumWithOid::from(KIND_TYPED_LITERAL),
+            DatumWithOid::from(datatype),
+        ],
+    )
+    .unwrap_or_else(|e| pgrx::error!("dictionary encode_typed_literal SPI error: {e}"))
+    .unwrap_or_else(|| pgrx::error!("dictionary encode_typed_literal: no id returned"));
+
+    ENCODE_CACHE.with(|c| c.borrow_mut().put(hash128, id));
+    DECODE_CACHE.with(|c| c.borrow_mut().put(id, canonical));
+
+    id
+}
+
+/// Encode a language-tagged literal (`"value"@lang`) into the dictionary.
+pub fn encode_lang_literal(value: &str, lang: &str) -> i64 {
+    let canonical = format!("\"{}\"@{}", value, lang);
+    let hash128 = term_hash(&canonical, KIND_LANG_LITERAL);
+
+    if let Some(id) = ENCODE_CACHE.with(|c| c.borrow_mut().get(&hash128).copied()) {
+        return id;
+    }
+
+    let hash_bytes = hash128.to_be_bytes();
+
+    let id: i64 = Spi::get_one_with_args::<i64>(
+        "WITH ins AS ( \
+             INSERT INTO _pg_ripple.dictionary (hash, value, kind, lang) \
+             VALUES ($1, $2, $3, $4) \
+             ON CONFLICT (hash) DO NOTHING \
+             RETURNING id \
+         ) \
+         SELECT COALESCE( \
+             (SELECT id FROM ins), \
+             (SELECT id FROM _pg_ripple.dictionary WHERE hash = $1) \
+         )",
+        &[
+            DatumWithOid::from(hash_bytes.as_slice()),
+            DatumWithOid::from(value),
+            DatumWithOid::from(KIND_LANG_LITERAL),
+            DatumWithOid::from(lang),
+        ],
+    )
+    .unwrap_or_else(|e| pgrx::error!("dictionary encode_lang_literal SPI error: {e}"))
+    .unwrap_or_else(|| pgrx::error!("dictionary encode_lang_literal: no id returned"));
+
+    ENCODE_CACHE.with(|c| c.borrow_mut().put(hash128, id));
+    DECODE_CACHE.with(|c| c.borrow_mut().put(id, canonical));
+
+    id
+}
+
+/// Encode a plain literal (no datatype, no language tag).
+pub fn encode_plain_literal(value: &str) -> i64 {
+    encode(value, KIND_LITERAL)
+}
+
+/// Full decoded representation of a dictionary entry.
+pub struct TermInfo {
+    pub value: String,
+    pub kind: i16,
+    pub datatype: Option<String>,
+    pub lang: Option<String>,
+}
+
+/// Decode a dictionary `id` to its full representation (value, kind, datatype, lang).
+///
+/// Returns `None` if the id is not in the dictionary.
+pub fn decode_full(id: i64) -> Option<TermInfo> {
+    Spi::connect(|client| {
+        client
+            .select(
+                "SELECT value, kind, datatype, lang \
+                 FROM _pg_ripple.dictionary WHERE id = $1",
+                Some(1),
+                &[DatumWithOid::from(id)],
+            )
+            .unwrap_or_else(|e| pgrx::error!("dictionary decode_full SPI error: {e}"))
+            .filter_map(|row| {
+                let value: String = row.get::<String>(1).ok().flatten()?;
+                let kind: i16 = row.get::<i16>(2).ok().flatten()?;
+                let datatype: Option<String> = row.get::<String>(3).ok().flatten();
+                let lang: Option<String> = row.get::<String>(4).ok().flatten();
+                Some(TermInfo { value, kind, datatype, lang })
+            })
+            .next()
+    })
+}
+
+/// Format a dictionary entry as an N-Triples term string.
+///
+/// - IRI → `<iri>`
+/// - Blank node → `_:id` (using dictionary sequence id for stable uniqueness)
+/// - Plain literal → `"value"`
+/// - Typed literal → `"value"^^<datatype>`
+/// - Lang literal → `"value"@lang`
+pub fn format_ntriples(id: i64) -> String {
+    match decode_full(id) {
+        None => format!("<unknown:{}>", id),
+        Some(t) => format_ntriples_term(&t.value, t.kind, t.datatype.as_deref(), t.lang.as_deref(), id),
+    }
+}
+
+/// Format from components.
+pub fn format_ntriples_term(value: &str, kind: i16, datatype: Option<&str>, lang: Option<&str>, fallback_id: i64) -> String {
+    match kind {
+        k if k == KIND_IRI        => format!("<{}>", value),
+        k if k == KIND_BLANK      => format!("_:b{}", fallback_id),
+        k if k == KIND_LITERAL    => format!("\"{}\"", escape_literal(value)),
+        k if k == KIND_TYPED_LITERAL => {
+            let dt = datatype.unwrap_or("http://www.w3.org/2001/XMLSchema#string");
+            format!("\"{}\"^^<{}>", escape_literal(value), dt)
+        }
+        k if k == KIND_LANG_LITERAL => {
+            let l = lang.unwrap_or("und");
+            format!("\"{}\"@{}", escape_literal(value), l)
+        }
+        _ => format!("\"{}\"", escape_literal(value)),
+    }
+}
+
+/// Escape a string value for N-Triples literal output.
+fn escape_literal(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for ch in s.chars() {
+        match ch {
+            '"'  => out.push_str("\\\""),
+            '\\'  => out.push_str("\\\\"),
+            '\n'  => out.push_str("\\n"),
+            '\r'  => out.push_str("\\r"),
+            '\t'  => out.push_str("\\t"),
+            c    => out.push(c),
+        }
+    }
+    out
+}
+
 /// Decode a dictionary `id` back to its original term string.
 ///
 /// Returns `None` if the id is not found in the dictionary.
