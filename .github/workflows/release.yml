@@ -69,7 +69,7 @@ jobs:
 
       - name: Initialise pgrx (PostgreSQL 18)
         run: |
-          if [[ ! -f ~/.pgrx/18.*/pgrx-install/bin/pg_config ]]; then
+          if ! ls ~/.pgrx/18.*/pgrx-install/bin/pg_config 2>/dev/null | grep -q .; then
             cargo pgrx init --pg18 download
           fi
 
@@ -134,7 +134,7 @@ jobs:
 
       - name: Initialise pgrx (PostgreSQL 18)
         run: |
-          if [[ ! -f ~/.pgrx/18.*/pgrx-install/bin/pg_config ]]; then
+          if ! ls ~/.pgrx/18.*/pgrx-install/bin/pg_config 2>/dev/null | grep -q .; then
             cargo pgrx init --pg18 download
           fi
 
