@@ -19,20 +19,22 @@ $$;
 -- ─── Dictionary ───────────────────────────────────────────────────────────────
 
 -- Unified term dictionary: IRIs, blank nodes, and literals share one table.
--- id   = high 64 bits of XXH3-128 hash (used as the integer key everywhere)
--- hash = low  64 bits of XXH3-128 hash (stored for collision detection)
+-- id   = dense IDENTITY sequence — the join key used in every VP table
+-- hash = full 16-byte XXH3-128 of (kind_le_bytes || term_utf8) — collision-free
 -- kind: 0=IRI 1=blank 2=literal 3=typed-literal 4=lang-literal
+-- The kind discriminant is mixed into the hash so that the same string encoded
+-- as different term types always maps to distinct rows.
 CREATE TABLE _pg_ripple.dictionary (
-    id       BIGINT  NOT NULL,
-    hash     BIGINT  NOT NULL,
-    value    TEXT    NOT NULL,
+    id       BIGINT   GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    hash     BYTEA    NOT NULL,
+    value    TEXT     NOT NULL,
     kind     SMALLINT NOT NULL DEFAULT 0,
     datatype TEXT,           -- populated for typed literals (kind=3)
-    lang     TEXT,           -- populated for language-tagged literals (kind=4)
-    CONSTRAINT dictionary_pkey PRIMARY KEY (id)
+    lang     TEXT            -- populated for language-tagged literals (kind=4)
 );
 
-CREATE INDEX ON _pg_ripple.dictionary (value, kind);
+CREATE UNIQUE INDEX ON _pg_ripple.dictionary (hash);
+CREATE        INDEX ON _pg_ripple.dictionary (value, kind);
 
 COMMENT ON TABLE _pg_ripple.dictionary IS
     'Term dictionary: every IRI, blank node, and literal encoded as BIGINT.';

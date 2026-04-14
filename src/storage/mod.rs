@@ -52,17 +52,24 @@ pub fn initialize_schema() {
     // Create the dictionary table.
     Spi::run_with_args(
         "CREATE TABLE IF NOT EXISTS _pg_ripple.dictionary ( \
-             id       BIGINT  NOT NULL, \
-             hash     BIGINT  NOT NULL, \
-             value    TEXT    NOT NULL, \
+             id       BIGINT   GENERATED ALWAYS AS IDENTITY PRIMARY KEY, \
+             hash     BYTEA    NOT NULL, \
+             value    TEXT     NOT NULL, \
              kind     SMALLINT NOT NULL DEFAULT 0, \
              datatype TEXT, \
-             lang     TEXT, \
-             PRIMARY KEY (id) \
+             lang     TEXT \
          )",
         &[],
     )
     .unwrap_or_else(|e| pgrx::error!("dictionary table creation error: {e}"));
+
+    // Unique index on the full 128-bit hash (collision-free lookup key).
+    Spi::run_with_args(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_dictionary_hash \
+         ON _pg_ripple.dictionary (hash)",
+        &[],
+    )
+    .unwrap_or_else(|e| pgrx::error!("dictionary hash index creation error: {e}"));
 
     // Create indexes on dictionary table
     Spi::run_with_args(
