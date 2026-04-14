@@ -54,6 +54,9 @@ pub const KIND_LITERAL: i16 = 2;
 pub const KIND_TYPED_LITERAL: i16 = 3;
 #[allow(dead_code)]
 pub const KIND_LANG_LITERAL: i16 = 4;
+/// RDF-star quoted triple: the `value` holds the canonical N-Triples-star form;
+/// `qt_s`, `qt_p`, `qt_o` hold the component dictionary IDs.
+pub const KIND_QUOTED_TRIPLE: i16 = 5;
 
 thread_local! {
     /// Encode cache: full XXH3-128 hash → sequence-generated id.
@@ -206,6 +209,124 @@ pub fn encode_plain_literal(value: &str) -> i64 {
     encode(value, KIND_LITERAL)
 }
 
+// ─── Quoted triple (RDF-star) encoding ───────────────────────────────────────
+
+/// Compute the XXH3-128 hash for a quoted triple `(s_id, p_id, o_id)`.
+///
+/// Mixing in `KIND_QUOTED_TRIPLE` as a prefix guarantees that the same i64
+/// triple never collides with an IRI or literal hash.
+fn quoted_triple_hash(s_id: i64, p_id: i64, o_id: i64) -> u128 {
+    let mut buf = [0u8; 2 + 8 + 8 + 8];
+    buf[0..2].copy_from_slice(&KIND_QUOTED_TRIPLE.to_le_bytes());
+    buf[2..10].copy_from_slice(&s_id.to_le_bytes());
+    buf[10..18].copy_from_slice(&p_id.to_le_bytes());
+    buf[18..26].copy_from_slice(&o_id.to_le_bytes());
+    xxh3_128(&buf)
+}
+
+/// Encode a quoted triple `(s_id, p_id, o_id)` into the dictionary.
+///
+/// The `value` column stores the canonical N-Triples-star representation
+/// (computed lazily at insert time).  The `qt_s`, `qt_p`, `qt_o` columns
+/// hold the component dictionary IDs so they can be reconstructed without
+/// re-parsing the value string.
+pub fn encode_quoted_triple(s_id: i64, p_id: i64, o_id: i64) -> i64 {
+    let hash128 = quoted_triple_hash(s_id, p_id, o_id);
+
+    if let Some(id) = ENCODE_CACHE.with(|c| c.borrow_mut().get(&hash128).copied()) {
+        return id;
+    }
+
+    let hash_bytes = hash128.to_be_bytes();
+    // Build canonical value lazily — only stored once at insert time.
+    let canonical = format!(
+        "<< {} {} {} >>",
+        format_ntriples(s_id),
+        format_ntriples(p_id),
+        format_ntriples(o_id)
+    );
+
+    let id: i64 = Spi::get_one_with_args::<i64>(
+        "WITH ins AS ( \
+             INSERT INTO _pg_ripple.dictionary (hash, value, kind, qt_s, qt_p, qt_o) \
+             VALUES ($1, $2, $3, $4, $5, $6) \
+             ON CONFLICT (hash) DO NOTHING \
+             RETURNING id \
+         ) \
+         SELECT COALESCE( \
+             (SELECT id FROM ins), \
+             (SELECT id FROM _pg_ripple.dictionary WHERE hash = $1) \
+         )",
+        &[
+            DatumWithOid::from(hash_bytes.as_slice()),
+            DatumWithOid::from(canonical.as_str()),
+            DatumWithOid::from(KIND_QUOTED_TRIPLE),
+            DatumWithOid::from(s_id),
+            DatumWithOid::from(p_id),
+            DatumWithOid::from(o_id),
+        ],
+    )
+    .unwrap_or_else(|e| pgrx::error!("dictionary encode_quoted_triple SPI error: {e}"))
+    .unwrap_or_else(|| pgrx::error!("dictionary encode_quoted_triple: no id returned"));
+
+    ENCODE_CACHE.with(|c| c.borrow_mut().put(hash128, id));
+    DECODE_CACHE.with(|c| c.borrow_mut().put(id, canonical));
+    id
+}
+
+/// Look up a quoted triple without inserting.
+///
+/// Returns `None` if the quoted triple has never been stored.
+pub fn lookup_quoted_triple(s_id: i64, p_id: i64, o_id: i64) -> Option<i64> {
+    let hash128 = quoted_triple_hash(s_id, p_id, o_id);
+    if let Some(id) = ENCODE_CACHE.with(|c| c.borrow_mut().get(&hash128).copied()) {
+        return Some(id);
+    }
+    let hash_bytes = hash128.to_be_bytes();
+    Spi::connect(|client| {
+        let tbl = client
+            .select(
+                "SELECT id FROM _pg_ripple.dictionary WHERE hash = $1",
+                Some(1),
+                &[DatumWithOid::from(hash_bytes.as_slice())],
+            )
+            .unwrap_or_else(|e| pgrx::error!("lookup_quoted_triple SPI error: {e}"));
+        if tbl.is_empty() {
+            None
+        } else {
+            tbl.first()
+                .get_one::<i64>()
+                .unwrap_or_else(|e| pgrx::error!("lookup_quoted_triple decode SPI error: {e}"))
+        }
+    })
+}
+
+/// Decode a quoted triple ID back to its component dictionary IDs `(s_id, p_id, o_id)`.
+///
+/// Returns `None` if the ID is not a quoted triple in the dictionary.
+pub fn decode_quoted_triple_components(id: i64) -> Option<(i64, i64, i64)> {
+    Spi::connect(|client| {
+        client
+            .select(
+                "SELECT qt_s, qt_p, qt_o FROM _pg_ripple.dictionary \
+                 WHERE id = $1 AND kind = $2",
+                Some(1),
+                &[
+                    DatumWithOid::from(id),
+                    DatumWithOid::from(KIND_QUOTED_TRIPLE),
+                ],
+            )
+            .unwrap_or_else(|e| pgrx::error!("decode_quoted_triple_components SPI error: {e}"))
+            .filter_map(|row| {
+                let s: i64 = row.get::<i64>(1).ok().flatten()?;
+                let p: i64 = row.get::<i64>(2).ok().flatten()?;
+                let o: i64 = row.get::<i64>(3).ok().flatten()?;
+                Some((s, p, o))
+            })
+            .next()
+    })
+}
+
 /// Look up a term in the dictionary **without inserting** it.
 ///
 /// Returns `None` if the term has never been stored.  Used by the SPARQL
@@ -328,6 +449,9 @@ pub fn format_ntriples_term(
             let l = lang.unwrap_or("und");
             format!("\"{}\"@{}", escape_literal(value), l)
         }
+        // KIND_QUOTED_TRIPLE: the `value` column already stores the canonical
+        // N-Triples-star form `<< ... >>`, so we can reuse it directly.
+        k if k == KIND_QUOTED_TRIPLE => value.to_owned(),
         _ => format!("\"{}\"", escape_literal(value)),
     }
 }

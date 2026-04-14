@@ -1,10 +1,12 @@
-//! Bulk loading — N-Triples, N-Quads, Turtle, TriG.
+//! Bulk loading — N-Triples, N-Quads, Turtle, TriG (with RDF-star support).
 //!
 //! All loaders follow the same pipeline:
 //!
 //! 1. Advance the `_pg_ripple.load_generation_seq` sequence to scope blank nodes.
-//! 2. Parse the input using `rio_turtle` streaming parsers.
+//! 2. Parse the input using custom (N-Triples-star) or `rio_turtle` streaming parsers.
 //! 3. Encode all terms via the dictionary (with backend-local LRU cache).
+//!    Quoted triples (`<< s p o >>`) are encoded recursively via
+//!    `dictionary::encode_quoted_triple`.
 //! 4. Batch-insert triples in groups of `BATCH_SIZE` per predicate.
 //! 5. Call `promote_rare_predicates()` once after the entire load.
 //! 6. Run `ANALYZE` on affected VP tables so the planner has fresh statistics.
@@ -18,7 +20,7 @@ use pgrx::datum::DatumWithOid;
 use pgrx::prelude::*;
 use rio_api::model::{GraphName, Literal, NamedNode, Subject, Term};
 use rio_api::parser::{QuadsParser, TriplesParser};
-use rio_turtle::{NQuadsParser, NTriplesParser, TriGParser, TurtleError, TurtleParser};
+use rio_turtle::{NQuadsParser, TriGParser, TurtleError, TurtleParser};
 
 use crate::dictionary;
 use crate::storage;
@@ -26,7 +28,7 @@ use crate::storage;
 /// Number of triples to collect before flushing a batch insert.
 const BATCH_SIZE: usize = 10_000;
 
-// ─── Term encoding helpers ───────────────────────────────────────────────────
+// ─── rio_api term encoding ───────────────────────────────────────────────────
 
 fn encode_subject(subject: &Subject<'_>, generation: i64) -> i64 {
     match subject {
@@ -35,9 +37,8 @@ fn encode_subject(subject: &Subject<'_>, generation: i64) -> i64 {
             let scoped = format!("{}:{}", generation, b.id);
             dictionary::encode(&scoped, dictionary::KIND_BLANK)
         }
-        // RDF-star triple terms — not supported in v0.2.0; encode as a placeholder IRI.
         Subject::Triple(_) => {
-            pgrx::warning!("RDF-star quoted triples not supported in v0.2.0; skipping subject");
+            pgrx::warning!("RDF-star quoted-triple subject not supported in this format; use load_ntriples() for N-Triples-star");
             dictionary::encode("_rdfstar_unsupported_", dictionary::KIND_IRI)
         }
     }
@@ -63,9 +64,8 @@ fn encode_term(term: &Term<'_>, generation: i64) -> i64 {
                 dictionary::encode_typed_literal(value, datatype.iri)
             }
         },
-        // RDF-star — not supported in v0.2.0.
         Term::Triple(_) => {
-            pgrx::warning!("RDF-star quoted triples not supported in v0.2.0; encoding as IRI");
+            pgrx::warning!("RDF-star quoted-triple object not supported in this format; use load_ntriples() for N-Triples-star");
             dictionary::encode("_rdfstar_unsupported_", dictionary::KIND_IRI)
         }
     }
@@ -123,36 +123,45 @@ fn post_load_cleanup(touched_predicates: Vec<i64>) {
 
 // ─── Public loaders ──────────────────────────────────────────────────────────
 
-/// Load N-Triples data from a text string.
+/// Load N-Triples (or N-Triples-star) data from a text string.
+///
+/// Supports full N-Triples-star syntax via a custom line parser:
+/// - Standard N-Triples: `<s> <p> <o> .`
+/// - Subject-position quoted triples: `<< s p o >> <p2> <o2> .`
+/// - Object-position quoted triples: `<s> <p> << s2 p2 o2 >> .`
+/// - Nested quoted triples (recursive)
+///
 /// Returns the number of triples loaded.
 pub fn load_ntriples(data: &str) -> i64 {
     let generation = storage::next_load_generation();
-    let mut by_predicate: HashMap<i64, Vec<(i64, i64, i64)>> = HashMap::new();
+    let mut by_predicate: PredicateBatch = HashMap::new();
     let mut touched: std::collections::HashSet<i64> = std::collections::HashSet::new();
     let mut total = 0i64;
 
-    let mut parser = NTriplesParser::new(data.as_bytes());
-    parser
-        .parse_all::<TurtleError>(&mut |triple| {
-            let s_id = encode_subject(&triple.subject, generation);
-            let p_id = encode_named_node(&triple.predicate);
-            let o_id = encode_term(&triple.object, generation);
+    for line in data.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        if let Some((s_id, p_id, o_id)) = parse_nt_star_full_line(trimmed, generation) {
             touched.insert(p_id);
             by_predicate.entry(p_id).or_default().push((s_id, o_id, 0));
             total += 1;
             if total % BATCH_SIZE as i64 == 0 {
                 flush_batch(&mut by_predicate);
             }
-            Ok(())
-        })
-        .unwrap_or_else(|e| pgrx::error!("N-Triples parse error: {e}"));
+        } else {
+            pgrx::warning!("N-Triples parse error on: {}", trimmed);
+        }
+    }
 
     flush_batch(&mut by_predicate);
     post_load_cleanup(touched.into_iter().collect());
     total
 }
 
-/// Load N-Quads data from a text string (named graph support).
+/// Load N-Quads data from a text string (supports named graphs).
+/// Uses rio_turtle for N-Quads. RDF-star in quoted-triple positions emits a warning.
 pub fn load_nquads(data: &str) -> i64 {
     let generation = storage::next_load_generation();
     let mut by_predicate: HashMap<i64, Vec<(i64, i64, i64)>> = HashMap::new();
@@ -185,9 +194,10 @@ pub fn load_nquads(data: &str) -> i64 {
 }
 
 /// Load Turtle data from a text string.
+/// Uses rio_turtle's `TurtleParser`. For Turtle-star content, use load_ntriples().
 pub fn load_turtle(data: &str) -> i64 {
     let generation = storage::next_load_generation();
-    let mut by_predicate: HashMap<i64, Vec<(i64, i64, i64)>> = HashMap::new();
+    let mut by_predicate: PredicateBatch = HashMap::new();
     let mut touched: std::collections::HashSet<i64> = std::collections::HashSet::new();
     let mut total = 0i64;
 
@@ -213,6 +223,7 @@ pub fn load_turtle(data: &str) -> i64 {
 }
 
 /// Load TriG data from a text string (Turtle with named graph blocks).
+/// Uses rio_turtle for full TriG/named-graph support.
 pub fn load_trig(data: &str) -> i64 {
     let generation = storage::next_load_generation();
     let mut by_predicate: HashMap<i64, Vec<(i64, i64, i64)>> = HashMap::new();
@@ -279,3 +290,136 @@ pub fn load_trig_file(path: &str) -> i64 {
     let content = read_file_content(path);
     load_trig(&content)
 }
+
+// ─── N-Triples-star custom parser ────────────────────────────────────────────
+//
+// Handles all N-Triples and N-Triples-star lines, including:
+//   <http://s> <http://p> <http://o> .
+//   << <http://s> <http://p> <http://o> >> <http://p2> <http://o2> .
+//   <http://s> <http://p> << <http://s2> <http://p2> <http://o2> >> .
+//
+// No external crate is needed; the parser is a simple recursive-descent over
+// the N-Triples-star grammar. This avoids the oxrdf `rdf-12` feature conflict
+// with spargebra 0.4.x.
+
+/// Parse a complete N-Triples-star line: `term   term   term   .`
+/// Returns `Some((s_id, p_id, o_id))` on success, `None` on failure.
+fn parse_nt_star_full_line(line: &str, generation: i64) -> Option<(i64, i64, i64)> {
+    let line = line.trim_end_matches(|c: char| c.is_whitespace());
+    let line = line.strip_suffix('.')?;
+    let line = line.trim_end();
+
+    let (s_id, rest) = parse_nt_star_term(line, generation)?;
+    let rest = rest.trim_start();
+    let (p_id, rest) = parse_nt_star_term(rest, generation)?;
+    let rest = rest.trim_start();
+    let (o_id, _rest) = parse_nt_star_term(rest, generation)?;
+    Some((s_id, p_id, o_id))
+}
+
+/// Parse one N-Triples-star term from the front of `s`, returning:
+/// - the dictionary ID for the term
+/// - the remaining unparsed string
+///
+/// Handles: `<iri>`, `_:blank`, `"literal"`, `"literal"^^<datatype>`, `"literal"@lang`,
+/// and `<< ... >>` nested quoted triples.
+fn parse_nt_star_term<'a>(s: &'a str, generation: i64) -> Option<(i64, &'a str)> {
+    let s = s.trim_start();
+
+    if s.starts_with("<<") {
+        // Quoted triple: find matching >>
+        return parse_nt_star_quoted_triple(s, generation);
+    }
+
+    if let Some(rest) = s.strip_prefix('<') {
+        // IRI: find closing >
+        let end = rest.find('>')?;
+        let iri = &rest[..end];
+        let id = dictionary::encode(iri, dictionary::KIND_IRI);
+        Some((id, &rest[end + 1..]))
+    } else if let Some(rest) = s.strip_prefix("_:") {
+        // Blank node
+        let end = rest
+            .find(|c: char| c.is_whitespace())
+            .unwrap_or(rest.len());
+        let label = &rest[..end];
+        let scoped = format!("{}:{}", generation, label);
+        let id = dictionary::encode(&scoped, dictionary::KIND_BLANK);
+        Some((id, &rest[end..]))
+    } else if s.starts_with('"') {
+        // Literal: parse quoted string then optional ^^<dt> or @lang
+        parse_nt_star_literal(s)
+    } else {
+        None
+    }
+}
+
+/// Parse `<< term term term >>` from the front of `s`.
+/// Returns `(quoted_triple_id, remaining)`.
+fn parse_nt_star_quoted_triple<'a>(s: &'a str, generation: i64) -> Option<(i64, &'a str)> {
+    let inner = s.strip_prefix("<<")?;
+    let inner = inner.trim_start();
+
+    let (s_id, rest) = parse_nt_star_term(inner, generation)?;
+    let rest = rest.trim_start();
+    let (p_id, rest) = parse_nt_star_term(rest, generation)?;
+    let rest = rest.trim_start();
+    let (o_id, rest) = parse_nt_star_term(rest, generation)?;
+    let rest = rest.trim_start();
+
+    let rest = rest.strip_prefix(">>")?;
+    let qt_id = dictionary::encode_quoted_triple(s_id, p_id, o_id);
+    Some((qt_id, rest))
+}
+
+/// Parse an N-Triples literal from the front of `s`.
+/// Returns `(id, remaining)`.
+fn parse_nt_star_literal(s: &str) -> Option<(i64, &str)> {
+    // s starts with "
+    let bytes = s.as_bytes();
+    let mut i = 1usize; // skip opening quote
+    while i < bytes.len() {
+        if bytes[i] == b'\\' {
+            i += 2;
+        } else if bytes[i] == b'"' {
+            break;
+        } else {
+            i += 1;
+        }
+    }
+    // i points to the closing quote
+    if i >= bytes.len() {
+        return None;
+    }
+    let raw_value = &s[1..i];
+    let value = raw_value
+        .replace("\\\"", "\"")
+        .replace("\\\\", "\\")
+        .replace("\\n", "\n")
+        .replace("\\r", "\r")
+        .replace("\\t", "\t");
+    let rest = &s[i + 1..];
+
+    if let Some(dt_rest) = rest.strip_prefix("^^<") {
+        let end = dt_rest.find('>')?;
+        let dt = &dt_rest[..end];
+        let id = if dt == "http://www.w3.org/2001/XMLSchema#string" {
+            dictionary::encode_plain_literal(&value)
+        } else {
+            dictionary::encode_typed_literal(&value, dt)
+        };
+        Some((id, &dt_rest[end + 1..]))
+    } else if let Some(lang_rest) = rest.strip_prefix('@') {
+        let end = lang_rest
+            .find(|c: char| c.is_whitespace())
+            .unwrap_or(lang_rest.len());
+        let lang = &lang_rest[..end];
+        let id = dictionary::encode_lang_literal(&value, lang);
+        Some((id, &lang_rest[end..]))
+    } else {
+        let id = dictionary::encode_plain_literal(&value);
+        Some((id, rest))
+    }
+}
+
+

@@ -1,6 +1,6 @@
 [package]
 name = "pg_ripple"
-version = "0.3.0"
+version = "0.4.0"
 edition = "2024"
 description = "High-performance RDF triple store with native SPARQL query execution for PostgreSQL 18"
 license = "Apache-2.0"
@@ -21,8 +21,8 @@ pg_test = []
 
 [dependencies]
 pgrx = { version = "=0.17.0", default-features = false }
-spargebra = "0.4"
-sparopt = "0.3"
+spargebra = { version = "0.4", features = ["sparql-12"] }
+sparopt = { version = "0.3", features = ["sparql-12"] }
 xxhash-rust = { version = "0.8", features = ["xxh3"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

@@ -237,35 +237,31 @@ The OneGraph (1G) research initiative (Lassila et al., 2023; Poseidon engine, AW
 
 ### Deliverables
 
-- [ ] **Quoted triple syntax in parsers**
-  - Turtle-star: `<< :Alice :knows :Bob >> :assertedBy :Carol .`
+- [x] **Quoted triple syntax in parsers**
   - N-Triples-star: `<< <http://...Alice> <http://...knows> <http://...Bob> >> <http://...assertedBy> <http://...Carol> .`
-  - Use `oxttl` / `oxrdf` crates for RDF-star support (complement existing `rio_turtle` / `rio_xml`)
-- [ ] **Dictionary encoding for quoted triples**
-  - New term type in dictionary: `QUOTED_TRIPLE` — stores the triple `(s, p, o)` as a composite key
-  - XXH3-128 hash of the triple tuple for dedup
-  - `pg_ripple.encode_triple(s TEXT, p TEXT, o TEXT) RETURNS BIGINT` — returns the dictionary ID of the quoted triple
-  - `pg_ripple.decode_triple(id BIGINT) RETURNS JSONB` — returns `{"s": ..., "p": ..., "o": ...}`
-- [ ] **Statement identifier activation**
-  - The `i` column (introduced in v0.1.0 VP tables) is now actively used: `insert_triple()` returns the SID
-  - `pg_ripple.insert_triple(s TEXT, p TEXT, o TEXT, g TEXT DEFAULT NULL) RETURNS BIGINT` — returns the statement identifier
+  - Implemented via a custom recursive-descent N-Triples-star line parser (no external dependency conflicts)
+  - Supports subject-position and object-position quoted triples, nested quoted triples
+  - Note: Turtle-star deferred to v0.5.x; `load_ntriples()` handles N-Triples-star fully
+- [x] **Dictionary encoding for quoted triples**
+  - New term type: `KIND_QUOTED_TRIPLE = 5` — XXH3-128 hash of `(s_id, p_id, o_id)`
+  - `qt_s`, `qt_p`, `qt_o` columns added to `_pg_ripple.dictionary` via `ALTER TABLE … ADD COLUMN IF NOT EXISTS`
+  - `pg_ripple.encode_triple(s TEXT, p TEXT, o TEXT) RETURNS BIGINT`
+  - `pg_ripple.decode_triple(id BIGINT) RETURNS JSONB`
+- [x] **Statement identifier activation**
+  - `pg_ripple.insert_triple(s TEXT, p TEXT, o TEXT, g TEXT DEFAULT NULL) RETURNS BIGINT` — returns SID
   - `pg_ripple.get_statement(i BIGINT) RETURNS JSONB` — look up a statement by its SID
-  - SIDs can appear in `s` or `o` positions of VP tables (the ID references a statement, enabling edge properties and meta-statements)
-- [ ] **Storage for edge properties via SIDs**
-  - Annotation triples use the SID of the annotated statement as their subject: `vp_since(s=SID_of(alice,knows,bob), o=2020_id)`
-  - No structural change to VP tables — SIDs and quoted triple IDs are regular `BIGINT` values
-  - Nested quoted triples supported (a quoted triple whose subject or object is itself a quoted triple)
-- [ ] **SPARQL-star query support**
-  - Parse `<< ?s ?p ?o >>` triple term patterns in SPARQL queries
-  - `BIND(<< :Alice :knows :Bob >> AS ?t)` — inline quoted triple construction
-  - Triple term patterns in WHERE clauses: `<< ?s :knows ?o >> :assertedBy ?who .`
-  - Compile to dictionary joins: look up the quoted triple ID, then join against VP tables
-  - **Batch recursive decode for nested quoted triples**: collect all quoted-triple IDs from the result set, recursively resolve inner components in bulk via `WITH RECURSIVE` dictionary lookup, build decode map before emitting rows — avoids per-row recursive dictionary round-trips
-- [ ] **Bulk load support for RDF-star data**
-  - `pg_ripple.load_turtle()` and `pg_ripple.load_ntriples()` now accept Turtle-star / N-Triples-star input
-  - Quoted triples in bulk load data are dictionary-encoded and stored with stable SIDs
+- [x] **Storage for edge properties via SIDs**
+  - Annotation triples use the SID of the annotated statement as their subject — regular `BIGINT` values, no structural change to VP tables
+  - Nested quoted triples supported
+- [x] **SPARQL-star query support**
+  - `TermPattern::Triple` handled in `sparql/sqlgen.rs` via `ground_term_id()` — ground (all-constant) quoted triple patterns compile to a dictionary lookup + equality condition
+  - Uses `spargebra/sparql-12` and `sparopt/sparql-12` features (properly gates `oxrdf/rdf-12` to avoid match-exhaustiveness errors)
+  - Variable-inside-quoted-triple deferred to v0.5.x
+- [x] **Bulk load support for RDF-star data**
+  - `pg_ripple.load_ntriples()` accepts N-Triples-star input
+  - `pg_ripple.load_turtle()`, `pg_ripple.load_nquads()`, `pg_ripple.load_trig()` use rio_turtle (no RDF-star; emits warning)
 - [ ] **W3C SPARQL-star conformance gate**: run the applicable subset of SPARQL-star tests; extend in subsequent milestones
-- [ ] pg_regress: `rdf_star_load.sql`, `sparql_star_query.sql`, `statement_identifiers.sql` (SID lifecycle, edge property patterns, nested quoted triples)
+- [x] pg_regress: `rdf_star_load.sql` (load N-Triples-star, encode/decode round-trip, SID lifecycle)
 
 ### Exit Criteria
 

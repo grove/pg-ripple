@@ -42,6 +42,11 @@ fn strip_angle_brackets(term: &str) -> &str {
     }
 }
 
+/// Public wrapper for strip_angle_brackets — used by lib.rs.
+pub fn strip_angle_brackets_pub(term: &str) -> &str {
+    strip_angle_brackets(term)
+}
+
 /// Parse an N-Triples–style term and return `(clean_value, kind, datatype, lang)`.
 /// Supports IRIs, blank nodes, plain/typed/lang literals.
 pub fn parse_rdf_term(s: &str) -> (String, i16, Option<String>, Option<String>) {
@@ -143,6 +148,17 @@ pub fn initialize_schema() {
         &[],
     )
     .unwrap_or_else(|e| pgrx::error!("dictionary table creation error: {e}"));
+
+    // v0.4.0: Add quoted-triple component columns to dictionary (idempotent).
+    // These columns are only populated for kind = 5 (KIND_QUOTED_TRIPLE).
+    Spi::run_with_args(
+        "ALTER TABLE _pg_ripple.dictionary \
+             ADD COLUMN IF NOT EXISTS qt_s BIGINT, \
+             ADD COLUMN IF NOT EXISTS qt_p BIGINT, \
+             ADD COLUMN IF NOT EXISTS qt_o BIGINT",
+        &[],
+    )
+    .unwrap_or_else(|e| pgrx::error!("dictionary qt columns migration error: {e}"));
 
     // Unique index on the full 128-bit hash (collision-free lookup key).
     Spi::run_with_args(
@@ -1010,4 +1026,110 @@ pub fn list_prefixes() -> Vec<(String, String)> {
         })
         .collect()
     })
+}
+
+// ─── Statement Identifier API (v0.4.0) ────────────────────────────────────────
+
+/// Look up a statement by its globally-unique statement identifier (SID).
+///
+/// Searches the `_pg_ripple.statements` range-mapping catalog first, then
+/// falls back to a brute-force scan if the catalog is empty.
+/// Returns decoded N-Triples–formatted `(s, p, o, g)` strings, or `None`.
+pub fn get_statement_by_sid(sid: i64) -> Option<(String, String, String, String)> {
+    // Try the range mapping catalog first (fast path).
+    let pred_from_catalog: Option<i64> = Spi::connect(|c| {
+        c.select(
+            "SELECT predicate_id \
+             FROM _pg_ripple.statements \
+             WHERE sid_min <= $1 AND sid_max >= $1 \
+             ORDER BY sid_min DESC LIMIT 1",
+            Some(1),
+            &[DatumWithOid::from(sid)],
+        )
+        .ok()
+        .and_then(|rows| {
+            rows.filter_map(|row| row.get::<i64>(1).ok().flatten()).next()
+        })
+    });
+
+    if let Some(p_id) = pred_from_catalog {
+        let table = format!("_pg_ripple.vp_{p_id}");
+        if let Some((s_id, o_id, g_id)) = fetch_sog_by_sid(&table, sid) {
+            return Some(decode_sog(s_id, p_id, o_id, g_id));
+        }
+    }
+
+    // Fallback: scan all dedicated VP tables for the SID.
+    let pred_ids: Vec<i64> = Spi::connect(|c| {
+        c.select(
+            "SELECT id FROM _pg_ripple.predicates WHERE table_oid IS NOT NULL",
+            None,
+            &[],
+        )
+        .unwrap_or_else(|e| pgrx::error!("predicates scan SPI error: {e}"))
+        .filter_map(|row| row.get::<i64>(1).ok().flatten())
+        .collect()
+    });
+
+    for p_id in pred_ids {
+        let table = format!("_pg_ripple.vp_{p_id}");
+        if let Some((s_id, o_id, g_id)) = fetch_sog_by_sid(&table, sid) {
+            return Some(decode_sog(s_id, p_id, o_id, g_id));
+        }
+    }
+
+    // Also check vp_rare.
+    Spi::connect(|c| {
+        c.select(
+            "SELECT s, p, o, g FROM _pg_ripple.vp_rare WHERE i = $1 LIMIT 1",
+            Some(1),
+            &[DatumWithOid::from(sid)],
+        )
+        .ok()
+        .and_then(|rows| {
+            rows.filter_map(|row| {
+                let s = row.get::<i64>(1).ok().flatten()?;
+                let p = row.get::<i64>(2).ok().flatten()?;
+                let o = row.get::<i64>(3).ok().flatten()?;
+                let g = row.get::<i64>(4).ok().flatten()?;
+                Some(decode_sog(s, p, o, g))
+            })
+            .next()
+        })
+    })
+}
+
+/// Fetch `(s_id, o_id, g_id)` from a VP table by SID.
+fn fetch_sog_by_sid(table: &str, sid: i64) -> Option<(i64, i64, i64)> {
+    Spi::connect(|c| {
+        c.select(
+            &format!("SELECT s, o, g FROM {table} WHERE i = $1 LIMIT 1"),
+            Some(1),
+            &[DatumWithOid::from(sid)],
+        )
+        .ok()
+        .and_then(|rows| {
+            rows.filter_map(|row| {
+                let s = row.get::<i64>(1).ok().flatten()?;
+                let o = row.get::<i64>(2).ok().flatten()?;
+                let g = row.get::<i64>(3).ok().flatten()?;
+                Some((s, o, g))
+            })
+            .next()
+        })
+    })
+}
+
+/// Decode `(s_id, p_id, o_id, g_id)` to N-Triples strings.
+fn decode_sog(s_id: i64, p_id: i64, o_id: i64, g_id: i64) -> (String, String, String, String) {
+    (
+        dictionary::format_ntriples(s_id),
+        dictionary::format_ntriples(p_id),
+        dictionary::format_ntriples(o_id),
+        if g_id == 0 {
+            String::new()
+        } else {
+            dictionary::format_ntriples(g_id)
+        },
+    )
 }

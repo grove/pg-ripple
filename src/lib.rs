@@ -131,14 +131,79 @@ mod pg_ripple {
         crate::dictionary::decode(id)
     }
 
+    // ── RDF-star: quoted triple encoding (v0.4.0) ──────────────────────────
+
+    /// Encode a quoted triple `(s, p, o)` into the dictionary.
+    ///
+    /// All three arguments must be N-Triples–formatted terms (IRIs, literals,
+    /// blank nodes, or nested `<< … >>` quoted triples).
+    /// Returns the dictionary ID of the quoted triple.
+    #[pg_extern]
+    fn encode_triple(s: &str, p: &str, o: &str) -> i64 {
+        let s_id = crate::storage::encode_rdf_term(s);
+        let p_id = crate::dictionary::encode(
+            crate::storage::strip_angle_brackets_pub(p),
+            crate::dictionary::KIND_IRI,
+        );
+        let o_id = crate::storage::encode_rdf_term(o);
+        crate::dictionary::encode_quoted_triple(s_id, p_id, o_id)
+    }
+
+    /// Decode a quoted triple dictionary ID to its component terms as JSONB.
+    ///
+    /// Returns `{"s": "...", "p": "...", "o": "..."}` with N-Triples–formatted
+    /// values, or NULL if `id` is not a quoted triple.
+    #[pg_extern]
+    fn decode_triple(id: i64) -> Option<pgrx::JsonB> {
+        let (s_id, p_id, o_id) = crate::dictionary::decode_quoted_triple_components(id)?;
+        let mut obj = serde_json::Map::new();
+        obj.insert(
+            "s".to_owned(),
+            serde_json::Value::String(crate::dictionary::format_ntriples(s_id)),
+        );
+        obj.insert(
+            "p".to_owned(),
+            serde_json::Value::String(crate::dictionary::format_ntriples(p_id)),
+        );
+        obj.insert(
+            "o".to_owned(),
+            serde_json::Value::String(crate::dictionary::format_ntriples(o_id)),
+        );
+        Some(pgrx::JsonB(serde_json::Value::Object(obj)))
+    }
+
     // ── Triple CRUD ───────────────────────────────────────────────────────────
 
     /// Insert a triple into the appropriate VP table.
-    /// `s`, `p`, and `o` accept N-Triples–formatted terms (IRIs, literals, blank nodes).
+    ///
+    /// `s`, `p`, and `o` accept N-Triples–formatted terms (IRIs, literals,
+    /// blank nodes, or `<< … >>` quoted triples).
+    /// `g` is an optional named graph IRI; NULL uses the default graph.
     /// Returns the globally-unique statement identifier (SID).
     #[pg_extern]
-    fn insert_triple(s: &str, p: &str, o: &str) -> i64 {
-        crate::storage::insert_triple(s, p, o, 0_i64)
+    fn insert_triple(s: &str, p: &str, o: &str, g: default!(Option<&str>, "NULL")) -> i64 {
+        let g_id = g.map_or(0_i64, |iri| {
+            crate::dictionary::encode(
+                crate::storage::strip_angle_brackets_pub(iri),
+                crate::dictionary::KIND_IRI,
+            )
+        });
+        crate::storage::insert_triple(s, p, o, g_id)
+    }
+
+    /// Look up a statement by its globally-unique statement identifier (SID).
+    ///
+    /// Returns `{"s": "...", "p": "...", "o": "...", "g": "..."}` as JSONB,
+    /// or NULL if the SID is not found.
+    #[pg_extern]
+    fn get_statement(i: i64) -> Option<pgrx::JsonB> {
+        let (s, p, o, g) = crate::storage::get_statement_by_sid(i)?;
+        let mut obj = serde_json::Map::new();
+        obj.insert("s".to_owned(), serde_json::Value::String(s));
+        obj.insert("p".to_owned(), serde_json::Value::String(p));
+        obj.insert("o".to_owned(), serde_json::Value::String(o));
+        obj.insert("g".to_owned(), serde_json::Value::String(g));
+        Some(pgrx::JsonB(serde_json::Value::Object(obj)))
     }
 
     /// Delete a triple.  Returns the number of rows removed (0 or 1).
@@ -186,6 +251,7 @@ mod pg_ripple {
     // ── Bulk loaders ──────────────────────────────────────────────────────────
 
     /// Load N-Triples data from a text string.  Returns the number of triples loaded.
+    /// Also accepts N-Triples-star (quoted triples as objects or subjects).
     #[pg_extern]
     fn load_ntriples(data: &str) -> i64 {
         crate::bulk_load::load_ntriples(data)
@@ -198,6 +264,7 @@ mod pg_ripple {
     }
 
     /// Load Turtle data from a text string.
+    /// Also accepts Turtle-star (quoted triples) using oxttl with rdf-12 support.
     #[pg_extern]
     fn load_turtle(data: &str) -> i64 {
         crate::bulk_load::load_turtle(data)
@@ -466,6 +533,58 @@ mod tests {
         let rows =
             crate::sparql::sparql("SELECT ?s ?o WHERE { ?s <https://example.org/p> ?o } LIMIT 1");
         assert!(rows.len() <= 1, "LIMIT 1 must return at most one row");
+    }
+
+    // ─── RDF-star / Statement Identifiers tests (v0.4.0) ──────────────────────
+
+    /// N-Triples-star: loading an object-position quoted triple must succeed.
+    #[pg_test]
+    fn pg_test_ntriples_star_object_position() {
+        let n = crate::bulk_load::load_ntriples(
+            "<https://example.org/eve> <https://example.org/said> \
+             << <https://example.org/alice> <https://example.org/knows> \
+             <https://example.org/bob> >> .\n",
+        );
+        assert_eq!(n, 1, "object-position quoted triple must load as 1 triple");
+    }
+
+    /// N-Triples-star: loading a subject-position quoted triple must succeed.
+    #[pg_test]
+    fn pg_test_ntriples_star_subject_position() {
+        let n = crate::bulk_load::load_ntriples(
+            "<< <https://example.org/alice> <https://example.org/knows> \
+             <https://example.org/bob> >> <https://example.org/certainty> \
+             \"0.9\"^^<http://www.w3.org/2001/XMLSchema#decimal> .\n",
+        );
+        assert_eq!(n, 1, "subject-position quoted triple must load as 1 triple");
+    }
+
+    /// encode_quoted_triple / decode_quoted_triple_components round-trip.
+    #[pg_test]
+    fn pg_test_quoted_triple_encode_decode() {
+        let s_id = crate::dictionary::encode("https://example.org/alice", crate::dictionary::KIND_IRI);
+        let p_id = crate::dictionary::encode("https://example.org/knows", crate::dictionary::KIND_IRI);
+        let o_id = crate::dictionary::encode("https://example.org/bob", crate::dictionary::KIND_IRI);
+        let qt_id = crate::dictionary::encode_quoted_triple(s_id, p_id, o_id);
+        assert!(qt_id != 0, "quoted triple must have a non-zero ID");
+        let components = crate::dictionary::decode_quoted_triple_components(qt_id);
+        assert!(components.is_some(), "decode must return Some");
+        let (ds, dp, ob) = components.unwrap();
+        assert_eq!(ds, s_id);
+        assert_eq!(dp, p_id);
+        assert_eq!(ob, o_id);
+    }
+
+    /// insert_triple returns a positive SID; get_statement can look it back up.
+    #[pg_test]
+    fn pg_test_statement_identifier_lifecycle() {
+        let sid = crate::storage::insert_triple(
+            "<https://example.org/subject1>",
+            "<https://example.org/predicate1>",
+            "<https://example.org/object1>",
+            0,
+        );
+        assert!(sid > 0, "insert must return a positive SID");
     }
 
     /// SPARQL DISTINCT must deduplicate results.

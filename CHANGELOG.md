@@ -9,7 +9,34 @@ Versions correspond to the milestones in [ROADMAP.md](ROADMAP.md).
 
 ## [Unreleased]
 
-Nothing yet — next milestone is [v0.4.0 (RDF-star)](ROADMAP.md).
+Nothing yet — next milestone is [v0.5.0 (SPARQL Advanced)](ROADMAP.md).
+
+---
+
+## [0.4.0] — 2026-04-15 — RDF-star / Statement Identifiers
+
+This release adds RDF-star support: quoted triples, statement identifiers, and SPARQL-star query patterns. You can now make statements about statements — essential for provenance, temporal annotations, and LPG-style edge properties.
+
+### What you can do
+
+- **Load N-Triples-star data** — `pg_ripple.load_ntriples()` now accepts N-Triples-star input including subject-position and object-position quoted triples, and nested quoted triples
+- **Encode and decode quoted triples** — `pg_ripple.encode_triple(s, p, o) RETURNS BIGINT` encodes a quoted triple to its dictionary ID; `pg_ripple.decode_triple(id) RETURNS JSONB` reverses the lookup
+- **Use statement identifiers (SIDs)** — `pg_ripple.insert_triple()` now accepts an optional named graph and returns the statement SID; SIDs are stable `BIGINT` values that can appear as subjects or objects in other triples
+- **Look up statements by SID** — `pg_ripple.get_statement(i BIGINT) RETURNS JSONB` returns `{"s":...,"p":...,"o":...,"g":...}` for the statement with that identifier
+- **Query with SPARQL-star** — Ground (all-constant) triple term patterns in SPARQL WHERE clauses are supported; e.g. `WHERE { << :Alice :knows :Bob >> :assertedBy ?who }`
+
+### Technical highlights
+
+- `KIND_QUOTED_TRIPLE = 5` added to the dictionary; quoted triples stored with `qt_s`, `qt_p`, `qt_o` columns via non-destructive `ALTER TABLE … ADD COLUMN IF NOT EXISTS`
+- Custom recursive-descent N-Triples-star line parser — avoids the `oxrdf/rdf-12` + `spargebra` feature conflict by using only a pure-Rust parser with no new crate dependencies
+- `spargebra` and `sparopt` now use the `sparql-12` feature, which properly enables `TermPattern::Triple` with correct exhaustiveness guards
+- SPARQL-star ground patterns compile to a dictionary lookup + SQL equality condition; variable-inside-quoted-triple patterns emit a warning and match nothing (deferred to v0.5.x)
+
+### Known limitations
+
+- Turtle-star is not yet supported; use N-Triples-star for RDF-star bulk loading
+- Variable-inside-quoted-triple SPARQL patterns (e.g. `<< ?s :knows ?o >> :assertedBy ?who`) are deferred to v0.5.x
+- W3C SPARQL-star conformance test suite not yet run (deferred to v0.5.x)
 
 ---
 

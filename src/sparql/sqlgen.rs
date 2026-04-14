@@ -212,6 +212,25 @@ impl Fragment {
 
 // ─── TermPattern → SQL column ─────────────────────────────────────────────────
 
+/// Try to evaluate a `TermPattern` as a ground constant (i64 dictionary ID).
+/// Returns `None` if the pattern contains free variables.
+fn ground_term_id(term: &TermPattern, ctx: &mut Ctx) -> Option<i64> {
+    match term {
+        TermPattern::NamedNode(nn) => ctx.encode_iri(nn.as_str()),
+        TermPattern::Literal(lit) => Some(ctx.encode_literal(lit)),
+        TermPattern::Triple(inner) => {
+            let s_id = ground_term_id(&inner.subject, ctx)?;
+            let p_id = match &inner.predicate {
+                NamedNodePattern::NamedNode(nn) => ctx.encode_iri(nn.as_str())?,
+                NamedNodePattern::Variable(_) => return None,
+            };
+            let o_id = ground_term_id(&inner.object, ctx)?;
+            dictionary::lookup_quoted_triple(s_id, p_id, o_id)
+        }
+        TermPattern::Variable(_) | TermPattern::BlankNode(_) => None,
+    }
+}
+
 /// Bind one end of a triple (subject or object) to the translation context.
 /// Returns an optional SQL equality condition if the term is a constant.
 fn bind_term(
@@ -245,6 +264,21 @@ fn bind_term(
             // Blank nodes in query patterns are treated as variables in SPARQL;
             // spargebra should have converted them to fresh variables already.
             // As a fallback, treat as an unbound (wildcard) subject/object.
+        }
+        TermPattern::Triple(_) => {
+            // Quoted triple pattern — try to evaluate as a ground constant.
+            match ground_term_id(term, ctx) {
+                Some(id) => conditions.push(format!("{col_expr} = {id}")),
+                None => {
+                    // Variable-inside-quoted-triple requires dictionary scan;
+                    // not supported in v0.4.0.
+                    pgrx::warning!(
+                        "SPARQL-star: variable inside quoted triple pattern is not yet supported; \
+                         pattern treated as no-match"
+                    );
+                    conditions.push("FALSE".to_owned());
+                }
+            }
         }
     }
 }

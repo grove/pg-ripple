@@ -1,0 +1,55 @@
+-- pg_regress test: RDF-star loading and statement identifiers
+
+-- Load standard N-Triples via the custom parser
+SELECT pg_ripple.load_ntriples(
+    '<https://example.org/alice> <https://example.org/knows> <https://example.org/bob> .' ||
+    E'\n' ||
+    '<https://example.org/bob> <https://example.org/age> "30"^^<http://www.w3.org/2001/XMLSchema#integer> .'
+) = 2 AS loaded_standard_ntriples;
+
+-- Load N-Triples-star: object-position quoted triple
+SELECT pg_ripple.load_ntriples(
+    E'<https://example.org/eve> <https://example.org/said> << <https://example.org/alice> <https://example.org/knows> <https://example.org/bob> >> .'
+) = 1 AS loaded_object_quoted_triple;
+
+-- Load N-Triples-star: subject-position quoted triple
+SELECT pg_ripple.load_ntriples(
+    E'<< <https://example.org/alice> <https://example.org/knows> <https://example.org/bob> >> <https://example.org/certainty> "0.9"^^<http://www.w3.org/2001/XMLSchema#decimal> .'
+) = 1 AS loaded_subject_quoted_triple;
+
+-- encode_triple: encode a quoted triple and get back an id
+SELECT pg_ripple.encode_triple(
+    '<https://example.org/alice>',
+    '<https://example.org/knows>',
+    '<https://example.org/bob>'
+) IS NOT NULL AS encode_triple_returns_id;
+
+-- decode_triple: round-trip
+SELECT (
+    pg_ripple.decode_triple(
+        pg_ripple.encode_triple(
+            '<https://example.org/alice>',
+            '<https://example.org/knows>',
+            '<https://example.org/bob>'
+        )
+    ) ->> 's'
+) = '<https://example.org/alice>' AS decode_triple_subject_ok;
+
+SELECT (
+    pg_ripple.decode_triple(
+        pg_ripple.encode_triple(
+            '<https://example.org/alice>',
+            '<https://example.org/knows>',
+            '<https://example.org/bob>'
+        )
+    ) ->> 'p'
+) = '<https://example.org/knows>' AS decode_triple_predicate_ok;
+
+-- get_statement: look up a statement by SID
+SELECT pg_ripple.get_statement(
+    pg_ripple.insert_triple(
+        '<https://example.org/subject1>',
+        '<https://example.org/pred1>',
+        '<https://example.org/obj1>'
+    )
+) IS NOT NULL AS get_statement_returns_json;
