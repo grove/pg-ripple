@@ -1,0 +1,46 @@
+# CODEOWNERS for pg_ripple
+#
+# See: https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+#
+# Each line is a file pattern followed by one or more owners.
+# The last matching pattern takes precedence.
+# Owners are notified when a PR touches files matching their pattern.
+
+# ── Default: all files require maintainer review ──────────────────────────────
+*                                   @grove/pg-ripple-maintainers
+
+# ── Rust source ───────────────────────────────────────────────────────────────
+src/                                @grove/pg-ripple-maintainers @grove/pg-ripple-rust
+src/dictionary/                     @grove/pg-ripple-maintainers @grove/pg-ripple-rust
+src/storage/                        @grove/pg-ripple-maintainers @grove/pg-ripple-rust
+src/sparql/                         @grove/pg-ripple-maintainers @grove/pg-ripple-rust
+src/datalog/                        @grove/pg-ripple-maintainers @grove/pg-ripple-rust
+src/shacl/                          @grove/pg-ripple-maintainers @grove/pg-ripple-rust
+src/export/                         @grove/pg-ripple-maintainers @grove/pg-ripple-rust
+
+# ── Build & dependency configuration ─────────────────────────────────────────
+Cargo.toml                          @grove/pg-ripple-maintainers @grove/pg-ripple-rust
+Cargo.lock                          @grove/pg-ripple-maintainers @grove/pg-ripple-rust
+build.rs                            @grove/pg-ripple-maintainers @grove/pg-ripple-rust
+
+# ── PostgreSQL extension control ─────────────────────────────────────────────
+pg_ripple.control                   @grove/pg-ripple-maintainers
+
+# ── SQL (extension install scripts and regress tests) ────────────────────────
+sql/                                @grove/pg-ripple-maintainers @grove/pg-ripple-rust
+tests/                              @grove/pg-ripple-maintainers @grove/pg-ripple-rust
+
+# ── CI / GitHub Actions ───────────────────────────────────────────────────────
+.github/workflows/                  @grove/pg-ripple-maintainers @grove/pg-ripple-infra
+
+# ── Agent skills & customisation ─────────────────────────────────────────────
+.github/skills/                     @grove/pg-ripple-maintainers
+
+# ── Planning and architecture documents ───────────────────────────────────────
+plans/                              @grove/pg-ripple-maintainers
+ROADMAP.md                          @grove/pg-ripple-maintainers
+AGENTS.md                           @grove/pg-ripple-maintainers
+
+# ── Release process ───────────────────────────────────────────────────────────
+RELEASE.md                          @grove/pg-ripple-maintainers
+CHANGELOG.md                        @grove/pg-ripple-maintainers
