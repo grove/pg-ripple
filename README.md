@@ -13,19 +13,40 @@ pg_ripple is a PostgreSQL 18 extension building toward a fully-featured knowledg
 
 ---
 
-## What works today (v0.1.0)
+## What works today (v0.3.0)
 
-The foundation is in place. You can install the extension, store triples, and query them back by pattern:
+You can install the extension, store triples, bulk-load RDF datasets, manage named graphs, and query with SPARQL:
 
 ```sql
 CREATE EXTENSION pg_ripple;
 
--- Store a fact
+-- Store a single fact
 SELECT pg_ripple.insert_triple(
   'http://example.org/Alice',
   'http://xmlns.com/foaf/0.1/knows',
   'http://example.org/Bob'
 );
+
+-- Bulk-load Turtle data (returns number of triples loaded)
+SELECT pg_ripple.load_turtle('
+  @prefix foaf: <http://xmlns.com/foaf/0.1/> .
+  <http://example.org/Alice> foaf:knows <http://example.org/Bob> .
+  <http://example.org/Bob>   foaf:name  "Bob" .
+');
+
+-- Query with SPARQL SELECT (returns JSONB rows)
+SELECT * FROM pg_ripple.sparql('
+  PREFIX foaf: <http://xmlns.com/foaf/0.1/>
+  SELECT ?person ?name WHERE {
+    <http://example.org/Alice> foaf:knows ?person .
+    ?person foaf:name ?name .
+  }
+');
+
+-- Ask a yes/no question
+SELECT pg_ripple.sparql_ask('
+  ASK { <http://example.org/Alice> <http://xmlns.com/foaf/0.1/knows> ?who }
+');
 
 -- Query by pattern (NULL = wildcard)
 SELECT * FROM pg_ripple.find_triples(
@@ -36,40 +57,13 @@ SELECT * FROM pg_ripple.find_triples(
 SELECT pg_ripple.triple_count();
 ```
 
-Every IRI, blank node, and literal is dictionary-encoded to a compact integer for fast joins. Facts about different predicates are stored in separate tables (Vertical Partitioning) so queries that bind a predicate touch only one compact, indexed table. No `shared_preload_libraries` configuration required.
+Every IRI, blank node, and literal is dictionary-encoded to a compact integer for fast joins. Facts about different predicates are stored in separate tables (Vertical Partitioning) so queries that bind a predicate touch only one compact, indexed table. Bulk loaders accept Turtle, N-Triples, N-Quads, and TriG formats. SPARQL SELECT, ASK, FILTER, OPTIONAL, and named-graph patterns are supported. No `shared_preload_libraries` configuration required.
 
 ---
 
 ## Where we're headed
 
 Each release adds a self-contained layer of capability, building toward a complete knowledge graph platform inside PostgreSQL.
-
-### v0.2.0 — Bulk loading & named graphs
-
-Stop inserting one triple at a time. Load entire RDF files in Turtle, N-Triples, N-Quads, or TriG format. Named graphs let you organise facts into labelled collections and query or drop them as a unit.
-
-```sql
-SELECT pg_ripple.load_turtle('
-  @prefix foaf: <http://xmlns.com/foaf/0.1/> .
-  <http://example.org/Alice> foaf:knows <http://example.org/Bob> .
-  <http://example.org/Bob>   foaf:name  "Bob" .
-');
--- Returns: number of triples loaded
-```
-
-### v0.3.0 — SPARQL query engine
-
-Ask questions in SPARQL — the standard W3C query language for RDF, analogous to SQL for relational data. Supports SELECT, ASK, basic graph patterns, FILTER, OPTIONAL, and named graph queries.
-
-```sql
-SELECT * FROM pg_ripple.sparql('
-  PREFIX foaf: <http://xmlns.com/foaf/0.1/>
-  SELECT ?person ?name WHERE {
-    <http://example.org/Alice> foaf:knows ?person .
-    ?person foaf:name ?name .
-  }
-');
-```
 
 ### v0.4.0 — RDF-star
 
@@ -323,7 +317,7 @@ cargo pgrx install --pg-config $(which pg_config)
 CREATE EXTENSION pg_ripple;
 ```
 
-Bulk loaders, SPARQL queries, SHACL validation, and Datalog reasoning are coming in later milestones — see the roadmap below.
+SHACL validation and Datalog reasoning are coming in later milestones — see the roadmap below.
 
 ---
 
@@ -334,8 +328,8 @@ Bulk loaders, SPARQL queries, SHACL validation, and Datalog reasoning are coming
 | Version | Name | What it delivers | Effort | Status |
 |---|---|---|---|---|
 | **0.1.0** | **Foundation** | Dictionary encoding, VP storage, basic triple CRUD | 6–8 pw | ✅ Done |
-| 0.2.0 | Bulk Loading & Named Graphs | Turtle/N-Triples/N-Quads/TriG import, named graphs, rare-predicate table | 6–8 pw | Planned |
-| 0.3.0 | SPARQL Basic | SELECT, ASK, BGPs, FILTER, OPTIONAL, GRAPH patterns, plan cache | 6–8 pw | Planned |
+| **0.2.0** | **Bulk Loading & Named Graphs** | Turtle/N-Triples/N-Quads/TriG import, named graphs, rare-predicate table | 6–8 pw | ✅ Done |
+| **0.3.0** | **SPARQL Basic** | SELECT, ASK, BGPs, FILTER, OPTIONAL, GRAPH patterns, plan cache | 6–8 pw | ✅ Done |
 | 0.4.0 | RDF-star | Quoted triples, statement metadata, LPG-ready storage | 8–10 pw | Planned |
 | 0.5.0 | SPARQL Advanced (Query) | Property paths, aggregates, UNION/MINUS, subqueries, BIND/VALUES | 6–8 pw | Planned |
 | 0.5.1 | SPARQL Advanced (Write) | Inline encoding, CONSTRUCT/DESCRIBE, INSERT/DELETE DATA, full-text search | 6–8 pw | Planned |

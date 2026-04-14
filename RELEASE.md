@@ -28,6 +28,10 @@ Complete every item before starting the release process.
   - Written in plain, accessible language (see [Changelog Style](#changelog-style) below)
   - All significant user-visible changes are included
   - Date is set to today's date
+- [ ] **README.md is updated**
+  - The "What works today (v0.X.Y)" section reflects the current release
+  - Describes only functionality implemented and merged in this version
+  - Remove planned features that haven't shipped yet
 - [ ] **No uncommitted changes** — `git status` is clean
 - [ ] **Main branch is up to date** — `git pull origin main`
 
