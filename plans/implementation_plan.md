@@ -422,6 +422,8 @@ SELECT DISTINCT s, o FROM path WHERE NOT is_cycle;
   - `pg_ripple.drop_graph(uri TEXT)`
   - `pg_ripple.list_graphs() RETURNS SETOF TEXT`
 
+> **Post-1.0 consideration — graph-partitioned VP tables**: For workloads where `DROP GRAPH` is frequent and graphs are large, consider adding optional PostgreSQL range- or list-partitioning on the `g` column of individual VP tables. A graph drop would then become a DDL `DETACH PARTITION; DROP TABLE` operation, completely bypassing the `DELETE + VACUUM` overhead that the current `(g, p, s, o)` index-driven bulk delete incurs. This adds schema complexity and is only worthwhile when graphs are large and short-lived (e.g., named-graph-per-document load patterns). Revisit during v0.12.0 planning.
+
 ### 4.6 SHACL Validation Engine (`src/shacl/`)
 
 **Purpose**: Enforce data integrity constraints defined in SHACL shapes.
@@ -651,6 +653,8 @@ All GUC parameters exposed by pg_ripple, listed alphabetically. GUCs marked **st
 | Dictionary encode | <50μs (cache miss) | B-tree index on hash |
 | Dictionary batch decode | <1ms per 1,000 IDs | Single `WHERE id = ANY(...)` query |
 | Unbound-predicate scan | <500ms (10M triples, ≤60K predicates) | Rare-predicate consolidation table avoids scanning thousands of empty VP tables |
+
+> **Unbound-predicate query verification (v0.3.0+)**: `find_triples(s, NULL, NULL)` and the SPARQL equivalent (`?s ?p ?o` without predicate binding) must efficiently enumerate the predicate catalog and query each relevant VP table before falling back to `vp_rare`. The implementation should use a single `UNION ALL` plan across matched VP tables rather than per-predicate round-trips through SPI. Benchmark this pattern explicitly at v0.3.0 against the <500 ms target with a 60K-predicate dataset (DBpedia scale). Vertical Partitioning inherently penalises exploratory/unbound queries relative to monolithic layouts; the rare-predicate table partially mitigates this but the mitigation should be verified empirically.
 
 ---
 
