@@ -19,6 +19,15 @@ Versions correspond to the milestones in [ROADMAP.md](ROADMAP.md).
 
   **Rationale**: The previous scheme truncated XXH3-128 to 64 bits and used that as the dictionary key directly. At Wikidata scale (~3 billion vocabulary terms) the birthday-problem collision probability in 64-bit space is non-negligible (~1 collision expected per ~4.3 billion terms). The hash-backed sequence preserves collision freedom — the 128-bit hash is stored in full and collisions within 128-bit space are computationally implausible — while keeping all VP-table joins on dense sequential integers.
 
+- **Query plan caching moved from v0.13.0 to v0.3.0**
+  - SPI re-parses and re-plans the generated SQL on every call. Caching the SPARQL→SQL translation result keyed on the normalized algebra tree hash avoids this overhead from the first SPARQL-capable release.
+  - `pg_ripple.plan_cache_size` GUC introduced in v0.3.0.
+
+- **`WITH RECURSIVE` property path performance caveat added to plan and ROADMAP**
+  - PostgreSQL materializes each CTE level. The <100 ms benchmark target applies to depth ≤ 10 on typical datasets; unbounded paths on dense graphs will exceed it. `max_path_depth` GUC and `statement_timeout` are the mitigations.
+
+- **AGENTS.md**: added implementation-status note so automated reviewers know working code exists as of 2026-04-14.
+
 ---
 
 ## [0.1.0] — in development

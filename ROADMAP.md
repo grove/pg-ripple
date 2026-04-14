@@ -169,7 +169,7 @@ Rare-predicate consolidation table absorbs low-frequency predicates. Bulk loadin
 
 ## v0.3.0 — SPARQL Query Engine (Basic)
 
-**Theme**: Parse and execute SPARQL SELECT and ASK queries with basic graph patterns, named graph querying, and initial join optimizations.
+**Theme**: Parse and execute SPARQL SELECT and ASK queries with basic graph patterns, named graph querying, initial join optimizations, and plan caching from day one.
 
 > **In plain language:** SPARQL is the standard language for asking questions over linked data — the same way SQL is for relational databases. This release makes pg_ripple understand SPARQL, so users can write queries like *"find all people who know someone who works at Acme Corp"* using the official W3C syntax. It also enables querying across named graphs (created in v0.2.0) using the standard SPARQL `GRAPH` keyword.
 >
@@ -208,6 +208,11 @@ Rare-predicate consolidation table absorbs low-frequency predicates. Bulk loadin
 - [ ] **Join optimizations** (phase 1)
   - Self-join elimination for star patterns
   - Filter pushdown: encode FILTER constants before SQL generation
+- [ ] **Query plan caching** *(introduced in v0.3.0 — not deferred to v0.13.0)*
+  - Cache SPARQL→SQL translation results keyed by a structural hash of the query (variable-normalized algebra tree)
+  - `pg_ripple.plan_cache_size` GUC (default: `256`; `0` = disabled)
+  - SPI re-parses and re-plans the generated SQL on every call unless the SQL string is identical. The plan cache sidesteps this by skipping SPARQL→SQL translation entirely for structurally identical queries, which is the dominant overhead for repeated parameterized queries (e.g. repeated lookups with different IRI constants that normalize to the same query shape).
+  - Rationale: every SPARQL→SQL call goes through SPI and PG re-plans the SQL unless it is a prepared statement. The plan cache avoids redundant SPARQL→SQL translation at minimum; future work (v0.13.0) may add SPI prepared-statement binding for the generated SQL.
 - [ ] `pg_ripple.sparql_explain(query TEXT, analyze BOOL DEFAULT false) RETURNS TEXT` — show generated SQL; `analyze := true` executes the query and augments the output with actual row counts
 - [ ] **SQL injection / adversarial tests**: verify that SPARQL queries containing SQL metacharacters in IRIs, literals, and prefixed names (`'; DROP TABLE --`, Unicode escapes, null bytes) are safely dictionary-encoded and never reach generated SQL as raw strings
 - [ ] **Malformed input tests**: invalid Turtle, truncated N-Triples, malformed SPARQL — verify clean error messages (no panics, no partial state)
@@ -291,6 +296,7 @@ Users can load RDF-star data (Turtle-star, N-Triples-star), query it with SPARQL
   - `^` (inverse) → swap `s`/`o`
   - Cycle detection via PG18 `CYCLE` clause (hash-based, replaces array-based visited tracking for $O(1)$ membership checks instead of $O(n)$ array scans)
   - `pg_ripple.max_path_depth` GUC
+  - **Known performance constraint**: PostgreSQL materializes each level of a `WITH RECURSIVE` CTE into a work-table. For deep traversals (depth > ~15) or wide fan-out on graphs with 10M+ triples the per-level copy cost becomes the bottleneck. The <100 ms target in §13 benchmarks applies to bounded-depth paths (depth ≤ 10) on typical RDF datasets; unbounded paths on dense graphs will exceed it. A purpose-built graph traversal engine would outperform this approach at extreme depth/fan-out, but that is out of scope for v1.0.
 - [ ] **UNION / MINUS**
   - UNION → SQL `UNION`
   - MINUS → SQL `EXCEPT`
@@ -729,7 +735,7 @@ Full SPARQL 1.1 Update operations work correctly. Pattern-based updates compile 
   - Place the most selective pattern first in the join tree to minimize intermediate result sizes
   - Emit `SET LOCAL join_collapse_limit = 1` before the generated SQL to lock the PostgreSQL planner into the computed join order
   - When join columns are already sorted (e.g. after a range scan on an ordered `i64` column), emit `SET LOCAL enable_mergejoin = on` to exploit merge-join (strategy #6)
-- [ ] **Query plan caching**
+- [ ] **Query plan caching** *(moved forward from v0.3.0)*
   - Cache SPARQL→SQL translations keyed by query structure hash
   - `pg_ripple.plan_cache_size` GUC
   - Note: SPI-executed dynamic SQL does not benefit from PostgreSQL's built-in prepared-statement cache — the SPARQL-layer plan cache compensates for this by avoiding repeated SPARQL→SQL translation for structurally identical queries

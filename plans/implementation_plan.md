@@ -377,6 +377,10 @@ Optimizations fall into two categories: **structural rewrites** that are applied
 5. **Filter pushdown**: SPARQL `FILTER` clauses operating on bound IRIs are resolved to integer IDs *before* generating SQL, ensuring B-tree index usage. From v0.5.1, typed numeric/date literals use the inline-encoded i64 range (see §4.2.2) to enable `BETWEEN $lo AND $hi` range scans with no decode step. Prior to v0.5.1, FILTER comparisons on typed literals use a dictionary-join decode approach.
 6. **Merge-join enablement**: When the join variable matches the `s` sort key of a VP table's `(s, o, g)` primary index, the emitter wraps the CTE in `ORDER BY s`. The PostgreSQL planner then considers a merge join rather than a hash join, reducing memory pressure for large intermediate results.
 
+**Plan caching (v0.3.0+)**:
+
+SPI re-parses and re-plans the generated SQL string on every query invocation. The SPARQL-layer plan cache avoids this overhead for structurally identical queries by caching the SPARQL→SQL translation result keyed on a structural hash of the normalized algebra tree (variable names replaced with position indices). Controlled by `pg_ripple.plan_cache_size` GUC (default: 256; 0 = disabled). This is introduced in v0.3.0 — before the performance milestone — because re-translation overhead is observable from the first SPARQL-capable release. Statistics-driven and prepared-statement optimizations remain v0.13.0 work.
+
 **Statistics-driven rewrites (v0.13.0+)**:
 7. **BGP join reordering**: The algebra optimizer reads `pg_stats.n_distinct` and `pg_class.reltuples` for each VP table involved in the query and reorders BGPs cheapest-first (most selective predicate scanned first). Only activated when statistics are available; falls back to source order otherwise. When active, emits `SET LOCAL join_collapse_limit = 1` before the generated SQL to lock the PostgreSQL planner into the computed join order, preventing it from re-ordering the already-optimized sequence.
 8. **Join-order hints**: A `<http://pg-ripple.io/hints/join-order>` pragma in the SPARQL prologue overrides statistics-driven ordering by emitting `SET LOCAL join_collapse_limit = 1` with the user-specified BGP order.
@@ -406,6 +410,7 @@ SELECT DISTINCT s, o FROM path WHERE NOT is_cycle;
 - Configurable `pg_ripple.max_path_depth` GUC (default: 100)
 - PG18 `CYCLE` clause for hash-based cycle detection (replaces array-based visited tracking — $O(1)$ membership checks instead of $O(n)$ array scans)
 - PG18's improved CTE performance benefits recursive path queries
+- **Performance constraint**: PostgreSQL materializes each level of a `WITH RECURSIVE` CTE into a work-table before proceeding to the next. For deep traversals (depth > ~15) or wide fan-out on large graphs (>10M triples) the per-level materialization cost dominates. The <100 ms benchmark target (§13) applies to bounded-depth paths (depth ≤ 10) on typical RDF datasets; unbounded paths on dense graphs will exceed it. A purpose-built graph traversal engine would outperform this approach at extreme depth/fan-out, but that is out of scope for v1.0. Mitigation: `max_path_depth` GUC, `statement_timeout`, and the resource-exhaustion test suite in v0.5.0.
 
 ### 4.5 Named Graph Support (`src/graph/`)
 
