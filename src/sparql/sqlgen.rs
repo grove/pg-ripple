@@ -60,11 +60,11 @@ fn table_expr(src: &VpSource) -> String {
     match src {
         VpSource::Dedicated(name) => name.clone(),
         VpSource::Rare(p) => {
-            format!(
-                "(SELECT s, o, g FROM _pg_ripple.vp_rare WHERE p = {p})"
-            )
+            format!("(SELECT s, o, g FROM _pg_ripple.vp_rare WHERE p = {p})")
         }
-        VpSource::Empty => "(SELECT NULL::bigint AS s, NULL::bigint AS o, NULL::bigint AS g LIMIT 0)".to_owned(),
+        VpSource::Empty => {
+            "(SELECT NULL::bigint AS s, NULL::bigint AS o, NULL::bigint AS g LIMIT 0)".to_owned()
+        }
     }
 }
 
@@ -160,8 +160,7 @@ impl Fragment {
         for (var, col) in other.bindings {
             if let Some(existing) = self.bindings.get(&var) {
                 // Variable already bound — equijoin.
-                self.conditions
-                    .push(format!("{} = {}", col, existing));
+                self.conditions.push(format!("{} = {}", col, existing));
             } else {
                 self.bindings.insert(var, col);
             }
@@ -217,7 +216,7 @@ impl Fragment {
 /// Returns an optional SQL equality condition if the term is a constant.
 fn bind_term(
     alias: &str,
-    col: &str,           // "s" or "o"
+    col: &str, // "s" or "o"
     term: &TermPattern,
     ctx: &mut Ctx,
     bindings: &mut HashMap<String, String>,
@@ -234,12 +233,10 @@ fn bind_term(
                 bindings.insert(vname, col_expr);
             }
         }
-        TermPattern::NamedNode(nn) => {
-            match ctx.encode_iri(nn.as_str()) {
-                Some(id) => conditions.push(format!("{col_expr} = {id}")),
-                None => conditions.push("FALSE".to_owned()),
-            }
-        }
+        TermPattern::NamedNode(nn) => match ctx.encode_iri(nn.as_str()) {
+            Some(id) => conditions.push(format!("{col_expr} = {id}")),
+            None => conditions.push("FALSE".to_owned()),
+        },
         TermPattern::Literal(lit) => {
             let id = ctx.encode_literal(lit);
             conditions.push(format!("{col_expr} = {id}"));
@@ -248,9 +245,6 @@ fn bind_term(
             // Blank nodes in query patterns are treated as variables in SPARQL;
             // spargebra should have converted them to fresh variables already.
             // As a fallback, treat as an unbound (wildcard) subject/object.
-        }
-        _ => {
-            // Catch-all for future term pattern variants (e.g. RDF-star triples).
         }
     }
 }
@@ -291,18 +285,29 @@ fn translate_bgp(patterns: &[spargebra::term::TriplePattern], ctx: &mut Ctx) -> 
                 // Generate a rare-all subquery and bind the predicate variable to `p`.
                 let vname = v.as_str().to_owned();
                 let a = alias.clone();
-                frag.from_items.push((
-                    a.clone(),
-                    "_pg_ripple.vp_rare".to_owned(),
-                ));
+                frag.from_items
+                    .push((a.clone(), "_pg_ripple.vp_rare".to_owned()));
                 if let Some(existing) = frag.bindings.get(&vname) {
-                    frag.conditions
-                        .push(format!("{a}.p = {existing}"));
+                    frag.conditions.push(format!("{a}.p = {existing}"));
                 } else {
                     frag.bindings.insert(vname, format!("{a}.p"));
                 }
-                bind_term(&a, "s", &tp.subject, ctx, &mut frag.bindings, &mut frag.conditions);
-                bind_term(&a, "o", &tp.object, ctx, &mut frag.bindings, &mut frag.conditions);
+                bind_term(
+                    &a,
+                    "s",
+                    &tp.subject,
+                    ctx,
+                    &mut frag.bindings,
+                    &mut frag.conditions,
+                );
+                bind_term(
+                    &a,
+                    "o",
+                    &tp.object,
+                    ctx,
+                    &mut frag.bindings,
+                    &mut frag.conditions,
+                );
                 continue;
             }
         };
@@ -313,8 +318,22 @@ fn translate_bgp(patterns: &[spargebra::term::TriplePattern], ctx: &mut Ctx) -> 
             frag.conditions.push(c);
         }
 
-        bind_term(&alias, "s", &tp.subject, ctx, &mut frag.bindings, &mut frag.conditions);
-        bind_term(&alias, "o", &tp.object, ctx, &mut frag.bindings, &mut frag.conditions);
+        bind_term(
+            &alias,
+            "s",
+            &tp.subject,
+            ctx,
+            &mut frag.bindings,
+            &mut frag.conditions,
+        );
+        bind_term(
+            &alias,
+            "o",
+            &tp.object,
+            ctx,
+            &mut frag.bindings,
+            &mut frag.conditions,
+        );
     }
 
     frag
@@ -408,14 +427,15 @@ fn translate_pattern(pattern: &GraphPattern, ctx: &mut Ctx) -> Fragment {
                 .map(|c| format!("ON {c}"))
                 .unwrap_or_else(|| "ON TRUE".to_owned());
 
-            let combined = format!("{left_sq} LEFT JOIN {right_subquery} AS {opt_alias} {on_clause}");
+            let combined =
+                format!("{left_sq} LEFT JOIN {right_subquery} AS {opt_alias} {on_clause}");
             frag.from_items.push((left_alias.clone(), combined));
 
             // Rebind left variables through the left subquery prefix.
             let left_bind_remap: HashMap<String, String> = frag
                 .bindings
-                .iter()
-                .map(|(v, _)| (v.clone(), format!("{left_alias}._left_{v}")))
+                .keys()
+                .map(|v| (v.clone(), format!("{left_alias}._left_{v}")))
                 .collect();
             frag.bindings = left_bind_remap;
 
@@ -459,8 +479,7 @@ fn translate_pattern(pattern: &GraphPattern, ctx: &mut Ctx) -> Fragment {
                     if let Some((alias, _)) = frag.from_items.first() {
                         let col = format!("{alias}.g");
                         if let Some(existing) = frag.bindings.get(&vname) {
-                            frag.conditions
-                                .push(format!("{col} = {existing}"));
+                            frag.conditions.push(format!("{col} = {existing}"));
                         } else {
                             frag.bindings.insert(vname, col);
                         }
@@ -602,27 +621,20 @@ fn translate_expr_value(
 
 // ─── ORDER BY translator ──────────────────────────────────────────────────────
 
-fn translate_order_by(
-    exprs: &[OrderExpression],
-    bindings: &HashMap<String, String>,
-) -> String {
+fn translate_order_by(exprs: &[OrderExpression], bindings: &HashMap<String, String>) -> String {
     let parts: Vec<String> = exprs
         .iter()
         .filter_map(|oe| match oe {
             OrderExpression::Asc(expr) => {
                 if let Expression::Variable(v) = expr {
-                    bindings
-                        .get(v.as_str())
-                        .map(|col| format!("{col} ASC"))
+                    bindings.get(v.as_str()).map(|col| format!("{col} ASC"))
                 } else {
                     None
                 }
             }
             OrderExpression::Desc(expr) => {
                 if let Expression::Variable(v) = expr {
-                    bindings
-                        .get(v.as_str())
-                        .map(|col| format!("{col} DESC"))
+                    bindings.get(v.as_str()).map(|col| format!("{col} DESC"))
                 } else {
                     None
                 }
@@ -743,10 +755,7 @@ pub fn translate_select(pattern: &GraphPattern) -> Translation {
     let from = frag.build_from();
     let where_clause = frag.build_where();
     let order_clause = mods.order_by.unwrap_or_default();
-    let limit_clause = mods
-        .limit
-        .map(|l| format!("LIMIT {l}"))
-        .unwrap_or_default();
+    let limit_clause = mods.limit.map(|l| format!("LIMIT {l}")).unwrap_or_default();
     let offset_clause = if mods.offset > 0 {
         format!("OFFSET {}", mods.offset)
     } else {
@@ -755,7 +764,11 @@ pub fn translate_select(pattern: &GraphPattern) -> Translation {
 
     let sql = format!(
         "SELECT {distinct_kw}{} FROM {from} {where_clause} {order_clause} {limit_clause} {offset_clause}",
-        if select_cols.is_empty() { "1 AS _dummy".to_owned() } else { select_cols.join(", ") }
+        if select_cols.is_empty() {
+            "1 AS _dummy".to_owned()
+        } else {
+            select_cols.join(", ")
+        }
     );
 
     Translation { sql, variables }
@@ -763,7 +776,7 @@ pub fn translate_select(pattern: &GraphPattern) -> Translation {
 
 /// Translate a SPARQL ASK query pattern to SQL.
 pub fn translate_ask(pattern: &GraphPattern) -> String {
-    let mut mods = extract_modifiers(pattern);
+    let mods = extract_modifiers(pattern);
     let inner = mods.pattern;
     let mut ctx = Ctx::new();
     let frag = translate_pattern(inner, &mut ctx);
