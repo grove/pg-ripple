@@ -1,5 +1,12 @@
 # pg_ripple
 
+[![CI](https://github.com/grove/pg-ripple/actions/workflows/ci.yml/badge.svg)](https://github.com/grove/pg-ripple/actions/workflows/ci.yml)
+[![Release](https://github.com/grove/pg-ripple/actions/workflows/release.yml/badge.svg)](https://github.com/grove/pg-ripple/actions/workflows/release.yml)
+[![Roadmap](https://img.shields.io/badge/Roadmap-view-informational)](ROADMAP.md)
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
+[![PostgreSQL 18](https://img.shields.io/badge/PostgreSQL-18-blue?logo=postgresql&logoColor=white)](https://www.postgresql.org/)
+[![pgrx 0.17](https://img.shields.io/badge/pgrx-0.17-orange)](https://github.com/pgcentralfoundation/pgrx)
+
 **A high-performance RDF triple store inside PostgreSQL.**
 
 pg_ripple is a PostgreSQL 18 extension that is building toward a fully-featured knowledge graph inside the database. The target system stores RDF data, queries it with SPARQL, validates it with exact W3C SHACL semantics, and reasons over it with Datalog — all without leaving PostgreSQL.
