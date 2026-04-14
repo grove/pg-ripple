@@ -53,8 +53,9 @@ Each release below has two layers:
 - [ ] Extension bootstrap: `CREATE EXTENSION pg_ripple` creates `_pg_ripple` schema
 - [ ] **Dictionary encoder**
   - Unified dictionary table (IRIs, blank nodes, literals in a single table with `kind` discriminator — avoids ID space collision between separate resource/literal tables)
-  - XXH3-128 hash-based dedup
-  - Encode/decode SQL functions: `pg_ripple.encode_iri()`, `pg_ripple.decode_id()`
+  - **Hash-Backed Sequence encoding (Route 2)**: XXH3-128 is computed over `kind_le_bytes || term_utf8` (kind is mixed in so the same string as different term types maps to distinct IDs); the full 16-byte hash is stored in a `BYTEA` column with a `UNIQUE` index as the collision-detection key; a PostgreSQL `GENERATED ALWAYS AS IDENTITY` sequence produces the dense, sequential `i64` join key used in every VP table. This avoids the birthday-problem collision risk of schemes that truncate the hash to 64 bits (collision expected at ~4 billion terms in 64-bit space).
+  - Backend-local encode cache (`LruCache<u128, i64>`, keyed on full 128-bit hash) and decode cache (`LruCache<i64, String>`)
+  - Encode/decode SQL functions: `pg_ripple.encode_term()`, `pg_ripple.decode_id()`
 - [ ] **Vertical Partitioning from day one**
   - Dynamic VP table management: auto-create `_pg_ripple.vp_{predicate_id}` tables on first triple with a new predicate
   - Predicate catalog: `_pg_ripple.predicates (id BIGINT, table_oid OID, triple_count BIGINT)`

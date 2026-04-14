@@ -70,7 +70,7 @@ This means you get:
 
 ### Standard RDF storage *(planned — v0.1.0)*
 
-Store triples and quads using the standard RDF data model. Every IRI, blank node, and literal is dictionary-encoded to a compact 64-bit integer for fast joins and minimal storage.
+Store triples and quads using the standard RDF data model. Every IRI, blank node, and literal is dictionary-encoded to a dense sequential `BIGINT` (collision-free, hash-backed sequence) for fast joins and minimal storage.
 
 ```sql
 SELECT pg_ripple.insert_triple(
@@ -249,7 +249,7 @@ pg_ripple is built from the ground up for performance:
 
 ### Storage design
 
-- **Dictionary encoding**: Every IRI, blank node, and literal is mapped to a 64-bit integer via XXH3-128 hashing. All joins operate on integers — no string comparisons in the hot path.
+- **Dictionary encoding**: Every IRI, blank node, and literal is mapped to a dense sequential `BIGINT` via a hash-backed sequence. XXH3-128 is computed over the term (with the term-kind discriminant mixed in) and stored in full as a 16-byte `BYTEA` collision-detection key; a PostgreSQL IDENTITY sequence generates the actual join key. All VP-table joins operate on integers — no string comparisons in the hot path.
 - **Vertical partitioning**: Each predicate gets its own table (`_pg_ripple.vp_{id}`) with columns `(s, o, g)`. This means queries that bind a predicate touch only one compact, heavily-indexed table.
 - **Rare-predicate consolidation**: Predicates with fewer than 1,000 triples share a single table to avoid catalog bloat on predicate-rich datasets.
 - **HTAP architecture**: Writes go to a small delta partition (B-tree indexed); a background worker asynchronously merges deltas into the read-optimised main partition (BRIN indexed). Reads and writes never block each other.

@@ -97,27 +97,29 @@
 
 #### 4.2.1 Schema
 
-A single unified dictionary table holds all term types (IRIs, blank nodes, and literals). Using one table with one sequence guarantees that every dictionary ID is globally unique — the decode path can always resolve an `i64` to exactly one term without ambiguity. This is the approach used by RDF4J, Blazegraph, and Oxigraph.
+A single unified dictionary table holds all term types (IRIs, blank nodes, and literals). Using one table with one IDENTITY sequence guarantees that every dictionary ID is globally unique — the decode path can always resolve an `i64` to exactly one term without ambiguity. This is the approach used by RDF4J, Blazegraph, and Oxigraph.
 
 ```sql
 -- Unified dictionary (IRIs, blank nodes, and literals)
 CREATE TABLE _pg_ripple.dictionary (
-    id        BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    hash      BYTEA NOT NULL,          -- XXH3-128 of the term
-    value     TEXT NOT NULL,
-    kind      SMALLINT NOT NULL,        -- 0=IRI, 1=blank node, 2=literal
-    datatype  BIGINT,                   -- for literals: FK to dictionary(id)
-    lang      TEXT                      -- for language-tagged literals
+    id        BIGINT   GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    hash      BYTEA    NOT NULL,  -- full 16-byte XXH3-128 of (kind_le_bytes || term_utf8)
+    value     TEXT     NOT NULL,
+    kind      SMALLINT NOT NULL,  -- 0=IRI, 1=blank node, 2=literal, 3=typed-literal, 4=lang-literal
+    datatype  TEXT,               -- for literals: xsd datatype IRI (kind=3)
+    lang      TEXT                -- for language-tagged literals (kind=4)
 );
 CREATE UNIQUE INDEX ON _pg_ripple.dictionary (hash);
 ```
 
-> **Design note**: Earlier iterations considered separate `resource_dict` and `literal_dict` tables, each with their own `GENERATED ALWAYS AS IDENTITY` sequence. This creates an ID space collision — `resource_dict.id = 42` and `literal_dict.id = 42` can both exist, making the decode path ambiguous. A unified table eliminates this class of bugs at zero performance cost (lookups are by `id` primary key or `hash` unique index — both $O(1)$ regardless of table size). The `kind` column adds negligible overhead. For literals, `datatype` and `lang` are NULL for non-literal terms.
+> **Design decision — Hash-Backed Sequence (Route 2)**: The XXH3-128 hash is stored in full (16 bytes, `BYTEA`) and used as the *collision-detection key* via `ON CONFLICT (hash) DO NOTHING`. The dense `i64` join key used in every VP table is the IDENTITY-generated `id` — a sequential integer independent of the hash. This avoids the birthday-problem collision risk of schemes that truncate the 128-bit hash to 64 bits (collision expected around 4 billion terms in the 64-bit variant). The `kind` discriminant is mixed into the hash input as two little-endian bytes — so the same string encoded as an IRI and as a blank node always maps to distinct rows. For the encode path, this yields an `ENCODE_CACHE` keyed on the full `u128` hash.
+
+> **Earlier alternative rejected**: Separate `resource_dict` and `literal_dict` tables, each with their own IDENTITY sequence, create an ID space collision — `resource_dict.id = 42` and `literal_dict.id = 42` can both exist, making the decode path ambiguous. A unified table eliminates this class of bugs at zero performance cost (lookups are by `id` primary key or `hash` unique index — both $O(1)$ regardless of table size).
 
 #### 4.2.2 Implementation
 
-- **Encoding path** (`encode()`): Hash → check in-memory cache (LRU, configurable via GUC) → check PG table → INSERT if miss → return `i64`
-- **Decoding path** (`decode()`): `i64` → LRU cache → PG lookup → return string
+- **Encoding path** (`encode(term, kind)`): Compute XXH3-128 over `kind_le_bytes || term_utf8` → check `ENCODE_CACHE (u128 → i64)` for a cache hit → `INSERT … ON CONFLICT (hash) DO NOTHING RETURNING id` → if no row returned (conflict), `SELECT id … WHERE hash = $1` → populate both caches → return the IDENTITY `i64`
+- **Decoding path** (`decode(id)`): `i64` → `DECODE_CACHE (i64 → String)` → `SELECT value … WHERE id = $1` → populate cache → return string
 - **Batch decoding** (`decode_batch()`): Collect all output `i64` IDs from a result set, resolve in a single `WHERE id = ANY(...)` query, build an in-memory `HashMap<i64, String>`, then emit decoded rows. Avoids per-row dictionary round-trips — critical for large result sets
 - **Batch encoding** (`encode_batch()`): Bulk insert with `ON CONFLICT DO NOTHING` + `RETURNING`, minimising round-trips during data load
 - **Blank node document-scoping** (`src/dictionary/bnode.rs`): Each bulk load call (and each `INSERT DATA` statement) is assigned a monotonically-increasing `load_generation BIGINT` from another shared sequence. Blank node labels are hashed as `"{generation}:{label}"` rather than `"{label}"` — so `_:b0` from load call #5 hashes as `"5:b0"` and `_:b0` from load call #6 hashes as `"6:b0"`, yielding distinct dictionary IDs. This isolation is mandatory for correct multi-file RDF loading and is in effect from v0.2.0. The `load_generation` is stored in a thread-local / SPI-session context and advanced at the start of each top-level load operation.
