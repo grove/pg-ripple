@@ -61,6 +61,8 @@ jobs:
         run: cargo clippy --features pg18 -- -D warnings
 
       - name: Run pg_test suite
+        env:
+          RUST_TEST_THREADS: "1"
         run: cargo pgrx test pg18
 
   # ── 2. pg_regress suite ──────────────────────────────────────────────────────
