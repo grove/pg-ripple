@@ -42,6 +42,7 @@ Items in the ROADMAP.md checklist are listed in dependency order — implement t
 2. Add SQL to `sql/` if needed
 3. Write `#[pg_test]` integration tests
 4. Write the pg_regress `.sql` file
+5. **Tick the checkbox in ROADMAP.md** — change `- [ ]` to `- [x]` for that deliverable immediately after it is implemented and tested; do not batch this at the end
 
 ### 5. Verify exit criteria
 
@@ -83,6 +84,7 @@ These are the mistakes most likely to produce silent bugs:
 (copy exit criteria verbatim from ROADMAP.md, check each explicitly)
 
 ### Git
+- [ ] All ROADMAP.md deliverable checkboxes for this version are ticked (`- [x]`)
 - [ ] CHANGELOG.md updated
 - [ ] Commit staged (do not run `git commit` without user approval)
 ```

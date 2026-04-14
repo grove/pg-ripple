@@ -12,6 +12,7 @@ Complete every item before starting the release process.
 
 - [ ] **All roadmap deliverables for the version are implemented**
   - Cross-check against the version's deliverables list in [ROADMAP.md](ROADMAP.md)
+  - All deliverable checkboxes are ticked (`- [x]`) in ROADMAP.md — if any are unticked, tick them now before proceeding
 - [ ] **All exit criteria in ROADMAP.md are satisfied**
   - Verify each criterion explicitly — do not rely on partial evidence
 - [ ] **Tests pass**
