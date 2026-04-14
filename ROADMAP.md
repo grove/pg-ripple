@@ -51,33 +51,33 @@ Each release below has two layers:
 
 ### Deliverables
 
-- [ ] pgrx 0.17 project scaffolding targeting PostgreSQL 18
-- [ ] Extension bootstrap: `CREATE EXTENSION pg_ripple` creates `_pg_ripple` schema
-- [ ] **Dictionary encoder**
+- [x] pgrx 0.17 project scaffolding targeting PostgreSQL 18
+- [x] Extension bootstrap: `CREATE EXTENSION pg_ripple` creates `_pg_ripple` schema
+- [x] **Dictionary encoder**
   - Unified dictionary table (IRIs, blank nodes, literals in a single table with `kind` discriminator — avoids ID space collision between separate resource/literal tables)
   - **Hash-Backed Sequence encoding (Route 2)**: XXH3-128 is computed over `kind_le_bytes || term_utf8` (kind is mixed in so the same string as different term types maps to distinct IDs); the full 16-byte hash is stored in a `BYTEA` column with a `UNIQUE` index as the collision-detection key; a PostgreSQL `GENERATED ALWAYS AS IDENTITY` sequence produces the dense, sequential `i64` join key used in every VP table. This avoids the birthday-problem collision risk of schemes that truncate the hash to 64 bits (collision expected at ~4 billion terms in 64-bit space).
   - Backend-local encode cache (`LruCache<u128, i64>`, keyed on full 128-bit hash) and decode cache (`LruCache<i64, String>`)
   - Encode/decode SQL functions: `pg_ripple.encode_term()`, `pg_ripple.decode_id()`
-- [ ] **Vertical Partitioning from day one**
+- [x] **Vertical Partitioning from day one**
   - Dynamic VP table management: auto-create `_pg_ripple.vp_{predicate_id}` tables on first triple with a new predicate
   - Predicate catalog: `_pg_ripple.predicates (id BIGINT, table_oid OID, triple_count BIGINT)`
   - Dual B-tree indices per VP table: `(s, o)` and `(o, s)`
   - Global statement identifier sequence: `_pg_ripple.statement_id_seq` — every VP table row gets a globally-unique SID via `i BIGINT NOT NULL DEFAULT nextval('statement_id_seq')`
   - SIDs are not exposed to users in v0.1.0 but are available for internal use from the start (prerequisite for RDF-star in v0.4.0)
-- [ ] **Basic triple CRUD**
+- [x] **Basic triple CRUD**
   - `pg_ripple.insert_triple(s TEXT, p TEXT, o TEXT)`
   - `pg_ripple.delete_triple(s TEXT, p TEXT, o TEXT)`
   - `pg_ripple.triple_count() RETURNS BIGINT`
-- [ ] **Basic querying** (SQL-level, no SPARQL yet)
+- [x] **Basic querying** (SQL-level, no SPARQL yet)
   - `pg_ripple.find_triples(s TEXT, p TEXT, o TEXT) RETURNS TABLE (s TEXT, p TEXT, o TEXT, g TEXT)` — any param can be NULL for wildcard; returns decoded string values
-- [ ] Unit tests for dictionary encode/decode round-trips
-- [ ] Integration test: insert + query cycle
-- [ ] pg_regress: `dictionary.sql` (encode/decode, prefix expansion, hash collision behaviour), `basic_crud.sql` (insert, delete, find_triples, triple_count)
-- [ ] CI pipeline (GitHub Actions)
-- [ ] **GUC-gated lazy initialization**
+- [x] Unit tests for dictionary encode/decode round-trips
+- [x] Integration test: insert + query cycle
+- [x] pg_regress: `dictionary.sql` (encode/decode, prefix expansion, hash collision behaviour), `basic_crud.sql` (insert, delete, find_triples, triple_count)
+- [x] CI pipeline (GitHub Actions)
+- [x] **GUC-gated lazy initialization**
   - Merge worker, SHACL engine, and reasoning engine only start when their respective GUCs are enabled (`pg_ripple.merge_threshold > 0`, `pg_ripple.shacl_mode != 'off'`, `pg_ripple.inference_mode != 'off'`)
   - Reduces resource overhead for deployments that use only a subset of features
-- [ ] **Error taxonomy module** (`src/error.rs`)
+- [x] **Error taxonomy module** (`src/error.rs`)
   - `thiserror`-based error types with PT error code constants
   - Initial ranges: dictionary errors (PT001–PT099) and storage errors (PT100–PT199)
   - PostgreSQL-style formatting: lowercase first word, no trailing period
@@ -102,44 +102,44 @@ A user can install the extension, insert triples (routed to per-predicate VP tab
 
 ### Deliverables
 
-- [ ] **Rare-predicate consolidation table**
+- [x] **Rare-predicate consolidation table**
   - Predicates with fewer than `pg_ripple.vp_promotion_threshold` triples (default: 1,000) are stored in a shared `_pg_ripple.vp_rare (p BIGINT, s BIGINT, o BIGINT, g BIGINT, i BIGINT)` table with a primary composite index on `(p, s, o)` and two secondary indices: `(s, p)` for DESCRIBE queries and `(g, p, s, o)` for efficient graph-drop bulk-delete
   - Promotion is **deferred to end-of-statement** (not mid-batch): during a bulk load, triples accumulate in `vp_rare`; after the load completes, predicates exceeding the threshold are promoted in a single `INSERT … SELECT` + `DELETE` transaction — avoids disrupting in-flight COPY streams
   - `pg_ripple.promote_rare_predicates()` can also be called manually or by the background merge worker
   - Prevents catalog bloat for predicate-rich datasets (DBpedia ≈60K predicates, Wikidata ≈10K) — avoids hundreds of thousands of PG objects, reduces planner overhead, and cuts VACUUM cost
-- [ ] **`_pg_ripple.statements` range-mapping catalog**
+- [x] **`_pg_ripple.statements` range-mapping catalog**
   - Maintained by the merge worker; stores `(sid_min, sid_max, predicate_id, table_oid)` range rows rather than one row per statement — resolved via binary search in *O(log n)* with no full-table scans
   - After each merge cycle the worker inserts one range row per VP table covering the SIDs allocated since the last merge; because SIDs are drawn from a monotonically-increasing sequence, ranges are non-overlapping
   - Required for v0.4.0 RDF-star where SIDs appear as subjects/objects in other VP tables and must be unambiguously resolved to their owning VP table
-- [ ] **Named graph support** (basic)
+- [x] **Named graph support** (basic)
   - `g` column in VP tables
   - `pg_ripple.create_graph()`, `pg_ripple.drop_graph()`, `pg_ripple.list_graphs()`
-- [ ] **`pg_ripple.named_graph_optimized` GUC** (default: `off`)
+- [x] **`pg_ripple.named_graph_optimized` GUC** (default: `off`)
   - When enabled, adds an optional `(g, s, o)` index per dedicated VP table (and equivalent coverage on `vp_rare`) to accelerate graph-scoped queries (e.g. list all triples in graph G, drop a named graph)
   - Off by default to avoid index bloat for workloads that do not use named graphs heavily
-- [ ] **Blank node document-scoping**
+- [x] **Blank node document-scoping**
   - Each bulk load operation is assigned a monotonically-increasing `load_generation` counter from a shared sequence
   - Blank nodes are hashed as `"{generation}:{label}"` — so `_:b0` from two different load calls yields two distinct dictionary IDs
   - Prevents incorrect merging of blank nodes across document boundaries, which would corrupt data in multi-file loads
   - Also applies to `INSERT DATA` (SPARQL Update, v0.5.1+) which always gets its own generation
-- [ ] **Bulk loader** (N-Triples)
+- [x] **Bulk loader** (N-Triples)
   - `pg_ripple.load_ntriples(data TEXT) RETURNS BIGINT`
   - Streaming parser via `rio_turtle` crate
   - Batch encoding + COPY for throughput
-- [ ] **Bulk loader** (N-Quads)
+- [x] **Bulk loader** (N-Quads)
   - `pg_ripple.load_nquads(data TEXT) RETURNS BIGINT`
   - Standard format for named-graph quads (`<s> <p> <o> <g> .`); same `rio_turtle` parser path as N-Triples
   - Route quads to the appropriate named graph (`g` column) automatically
-- [ ] **Bulk loader** (Turtle)
+- [x] **Bulk loader** (Turtle)
   - `pg_ripple.load_turtle(data TEXT) RETURNS BIGINT`
   - Prefix declarations auto-registered
   - Blank node scoping per load operation
   - `rio_turtle` crate already handles both formats — incremental parser work
-- [ ] **Bulk loader** (TriG)
+- [x] **Bulk loader** (TriG)
   - `pg_ripple.load_trig(data TEXT) RETURNS BIGINT`
   - Turtle with named graph blocks (`GRAPH <g> { … }`) — the standard interchange format for named-graph Turtle data
   - Uses the same `rio_turtle` streaming parser; named graph IRI is dictionary-encoded and stored in the `g` column
-- [ ] **File-path bulk load variants**
+- [x] **File-path bulk load variants**
   - `pg_ripple.load_turtle_file(path TEXT) RETURNS BIGINT`
   - `pg_ripple.load_ntriples_file(path TEXT) RETURNS BIGINT`
   - `pg_ripple.load_nquads_file(path TEXT) RETURNS BIGINT`
@@ -147,21 +147,21 @@ A user can install the extension, insert triples (routed to per-predicate VP tab
   - Reads via `pg_read_file()` with superuser privilege check — prevents unauthorized file access
   - Essential for datasets larger than ~1 GB where passing data as a TEXT parameter exceeds PostgreSQL's TEXT size limit and imposes significant memory overhead
   - Returns count of loaded triples; otherwise identical behaviour to the inline TEXT variants
-- [ ] **IRI prefix management**
+- [x] **IRI prefix management**
   - `pg_ripple.register_prefix(prefix TEXT, expansion TEXT)`
   - `pg_ripple.prefixes() RETURNS TABLE`
   - Prefix expansion in encode/decode paths
-- [ ] **ANALYZE after bulk loads**
+- [x] **ANALYZE after bulk loads**
   - All inline and file-path load functions run `ANALYZE` on affected VP tables after load completes
   - Ensures the PostgreSQL planner has accurate selectivity estimates for generated SQL — critical for good join plans in v0.3.0+
 - [ ] Benchmarks: insert throughput (1M triples)
 - [ ] **Performance regression baseline**: record insert throughput and point-query latency as CI benchmark baselines; fail CI if a commit regresses throughput by >10% (maintained and extended in every subsequent milestone)
-- [ ] **N-Triples / N-Quads export** (basic)
+- [x] **N-Triples / N-Quads export** (basic)
   - `pg_ripple.export_ntriples(graph TEXT DEFAULT NULL) RETURNS TEXT`
   - `pg_ripple.export_nquads(graph TEXT DEFAULT NULL) RETURNS TEXT` — exports all named graphs as NQuads when `graph` is NULL; a single graph when specified
   - Streaming variants returning `SETOF TEXT` for large graphs
   - Essential for verifying bulk load round-trips in v0.2.0 testing
-- [ ] pg_regress test suite: `triple_crud.sql`, `named_graphs.sql`, `export_ntriples.sql`, `nquads_trig.sql` (N-Quads round-trip, TriG named-graph import, file-path loaders)
+- [x] pg_regress test suite: `triple_crud.sql`, `named_graphs.sql`, `export_ntriples.sql`, `nquads_trig.sql` (N-Quads round-trip, TriG named-graph import, file-path loaders)
 
 ### Exit Criteria
 
