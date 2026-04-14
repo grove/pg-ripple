@@ -130,9 +130,22 @@ SELECT pg_ripple.load_shacl('
 Automatically derive new facts from rules. Built-in rulesets cover RDFS (13 rules) and OWL 2 RL (~80 rules). You can also write custom rules. Once enabled, SPARQL queries see both explicit and inferred facts transparently.
 
 ```sql
+-- Load built-in RDFS entailment
 SELECT pg_ripple.load_rules_builtin('rdfs');
 -- If :Dog rdfs:subClassOf :Animal, and :Rex rdf:type :Dog,
 -- then pg_ripple automatically infers :Rex rdf:type :Animal
+
+-- Or write custom rules to derive new relationships
+SELECT pg_ripple.load_rules('
+  -- Transitive manager relationship
+  ?x ex:indirectManager ?z :- ?x ex:manager ?z .
+  ?x ex:indirectManager ?z :- ?x ex:manager ?y, ?y ex:indirectManager ?z .
+
+  -- Flag people without an email (negation-as-failure)
+  ?x ex:missingEmail "true"^^xsd:boolean :- 
+    ?x rdf:type foaf:Person, 
+    NOT ?x foaf:mbox ?_ .
+', rule_set := 'company_data');
 ```
 
 ### v0.15.0 — SPARQL Protocol (HTTP)
