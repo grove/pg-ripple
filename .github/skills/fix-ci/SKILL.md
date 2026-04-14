@@ -82,14 +82,16 @@ error: unexpected argument '--test-threads' found
 
 **Cause:** `cargo pgrx test` consumes the first `--` as its own argument separator before invoking `cargo test`. A single `--` delivers `--test-threads` as a cargo flag, not a test-binary flag.
 
-**Fix:** Use a double `--` to pass through to the test binary:
+**Fix:** Use the `RUST_TEST_THREADS` environment variable — `cargo pgrx test` does not support `--` as a passthrough separator, so the env var is the only reliable way to control the test thread count:
 
 ```yaml
 - name: Run pg_test suite
-  run: cargo pgrx test pg18 -- -- --test-threads=1
+  env:
+    RUST_TEST_THREADS: "1"
+  run: cargo pgrx test pg18
 ```
 
-The chain is: `cargo pgrx test` → first `--` → `cargo test` → second `--` → test binary.
+> Do not use `cargo pgrx test pg18 -- --test-threads=1` or `cargo pgrx test pg18 -- -- --test-threads=1` — pgrx 0.17 parses `--test-threads` as its own unknown flag and exits with error code 2.
 
 ---
 
@@ -110,7 +112,9 @@ postgres location: deadlock.c:1133
 
 ```yaml
 - name: Run pg_test suite
-  run: cargo pgrx test pg18 -- -- --test-threads=1
+  env:
+    RUST_TEST_THREADS: "1"
+  run: cargo pgrx test pg18
 ```
 
 > Do not increase dictionary concurrency to "fix" this — the tests are integration tests that legitimately need serial execution.
@@ -307,7 +311,9 @@ The known-good workflow for this project:
   run: cargo pgrx init --pg18 download
 
 - name: Run pg_test suite
-  run: cargo pgrx test pg18 -- -- --test-threads=1
+  env:
+    RUST_TEST_THREADS: "1"
+  run: cargo pgrx test pg18
 
 # (regress job)
 - name: Run pg_regress suite
