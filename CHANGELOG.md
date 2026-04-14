@@ -9,7 +9,57 @@ Versions correspond to the milestones in [ROADMAP.md](ROADMAP.md).
 
 ## [Unreleased]
 
-Nothing yet — next milestone is [v0.3.0 (SPARQL Basic)](ROADMAP.md).
+Nothing yet — next milestone is [v0.4.0 (RDF-star)](ROADMAP.md).
+
+---
+
+## [0.3.0] — 2026-04-14 — SPARQL Query Engine (Basic)
+
+This release introduces SPARQL SELECT and ASK queries. You can now ask questions over stored RDF data using the standard W3C query language, with results returned as JSONB rows.
+
+### What you can do
+
+- **Run SPARQL SELECT queries** — `pg_ripple.sparql(query TEXT) RETURNS SETOF JSONB` parses and executes a SPARQL SELECT, returning one JSONB object per result row with variable names as keys and N-Triples–formatted term strings as values
+- **Run SPARQL ASK queries** — `pg_ripple.sparql_ask(query TEXT) RETURNS BOOLEAN` returns `TRUE` if any results exist
+- **Inspect generated SQL** — `pg_ripple.sparql_explain(query TEXT, analyze BOOL DEFAULT false) RETURNS TEXT` shows the SQL generated from a SPARQL query; pass `analyze := true` to run EXPLAIN ANALYZE on it
+- **Tune plan cache size** — `pg_ripple.plan_cache_size` GUC (default: 256) controls how many SPARQL→SQL translations are cached per backend; set to `0` to disable
+
+### Supported SPARQL features
+
+- Basic Graph Patterns (BGP) with bound subjects, predicates, and objects
+- `FILTER` expressions: `=`, `!=`, `<`, `<=`, `>`, `>=`, `&&`, `||`, `!`, `BOUND()`
+- `OPTIONAL` (LEFT JOIN)
+- `GRAPH <iri> { ... }` and `GRAPH ?g { ... }` named-graph patterns
+- `PROJECT` (SELECT variable list), `DISTINCT`, `REDUCED`
+- `LIMIT`, `OFFSET`
+- `ORDER BY` (single variable, ASC/DESC)
+- Result pagination via `LIMIT`/`OFFSET`
+
+### How it works behind the scenes
+
+- SPARQL text is parsed by `spargebra 0.4` into a `GraphPattern` algebra tree
+- The SPARQL algebra is translated to SQL by `src/sparql/sqlgen.rs`: each BGP triple pattern maps to a VP-table join (integer equality on encoded IDs); every IRI and literal constant is encoded to an `i64` before appearing in SQL — SQL injection via SPARQL constants is structurally impossible
+- A per-query encoding cache (`Ctx.per_query`) avoids redundant SPI dictionary lookups for constants that appear multiple times in one query
+- Self-join elimination: BGP patterns that share a subject but use different predicates are compiled into a single scan with multiple predicates joined, not separate subqueries
+- Batch decode: all `i64` result columns are collected, deduplicated, and decoded in a single `SELECT ... WHERE id IN (...)` round-trip; no per-row dictionary queries
+- `sparopt 0.3` is in `Cargo.toml`; direct algebra-tree conversion between sparopt and spargebra types is not yet available (distinct type systems), so filter-pushdown and constant-folding are implemented inline in the SQL generator
+- A `vp_source` lookup bug was discovered and fixed: pgrx 0.17 returns `Err(InvalidPosition)` for zero-row queries rather than `Ok(None)`, so querying with `AND table_oid IS NOT NULL` incorrectly returned `VpSource::Empty` for rare-predicate tables
+
+### Technical Details
+
+<details>
+<summary>Click to expand implementation details</summary>
+
+- **New module `src/sparql/`**: `mod.rs` (public functions), `sqlgen.rs` (SPARQL algebra → SQL), `plan_cache.rs` (LRU translation cache)
+- **New functions**: `pg_ripple.sparql`, `pg_ripple.sparql_ask`, `pg_ripple.sparql_explain`
+- **New GUC**: `pg_ripple.plan_cache_size` (i32, default 256, range 0–65536)
+- **Dictionary additions** (`src/dictionary/mod.rs`): `lookup(term, kind)` and `lookup_iri(iri)` — read-only dictionary lookups that return `None` for unknown terms, used by the SPARQL translator to handle unresolvable IRIs without polluting the dictionary
+- **Dependencies added**: `spargebra = "0.4"`, `sparopt = "0.3"`
+- **Test deadlock fix**: added `RUST_TEST_THREADS = "1"` to `.cargo/config.toml` to serialize `cargo pgrx test` execution and prevent concurrent dictionary upsert deadlocks
+- **pg_test tests** (8 new, in `src/lib.rs`): `pg_test_sparql_select_empty`, `pg_test_sparql_select_one_triple`, `pg_test_sparql_ask_empty`, `pg_test_sparql_ask_match`, `pg_test_sparql_explain_returns_sql`, `pg_test_sparql_limit`, `pg_test_sparql_distinct`, `pg_test_sparql_filter_bound`
+- **pg_regress tests**: `sparql_queries.sql` (10 queries), `sparql_injection.sql` (7 adversarial inputs)
+
+</details>
 
 ---
 

@@ -1,4 +1,10 @@
 # https://docs.rs/pgrx/latest/pgrx/
+
+# Serialize pg_test integration tests — they share a single PostgreSQL
+# instance and the dictionary upsert causes deadlocks under parallel execution.
+[env]
+RUST_TEST_THREADS = "1"
+
 [target.'cfg(target_os = "linux")']
 linker = "clang"
 rustflags = ["-C", "link-arg=-Wl,-undefined,dynamic_lookup"]

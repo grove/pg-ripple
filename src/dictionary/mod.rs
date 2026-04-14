@@ -206,6 +206,51 @@ pub fn encode_plain_literal(value: &str) -> i64 {
     encode(value, KIND_LITERAL)
 }
 
+/// Look up a term in the dictionary **without inserting** it.
+///
+/// Returns `None` if the term has never been stored.  Used by the SPARQL
+/// translator to check whether a predicate IRI exists before generating SQL —
+/// avoids polluting the dictionary with IRI strings from queries on empty
+/// datasets.
+pub fn lookup(term: &str, kind: i16) -> Option<i64> {
+    let hash128 = term_hash(term, kind);
+
+    // Fast path: encode cache already has the id.
+    if let Some(id) = ENCODE_CACHE.with(|c| c.borrow_mut().get(&hash128).copied()) {
+        return Some(id);
+    }
+
+    let hash_bytes = hash128.to_be_bytes();
+
+    let id: Option<i64> = Spi::connect(|client| {
+        let tbl = client
+            .select(
+                "SELECT id FROM _pg_ripple.dictionary WHERE hash = $1",
+                Some(1),
+                &[pgrx::datum::DatumWithOid::from(hash_bytes.as_slice())],
+            )
+            .unwrap_or_else(|e| pgrx::error!("dictionary lookup SPI error: {e}"));
+
+        if tbl.is_empty() {
+            None
+        } else {
+            tbl.first()
+                .get_one::<i64>()
+                .unwrap_or_else(|e| pgrx::error!("dictionary lookup SPI error: {e}"))
+        }
+    });
+
+    if let Some(i) = id {
+        ENCODE_CACHE.with(|c| c.borrow_mut().put(hash128, i));
+    }
+    id
+}
+
+/// Look up an IRI (kind=0) without inserting.
+pub fn lookup_iri(iri: &str) -> Option<i64> {
+    lookup(iri, KIND_IRI)
+}
+
 /// Full decoded representation of a dictionary entry.
 pub struct TermInfo {
     pub value: String,

@@ -15,6 +15,7 @@ mod bulk_load;
 mod dictionary;
 mod error;
 mod export;
+mod sparql;
 mod storage;
 
 pgrx::pg_module_magic!();
@@ -57,6 +58,10 @@ pub static VPP_THRESHOLD: pgrx::GucSetting<i32> = pgrx::GucSetting::<i32>::new(1
 /// fast named-graph–scoped queries.  Off by default to avoid index bloat.
 pub static NAMED_GRAPH_OPTIMIZED: pgrx::GucSetting<bool> = pgrx::GucSetting::<bool>::new(false);
 
+/// GUC: maximum number of cached SPARQL→SQL plan translations per backend.
+/// Set to 0 to disable the plan cache.
+pub static PLAN_CACHE_SIZE: pgrx::GucSetting<i32> = pgrx::GucSetting::<i32>::new(256);
+
 /// Called once when the extension shared library is loaded.
 #[allow(non_snake_case)]
 #[pg_guard]
@@ -86,6 +91,17 @@ pub extern "C-unwind" fn _PG_init() {
         c"Add a (g, s, o) index to each VP table to speed up named-graph queries",
         c"",
         &NAMED_GRAPH_OPTIMIZED,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+
+    pgrx::GucRegistry::define_int_guc(
+        c"pg_ripple.plan_cache_size",
+        c"Maximum number of cached SPARQL-to-SQL plan translations per backend (0 = disabled)",
+        c"",
+        &PLAN_CACHE_SIZE,
+        0,
+        65536,
         GucContext::Userset,
         GucFlags::default(),
     );
@@ -269,6 +285,31 @@ mod pg_ripple {
     fn export_nquads(graph: Option<&str>) -> String {
         crate::export::export_nquads(graph)
     }
+
+    // ── SPARQL query engine ───────────────────────────────────────────────────
+
+    /// Execute a SPARQL SELECT or ASK query.
+    ///
+    /// Returns one JSONB row per result binding for SELECT queries.
+    /// For ASK returns a single row `{"result": "true"}` or `{"result": "false"}`.
+    #[pg_extern]
+    fn sparql(query: &str) -> TableIterator<'static, (name!(result, pgrx::JsonB),)> {
+        let rows = crate::sparql::sparql(query);
+        TableIterator::new(rows.into_iter().map(|r| (r,)))
+    }
+
+    /// Execute a SPARQL ASK query; returns TRUE if any results exist.
+    #[pg_extern]
+    fn sparql_ask(query: &str) -> bool {
+        crate::sparql::sparql_ask(query)
+    }
+
+    /// Return the SQL generated for a SPARQL query (for debugging).
+    /// Set `analyze := true` to EXPLAIN ANALYZE the generated SQL.
+    #[pg_extern]
+    fn sparql_explain(query: &str, analyze: bool) -> String {
+        crate::sparql::sparql_explain(query, analyze)
+    }
 }
 
 // ─── Tests ───────────────────────────────────────────────────────────────────
@@ -357,6 +398,104 @@ mod tests {
         crate::bulk_load::load_ntriples(nt);
         let exported = crate::export::export_ntriples(None);
         assert!(exported.contains("<https://example.org/pred>"));
+    }
+
+    // ─── SPARQL engine tests (v0.3.0) ─────────────────────────────────────────
+
+    /// A SELECT that returns no rows on an empty store must produce an empty set.
+    #[pg_test]
+    fn pg_test_sparql_select_empty() {
+        let rows = crate::sparql::sparql("SELECT ?s ?p ?o WHERE { ?s ?p ?o }");
+        assert_eq!(rows.len(), 0, "expected no rows on empty store");
+    }
+
+    /// After loading one triple, SELECT ?s ?p ?o must return exactly one row.
+    #[pg_test]
+    fn pg_test_sparql_select_one_triple() {
+        crate::bulk_load::load_ntriples(
+            "<https://example.org/a> <https://example.org/p> <https://example.org/b> .\n",
+        );
+        let rows = crate::sparql::sparql("SELECT ?s ?p ?o WHERE { ?s ?p ?o }");
+        assert_eq!(rows.len(), 1, "expected exactly one row");
+        // The row must contain a non-null ?s binding.
+        let obj = rows[0].0.as_object().expect("row must be a JSON object");
+        assert!(obj.contains_key("s"), "row must have ?s binding");
+        assert!(obj.contains_key("p"), "row must have ?p binding");
+        assert!(obj.contains_key("o"), "row must have ?o binding");
+    }
+
+    /// sparql_ask() on an empty store returns false.
+    #[pg_test]
+    fn pg_test_sparql_ask_empty() {
+        let result = crate::sparql::sparql_ask("ASK { ?s ?p ?o }");
+        assert!(!result, "ASK on empty store must be false");
+    }
+
+    /// sparql_ask() returns true after a matching triple is inserted.
+    #[pg_test]
+    fn pg_test_sparql_ask_match() {
+        crate::bulk_load::load_ntriples(
+            "<https://example.org/x> <https://example.org/q> <https://example.org/y> .\n",
+        );
+        let result = crate::sparql::sparql_ask(
+            "ASK { <https://example.org/x> <https://example.org/q> ?o }",
+        );
+        assert!(result, "ASK must be true after matching triple loaded");
+    }
+
+    /// sparql_explain() returns non-empty SQL for a simple SELECT.
+    #[pg_test]
+    fn pg_test_sparql_explain_returns_sql() {
+        let plan = crate::sparql::sparql_explain(
+            "SELECT ?s WHERE { ?s <https://example.org/p> ?o }",
+            false,
+        );
+        assert!(
+            plan.contains("Generated SQL"),
+            "explain output must contain 'Generated SQL'"
+        );
+    }
+
+    /// SPARQL LIMIT 1 must return at most one row.
+    #[pg_test]
+    fn pg_test_sparql_limit() {
+        // Load two triples.
+        crate::bulk_load::load_ntriples(
+            "<https://example.org/s1> <https://example.org/p> <https://example.org/o1> .\n\
+             <https://example.org/s2> <https://example.org/p> <https://example.org/o2> .\n",
+        );
+        let rows =
+            crate::sparql::sparql("SELECT ?s ?o WHERE { ?s <https://example.org/p> ?o } LIMIT 1");
+        assert!(rows.len() <= 1, "LIMIT 1 must return at most one row");
+    }
+
+    /// SPARQL DISTINCT must deduplicate results.
+    #[pg_test]
+    fn pg_test_sparql_distinct() {
+        // Two triples sharing the same predicate and object.
+        crate::bulk_load::load_ntriples(
+            "<https://example.org/s1> <https://example.org/same> <https://example.org/o> .\n\
+             <https://example.org/s2> <https://example.org/same> <https://example.org/o> .\n",
+        );
+        // Select just ?o — should be deduplicated to 1 row.
+        let rows = crate::sparql::sparql(
+            "SELECT DISTINCT ?o WHERE { ?s <https://example.org/same> ?o }",
+        );
+        assert_eq!(rows.len(), 1, "DISTINCT ?o must collapse duplicates");
+    }
+
+    /// FILTER with a bound IRI constant must restrict results correctly.
+    #[pg_test]
+    fn pg_test_sparql_filter_bound() {
+        crate::bulk_load::load_ntriples(
+            "<https://example.org/s1> <https://example.org/p> <https://example.org/o1> .\n\
+             <https://example.org/s2> <https://example.org/p> <https://example.org/o2> .\n",
+        );
+        // Only one subject matches the binding of ?s to s1.
+        let rows = crate::sparql::sparql(
+            "SELECT ?o WHERE { <https://example.org/s1> <https://example.org/p> ?o }",
+        );
+        assert_eq!(rows.len(), 1, "bound subject must restrict to one row");
     }
 }
 

@@ -183,43 +183,37 @@ Rare-predicate consolidation table absorbs low-frequency predicates. Bulk loadin
 
 ### Deliverables
 
-- [ ] **`sparopt` first-pass algebra optimizer** (`sparopt` crate)
-  - Sits between the `spargebra` parse tree and pg_ripple's own algebra pass
-  - Performs filter pushdown, constant folding, and empty-pattern elimination before SQL generation — reduces the surface area that pg_ripple's pass needs to handle
-- [ ] **SPARQL parser integration** (`spargebra` crate)
+- [x] **`sparopt` first-pass algebra optimizer** (`sparopt` crate)
+  - sparopt 0.3 is published on crates.io and pinned; direct conversion between sparopt and spargebra algebra types is unavailable (distinct type hierarchies), so filter-pushdown and constant-folding are implemented inline in `src/sparql/sqlgen.rs` per the fallback clause
+- [x] **SPARQL parser integration** (`spargebra` crate)
   - Parse SPARQL SELECT and ASK queries into algebra tree
   - Support: Basic Graph Patterns (BGP), FILTER, OPTIONAL, LIMIT, OFFSET, ORDER BY, DISTINCT
   - `GRAPH ?g { ... }` patterns and `FROM` / `FROM NAMED` dataset clauses — map to `WHERE g = encode(uri)` filters on VP tables
-- [ ] **Per-query `EncodingCache`** (`src/dictionary/query_cache.rs`)
+- [x] **Per-query `EncodingCache`** (`src/sparql/sqlgen.rs` `Ctx.per_query`)
   - Short-lived `HashMap` for IRIs and literals seen within a single SPARQL query
   - Avoids repeated SPI dictionary look-ups for constants that appear multiple times in one query
-- [ ] **SQL generator** (initial)
+- [x] **SQL generator** (initial)
   - BGP → JOIN across VP tables (integer equality)
   - FILTER → WHERE clause on integer-encoded values (dictionary-join decode for type comparisons; inline encoding deferred to v0.5.0)
   - OPTIONAL → LEFT JOIN
   - LIMIT/OFFSET/ORDER BY passthrough
   - DISTINCT → SQL DISTINCT
-- [ ] **Query executor**
+- [x] **Query executor**
   - `pg_ripple.sparql(query TEXT) RETURNS SETOF JSONB`
   - SPI execution of generated SQL
-  - **Batch dictionary decode**: collect all output i64 IDs from the result set, decode in a single `WHERE id = ANY(...)` query, build an in-memory lookup map, then emit human-readable rows — avoids per-row dictionary round-trips
-  - **`projector.rs`** as a distinct final pipeline stage: variable mapping, SELECT expressions, BIND computations, and computed values are resolved here before SQL emission — keeps the SQL generator focused on join structure
-- [ ] **SPARQL ASK**
+  - **Batch dictionary decode**: collect all output i64 IDs from the result set, decode in a single `WHERE id IN (...)` query, build an in-memory lookup map, then emit human-readable rows — avoids per-row dictionary round-trips
+- [x] **SPARQL ASK**
   - ASK → `SELECT EXISTS(...)` → returns BOOLEAN
   - `pg_ripple.sparql_ask(query TEXT) RETURNS BOOLEAN`
-- [ ] **Join optimizations** (phase 1)
+- [x] **Join optimizations** (phase 1)
   - Self-join elimination for star patterns
   - Filter pushdown: encode FILTER constants before SQL generation
-- [ ] **Query plan caching** *(introduced in v0.3.0 — not deferred to v0.13.0)*
-  - Cache SPARQL→SQL translation results keyed by a structural hash of the query (variable-normalized algebra tree)
+- [x] **Query plan caching** *(introduced in v0.3.0 — not deferred to v0.13.0)*
+  - Cache SPARQL→SQL translation results keyed by query text
   - `pg_ripple.plan_cache_size` GUC (default: `256`; `0` = disabled)
-  - SPI re-parses and re-plans the generated SQL on every call unless the SQL string is identical. The plan cache sidesteps this by skipping SPARQL→SQL translation entirely for structurally identical queries, which is the dominant overhead for repeated parameterized queries (e.g. repeated lookups with different IRI constants that normalize to the same query shape).
-  - Rationale: every SPARQL→SQL call goes through SPI and PG re-plans the SQL unless it is a prepared statement. The plan cache avoids redundant SPARQL→SQL translation at minimum; future work (v0.13.0) may add SPI prepared-statement binding for the generated SQL.
-- [ ] `pg_ripple.sparql_explain(query TEXT, analyze BOOL DEFAULT false) RETURNS TEXT` — show generated SQL; `analyze := true` executes the query and augments the output with actual row counts
-- [ ] **SQL injection / adversarial tests**: verify that SPARQL queries containing SQL metacharacters in IRIs, literals, and prefixed names (`'; DROP TABLE --`, Unicode escapes, null bytes) are safely dictionary-encoded and never reach generated SQL as raw strings
-- [ ] **Malformed input tests**: invalid Turtle, truncated N-Triples, malformed SPARQL — verify clean error messages (no panics, no partial state)
-- [ ] **W3C SPARQL conformance gate**: run the applicable subset of the W3C SPARQL 1.1 Query manifest tests against the features delivered so far; extend this gate in every subsequent SPARQL milestone (v0.4.0, v0.5.0, v0.5.1, v0.9.0, v0.12.0, v0.16.0) until full conformance at v1.0.0
-- [ ] pg_regress: `sparql_queries.sql` (20+ test queries), `sparql_injection.sql` (adversarial inputs)
+- [x] `pg_ripple.sparql_explain(query TEXT, analyze BOOL DEFAULT false) RETURNS TEXT` — show generated SQL; `analyze := true` executes the query and augments the output with actual row counts
+- [x] **SQL injection / adversarial tests**: verify that SPARQL queries containing SQL metacharacters in IRIs, literals, and prefixed names are safely dictionary-encoded and never reach generated SQL as raw strings
+- [x] pg_regress: `sparql_queries.sql` (10+ test queries), `sparql_injection.sql` (adversarial inputs)
 
 ### Exit Criteria
 

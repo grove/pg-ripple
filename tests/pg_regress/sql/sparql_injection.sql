@@ -1,0 +1,42 @@
+-- pg_regress test: SPARQL adversarial inputs (injection safety, v0.3.0)
+
+-- Setup a baseline triple so ASK queries can test real data.
+SELECT pg_ripple.load_ntriples(
+    '<https://inj.test/safe> <https://inj.test/p> <https://inj.test/v> .' || E'\n'
+) = 1 AS baseline_loaded;
+
+-- IRI containing percent-encoded SQL-injection-like characters: must not match.
+-- (The SPARQL parser accepts percent-encoded chars safely; bound IRI is encoded
+-- to an i64 before any SQL is generated, so SQL injection is impossible.)
+SELECT pg_ripple.sparql_ask(
+    'ASK { <https://inj.test/safe%27%3B%20DROP%20TABLE%20_pg_ripple.dictionary%3B%20--#> ?p ?o }'
+) AS injection_iri_ask;
+
+-- SPARQL query with a literal containing single quotes.
+SELECT pg_ripple.sparql_ask(
+    $$ASK { ?s ?p "it's fine" }$$
+) AS literal_single_quote;
+
+-- SPARQL query with a literal containing a backslash.
+SELECT pg_ripple.sparql_ask(
+    $$ASK { ?s ?p "path\\to\\file" }$$
+) AS literal_backslash;
+
+-- SPARQL query with a Unicode IRI.
+SELECT pg_ripple.sparql_ask(
+    U&'ASK { <https://inj.test/\00e9l\00e8ve> ?p ?o }'
+) AS unicode_iri_ask;
+
+-- Very long IRI (256 characters): must not error.
+SELECT pg_ripple.sparql_ask(
+    'ASK { <https://inj.test/' ||
+    repeat('a', 256) ||
+    '> ?p ?o }'
+) AS long_iri_ask;
+
+-- Verify the baseline triple is retrievable via SPARQL.
+SELECT COUNT(*) AS baseline_count
+FROM pg_ripple.sparql('SELECT ?s ?p ?o WHERE { ?s <https://inj.test/p> ?o }');
+
+-- Verify dictionary is intact after all injection attempts.
+SELECT pg_ripple.triple_count() >= 1 AS dictionary_intact;
