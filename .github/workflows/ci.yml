@@ -61,7 +61,7 @@ jobs:
         run: cargo clippy --features pg18 -- -D warnings
 
       - name: Run pg_test suite
-        run: cargo pgrx test pg18 -- --test-threads=1
+        run: cargo pgrx test pg18 -- -- --test-threads=1
 
   regress:
     name: pg_regress (pg18)
