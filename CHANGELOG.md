@@ -11,6 +11,11 @@ Versions correspond to the milestones in [ROADMAP.md](ROADMAP.md).
 
 ### Changed
 
+- **Documentation aligned with current implementation status and authoritative plans**
+  - `README.md` now distinguishes the current implemented surface (dictionary encoder, VP storage, basic triple CRUD) from the broader target-state architecture and planned milestones.
+  - SHACL wording in the README now matches the roadmap and implementation plan: exact W3C semantics first, with PostgreSQL constraints and indices used only as semantics-preserving accelerators.
+  - The README architecture section now explicitly labels the HTAP/shared-memory diagram as the intended v0.6.0+ target state rather than the current checkout.
+
 - **Dictionary: switch to hash-backed sequence encoding (Route 2)**
   - `id` column changed from a bare `BIGINT` (holding the truncated upper 64 bits of XXH3-128) to `BIGINT GENERATED ALWAYS AS IDENTITY` — a dense sequential join key independent of the hash.
   - `hash` column changed from `BIGINT` (lower 64 bits) to `BYTEA` (full 16-byte XXH3-128) so the complete 128-bit fingerprint is preserved. A `UNIQUE` index on `hash` is the collision-detection key.

@@ -2,10 +2,12 @@
 
 **A high-performance RDF triple store inside PostgreSQL.**
 
-pg_ripple is a PostgreSQL 18 extension that turns your database into a fully-featured knowledge graph. Store RDF data, query it with SPARQL, enforce data quality with SHACL, and reason over it with Datalog — all without leaving PostgreSQL.
+pg_ripple is a PostgreSQL 18 extension that is building toward a fully-featured knowledge graph inside the database. The target system stores RDF data, queries it with SPARQL, validates it with exact W3C SHACL semantics, and reasons over it with Datalog — all without leaving PostgreSQL.
+
+> **Current status (2026-04-14):** v0.1.0 code exists and builds. The dictionary encoder, VP storage engine, and basic triple CRUD SQL functions are implemented. SPARQL, SHACL, Datalog, the HTTP endpoint, and federation remain planned milestones.
 
 ```sql
--- Install and start using
+-- Illustrative target-state example (planned later milestones)
 CREATE EXTENSION pg_ripple;
 
 -- Load some data
@@ -103,7 +105,7 @@ Basic write operations (INSERT DATA, DELETE DATA) land in v0.5.1, enabling stand
 
 ### SHACL data quality *(planned — v0.7.0 core, v0.8.0 advanced)*
 
-Define data integrity rules using the W3C SHACL standard. Constraints are enforced at insert time (synchronous mode) or checked in the background (asynchronous mode).
+Define data integrity rules using the W3C SHACL standard. Validation uses exact W3C SHACL semantics in both synchronous and asynchronous modes; PostgreSQL constraints and helper indices are internal accelerators only when they preserve those semantics exactly.
 
 ```sql
 -- Load a shape that requires every Person to have exactly one email
@@ -205,7 +207,9 @@ SELECT * FROM _pg_ripple.sparql_view_active_employees;
 
 ## Architecture
 
-pg_ripple is built from the ground up for performance:
+pg_ripple is built from the ground up for performance.
+
+> **Target-state note:** The diagram below shows the intended v0.6.0+ architecture after the HTAP split and shared-memory cache land. The current codebase is earlier than this target state.
 
 ```
  SPARQL Query / Update                   HTTP API
@@ -291,7 +295,7 @@ pg_ripple is built from the ground up for performance:
 
 ## Project Status
 
-pg_ripple is in the **design and planning phase**. No code has been written yet. The architecture, roadmap, and implementation plan are documented and ready for development.
+pg_ripple is in **early implementation**. The v0.1.0 foundation is partially implemented today: dictionary encoding, VP storage, and basic triple CRUD exist in the repository. The roadmap and implementation plan still describe the broader target architecture from v0.2.0 through v1.0.0.
 
 See the [Roadmap](ROADMAP.md) for the full release plan (v0.1.0 through v1.0.0) and the [Implementation Plan](plans/implementation_plan.md) for detailed technical design.
 
@@ -330,33 +334,23 @@ cargo pgrx install --pg-config $(which pg_config)
 CREATE EXTENSION pg_ripple;
 ```
 
-### Load some data
+### Insert a triple
 
 ```sql
-SELECT pg_ripple.load_turtle('
-  @prefix ex: <http://example.org/> .
-  @prefix foaf: <http://xmlns.com/foaf/0.1/> .
-
-  ex:Alice a foaf:Person ;
-    foaf:name "Alice" ;
-    foaf:knows ex:Bob .
-
-  ex:Bob a foaf:Person ;
-    foaf:name "Bob" .
-');
+SELECT pg_ripple.insert_triple(
+  'http://example.org/Alice',
+  'http://xmlns.com/foaf/0.1/knows',
+  'http://example.org/Bob'
+);
 ```
 
-### Query with SPARQL
+### Check the current store
 
 ```sql
-SELECT * FROM pg_ripple.sparql('
-  PREFIX foaf: <http://xmlns.com/foaf/0.1/>
-  SELECT ?name WHERE {
-    ?person a foaf:Person .
-    ?person foaf:name ?name .
-  }
-');
+SELECT pg_ripple.triple_count();
 ```
+
+Bulk loaders, SPARQL queries, SHACL validation, and Datalog reasoning are planned later milestones; see the roadmap below for their target versions.
 
 ---
 
@@ -371,7 +365,7 @@ pg_ripple is planned as 18 incremental releases from v0.1.0 to v1.0.0 (~98–131
 | **RDF-star** | 0.4.0 | Quoted triples, statement-level metadata, LPG-ready storage |
 | **Query (Advanced)** | 0.5.0 – 0.5.1 | Property paths, aggregates, subqueries, inline encoding, CONSTRUCT/DESCRIBE, INSERT DATA/DELETE DATA, full-text search |
 | **Concurrency** | 0.6.0 | HTAP architecture — reads and writes at full speed, shared-memory cache |
-| **Data quality** | 0.7.0 – 0.8.0 | SHACL validation (sync + async), complex shapes |
+| **Data quality** | 0.7.0 – 0.8.0 | SHACL validation (sync + async, exact W3C semantics), complex shapes |
 | **Interop** | 0.9.0 | RDF/XML import, Turtle/JSON-LD export, RDF-star serialization |
 | **Intelligence** | 0.10.0 | Datalog reasoning (RDFS, OWL RL, custom rules), constraint rules |
 | **Reactivity** | 0.11.0 | Incremental SPARQL & Datalog views, ExtVP (requires pg_trickle) |
