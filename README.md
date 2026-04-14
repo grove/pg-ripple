@@ -9,36 +9,90 @@
 
 **A high-performance RDF triple store inside PostgreSQL.**
 
-pg_ripple is a PostgreSQL 18 extension that is building toward a fully-featured knowledge graph inside the database. The target system stores RDF data, queries it with SPARQL, validates it with exact W3C SHACL semantics, and reasons over it with Datalog — all without leaving PostgreSQL.
+pg_ripple is a PostgreSQL 18 extension building toward a fully-featured knowledge graph inside the database. It stores RDF data, queries it with SPARQL, validates it with SHACL, and reasons over it with Datalog — all without leaving PostgreSQL.
 
-> **Current status (2026-04-14):** v0.1.0 code exists and builds. The dictionary encoder, VP storage engine, and basic triple CRUD SQL functions are implemented. SPARQL, SHACL, Datalog, the HTTP endpoint, and federation remain planned milestones.
+---
+
+## What works today (v0.1.0)
+
+The foundation is in place. You can install the extension, store triples, and query them back by pattern:
 
 ```sql
--- Illustrative target-state example (planned later milestones)
 CREATE EXTENSION pg_ripple;
 
--- Load some data
-SELECT pg_ripple.load_turtle('
-  @prefix ex: <http://example.org/> .
-  @prefix foaf: <http://xmlns.com/foaf/0.1/> .
+-- Store a fact
+SELECT pg_ripple.insert_triple(
+  'http://example.org/Alice',
+  'http://xmlns.com/foaf/0.1/knows',
+  'http://example.org/Bob'
+);
 
-  ex:Alice foaf:knows ex:Bob .
-  ex:Alice foaf:name "Alice" .
-  ex:Bob   foaf:name "Bob" .
-  ex:Bob   foaf:knows ex:Carol .
+-- Query by pattern (NULL = wildcard)
+SELECT * FROM pg_ripple.find_triples(
+  'http://example.org/Alice', NULL, NULL
+);
+
+-- Count all triples in the store
+SELECT pg_ripple.triple_count();
+```
+
+Every IRI, blank node, and literal is dictionary-encoded to a compact integer for fast joins. Facts about different predicates are stored in separate tables (Vertical Partitioning) so queries that bind a predicate touch only one compact, indexed table. No `shared_preload_libraries` configuration required.
+
+---
+
+## Where we're headed
+
+Each future release adds a self-contained layer of capability:
+
+```sql
+-- v0.2.0: bulk import from files
+SELECT pg_ripple.load_turtle('
+  @prefix foaf: <http://xmlns.com/foaf/0.1/> .
+  <http://example.org/Alice> foaf:knows <http://example.org/Bob> .
+  <http://example.org/Bob>   foaf:name  "Bob" .
 ');
 
--- Query with SPARQL
+-- v0.3.0: ask questions in SPARQL
 SELECT * FROM pg_ripple.sparql('
-  PREFIX ex:   <http://example.org/>
   PREFIX foaf: <http://xmlns.com/foaf/0.1/>
   SELECT ?name WHERE {
-    ex:Alice foaf:knows+ ?person .
+    <http://example.org/Alice> foaf:knows ?person .
     ?person foaf:name ?name .
   }
 ');
--- Returns: Alice → knows → Bob → knows → Carol
--- Result: [{"name": "Bob"}, {"name": "Carol"}]
+
+-- v0.5.0: property paths — follow chains of any length
+SELECT * FROM pg_ripple.sparql('
+  PREFIX foaf: <http://xmlns.com/foaf/0.1/>
+  SELECT ?name WHERE {
+    <http://example.org/Alice> foaf:knows+ ?person .
+    ?person foaf:name ?name .
+  }
+');
+-- Returns everyone reachable through "knows" links
+
+-- v0.7.0: data quality rules with SHACL
+SELECT pg_ripple.load_shacl('
+  @prefix sh: <http://www.w3.org/ns/shacl#> .
+  <http://example.org/PersonShape> a sh:NodeShape ;
+    sh:targetClass <http://example.org/Person> ;
+    sh:property [ sh:path <http://xmlns.com/foaf/0.1/name> ;
+                  sh:minCount 1 ] .
+');
+
+-- v0.10.0: reasoning — derive new facts automatically
+SELECT pg_ripple.load_rules_builtin('rdfs');
+-- Queries now infer transitive subclass relationships
+
+-- v0.16.0: federate queries across remote SPARQL endpoints
+SELECT * FROM pg_ripple.sparql('
+  SELECT ?abstract WHERE {
+    <http://example.org/Alice> <http://example.org/worksAt> ?org .
+    SERVICE <https://dbpedia.org/sparql> {
+      ?org <http://dbpedia.org/ontology/abstract> ?abstract .
+    }
+  }
+');
 ```
 
 ---
@@ -75,148 +129,11 @@ This means you get:
 
 ---
 
-## Key Features
-
-### Standard RDF storage *(planned — v0.1.0)*
-
-Store triples and quads using the standard RDF data model. Every IRI, blank node, and literal is dictionary-encoded to a dense sequential `BIGINT` (collision-free, hash-backed sequence) for fast joins and minimal storage.
-
-```sql
-SELECT pg_ripple.insert_triple(
-  'http://example.org/Alice',
-  'http://xmlns.com/foaf/0.1/knows',
-  'http://example.org/Bob'
-);
-```
-
-### SPARQL query engine *(planned — v0.3.0 basic, v0.5.0–v0.5.1 advanced)*
-
-Full SPARQL 1.1 support — SELECT, ASK, CONSTRUCT, DESCRIBE, property paths, aggregates, subqueries, UNION, OPTIONAL, FILTER, BIND, VALUES, and full-text search. Basic graph patterns, FILTER, and OPTIONAL land in v0.3.0; property paths, aggregates, and subqueries in v0.5.0; inline value encoding, CONSTRUCT/DESCRIBE, full-text search, and basic write support in v0.5.1.
-
-```sql
--- Find everyone Alice can reach through "knows" links (any depth)
-SELECT * FROM pg_ripple.sparql('
-  PREFIX ex:   <http://example.org/>
-  PREFIX foaf: <http://xmlns.com/foaf/0.1/>
-  SELECT ?person ?name WHERE {
-    ex:Alice foaf:knows+ ?person .
-    ?person foaf:name ?name .
-  }
-  ORDER BY ?name
-');
-```
-
-### SPARQL Update *(planned — v0.5.1 basic, v0.12.0 advanced)*
-
-Basic write operations (INSERT DATA, DELETE DATA) land in v0.5.1, enabling standard RDF tools to write to pg_ripple. Pattern-based updates (DELETE/INSERT WHERE), LOAD, CLEAR, DROP, and CREATE complete the full SPARQL 1.1 Update specification in v0.12.0.
-
-### SHACL data quality *(planned — v0.7.0 core, v0.8.0 advanced)*
-
-Define data integrity rules using the W3C SHACL standard. Validation uses exact W3C SHACL semantics in both synchronous and asynchronous modes; PostgreSQL constraints and helper indices are internal accelerators only when they preserve those semantics exactly.
-
-```sql
--- Load a shape that requires every Person to have exactly one email
-SELECT pg_ripple.load_shacl('
-  @prefix sh: <http://www.w3.org/ns/shacl#> .
-  @prefix ex: <http://example.org/> .
-
-  ex:PersonShape a sh:NodeShape ;
-    sh:targetClass ex:Person ;
-    sh:property [
-      sh:path ex:email ;
-      sh:minCount 1 ;
-      sh:maxCount 1 ;
-    ] .
-');
-```
-
-### Datalog reasoning *(planned — v0.10.0)*
-
-Automatically derive new facts from rules and logic. Ships with built-in RDFS (13 rules) and OWL 2 RL (~80 rules) entailment. Write your own rules in a Turtle-flavoured Datalog syntax.
-
-```sql
--- Load RDFS entailment rules
-SELECT pg_ripple.load_rules_builtin('rdfs');
-
--- Now SPARQL queries automatically infer subclass relationships:
--- If Dog rdfs:subClassOf Animal, and Rex rdf:type Dog,
--- then Rex rdf:type Animal is inferred
-```
-
-### SPARQL Protocol (HTTP) *(planned — v0.15.0)*
-
-A companion HTTP service (`pg_ripple_http`) exposes a standard W3C SPARQL 1.1 Protocol endpoint, so web applications, YASGUI, Postman, and any SPARQL client can query pg_ripple over HTTP with full content negotiation.
-
-### SPARQL Federation *(planned — v0.16.0)*
-
-Query remote SPARQL endpoints from within pg_ripple queries using the standard `SERVICE` keyword. Multiple remote calls execute in parallel.
-
-```sql
-SELECT * FROM pg_ripple.sparql('
-  PREFIX ex:  <http://example.org/>
-  PREFIX dbo: <http://dbpedia.org/ontology/>
-  SELECT ?person ?abstract WHERE {
-    ?person ex:worksAt ex:AcmeCorp .
-    SERVICE <https://dbpedia.org/sparql> {
-      ?person dbo:abstract ?abstract .
-      FILTER(LANG(?abstract) = "en")
-    }
-  }
-');
-```
-
-### RDF-star / RDF 1.2 *(planned — v0.4.0)*
-
-Make statements about statements — essential for provenance, temporal annotations, and trust.
-
-```sql
-SELECT pg_ripple.load_turtle('
-  @prefix ex:  <http://example.org/> .
-  @prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
-
-  << ex:Alice ex:knows ex:Bob >> ex:assertedBy ex:Carol ;
-                                  ex:assertedOn "2024-01-15"^^xsd:date .
-');
-```
-
-### Named graphs with access control *(planned — v0.2.0 graphs, v0.14.0 RLS)*
-
-Organise facts into named graphs, then control access per graph using PostgreSQL's Row-Level Security.
-
-```sql
-SELECT pg_ripple.grant_graph('analyst_role', 'http://example.org/public-data', 'read');
-SELECT pg_ripple.grant_graph('admin_role', 'http://example.org/internal', 'admin');
-```
-
-### Incremental SPARQL views *(planned — v0.11.0)*
-
-Pin a SPARQL query as a live view that updates incrementally when the underlying data changes — no full recomputation. Requires the companion [pg_trickle](https://github.com/grove/pg-trickle) extension.
-
-```sql
-SELECT pg_ripple.create_sparql_view(
-  'active_employees',
-  'PREFIX rdf:  <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
-   PREFIX ex:   <http://example.org/>
-   PREFIX foaf: <http://xmlns.com/foaf/0.1/>
-   SELECT ?name ?dept WHERE {
-     ?p rdf:type ex:Employee .
-     ?p foaf:name ?name .
-     ?p ex:department ?dept .
-   }',
-  '5s'  -- refresh interval
-);
-
--- Queries against the view are sub-millisecond table scans
-SELECT * FROM _pg_ripple.sparql_view_active_employees;
-```
-
----
-
 ## Architecture
 
 pg_ripple is built from the ground up for performance.
 
-> **Target-state note:** The diagram below shows the intended v0.6.0+ architecture after the HTAP split and shared-memory cache land. The current codebase is earlier than this target state.
+> The diagram below shows the target v0.6.0+ architecture after the HTAP split and shared-memory cache land.
 
 ```
  SPARQL Query / Update                   HTTP API
@@ -300,30 +217,19 @@ pg_ripple is built from the ground up for performance.
 
 ---
 
-## Project Status
-
-pg_ripple is in **early implementation**. The v0.1.0 foundation is partially implemented today: dictionary encoding, VP storage, and basic triple CRUD exist in the repository. The roadmap and implementation plan still describe the broader target architecture from v0.2.0 through v1.0.0.
-
-See the [Roadmap](ROADMAP.md) for the full release plan (v0.1.0 through v1.0.0) and the [Implementation Plan](plans/implementation_plan.md) for detailed technical design.
-
----
-
 ## Getting Started
-
-> **Note**: pg_ripple is not yet released. The instructions below describe the intended installation workflow.
 
 ### Prerequisites
 
 - PostgreSQL 18
-- Rust toolchain (stable)
+- Rust stable toolchain
 - [pgrx](https://github.com/pgcentralfoundation/pgrx) 0.17
 
 ### Build and install
 
 ```bash
-# Clone the repository
 git clone https://github.com/grove/pg-ripple.git
-cd pg_ripple
+cd pg-ripple
 
 # Initialise pgrx for PostgreSQL 18
 cargo pgrx init --pg18 $(which pg_config)
@@ -341,51 +247,40 @@ cargo pgrx install --pg-config $(which pg_config)
 CREATE EXTENSION pg_ripple;
 ```
 
-### Insert a triple
-
-```sql
-SELECT pg_ripple.insert_triple(
-  'http://example.org/Alice',
-  'http://xmlns.com/foaf/0.1/knows',
-  'http://example.org/Bob'
-);
-```
-
-### Check the current store
-
-```sql
-SELECT pg_ripple.triple_count();
-```
-
-Bulk loaders, SPARQL queries, SHACL validation, and Datalog reasoning are planned later milestones; see the roadmap below for their target versions.
+Bulk loaders, SPARQL queries, SHACL validation, and Datalog reasoning are coming in later milestones — see the roadmap below.
 
 ---
 
 ## Roadmap
 
-pg_ripple is planned as 18 incremental releases from v0.1.0 to v1.0.0 (~98–131 person-weeks):
+18 releases from v0.1.0 to v1.0.0, estimated at 98–131 person-weeks total.
 
-| Phase | Versions | What you get |
-|---|---|---|
-| **Foundation** | 0.1.0 – 0.2.0 | Store triples, bulk import, VP storage, named graphs, statement identifiers |
-| **Query (Basic)** | 0.3.0 | SPARQL SELECT and ASK with BGPs, FILTER, OPTIONAL, GRAPH patterns |
-| **RDF-star** | 0.4.0 | Quoted triples, statement-level metadata, LPG-ready storage |
-| **Query (Advanced)** | 0.5.0 – 0.5.1 | Property paths, aggregates, subqueries, inline encoding, CONSTRUCT/DESCRIBE, INSERT DATA/DELETE DATA, full-text search |
-| **Concurrency** | 0.6.0 | HTAP architecture — reads and writes at full speed, shared-memory cache |
-| **Data quality** | 0.7.0 – 0.8.0 | SHACL validation (sync + async, exact W3C semantics), complex shapes |
-| **Interop** | 0.9.0 | RDF/XML import, Turtle/JSON-LD export, RDF-star serialization |
-| **Intelligence** | 0.10.0 | Datalog reasoning (RDFS, OWL RL, custom rules), constraint rules |
-| **Reactivity** | 0.11.0 | Incremental SPARQL & Datalog views, ExtVP (requires pg_trickle) |
-| **Writes (Advanced)** | 0.12.0 | Pattern-based SPARQL Update — DELETE/INSERT WHERE, LOAD, CLEAR, DROP |
-| **Production** | 0.13.0 – 0.14.0 | Performance tuning, BSBM benchmarks, admin tools, graph-level RLS, docs |
-| **Ecosystem** | 0.15.0 – 0.16.0 | HTTP SPARQL Protocol, SPARQL Federation |
-| **Release** | 1.0.0 | W3C conformance, stress testing, security audit |
+| Version | Name | What it delivers | Effort | Status |
+|---|---|---|---|---|
+| **0.1.0** | **Foundation** | Dictionary encoding, VP storage, basic triple CRUD | 6–8 pw | ✅ Done |
+| 0.2.0 | Bulk Loading & Named Graphs | Turtle/N-Triples/N-Quads/TriG import, named graphs, rare-predicate table | 6–8 pw | Planned |
+| 0.3.0 | SPARQL Basic | SELECT, ASK, BGPs, FILTER, OPTIONAL, GRAPH patterns, plan cache | 6–8 pw | Planned |
+| 0.4.0 | RDF-star | Quoted triples, statement metadata, LPG-ready storage | 8–10 pw | Planned |
+| 0.5.0 | SPARQL Advanced (Query) | Property paths, aggregates, UNION/MINUS, subqueries, BIND/VALUES | 6–8 pw | Planned |
+| 0.5.1 | SPARQL Advanced (Write) | Inline encoding, CONSTRUCT/DESCRIBE, INSERT/DELETE DATA, full-text search | 6–8 pw | Planned |
+| 0.6.0 | HTAP Architecture | Concurrent reads/writes, shared-memory dictionary cache | 8–10 pw | Planned |
+| 0.7.0 | SHACL Core | Constraint shapes, synchronous validation on insert | 4–6 pw | Planned |
+| 0.8.0 | SHACL Advanced | Complex shapes, async background validation pipeline | 4–6 pw | Planned |
+| 0.9.0 | Serialization | Turtle/N-Triples/JSON-LD/RDF-XML export, RDF-star formats | 3–4 pw | Planned |
+| 0.10.0 | Datalog Reasoning | RDFS (13 rules), OWL 2 RL (~80 rules), custom rules | 10–12 pw | Planned |
+| 0.11.0 | SPARQL & Datalog Views | Incremental live views via pg_trickle, ExtVP | 5–7 pw | Planned |
+| 0.12.0 | SPARQL Update (Advanced) | DELETE/INSERT WHERE, LOAD, CLEAR, DROP, CREATE | 3–4 pw | Planned |
+| 0.13.0 | Performance | BSBM benchmarks, prepared statements, planner statistics | 6–8 pw | Planned |
+| 0.14.0 | Admin & Security | Graph-level RLS, vacuum/reindex, packaging, full docs | 4–6 pw | Planned |
+| 0.15.0 | SPARQL Protocol | Standard W3C HTTP endpoint (`pg_ripple_http` binary) | 3–4 pw | Planned |
+| 0.16.0 | SPARQL Federation | `SERVICE` keyword, parallel remote endpoint queries | 4–6 pw | Planned |
+| 1.0.0 | Production Release | W3C conformance, stress testing, security audit | 6–8 pw | Planned |
 
-See the full [Roadmap](ROADMAP.md) for details on every release.
+See [ROADMAP.md](ROADMAP.md) for deliverables and exit criteria for every release.
 
 ### Beyond 1.0
 
-Planned future directions include distributed storage (Citus), vector + graph hybrid search (pgvector), temporal queries (TimescaleDB), GeoSPARQL (PostGIS), Cypher/GQL query language, and R2RML virtual graphs. See the [Roadmap](ROADMAP.md) for the full post-1.0 horizon.
+Planned future directions: distributed storage (Citus), vector + graph hybrid search (pgvector), temporal queries (TimescaleDB), GeoSPARQL (PostGIS), Cypher/GQL query language, and R2RML virtual graphs.
 
 ---
 
