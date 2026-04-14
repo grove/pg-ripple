@@ -42,7 +42,11 @@ jobs:
             pkg-config \
             libssl-dev \
             libclang-dev \
-            clang
+            clang \
+            libreadline-dev \
+            libicu-dev \
+            bison \
+            flex
 
       - name: Install cargo-pgrx
         run: cargo install cargo-pgrx --version "=0.17.0" --locked
@@ -85,7 +89,8 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends \
-            build-essential pkg-config libssl-dev libclang-dev clang
+            build-essential pkg-config libssl-dev libclang-dev clang \
+            libreadline-dev libicu-dev bison flex
 
       - name: Install cargo-pgrx
         run: cargo install cargo-pgrx --version "=0.17.0" --locked
