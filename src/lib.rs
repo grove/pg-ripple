@@ -8,7 +8,7 @@
 //! are parsed with `spargebra`, compiled to SQL, and executed via SPI
 //! (see `src/sparql/`).
 
-use pgrx::guc::{GucContext, GucFlags, GucRegistry};
+use pgrx::guc::{GucContext, GucFlags};
 use pgrx::prelude::*;
 
 mod dictionary;
@@ -16,6 +16,16 @@ mod error;
 mod storage;
 
 pgrx::pg_module_magic!();
+
+// Allow creating the `pg_ripple` schema despite the `pg_` prefix restriction.
+// PostgreSQL reserves `pg_`-prefixed schema names; `SET LOCAL allow_system_table_mods = on`
+// (superuser-only) lifts the restriction for the duration of the CREATE EXTENSION transaction.
+// This runs before pgrx's generated `CREATE SCHEMA IF NOT EXISTS pg_ripple` SQL.
+pgrx::extension_sql!(
+    r#"SET LOCAL allow_system_table_mods = on;"#,
+    name = "bootstrap_allow_system_mods",
+    bootstrap
+);
 
 /// GUC: default named-graph identifier (empty string → default graph 0).
 static DEFAULT_GRAPH: pgrx::GucSetting<Option<std::ffi::CString>> =
@@ -47,50 +57,63 @@ pub extern "C-unwind" fn _PG_init() {
 
 // ─── Public SQL-callable functions (v0.1.0) ───────────────────────────────────
 
-/// Encode a text IRI/blank-node/literal to its dictionary `i64` identifier.
-/// Creates a new entry if the term has not been seen before.
-#[pg_extern]
-fn encode_term(term: &str, kind: i16) -> i64 {
-    dictionary::encode(term, kind)
-}
+/// All user-visible SQL functions live in the `pg_ripple` schema.
+#[pg_schema]
+mod pg_ripple {
+    use pgrx::prelude::*;
 
-/// Decode a dictionary `i64` back to its original text value.
-/// Returns `None` when the identifier is not present in the dictionary.
-#[pg_extern]
-fn decode_id(id: i64) -> Option<String> {
-    dictionary::decode(id)
-}
+    /// Encode a text IRI/blank-node/literal to its dictionary `i64` identifier.
+    /// Creates a new entry if the term has not been seen before.
+    #[pg_extern]
+    fn encode_term(term: &str, kind: i16) -> i64 {
+        crate::dictionary::encode(term, kind)
+    }
 
-/// Insert a triple into the appropriate VP table.
-/// `s`, `p`, and `o` are N-Triples-formatted string representations.
-#[pg_extern]
-fn insert_triple(s: &str, p: &str, o: &str) -> i64 {
-    storage::insert_triple(s, p, o, 0_i64)
-}
+    /// Decode a dictionary `i64` back to its original text value.
+    /// Returns `None` when the identifier is not present in the dictionary.
+    #[pg_extern]
+    fn decode_id(id: i64) -> Option<String> {
+        crate::dictionary::decode(id)
+    }
 
-/// Delete a triple.  Returns the number of rows removed (0 or 1).
-#[pg_extern]
-fn delete_triple(s: &str, p: &str, o: &str) -> i64 {
-    storage::delete_triple(s, p, o, 0_i64)
-}
+    /// Insert a triple into the appropriate VP table.
+    /// `s`, `p`, and `o` are N-Triples-formatted string representations.
+    #[pg_extern]
+    fn insert_triple(s: &str, p: &str, o: &str) -> i64 {
+        crate::storage::insert_triple(s, p, o, 0_i64)
+    }
 
-/// Return the total number of triples across all VP tables.
-#[pg_extern]
-fn triple_count() -> i64 {
-    storage::total_triple_count()
-}
+    /// Delete a triple.  Returns the number of rows removed (0 or 1).
+    #[pg_extern]
+    fn delete_triple(s: &str, p: &str, o: &str) -> i64 {
+        crate::storage::delete_triple(s, p, o, 0_i64)
+    }
 
-/// Pattern-match triples; any argument may be NULL to act as a wildcard.
-/// Returns decoded `(s, p, o, g)` text tuples.
-#[pg_extern]
-fn find_triples(
-    s: Option<&str>,
-    p: Option<&str>,
-    o: Option<&str>,
-) -> TableIterator<'static, (name!(s, String), name!(p, String), name!(o, String), name!(g, String))>
-{
-    let rows = storage::find_triples(s, p, o, None);
-    TableIterator::new(rows.into_iter())
+    /// Return the total number of triples across all VP tables.
+    #[pg_extern]
+    fn triple_count() -> i64 {
+        crate::storage::total_triple_count()
+    }
+
+    /// Pattern-match triples; any argument may be NULL to act as a wildcard.
+    /// Returns decoded `(s, p, o, g)` text tuples.
+    #[pg_extern]
+    fn find_triples(
+        s: Option<&str>,
+        p: Option<&str>,
+        o: Option<&str>,
+    ) -> TableIterator<
+        'static,
+        (
+            name!(s, String),
+            name!(p, String),
+            name!(o, String),
+            name!(g, String),
+        ),
+    > {
+        let rows = crate::storage::find_triples(s, p, o, None);
+        TableIterator::new(rows)
+    }
 }
 
 // ─── Tests ───────────────────────────────────────────────────────────────────
@@ -123,6 +146,10 @@ mod tests {
 pub mod pg_test {
     pub fn setup(_options: Vec<&str>) {}
     pub fn postgresql_conf_options() -> Vec<&'static str> {
-        vec![]
+        // allow_system_table_mods is needed when the test framework creates
+        // CREATE EXTENSION pg_ripple, since `pg_ripple` starts with `pg_`.
+        // The extension's own bootstrap SQL (SET LOCAL allow_system_table_mods)
+        // handles production installs; this covers the pgrx test harness path.
+        vec!["allow_system_table_mods = on"]
     }
 }

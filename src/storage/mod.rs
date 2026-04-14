@@ -42,12 +42,27 @@ fn strip_angle_brackets(term: &str) -> &str {
 /// Initialize the extension's base schemas and tables.
 /// Called once from _PG_init to ensure all base infrastructure exists.
 pub fn initialize_schema() {
-    // Create the internal schema if it doesn't exist.
+    // Create the user-visible schema if it doesn't exist.
+    // NOTE: pg_ripple starts with pg_ which is reserved; the extension's
+    // bootstrap SQL (SET LOCAL allow_system_table_mods = on) enables creation
+    // during CREATE EXTENSION.  In subsequent calls (e.g. after server restart),
+    // the schema already exists so IF NOT EXISTS is a no-op.  We set
+    // allow_system_table_mods locally here for that "already exists" fast-path;
+    // the actual creation was done during CREATE EXTENSION.
     Spi::run_with_args(
-        "CREATE SCHEMA IF NOT EXISTS _pg_ripple",
+        "DO $$ BEGIN \
+             IF NOT EXISTS (SELECT 1 FROM pg_namespace WHERE nspname = 'pg_ripple') THEN \
+                 SET LOCAL allow_system_table_mods = on; \
+                 CREATE SCHEMA pg_ripple; \
+             END IF; \
+         END $$",
         &[],
     )
-    .unwrap_or_else(|e| pgrx::error!("_pg_ripple schema creation error: {e}"));
+    .unwrap_or_else(|e| pgrx::error!("pg_ripple schema creation error: {e}"));
+
+    // Create the internal schema if it doesn't exist.
+    Spi::run_with_args("CREATE SCHEMA IF NOT EXISTS _pg_ripple", &[])
+        .unwrap_or_else(|e| pgrx::error!("_pg_ripple schema creation error: {e}"));
 
     // Create the dictionary table.
     Spi::run_with_args(
@@ -160,15 +175,19 @@ fn ensure_vp_table(predicate_id: i64) -> String {
 
     // Create indexes separately
     Spi::run_with_args(
-        &format!("CREATE INDEX IF NOT EXISTS idx_vp_{predicate_id}_s_o \
-         ON {table} (s, o)"),
+        &format!(
+            "CREATE INDEX IF NOT EXISTS idx_vp_{predicate_id}_s_o \
+         ON {table} (s, o)"
+        ),
         &[],
     )
     .unwrap_or_else(|e| pgrx::error!("VP table index 1 SPI error: {e}"));
 
     Spi::run_with_args(
-        &format!("CREATE INDEX IF NOT EXISTS idx_vp_{predicate_id}_o_s \
-         ON {table} (o, s)"),
+        &format!(
+            "CREATE INDEX IF NOT EXISTS idx_vp_{predicate_id}_o_s \
+         ON {table} (o, s)"
+        ),
         &[],
     )
     .unwrap_or_else(|e| pgrx::error!("VP table index 2 SPI error: {e}"));
@@ -264,11 +283,9 @@ pub fn delete_triple(s: &str, p: &str, o: &str, g: i64) -> i64 {
 
 /// Return the sum of `triple_count` across all predicate catalog entries.
 pub fn total_triple_count() -> i64 {
-    Spi::get_one::<i64>(
-        "SELECT COALESCE(SUM(triple_count), 0)::bigint FROM _pg_ripple.predicates",
-    )
-    .unwrap_or_else(|e| pgrx::error!("triple_count SPI error: {e}"))
-    .unwrap_or(0)
+    Spi::get_one::<i64>("SELECT COALESCE(SUM(triple_count), 0)::bigint FROM _pg_ripple.predicates")
+        .unwrap_or_else(|e| pgrx::error!("triple_count SPI error: {e}"))
+        .unwrap_or(0)
 }
 
 /// Find triples matching the supplied pattern.
@@ -376,4 +393,3 @@ fn scan_vp_table(
         .collect()
     })
 }
-

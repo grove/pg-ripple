@@ -5,5 +5,5 @@ comment = 'High-performance RDF triple store with native SPARQL query execution'
 default_version = '0.1.0'
 module_pathname = '$libdir/pg_ripple'
 relocatable = false
-superuser = false
+superuser = true
 requires = ''

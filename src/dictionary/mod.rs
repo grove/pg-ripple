@@ -46,9 +46,13 @@ use xxhash_rust::xxh3::xxh3_128;
 const CACHE_CAPACITY: usize = 16_384;
 
 pub const KIND_IRI: i16 = 0;
+#[allow(dead_code)]
 pub const KIND_BLANK: i16 = 1;
+#[allow(dead_code)]
 pub const KIND_LITERAL: i16 = 2;
+#[allow(dead_code)]
 pub const KIND_TYPED_LITERAL: i16 = 3;
+#[allow(dead_code)]
 pub const KIND_LANG_LITERAL: i16 = 4;
 
 thread_local! {
@@ -86,32 +90,30 @@ pub fn encode(term: &str, kind: i16) -> i64 {
 
     let hash_bytes = hash128.to_be_bytes();
 
-    // Try to insert; if the term already exists the UNIQUE constraint on `hash`
-    // fires and ON CONFLICT DO NOTHING suppresses the error, returning no row.
-    let id: i64 = match Spi::get_one_with_args::<i64>(
-        "INSERT INTO _pg_ripple.dictionary (hash, value, kind) \
-         VALUES ($1, $2, $3) \
-         ON CONFLICT (hash) DO NOTHING \
-         RETURNING id",
+    // Upsert + lookup in a single round-trip.  The CTE inserts the term when it
+    // is new (ON CONFLICT DO NOTHING) and the outer COALESCE returns the id
+    // whether the row was just inserted or already existed.  This always returns
+    // exactly one row, which is safe even in pgrx 0.17 where get_one_with_args
+    // returns Err(InvalidPosition) on 0-row results.
+    let id: i64 = Spi::get_one_with_args::<i64>(
+        "WITH ins AS ( \
+             INSERT INTO _pg_ripple.dictionary (hash, value, kind) \
+             VALUES ($1, $2, $3) \
+             ON CONFLICT (hash) DO NOTHING \
+             RETURNING id \
+         ) \
+         SELECT COALESCE( \
+             (SELECT id FROM ins), \
+             (SELECT id FROM _pg_ripple.dictionary WHERE hash = $1) \
+         )",
         &[
             DatumWithOid::from(hash_bytes.as_slice()),
             DatumWithOid::from(term),
             DatumWithOid::from(kind),
         ],
     )
-    .unwrap_or_else(|e| pgrx::error!("dictionary encode (insert) SPI error: {e}"))
-    {
-        Some(id) => id,
-        None => {
-            // Conflict: term already exists — look up the existing sequence id.
-            Spi::get_one_with_args::<i64>(
-                "SELECT id FROM _pg_ripple.dictionary WHERE hash = $1",
-                &[DatumWithOid::from(hash_bytes.as_slice())],
-            )
-            .unwrap_or_else(|e| pgrx::error!("dictionary encode (lookup) SPI error: {e}"))
-            .unwrap_or_else(|| pgrx::error!("dictionary encode: term not found after conflict"))
-        }
-    };
+    .unwrap_or_else(|e| pgrx::error!("dictionary encode SPI error: {e}"))
+    .unwrap_or_else(|| pgrx::error!("dictionary encode: no id returned for term"));
 
     ENCODE_CACHE.with(|c| c.borrow_mut().put(hash128, id));
     DECODE_CACHE.with(|c| c.borrow_mut().put(id, term.to_owned()));
@@ -127,11 +129,26 @@ pub fn decode(id: i64) -> Option<String> {
         return Some(value);
     }
 
-    let value = Spi::get_one_with_args::<String>(
-        "SELECT value FROM _pg_ripple.dictionary WHERE id = $1",
-        &[DatumWithOid::from(id)],
-    )
-    .unwrap_or_else(|e| pgrx::error!("dictionary decode SPI error: {e}"));
+    // Use Spi::connect + select to safely handle 0-row results.  pgrx 0.17's
+    // get_one_with_args returns Err(InvalidPosition) on empty results, which
+    // would be misinterpreted as an error rather than "not found".
+    let value: Option<String> = Spi::connect(|client| {
+        let tbl = client
+            .select(
+                "SELECT value FROM _pg_ripple.dictionary WHERE id = $1",
+                Some(1),
+                &[DatumWithOid::from(id)],
+            )
+            .unwrap_or_else(|e| pgrx::error!("dictionary decode SPI error: {e}"));
+
+        if tbl.is_empty() {
+            None
+        } else {
+            tbl.first()
+                .get_one::<String>()
+                .unwrap_or_else(|e| pgrx::error!("dictionary decode SPI error: {e}"))
+        }
+    });
 
     if let Some(ref v) = value {
         DECODE_CACHE.with(|c| {

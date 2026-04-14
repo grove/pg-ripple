@@ -7,6 +7,7 @@
 use thiserror::Error;
 
 /// Dictionary-layer errors (PT001–PT099).
+#[allow(dead_code)]
 #[derive(Debug, Error)]
 pub enum DictionaryError {
     /// The term string exceeded the maximum allowed length.
@@ -23,6 +24,7 @@ pub enum DictionaryError {
 }
 
 /// Storage-layer errors (PT100–PT199).
+#[allow(dead_code)]
 #[derive(Debug, Error)]
 pub enum StorageError {
     /// The predicate VP table could not be located in the catalog.
