@@ -437,9 +437,8 @@ mod tests {
         crate::bulk_load::load_ntriples(
             "<https://example.org/x> <https://example.org/q> <https://example.org/y> .\n",
         );
-        let result = crate::sparql::sparql_ask(
-            "ASK { <https://example.org/x> <https://example.org/q> ?o }",
-        );
+        let result =
+            crate::sparql::sparql_ask("ASK { <https://example.org/x> <https://example.org/q> ?o }");
         assert!(result, "ASK must be true after matching triple loaded");
     }
 
@@ -478,9 +477,8 @@ mod tests {
              <https://example.org/s2> <https://example.org/same> <https://example.org/o> .\n",
         );
         // Select just ?o — should be deduplicated to 1 row.
-        let rows = crate::sparql::sparql(
-            "SELECT DISTINCT ?o WHERE { ?s <https://example.org/same> ?o }",
-        );
+        let rows =
+            crate::sparql::sparql("SELECT DISTINCT ?o WHERE { ?s <https://example.org/same> ?o }");
         assert_eq!(rows.len(), 1, "DISTINCT ?o must collapse duplicates");
     }
 

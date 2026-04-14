@@ -186,16 +186,11 @@ pub fn sparql(query_text: &str) -> Vec<pgrx::JsonB> {
                 .unwrap_or_else(|e| pgrx::error!("SPARQL ASK SPI error: {e}"))
                 .unwrap_or(false);
             let mut obj = Map::new();
-            obj.insert(
-                "result".to_owned(),
-                Json::String(result.to_string()),
-            );
+            obj.insert("result".to_owned(), Json::String(result.to_string()));
             vec![pgrx::JsonB(Json::Object(obj))]
         }
         _ => {
-            pgrx::error!(
-                "sparql() supports SELECT and ASK; use sparql_explain() for debugging"
-            );
+            pgrx::error!("sparql() supports SELECT and ASK; use sparql_explain() for debugging");
         }
     }
 }
