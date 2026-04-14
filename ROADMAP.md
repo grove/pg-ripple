@@ -2,6 +2,8 @@
 
 > From **0.1.0** (foundation) to **1.0.0** (production-ready triple store)
 
+> **Authority rule**: [plans/implementation_plan.md](plans/implementation_plan.md) is the authoritative description of the **eventual target architecture**. This roadmap is the delivery sequence for that architecture. If a milestone summary here conflicts with the implementation plan, the implementation plan wins and the roadmap should be updated to match it.
+
 ## How to read this roadmap
 
 Each release below has two layers:
@@ -251,7 +253,7 @@ The OneGraph (1G) research initiative (Lassila et al., 2023; Poseidon engine, AW
   - `pg_ripple.encode_triple(s TEXT, p TEXT, o TEXT) RETURNS BIGINT` — returns the dictionary ID of the quoted triple
   - `pg_ripple.decode_triple(id BIGINT) RETURNS JSONB` — returns `{"s": ..., "p": ..., "o": ...}`
 - [ ] **Statement identifier activation**
-  - The `i` column (introduced in v0.2.0 VP tables) is now actively used: `insert_triple()` returns the SID
+  - The `i` column (introduced in v0.1.0 VP tables) is now actively used: `insert_triple()` returns the SID
   - `pg_ripple.insert_triple(s TEXT, p TEXT, o TEXT, g TEXT DEFAULT NULL) RETURNS BIGINT` — returns the statement identifier
   - `pg_ripple.get_statement(i BIGINT) RETURNS JSONB` — look up a statement by its SID
   - SIDs can appear in `s` or `o` positions of VP tables (the ID references a statement, enabling edge properties and meta-statements)
@@ -479,15 +481,14 @@ Writes do not block reads. Merge worker operates correctly under concurrent writ
 - [ ] **SHACL parser** (Turtle-based shapes)
   - `pg_ripple.load_shacl(data TEXT)` — parse and store shapes
   - Internal shape IR stored in `_pg_ripple.shacl_shapes`
-- [ ] **Static constraint compilation**
-  - `sh:minCount` → NOT NULL / CHECK trigger
-  - `sh:maxCount` → UNIQUE index
-  - `sh:datatype` → CHECK on literal datatype
-  - `sh:in` → CHECK with allowed values
-  - `sh:pattern` → regex CHECK
+- [ ] **Exact SHACL validator compilation**
+  - Parse shapes to an internal IR that preserves W3C SHACL semantics
+  - Compile validator plans over focus nodes and value nodes rather than reducing shapes to lossy table constraints
+  - PostgreSQL constraints, triggers, and helper indices are allowed only as internal accelerators when semantics are proven equivalent for the specific shape pattern
 - [ ] **Synchronous validation mode**
   - Triggered on `insert_triple()` when `pg_ripple.shacl_mode = 'sync'`
   - Returns validation error immediately on constraint violation
+  - Uses the same exact validator semantics as offline validation; no fast path weakens or changes SHACL meaning
 - [ ] **Validation report**
   - `pg_ripple.validate(graph TEXT DEFAULT NULL) RETURNS JSONB`
   - Full SHACL validation report as JSON
@@ -502,7 +503,7 @@ Writes do not block reads. Merge worker operates correctly under concurrent writ
 
 ### Exit Criteria
 
-Core SHACL constraints are enforced at insert time. Validation reports conform to SHACL spec. Malformed shapes are rejected with actionable error messages.
+Delivered SHACL Core features are enforced at insert time with exact W3C semantics. Validation reports conform to SHACL spec. Malformed shapes are rejected with actionable error messages.
 
 ---
 
@@ -533,7 +534,7 @@ Core SHACL constraints are enforced at insert time. Validation reports conform t
 
 ### Exit Criteria
 
-Async validation pipeline operational. Complex SHACL shapes validated correctly.
+Async validation pipeline operational. Complex SHACL shapes validated correctly with the same semantics as synchronous validation.
 
 ---
 
@@ -741,10 +742,10 @@ Full SPARQL 1.1 Update operations work correctly. Pattern-based updates compile 
   - Emit `SET LOCAL join_collapse_limit = 1` before the generated SQL to lock the PostgreSQL planner into the computed join order
   - **Optimizer Robustness / Fallback**: Because deriving perfect selectivity from `pg_stats.n_distinct` is fragile over multi-way self-joins, the Rust-based optimizer implements dynamic sampling or uses fallback heuristic costs (e.g. reverting to native PostgreSQL planning) if `pg_stats` suggests high cardinality uncertainty. This prevents forcing PostgreSQL into highly suboptimal plans.
   - When join columns are already sorted (e.g. after a range scan on an ordered `i64` column), emit `SET LOCAL enable_mergejoin = on` to exploit merge-join (strategy #6)
-- [ ] **Query plan caching** *(moved forward from v0.3.0)*
-  - Cache SPARQL→SQL translations keyed by query structure hash
-  - `pg_ripple.plan_cache_size` GUC
-  - Note: SPI-executed dynamic SQL does not benefit from PostgreSQL's built-in prepared-statement cache — the SPARQL-layer plan cache compensates for this by avoiding repeated SPARQL→SQL translation for structurally identical queries
+- [ ] **Prepared execution and cache hardening**
+  - Build on the v0.3.0 SPARQL translation cache rather than reintroducing it here
+  - Evaluate prepared statements with parameter binding for generated SQL where this improves planner reuse
+  - Add instrumentation and benchmarks for translation-cache hit rate, eviction behavior, and prepared-plan reuse
 - [ ] **Parallel query exploitation**
   - Ensure VP table queries are parallel-safe
   - Mark SQL functions as `PARALLEL SAFE` where applicable
@@ -768,10 +769,9 @@ Full SPARQL 1.1 Update operations work correctly. Pattern-based updates compile 
   - Parallel dictionary encoding
   - Deferred index build with `CREATE INDEX CONCURRENTLY` post-load
 - [ ] **SHACL-driven query optimization**
-  - The algebrizer reads loaded SHACL shapes and the predicate catalog before building the join tree, making shape constraints available as plan-time hints
-  - `sh:minCount 1` → OPTIONAL→INNER JOIN downgrade in SPARQL→SQL
-  - `sh:maxCount 1` → skip DISTINCT for single-valued properties
-  - `sh:class` → VP table pruning based on target class
+  - The algebrizer reads loaded SHACL shapes and the predicate catalog before building the join tree, using them for costing and only for rewrites that are proven semantics-preserving
+  - Shape metadata can tighten plans only when the query domain is provably identical to the validated focus-node set
+  - Presence of a shape alone is insufficient to change query semantics
 - [ ] **pg_trickle integration: ExtVP workload advisor** *(optional, when pg_trickle is installed)*
   - `_pg_ripple.extvp_candidates` stream table aggregates predicate co-occurrence from the SPARQL query log over a rolling 1-hour window
   - Admin function `pg_ripple.recommend_extvp()` reads the stream table and lists the top N predicate pairs to pre-compute
@@ -781,7 +781,7 @@ Full SPARQL 1.1 Update operations work correctly. Pattern-based updates compile 
 
 ### Exit Criteria
 
-BSBM results documented. >100K triples/sec sustained bulk load. <10ms for simple BGP queries at 10M triples. <5ms for cached repeat queries. SHACL constraints exploited by query optimizer. PostgreSQL parallel plans verified for multi-VP-table joins.
+BSBM results documented. >100K triples/sec sustained bulk load. <10ms for simple BGP queries at 10M triples. <5ms for cached repeat queries. SHACL metadata exploited only through semantics-preserving optimizer rules. PostgreSQL parallel plans verified for multi-VP-table joins.
 
 ---
 
@@ -951,8 +951,8 @@ SPARQL queries with `SERVICE` clauses correctly fetch and join data from registe
   - Pass W3C SPARQL 1.1 Update test suite (supported subset)
   - Document unsupported features
 - [ ] **SHACL Core conformance**
-  - Pass W3C SHACL Core test suite (supported subset)
-  - Document unsupported constraints
+  - Pass the full W3C SHACL Core test suite
+  - Any optimization strategy must preserve the same externally visible results as the reference semantics
 - [ ] **Stability hardening**
   - 72-hour continuous load test (mixed read/write)
   - Memory leak detection (Valgrind via `cargo pgrx test --valgrind`)

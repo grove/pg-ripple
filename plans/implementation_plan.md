@@ -317,7 +317,7 @@ Algebrizer (src/sparql/algebra.rs)
     ▼
 Algebra Optimizer (Rust)  — pg_ripple-specific second pass
     - Self-join elimination
-    - Optional-to-inner downgrade (with SHACL hints)
+    - Optional-to-inner downgrade only when proven semantics-preserving for the query domain
     - Filter pushdown (pre-decode)
     - UNION folding → WHERE IN
     - BGP join reordering: uses `pg_stats.n_distinct` + `pg_class.reltuples` for each
@@ -388,7 +388,7 @@ Optimizations fall into two categories: **structural rewrites** that are applied
 
 **Structural rewrites (v0.3.0+)**:
 1. **Self-join elimination**: Star patterns on the same subject collapse into a single scan of the subject across multiple VP tables, joined by subject ID equality
-2. **Optional-self-join elimination**: When SHACL declares `sh:minCount 1`, OPTIONAL → INNER JOIN
+2. **Optional-self-join elimination**: OPTIONAL → INNER JOIN only when the optimizer can prove the rewrite preserves query semantics for the actual focus-node domain; SHACL metadata can contribute evidence but is not sufficient on its own
 3. **Self-union elimination**: Multiple triple patterns binding the same variable to different predicates are rewritten to `WHERE predicate_id IN (...)`
 4. **Projection pushing**: `SELECT DISTINCT ?p` queries enumerate the `_pg_ripple.predicates` catalog instead of scanning all VP tables
 5. **Filter pushdown**: SPARQL `FILTER` clauses operating on bound IRIs are resolved to integer IDs *before* generating SQL, ensuring B-tree index usage. From v0.5.1, typed numeric/date literals use the inline-encoded i64 range (see §4.2.2) to enable `BETWEEN $lo AND $hi` range scans with no decode step. Prior to v0.5.1, FILTER comparisons on typed literals use a dictionary-join decode approach.
@@ -446,19 +446,31 @@ SELECT DISTINCT s, o FROM path WHERE NOT is_cycle;
 
 **Purpose**: Enforce data integrity constraints defined in SHACL shapes.
 
-#### 4.6.1 Static Constraint Compilation
+#### 4.6.1 Exact SHACL Semantics
 
-SHACL shapes loaded via `pg_ripple.load_shacl(data TEXT)` are transpiled to:
+SHACL support is **spec-first**: loaded shapes are parsed into a shape IR that preserves W3C SHACL semantics, and validation is executed against that IR. PostgreSQL constraints, triggers, helper tables, or stream tables may be used as **internal accelerators only when they are proven semantics-preserving for the specific shape pattern**; they are never the normative definition of constraint behavior.
 
-| SHACL Constraint | PostgreSQL Implementation |
+Validation is compiled to per-shape validator plans over focus nodes and value nodes:
+
+| SHACL Constraint | Validation Strategy |
 |---|---|
-| `sh:minCount 1` | `NOT NULL` on VP table (or CHECK trigger) |
-| `sh:maxCount 1` | `UNIQUE` index on `(s, g)` in the VP table |
-| `sh:datatype xsd:integer` | `CHECK` constraint on literal dictionary entry's datatype |
-| `sh:in (...)` | `CHECK (o IN (...))` on VP table |
-| `sh:pattern` | `CHECK` constraint with regex on decoded value |
-| `sh:class` | Trigger verifying `rdf:type` triple exists |
-| `sh:node` / `sh:property` (complex) | PL/pgSQL validation trigger |
+| `sh:minCount` | Count matching value nodes per focus node and compare against the required minimum |
+| `sh:maxCount` | Count matching value nodes per focus node and compare against the allowed maximum |
+| `sh:datatype` | Validate RDF term kind and datatype IRI exactly against dictionary metadata / inline encoding |
+| `sh:in (...)` | Validate RDF-term equality against the allowed value set |
+| `sh:pattern` | Apply SHACL regex semantics to the lexical form of the value node |
+| `sh:class` | Evaluate required `rdf:type` membership for each value node |
+| `sh:node` / `sh:property` | Recurse into nested shapes using the same validator pipeline |
+| `sh:or` / `sh:and` / `sh:not` / qualified constraints | Evaluate via composed validator plans (v0.8.0+) |
+
+Examples of **allowed internal accelerators** when exactness is preserved:
+- An index on `(s, g)` to speed up `sh:maxCount 1` counting
+- A cached target-node set for `sh:targetClass`
+- A trigger that short-circuits obvious violations but still falls back to the full validator when needed
+
+Examples of **disallowed semantic shortcuts**:
+- Treating `sh:minCount 1` as a bare `NOT NULL` on a VP row
+- Treating `sh:maxCount 1` as a table-wide `UNIQUE` index without proving the same focus-node and path semantics as the SHACL shape
 
 #### 4.6.2 Asynchronous Validation Pipeline
 
@@ -472,9 +484,10 @@ For bulk loads where synchronous validation is too expensive:
 #### 4.6.3 Query Optimization via SHACL
 
 The SPARQL→SQL translator reads loaded SHACL shapes:
-- `sh:minCount 1` → downgrade LEFT JOIN to INNER JOIN for that predicate
-- `sh:maxCount 1` → enables single-row optimizations (no need for DISTINCT)
-- `sh:class` / `sh:targetClass` → enables type-based pruning of VP tables to scan
+- Shape metadata may inform **costing** and may enable **semantics-preserving rewrites** when the proof obligation is satisfied for the exact query domain
+- `sh:maxCount 1` may enable cardinality-sensitive optimizations only when the query is provably restricted to the same focus-node population as the validated shape
+- `sh:class` / `sh:targetClass` may support type-based pruning only when the query's variable domain is provably identical to the shape target set
+- The presence of a shape alone is never sufficient to rewrite query semantics; unsafe rewrites are disabled by default
 
 ### 4.7 Serialization & Export (`src/export/`)
 
@@ -609,7 +622,7 @@ All GUC parameters exposed by pg_ripple, listed alphabetically. GUCs marked **st
 | `pg_ripple.merge_threshold` | `INT` | `100000` | 0 – 1,000,000,000 | v0.6.0 | Delta row count that triggers a background merge; `0` disables the merge worker entirely |
 | `pg_ripple.merge_watchdog_timeout` | `INT` | `300` | 60 – 3600 (seconds) | v0.6.0 | If the merge worker heartbeat stalls for longer than this, `_PG_init` on the next backend connection logs a WARNING and attempts restart |
 | `pg_ripple.named_graph_optimized` | `BOOL` | `off` | `on`, `off` | v0.2.0 | When `on`, adds a `(g, s, o)` index per VP table; increases write overhead; useful for heavy named-graph workloads |
-| `pg_ripple.plan_cache_size` | `INT` | `1024` | 0 – 100,000 | v0.13.0 | Number of SPARQL→SQL translation results cached per session; `0` disables |
+| `pg_ripple.plan_cache_size` | `INT` | `256` | 0 – 100,000 | v0.3.0 | Number of SPARQL→SQL translation results cached per session; `0` disables. v0.13.0 extends cache instrumentation and prepared-statement work, but the translation cache itself lands in v0.3.0 |
 | `pg_ripple.rls_bypass` | `BOOL` | `off` | `on`, `off` | v0.14.0 | Superuser override to bypass graph-level Row-Level Security policies |
 | `pg_ripple.rule_graph_scope` | `ENUM` | `'default'` | `'default'`, `'all'` | v0.10.0 | Controls whether unscoped Datalog rule atoms operate on the default graph only or all graphs |
 | `pg_ripple.shacl_mode` | `ENUM` | `'off'` | `'off'`, `'sync'`, `'async'` | v0.7.0 | Controls SHACL validation; `'sync'` rejects bad triples inline; `'async'` queues for background validation |
@@ -623,6 +636,8 @@ All GUC parameters exposed by pg_ripple, listed alphabetically. GUCs marked **st
 
 ## 5. Data Flow: Insert Path
 
+> **Target-state note**: The flow below is the **v0.6.0+ target architecture** after the HTAP split lands. In v0.1.0–v0.5.1, inserts write directly to the flat `_pg_ripple.vp_{predicate_id}` table.
+
 ```
 1. pg_ripple.insert_triple('http://ex.org/Alice', 'http://ex.org/knows', 'http://ex.org/Bob')
 2. Dictionary encode: s=42, p=7, o=43
@@ -633,6 +648,8 @@ All GUC parameters exposed by pg_ripple, listed alphabetically. GUCs marked **st
 ```
 
 ## 6. Data Flow: Query Path
+
+> **Target-state note**: The flow below is the **v0.6.0+ target architecture**. In v0.1.0–v0.5.1, queries read from the flat `_pg_ripple.vp_{predicate_id}` tables only.
 
 ```
 1. pg_ripple.sparql('SELECT ?name WHERE { ?person foaf:knows ex:Bob . ?person foaf:name ?name }')
@@ -751,7 +768,9 @@ All GUC parameters exposed by pg_ripple, listed alphabetically. GUCs marked **st
 
 ## 9. Project Structure
 
-> **Cargo workspace**: The repository is a Cargo workspace from **v0.1.0** with two members: `pg_ripple/` (the PostgreSQL extension) and `pg_ripple_http/` (the companion HTTP binary). The HTTP binary is an empty placeholder (`fn main() {}`) until v0.15.0. Setting up the workspace from the start avoids a structural disruption mid-project that would break CI, dependency caches, and any tooling referencing `Cargo.toml`.
+> **Target architecture**: This section describes the **intended end-state repository layout and module structure**, not a claim that every milestone or the current checkout already matches it exactly. The implementation plan is authoritative for the eventual architecture; intermediate releases may temporarily use a simpler layout while converging toward this structure.
+
+> **Cargo workspace**: The target repository is a Cargo workspace with two members: `pg_ripple/` (the PostgreSQL extension) and `pg_ripple_http/` (the companion HTTP binary). The HTTP binary is an empty placeholder (`fn main() {}`) until v0.15.0. Establishing the workspace early in the target architecture avoids a structural disruption later that would break CI, dependency caches, and tooling.
 
 ```
 pg_ripple/                             # Cargo workspace root
