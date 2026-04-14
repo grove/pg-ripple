@@ -396,7 +396,7 @@ Optimizations fall into two categories: **structural rewrites** that are applied
 
 **Plan caching (v0.3.0+)**:
 
-SPI re-parses and re-plans the generated SQL string on every query invocation. The SPARQL-layer plan cache avoids this overhead for structurally identical queries by caching the SPARQL→SQL translation result keyed on a structural hash of the normalized algebra tree (variable names replaced with position indices). Controlled by `pg_ripple.plan_cache_size` GUC (default: 256; 0 = disabled). This is introduced in v0.3.0 — before the performance milestone — because re-translation overhead is observable from the first SPARQL-capable release. Statistics-driven and prepared-statement optimizations remain v0.13.0 work.
+SPI re-parses and re-plans the generated SQL string on every query invocation. The SPARQL-layer plan cache avoids this overhead for structurally identical queries by caching the SPARQL→SQL translation result keyed on a structural hash of the normalized algebra tree (variable names replaced with position indices). Controlled by `pg_ripple.plan_cache_size` GUC (default: 256; 0 = disabled). This is introduced in v0.3.0 — before the performance milestone — because re-translation overhead is observable from the first SPARQL-capable release. Benchmarked via BSBM from v0.5.0; statistics-driven and prepared-statement optimizations remain v0.13.0 work.
 
 **Statistics-driven rewrites (v0.13.0+)**:
 7. **BGP join reordering**: The algebra optimizer reads `pg_stats.n_distinct` and `pg_class.reltuples` for each VP table involved in the query and reorders BGPs cheapest-first (most selective predicate scanned first). Only activated when statistics are available; falls back to source order otherwise. When active, emits `SET LOCAL join_collapse_limit = 1` before the generated SQL to lock the PostgreSQL planner into the computed join order, preventing it from re-ordering the already-optimized sequence.
@@ -622,7 +622,7 @@ All GUC parameters exposed by pg_ripple, listed alphabetically. GUCs marked **st
 | `pg_ripple.merge_threshold` | `INT` | `100000` | 0 – 1,000,000,000 | v0.6.0 | Delta row count that triggers a background merge; `0` disables the merge worker entirely |
 | `pg_ripple.merge_watchdog_timeout` | `INT` | `300` | 60 – 3600 (seconds) | v0.6.0 | If the merge worker heartbeat stalls for longer than this, `_PG_init` on the next backend connection logs a WARNING and attempts restart |
 | `pg_ripple.named_graph_optimized` | `BOOL` | `off` | `on`, `off` | v0.2.0 | When `on`, adds a `(g, s, o)` index per VP table; increases write overhead; useful for heavy named-graph workloads |
-| `pg_ripple.plan_cache_size` | `INT` | `256` | 0 – 100,000 | v0.3.0 | Number of SPARQL→SQL translation results cached per session; `0` disables. v0.13.0 extends cache instrumentation and prepared-statement work, but the translation cache itself lands in v0.3.0 |
+| `pg_ripple.plan_cache_size` | `INT` | `256` | 0 – 100,000 | v0.3.0 | Number of SPARQL→SQL translation results cached per session; `0` disables. v0.13.0 extends cache instrumentation and prepared-statement work, but the translation cache itself lands in v0.3.0. Benchmarked via BSBM from v0.5.0 |
 | `pg_ripple.rls_bypass` | `BOOL` | `off` | `on`, `off` | v0.14.0 | Superuser override to bypass graph-level Row-Level Security policies |
 | `pg_ripple.rule_graph_scope` | `ENUM` | `'default'` | `'default'`, `'all'` | v0.10.0 | Controls whether unscoped Datalog rule atoms operate on the default graph only or all graphs |
 | `pg_ripple.shacl_mode` | `ENUM` | `'off'` | `'off'`, `'sync'`, `'async'` | v0.7.0 | Controls SHACL validation; `'sync'` rejects bad triples inline; `'async'` queues for background validation |
@@ -744,7 +744,7 @@ All GUC parameters exposed by pg_ripple, listed alphabetically. GUCs marked **st
 ### 8.6 Performance Regression
 
 - **CI benchmark gate** (from v0.2.0): record insert throughput and point-query latency as baselines; fail CI if a commit regresses throughput by >10%
-- Baselines extended at each milestone: star queries (v0.3.0), property paths (v0.5.0), concurrent read/write (v0.6.0), BSBM full mix (v0.13.0)
+- Baselines extended at each milestone: star queries (v0.3.0), BSBM full mix + property paths (v0.5.0), concurrent read/write (v0.6.0), join reordering (v0.13.0)
 - Performance regression suite maintained as pgbench custom scripts in `sql/bench/`
 
 ### 8.7 Benchmarks

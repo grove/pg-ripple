@@ -315,6 +315,10 @@ Users can load RDF-star data (Turtle-star, N-Triples-star), query it with SPARQL
   - Optional-self-join elimination
   - Self-union elimination (UNION → WHERE IN)
   - Projection pushing for DISTINCT queries
+- [ ] **Berlin SPARQL Benchmark (BSBM) integration**
+  - Data generator adapted for pg_ripple bulk load
+  - Full query mix execution with timing
+  - Comparison baselines documented
 - [ ] Benchmark: SP2Bench subset
 - [ ] **Resource exhaustion tests**: Cartesian-product queries, unbounded property paths on cyclic graphs, deeply nested subqueries — verify that `max_path_depth`, `statement_timeout`, and memory limits prevent runaway resource consumption
 - [ ] **Fuzz testing** (`cargo-fuzz`): continuous fuzzing of the SPARQL→SQL pipeline — feed random/mutated SPARQL strings through the parser and SQL generator; verify no panics, no invalid SQL emitted, no memory safety violations
@@ -726,16 +730,12 @@ Full SPARQL 1.1 Update operations work correctly. Pattern-based updates compile 
 
 **Theme**: Optimize for production-scale workloads. Benchmark-driven improvements.
 
-> **In plain language:** This release is about *speed*. Using the Berlin SPARQL Benchmark (a standard test suite used by the RDF industry), we measure pg_ripple's performance against known baselines and then tune it. Improvements include caching query plans so repeated queries skip redundant work, loading data in parallel, and teaching the system to use data quality rules (from v0.7.0/v0.8.0) as hints to avoid unnecessary work during queries. The target is simple queries answering in under 10 milliseconds on a dataset of 10 million facts, and bulk loading sustained at over 100,000 facts per second.
+> **In plain language:** This release is about *speed*. Using the benchmarks established in v0.5.0, we measure pg_ripple's performance against known baselines and then tune it. Improvements include caching query plans so repeated queries skip redundant work, loading data in parallel, and teaching the system to use data quality rules (from v0.7.0/v0.8.0) as hints to avoid unnecessary work during queries. The target is simple queries answering in under 10 milliseconds on a dataset of 10 million facts, and bulk loading sustained at over 100,000 facts per second.
 >
 > **Effort estimate: 6–8 person-weeks**
 
 ### Deliverables
 
-- [ ] **Berlin SPARQL Benchmark (BSBM)** integration
-  - Data generator adapted for pg_ripple bulk load
-  - Full query mix execution with timing
-  - Comparison baselines documented
 - [ ] **BGP join reordering**
   - At plan time, read `pg_stats.n_distinct` and `pg_class.reltuples` for the target VP tables to estimate the selectivity of each triple pattern
   - Place the most selective pattern first in the join tree to minimize intermediate result sizes
