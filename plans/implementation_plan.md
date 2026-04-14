@@ -229,6 +229,7 @@ CREATE INDEX ON _pg_ripple.vp_{predicate_id} (o, s);
 **Merge Worker** (background worker via pgrx `BackgroundWorker`):
 - Periodically merges delta into main when delta exceeds `pg_ripple.merge_threshold` rows
 - Runs as a pgrx background worker with `BGWORKER_SHMEM_ACCESS`
+- **Concurrency & Locking** (v0.6.0+): The rename/truncate step requires an `AccessExclusiveLock`. To prevent stalling the database if queries are actively holding shared read locks on the delta table, the merge worker uses a low `lock_timeout` and retry logic for the `ALTER TABLE ... RENAME` statement, ensuring concurrent `INSERT` and `SELECT` operations are not blocked entirely by a queued exclusive lock.
 - **Fresh-table generation merge** (v0.6.0): each merge cycle creates a *new* `vp_{id}_main_new` table rather than inserting incrementally into the existing one (incremental inserts degrade BRIN effectiveness because BRIN requires physically sorted data):
   1. `CREATE TABLE _pg_ripple.vp_{id}_main_new` (heap)
   2. `INSERT … SELECT … ORDER BY s FROM (SELECT * FROM vp_{id}_main EXCEPT SELECT * FROM vp_{id}_tombstones UNION ALL SELECT * FROM vp_{id}_delta)` — combines existing main (minus tombstones) with new delta rows; `ORDER BY s` on a freshly created heap produces physically sorted pages so BRIN works correctly without a separate `CLUSTER` step
@@ -274,6 +275,22 @@ CREATE INDEX ON _pg_ripple.subject_patterns USING GIN (pattern);
 - **Statistics**: `SELECT unnest(pattern), count(*) FROM subject_patterns GROUP BY 1` gives predicate-popularity counts without touching VP tables
 - **GIN index**: enables "subjects that have both predicate P1 and P2" queries (`pattern @> ARRAY[$1, $2]`) efficiently
 - Maintained by the merge worker after each generation merge, not on individual INSERTs
+
+#### 4.3.5 Object Patterns (`_pg_ripple.object_patterns`, v0.6.0)
+
+Precomputed index mapping each object to the sorted array of all its predicate IDs. This solves the "unbound object problem" for reverse-edge exploration.
+
+```sql
+CREATE TABLE _pg_ripple.object_patterns (
+    o        BIGINT NOT NULL,
+    pattern  BIGINT[] NOT NULL,  -- sorted array of predicate IDs for this object
+    PRIMARY KEY (o)
+);
+CREATE INDEX ON _pg_ripple.object_patterns USING GIN (pattern);
+```
+
+- **Reverse DESCRIBE / Incoming Arcs**: Similar to `subject_patterns`, `object_patterns` intercepts scattergun reverse queries (`?s ?p <Object>`) in O(N) rather than forcing a catastrophic `UNION ALL` across all thousands of VP tables.
+- Maintained by the merge worker after each generation merge.
 
 ### 4.4 SPARQL Query Engine (`src/sparql/`)
 
@@ -383,8 +400,9 @@ SPI re-parses and re-plans the generated SQL string on every query invocation. T
 
 **Statistics-driven rewrites (v0.13.0+)**:
 7. **BGP join reordering**: The algebra optimizer reads `pg_stats.n_distinct` and `pg_class.reltuples` for each VP table involved in the query and reorders BGPs cheapest-first (most selective predicate scanned first). Only activated when statistics are available; falls back to source order otherwise. When active, emits `SET LOCAL join_collapse_limit = 1` before the generated SQL to lock the PostgreSQL planner into the computed join order, preventing it from re-ordering the already-optimized sequence.
-8. **Join-order hints**: A `<http://pg-ripple.io/hints/join-order>` pragma in the SPARQL prologue overrides statistics-driven ordering by emitting `SET LOCAL join_collapse_limit = 1` with the user-specified BGP order.
-9. **`no-inference` hint**: Adding `hint:no-inference true` to the query prologue appends `AND source = 0` on every VP table scan, restricting results to explicitly asserted triples only (v0.10.0+).
+8. **Optimizer Robustness / Fallback**: Because deriving perfect selectivity from `pg_stats.n_distinct` is fragile over multi-way self-joins, the Rust-based optimizer implements dynamic sampling or uses fallback heuristic costs (e.g. reverting to native PostgreSQL planning) if `pg_stats` suggests high cardinality uncertainty. This prevents forcing PostgreSQL into highly suboptimal plans.
+9. **Join-order hints**: A `<http://pg-ripple.io/hints/join-order>` pragma in the SPARQL prologue overrides statistics-driven ordering by emitting `SET LOCAL join_collapse_limit = 1` with the user-specified BGP order.
+10. **`no-inference` hint**: Adding `hint:no-inference true` to the query prologue appends `AND source = 0` on every VP table scan, restricting results to explicitly asserted triples only (v0.10.0+).
 
 #### 4.4.4 Property Path Compilation
 
@@ -410,7 +428,7 @@ SELECT DISTINCT s, o FROM path WHERE NOT is_cycle;
 - Configurable `pg_ripple.max_path_depth` GUC (default: 100)
 - PG18 `CYCLE` clause for hash-based cycle detection (replaces array-based visited tracking — $O(1)$ membership checks instead of $O(n)$ array scans)
 - PG18's improved CTE performance benefits recursive path queries
-- **Performance constraint**: PostgreSQL materializes each level of a `WITH RECURSIVE` CTE into a work-table before proceeding to the next. For deep traversals (depth > ~15) or wide fan-out on large graphs (>10M triples) the per-level materialization cost dominates. The <100 ms benchmark target (§13) applies to bounded-depth paths (depth ≤ 10) on typical RDF datasets; unbounded paths on dense graphs will exceed it. A purpose-built graph traversal engine would outperform this approach at extreme depth/fan-out, but that is out of scope for v1.0. Mitigation: `max_path_depth` GUC, `statement_timeout`, and the resource-exhaustion test suite in v0.5.0.
+- **Performance constraint**: PostgreSQL materializes each level of a `WITH RECURSIVE` CTE into a work-table before proceeding to the next. For deep traversals (depth > ~5-10 hops) or wide fan-out on large graphs, the per-level materialization cost dominates and can cause execution times to degrade exponentially. The <100 ms benchmark target (§13) applies to bounded-depth paths (depth ≤ 10) on typical RDF datasets; unbounded paths on dense graphs will inherently bottleneck the PG execution planner. Mitigation: `max_path_depth` GUC, `statement_timeout`, and the resource-exhaustion test suite in v0.5.0.
 
 ### 4.5 Named Graph Support (`src/graph/`)
 

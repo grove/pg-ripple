@@ -402,6 +402,7 @@ Inline value encoding eliminates dictionary lookups for numeric and date FILTER 
 - [ ] **Background merge worker**
   - pgrx `BackgroundWorker` implementation
   - Configurable merge threshold via `pg_ripple.merge_threshold` GUC
+  - **Concurrency & Locking logic**: The rename/truncate step requires an `AccessExclusiveLock`. To prevent stalling the database, the merge worker uses a low `lock_timeout` and retry logic for the `ALTER TABLE ... RENAME` statement, ensuring concurrent `INSERT` and `SELECT` operations are not blocked entirely by a queued exclusive lock.
   - **Fresh-table generation merge**: rather than inserting into an existing `_main` table, create `vp_{id}_main_new`, insert *all* rows from both `_main` and `_delta` (minus tombstones) in sort order (ensuring BRIN pages are physically ordered), then atomically rename it to replace `_main` and TRUNCATE both `_delta` and `_tombstones` — writes to delta are never blocked during the merge and BRIN indexing is maximally effective because rows arrive in sorted order at table-creation time
   - BRIN index rebuild on main post-merge (concurrent where possible)
   - Shared-memory latch signaling
@@ -430,6 +431,10 @@ Inline value encoding eliminates dictionary lookups for numeric and date FILTER 
   - `_pg_ripple.subject_patterns(s BIGINT, predicates BIGINT[])` with a GIN index on `predicates`
   - Maintained by the merge worker after each generation merge (not on individual INSERTs — amortized cost)
   - Enables fast "which predicates does subject X have?" look-up for DESCRIBE queries and star-pattern rewriting in the algebra optimizer
+- [ ] **`object_patterns` lookup table**
+  - `_pg_ripple.object_patterns(o BIGINT, predicates BIGINT[])` with a GIN index on `predicates`
+  - Maintained by the merge worker alongside `subject_patterns`
+  - Solves the "unbound object problem" by intercepting reverse-edge scattergun queries (`?s ?p <Object>`) in O(N) instead of forcing a `UNION ALL` across all VP tables
 - [ ] **Statistics**
   - `pg_ripple.stats()` JSONB: triple count, per-predicate counts, cache hit ratio, delta/main sizes
 - [ ] **pg_trickle integration: live statistics** *(optional, when pg_trickle is installed)*
@@ -734,6 +739,7 @@ Full SPARQL 1.1 Update operations work correctly. Pattern-based updates compile 
   - At plan time, read `pg_stats.n_distinct` and `pg_class.reltuples` for the target VP tables to estimate the selectivity of each triple pattern
   - Place the most selective pattern first in the join tree to minimize intermediate result sizes
   - Emit `SET LOCAL join_collapse_limit = 1` before the generated SQL to lock the PostgreSQL planner into the computed join order
+  - **Optimizer Robustness / Fallback**: Because deriving perfect selectivity from `pg_stats.n_distinct` is fragile over multi-way self-joins, the Rust-based optimizer implements dynamic sampling or uses fallback heuristic costs (e.g. reverting to native PostgreSQL planning) if `pg_stats` suggests high cardinality uncertainty. This prevents forcing PostgreSQL into highly suboptimal plans.
   - When join columns are already sorted (e.g. after a range scan on an ordered `i64` column), emit `SET LOCAL enable_mergejoin = on` to exploit merge-join (strategy #6)
 - [ ] **Query plan caching** *(moved forward from v0.3.0)*
   - Cache SPARQL→SQL translations keyed by query structure hash
