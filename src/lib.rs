@@ -562,9 +562,12 @@ mod tests {
     /// encode_quoted_triple / decode_quoted_triple_components round-trip.
     #[pg_test]
     fn pg_test_quoted_triple_encode_decode() {
-        let s_id = crate::dictionary::encode("https://example.org/alice", crate::dictionary::KIND_IRI);
-        let p_id = crate::dictionary::encode("https://example.org/knows", crate::dictionary::KIND_IRI);
-        let o_id = crate::dictionary::encode("https://example.org/bob", crate::dictionary::KIND_IRI);
+        let s_id =
+            crate::dictionary::encode("https://example.org/alice", crate::dictionary::KIND_IRI);
+        let p_id =
+            crate::dictionary::encode("https://example.org/knows", crate::dictionary::KIND_IRI);
+        let o_id =
+            crate::dictionary::encode("https://example.org/bob", crate::dictionary::KIND_IRI);
         let qt_id = crate::dictionary::encode_quoted_triple(s_id, p_id, o_id);
         assert!(qt_id != 0, "quoted triple must have a non-zero ID");
         let components = crate::dictionary::decode_quoted_triple_components(qt_id);

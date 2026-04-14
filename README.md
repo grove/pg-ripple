@@ -13,14 +13,14 @@ pg_ripple is a PostgreSQL 18 extension building toward a fully-featured knowledg
 
 ---
 
-## What works today (v0.3.0)
+## What works today (v0.4.0)
 
-You can install the extension, store triples, bulk-load RDF datasets, manage named graphs, and query with SPARQL:
+You can install the extension, store triples, bulk-load RDF datasets (including N-Triples-star), manage named graphs, query with SPARQL, and work with RDF-star quoted triples and statement identifiers:
 
 ```sql
 CREATE EXTENSION pg_ripple;
 
--- Store a single fact
+-- Store a single fact (returns the statement identifier, SID)
 SELECT pg_ripple.insert_triple(
   'http://example.org/Alice',
   'http://xmlns.com/foaf/0.1/knows',
@@ -33,6 +33,22 @@ SELECT pg_ripple.load_turtle('
   <http://example.org/Alice> foaf:knows <http://example.org/Bob> .
   <http://example.org/Bob>   foaf:name  "Bob" .
 ');
+
+-- Load N-Triples-star with quoted triples
+SELECT pg_ripple.load_ntriples('
+  << <http://example.org/Alice> <http://xmlns.com/foaf/0.1/knows> <http://example.org/Bob> >>
+      <http://example.org/assertedBy> <http://example.org/Carol> .
+');
+
+-- Encode a quoted triple to its dictionary ID
+SELECT pg_ripple.encode_triple(
+  '<http://example.org/Alice>',
+  '<http://xmlns.com/foaf/0.1/knows>',
+  '<http://example.org/Bob>'
+);
+
+-- Look up a triple by its statement identifier
+SELECT pg_ripple.get_statement(42);
 
 -- Query with SPARQL SELECT (returns JSONB rows)
 SELECT * FROM pg_ripple.sparql('
@@ -57,28 +73,13 @@ SELECT * FROM pg_ripple.find_triples(
 SELECT pg_ripple.triple_count();
 ```
 
-Every IRI, blank node, and literal is dictionary-encoded to a compact integer for fast joins. Facts about different predicates are stored in separate tables (Vertical Partitioning) so queries that bind a predicate touch only one compact, indexed table. Bulk loaders accept Turtle, N-Triples, N-Quads, and TriG formats. SPARQL SELECT, ASK, FILTER, OPTIONAL, and named-graph patterns are supported. No `shared_preload_libraries` configuration required.
+Every IRI, blank node, literal, and quoted triple is dictionary-encoded to a compact integer for fast joins. Facts about different predicates are stored in separate tables (Vertical Partitioning) so queries that bind a predicate touch only one compact, indexed table. Bulk loaders accept Turtle, N-Triples (including N-Triples-star), N-Quads, and TriG formats. SPARQL SELECT, ASK, FILTER, OPTIONAL, named-graph patterns, and ground SPARQL-star triple term patterns are supported. No `shared_preload_libraries` configuration required.
 
 ---
 
 ## Where we're headed
 
 Each release adds a self-contained layer of capability, building toward a complete knowledge graph platform inside PostgreSQL.
-
-### v0.4.0 — RDF-star
-
-Make statements *about* statements. Standard RDF can say "Alice knows Bob" — RDF-star lets you also say "Alice told us she knows Bob, on January 5th". Essential for provenance tracking, temporal annotations, and trust metadata.
-
-```sql
-SELECT pg_ripple.load_turtle('
-  @prefix ex:  <http://example.org/> .
-  @prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
-
-  << ex:Alice ex:knows ex:Bob >>
-      ex:assertedBy ex:Carol ;
-      ex:assertedOn "2024-01-15"^^xsd:date .
-');
-```
 
 ### v0.5.0 — Advanced SPARQL queries
 
@@ -274,7 +275,7 @@ pg_ripple is built from the ground up for performance.
 | PostgreSQL version | 18.x |
 | SPARQL parser | [spargebra](https://crates.io/crates/spargebra) — W3C-compliant SPARQL 1.1 algebra |
 | SPARQL optimizer | [sparopt](https://crates.io/crates/sparopt) — first-pass algebra optimizer (filter pushdown, constant folding) |
-| RDF parsers | [rio_turtle](https://crates.io/crates/rio_turtle), [rio_xml](https://crates.io/crates/rio_xml) — Turtle, N-Triples, RDF/XML; [oxttl](https://crates.io/crates/oxttl) / [oxrdf](https://crates.io/crates/oxrdf) added at v0.4.0 for RDF-star (Turtle-star, N-Triples-star) |
+| RDF parsers | [rio_turtle](https://crates.io/crates/rio_turtle), [rio_xml](https://crates.io/crates/rio_xml) — Turtle, N-Triples, RDF/XML; custom N-Triples-star parser (v0.4.0); [oxttl](https://crates.io/crates/oxttl) / [oxrdf](https://crates.io/crates/oxrdf) planned at v0.5.x for Turtle-star |
 | Hashing | [xxhash-rust](https://crates.io/crates/xxhash-rust) (XXH3-128) — fast non-cryptographic hash for dictionary dedup |
 | Serialization | [serde](https://crates.io/crates/serde) + [serde_json](https://crates.io/crates/serde_json) — SHACL reports, SPARQL results, config |
 | HTTP server | [axum](https://crates.io/crates/axum) (built on [tokio](https://tokio.rs/)) — SPARQL Protocol HTTP endpoint (`pg_ripple_http` binary) |

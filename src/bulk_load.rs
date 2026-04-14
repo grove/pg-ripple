@@ -38,7 +38,9 @@ fn encode_subject(subject: &Subject<'_>, generation: i64) -> i64 {
             dictionary::encode(&scoped, dictionary::KIND_BLANK)
         }
         Subject::Triple(_) => {
-            pgrx::warning!("RDF-star quoted-triple subject not supported in this format; use load_ntriples() for N-Triples-star");
+            pgrx::warning!(
+                "RDF-star quoted-triple subject not supported in this format; use load_ntriples() for N-Triples-star"
+            );
             dictionary::encode("_rdfstar_unsupported_", dictionary::KIND_IRI)
         }
     }
@@ -65,7 +67,9 @@ fn encode_term(term: &Term<'_>, generation: i64) -> i64 {
             }
         },
         Term::Triple(_) => {
-            pgrx::warning!("RDF-star quoted-triple object not supported in this format; use load_ntriples() for N-Triples-star");
+            pgrx::warning!(
+                "RDF-star quoted-triple object not supported in this format; use load_ntriples() for N-Triples-star"
+            );
             dictionary::encode("_rdfstar_unsupported_", dictionary::KIND_IRI)
         }
     }
@@ -323,7 +327,7 @@ fn parse_nt_star_full_line(line: &str, generation: i64) -> Option<(i64, i64, i64
 ///
 /// Handles: `<iri>`, `_:blank`, `"literal"`, `"literal"^^<datatype>`, `"literal"@lang`,
 /// and `<< ... >>` nested quoted triples.
-fn parse_nt_star_term<'a>(s: &'a str, generation: i64) -> Option<(i64, &'a str)> {
+fn parse_nt_star_term(s: &str, generation: i64) -> Option<(i64, &str)> {
     let s = s.trim_start();
 
     if s.starts_with("<<") {
@@ -339,9 +343,7 @@ fn parse_nt_star_term<'a>(s: &'a str, generation: i64) -> Option<(i64, &'a str)>
         Some((id, &rest[end + 1..]))
     } else if let Some(rest) = s.strip_prefix("_:") {
         // Blank node
-        let end = rest
-            .find(|c: char| c.is_whitespace())
-            .unwrap_or(rest.len());
+        let end = rest.find(|c: char| c.is_whitespace()).unwrap_or(rest.len());
         let label = &rest[..end];
         let scoped = format!("{}:{}", generation, label);
         let id = dictionary::encode(&scoped, dictionary::KIND_BLANK);
@@ -356,7 +358,7 @@ fn parse_nt_star_term<'a>(s: &'a str, generation: i64) -> Option<(i64, &'a str)>
 
 /// Parse `<< term term term >>` from the front of `s`.
 /// Returns `(quoted_triple_id, remaining)`.
-fn parse_nt_star_quoted_triple<'a>(s: &'a str, generation: i64) -> Option<(i64, &'a str)> {
+fn parse_nt_star_quoted_triple(s: &str, generation: i64) -> Option<(i64, &str)> {
     let inner = s.strip_prefix("<<")?;
     let inner = inner.trim_start();
 
@@ -421,5 +423,3 @@ fn parse_nt_star_literal(s: &str) -> Option<(i64, &str)> {
         Some((id, rest))
     }
 }
-
-

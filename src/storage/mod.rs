@@ -1048,7 +1048,8 @@ pub fn get_statement_by_sid(sid: i64) -> Option<(String, String, String, String)
         )
         .ok()
         .and_then(|rows| {
-            rows.filter_map(|row| row.get::<i64>(1).ok().flatten()).next()
+            rows.filter_map(|row| row.get::<i64>(1).ok().flatten())
+                .next()
         })
     });
 

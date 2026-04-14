@@ -13,7 +13,7 @@ Nothing yet — next milestone is [v0.5.0 (SPARQL Advanced)](ROADMAP.md).
 
 ---
 
-## [0.4.0] — 2026-04-15 — RDF-star / Statement Identifiers
+## [0.4.0] — 2026-04-14 — RDF-star / Statement Identifiers
 
 This release adds RDF-star support: quoted triples, statement identifiers, and SPARQL-star query patterns. You can now make statements about statements — essential for provenance, temporal annotations, and LPG-style edge properties.
 
