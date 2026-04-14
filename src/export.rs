@@ -23,7 +23,10 @@ pub fn export_ntriples(graph: Option<&str>) -> String {
             } else {
                 g_str
             };
-            Some(crate::dictionary::encode(stripped, crate::dictionary::KIND_IRI))
+            Some(crate::dictionary::encode(
+                stripped,
+                crate::dictionary::KIND_IRI,
+            ))
         }
         None => Some(0), // default graph
     };
@@ -60,7 +63,10 @@ pub fn export_nquads(graph: Option<&str>) -> String {
             } else {
                 g_str
             };
-            Some(crate::dictionary::encode(stripped, crate::dictionary::KIND_IRI))
+            Some(crate::dictionary::encode(
+                stripped,
+                crate::dictionary::KIND_IRI,
+            ))
         }
         None => None, // all graphs
     };

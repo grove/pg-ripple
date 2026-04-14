@@ -51,13 +51,11 @@ pub static DEFAULT_GRAPH: pgrx::GucSetting<Option<std::ffi::CString>> =
     pgrx::GucSetting::<Option<std::ffi::CString>>::new(None);
 
 /// GUC: minimum triple count before a rare predicate gets its own VP table.
-pub static VPP_THRESHOLD: pgrx::GucSetting<i32> =
-    pgrx::GucSetting::<i32>::new(1000);
+pub static VPP_THRESHOLD: pgrx::GucSetting<i32> = pgrx::GucSetting::<i32>::new(1000);
 
 /// GUC: when true, add a `(g, s, o)` index to every dedicated VP table for
 /// fast named-graph–scoped queries.  Off by default to avoid index bloat.
-pub static NAMED_GRAPH_OPTIMIZED: pgrx::GucSetting<bool> =
-    pgrx::GucSetting::<bool>::new(false);
+pub static NAMED_GRAPH_OPTIMIZED: pgrx::GucSetting<bool> = pgrx::GucSetting::<bool>::new(false);
 
 /// Called once when the extension shared library is loaded.
 #[allow(non_snake_case)]
@@ -300,11 +298,17 @@ mod tests {
 
     #[pg_test]
     fn test_typed_literal_roundtrip() {
-        let id = crate::dictionary::encode_typed_literal("42", "http://www.w3.org/2001/XMLSchema#integer");
+        let id = crate::dictionary::encode_typed_literal(
+            "42",
+            "http://www.w3.org/2001/XMLSchema#integer",
+        );
         let full = crate::dictionary::decode_full(id).expect("decode_full should succeed");
         assert_eq!(full.value, "42");
         assert_eq!(full.kind, crate::dictionary::KIND_TYPED_LITERAL);
-        assert_eq!(full.datatype.as_deref(), Some("http://www.w3.org/2001/XMLSchema#integer"));
+        assert_eq!(
+            full.datatype.as_deref(),
+            Some("http://www.w3.org/2001/XMLSchema#integer")
+        );
     }
 
     #[pg_test]
@@ -317,7 +321,8 @@ mod tests {
 
     #[pg_test]
     fn test_ntriples_bulk_load() {
-        let data = "<https://example.org/a> <https://example.org/knows> <https://example.org/b> .\n";
+        let data =
+            "<https://example.org/a> <https://example.org/knows> <https://example.org/b> .\n";
         let count = crate::bulk_load::load_ntriples(data);
         assert_eq!(count, 1);
         assert!(crate::storage::total_triple_count() >= 1);
@@ -347,7 +352,8 @@ mod tests {
 
     #[pg_test]
     fn test_export_ntriples_roundtrip() {
-        let nt = "<https://example.org/ex> <https://example.org/pred> <https://example.org/obj> .\n";
+        let nt =
+            "<https://example.org/ex> <https://example.org/pred> <https://example.org/obj> .\n";
         crate::bulk_load::load_ntriples(nt);
         let exported = crate::export::export_ntriples(None);
         assert!(exported.contains("<https://example.org/pred>"));
@@ -361,4 +367,3 @@ pub mod pg_test {
         vec!["allow_system_table_mods = on"]
     }
 }
-

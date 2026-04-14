@@ -232,7 +232,12 @@ pub fn decode_full(id: i64) -> Option<TermInfo> {
                 let kind: i16 = row.get::<i16>(2).ok().flatten()?;
                 let datatype: Option<String> = row.get::<String>(3).ok().flatten();
                 let lang: Option<String> = row.get::<String>(4).ok().flatten();
-                Some(TermInfo { value, kind, datatype, lang })
+                Some(TermInfo {
+                    value,
+                    kind,
+                    datatype,
+                    lang,
+                })
             })
             .next()
     })
@@ -248,16 +253,28 @@ pub fn decode_full(id: i64) -> Option<TermInfo> {
 pub fn format_ntriples(id: i64) -> String {
     match decode_full(id) {
         None => format!("<unknown:{}>", id),
-        Some(t) => format_ntriples_term(&t.value, t.kind, t.datatype.as_deref(), t.lang.as_deref(), id),
+        Some(t) => format_ntriples_term(
+            &t.value,
+            t.kind,
+            t.datatype.as_deref(),
+            t.lang.as_deref(),
+            id,
+        ),
     }
 }
 
 /// Format from components.
-pub fn format_ntriples_term(value: &str, kind: i16, datatype: Option<&str>, lang: Option<&str>, fallback_id: i64) -> String {
+pub fn format_ntriples_term(
+    value: &str,
+    kind: i16,
+    datatype: Option<&str>,
+    lang: Option<&str>,
+    fallback_id: i64,
+) -> String {
     match kind {
-        k if k == KIND_IRI        => format!("<{}>", value),
-        k if k == KIND_BLANK      => format!("_:b{}", fallback_id),
-        k if k == KIND_LITERAL    => format!("\"{}\"", escape_literal(value)),
+        k if k == KIND_IRI => format!("<{}>", value),
+        k if k == KIND_BLANK => format!("_:b{}", fallback_id),
+        k if k == KIND_LITERAL => format!("\"{}\"", escape_literal(value)),
         k if k == KIND_TYPED_LITERAL => {
             let dt = datatype.unwrap_or("http://www.w3.org/2001/XMLSchema#string");
             format!("\"{}\"^^<{}>", escape_literal(value), dt)
@@ -275,12 +292,12 @@ fn escape_literal(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for ch in s.chars() {
         match ch {
-            '"'  => out.push_str("\\\""),
-            '\\'  => out.push_str("\\\\"),
-            '\n'  => out.push_str("\\n"),
-            '\r'  => out.push_str("\\r"),
-            '\t'  => out.push_str("\\t"),
-            c    => out.push(c),
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c => out.push(c),
         }
     }
     out

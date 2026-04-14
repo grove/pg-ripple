@@ -18,7 +18,7 @@ use pgrx::datum::DatumWithOid;
 use pgrx::prelude::*;
 use rio_api::model::{GraphName, Literal, NamedNode, Subject, Term};
 use rio_api::parser::{QuadsParser, TriplesParser};
-use rio_turtle::{NQuadsParser, NTriplesParser, TriGParser, TurtleParser, TurtleError};
+use rio_turtle::{NQuadsParser, NTriplesParser, TriGParser, TurtleError, TurtleParser};
 
 use crate::dictionary;
 use crate::storage;
@@ -80,9 +80,12 @@ fn encode_graph_name_opt(graph_name: &Option<GraphName<'_>>) -> i64 {
 
 // ─── Batch flush helper ───────────────────────────────────────────────────────
 
+type TripleRow = (i64, i64, i64);
+type PredicateBatch = HashMap<i64, Vec<TripleRow>>;
+
 /// Flush accumulated triples (grouped by predicate) in batched VP inserts.
-fn flush_batch(by_predicate: &mut HashMap<i64, Vec<(i64, i64, i64)>>) {
-    let groups: Vec<(i64, Vec<(i64, i64, i64)>)> = by_predicate.drain().collect();
+fn flush_batch(by_predicate: &mut PredicateBatch) {
+    let groups: Vec<(i64, Vec<TripleRow>)> = by_predicate.drain().collect();
     for (p_id, rows) in groups {
         storage::batch_insert_encoded(p_id, &rows);
     }
@@ -135,10 +138,7 @@ pub fn load_ntriples(data: &str) -> i64 {
             let p_id = encode_named_node(&triple.predicate);
             let o_id = encode_term(&triple.object, generation);
             touched.insert(p_id);
-            by_predicate
-                .entry(p_id)
-                .or_default()
-                .push((s_id, o_id, 0));
+            by_predicate.entry(p_id).or_default().push((s_id, o_id, 0));
             total += 1;
             if total % BATCH_SIZE as i64 == 0 {
                 flush_batch(&mut by_predicate);
@@ -198,10 +198,7 @@ pub fn load_turtle(data: &str) -> i64 {
             let p_id = encode_named_node(&triple.predicate);
             let o_id = encode_term(&triple.object, generation);
             touched.insert(p_id);
-            by_predicate
-                .entry(p_id)
-                .or_default()
-                .push((s_id, o_id, 0));
+            by_predicate.entry(p_id).or_default().push((s_id, o_id, 0));
             total += 1;
             if total % BATCH_SIZE as i64 == 0 {
                 flush_batch(&mut by_predicate);
@@ -254,12 +251,9 @@ fn read_file_content(path: &str) -> String {
     // pg_read_file() requires superuser or pg_monitor role; SPI propagates
     // the caller's privileges, so a non-superuser call will fail with a
     // permissions error — no additional check needed here.
-    Spi::get_one_with_args::<String>(
-        "SELECT pg_read_file($1)",
-        &[DatumWithOid::from(path)],
-    )
-    .unwrap_or_else(|e| pgrx::error!("pg_read_file({path}): {e}"))
-    .unwrap_or_else(|| pgrx::error!("pg_read_file({path}): returned NULL"))
+    Spi::get_one_with_args::<String>("SELECT pg_read_file($1)", &[DatumWithOid::from(path)])
+        .unwrap_or_else(|e| pgrx::error!("pg_read_file({path}): {e}"))
+        .unwrap_or_else(|| pgrx::error!("pg_read_file({path}): returned NULL"))
 }
 
 /// Load N-Triples from a server-side file path.

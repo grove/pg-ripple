@@ -47,10 +47,15 @@ fn strip_angle_brackets(term: &str) -> &str {
 pub fn parse_rdf_term(s: &str) -> (String, i16, Option<String>, Option<String>) {
     let s = s.trim();
     if s.starts_with('<') && s.ends_with('>') {
-        return (s[1..s.len() - 1].to_owned(), dictionary::KIND_IRI, None, None);
+        return (
+            s[1..s.len() - 1].to_owned(),
+            dictionary::KIND_IRI,
+            None,
+            None,
+        );
     }
-    if s.starts_with("_:") {
-        return (s[2..].to_owned(), dictionary::KIND_BLANK, None, None);
+    if let Some(rest) = s.strip_prefix("_:") {
+        return (rest.to_owned(), dictionary::KIND_BLANK, None, None);
     }
     if s.starts_with('"') {
         // Find closing quote (handling \" escapes)
@@ -79,7 +84,12 @@ pub fn parse_rdf_term(s: &str) -> (String, i16, Option<String>, Option<String>) 
             return (value, dictionary::KIND_TYPED_LITERAL, Some(dt), None);
         }
         if let Some(lang_part) = rest.strip_prefix('@') {
-            return (value, dictionary::KIND_LANG_LITERAL, None, Some(lang_part.to_owned()));
+            return (
+                value,
+                dictionary::KIND_LANG_LITERAL,
+                None,
+                Some(lang_part.to_owned()),
+            );
         }
         return (value, dictionary::KIND_LITERAL, None, None);
     }
@@ -518,10 +528,7 @@ pub fn batch_insert_encoded(p_id: i64, rows: &[(i64, i64, i64)]) -> i64 {
             .iter()
             .map(|(s, o, g)| format!("({},{},{})", s, o, g))
             .collect();
-        let sql = format!(
-            "INSERT INTO {table} (s, o, g) VALUES {}",
-            values.join(",")
-        );
+        let sql = format!("INSERT INTO {table} (s, o, g) VALUES {}", values.join(","));
         Spi::run_with_args(&sql, &[])
             .unwrap_or_else(|e| pgrx::error!("batch VP insert SPI error: {e}"));
 
@@ -640,8 +647,8 @@ pub fn find_triples(
     let g = graph.unwrap_or(0);
     let mut results = Vec::new();
 
-    let s_id = s.map(|v| encode_rdf_term(v));
-    let o_id = o.map(|v| encode_rdf_term(v));
+    let s_id = s.map(encode_rdf_term);
+    let o_id = o.map(encode_rdf_term);
 
     if let Some(p_str) = p {
         let p_id = dictionary::encode(strip_angle_brackets(p_str), dictionary::KIND_IRI);
@@ -859,10 +866,7 @@ fn scan_vp_rare(
 /// Encode a named graph IRI and return its dictionary id.
 /// This is idempotent — calling it again returns the same id.
 pub fn create_graph(graph_iri: &str) -> i64 {
-    dictionary::encode(
-        strip_angle_brackets(graph_iri),
-        dictionary::KIND_IRI,
-    )
+    dictionary::encode(strip_angle_brackets(graph_iri), dictionary::KIND_IRI)
 }
 
 /// Drop all triples in a named graph.  Returns the number of triples deleted.
@@ -947,7 +951,9 @@ pub fn list_graphs() -> Vec<String> {
             .filter_map(|row| row.get::<i64>(1).ok().flatten())
             .collect()
         });
-        for id in ids { g_ids.insert(id); }
+        for id in ids {
+            g_ids.insert(id);
+        }
     }
 
     let rare_ids: Vec<i64> = Spi::connect(|c| {
@@ -960,11 +966,13 @@ pub fn list_graphs() -> Vec<String> {
         .filter_map(|row| row.get::<i64>(1).ok().flatten())
         .collect()
     });
-    for id in rare_ids { g_ids.insert(id); }
+    for id in rare_ids {
+        g_ids.insert(id);
+    }
 
     let mut graphs: Vec<String> = g_ids
         .into_iter()
-        .filter_map(|id| dictionary::decode(id))
+        .filter_map(dictionary::decode)
         .map(|iri| format!("<{}>", iri))
         .collect();
     graphs.sort();
@@ -978,10 +986,7 @@ pub fn register_prefix(prefix: &str, expansion: &str) {
     Spi::run_with_args(
         "INSERT INTO _pg_ripple.prefixes (prefix, expansion) VALUES ($1, $2) \
          ON CONFLICT (prefix) DO UPDATE SET expansion = EXCLUDED.expansion",
-        &[
-            DatumWithOid::from(prefix),
-            DatumWithOid::from(expansion),
-        ],
+        &[DatumWithOid::from(prefix), DatumWithOid::from(expansion)],
     )
     .unwrap_or_else(|e| pgrx::error!("register_prefix SPI error: {e}"));
 }
