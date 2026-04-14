@@ -53,32 +53,33 @@ Perform these steps in order.
 
    ```bash
    git tag -a v0.X.Y -m "Release v0.X.Y — <version name from ROADMAP>"
+   git push origin v0.X.Y
    ```
 
    > **This step is done manually.** The release skill deliberately does not create tags.
 
-3. **Push the tag**
+3. **The GitHub release is created automatically**
+
+   Pushing the tag triggers `.github/workflows/release.yml`, which:
+   - Runs the full test + pg_regress suite on the tagged commit
+   - Extracts the changelog entry for this version from `CHANGELOG.md`
+   - Creates the GitHub release with the extracted notes
+
+   Monitor the workflow:
 
    ```bash
-   git push origin v0.X.Y
+   gh run list --limit 5
+   gh run view <run-id>
    ```
-
-4. **Create a GitHub release**
-
-   ```bash
-   gh release create v0.X.Y --title "v0.X.Y — <version name>" --notes-file /tmp/release_notes.md
-   ```
-
-   The release notes file should contain the CHANGELOG entry for this version.
 
 ---
 
 ## Post-Release Checklist
 
+- [ ] **Verify the release workflow passed** — check `.github/workflows/release.yml` run on the tag
+  - `gh run list --limit 5`
 - [ ] **Verify the GitHub release page** looks correct
   - `gh release view v0.X.Y`
-- [ ] **Verify CI passed on the tagged commit**
-  - Check the Actions tab or `gh run list --limit 3`
 - [ ] **Update the `[Unreleased]` section in CHANGELOG.md**
   - Add an empty `[Unreleased]` section above the just-released version
   - Commit: `git commit -am "docs: start unreleased section after v0.X.Y"`

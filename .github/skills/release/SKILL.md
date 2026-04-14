@@ -98,21 +98,19 @@ git tag -a vX.Y.Z -m "Release vX.Y.Z — <version name from ROADMAP>"
 git push origin vX.Y.Z
 ```
 
-### 8. Create release notes file
+### 8. GitHub release is created automatically
 
-Write the release notes to a temporary file using the **`create_file` tool** (never a shell heredoc), then use it with `gh release create`:
+Pushing the tag triggers `.github/workflows/release.yml`, which:
 
-```bash
-rm -f /tmp/release_vX.Y.Z.md
-# Use create_file tool to write /tmp/release_vX.Y.Z.md
-```
+1. Runs the full test + regress suite on the tagged commit
+2. Extracts the changelog entry for the version from `CHANGELOG.md`
+3. Creates the GitHub release with that text as the body
 
-The release notes should be the CHANGELOG entry for this version, reformatted if needed for GitHub's release page.
-
-### 9. Create GitHub release (after user tags)
+**No manual `gh release create` step is needed.** Monitor the workflow run:
 
 ```bash
-gh release create vX.Y.Z --title "vX.Y.Z — <version name>" --notes-file /tmp/release_vX.Y.Z.md
+gh run list --limit 5
+gh run view <run-id>
 ```
 
 ## Common Pitfalls

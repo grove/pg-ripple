@@ -1,0 +1,166 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  # ── 1. Full test suite (same checks as CI) ───────────────────────────────────
+  test:
+    name: Test (pg18)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache Cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            build-essential \
+            pkg-config \
+            libssl-dev \
+            libclang-dev \
+            clang \
+            libreadline-dev \
+            libicu-dev \
+            bison \
+            flex
+
+      - name: Install cargo-pgrx
+        run: cargo install cargo-pgrx --version "=0.17.0" --locked
+
+      - name: Initialise pgrx (PostgreSQL 18)
+        run: cargo pgrx init --pg18 download
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Clippy
+        run: cargo clippy --features pg18 -- -D warnings
+
+      - name: Run pg_test suite
+        run: cargo pgrx test pg18
+
+  # ── 2. pg_regress suite ──────────────────────────────────────────────────────
+  regress:
+    name: pg_regress (pg18)
+    runs-on: ubuntu-latest
+    needs: test
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            build-essential pkg-config libssl-dev libclang-dev clang \
+            libreadline-dev libicu-dev bison flex
+
+      - name: Install cargo-pgrx
+        run: cargo install cargo-pgrx --version "=0.17.0" --locked
+
+      - name: Initialise pgrx (PostgreSQL 18)
+        run: cargo pgrx init --pg18 download
+
+      - name: Run pg_regress suite
+        run: cargo pgrx regress pg18 --postgresql-conf "allow_system_table_mods=on"
+
+  # ── 3. Create GitHub release ─────────────────────────────────────────────────
+  release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+    needs: [test, regress]
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Extract version from tag
+        id: version
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Extract changelog entry for this version
+        id: notes
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          # Extract the block between "## [X.Y.Z]" and the next "## [" heading.
+          # sed: print lines from the first version heading to the line before
+          # the next heading (or EOF), then strip the heading line itself.
+          python3 - <<'EOF'
+          import re, sys
+
+          with open("CHANGELOG.md") as f:
+              text = f.read()
+
+          version = "${{ steps.version.outputs.version }}"
+          # Match the section for this version (heading through next heading or EOF)
+          pattern = rf"(## \[{re.escape(version)}\][^\n]*\n)(.*?)(?=\n## \[|\Z)"
+          m = re.search(pattern, text, re.DOTALL)
+          if not m:
+              print(f"ERROR: No changelog entry found for version {version}", file=sys.stderr)
+              sys.exit(1)
+
+          # Body is everything after the heading line
+          body = m.group(2).strip()
+          with open("/tmp/release_notes.md", "w") as out:
+              out.write(body + "\n")
+          print(f"Extracted {len(body)} chars for v{version}")
+          EOF
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          VERSION="${{ steps.version.outputs.version }}"
+          # Derive release name from ROADMAP — look for the version's theme line
+          THEME=$(grep -m1 "^## v${VERSION}" ROADMAP.md \
+                  | sed 's/^## v[0-9.]* — //' || echo "")
+          if [ -n "$THEME" ]; then
+            TITLE="${TAG} — ${THEME}"
+          else
+            TITLE="${TAG}"
+          fi
+          gh release create "${TAG}" \
+            --title "${TITLE}" \
+            --notes-file /tmp/release_notes.md \
+            --verify-tag
