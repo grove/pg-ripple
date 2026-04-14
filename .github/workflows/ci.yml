@@ -9,6 +9,7 @@ on:
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
+  PGRX_VERSION: "0.17.0"
 
 jobs:
   test:
@@ -34,6 +35,18 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: ${{ runner.os }}-cargo-
 
+      - name: Cache cargo-pgrx binary
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/cargo-pgrx
+          key: ${{ runner.os }}-cargo-pgrx-${{ env.PGRX_VERSION }}
+
+      - name: Cache pgrx PostgreSQL build
+        uses: actions/cache@v4
+        with:
+          path: ~/.pgrx
+          key: ${{ runner.os }}-pgrx-pg18-${{ env.PGRX_VERSION }}
+
       - name: Install system dependencies
         run: |
           sudo apt-get update -qq
@@ -49,10 +62,16 @@ jobs:
             flex
 
       - name: Install cargo-pgrx
-        run: cargo install cargo-pgrx --version "=0.17.0" --locked
+        run: |
+          if ! cargo pgrx --version 2>/dev/null | grep -q "${{ env.PGRX_VERSION }}"; then
+            cargo install cargo-pgrx --version "=${{ env.PGRX_VERSION }}" --locked
+          fi
 
       - name: Initialise pgrx (PostgreSQL 18)
-        run: cargo pgrx init --pg18 download
+        run: |
+          if [[ ! -f ~/.pgrx/18.*/pgrx-install/bin/pg_config ]]; then
+            cargo pgrx init --pg18 download
+          fi
 
       - name: Check formatting
         run: cargo fmt --all -- --check
@@ -68,7 +87,6 @@ jobs:
   regress:
     name: pg_regress (pg18)
     runs-on: ubuntu-latest
-    needs: test
 
     steps:
       - name: Checkout
@@ -87,6 +105,18 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: ${{ runner.os }}-cargo-
 
+      - name: Cache cargo-pgrx binary
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/cargo-pgrx
+          key: ${{ runner.os }}-cargo-pgrx-${{ env.PGRX_VERSION }}
+
+      - name: Cache pgrx PostgreSQL build
+        uses: actions/cache@v4
+        with:
+          path: ~/.pgrx
+          key: ${{ runner.os }}-pgrx-pg18-${{ env.PGRX_VERSION }}
+
       - name: Install system dependencies
         run: |
           sudo apt-get update -qq
@@ -95,10 +125,16 @@ jobs:
             libreadline-dev libicu-dev bison flex
 
       - name: Install cargo-pgrx
-        run: cargo install cargo-pgrx --version "=0.17.0" --locked
+        run: |
+          if ! cargo pgrx --version 2>/dev/null | grep -q "${{ env.PGRX_VERSION }}"; then
+            cargo install cargo-pgrx --version "=${{ env.PGRX_VERSION }}" --locked
+          fi
 
       - name: Initialise pgrx (PostgreSQL 18)
-        run: cargo pgrx init --pg18 download
+        run: |
+          if [[ ! -f ~/.pgrx/18.*/pgrx-install/bin/pg_config ]]; then
+            cargo pgrx init --pg18 download
+          fi
 
       - name: Run pg_regress suite
         run: cargo pgrx regress pg18 --postgresql-conf "allow_system_table_mods=on"
