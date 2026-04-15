@@ -10,10 +10,12 @@
 #
 # The resulting image is also published to ghcr.io as part of each release:
 #   docker run --rm -p 5432:5432 -e POSTGRES_PASSWORD=ripple \
-#     ghcr.io/grove/pg-ripple:0.5.0
+#     ghcr.io/grove/pg-ripple:0.5.1
 
 # ── Build stage ───────────────────────────────────────────────────────────────
-FROM rust:1.85-bookworm AS builder
+# pgrx 0.17 requires nightly Rust (specifically for let guards in pgrx-sql-entity-graph).
+# We use a recent nightly (2025-04-15) which includes necessary unstable features.
+FROM rust:nightly-2025-04-15-bookworm AS builder
 
 ARG PGRX_VERSION=0.17.0
 
