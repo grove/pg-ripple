@@ -1,0 +1,28 @@
+-- Migration: pg_ripple 0.5.0 → 0.5.1
+-- Released: 2025-04-15
+--
+-- Summary of changes in v0.5.1 (new SQL-callable functions only; no DDL changes)
+--
+-- 1. Inline value encoding
+--    Typed literals of types xsd:integer (and numeric subtypes), xsd:boolean,
+--    xsd:date, and xsd:dateTime are now stored as bit-packed BIGINT IDs rather
+--    than dictionary rows.  The storage schema is unchanged; the optimisation
+--    is transparent to existing queries.
+--
+-- 2. SPARQL CONSTRUCT / DESCRIBE
+--    pg_ripple.sparql_construct(query TEXT) RETURNS SETOF JSONB
+--    pg_ripple.sparql_describe(query TEXT, strategy TEXT) RETURNS SETOF JSONB
+--
+-- 3. Basic SPARQL Update (INSERT DATA / DELETE DATA)
+--    pg_ripple.sparql_update(query TEXT) RETURNS BIGINT
+--
+-- 4. Full-text search on literals
+--    pg_ripple.fts_index(predicate TEXT) RETURNS BIGINT
+--    pg_ripple.fts_search(query TEXT, predicate TEXT) RETURNS TABLE(s TEXT, p TEXT, o TEXT)
+--
+-- 5. New GUC
+--    pg_ripple.describe_strategy (TEXT, default 'cbd')
+--
+-- No schema changes are required: all new functionality is provided by the
+-- compiled Rust library.  Existing tables, sequences, and indexes are
+-- unchanged.

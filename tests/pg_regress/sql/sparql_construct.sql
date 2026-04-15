@@ -1,0 +1,41 @@
+-- pg_regress test: SPARQL CONSTRUCT queries (v0.5.1)
+-- Namespace: https://construct.test/
+
+DO $$
+BEGIN
+    DELETE FROM _pg_ripple.vp_rare
+    WHERE p IN (
+        SELECT id FROM _pg_ripple.dictionary
+        WHERE value LIKE 'https://construct.test/%'
+    );
+END $$;
+
+-- Load test data.
+SELECT pg_ripple.load_ntriples(
+    '<https://construct.test/alice> <https://construct.test/knows> <https://construct.test/bob> .' || E'\n' ||
+    '<https://construct.test/bob>   <https://construct.test/knows> <https://construct.test/carol> .' || E'\n' ||
+    '<https://construct.test/alice> <https://construct.test/name>  "Alice" .' || E'\n' ||
+    '<https://construct.test/bob>   <https://construct.test/name>  "Bob" .'
+) = 4 AS four_triples_loaded;
+
+-- CONSTRUCT with explicit template: build inverse knows triples.
+SELECT count(*) = 2 AS two_inverse_triples
+FROM pg_ripple.sparql_construct(
+    'CONSTRUCT { ?b <https://construct.test/knownBy> ?a }
+     WHERE { ?a <https://construct.test/knows> ?b }'
+);
+
+-- CONSTRUCT WHERE (bare form): returns original pattern triples.
+SELECT count(*) >= 1 AS construct_where_works
+FROM pg_ripple.sparql_construct(
+    'CONSTRUCT WHERE { <https://construct.test/alice> <https://construct.test/knows> ?o }'
+);
+
+-- CONSTRUCT result contains expected subject / predicate strings.
+SELECT (result->>'s') LIKE '%bob%' AND (result->>'p') LIKE '%knownBy%'
+    AS inverse_triple_is_correct
+FROM pg_ripple.sparql_construct(
+    'CONSTRUCT { ?b <https://construct.test/knownBy> ?a }
+     WHERE { ?a <https://construct.test/knows> ?b }
+         ORDER BY ?a LIMIT 1'
+);

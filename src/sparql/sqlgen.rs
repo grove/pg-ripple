@@ -84,6 +84,10 @@ struct Ctx {
     path_counter: u32,
     /// Per-query IRI/literal encoding cache — avoids repeated SPI look-ups.
     per_query: HashMap<String, Option<i64>>,
+    /// Variables that hold raw SQL integers (COUNT, SUM, etc. aggregate outputs).
+    /// FILTER constants compared against these must stay as raw SQL values,
+    /// not be re-encoded as inline IDs.
+    raw_numeric_vars: std::collections::HashSet<String>,
 }
 
 impl Ctx {
@@ -93,6 +97,7 @@ impl Ctx {
             opt_counter: 0,
             path_counter: 0,
             per_query: HashMap::new(),
+            raw_numeric_vars: std::collections::HashSet::new(),
         }
     }
 
@@ -930,9 +935,20 @@ fn translate_group(
         for (vname, _) in &agg_bindings {
             having_bindings.insert(vname.clone(), format!("_g_{vname}"));
         }
-        translate_expr(having_expr, &having_bindings, ctx)
+        // Mark aggregate vars as raw numeric so FILTER constants (e.g. >= 2) are
+        // not encoded as inline IDs — COUNT(*) returns a raw SQL integer, not an
+        // inline-encoded value.
+        for (vname, _) in &agg_bindings {
+            ctx.raw_numeric_vars.insert(vname.clone());
+        }
+        let result = translate_expr(having_expr, &having_bindings, ctx)
             .map(|c| format!("HAVING {c}"))
-            .unwrap_or_default()
+            .unwrap_or_default();
+        // Remove them again — only raw in HAVING scope of this group fragment.
+        for (vname, _) in &agg_bindings {
+            ctx.raw_numeric_vars.remove(vname.as_str());
+        }
+        result
     } else {
         String::new()
     };
@@ -956,10 +972,13 @@ fn translate_group(
     for (v, _) in &group_cols {
         frag.bindings.insert(v.clone(), format!("{alias}._g_{v}"));
     }
-    // Bind aggregate output variables.
+    // Bind aggregate output variables and mark them as raw numeric.
+    // This ensures that FILTER(?cnt >= 2) in an outer pattern (e.g. a subquery
+    // wrapping a GROUP BY) uses raw integer comparison rather than inline IDs.
     for (vname, _) in &agg_bindings {
         frag.bindings
             .insert(vname.clone(), format!("{alias}._g_{vname}"));
+        ctx.raw_numeric_vars.insert(vname.clone());
     }
 
     frag
@@ -1112,33 +1131,27 @@ fn translate_expr(
         }
 
         Expression::Equal(a, b) => {
-            let la = translate_expr_value(a, bindings, ctx)?;
-            let ra = translate_expr_value(b, bindings, ctx)?;
+            let (la, ra) = translate_comparison_sides(a, b, bindings, ctx)?;
             Some(format!("({la} = {ra})"))
         }
         Expression::SameTerm(a, b) => {
-            let la = translate_expr_value(a, bindings, ctx)?;
-            let ra = translate_expr_value(b, bindings, ctx)?;
+            let (la, ra) = translate_comparison_sides(a, b, bindings, ctx)?;
             Some(format!("({la} = {ra})"))
         }
         Expression::Greater(a, b) => {
-            let la = translate_expr_value(a, bindings, ctx)?;
-            let ra = translate_expr_value(b, bindings, ctx)?;
+            let (la, ra) = translate_comparison_sides(a, b, bindings, ctx)?;
             Some(format!("({la} > {ra})"))
         }
         Expression::GreaterOrEqual(a, b) => {
-            let la = translate_expr_value(a, bindings, ctx)?;
-            let ra = translate_expr_value(b, bindings, ctx)?;
+            let (la, ra) = translate_comparison_sides(a, b, bindings, ctx)?;
             Some(format!("({la} >= {ra})"))
         }
         Expression::Less(a, b) => {
-            let la = translate_expr_value(a, bindings, ctx)?;
-            let ra = translate_expr_value(b, bindings, ctx)?;
+            let (la, ra) = translate_comparison_sides(a, b, bindings, ctx)?;
             Some(format!("({la} < {ra})"))
         }
         Expression::LessOrEqual(a, b) => {
-            let la = translate_expr_value(a, bindings, ctx)?;
-            let ra = translate_expr_value(b, bindings, ctx)?;
+            let (la, ra) = translate_comparison_sides(a, b, bindings, ctx)?;
             Some(format!("({la} <= {ra})"))
         }
 
@@ -1182,6 +1195,13 @@ fn translate_expr(
 }
 
 /// Translate an expression to a SQL integer value (dictionary id or column ref).
+///
+/// For SPARQL literals of inline-encodable types (xsd:integer, xsd:boolean,
+/// xsd:dateTime, xsd:date), we return the inline-encoded i64 so that
+/// FILTER comparisons on stored inline values work correctly (both sides use
+/// the same encoding).  When the other side of a comparison is a raw numeric
+/// variable (aggregate output), callers should use `translate_expr_value_raw`
+/// instead.
 fn translate_expr_value(
     expr: &Expression,
     bindings: &HashMap<String, String>,
@@ -1194,10 +1214,32 @@ fn translate_expr_value(
             Some(id.to_string())
         }
         Expression::Literal(lit) => {
+            // use inline encoding (or dict if out of range / unsupported type)
+            let id = ctx.encode_literal(lit);
+            Some(id.to_string())
+        }
+        _ => None,
+    }
+}
+
+/// Like `translate_expr_value`, but always returns raw numeric SQL values for
+/// numeric literals — used when the comparison context is a raw aggregate
+/// output (COUNT, SUM, etc.) rather than a stored inline-encoded triple value.
+fn translate_expr_value_raw(
+    expr: &Expression,
+    bindings: &HashMap<String, String>,
+    ctx: &mut Ctx,
+) -> Option<String> {
+    match expr {
+        Expression::Variable(v) => Some(bindings.get(v.as_str())?.clone()),
+        Expression::NamedNode(nn) => {
+            let id = ctx.encode_iri(nn.as_str())?;
+            Some(id.to_string())
+        }
+        Expression::Literal(lit) => {
             let dt = lit.datatype().as_str();
-            // For numeric types, return the raw numeric value.
-            // Comparing dict IDs for numeric comparisons is semantically wrong
-            // (e.g. FILTER(?count >= 2) or FILTER(?age > 18)).
+            // For numeric types compared with aggregate results, return the
+            // raw lexical value so COUNT(*) = 2 comparisons work correctly.
             if dt == "http://www.w3.org/2001/XMLSchema#integer"
                 || dt == "http://www.w3.org/2001/XMLSchema#long"
                 || dt == "http://www.w3.org/2001/XMLSchema#int"
@@ -1213,6 +1255,34 @@ fn translate_expr_value(
             }
         }
         _ => None,
+    }
+}
+
+/// Determine whether an expression is a raw-numeric variable (aggregate output).
+fn expr_is_raw_numeric(expr: &Expression, ctx: &Ctx) -> bool {
+    if let Expression::Variable(v) = expr {
+        ctx.raw_numeric_vars.contains(v.as_str())
+    } else {
+        false
+    }
+}
+
+/// Translate both sides of a comparison, using raw encoding for numeric
+/// literals when either side is a raw-numeric aggregate variable.
+fn translate_comparison_sides(
+    a: &Expression,
+    b: &Expression,
+    bindings: &HashMap<String, String>,
+    ctx: &mut Ctx,
+) -> Option<(String, String)> {
+    if expr_is_raw_numeric(a, ctx) || expr_is_raw_numeric(b, ctx) {
+        let la = translate_expr_value_raw(a, bindings, ctx)?;
+        let ra = translate_expr_value_raw(b, bindings, ctx)?;
+        Some((la, ra))
+    } else {
+        let la = translate_expr_value(a, bindings, ctx)?;
+        let ra = translate_expr_value(b, bindings, ctx)?;
+        Some((la, ra))
     }
 }
 

@@ -17,4 +17,5 @@ SELECT pg_ripple.encode_term('node1', 1::smallint) != pg_ripple.encode_term('nod
     AS blank_vs_iri_distinct;
 
 -- Unknown ID decodes to NULL
-SELECT pg_ripple.decode_id(-1) IS NULL AS unknown_id_is_null;
+-- Unknown positive ID returns NULL (negative IDs are now reserved for inline-encoded values).
+SELECT pg_ripple.decode_id(999999999) IS NULL AS unknown_id_is_null;

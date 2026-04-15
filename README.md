@@ -13,7 +13,7 @@ pg_ripple is a PostgreSQL 18 extension building toward a fully-featured knowledg
 
 ---
 
-## What works today (v0.5.0)
+## What works today (v0.5.1)
 
 You can install the extension, store triples, bulk-load RDF datasets, manage named graphs, and query with full SPARQL 1.1:
 
@@ -35,6 +35,26 @@ SELECT * FROM pg_ripple.sparql('
   }
 ');
 
+-- SPARQL CONSTRUCT: create new triples from a template
+SELECT * FROM pg_ripple.sparql_construct('
+  PREFIX foaf: <http://xmlns.com/foaf/0.1/>
+  CONSTRUCT { ?b foaf:knownBy ?a }
+  WHERE { ?a foaf:knows ?b }
+');
+
+-- SPARQL DESCRIBE: get all available information about a resource
+SELECT * FROM pg_ripple.sparql_describe(
+  'DESCRIBE <http://example.org/Alice>'
+);
+
+-- Insert and delete triples via SPARQL
+SELECT pg_ripple.sparql_update(
+  'INSERT DATA { <http://example.org/Alice> <http://example.org/age> "30"^^<http://www.w3.org/2001/XMLSchema#integer> }'
+);
+
+-- Full-text search on literals
+SELECT * FROM pg_ripple.fts_search('semantic', '<http://example.org/abstract>');
+
 -- Count people per company with GROUP BY and aggregates
 SELECT * FROM pg_ripple.sparql('
   PREFIX ex: <http://example.org/>
@@ -42,25 +62,6 @@ SELECT * FROM pg_ripple.sparql('
     ?person ex:worksAt ?company .
   }
   GROUP BY ?company
-');
-
--- Combine two queries with UNION
-SELECT * FROM pg_ripple.sparql('
-  PREFIX foaf: <http://xmlns.com/foaf/0.1/>
-  SELECT ?person WHERE {
-    { <http://example.org/Alice> foaf:knows ?person . }
-    UNION
-    { <http://example.org/Bob> foaf:knows ?person . }
-  }
-');
-
--- Use BIND to compute values
-SELECT * FROM pg_ripple.sparql('
-  PREFIX foaf: <http://xmlns.com/foaf/0.1/>
-  SELECT ?person ?fullName WHERE {
-    ?person foaf:givenName ?first ; foaf:familyName ?last .
-    BIND(CONCAT(?first, " ", ?last) AS ?fullName)
-  }
 ');
 
 -- Query by pattern (NULL = wildcard)
@@ -72,7 +73,7 @@ SELECT * FROM pg_ripple.find_triples(
 SELECT pg_ripple.triple_count();
 ```
 
-Every IRI, blank node, literal, and quoted triple is dictionary-encoded to a compact integer for fast joins. Facts are stored in separate tables per predicate (Vertical Partitioning). The SPARQL engine supports property paths (`+`, `*`, `?`), UNION/MINUS, aggregates, GROUP BY, subqueries, BIND, VALUES, OPTIONAL, and named graphs. No `shared_preload_libraries` configuration required.
+Every IRI, blank node, literal, and quoted triple is dictionary-encoded to a compact integer for fast joins. Numeric and date literals are automatically *inline-encoded* — stored as bit-packed integers with no dictionary overhead, making FILTER comparisons extremely fast. Facts are stored in separate tables per predicate (Vertical Partitioning). The SPARQL engine supports property paths (`+`, `*`, `?`), UNION/MINUS, aggregates, GROUP BY, subqueries, BIND, VALUES, OPTIONAL, and named graphs. All four SPARQL query forms (SELECT, CONSTRUCT, DESCRIBE, ASK) are fully supported. No `shared_preload_libraries` configuration required.
 
 ---
 

@@ -9,9 +9,43 @@ Versions correspond to the milestones in [ROADMAP.md](ROADMAP.md).
 
 ## [Unreleased]
 
-Development towards [v0.5.1 (Inline Value Encoding)](ROADMAP.md).
+Development towards [v0.6.0 (HTAP Architecture)](ROADMAP.md).
 
 ---
+
+## [0.5.1] — 2025-04-15 — SPARQL Advanced (Storage, Serialization & Write)
+
+This release introduces inline value encoding for numeric and date literals, completes all four SPARQL query forms with CONSTRUCT and DESCRIBE, adds basic SPARQL Update (INSERT DATA / DELETE DATA), and delivers full-text search on literal objects.
+
+### What you can do
+
+- **Inline value encoding** — `xsd:integer`, `xsd:boolean`, `xsd:date`, and `xsd:dateTime` literals are now stored as bit-packed `BIGINT` IDs in VP tables. FILTER comparisons on these types (`>`, `<`, `<=`, `>=`, `=`) require zero dictionary round-trips and execute as plain SQL integer comparisons
+- **SPARQL CONSTRUCT** — `pg_ripple.sparql_construct(query TEXT) RETURNS SETOF JSONB` — constructs new triples from a template and returns them as JSONB objects `{s, p, o}`; supports both explicit-template and bare CONSTRUCT WHERE forms
+- **SPARQL DESCRIBE** — `pg_ripple.sparql_describe(query TEXT, strategy TEXT) RETURNS SETOF JSONB` — returns Concise Bounded Description (CBD) or Symmetric CBD (SCBD) of named resources as JSONB triples; `pg_ripple.describe_strategy` GUC selects the default algorithm
+- **SPARQL UPDATE** — `pg_ripple.sparql_update(query TEXT) RETURNS BIGINT` — executes `INSERT DATA { … }` and `DELETE DATA { … }` statements; returns count of affected triples; supports typed literals including inline-encoded types
+- **Full-text search** — `pg_ripple.fts_index(predicate TEXT)` creates a GIN `tsvector` index on string-literal objects of a predicate; `pg_ripple.fts_search(query TEXT, predicate TEXT) RETURNS TABLE(s TEXT, p TEXT, o TEXT)` searches using PostgreSQL `tsquery` syntax
+
+### Bug fixes
+
+- `fts_index`: accepts N-Triples notation (`<IRI>`) for predicate — angle brackets are stripped before dictionary lookup
+- `fts_index`: index predicate changed from subquery-based partial index (unsupported by PostgreSQL) to a `WHERE kind = 2` partial index on all plain string literals — search correctness is ensured by the VP-table JOIN in `fts_search`
+- `batch_decode`: inline IDs are now decoded locally without a DB round-trip, fixing incorrect NULL returns for inline-encoded values in SPARQL SELECT results
+
+### New GUCs
+
+- `pg_ripple.describe_strategy` (TEXT, default `'cbd'`) — DESCRIBE expansion algorithm: `'cbd'` (Concise Bounded Description), `'scbd'` (Symmetric CBD), `'simple'` (single subject only)
+
+### Test infrastructure
+
+- 5 new pg_regress test files: `inline_encoding.sql`, `sparql_construct.sql`, `sparql_insert_data.sql`, `sparql_delete_data.sql`, `fts_search.sql`
+- Total: 19 pg_regress tests, all passing
+
+### Documentation
+
+- `user-guide/sql-reference/sparql-query.md` — CONSTRUCT / DESCRIBE, `describe_strategy` GUC
+- `user-guide/sql-reference/sparql-update.md` — `sparql_update()`, INSERT DATA / DELETE DATA
+- `user-guide/sql-reference/fts.md` — `fts_index`, `fts_search`
+- `user-guide/best-practices/update-patterns.md` — INSERT DATA vs bulk load, idempotent patterns
 
 ## [0.5.0] — 2026-04-15 — SPARQL Advanced Query Engine
 

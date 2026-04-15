@@ -1134,3 +1134,204 @@ fn decode_sog(s_id: i64, p_id: i64, o_id: i64, g_id: i64) -> (String, String, St
         },
     )
 }
+
+// ─── v0.5.1 additions ─────────────────────────────────────────────────────────
+
+/// Insert a triple by pre-encoded dictionary IDs.
+/// Alias for `insert_encoded_triple` for use from the SPARQL Update executor.
+pub fn insert_triple_by_ids(s_id: i64, p_id: i64, o_id: i64, g_id: i64) -> i64 {
+    insert_encoded_triple(s_id, p_id, o_id, g_id)
+}
+
+/// Delete a triple by pre-encoded dictionary IDs.  Returns the number of deleted rows.
+pub fn delete_triple_by_ids(s_id: i64, p_id: i64, o_id: i64, g_id: i64) -> i64 {
+    let mut deleted = 0i64;
+
+    // Try dedicated VP table.
+    if let Some(table) = get_dedicated_vp_table(p_id) {
+        let d = Spi::get_one_with_args::<i64>(
+            &format!(
+                "WITH d AS (DELETE FROM {table} WHERE s=$1 AND o=$2 AND g=$3 RETURNING 1) \
+                 SELECT count(*)::bigint FROM d"
+            ),
+            &[
+                DatumWithOid::from(s_id),
+                DatumWithOid::from(o_id),
+                DatumWithOid::from(g_id),
+            ],
+        )
+        .unwrap_or_else(|e| pgrx::error!("delete_triple_by_ids SPI error: {e}"))
+        .unwrap_or(0);
+        if d > 0 {
+            Spi::run_with_args(
+                "UPDATE _pg_ripple.predicates \
+                 SET triple_count = GREATEST(0, triple_count - $2) WHERE id = $1",
+                &[DatumWithOid::from(p_id), DatumWithOid::from(d)],
+            )
+            .unwrap_or_else(|e| pgrx::error!("predicate count update SPI error: {e}"));
+            deleted += d;
+        }
+    }
+
+    // Also try vp_rare.
+    let d = Spi::get_one_with_args::<i64>(
+        "WITH d AS (DELETE FROM _pg_ripple.vp_rare \
+         WHERE p=$1 AND s=$2 AND o=$3 AND g=$4 RETURNING 1) \
+         SELECT count(*)::bigint FROM d",
+        &[
+            DatumWithOid::from(p_id),
+            DatumWithOid::from(s_id),
+            DatumWithOid::from(o_id),
+            DatumWithOid::from(g_id),
+        ],
+    )
+    .unwrap_or_else(|e| pgrx::error!("vp_rare delete_by_ids SPI error: {e}"))
+    .unwrap_or(0);
+    if d > 0 {
+        Spi::run_with_args(
+            "UPDATE _pg_ripple.predicates \
+             SET triple_count = GREATEST(0, triple_count - $2) WHERE id = $1",
+            &[DatumWithOid::from(p_id), DatumWithOid::from(d)],
+        )
+        .unwrap_or_else(|e| pgrx::error!("predicate count update SPI error: {e}"));
+        deleted += d;
+    }
+
+    deleted
+}
+
+/// Return the current load generation counter (used for blank-node scoping).
+/// Wraps `next_load_generation` but does NOT advance the generation — it just
+/// reads the current in-session value.
+pub fn current_load_generation() -> i64 {
+    // Use a thread-local to track the current generation within the session.
+    // INSERT DATA blank nodes get scoped to the generation at update time.
+    use std::sync::atomic::{AtomicI64, Ordering};
+    static GEN: AtomicI64 = AtomicI64::new(0);
+    let g = GEN.load(Ordering::Relaxed);
+    if g == 0 {
+        // Fetch from DB on first call.
+        let g2 = Spi::get_one::<i64>("SELECT last_value FROM _pg_ripple.load_generation_seq")
+            .ok()
+            .flatten()
+            .unwrap_or(1);
+        GEN.store(g2, Ordering::Relaxed);
+        g2
+    } else {
+        g
+    }
+}
+
+/// Return all `(predicate_id, object_id)` pairs where the given `subject_id`
+/// appears as the subject.  Used by the CBD DESCRIBE algorithm.
+pub fn triples_for_subject(subject_id: i64) -> Vec<(i64, i64)> {
+    let mut result = Vec::new();
+
+    // Scan all dedicated VP tables.
+    let pred_ids: Vec<i64> = Spi::connect(|c| {
+        c.select(
+            "SELECT id FROM _pg_ripple.predicates WHERE table_oid IS NOT NULL",
+            None,
+            &[],
+        )
+        .unwrap_or_else(|e| pgrx::error!("describe predicates SPI error: {e}"))
+        .filter_map(|row| row.get::<i64>(1).ok().flatten())
+        .collect()
+    });
+
+    for p_id in pred_ids {
+        let table = format!("_pg_ripple.vp_{p_id}");
+        let pairs: Vec<(i64, i64)> = Spi::connect(|c| {
+            c.select(
+                &format!("SELECT $1, o FROM {table} WHERE s = $2"),
+                None,
+                &[DatumWithOid::from(p_id), DatumWithOid::from(subject_id)],
+            )
+            .unwrap_or_else(|e| pgrx::error!("describe vp SPI error: {e}"))
+            .filter_map(|row| {
+                Some((
+                    row.get::<i64>(1).ok().flatten()?,
+                    row.get::<i64>(2).ok().flatten()?,
+                ))
+            })
+            .collect()
+        });
+        result.extend(pairs);
+    }
+
+    // Also scan vp_rare.
+    let rare_pairs: Vec<(i64, i64)> = Spi::connect(|c| {
+        c.select(
+            "SELECT p, o FROM _pg_ripple.vp_rare WHERE s = $1",
+            None,
+            &[DatumWithOid::from(subject_id)],
+        )
+        .unwrap_or_else(|e| pgrx::error!("describe vp_rare SPI error: {e}"))
+        .filter_map(|row| {
+            Some((
+                row.get::<i64>(1).ok().flatten()?,
+                row.get::<i64>(2).ok().flatten()?,
+            ))
+        })
+        .collect()
+    });
+    result.extend(rare_pairs);
+
+    result
+}
+
+/// Return all `(subject_id, predicate_id)` pairs where the given `object_id`
+/// appears as the object.  Used by the symmetric CBD DESCRIBE algorithm.
+pub fn triples_for_object(object_id: i64) -> Vec<(i64, i64)> {
+    let mut result = Vec::new();
+
+    let pred_ids: Vec<i64> = Spi::connect(|c| {
+        c.select(
+            "SELECT id FROM _pg_ripple.predicates WHERE table_oid IS NOT NULL",
+            None,
+            &[],
+        )
+        .unwrap_or_else(|e| pgrx::error!("describe_incoming predicates SPI error: {e}"))
+        .filter_map(|row| row.get::<i64>(1).ok().flatten())
+        .collect()
+    });
+
+    for p_id in pred_ids {
+        let table = format!("_pg_ripple.vp_{p_id}");
+        let pairs: Vec<(i64, i64)> = Spi::connect(|c| {
+            c.select(
+                &format!("SELECT s, $1 FROM {table} WHERE o = $2"),
+                None,
+                &[DatumWithOid::from(p_id), DatumWithOid::from(object_id)],
+            )
+            .unwrap_or_else(|e| pgrx::error!("describe_incoming vp SPI error: {e}"))
+            .filter_map(|row| {
+                Some((
+                    row.get::<i64>(1).ok().flatten()?,
+                    row.get::<i64>(2).ok().flatten()?,
+                ))
+            })
+            .collect()
+        });
+        result.extend(pairs);
+    }
+
+    let rare_pairs: Vec<(i64, i64)> = Spi::connect(|c| {
+        c.select(
+            "SELECT s, p FROM _pg_ripple.vp_rare WHERE o = $1",
+            None,
+            &[DatumWithOid::from(object_id)],
+        )
+        .unwrap_or_else(|e| pgrx::error!("describe_incoming vp_rare SPI error: {e}"))
+        .filter_map(|row| {
+            Some((
+                row.get::<i64>(1).ok().flatten()?,
+                row.get::<i64>(2).ok().flatten()?,
+            ))
+        })
+        .collect()
+    });
+    result.extend(rare_pairs);
+
+    result
+}

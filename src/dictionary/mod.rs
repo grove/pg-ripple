@@ -36,6 +36,8 @@
 //! and a decode `LruCache<i64, String>` (sequence id → term value).
 //! Shared-memory caches are introduced in v0.6.0.
 
+pub mod inline;
+
 use lru::LruCache;
 use pgrx::datum::DatumWithOid;
 use pgrx::prelude::*;
@@ -126,9 +128,32 @@ pub fn encode(term: &str, kind: i16) -> i64 {
 
 /// Encode a typed literal (`"value"^^<datatype>`) into the dictionary.
 ///
-/// The hash is computed over `kind_le_bytes || value_utf8 || "^^<" || datatype_utf8 || ">"`,
-/// so two literals with the same value but different datatypes always map to distinct IDs.
+/// For `xsd:integer`, `xsd:boolean`, `xsd:dateTime`, and `xsd:date`, the
+/// value is encoded inline (bit 63 = 1) — no dictionary row is inserted.
+/// All other typed literals are stored in the dictionary as usual.
 pub fn encode_typed_literal(value: &str, datatype: &str) -> i64 {
+    // Fast path: try inline encoding for supported numeric / date types.
+    let inline_id = match datatype {
+        "http://www.w3.org/2001/XMLSchema#integer"
+        | "http://www.w3.org/2001/XMLSchema#long"
+        | "http://www.w3.org/2001/XMLSchema#int"
+        | "http://www.w3.org/2001/XMLSchema#short"
+        | "http://www.w3.org/2001/XMLSchema#byte"
+        | "http://www.w3.org/2001/XMLSchema#nonNegativeInteger"
+        | "http://www.w3.org/2001/XMLSchema#positiveInteger"
+        | "http://www.w3.org/2001/XMLSchema#negativeInteger"
+        | "http://www.w3.org/2001/XMLSchema#nonPositiveInteger" => {
+            inline::try_encode_integer(value)
+        }
+        "http://www.w3.org/2001/XMLSchema#boolean" => inline::try_encode_boolean(value),
+        "http://www.w3.org/2001/XMLSchema#dateTime" => inline::try_encode_datetime(value),
+        "http://www.w3.org/2001/XMLSchema#date" => inline::try_encode_date(value),
+        _ => None,
+    };
+    if let Some(id) = inline_id {
+        return id;
+    }
+
     // Build canonical form for hashing.
     let canonical = format!("\"{}\"^^<{}>", value, datatype);
     let hash128 = term_hash(&canonical, KIND_TYPED_LITERAL);
@@ -372,6 +397,30 @@ pub fn lookup_iri(iri: &str) -> Option<i64> {
     lookup(iri, KIND_IRI)
 }
 
+/// Return `true` if `id` is a blank-node dictionary entry.
+///
+/// The function handles inline IDs (which are never blank nodes) gracefully.
+pub fn is_blank_node(id: i64) -> bool {
+    if inline::is_inline(id) {
+        return false;
+    }
+    Spi::connect(|client| {
+        client
+            .select(
+                "SELECT kind FROM _pg_ripple.dictionary WHERE id = $1 LIMIT 1",
+                Some(1),
+                &[DatumWithOid::from(id)],
+            )
+            .ok()
+            .and_then(|rows| {
+                rows.filter_map(|row| row.get::<i16>(1).ok().flatten())
+                    .next()
+            })
+            .map(|k| k == KIND_BLANK)
+            .unwrap_or(false)
+    })
+}
+
 /// Full decoded representation of a dictionary entry.
 pub struct TermInfo {
     pub value: String,
@@ -416,7 +465,12 @@ pub fn decode_full(id: i64) -> Option<TermInfo> {
 /// - Plain literal → `"value"`
 /// - Typed literal → `"value"^^<datatype>`
 /// - Lang literal → `"value"@lang`
+/// - Inline value → decoded literal, e.g. `"42"^^<xsd:integer>`
 pub fn format_ntriples(id: i64) -> String {
+    // Inline-encoded values (bit 63 = 1) are decoded without a DB round-trip.
+    if inline::is_inline(id) {
+        return inline::format_inline(id);
+    }
     match decode_full(id) {
         None => format!("<unknown:{}>", id),
         Some(t) => format_ntriples_term(
@@ -475,7 +529,13 @@ fn escape_literal(s: &str) -> String {
 /// Decode a dictionary `id` back to its original term string.
 ///
 /// Returns `None` if the id is not found in the dictionary.
+/// Inline-encoded values (bit 63 = 1) are decoded without a DB round-trip.
 pub fn decode(id: i64) -> Option<String> {
+    // Inline values are always decodable without a DB round-trip.
+    if inline::is_inline(id) {
+        return Some(inline::format_inline(id));
+    }
+
     if let Some(value) = DECODE_CACHE.with(|c| c.borrow_mut().get(&id).cloned()) {
         return Some(value);
     }

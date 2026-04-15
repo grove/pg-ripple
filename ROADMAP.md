@@ -351,17 +351,17 @@ SPARQL 1.1 Query coverage for property paths, UNION/MINUS, aggregates, subquerie
 
 ### Deliverables
 
-- [ ] **Inline value encoding** (`src/dictionary/inline.rs`)
+- [x] **Inline value encoding** (`src/dictionary/inline.rs`)
   - Type-tagged `i64` encoding for xsd:integer, xsd:boolean, xsd:dateTime, xsd:date — FILTER comparisons on these types require zero dictionary round-trips
   - IDs allocated in monotonically increasing semantic order so range FILTERs (`>`, `<`, `BETWEEN`) compile directly to SQL numeric comparisons on the raw `i64` column
   - Deferred from v0.3.0 to keep the initial SPARQL engine focused on a single ID space; now that the query engine is stable, the dual-space (inline + dictionary) model can be introduced safely
   - **Note**: `xsd:double` is stored in the dictionary rather than inline-encoded — truncating IEEE 754 doubles to 56 bits produces undefined precision/range behaviour; dictionary storage is safe and range comparisons on doubles are uncommon in SPARQL
-- [ ] **SPARQL CONSTRUCT / DESCRIBE** (JSONB output)
+- [x] **SPARQL CONSTRUCT / DESCRIBE** (JSONB output)
   - CONSTRUCT → returns triples as JSONB (Turtle/JSON-LD serialization deferred to v0.9.0)
   - DESCRIBE → Concise Bounded Description (CBD) as default algorithm
   - `pg_ripple.describe_strategy` GUC (values: `'cbd'` / `'scbd'` / `'simple'`): selects the DESCRIBE expansion algorithm. Introduced here alongside DESCRIBE so the GUC is available from the first release that uses it.
   - Completes the four standard SPARQL query forms, making pg_ripple usable as an entity browser
-- [ ] **Basic SPARQL Update** (`INSERT DATA` / `DELETE DATA`)
+- [x] **Basic SPARQL Update** (`INSERT DATA` / `DELETE DATA`)
   - Parse and execute `INSERT DATA { … }` statements via `spargebra` (already supports Update algebra)
   - Route through dictionary encoder + VP table insert path
   - Named graph support: `INSERT DATA { GRAPH <g> { … } }`
@@ -369,21 +369,21 @@ SPARQL 1.1 Query coverage for property paths, UNION/MINUS, aggregates, subquerie
   - `pg_ripple.sparql_update(query TEXT) RETURNS BIGINT` — returns count of affected triples
   - Pattern-based updates (`DELETE/INSERT WHERE`), `LOAD`, `CLEAR`, `DROP`, `CREATE` deferred to v0.12.0
   - Enables standard RDF tools (Protégé, TopBraid, SPARQL workbenches) to write to pg_ripple without a custom adapter
-- [ ] **Full-text search on literals**
+- [x] **Full-text search on literals**
   - `pg_ripple.fts_index(predicate TEXT)` — create a GIN `tsvector` index on the dictionary for a predicate
   - SPARQL `CONTAINS()` and `REGEX()` FILTERs on indexed predicates rewrite to `@@` / `LIKE` against the GIN index
   - `pg_ripple.fts_search(query TEXT, predicate TEXT) RETURNS TABLE` — direct full-text search API
   - Index is maintained incrementally on `insert_triple()` for indexed predicates
-- [ ] pg_regress: `fts_search.sql`, `sparql_construct.sql`, `sparql_insert_data.sql`, `sparql_delete_data.sql`, `inline_encoding.sql`
+- [x] pg_regress: `fts_search.sql`, `sparql_construct.sql`, `sparql_insert_data.sql`, `sparql_delete_data.sql`, `inline_encoding.sql`
 
 ### Documentation
 
 > See [plans/documentation.md](plans/documentation.md) for details.
 
-- [ ] `user-guide/sql-reference/sparql-update.md` — `sparql_update()`, INSERT DATA / DELETE DATA, named-graph variants
-- [ ] `user-guide/sql-reference/fts.md` — `fts_index`, `fts_search`, SPARQL CONTAINS/REGEX rewriting
-- [ ] `user-guide/sql-reference/sparql-query.md` expanded: CONSTRUCT / DESCRIBE, `describe_strategy` GUC
-- [ ] `user-guide/best-practices/update-patterns.md` — INSERT DATA vs bulk load, idempotent patterns
+- [x] `user-guide/sql-reference/sparql-update.md` — `sparql_update()`, INSERT DATA / DELETE DATA, named-graph variants
+- [x] `user-guide/sql-reference/fts.md` — `fts_index`, `fts_search`, SPARQL CONTAINS/REGEX rewriting
+- [x] `user-guide/sql-reference/sparql-query.md` expanded: CONSTRUCT / DESCRIBE, `describe_strategy` GUC
+- [x] `user-guide/best-practices/update-patterns.md` — INSERT DATA vs bulk load, idempotent patterns
 
 ### Exit Criteria
 

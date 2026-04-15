@@ -15,6 +15,7 @@ mod bulk_load;
 mod dictionary;
 mod error;
 mod export;
+mod fts;
 mod sparql;
 mod storage;
 
@@ -65,6 +66,11 @@ pub static PLAN_CACHE_SIZE: pgrx::GucSetting<i32> = pgrx::GucSetting::<i32>::new
 /// GUC: maximum recursion depth for SPARQL property path queries (`+`, `*`).
 /// Prevents runaway recursive CTEs on cyclic or very deep graphs.
 pub static MAX_PATH_DEPTH: pgrx::GucSetting<i32> = pgrx::GucSetting::<i32>::new(100);
+
+/// GUC: DESCRIBE algorithm — 'cbd' (Concise Bounded Description, default),
+/// 'scbd' (Symmetric CBD, includes incoming arcs), 'simple' (one-hop only).
+pub static DESCRIBE_STRATEGY: pgrx::GucSetting<Option<std::ffi::CString>> =
+    pgrx::GucSetting::<Option<std::ffi::CString>>::new(None);
 
 /// Called once when the extension shared library is loaded.
 #[allow(non_snake_case)]
@@ -117,6 +123,15 @@ pub extern "C-unwind" fn _PG_init() {
         &MAX_PATH_DEPTH,
         0,
         10000,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+
+    pgrx::GucRegistry::define_string_guc(
+        c"pg_ripple.describe_strategy",
+        c"DESCRIBE algorithm: 'cbd' (Concise Bounded Description), 'scbd' (Symmetric CBD), or 'simple'",
+        c"",
+        &DESCRIBE_STRATEGY,
         GucContext::Userset,
         GucFlags::default(),
     );
@@ -392,6 +407,62 @@ mod pg_ripple {
     fn sparql_explain(query: &str, analyze: bool) -> String {
         crate::sparql::sparql_explain(query, analyze)
     }
+
+    /// Execute a SPARQL CONSTRUCT query; returns one JSONB row per constructed triple.
+    ///
+    /// Each row is `{"s": "...", "p": "...", "o": "..."}` in N-Triples format.
+    #[pg_extern]
+    fn sparql_construct(query: &str) -> TableIterator<'static, (name!(result, pgrx::JsonB),)> {
+        let rows = crate::sparql::sparql_construct(query);
+        TableIterator::new(rows.into_iter().map(|r| (r,)))
+    }
+
+    /// Execute a SPARQL DESCRIBE query using the Concise Bounded Description algorithm.
+    ///
+    /// Returns one JSONB row per triple in the description.
+    /// `strategy` may be `'cbd'` (default), `'scbd'` (symmetric), or `'simple'`.
+    #[pg_extern]
+    fn sparql_describe(
+        query: &str,
+        strategy: default!(&str, "'cbd'"),
+    ) -> TableIterator<'static, (name!(result, pgrx::JsonB),)> {
+        let rows = crate::sparql::sparql_describe(query, strategy);
+        TableIterator::new(rows.into_iter().map(|r| (r,)))
+    }
+
+    /// Execute a SPARQL Update statement (`INSERT DATA` or `DELETE DATA`).
+    ///
+    /// Returns the total number of triples affected (inserted or deleted).
+    #[pg_extern]
+    fn sparql_update(query: &str) -> i64 {
+        crate::sparql::sparql_update(query)
+    }
+
+    // ── Full-text search ─────────────────────────────────────────────────────
+
+    /// Create a GIN tsvector index on the dictionary for the given predicate IRI.
+    ///
+    /// After indexing, SPARQL `CONTAINS()` and `REGEX()` FILTERs on triples
+    /// using this predicate will be rewritten to use the GIN index for
+    /// efficient text matching.  Returns the predicate dictionary id.
+    #[pg_extern]
+    fn fts_index(predicate: &str) -> i64 {
+        crate::fts::fts_index(predicate)
+    }
+
+    /// Full-text search on literal objects of a given predicate.
+    ///
+    /// `query` is a `tsquery`-formatted search string (e.g. `'knowledge & graph'`).
+    /// Returns matching triples as `(s TEXT, p TEXT, o TEXT)` in N-Triples format.
+    #[pg_extern]
+    fn fts_search(
+        query: &str,
+        predicate: &str,
+    ) -> TableIterator<'static, (name!(s, String), name!(p, String), name!(o, String))> {
+        let rows: Vec<(String, String, String)> =
+            crate::fts::fts_search(query, predicate).collect();
+        TableIterator::new(rows)
+    }
 }
 
 // ─── Tests ───────────────────────────────────────────────────────────────────
@@ -421,16 +492,20 @@ mod tests {
 
     #[pg_test]
     fn test_typed_literal_roundtrip() {
+        // xsd:integer is now inline-encoded (bit 63 = 1, no dictionary row).
         let id = crate::dictionary::encode_typed_literal(
             "42",
             "http://www.w3.org/2001/XMLSchema#integer",
         );
-        let full = crate::dictionary::decode_full(id).expect("decode_full should succeed");
-        assert_eq!(full.value, "42");
-        assert_eq!(full.kind, crate::dictionary::KIND_TYPED_LITERAL);
+        assert!(
+            crate::dictionary::inline::is_inline(id),
+            "xsd:integer should be inline-encoded"
+        );
+        // decode() must still return the correct N-Triples literal string.
+        let decoded = crate::dictionary::decode(id).expect("decode should succeed for inline");
         assert_eq!(
-            full.datatype.as_deref(),
-            Some("http://www.w3.org/2001/XMLSchema#integer")
+            decoded,
+            "\"42\"^^<http://www.w3.org/2001/XMLSchema#integer>"
         );
     }
 

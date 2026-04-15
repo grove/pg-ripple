@@ -270,9 +270,19 @@ assert_column "_pg_ripple" "dictionary" "qt_s"
 ok "schema unchanged (no DDL in 0.4.0→0.5.0)"
 echo
 
+# ── Step 6: migrate 0.5.0 → 0.5.1 ───────────────────────────────────────────
+
+info "=== migration 0.5.0 → 0.5.1 ==="
+apply_script "${SQL_DIR}/pg_ripple--0.5.0--0.5.1.sql" "pg_ripple--0.5.0--0.5.1.sql"
+
+# No schema changes in this migration
+assert_column "_pg_ripple" "dictionary" "qt_s"
+ok "schema unchanged (no DDL in 0.5.0→0.5.1)"
+echo
+
 # ── Final state verification ──────────────────────────────────────────────────
 
-info "=== final schema verification (v0.5.0) ==="
+info "=== final schema verification (v0.5.1) ==="
 
 # Dictionary table columns
 for col in id hash value kind datatype lang qt_s qt_p qt_o; do

@@ -190,3 +190,89 @@ ASK { <ex:alice> <ex:knows> <ex:bob> }
 Compiled SPARQL→SQL plans are cached per-backend in an LRU cache (configurable via [`pg_ripple.plan_cache_size`](../configuration.md#plan_cache_size)). Repeated identical queries skip recompilation.
 
 The cache key includes the query text and the current value of `pg_ripple.max_path_depth`. Changing the GUC invalidates cached path query plans.
+
+---
+
+## sparql_construct
+
+```sql
+pg_ripple.sparql_construct(query TEXT) RETURNS SETOF JSONB
+```
+
+Executes a SPARQL CONSTRUCT query and returns the constructed triples as JSONB objects. Each result row has three keys: `"s"` (subject), `"p"` (predicate), and `"o"` (object), all in N-Triples notation.
+
+### Explicit template form
+
+```sql
+SELECT *
+FROM pg_ripple.sparql_construct('
+    CONSTRUCT { ?b <https://example.org/knownBy> ?a }
+    WHERE { ?a <https://example.org/knows> ?b }
+');
+-- Returns: {"s": "<https://...bob>", "p": "<https://...knownBy>", "o": "<https://...alice>"}
+```
+
+### CONSTRUCT WHERE (bare form)
+
+The `CONSTRUCT WHERE` shorthand returns the matched triples directly:
+
+```sql
+SELECT *
+FROM pg_ripple.sparql_construct('
+    CONSTRUCT WHERE { <https://example.org/alice> <https://example.org/knows> ?o }
+');
+```
+
+---
+
+## sparql_describe
+
+```sql
+pg_ripple.sparql_describe(query TEXT, strategy TEXT DEFAULT current_setting('pg_ripple.describe_strategy'))
+    RETURNS SETOF JSONB
+```
+
+Executes a SPARQL DESCRIBE query and returns the description of the named resources as JSONB triples `{s, p, o}`.
+
+```sql
+-- Describe a single resource (CBD algorithm)
+SELECT *
+FROM pg_ripple.sparql_describe(
+    'DESCRIBE <https://example.org/alice>'
+);
+
+-- Describe all people (resources identified by a WHERE pattern)
+SELECT *
+FROM pg_ripple.sparql_describe(
+    'DESCRIBE ?person WHERE { ?person a <https://example.org/Person> }'
+);
+```
+
+### describe_strategy GUC
+
+`pg_ripple.describe_strategy` (default: `'cbd'`) sets the default expansion algorithm:
+
+| Value | Algorithm | Description |
+|---|---|---|
+| `'cbd'` | Concise Bounded Description | All outgoing arcs; recursively expands blank node objects |
+| `'scbd'` | Symmetric CBD | CBD + all incoming arcs to the named resource |
+| `'simple'` | Simple description | Outgoing arcs only; no blank-node recursion |
+
+```sql
+-- Use SCBD for this session
+SET pg_ripple.describe_strategy = 'scbd';
+
+SELECT * FROM pg_ripple.sparql_describe('DESCRIBE <https://example.org/alice>');
+```
+
+You can also pass the strategy as the second argument to `sparql_describe`:
+
+```sql
+SELECT * FROM pg_ripple.sparql_describe(
+    'DESCRIBE <https://example.org/alice>',
+    'scbd'
+);
+```
+
+> **Note**: CONSTRUCT and DESCRIBE return JSONB in v0.5.1. Turtle and JSON-LD serialization output are planned for v0.9.0.
+
