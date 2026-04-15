@@ -26,7 +26,7 @@ Each release below has two layers:
 | [0.5.0](#v050--sparql-query-engine-advanced--query-completeness) | SPARQL Advanced (Query) | Property paths, aggregates, UNION/MINUS, subqueries, BIND/VALUES | 6–8 pw |
 | [0.5.1](#v051--sparql-advanced-storage-serialization--write) | SPARQL Advanced (Storage & Write) | Inline encoding, CONSTRUCT/DESCRIBE, INSERT/DELETE DATA, FTS | 6–8 pw |
 | [0.6.0](#v060--htap-architecture) | HTAP Architecture | Heavy reads and writes at the same time; shared-memory cache | 8–10 pw |
-| [0.7.0](#v070--shacl-validation-core) | SHACL Core | Define data quality rules; reject bad data on insert | 4–6 pw |
+| [0.7.0](#v070--shacl-validation-core) | SHACL Core + Deduplication | Define data quality rules; reject bad data on insert; on-demand and merge-time triple deduplication | 5–7 pw |
 | [0.8.0](#v080--shacl-advanced) | SHACL Advanced | Complex data quality rules with background checking | 4–6 pw |
 | [0.9.0](#v090--serialization-export--interop) | Serialization | Import and export data in all standard RDF file formats | 3–4 pw |
 | [0.10.0](#v0100--datalog-reasoning-engine) | Datalog Reasoning | Automatically derive new facts from rules and logic | 10–12 pw |
@@ -543,6 +543,17 @@ Writes do not block reads. Merge worker operates correctly under concurrent writ
   - Violations detected within the same transaction as the DML
   - `_pg_ripple.violation_summary` stream table aggregates dead-letter queue by shape/severity; feeds `/metrics` Prometheus endpoint without full queue scans ([§2.13](plans/ecosystem/pg_trickle.md))
 - [ ] pg_regress: `shacl_validation.sql`, `shacl_malformed.sql` (invalid shape definitions, circular references, undefined target classes — verify clean error messages)
+- [ ] **Explicit deduplication functions** (on-demand cleanup; zero insert-time overhead)
+  - `pg_ripple.deduplicate_predicate(p_iri TEXT) RETURNS BIGINT` — remove duplicate `(s, o, g)` rows for a single predicate, keeping the row with the lowest SID; returns count of rows removed
+  - `pg_ripple.deduplicate_all() RETURNS BIGINT` — deduplicate all predicates across dedicated VP tables and `vp_rare`; returns total rows removed
+  - Runs `ANALYZE` on all affected tables; safe to call at any time
+  - Typical usage: call once after a bulk load that may contain duplicate triples
+- [ ] **Merge-time deduplication** (`pg_ripple.dedup_on_merge` GUC, default `false`)
+  - When enabled, the HTAP generation merge (`src/storage/merge.rs`) changes from a plain `UNION ALL` accumulation to a deduplicating projection using `DISTINCT ON (s, o, g) ORDER BY s, o, g, i ASC`, retaining the lowest-SID row for each logical triple
+  - Deduplication happens atomically during the regular background merge cycle — zero insert-time overhead; duplicates accumulate in the delta partition and are resolved when the merge worker fires
+  - Between merges, queries through the `(main EXCEPT tombstones) UNION ALL delta` view may still observe short-lived duplicates from the delta portion
+  - **RDF-star interaction**: SIDs of eliminated duplicate rows are not preserved; if RDF-star annotations exist on those SIDs, the annotations become orphaned. Use explicit dedup functions instead for datasets with active statement-level annotation workloads
+- [ ] pg_regress: `deduplication.sql` (explicit dedup functions; merge-time dedup via `dedup_on_merge`; verifies zero duplicates after each mechanism completes)
 
 ### Documentation
 
@@ -552,10 +563,11 @@ Writes do not block reads. Merge worker operates correctly under concurrent writ
 - [ ] `user-guide/best-practices/shacl-patterns.md` (initial: NodeShape vs PropertyShape, `sh:datatype`/`sh:minCount`/`sh:maxCount`, sync mode latency impact)
 - [ ] `user-guide/pre-deployment.md` expanded: SHACL mode selection, load shapes before bulk import
 - [ ] `reference/troubleshooting.md` expanded: insert rejected by SHACL, shape parsing failures
+- [ ] `user-guide/sql-reference/admin.md` expanded: `deduplicate_predicate`, `deduplicate_all`, `dedup_on_merge` GUC, merge-time dedup semantics and RDF-star interaction
 
 ### Exit Criteria
 
-Delivered SHACL Core features are enforced at insert time with exact W3C semantics. Validation reports conform to SHACL spec. Malformed shapes are rejected with actionable error messages.
+Delivered SHACL Core features are enforced at insert time with exact W3C semantics. Validation reports conform to SHACL spec. Malformed shapes are rejected with actionable error messages. Explicit deduplication functions correctly remove duplicate triples from all VP tables. Merge-time deduplication (when `dedup_on_merge = true`) produces duplicate-free `_main` tables after each merge cycle.
 
 ---
 

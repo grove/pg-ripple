@@ -292,6 +292,42 @@ CREATE INDEX ON _pg_ripple.object_patterns USING GIN (pattern);
 - **Reverse DESCRIBE / Incoming Arcs**: Similar to `subject_patterns`, `object_patterns` intercepts scattergun reverse queries (`?s ?p <Object>`) in O(N) rather than forcing a catastrophic `UNION ALL` across all thousands of VP tables.
 - Maintained by the merge worker after each generation merge.
 
+#### 4.3.6 Deduplication (`src/storage/mod.rs`, v0.7.0)
+
+RDF semantics permit a triple store to function as a *bag* (multiset) — the same `(s, p, o, g)` tuple may appear multiple times, each occurrence receiving a distinct statement identifier (SID). This is correct for provenance-tracking and RDF-star annotation use cases. However, many applications expect *set* semantics: each logical fact stored exactly once. Two mechanisms address this without modifying the insert path or affecting performance of normal writes:
+
+**Option 1 — Explicit deduplication functions** (on-demand; zero insert-time overhead)
+
+Exposed as `#[pg_extern]` functions in `src/lib.rs`, implemented in `src/storage/mod.rs`:
+
+- `pg_ripple.deduplicate_predicate(p_iri TEXT) RETURNS BIGINT` — removes duplicate `(s, o, g)` rows for a single predicate, keeping the row with the lowest SID (oldest assertion). For `vp_{id}_delta` tables, uses `DELETE … WHERE ctid NOT IN (SELECT MIN(ctid) … GROUP BY s, o, g)`. For `vp_{id}_main` (read-only between merges), records all but the minimum-SID row in `vp_{id}_tombstones`, which masks duplicates at query time and removes them at the next merge. For `vp_rare`, uses the same `MIN(ctid) GROUP BY p, s, o, g` pattern. Returns total rows removed.
+- `pg_ripple.deduplicate_all() RETURNS BIGINT` — applies `deduplicate_predicate` across all predicates; returns total rows removed across all VP tables and `vp_rare`.
+- Both functions run `ANALYZE` on all modified tables after deduplication.
+
+**Option 3 — HTAP merge-time deduplication** (background; `pg_ripple.dedup_on_merge` GUC, default `false`)
+
+When enabled, the generation merge in `src/storage/merge.rs` replaces the plain accumulation with a deduplicating projection:
+
+```sql
+-- dedup_on_merge = false (default): plain merge
+INSERT INTO vp_{id}_main_new
+SELECT s, o, g, i, source
+FROM (main − tombstones) UNION ALL delta
+ORDER BY s;
+
+-- dedup_on_merge = true: deduplicate during merge, keep lowest SID
+INSERT INTO vp_{id}_main_new
+SELECT DISTINCT ON (s, o, g) s, o, g, i, source
+FROM (main − tombstones) UNION ALL delta
+ORDER BY s, o, g, i ASC;
+```
+
+Semantics and constraints:
+- `DISTINCT ON (s, o, g) ORDER BY … i ASC` retains the globally-lowest SID for each logical triple.
+- After a merge, `_main` contains at most one row per `(s, o, g, named-graph)` tuple.
+- Between merges, the delta partition may temporarily hold duplicates; queries through the `(main EXCEPT tombstones) UNION ALL delta` view are not guaranteed duplicate-free until the next merge cycle fires.
+- SIDs of eliminated duplicate rows are **not** preserved. If RDF-star annotations exist on those SIDs in other VP tables, those annotations become orphaned (`vacuum_dictionary()` will not remove them since their IDs may still appear in the orphaned statement rows). For provenance-heavy workloads, use Option 1 instead.
+
 ### 4.4 SPARQL Query Engine (`src/sparql/`)
 
 **Purpose**: Parse SPARQL, translate to optimized SQL, execute, decode results.
@@ -512,6 +548,8 @@ The SPARQL→SQL translator reads loaded SHACL shapes:
 - `pg_ripple.dictionary_stats()` — cache hit ratio, dictionary sizes
 - `pg_ripple.register_prefix(prefix TEXT, expansion TEXT)` — IRI prefix registration
 - `pg_ripple.prefixes() RETURNS TABLE(prefix TEXT, expansion TEXT)`
+- `pg_ripple.deduplicate_predicate(p_iri TEXT) RETURNS BIGINT` — (v0.7.0) remove duplicate `(s, o, g)` rows for one predicate, keeping the lowest-SID row; runs `ANALYZE` afterward; returns count of rows removed
+- `pg_ripple.deduplicate_all() RETURNS BIGINT` — (v0.7.0) deduplicate all predicates across dedicated VP tables and `vp_rare`; returns total rows removed
 
 ### 4.10 Ecosystem: pg_trickle Integration (`src/ecosystem/`)
 
@@ -609,6 +647,7 @@ All GUC parameters exposed by pg_ripple, listed alphabetically. GUCs marked **st
 | GUC Name | Type | Default | Valid Values / Range | Introduced | Notes |
 |---|---|---|---|---|---|
 | `pg_ripple.default_graph` | `TEXT` | `''` | Any IRI string | v0.1.0 | Graph ID used when `g` is not specified on insert |
+| `pg_ripple.dedup_on_merge` | `BOOL` | `off` | `on`, `off` | v0.7.0 | When `on`, the HTAP generation merge eliminates duplicate `(s, o, g)` rows using `DISTINCT ON`, keeping the row with the lowest SID. Zero insert-time overhead; effective after the next merge cycle. Not recommended for datasets with active RDF-star annotations on individual statement IDs |
 | `pg_ripple.describe_strategy` | `ENUM` | `'cbd'` | `'cbd'`, `'scbd'`, `'simple'` | v0.5.1 | DESCRIBE algorithm: `'cbd'` = Concise Bounded Description (outgoing arcs + blank node closure); `'scbd'` = Symmetric CBD (incoming + outgoing arcs); `'simple'` = one-hop s/o expansion |
 | `pg_ripple.dictionary_cache_size` | `INT` | `65536` | 1 – 1,000,000 | v0.1.0 | Number of entries in the LRU dictionary cache. v0.1.0–v0.5.1: per-backend local cache. v0.6.0+: per-shard in shared memory (64 shards) |
 | `pg_ripple.enforce_constraints` | `ENUM` | `'warn'` | `'error'`, `'warn'`, `'off'` | v0.10.0 | Controls behavior when Datalog constraint rules (empty-head rules) detect violations |
