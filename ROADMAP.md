@@ -314,9 +314,40 @@ Users can load RDF-star data (Turtle-star, N-Triples-star), query it with SPARQL
 - [ ] **Fuzz testing** (`cargo-fuzz`): continuous fuzzing of the SPARQL→SQL pipeline — feed random/mutated SPARQL strings through the parser and SQL generator; verify no panics, no invalid SQL emitted, no memory safety violations
 - [ ] pg_regress: `property_paths.sql`, `aggregates.sql`, `resource_limits.sql` (exhaustion tests)
 
+### Documentation
+
+> See [plans/documentation.md](plans/documentation.md) for the complete page-by-page specification. v0.5.0 carries the full catch-up backlog for v0.1.0–v0.4.0 in addition to new v0.5.0 pages.
+
+**Catch-up — v0.1.0 Foundation**
+- [ ] Docs site scaffold: `docs/book.toml`, `.github/workflows/docs.yml`, `docs/src/SUMMARY.md`
+- [ ] `user-guide/introduction.md`, `user-guide/installation.md`, `user-guide/getting-started.md`
+- [ ] `user-guide/sql-reference/index.md`, `triple-crud.md`, `dictionary.md`, `prefix.md`
+- [ ] `reference/changelog.md` (mirror), `reference/roadmap.md` (mirror), `reference/security.md` (stub), `research/index.md`
+
+**Catch-up — v0.2.0 Bulk Loading & Named Graphs**
+- [ ] `user-guide/sql-reference/bulk-load.md`, `user-guide/sql-reference/named-graphs.md`
+- [ ] `user-guide/best-practices/bulk-loading.md`
+- [ ] `user-guide/configuration.md` (initial: `vp_promotion_threshold`, `named_graph_optimized`, `plan_cache_size`)
+- [ ] `reference/faq.md` (seed: 10+ questions covering v0.1.0–v0.4.0)
+
+**Catch-up — v0.3.0 SPARQL Basic**
+- [ ] `user-guide/playground.md` — Docker sandbox ⭐
+- [ ] `user-guide/sql-reference/sparql-query.md` (initial: SELECT, ASK, EXPLAIN)
+- [ ] `user-guide/best-practices/sparql-patterns.md` (initial)
+- [ ] `reference/troubleshooting.md` (initial)
+
+**Catch-up — v0.4.0 RDF-star**
+- [ ] `user-guide/sql-reference/rdf-star.md`
+- [ ] `user-guide/best-practices/data-modeling.md` (initial)
+
+**New in v0.5.0**
+- [ ] `user-guide/sql-reference/sparql-query.md` expanded: property paths, aggregates, UNION/MINUS, subqueries, BIND/VALUES
+- [ ] `user-guide/best-practices/sparql-patterns.md` expanded: property path recipes, resource exhaustion safeguards
+- [ ] `user-guide/configuration.md` expanded: `max_path_depth` GUC
+
 ### Exit Criteria
 
-SPARQL 1.1 Query coverage for property paths, UNION/MINUS, aggregates, subqueries, BIND/VALUES. Property path queries complete with hash-based cycle detection via PG18 `CYCLE` clause. Fuzz testing runs without panics or invalid SQL.
+SPARQL 1.1 Query coverage for property paths, UNION/MINUS, aggregates, subqueries, BIND/VALUES. Property path queries complete with hash-based cycle detection via PG18 `CYCLE` clause. Fuzz testing runs without panics or invalid SQL. Docs site is live on GitHub Pages with all catch-up pages written.
 
 ---
 
@@ -354,6 +385,15 @@ SPARQL 1.1 Query coverage for property paths, UNION/MINUS, aggregates, subquerie
   - `pg_ripple.fts_search(query TEXT, predicate TEXT) RETURNS TABLE` — direct full-text search API
   - Index is maintained incrementally on `insert_triple()` for indexed predicates
 - [ ] pg_regress: `fts_search.sql`, `sparql_construct.sql`, `sparql_insert_data.sql`, `sparql_delete_data.sql`, `inline_encoding.sql`
+
+### Documentation
+
+> See [plans/documentation.md](plans/documentation.md) for details.
+
+- [ ] `user-guide/sql-reference/sparql-update.md` — `sparql_update()`, INSERT DATA / DELETE DATA, named-graph variants
+- [ ] `user-guide/sql-reference/fts.md` — `fts_index`, `fts_search`, SPARQL CONTAINS/REGEX rewriting
+- [ ] `user-guide/sql-reference/sparql-query.md` expanded: CONSTRUCT / DESCRIBE, `describe_strategy` GUC
+- [ ] `user-guide/best-practices/update-patterns.md` — INSERT DATA vs bulk load, idempotent patterns
 
 ### Exit Criteria
 
@@ -456,6 +496,19 @@ Inline value encoding eliminates dictionary lookups for numeric and date FILTER 
   - Merge when `cache_budget` is near capacity (back-pressure path exercised)
 - [ ] pg_regress: `htap_merge.sql`, `change_notification.sql`, `concurrent_write_merge.sql`
 
+### Documentation
+
+> See [plans/documentation.md](plans/documentation.md) for details.
+
+- [ ] `user-guide/configuration.md` — major expansion: all HTAP GUCs grouped by subsystem, `shared_preload_libraries` requirement column
+- [ ] `user-guide/scaling.md` — HTAP architecture diagram, delta/main lifecycle, merge worker tuning, bloom filters, `subject_patterns`/`object_patterns`, pg_trickle optional integration
+- [ ] `user-guide/pre-deployment.md` — production checklist: `shared_preload_libraries`, `shared_memory_size` estimation, ANALYZE schedule
+- [ ] `user-guide/sql-reference/admin.md` — `stats()`, `promote_rare_predicates()`
+- [ ] `user-guide/best-practices/bulk-loading.md` expanded: HTAP delta-growth, back-pressure at 90% `cache_budget`
+- [ ] `reference/troubleshooting.md` expanded: merge worker not starting, shared memory mismatch after upgrade, delta bloat
+- [ ] `reference/faq.md` expanded: `shared_preload_libraries`, merge worker, change notifications
+- [ ] `research/postgresql-deepdive.md` (mirror `plans/postgresql-triplestore-deep-dive.md`)
+
 ### Exit Criteria
 
 Writes do not block reads. Merge worker operates correctly under concurrent writes and crash scenarios. >100K triples/sec bulk insert sustained. Change notifications fire correctly for matching patterns.
@@ -495,6 +548,15 @@ Writes do not block reads. Merge worker operates correctly under concurrent writ
   - `_pg_ripple.violation_summary` stream table aggregates dead-letter queue by shape/severity; feeds `/metrics` Prometheus endpoint without full queue scans ([§2.13](plans/ecosystem/pg_trickle.md))
 - [ ] pg_regress: `shacl_validation.sql`, `shacl_malformed.sql` (invalid shape definitions, circular references, undefined target classes — verify clean error messages)
 
+### Documentation
+
+> See [plans/documentation.md](plans/documentation.md) for details.
+
+- [ ] `user-guide/sql-reference/shacl.md` — `load_shacl`, `validate`, `list_shapes`, `drop_shape`; validation report JSON structure; `shacl_mode` GUC
+- [ ] `user-guide/best-practices/shacl-patterns.md` (initial: NodeShape vs PropertyShape, `sh:datatype`/`sh:minCount`/`sh:maxCount`, sync mode latency impact)
+- [ ] `user-guide/pre-deployment.md` expanded: SHACL mode selection, load shapes before bulk import
+- [ ] `reference/troubleshooting.md` expanded: insert rejected by SHACL, shape parsing failures
+
 ### Exit Criteria
 
 Delivered SHACL Core features are enforced at insert time with exact W3C semantics. Validation reports conform to SHACL spec. Malformed shapes are rejected with actionable error messages.
@@ -525,6 +587,14 @@ Delivered SHACL Core features are enforced at insert time with exact W3C semanti
   - Multiple SHACL shapes as a DAG of stream tables with topologically-ordered refresh
   - `violation_summary` DAG leaf node automatically clears counts when upstream shape violations resolve ([§2.13](plans/ecosystem/pg_trickle.md))
 - [ ] pg_regress: `shacl_advanced.sql`
+
+### Documentation
+
+> See [plans/documentation.md](plans/documentation.md) for details.
+
+- [ ] `user-guide/sql-reference/shacl.md` expanded: async pipeline, validation queue, dead-letter queue
+- [ ] `user-guide/best-practices/shacl-patterns.md` expanded: `sh:or`/`sh:and`/`sh:not`, async mode for high-throughput ingestion, reading the dead-letter queue
+- [ ] `reference/troubleshooting.md` expanded: async violations not appearing, dead-letter queue backlog
 
 ### Exit Criteria
 
@@ -557,6 +627,14 @@ Async validation pipeline operational. Complex SHACL shapes validated correctly 
   - CONSTRUCT can produce quoted triples in output
   - Turtle-star and N-Triples-star serialization in export functions
 - [ ] pg_regress: `serialization.sql`, `sparql_construct.sql`, `rdf_star_construct.sql`
+
+### Documentation
+
+> See [plans/documentation.md](plans/documentation.md) for details.
+
+- [ ] `user-guide/sql-reference/serialization.md` — `export_turtle`, `export_jsonld`, `load_rdfxml`, streaming variants, SPARQL CONSTRUCT Turtle/JSON-LD output, RDF-star serialization
+- [ ] `user-guide/best-practices/data-modeling.md` expanded: interop format guide (Protégé → RDF/XML; LinkedData Platform → JSON-LD; CLI → N-Triples/N-Quads)
+- [ ] `reference/faq.md` expanded: supported import/export formats, JSON-LD for REST APIs
 
 ### Exit Criteria
 
@@ -642,6 +720,15 @@ See [plans/ecosystem/datalog.md](plans/ecosystem/datalog.md) for the full design
   - Statement identifiers (SIDs) can be used in rule bodies to annotate derived triples
 - [ ] pg_regress: `datalog_rdfs.sql`, `datalog_owl_rl.sql`, `datalog_custom.sql`, `datalog_negation.sql`, `datalog_arithmetic.sql`, `datalog_constraints.sql`, `shacl_af_rule.sql`, `datalog_malformed.sql` (syntax errors, unstratifiable programs, unbound variables, cyclic rule dependencies — verify clear error messages), `rdf_star_datalog.sql`
 
+### Documentation
+
+> See [plans/documentation.md](plans/documentation.md) for details.
+
+- [ ] `user-guide/sql-reference/datalog.md` — `load_rules`, `infer`, `list_rules`, `enable_rule_set`, `disable_rule_set`; rule syntax primer; stratification; built-in RDFS/OWL RL rule sets; `inference_mode` GUC
+- [ ] `user-guide/best-practices/datalog-patterns.md` — RDFS subclass/domain/range patterns, OWL RL profiles, `source` column (explicit vs inferred), rule count vs inference time
+- [ ] `user-guide/configuration.md` expanded: `inference_mode`, `enforce_constraints` GUCs
+- [ ] `reference/faq.md` expanded: OWL reasoning support, `source` column meaning
+
 ### Exit Criteria
 
 Users can load RDFS or OWL RL rule sets (or custom rules), and SPARQL queries return inferred triples. Arithmetic built-ins filter correctly in rule bodies. Constraint rules detect and report violations (optionally rejecting transactions). Both on-demand and materialized modes operational. Stratified negation correctly validated and compiled. SHACL shapes with `sh:rule` entries are auto-compiled to Datalog rules.
@@ -683,6 +770,14 @@ See [plans/ecosystem/pg_trickle.md § 2.2](plans/ecosystem/pg_trickle.md) for th
   - Both SPARQL views and Datalog views can reference Datalog-derived VP tables; pg_trickle DAG handles refresh ordering
 - [ ] pg_regress: `sparql_views.sql`, `datalog_views.sql`, `extvp.sql`
 
+### Documentation
+
+> See [plans/documentation.md](plans/documentation.md) for details.
+
+- [ ] `user-guide/scaling.md` expanded: pg_trickle live statistics, SPARQL view refresh mode selection
+- [ ] `user-guide/best-practices/sparql-patterns.md` expanded: using `create_sparql_view()` for frequently-run queries
+- [ ] `research/pg-trickle.md` (mirror `plans/ecosystem/pg_trickle.md`)
+
 ### Exit Criteria
 
 Users can create SPARQL views and Datalog views that stay incrementally up-to-date. View queries are sub-millisecond table scans. Datalog views with goal patterns materialize only goal-relevant facts. Constraint monitoring views detect violations in real time. ExtVP semi-joins improve multi-predicate star-pattern performance.
@@ -709,6 +804,13 @@ Users can create SPARQL views and Datalog views that stay incrementally up-to-da
   - `DROP GRAPH <g>` — clear + remove graph from registry
   - `CREATE GRAPH <g>` — register a new empty named graph
 - [ ] pg_regress: `sparql_update_where.sql`, `sparql_graph_management.sql`
+
+### Documentation
+
+> See [plans/documentation.md](plans/documentation.md) for details.
+
+- [ ] `user-guide/sql-reference/sparql-update.md` expanded: DELETE/INSERT WHERE, LOAD / CLEAR / DROP / CREATE graph management
+- [ ] `user-guide/best-practices/update-patterns.md` expanded: pattern-based update recipes, graph lifecycle management
 
 ### Exit Criteria
 
@@ -769,6 +871,14 @@ Full SPARQL 1.1 Update operations work correctly. Pattern-based updates compile 
 - [ ] Performance regression test suite (pgbench custom scripts)
 - [ ] pg_regress: `shacl_query_opt.sql`
 
+### Documentation
+
+> See [plans/documentation.md](plans/documentation.md) for details.
+
+- [ ] `user-guide/scaling.md` expanded: benchmark results (BSBM, SP2Bench), GUC tuning reference values for small/medium/large deployments, index strategy per workload
+- [ ] `user-guide/pre-deployment.md` expanded: finalize as definitive production checklist; `pg_stat_statements` enabled; `work_mem` tuning for SPARQL aggregates
+- [ ] `reference/troubleshooting.md` expanded: slow query diagnosis using `sparql_explain(analyze:=true)`, cache hit ratio via `stats()`
+
 ### Exit Criteria
 
 BSBM results documented. >100K triples/sec sustained bulk load. <10ms for simple BGP queries at 10M triples. <5ms for cached repeat queries. SHACL metadata exploited only through semantics-preserving optimizer rules. PostgreSQL parallel plans verified for multi-VP-table joins.
@@ -802,13 +912,9 @@ BSBM results documented. >100K triples/sec sustained bulk load. <10ms for simple
 - [ ] **Logging & diagnostics**
   - Structured logging for merge operations, validation results
   - Custom `EXPLAIN` option showing SPARQL→SQL mapping (PG18 extension EXPLAIN)
-- [ ] **Documentation**
-  - README with quickstart
-  - SQL function reference
-  - SPARQL feature matrix
-  - **Performance tuning guide** — includes dictionary cache sizing guidance (`dictionary_cache_size` should be large enough to hold the working set of frequently-accessed terms; at 100M+ triples with ~50M unique terms, cache hit ratio is the dominant performance factor), `cache_budget` budgeting, `merge_threshold` tuning, and `vp_promotion_threshold` adjustment for predicate-rich vs predicate-sparse datasets
-  - SHACL constraint mapping reference
-  - Datalog rule authoring guide
+- [ ] **Documentation** *(see [plans/documentation.md](plans/documentation.md) for the full page-by-page specification)*
+  - `user-guide/backup-restore.md`, `user-guide/contributing.md` (complete), `reference/error-reference.md` (PT001–PT799), `reference/security.md` (complete)
+  - **Performance tuning guide** — dictionary cache sizing, `cache_budget` budgeting, `merge_threshold` and `vp_promotion_threshold` tuning; SHACL constraint mapping reference; Datalog rule authoring guide
 - [ ] **Graph-level Row-Level Security (RLS)**
   - `pg_ripple.enable_graph_rls()` — activate RLS policies on VP tables using the `g` column
   - Policy driven by a mapping table: `_pg_ripple.graph_access (role_name TEXT, graph_id BIGINT, permission TEXT)` — `'read'` / `'write'` / `'admin'`
@@ -821,6 +927,16 @@ BSBM results documented. >100K triples/sec sustained bulk load. <10ms for simple
   - Docker image with extension pre-installed
   - PGXN metadata
 - [ ] pg_regress: `admin_functions.sql` (vacuum, reindex, dictionary_stats, predicate_stats), `graph_rls.sql` (RLS policy enforcement, cross-role isolation, superuser bypass), `upgrade_path.sql` (install v0.1.0 → load data → sequential upgrade to current version → verify data integrity and query correctness at each step)
+
+### Documentation
+
+> See [plans/documentation.md](plans/documentation.md) for details.
+
+- [ ] `user-guide/backup-restore.md` — `pg_dump`/`pg_restore` procedure, VP table considerations, PITR with WAL
+- [ ] `reference/security.md` complete — supported versions matrix, responsible disclosure, hardening GUCs
+- [ ] `reference/error-reference.md` — PT001–PT799 error code table with resolution notes
+- [ ] `user-guide/contributing.md` complete — dev setup, test commands, PR workflow, AGENTS.md conventions, governance
+- [ ] `user-guide/sql-reference/admin.md` expanded: vacuum, reindex, `dictionary_stats`, `predicate_stats`
 
 ### Exit Criteria
 
@@ -868,6 +984,14 @@ Extension is installable, upgradable, and documented. Operational tooling suffic
   - Docker image bundles both PostgreSQL (with pg_ripple) and the HTTP service
   - Docker Compose example with separate PG and HTTP containers
 - [ ] pg_regress: `sparql_protocol.sql` (protocol-level tests via `curl`)
+
+### Documentation
+
+> See [plans/documentation.md](plans/documentation.md) for details.
+
+- [ ] `user-guide/sql-reference/sparql-query.md` expanded: HTTP protocol endpoint configuration, `Accept` header formats, SPARQL 1.1 Protocol conformance note
+- [ ] `user-guide/best-practices/sparql-patterns.md` expanded: using the HTTP endpoint from Python (`SPARQLWrapper`), Java (Jena), `curl`; SPARQL IDE / Protégé direct connection
+- [ ] `reference/faq.md` expanded: HTTP endpoint URL, connecting SPARQL tools directly
 
 ### Exit Criteria
 
@@ -962,6 +1086,17 @@ SPARQL queries with `SERVICE` clauses correctly fetch and join data from registe
   - Tagged release on GitHub
   - Published to PGXN
   - crates.io publication (library crate)
+
+### Documentation
+
+> See [plans/documentation.md](plans/documentation.md) for details. The 1.0.0 documentation milestone is a full audit: every page verified, every example tested against the release, no unresolved stubs.
+
+- [ ] Final audit of all docs pages — every code example verified against 1.0.0, all `TODO` / stub markers resolved
+- [ ] `user-guide/upgrading.md` complete — upgrade procedure from every 0.x version to 1.0.0; migration script inventory
+- [ ] `reference/error-reference.md` complete — all PT001–PT799 codes documented
+- [ ] `reference/faq.md` final pass — 20–30 questions covering all features
+- [ ] `reference/troubleshooting.md` final pass — complete runbook for every subsystem
+- [ ] All `research/` section mirrors complete
 
 ### Exit Criteria
 

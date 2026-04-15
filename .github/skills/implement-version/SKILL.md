@@ -11,7 +11,8 @@ argument-hint: 'Specify the version to implement, e.g., "v0.3.0" or "SPARQL Basi
 Always read these before writing any code:
 
 - [ROADMAP.md](../../../ROADMAP.md) — deliverables, exit criteria, test file names, effort estimates, version prerequisites
-- [plans/implementation_plan.md](../../../plans/implementation_plan.md) — schemas, API signatures, algorithms, crate choices, GUC parameters
+- [plans/implementation_plan.md](../../../plans/implementation_plan.md) — schemas, API signatures, algorithms, crate choices, GUC parameters, §14 documentation conventions
+- [plans/documentation.md](../../../plans/documentation.md) — docs site structure, tooling, and the full milestone-by-milestone list of pages to create or update
 - [AGENTS.md](../../../AGENTS.md) — code conventions, build/test commands, git workflow
 
 ## Procedure
@@ -47,6 +48,19 @@ Items in the ROADMAP.md checklist are listed in dependency order — implement t
 ### 5. Verify exit criteria
 
 Before closing a version, check every exit criterion in ROADMAP.md explicitly. Do not mark a version done on partial evidence.
+
+### 6. Write documentation
+
+Every ROADMAP.md version section contains a `### Documentation` subsection. Treat those checkboxes exactly like code deliverables.
+
+1. Read the `### Documentation` subsection for the target version in ROADMAP.md.
+2. Cross-reference [plans/documentation.md](../../../plans/documentation.md) for the full page specification (content, structure, examples required).
+3. Create or expand each listed `docs/src/` page.
+4. Verify the page is wired into `docs/src/SUMMARY.md`.
+5. Run `mdbook build docs` locally to confirm the site builds without errors.
+6. **Tick each documentation checkbox in ROADMAP.md** — same discipline as code checkboxes.
+
+> **v0.5.0 special case**: v0.5.0 carries the full catch-up backlog for v0.1.0–v0.4.0 (site scaffold, all released SQL API pages, playground, best practices, FAQ) in addition to its own pages. The site must be live on GitHub Pages before v0.5.0 is tagged.
 
 ## Common Pitfalls
 
@@ -89,6 +103,11 @@ These are the mistakes most likely to produce silent bugs:
   - Include schema changes (ALTER TABLE, CREATE INDEX, etc.) if any exist
   - Otherwise, write a comment header explaining what functionality is new
   - Without this file, users on earlier versions cannot upgrade via `ALTER EXTENSION ... UPDATE`
+- [ ] **Documentation deliverables complete** (see `### Documentation` in ROADMAP.md for this version)
+  - All listed `docs/src/` pages created or expanded
+  - All documentation checkboxes in ROADMAP.md ticked (`- [x]`)
+  - `docs/src/SUMMARY.md` updated to include any new pages
+  - `mdbook build docs` passes without errors
 - [ ] Verify `Cargo.toml` version field matches X.Y.Z
 - [ ] Verify `pg_ripple.control` `default_version` matches X.Y.Z
 

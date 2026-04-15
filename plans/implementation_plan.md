@@ -1038,3 +1038,78 @@ Extension error messages use PostgreSQL-style formatting (lowercase first word, 
 | `PT500`–`PT599` | Admin errors (vacuum, reindex, upgrade) |
 | `PT600`–`PT699` | Federation / HTTP errors (endpoint unreachable, SSRF rejection, timeout) |
 | `PT700`–`PT799` | Serialization / export errors (format errors, encoding failures) |
+
+---
+
+## 14. Documentation
+
+> **Authoritative source**: [plans/documentation.md](documentation.md) is the definitive specification for the documentation site — page list, section structure, tooling setup, and milestone delivery schedule. This section is a summary for implementers; always read `plans/documentation.md` alongside this plan when working on documentation deliverables.
+
+### 14.1 Tooling
+
+| Concern | Technology |
+|---|---|
+| Site generator | [mdBook](https://rust-lang.github.io/mdBook/) |
+| Hosting | GitHub Pages, published via `.github/workflows/docs.yml` |
+| Diagrams | `mdbook-mermaid` preprocessor (added at v0.6.0) |
+| Link validation | `mdbook-linkcheck` preprocessor (from day one) |
+| Mirrored files | CHANGELOG.md, ROADMAP.md, RELEASE.md, and all `plans/` research documents copied at CI build time — not symlinked |
+| Local development | `cargo install mdbook && cd docs && mdbook serve` |
+
+### 14.2 Site Structure
+
+Three top-level sections, each a directory under `docs/src/`:
+
+```
+docs/src/
+  user-guide/            — Task-oriented: install, query, configure, scale
+    introduction.md
+    installation.md
+    getting-started.md
+    playground.md        — Docker sandbox (⭐ highest adoption leverage)
+    sql-reference/       — One page per SQL API surface area
+    best-practices/      — Pattern guides (bulk loading, SPARQL, SHACL, Datalog)
+    configuration.md     — All GUC parameters
+    scaling.md
+    pre-deployment.md
+    upgrading.md
+    backup-restore.md
+    contributing.md
+  reference/             — Look-up: errors, FAQ, changelog, runbook
+    faq.md
+    troubleshooting.md
+    error-reference.md   — PT001–PT799 table
+    changelog.md         — (mirrored)
+    roadmap.md           — (mirrored)
+    release-process.md   — (mirrored)
+    security.md
+  research/              — Architecture rationale, prior art, design decisions
+    index.md
+    prior-art.md
+    postgresql-deepdive.md
+    pg-trickle.md
+    … (mirrors of plans/ documents)
+```
+
+### 14.3 Writing Conventions
+
+- **Lead with what the user can do**, not implementation detail — "Load a Turtle file in one SQL call" before any mention of VP tables.
+- **One working copy-paste example per function** in the SQL Reference.
+- Implementation detail goes in a clearly marked "Internal / Advanced" subsection or a `<details>` block.
+- Add `> **Available since vX.Y.Z**` callouts at the top of sections describing features not present from v0.1.0.
+- Every SQL Reference page must link back to the roadmap milestone where the feature was introduced.
+
+### 14.4 Milestone Delivery
+
+Each ROADMAP.md version section includes a `### Documentation` subsection listing the specific `docs/src/` pages that must be created or expanded as part of that version's deliverables. Documentation checkboxes in those sections are treated the same as code deliverables — they must be ticked (`- [x]`) before a version is considered done and the exit criteria are satisfied.
+
+**v0.5.0 special case**: Because v0.1.0–v0.4.0 shipped without any documentation, v0.5.0 carries the full catch-up backlog (site scaffold, installation, getting started, playground, SQL reference for all released APIs, best practices, FAQ, configuration, troubleshooting) in addition to its own new pages.
+
+### 14.5 Error Reference Generation
+
+The `reference/error-reference.md` page documents every PT error code (PT001–PT799, see §13.6). The target workflow is:
+1. Error codes and their message templates are defined in `src/error.rs` and its subsystem-specific modules.
+2. A build-time step or a manual curation pass extracts them into `docs/src/reference/error-reference.md`.
+3. Each entry includes: code, subsystem, message template, and a resolution note written for operators, not developers.
+
+The full PT001–PT799 table is due at v0.14.0 (see ROADMAP.md `### Documentation` for that version).
