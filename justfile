@@ -6,6 +6,9 @@ set dotenv-load := false
 # Default PostgreSQL major version
 pg := "18"
 
+# Default database for benchmarks
+db := "postgres"
+
 # List available recipes
 [group: "help"]
 default:
@@ -86,29 +89,29 @@ install:
 
 # ── Benchmarks ────────────────────────────────────────────────────────────
 
-# Load BSBM data (default: scale factor 1)
+# Load BSBM data (default: database 'postgres', scale factor 1)
 [group: "bench"]
-bench-bsbm-load scale="1":
-    psql -h /tmp -p 5432 -d postgres -v scale={{scale}} -f benchmarks/bsbm/bsbm_load.sql
+bench-bsbm-load database=db scale="1":
+    psql -h /tmp -p 5432 -d {{database}} -v scale={{scale}} -f benchmarks/bsbm/bsbm_load.sql
 
 # Run BSBM query mix (12 standard BSBM queries)
 [group: "bench"]
-bench-bsbm-queries:
-    psql -h /tmp -p 5432 -d postgres -f benchmarks/bsbm/bsbm_queries.sql
+bench-bsbm-queries database=db:
+    psql -h /tmp -p 5432 -d {{database}} -f benchmarks/bsbm/bsbm_queries.sql
 
 # Run BSBM HTAP concurrent workload (insert + query under load)
 [group: "bench"]
-bench-bsbm-htap:
-    psql -h /tmp -p 5432 -d postgres -f benchmarks/bsbm/bsbm_htap.sql
+bench-bsbm-htap database=db:
+    psql -h /tmp -p 5432 -d {{database}} -f benchmarks/bsbm/bsbm_htap.sql
 
-# Run pgbench BSBM sustained throughput test
+# Run BSBM pgbench sustained throughput test
 [group: "bench"]
-bench-bsbm-pgbench duration="60" clients="10" jobs="4":
-    pgbench -h /tmp -p 5432 -d postgres -f benchmarks/bsbm/bsbm_pgbench.sql -T {{duration}} -c {{clients}} -j {{jobs}}
+bench-bsbm-pgbench database=db duration="60" clients="10" jobs="4":
+    pgbench -h /tmp -p 5432 -d {{database}} -f benchmarks/bsbm/bsbm_pgbench.sql -T {{duration}} -c {{clients}} -j {{jobs}}
 
 # Run all BSBM benchmarks in sequence (load → queries → HTAP → pgbench)
 [group: "bench"]
-bench-bsbm-all scale="1" duration="60" clients="10" jobs="4": (bench-bsbm-load scale) bench-bsbm-queries bench-bsbm-htap (bench-bsbm-pgbench duration clients jobs)
+bench-bsbm-all database=db scale="1" duration="60" clients="10" jobs="4": (bench-bsbm-load database scale) (bench-bsbm-queries database) (bench-bsbm-htap database) (bench-bsbm-pgbench database duration clients jobs)
 
 # ── Docker ────────────────────────────────────────────────────────────────
 
