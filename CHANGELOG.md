@@ -26,6 +26,7 @@ This release introduces a full HTAP (Hybrid Transactional/Analytical Processing)
 - **Subject/object pattern tables** — `_pg_ripple.subject_patterns(s BIGINT, pattern BIGINT[])` and `_pg_ripple.object_patterns(o BIGINT, pattern BIGINT[])` are rebuilt by the merge worker after each generation; GIN-indexed for O(1) predicate lookup per subject/object
 - **Change notification / CDC** — `pg_ripple.subscribe(pattern TEXT, channel TEXT) RETURNS BIGINT` subscribes to triple changes matching a predicate pattern (use `'*'` for all); `pg_ripple.unsubscribe(channel TEXT) RETURNS BIGINT` removes subscriptions; notifications fire as `pg_notify(channel, '{"op":"insert|delete","s":...,"p":...,"o":...,"g":...}')` after each delta insert or delete
 - **Statistics** — `pg_ripple.stats() RETURNS JSONB` reports `total_triples`, `dedicated_predicates`, `htap_predicates`, `rare_triples`, `unmerged_delta_rows`, and `merge_worker_pid`
+- **`ExecutorEnd_hook` latch-poke** — when `shared_preload_libraries` is set, an `ExecutorEnd_hook` monitors `TOTAL_DELTA_ROWS`; once it reaches `latch_trigger_threshold`, the hook pokes the merge worker latch to trigger an early merge without waiting for the next poll cycle
 
 ### New GUCs
 
@@ -34,7 +35,7 @@ This release introduces a full HTAP (Hybrid Transactional/Analytical Processing)
 | `pg_ripple.merge_threshold` | `10000` | Minimum delta rows before background merge triggers |
 | `pg_ripple.merge_interval_secs` | `60` | Max seconds between merge worker polling cycles |
 | `pg_ripple.merge_retention_seconds` | `60` | Seconds to keep previous main table before dropping |
-| `pg_ripple.latch_trigger_threshold` | `10000` | Batch rows before poking merge worker latch |
+| `pg_ripple.latch_trigger_threshold` | `10000` | Batch rows before poking merge worker latch (ExecutorEnd hook) |
 | `pg_ripple.worker_database` | `postgres` | Database the merge worker connects to |
 | `pg_ripple.merge_watchdog_timeout` | `300` | Seconds of worker inactivity before a WARNING is logged |
 
@@ -49,6 +50,24 @@ This release introduces a full HTAP (Hybrid Transactional/Analytical Processing)
 | `pg_ripple.unsubscribe(channel TEXT)` | `BIGINT` | Remove a CDC subscription |
 | `pg_ripple.subject_predicates(subject_id BIGINT)` | `BIGINT[]` | Predicates for a subject (from pattern table) |
 | `pg_ripple.object_predicates(object_id BIGINT)` | `BIGINT[]` | Predicates for an object (from pattern table) |
+
+### New regression tests
+
+| Test | Description |
+|------|-------------|
+| `htap_merge.sql` | Delta→main promotion, tombstone-based deletes, compact idempotency |
+| `change_notification.sql` | CDC subscribe/notify, wildcard patterns, payload validation |
+| `merge_edge_cases.sql` | Edge cases: empty-delta compact, idempotency, delta-resident delete, non-existent delete |
+
+### Documentation
+
+- `user-guide/configuration.md` — expanded with all HTAP GUCs and descriptions
+- `user-guide/scaling.md` — new: HTAP architecture diagram, merge lifecycle, tuning guide
+- `user-guide/pre-deployment.md` — new: production checklist (`shared_preload_libraries`, memory sizing, monitoring)
+- `user-guide/sql-reference/admin.md` — new: `compact()`, `stats()`, `subscribe()`, `unsubscribe()`, `htap_migrate_predicate()`, `predicate_stats` view
+- `user-guide/best-practices/bulk-loading.md` — expanded with HTAP delta-growth strategies
+- `reference/troubleshooting.md` — expanded with merge worker not running, delta bloat, CDC not firing
+- `reference/faq.md` — expanded with `shared_preload_libraries`, merge worker, change notifications
 
 ### Migration
 

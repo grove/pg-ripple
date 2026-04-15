@@ -518,7 +518,7 @@ pub fn batch_insert_encoded(p_id: i64, rows: &[(i64, i64, i64)]) -> i64 {
         )
         .unwrap_or_else(|e| pgrx::error!("predicate count batch update SPI error: {e}"));
 
-        crate::shmem::record_delta_inserts(cnt);;
+        crate::shmem::record_delta_inserts(cnt);
     } else {
         // Insert into vp_rare in bulk.
         let values: Vec<String> = rows

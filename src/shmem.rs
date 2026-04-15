@@ -29,8 +29,7 @@ pub static LAYOUT_VERSION: PgAtomic<AtomicU32> =
 // ─── Merge worker coordination ────────────────────────────────────────────────
 
 /// PID of the running merge background worker (0 when not running).
-pub static MERGE_WORKER_PID: PgAtomic<AtomicI32> =
-    unsafe { PgAtomic::new(c"pg_ripple_merge_pid") };
+pub static MERGE_WORKER_PID: PgAtomic<AtomicI32> = unsafe { PgAtomic::new(c"pg_ripple_merge_pid") };
 
 // ─── Delta row tracker (bloom-filter substitute) ──────────────────────────────
 
@@ -128,4 +127,3 @@ pub fn delta_is_empty() -> bool {
     }
     TOTAL_DELTA_ROWS.get().load(Ordering::Relaxed) == 0
 }
-

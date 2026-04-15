@@ -53,6 +53,73 @@ For multi-billion-triple loads, consider a two-phase approach:
 
 This bypasses the per-row dictionary lookup overhead in the Rust parse-and-insert path. See the Bulk Load implementation notes in `plans/implementation_plan.md` for details.
 
+## HTAP delta growth during bulk loads (v0.6.0)
+
+With v0.6.0's HTAP storage layout, all inserts land in delta tables first. During a large bulk load the delta tables can grow very large before the merge worker has a chance to compress them into main.
+
+**Symptoms of runaway delta growth**:
+- Queries on bulk-loaded predicates scan large delta tables (slower than expected)
+- `SELECT pg_ripple.stats() -> 'unmerged_delta_rows'` shows millions of rows
+- `pg_stat_user_tables` shows very high `n_live_tup` on `*_delta` tables
+
+**Strategies**:
+
+### Option A: Tune merge aggressiveness
+
+Before starting a large load, lower the merge thresholds so the worker keeps up:
+
+```sql
+ALTER SYSTEM SET pg_ripple.merge_threshold = 10000;
+ALTER SYSTEM SET pg_ripple.latch_trigger_threshold = 5000;
+ALTER SYSTEM SET pg_ripple.merge_interval_secs = 5;
+SELECT pg_reload_conf();
+```
+
+After the load, restore production values.
+
+### Option B: Periodic manual compact
+
+For offline bulk loads where query freshness during the load is not important, call `compact()` at regular intervals:
+
+```bash
+for f in chunk_*; do
+    psql -c "SELECT pg_ripple.load_ntriples_file('/data/$f');"
+    # Compact every 10 chunks
+    if (( i % 10 == 0 )); then
+        psql -c "SELECT pg_ripple.compact();"
+    fi
+    ((i++))
+done
+# Final compact when done
+psql -c "SELECT pg_ripple.compact();"
+```
+
+### Option C: Disable HTAP for the load predicate (advanced)
+
+For predicates that will only ever be bulk-loaded (not streamed), you can keep them in the flat layout by migrating back after the load. This is an advanced use case — contact the maintainers for guidance.
+
+### Final cleanup
+
+After a bulk load and compact cycle, run `ANALYZE` to update planner statistics:
+
+```sql
+-- Analyze the delta, main, and vp_rare tables
+ANALYZE _pg_ripple.vp_rare;
+
+-- Analyze all objects in the _pg_ripple schema
+DO $$
+DECLARE t text;
+BEGIN
+  FOR t IN SELECT relname FROM pg_class c
+           JOIN pg_namespace n ON n.oid = c.relnamespace
+           WHERE n.nspname = '_pg_ripple'
+             AND c.relkind = 'r'
+  LOOP
+    EXECUTE 'ANALYZE _pg_ripple.' || quote_ident(t);
+  END LOOP;
+END $$;
+```
+
 ## Parallel loads
 
 Multiple concurrent `load_ntriples()` calls are safe — the dictionary insert uses `ON CONFLICT DO NOTHING … RETURNING` which is MVCC-safe. However, heavy concurrent writes to `vp_rare` can cause lock contention. For best throughput, load from a single database connection.

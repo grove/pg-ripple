@@ -96,3 +96,74 @@ On a modern server with an NVMe SSD, `load_ntriples()` processes approximately 5
 `find_triples()` only matches a single (s, p, o, g) pattern — it is equivalent to a SPARQL BGP with exactly one triple pattern. Use it for single-pattern lookups.
 
 Use `sparql()` for anything more complex: multi-pattern joins, OPTIONAL, FILTER, aggregates, property paths, or when you want the ergonomics of SPARQL's variable-binding model.
+
+---
+
+## HTAP & Operations (v0.6.0)
+
+### Does pg_ripple require shared_preload_libraries?
+
+For full HTAP functionality (background merge worker, latch-poke hook, shared-memory statistics) you must add pg_ripple to `shared_preload_libraries`:
+
+```ini
+shared_preload_libraries = 'pg_ripple'
+```
+
+Without this, the extension still works for reads and writes — but all writes stay in delta tables and are never automatically merged into main. Queries on predicates with large deltas will be slower than expected.
+
+See the [Pre-Deployment Checklist](../user-guide/pre-deployment.md) for the complete setup sequence.
+
+### What is the difference between compact() and the merge worker?
+
+| | `compact()` | Merge worker |
+|---|---|---|
+| **Trigger** | Manual SQL call | Automatic (latch poke or timer) |
+| **Blocks caller** | Yes | No — runs in background |
+| **When to use** | Maintenance windows, tests | Production continuous operation |
+
+Both produce the same result: delta rows are moved into main, tombstones are cleared, and a fresh BRIN index is built.
+
+### How do I know if the merge worker is keeping up?
+
+```sql
+-- Check unmerged row count
+SELECT pg_ripple.stats() -> 'unmerged_delta_rows';
+
+-- Watch it over time
+SELECT now(), (pg_ripple.stats() -> 'unmerged_delta_rows')::int AS lag
+FROM generate_series(1, 10) g,
+     pg_sleep(5) AS _s
+WHERE true;  -- run this manually in a loop
+```
+
+A healthy deployment shows `unmerged_delta_rows` rising during writes and falling after merges. If it only rises, the worker is behind — lower `merge_threshold` or increase server I/O capacity.
+
+### Can I subscribe to triple changes in real time?
+
+Yes. CDC (Change Data Capture) is available in v0.6.0 via PostgreSQL `NOTIFY`:
+
+```sql
+-- Subscribe to a specific predicate
+SELECT pg_ripple.subscribe('<https://schema.org/name>', 'name_changes');
+
+-- In another session
+LISTEN name_changes;
+
+-- Notifications arrive when triples are inserted or deleted
+SELECT pg_ripple.insert_triple(
+    '<https://example.org/Alice>',
+    '<https://schema.org/name>',
+    '"Alice"'
+);
+```
+
+Subscriptions are stored in `_pg_ripple.cdc_subscriptions` and persist across reconnects (but must be re-registered after a server restart). See the [Administration](../user-guide/sql-reference/admin.md#subscribepattern-channel) reference for details.
+
+### Why does my query not see recently inserted triples?
+
+If you inserted triples and immediately queried with SPARQL, the results should include those triples — delta tables are always queried alongside main tables.
+
+If triples are missing, check:
+1. The triple was committed (not inside an uncommitted transaction)
+2. The correct graph is being queried (default graph vs named graph)
+3. The correct predicate IRI spelling was used

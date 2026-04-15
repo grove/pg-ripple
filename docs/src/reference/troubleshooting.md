@@ -115,3 +115,82 @@ cargo pgrx install --pg-config $(which pg_config)
 ```
 
 Then retry `ALTER EXTENSION pg_ripple UPDATE`.
+
+---
+
+## Merge worker not running (v0.6.0)
+
+**Symptom**: `SELECT pg_ripple.stats() -> 'merge_worker_pid'` returns `0`.
+
+**Cause**: Either `shared_preload_libraries` is not set, or the worker crashed and was not restarted by the postmaster.
+
+**Fix**:
+
+1. Verify `shared_preload_libraries`:
+   ```sql
+   SHOW shared_preload_libraries;
+   -- Should include 'pg_ripple'
+   ```
+
+2. If not set, add it to `postgresql.conf` and restart PostgreSQL:
+   ```ini
+   shared_preload_libraries = 'pg_ripple'
+   ```
+
+3. Set `pg_ripple.worker_database` to match the database where the extension is installed:
+   ```ini
+   pg_ripple.worker_database = 'mydb'
+   ```
+
+4. Check PostgreSQL server logs for crash messages from the worker:
+   ```bash
+   grep "pg_ripple" $PGDATA/log/postgresql.log | tail -20
+   ```
+
+---
+
+## Delta rows not being merged (v0.6.0)
+
+**Symptom**: `"unmerged_delta_rows"` from `stats()` grows continuously without decreasing, even after inserting above the `merge_threshold`.
+
+**Possible causes and fixes**:
+
+1. **Merge threshold not reached**: check that `pg_ripple.merge_threshold` ≤ the current `unmerged_delta_rows`.
+
+2. **Worker is behind on its poll cycle**: lower `merge_interval_secs` or call `SELECT pg_ripple.compact()` to force an immediate merge.
+
+3. **Lock contention**: the merge worker holds a brief exclusive lock during the table swap. If many long-running transactions are open, the swap may be blocked. Monitor with:
+   ```sql
+   SELECT * FROM pg_locks WHERE relation IN (
+       SELECT oid FROM pg_class WHERE relname LIKE '%_delta'
+   );
+   ```
+
+4. **Watchdog warning**: if `pg_ripple.merge_watchdog_timeout` seconds pass without a successful merge, a `WARNING: pg_ripple merge worker idle for N seconds` message appears in the server log. This is the first sign of a stuck worker.
+
+---
+
+## stats() shows unmerged_delta_rows = -1 (v0.6.0)
+
+**Cause**: pg_ripple was loaded via `CREATE EXTENSION` only, not via `shared_preload_libraries`. The shared-memory atomics were never initialised.
+
+**Fix**: see [Pre-Deployment Checklist](../user-guide/pre-deployment.md) to add pg_ripple to `shared_preload_libraries` and restart PostgreSQL.
+
+---
+
+## CDC notifications not firing (v0.6.0)
+
+**Symptom**: After calling `pg_ripple.subscribe(...)` and `LISTEN my_channel`, no notifications arrive when triples are inserted.
+
+**Possible causes**:
+
+1. **Wrong predicate IRI in the subscription**: the `pattern` argument must exactly match the predicate IRI (with angle brackets, e.g. `'<https://schema.org/name>'`). Use `'*'` to subscribe to all predicates.
+
+2. **Notifications fire on commit**: PostgreSQL `NOTIFY` notifications are delivered after the inserting transaction commits. If you are testing inside a transaction that has not committed, no notification will fire.
+
+3. **Different database**: `LISTEN` and `NOTIFY` are database-scoped. The listener must be in the same database as the inserting session.
+
+4. **Subscription not persisted across restarts**: subscriptions are stored in `_pg_ripple.cdc_subscriptions`. After a server restart, resubscribe:
+   ```sql
+   SELECT pg_ripple.subscribe('<https://schema.org/name>', 'my_channel');
+   ```

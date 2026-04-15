@@ -99,6 +99,47 @@ pub static WORKER_DATABASE: pgrx::GucSetting<Option<std::ffi::CString>> =
 /// GUC: seconds before the merge worker watchdog logs a WARNING for inactivity.
 pub static MERGE_WATCHDOG_TIMEOUT: pgrx::GucSetting<i32> = pgrx::GucSetting::<i32>::new(300);
 
+// ─── ExecutorEnd hook (v0.6.0) ────────────────────────────────────────────────
+
+/// Register a PostgreSQL `ExecutorEnd_hook` that pokes the merge worker's latch
+/// whenever the accumulated unmerged delta row count crosses
+/// `pg_ripple.latch_trigger_threshold`.
+///
+/// Must only be called from `_PG_init` inside the postmaster context
+/// (i.e. when loaded via `shared_preload_libraries`).
+fn register_executor_end_hook() {
+    unsafe {
+        static mut PREV_EXECUTOR_END: pg_sys::ExecutorEnd_hook_type = None;
+
+        PREV_EXECUTOR_END = pg_sys::ExecutorEnd_hook;
+        pg_sys::ExecutorEnd_hook = Some(pg_ripple_executor_end);
+
+        #[pg_guard]
+        unsafe extern "C-unwind" fn pg_ripple_executor_end(query_desc: *mut pg_sys::QueryDesc) {
+            // Call the previous hook first.
+            unsafe {
+                if let Some(prev) = PREV_EXECUTOR_END {
+                    prev(query_desc);
+                } else {
+                    pg_sys::standard_ExecutorEnd(query_desc);
+                }
+            }
+
+            // If shmem is ready, check whether delta growth exceeds the threshold.
+            if !crate::shmem::SHMEM_READY.load(std::sync::atomic::Ordering::Acquire) {
+                return;
+            }
+            let threshold = crate::LATCH_TRIGGER_THRESHOLD.get() as i64;
+            let delta_rows = crate::shmem::TOTAL_DELTA_ROWS
+                .get()
+                .load(std::sync::atomic::Ordering::Relaxed);
+            if delta_rows >= threshold {
+                crate::shmem::poke_merge_worker();
+            }
+        }
+    }
+}
+
 /// Called once when the extension shared library is loaded.
 #[allow(non_snake_case)]
 #[pg_guard]
@@ -237,6 +278,9 @@ pub extern "C-unwind" fn _PG_init() {
     if unsafe { pg_sys::IsPostmasterEnvironment } {
         shmem::init();
         worker::register_merge_worker();
+        // Register ExecutorEnd hook to poke the merge worker latch when the
+        // accumulated unmerged delta row count crosses the trigger threshold.
+        register_executor_end_hook();
     }
 
     // Initialize schemas and base tables.
@@ -609,11 +653,10 @@ mod pg_ripple {
         .unwrap_or(None)
         .unwrap_or(0);
 
-        let rare_count: i64 = pgrx::Spi::get_one::<i64>(
-            "SELECT count(*)::bigint FROM _pg_ripple.vp_rare",
-        )
-        .unwrap_or(None)
-        .unwrap_or(0);
+        let rare_count: i64 =
+            pgrx::Spi::get_one::<i64>("SELECT count(*)::bigint FROM _pg_ripple.vp_rare")
+                .unwrap_or(None)
+                .unwrap_or(0);
 
         let htap_count: i64 = pgrx::Spi::get_one::<i64>(
             "SELECT count(*)::bigint FROM _pg_ripple.predicates WHERE htap = true",
@@ -621,15 +664,17 @@ mod pg_ripple {
         .unwrap_or(None)
         .unwrap_or(0);
 
-        let delta_rows: i64 = if crate::shmem::SHMEM_READY.load(std::sync::atomic::Ordering::Acquire) {
-            crate::shmem::TOTAL_DELTA_ROWS
-                .get()
-                .load(std::sync::atomic::Ordering::Relaxed)
-        } else {
-            -1 // shmem not available (loaded without shared_preload_libraries)
-        };
+        let delta_rows: i64 =
+            if crate::shmem::SHMEM_READY.load(std::sync::atomic::Ordering::Acquire) {
+                crate::shmem::TOTAL_DELTA_ROWS
+                    .get()
+                    .load(std::sync::atomic::Ordering::Relaxed)
+            } else {
+                -1 // shmem not available (loaded without shared_preload_libraries)
+            };
 
-        let merge_pid: i32 = if crate::shmem::SHMEM_READY.load(std::sync::atomic::Ordering::Acquire) {
+        let merge_pid: i32 = if crate::shmem::SHMEM_READY.load(std::sync::atomic::Ordering::Acquire)
+        {
             crate::shmem::MERGE_WORKER_PID
                 .get()
                 .load(std::sync::atomic::Ordering::Relaxed)
@@ -639,10 +684,16 @@ mod pg_ripple {
 
         let mut obj = serde_json::Map::new();
         obj.insert("total_triples".to_string(), serde_json::json!(total));
-        obj.insert("dedicated_predicates".to_string(), serde_json::json!(pred_count));
+        obj.insert(
+            "dedicated_predicates".to_string(),
+            serde_json::json!(pred_count),
+        );
         obj.insert("htap_predicates".to_string(), serde_json::json!(htap_count));
         obj.insert("rare_triples".to_string(), serde_json::json!(rare_count));
-        obj.insert("unmerged_delta_rows".to_string(), serde_json::json!(delta_rows));
+        obj.insert(
+            "unmerged_delta_rows".to_string(),
+            serde_json::json!(delta_rows),
+        );
         obj.insert("merge_worker_pid".to_string(), serde_json::json!(merge_pid));
 
         pgrx::JsonB(serde_json::Value::Object(obj))

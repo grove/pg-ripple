@@ -94,17 +94,13 @@ pub fn ensure_htap_tables(pred_id: i64) -> String {
     .unwrap_or_else(|e| pgrx::error!("delta table creation error: {e}"));
 
     Spi::run_with_args(
-        &format!(
-            "CREATE INDEX IF NOT EXISTS idx_vp_{pred_id}_delta_s_o ON {delta} (s, o)"
-        ),
+        &format!("CREATE INDEX IF NOT EXISTS idx_vp_{pred_id}_delta_s_o ON {delta} (s, o)"),
         &[],
     )
     .unwrap_or_else(|e| pgrx::error!("delta index(s,o) error: {e}"));
 
     Spi::run_with_args(
-        &format!(
-            "CREATE INDEX IF NOT EXISTS idx_vp_{pred_id}_delta_o_s ON {delta} (o, s)"
-        ),
+        &format!("CREATE INDEX IF NOT EXISTS idx_vp_{pred_id}_delta_o_s ON {delta} (o, s)"),
         &[],
     )
     .unwrap_or_else(|e| pgrx::error!("delta index(o,s) error: {e}"));
@@ -125,9 +121,7 @@ pub fn ensure_htap_tables(pred_id: i64) -> String {
     .unwrap_or_else(|e| pgrx::error!("main table creation error: {e}"));
 
     Spi::run_with_args(
-        &format!(
-            "CREATE INDEX IF NOT EXISTS idx_vp_{pred_id}_main_brin ON {main} USING BRIN (s)"
-        ),
+        &format!("CREATE INDEX IF NOT EXISTS idx_vp_{pred_id}_main_brin ON {main} USING BRIN (s)"),
         &[],
     )
     .unwrap_or_else(|e| pgrx::error!("main BRIN index error: {e}"));
@@ -197,6 +191,7 @@ pub fn is_htap(pred_id: i64) -> bool {
 }
 
 /// Return the delta table name for a predicate, or `None` if not HTAP.
+#[allow(dead_code)] // used by the ExecutorEnd hook introduced in v0.6.0
 pub fn delta_table(pred_id: i64) -> Option<String> {
     if is_htap(pred_id) {
         Some(format!("_pg_ripple.vp_{pred_id}_delta"))
@@ -228,11 +223,8 @@ pub fn merge_predicate(pred_id: i64) -> i64 {
     let tombs = format!("_pg_ripple.vp_{pred_id}_tombstones");
 
     // Drop any leftover _main_new from a previous failed merge.
-    Spi::run_with_args(
-        &format!("DROP TABLE IF EXISTS {main_new}"),
-        &[],
-    )
-    .unwrap_or_else(|e| pgrx::error!("merge: drop leftover main_new error: {e}"));
+    Spi::run_with_args(&format!("DROP TABLE IF EXISTS {main_new}"), &[])
+        .unwrap_or_else(|e| pgrx::error!("merge: drop leftover main_new error: {e}"));
 
     // Step 1: create fresh main_new from (main − tombstones UNION ALL delta) ORDER BY s.
     Spi::run_with_args(
@@ -256,31 +248,24 @@ pub fn merge_predicate(pred_id: i64) -> i64 {
 
     // Step 2: BRIN index on new main (effective because rows arrive ordered by s).
     Spi::run_with_args(
-        &format!(
-            "CREATE INDEX idx_vp_{pred_id}_main_new_brin ON {main_new} USING BRIN (s)"
-        ),
+        &format!("CREATE INDEX idx_vp_{pred_id}_main_new_brin ON {main_new} USING BRIN (s)"),
         &[],
     )
     .unwrap_or_else(|e| pgrx::error!("merge: BRIN index on main_new error: {e}"));
 
     // Count rows before rename (for return value).
-    let row_count: i64 = Spi::get_one_with_args::<i64>(
-        &format!("SELECT count(*)::bigint FROM {main_new}"),
-        &[],
-    )
-    .unwrap_or_else(|e| pgrx::error!("merge: count main_new error: {e}"))
-    .unwrap_or(0);
+    let row_count: i64 =
+        Spi::get_one_with_args::<i64>(&format!("SELECT count(*)::bigint FROM {main_new}"), &[])
+            .unwrap_or_else(|e| pgrx::error!("merge: count main_new error: {e}"))
+            .unwrap_or(0);
 
     // Step 3: atomic rename — drop old main, rename new → main.
     // Use lock_timeout to avoid blocking query path for too long.
     Spi::run_with_args("SET LOCAL lock_timeout = '5s'", &[])
         .unwrap_or_else(|e| pgrx::error!("merge: set lock_timeout error: {e}"));
 
-    Spi::run_with_args(
-        &format!("DROP TABLE IF EXISTS {main}"),
-        &[],
-    )
-    .unwrap_or_else(|e| pgrx::error!("merge: drop old main error: {e}"));
+    Spi::run_with_args(&format!("DROP TABLE IF EXISTS {main}"), &[])
+        .unwrap_or_else(|e| pgrx::error!("merge: drop old main error: {e}"));
 
     Spi::run_with_args(
         &format!("ALTER TABLE {main_new} RENAME TO vp_{pred_id}_main"),
@@ -289,11 +274,8 @@ pub fn merge_predicate(pred_id: i64) -> i64 {
     .unwrap_or_else(|e| pgrx::error!("merge: rename main_new error: {e}"));
 
     // Step 4: truncate delta and tombstones.
-    Spi::run_with_args(
-        &format!("TRUNCATE {delta}, {tombs}"),
-        &[],
-    )
-    .unwrap_or_else(|e| pgrx::error!("merge: truncate delta/tombstones error: {e}"));
+    Spi::run_with_args(&format!("TRUNCATE {delta}, {tombs}"), &[])
+        .unwrap_or_else(|e| pgrx::error!("merge: truncate delta/tombstones error: {e}"));
 
     // Step 5: recreate the view (may reference stale OIDs after rename).
     let view = format!("_pg_ripple.vp_{pred_id}");
@@ -313,11 +295,8 @@ pub fn merge_predicate(pred_id: i64) -> i64 {
     .unwrap_or_else(|e| pgrx::error!("merge: recreate view error: {e}"));
 
     // Step 6: ANALYZE so planner has fresh stats.
-    Spi::run_with_args(
-        &format!("ANALYZE {main}"),
-        &[],
-    )
-    .unwrap_or_else(|e| pgrx::error!("merge: ANALYZE error: {e}"));
+    Spi::run_with_args(&format!("ANALYZE {main}"), &[])
+        .unwrap_or_else(|e| pgrx::error!("merge: ANALYZE error: {e}"));
 
     // Update triple_count in predicates catalog.
     Spi::run_with_args(
@@ -346,9 +325,7 @@ pub fn merge_all() -> i64 {
     for p_id in pred_ids {
         // Only merge predicates that have rows in delta.
         let delta_rows: i64 = Spi::get_one_with_args::<i64>(
-            &format!(
-                "SELECT count(*)::bigint FROM _pg_ripple.vp_{p_id}_delta"
-            ),
+            &format!("SELECT count(*)::bigint FROM _pg_ripple.vp_{p_id}_delta"),
             &[],
         )
         .unwrap_or(None)
@@ -490,9 +467,7 @@ pub fn migrate_flat_to_htap(pred_id: i64) {
 
     // Create delta table (copy existing rows into it as the write inbox).
     Spi::run_with_args(
-        &format!(
-            "CREATE TABLE {delta} AS SELECT * FROM {backup}"
-        ),
+        &format!("CREATE TABLE {delta} AS SELECT * FROM {backup}"),
         &[],
     )
     .unwrap_or_else(|e| pgrx::error!("htap_migrate: create delta error: {e}"));
@@ -574,9 +549,6 @@ pub fn migrate_flat_to_htap(pred_id: i64) {
     .unwrap_or_else(|e| pgrx::error!("htap_migrate: predicates update error: {e}"));
 
     // Drop the backup table.
-    Spi::run_with_args(
-        &format!("DROP TABLE IF EXISTS {backup}"),
-        &[],
-    )
-    .unwrap_or_else(|e| pgrx::error!("htap_migrate: drop backup error: {e}"));
+    Spi::run_with_args(&format!("DROP TABLE IF EXISTS {backup}"), &[])
+        .unwrap_or_else(|e| pgrx::error!("htap_migrate: drop backup error: {e}"));
 }

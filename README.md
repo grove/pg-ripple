@@ -13,9 +13,9 @@ pg_ripple is a PostgreSQL 18 extension building toward a fully-featured knowledg
 
 ---
 
-## What works today (v0.5.1)
+## What works today (v0.6.0)
 
-You can install the extension, store triples, bulk-load RDF datasets, manage named graphs, and query with full SPARQL 1.1:
+You can install the extension, store triples, bulk-load RDF datasets, manage named graphs, and query with full SPARQL 1.1. v0.6.0 adds HTAP write isolation so reads are never blocked by writes:
 
 ```sql
 CREATE EXTENSION pg_ripple;
@@ -71,9 +71,23 @@ SELECT * FROM pg_ripple.find_triples(
 
 -- Count all triples
 SELECT pg_ripple.triple_count();
+
+-- HTAP: force merge of delta tables into main (v0.6.0)
+SELECT pg_ripple.compact();
+
+-- HTAP: extension statistics including merge worker state (v0.6.0)
+SELECT pg_ripple.stats();
+
+-- CDC: subscribe to triple change notifications (v0.6.0)
+SELECT pg_ripple.subscribe('<http://xmlns.com/foaf/0.1/knows>', 'foaf_changes');
+LISTEN foaf_changes;
 ```
 
-Every IRI, blank node, literal, and quoted triple is dictionary-encoded to a compact integer for fast joins. Numeric and date literals are automatically *inline-encoded* — stored as bit-packed integers with no dictionary overhead, making FILTER comparisons extremely fast. Facts are stored in separate tables per predicate (Vertical Partitioning). The SPARQL engine supports property paths (`+`, `*`, `?`), UNION/MINUS, aggregates, GROUP BY, subqueries, BIND, VALUES, OPTIONAL, and named graphs. All four SPARQL query forms (SELECT, CONSTRUCT, DESCRIBE, ASK) are fully supported. No `shared_preload_libraries` configuration required.
+Every IRI, blank node, literal, and quoted triple is dictionary-encoded to a compact integer for fast joins. Numeric and date literals are automatically *inline-encoded* — stored as bit-packed integers with no dictionary overhead, making FILTER comparisons extremely fast. Facts are stored in separate tables per predicate (Vertical Partitioning).
+
+**v0.6.0 HTAP architecture**: each VP table is split into a write-optimised delta partition and a read-optimised main partition (BRIN-indexed). A background merge worker continuously promotes delta rows into main. Reads always see `(main EXCEPT tombstones) UNION ALL delta` — no blocking of read sessions during writes. An `ExecutorEnd` hook automatically pokes the merge worker latch when unmerged rows exceed `pg_ripple.latch_trigger_threshold`.
+
+The SPARQL engine supports property paths (`+`, `*`, `?`), UNION/MINUS, aggregates, GROUP BY, subqueries, BIND, VALUES, OPTIONAL, and named graphs. All four SPARQL query forms (SELECT, CONSTRUCT, DESCRIBE, ASK) are fully supported.
 
 ---
 
