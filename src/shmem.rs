@@ -84,8 +84,7 @@ pub static TOTAL_DELTA_ROWS: PgAtomic<AtomicI64> =
 
 /// 1024-bit Bloom filter: which predicates have rows in their delta tables.
 /// Indexed by two multiplicative hashes of the predicate ID.
-pub static DELTA_BLOOM: PgLwLock<[u64; 16]> =
-    unsafe { PgLwLock::new(c"pg_ripple_delta_bloom") };
+pub static DELTA_BLOOM: PgLwLock<[u64; 16]> = unsafe { PgLwLock::new(c"pg_ripple_delta_bloom") };
 
 // ─── Shared-memory encode cache (4 shards × 1024 slots) ─────────────────────
 
@@ -225,11 +224,10 @@ pub fn set_predicate_delta_bit(pred_id: i64) {
     }
     let (p1, p2) = bloom_bits(pred_id);
     let mut guard = DELTA_BLOOM.exclusive();
-    let words: &mut [u64; 16] = &mut *guard;
+    let words: &mut [u64; 16] = &mut guard;
     words[p1 >> 6] |= 1u64 << (p1 & 63);
     words[p2 >> 6] |= 1u64 << (p2 & 63);
 }
-
 /// Clear the bloom-filter bits for `pred_id` after a successful merge.
 ///
 /// Clearing is conservative: we only clear bits that are exclusively owned
@@ -246,7 +244,7 @@ pub fn clear_predicate_delta_bit(pred_id: i64) {
     }
     let (p1, p2) = bloom_bits(pred_id);
     let mut guard = DELTA_BLOOM.exclusive();
-    let words: &mut [u64; 16] = &mut *guard;
+    let words: &mut [u64; 16] = &mut guard;
     words[p1 >> 6] &= !(1u64 << (p1 & 63));
     words[p2 >> 6] &= !(1u64 << (p2 & 63));
 }
@@ -260,13 +258,14 @@ pub fn clear_predicate_delta_bit(pred_id: i64) {
 /// then performed and may find no rows.
 ///
 /// Returns `true` (conservative: scan delta) when shmem is not initialised.
+#[allow(dead_code)]
 pub fn predicate_may_have_delta(pred_id: i64) -> bool {
     if !SHMEM_READY.load(Ordering::Acquire) {
         return true;
     }
     let (p1, p2) = bloom_bits(pred_id);
     let guard = DELTA_BLOOM.share();
-    let words: &[u64; 16] = &*guard;
+    let words: &[u64; 16] = &guard;
     let bit1_set = (words[p1 >> 6] >> (p1 & 63)) & 1 == 1;
     let bit2_set = (words[p2 >> 6] >> (p2 & 63)) & 1 == 1;
     bit1_set || bit2_set

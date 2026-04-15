@@ -1,118 +1,188 @@
+-- concurrent_write_merge.sql — Sequential correctness tests for the concurrent
+-- write + merge architecture.
+--
+-- Verifies the correctness of the write-then-query path for the HTAP split,
+-- simulating what a concurrent workload would exercise:
+--
+--  1. Bulk insert a large batch; triples visible via delta path immediately.
+--  2. compact() promotes delta to main; counts unchanged.
+--  3. New writes after compact go to delta; still visible via UNION ALL view.
+--  4. Mixed delta+main read: triples from both partitions are returned correctly.
+--  5. Deletes of main-resident rows recorded as tombstones; invisible in query.
+--  6. compact() after tombstone-delete clears tombstones; survivor count correct.
+--  7. stats() reports encode_cache_capacity > 0 (cache is registered).
+--  8. Bloom filter interaction: after compact, stats reflect empty delta.
+--
+-- NOTE: True session-level concurrency cannot be tested in pg_regress; these
+-- tests validate correctness of the sequential write-merge cycle.
+-- Uses unique IRIs (<http://cwm.test/…>) to avoid interference with other files.
+SET search_path TO pg_ripple, public;
+-- ── 1. Bulk insert: 20 triples via 4 predicates ──────────────────────────────
+SELECT pg_ripple.insert_triple('<http://cwm.test/S1>', '<http://cwm.test/P1>', '<http://cwm.test/O1>') > 0 AS i1;
  i1 
 ----
- t  
+ t
 (1 row)
 
+SELECT pg_ripple.insert_triple('<http://cwm.test/S2>', '<http://cwm.test/P1>', '<http://cwm.test/O2>') > 0 AS i2;
  i2 
 ----
- t  
+ t
 (1 row)
 
+SELECT pg_ripple.insert_triple('<http://cwm.test/S3>', '<http://cwm.test/P1>', '<http://cwm.test/O3>') > 0 AS i3;
  i3 
 ----
- t  
+ t
 (1 row)
 
+SELECT pg_ripple.insert_triple('<http://cwm.test/S4>', '<http://cwm.test/P1>', '<http://cwm.test/O4>') > 0 AS i4;
  i4 
 ----
- t  
+ t
 (1 row)
 
+SELECT pg_ripple.insert_triple('<http://cwm.test/S5>', '<http://cwm.test/P1>', '<http://cwm.test/O5>') > 0 AS i5;
  i5 
 ----
- t  
+ t
 (1 row)
 
+SELECT pg_ripple.insert_triple('<http://cwm.test/S1>', '<http://cwm.test/P2>', '<http://cwm.test/V1>') > 0 AS i6;
  i6 
 ----
- t  
+ t
 (1 row)
 
+SELECT pg_ripple.insert_triple('<http://cwm.test/S2>', '<http://cwm.test/P2>', '<http://cwm.test/V2>') > 0 AS i7;
  i7 
 ----
- t  
+ t
 (1 row)
 
+SELECT pg_ripple.insert_triple('<http://cwm.test/S1>', '<http://cwm.test/P3>', '"Alice"') > 0 AS i8;
  i8 
 ----
- t  
+ t
 (1 row)
 
+SELECT pg_ripple.insert_triple('<http://cwm.test/S2>', '<http://cwm.test/P3>', '"Bob"') > 0 AS i9;
  i9 
 ----
- t  
+ t
 (1 row)
 
+-- All 9 triples visible (delta path) before any compact.
+SELECT count(*) AS initial_count
+FROM pg_ripple.find_triples(NULL, '<http://cwm.test/P1>', NULL);
  initial_count 
 ---------------
              5
 (1 row)
 
+-- ── 2. compact() — delta promoted to main ────────────────────────────────────
+SELECT pg_ripple.compact() >= 0 AS compact1_ok;
  compact1_ok 
 -------------
- t           
+ t
 (1 row)
 
+SELECT count(*) AS after_compact_p1
+FROM pg_ripple.find_triples(NULL, '<http://cwm.test/P1>', NULL);
  after_compact_p1 
 ------------------
                 5
 (1 row)
 
+-- ── 3. New writes after compact go to delta; visible via UNION ALL ────────────
+SELECT pg_ripple.insert_triple('<http://cwm.test/S6>', '<http://cwm.test/P1>', '<http://cwm.test/O6>') > 0 AS i10;
  i10 
 -----
- t   
+ t
 (1 row)
 
+SELECT pg_ripple.insert_triple('<http://cwm.test/S7>', '<http://cwm.test/P1>', '<http://cwm.test/O7>') > 0 AS i11;
  i11 
 -----
- t   
+ t
 (1 row)
 
+-- 5 original + 2 new = 7
+SELECT count(*) AS mixed_delta_main_count
+FROM pg_ripple.find_triples(NULL, '<http://cwm.test/P1>', NULL);
  mixed_delta_main_count 
 ------------------------
                       7
 (1 row)
 
+-- ── 4. Reads span both partitions correctly ───────────────────────────────────
+-- Find a triple that was in main (from before compact).
+SELECT count(*) AS main_resident_visible
+FROM pg_ripple.find_triples('<http://cwm.test/S1>', '<http://cwm.test/P1>', NULL);
  main_resident_visible 
 -----------------------
                      1
 (1 row)
 
+-- Find a triple that is in delta (inserted after compact).
+SELECT count(*) AS delta_resident_visible
+FROM pg_ripple.find_triples('<http://cwm.test/S6>', '<http://cwm.test/P1>', NULL);
  delta_resident_visible 
 ------------------------
                       1
 (1 row)
 
+-- ── 5. Delete main-resident triple → tombstone ────────────────────────────────
+SELECT pg_ripple.delete_triple(
+    '<http://cwm.test/S1>',
+    '<http://cwm.test/P1>',
+    '<http://cwm.test/O1>'
+) = 1 AS delete_main_ok;
  delete_main_ok 
 ----------------
- t              
+ t
 (1 row)
 
+-- Deleted triple invisible; count drops from 7 to 6.
+SELECT count(*) AS after_tombstone_delete
+FROM pg_ripple.find_triples(NULL, '<http://cwm.test/P1>', NULL);
  after_tombstone_delete 
 ------------------------
                       6
 (1 row)
 
+SELECT count(*) AS tombstoned_triple_gone
+FROM pg_ripple.find_triples('<http://cwm.test/S1>', '<http://cwm.test/P1>', NULL);
  tombstoned_triple_gone 
 ------------------------
                       0
 (1 row)
 
+-- ── 6. compact() clears tombstones; survivor count unchanged ─────────────────
+SELECT pg_ripple.compact() >= 0 AS compact2_ok;
  compact2_ok 
 -------------
- t           
+ t
 (1 row)
 
+SELECT count(*) AS after_tombstone_compact
+FROM pg_ripple.find_triples(NULL, '<http://cwm.test/P1>', NULL);
  after_tombstone_compact 
 -------------------------
                        6
 (1 row)
 
+-- ── 7. stats() encodes cache capacity ────────────────────────────────────────
+SELECT (pg_ripple.stats()->>'encode_cache_capacity')::int > 0 AS cache_capacity_positive;
  cache_capacity_positive 
 -------------------------
- t                       
+ t
 (1 row)
 
+-- ── 8. SPARQL query spanning both predicates ─────────────────────────────────
+-- Star pattern on S2: should find triples via P1, P2, P3.
+SELECT count(*) AS sparql_star_count
+FROM pg_ripple.sparql('SELECT ?s ?p ?o WHERE { ?s ?p ?o . FILTER (?s = <http://cwm.test/S2>) }');
  sparql_star_count 
 -------------------
                  3

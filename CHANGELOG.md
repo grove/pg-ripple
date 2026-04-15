@@ -13,7 +13,7 @@ Development towards [v0.7.0 (SHACL Core + Deduplication)](ROADMAP.md).
 
 ---
 
-## [0.6.0] — 2025-04-15 — HTAP Architecture
+## [0.6.0] — 2026-04-15 — HTAP Architecture
 
 This release introduces a full HTAP (Hybrid Transactional/Analytical Processing) storage architecture, separating write traffic from read traffic so both can proceed at full speed simultaneously. A background merge worker periodically promotes delta rows into a read-optimised main partition. Change Data Capture (CDC) enables event-driven subscription to triple changes via PostgreSQL `LISTEN/NOTIFY`.
 
@@ -83,6 +83,9 @@ The migration script (`sql/pg_ripple--0.5.1--0.6.0.sql`) adds the `htap` column 
 
 - **`shmem::init()` race condition** — `SHMEM_READY` is now set inside a final `shmem_startup_hook` rather than immediately in `_PG_init`, eliminating the window where `SHMEM_READY = true` but `PgAtomic` inner pointers were still null
 - **Postmaster GUC registration crash** — `dictionary_cache_size` and `cache_budget` GUCs (both `GucContext::Postmaster`) are now only registered when `process_shared_preload_libraries_in_progress` is true, preventing `FATAL: cannot create PGC_POSTMASTER variables after startup` when `CREATE EXTENSION pg_ripple` runs without `shared_preload_libraries`
+- **SPARQL aggregate decode bug** — aggregate results (COUNT, SUM, etc.) were incorrectly dictionary-decoded instead of being emitted as raw numbers; the `raw_numeric_vars` set is now propagated through `Extend` nodes to `execute_select`
+- **Merge worker DROP TABLE without CASCADE** — the fresh-table generation merge failed when the old `_main` table had dependent views; `DROP TABLE` now uses `CASCADE` and the view is recreated afterward
+- **Merge worker stale BRIN index** — repeated `compact()` calls failed with "relation already exists" because the BRIN index name survived table renames; the merge now drops the stale index before creating a new one
 
 ### Benchmarks & CI
 

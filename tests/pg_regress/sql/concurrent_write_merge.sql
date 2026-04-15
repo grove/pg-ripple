@@ -81,8 +81,6 @@ FROM pg_ripple.find_triples(NULL, '<http://cwm.test/P1>', NULL);
 SELECT (pg_ripple.stats()->>'encode_cache_capacity')::int > 0 AS cache_capacity_positive;
 
 -- ── 8. SPARQL query spanning both predicates ─────────────────────────────────
--- Star pattern on S2: should find triples via P1 and P2.
+-- Star pattern on S2: should find triples via P1, P2, P3.
 SELECT count(*) AS sparql_star_count
-FROM jsonb_array_elements(
-    pg_ripple.sparql('SELECT ?s ?p ?o WHERE { ?s ?p ?o . FILTER (?s = <http://cwm.test/S2>) }')
-);
+FROM pg_ripple.sparql('SELECT ?s ?p ?o WHERE { ?s ?p ?o . FILTER (?s = <http://cwm.test/S2>) }');

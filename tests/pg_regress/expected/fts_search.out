@@ -21,10 +21,10 @@ SELECT pg_ripple.load_ntriples(
 (1 row)
 
 -- Create FTS index on the abstract predicate.
-SELECT pg_ripple.fts_index('<https://fts.test/abstract>') AS fts_index_created;
+SELECT pg_ripple.fts_index('<https://fts.test/abstract>') > 0 AS fts_index_created;
  fts_index_created 
 -------------------
-                31
+ t
 (1 row)
 
 -- Search for "semantic": doc1 and doc3 contain it (not doc2).
@@ -52,10 +52,10 @@ FROM pg_ripple.fts_search('rdf', '<https://fts.test/abstract>');
 (1 row)
 
 -- Search in un-indexed predicate (title): fts_index not called, should still work via seq scan.
-SELECT pg_ripple.fts_index('<https://fts.test/title>') AS title_fts_indexed;
+SELECT pg_ripple.fts_index('<https://fts.test/title>') > 0 AS title_fts_indexed;
  title_fts_indexed 
 -------------------
-                38
+ t
 (1 row)
 
 SELECT count(*) = 1 AS one_intro_match

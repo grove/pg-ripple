@@ -26,6 +26,7 @@ use pgrx::prelude::*;
 /// Create `_pg_ripple.cdc_subscriptions` and the notify trigger function.
 ///
 /// Called once from `storage::initialize_schema`.
+#[allow(dead_code)]
 pub fn initialize_cdc_schema() {
     // Subscription registry.
     Spi::run_with_args(

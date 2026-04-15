@@ -17,6 +17,9 @@
 
 SET search_path TO pg_ripple, public;
 
+-- Lower promotion threshold so 100 triples/predicate triggers HTAP split.
+SET pg_ripple.vp_promotion_threshold = 50;
+
 -- ── 1. Generate 500-triple N-Triples payload and bulk load ───────────────────
 -- Build the payload by inserting 100 triples per predicate × 5 predicates.
 -- We use a DO block to generate the N-Triples string and load it.

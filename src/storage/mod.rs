@@ -121,6 +121,7 @@ pub fn encode_rdf_term(s: &str) -> i64 {
 
 /// Initialize the extension's base schemas and tables.
 /// Called once from _PG_init to ensure all base infrastructure exists.
+#[allow(dead_code)]
 pub fn initialize_schema() {
     // Create the user-visible schema if it doesn't exist.
     Spi::run_with_args(

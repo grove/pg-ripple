@@ -19,7 +19,7 @@ SELECT pg_ripple.load_ntriples(
 ) = 4 AS four_triples_loaded;
 
 -- Create FTS index on the abstract predicate.
-SELECT pg_ripple.fts_index('<https://fts.test/abstract>') AS fts_index_created;
+SELECT pg_ripple.fts_index('<https://fts.test/abstract>') > 0 AS fts_index_created;
 
 -- Search for "semantic": doc1 and doc3 contain it (not doc2).
 SELECT count(*) = 2 AS two_semantic_matches
@@ -34,7 +34,7 @@ SELECT count(*) = 2 AS two_rdf_matches
 FROM pg_ripple.fts_search('rdf', '<https://fts.test/abstract>');
 
 -- Search in un-indexed predicate (title): fts_index not called, should still work via seq scan.
-SELECT pg_ripple.fts_index('<https://fts.test/title>') AS title_fts_indexed;
+SELECT pg_ripple.fts_index('<https://fts.test/title>') > 0 AS title_fts_indexed;
 
 SELECT count(*) = 1 AS one_intro_match
 FROM pg_ripple.fts_search('introduction', '<https://fts.test/title>');

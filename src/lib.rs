@@ -883,7 +883,10 @@ mod pg_ripple {
             )",
         )
         .unwrap_or_else(|e| {
-            pgrx::warning!("failed to create _pg_ripple.predicate_stats stream table: {}", e);
+            pgrx::warning!(
+                "failed to create _pg_ripple.predicate_stats stream table: {}",
+                e
+            );
         });
 
         // Create _pg_ripple.graph_stats stream table via pg_trickle.
@@ -904,7 +907,10 @@ mod pg_ripple {
             )",
         )
         .unwrap_or_else(|e| {
-            pgrx::warning!("failed to create _pg_ripple.graph_stats stream table: {}", e);
+            pgrx::warning!(
+                "failed to create _pg_ripple.graph_stats stream table: {}",
+                e
+            );
         });
 
         // Create _pg_ripple.vp_cardinality stream table — per-predicate live
@@ -924,7 +930,10 @@ mod pg_ripple {
             )",
         )
         .unwrap_or_else(|e| {
-            pgrx::warning!("failed to create _pg_ripple.vp_cardinality stream table: {}", e);
+            pgrx::warning!(
+                "failed to create _pg_ripple.vp_cardinality stream table: {}",
+                e
+            );
         });
 
         // Create _pg_ripple.rare_predicate_candidates stream table with
@@ -979,7 +988,7 @@ mod pg_ripple {
                  FROM _pg_ripple.predicate_stats",
             )
             .unwrap_or(None)
-            .unwrap_or_else(|| crate::storage::total_triple_count())
+            .unwrap_or_else(crate::storage::total_triple_count)
         } else {
             crate::storage::total_triple_count()
         };
