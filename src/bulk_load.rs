@@ -118,16 +118,22 @@ fn flush_batch(by_predicate: &mut PredicateBatch) {
 fn analyze_affected_tables(touched_predicates: &[i64]) {
     for p_id in touched_predicates {
         // Check if there's a dedicated table for this predicate.
-        let table_name: Option<String> = Spi::get_one_with_args::<String>(
-            "SELECT '_pg_ripple.vp_' || id::text \
-             FROM _pg_ripple.predicates WHERE id = $1 AND table_oid IS NOT NULL",
+        let has_table: bool = Spi::get_one_with_args::<bool>(
+            "SELECT EXISTS(SELECT 1 FROM _pg_ripple.predicates WHERE id = $1 AND table_oid IS NOT NULL)",
             &[DatumWithOid::from(*p_id)],
         )
-        .unwrap_or(None);
+        .unwrap_or(None)
+        .unwrap_or(false);
 
-        if let Some(table) = table_name {
-            Spi::run_with_args(&format!("ANALYZE {table}"), &[])
-                .unwrap_or_else(|e| pgrx::warning!("ANALYZE {}: {}", table, e));
+        if has_table {
+            // In HTAP mode (v0.6.0+) vp_{id} is a VIEW; ANALYZE the
+            // underlying _delta and _main tables instead.
+            let delta = format!("_pg_ripple.vp_{p_id}_delta");
+            let main = format!("_pg_ripple.vp_{p_id}_main");
+            Spi::run_with_args(&format!("ANALYZE {delta}"), &[])
+                .unwrap_or_else(|e| pgrx::warning!("ANALYZE {}: {}", delta, e));
+            Spi::run_with_args(&format!("ANALYZE {main}"), &[])
+                .unwrap_or_else(|e| pgrx::warning!("ANALYZE {}: {}", main, e));
         }
     }
     // Also ANALYZE vp_rare (catches any rare predicates not yet promoted).

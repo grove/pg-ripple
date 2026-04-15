@@ -64,6 +64,7 @@ pub extern "C-unwind" fn pg_ripple_merge_worker_main(_arg: pg_sys::Datum) {
 
     // Main loop: wait for latch or timeout, then run a merge cycle.
     let interval_secs = get_merge_interval();
+    let mut consecutive_errors: u32 = 0;
     while BackgroundWorker::wait_latch(Some(Duration::from_secs(interval_secs))) {
         if BackgroundWorker::sighup_received() {
             // SIGHUP: reload configuration.  The GUC system handles this.
@@ -78,9 +79,26 @@ pub extern "C-unwind" fn pg_ripple_merge_worker_main(_arg: pg_sys::Datum) {
         });
 
         if let Err(e) = run_result {
-            pgrx::log!("pg_ripple merge worker: merge cycle panicked: {e:?}");
-            // Continue running; next cycle may succeed.
+            consecutive_errors += 1;
+            pgrx::log!(
+                "pg_ripple merge worker: merge cycle panicked ({consecutive_errors}): {e:?}"
+            );
+            // After a panic the PostgreSQL error stack may be dirty.
+            // Do NOT loop immediately — go back to wait_latch so the next
+            // iteration sleeps for the full interval, preventing a rapid
+            // panic loop that would overflow ERRORDATA_STACK_SIZE and
+            // PANIC the entire cluster.
+            if consecutive_errors >= 5 {
+                pgrx::log!(
+                    "pg_ripple merge worker: {consecutive_errors} consecutive errors, \
+                     backing off to full interval"
+                );
+            }
+            continue;
         }
+
+        // Merge succeeded — reset error counter.
+        consecutive_errors = 0;
     }
 
     // Worker is terminating.  Clear our PID from shared memory.
