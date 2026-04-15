@@ -9,7 +9,7 @@ Versions correspond to the milestones in [ROADMAP.md](ROADMAP.md).
 
 ## [Unreleased]
 
-Nothing yet — next milestone is [v0.5.0 (SPARQL Advanced)](ROADMAP.md).
+Development towards [v0.5.0 (SPARQL Advanced Query)](ROADMAP.md) — property paths, aggregates, UNION/MINUS, subqueries, GROUP BY, BIND/VALUES.
 
 ---
 
