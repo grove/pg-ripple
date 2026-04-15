@@ -14,8 +14,7 @@
 
 # ── Build stage ───────────────────────────────────────────────────────────────
 # pgrx 0.17 requires nightly Rust (specifically for let guards in pgrx-sql-entity-graph).
-# We use a recent nightly (2025-04-15) which includes necessary unstable features.
-FROM rust:nightly-2025-04-15-bookworm AS builder
+FROM rust:nightly-bookworm AS builder
 
 ARG PGRX_VERSION=0.17.0
 
