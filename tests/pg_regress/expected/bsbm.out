@@ -1,0 +1,76 @@
+ register_prefix 
+-----------------
+ 
+(1 row)
+
+ register_prefix 
+-----------------
+ 
+(1 row)
+
+DO
+ bsbm_data_loaded 
+------------------
+ t
+(1 row)
+
+ q1_products_with_feature1 
+---------------------------
+                        10
+(1 row)
+
+ q2_products_with_label_and_feature 
+-------------------------------------
+                                  10
+(1 row)
+
+ q4_reviews_for_product1 
+--------------------------
+                        2
+(1 row)
+
+ q5_sibling_products_exist 
+---------------------------
+ t
+(1 row)
+
+ q8_all_reviewers_found 
+------------------------
+ t
+(1 row)
+
+ q9_review_count_correct 
+-------------------------
+ t
+(1 row)
+
+ q10_ask_true 
+--------------
+ t
+(1 row)
+
+ q11_union_entity_count 
+------------------------
+ t
+(1 row)
+
+ q12_construct_nonempty 
+------------------------
+ t
+(1 row)
+
+ bsbm_compact_ok 
+-----------------
+ t
+(1 row)
+
+ q4_post_compact 
+-----------------
+               2
+(1 row)
+
+ stats_has_live_field 
+----------------------
+ t
+(1 row)
+

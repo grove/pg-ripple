@@ -117,6 +117,35 @@ pub static DICTIONARY_CACHE_SIZE: pgrx::GucSetting<i32> =
 /// Set to 0 to disable back-pressure.  Startup-only GUC.
 pub static CACHE_BUDGET_MB: pgrx::GucSetting<i32> = pgrx::GucSetting::<i32>::new(64);
 
+// ─── pg_trickle runtime detection (v0.6.0) ───────────────────────────────────
+
+/// Returns `true` when the pg_trickle extension is installed in the current database.
+///
+/// All pg_trickle-dependent features gate on this check — core pg_ripple
+/// functionality works without pg_trickle.
+pub(crate) fn has_pg_trickle() -> bool {
+    pgrx::Spi::get_one::<bool>(
+        "SELECT EXISTS(SELECT 1 FROM pg_extension WHERE extname = 'pg_trickle')",
+    )
+    .unwrap_or(None)
+    .unwrap_or(false)
+}
+
+/// Returns `true` when the pg_trickle live-statistics stream tables have been
+/// created (i.e. `enable_live_statistics()` was previously called successfully).
+pub(crate) fn has_live_statistics() -> bool {
+    pgrx::Spi::get_one::<bool>(
+        "SELECT EXISTS(
+            SELECT 1 FROM pg_class c
+            JOIN pg_namespace n ON n.oid = c.relnamespace
+            WHERE n.nspname = '_pg_ripple'
+              AND c.relname = 'predicate_stats'
+        )",
+    )
+    .unwrap_or(None)
+    .unwrap_or(false)
+}
+
 // ─── ExecutorEnd hook (v0.6.0) ────────────────────────────────────────────────
 
 /// Register a PostgreSQL `ExecutorEnd_hook` that pokes the merge worker's latch
@@ -673,19 +702,153 @@ mod pg_ripple {
         crate::storage::merge::migrate_flat_to_htap(pred_id);
     }
 
+    // ── pg_trickle integration (v0.6.0, optional) ────────────────────────────
+
+    /// Enable live statistics via pg_trickle stream tables.
+    ///
+    /// Creates `_pg_ripple.predicate_stats` and `_pg_ripple.graph_stats` stream
+    /// tables using pg_trickle.  These let `pg_ripple.stats()` return results
+    /// instantly (no full VP table scan) when pg_trickle is installed and
+    /// `enable_live_statistics()` has been called.
+    ///
+    /// Returns `true` if stream tables were created, `false` if pg_trickle is
+    /// not installed (no error is raised — pg_trickle is optional).
+    ///
+    /// ```sql
+    /// SELECT pg_ripple.enable_live_statistics();
+    /// ```
+    #[pg_extern]
+    fn enable_live_statistics() -> bool {
+        // Check if pg_trickle is installed.
+        if !crate::has_pg_trickle() {
+            pgrx::warning!(
+                "pg_trickle is not installed; live statistics are unavailable. \
+                 Install pg_trickle and run SELECT pg_ripple.enable_live_statistics() to enable."
+            );
+            return false;
+        }
+
+        // Create _pg_ripple.predicate_stats stream table via pg_trickle.
+        // Refreshed every 5 seconds; reads from the predicates catalog +
+        // dedicated VP table reltuples (fast, planner-statistics-based).
+        pgrx::Spi::run(
+            "SELECT pg_trickle.create_stream_table(
+                '_pg_ripple.predicate_stats',
+                $$
+                    SELECT
+                        p.id          AS predicate_id,
+                        d.value       AS predicate_iri,
+                        p.triple_count,
+                        CASE WHEN p.table_oid IS NOT NULL THEN 'dedicated'
+                             ELSE 'rare' END AS storage_type
+                    FROM _pg_ripple.predicates p
+                    JOIN _pg_ripple.dictionary d ON d.id = p.id
+                    ORDER BY p.triple_count DESC
+                $$,
+                '5s'
+            )",
+        )
+        .unwrap_or_else(|e| {
+            pgrx::warning!("failed to create _pg_ripple.predicate_stats stream table: {}", e);
+        });
+
+        // Create _pg_ripple.graph_stats stream table via pg_trickle.
+        // Refreshed every 10 seconds.
+        pgrx::Spi::run(
+            "SELECT pg_trickle.create_stream_table(
+                '_pg_ripple.graph_stats',
+                $$
+                    SELECT
+                        g.id       AS graph_id,
+                        d.value    AS graph_iri,
+                        g.triple_count
+                    FROM _pg_ripple.graphs g
+                    JOIN _pg_ripple.dictionary d ON d.id = g.id
+                    ORDER BY g.triple_count DESC
+                $$,
+                '10s'
+            )",
+        )
+        .unwrap_or_else(|e| {
+            pgrx::warning!("failed to create _pg_ripple.graph_stats stream table: {}", e);
+        });
+
+        // Create _pg_ripple.vp_cardinality stream table — per-predicate live
+        // row counts for BGP join reordering without waiting for ANALYZE.
+        pgrx::Spi::run(
+            "SELECT pg_trickle.create_stream_table(
+                '_pg_ripple.vp_cardinality',
+                $$
+                    SELECT
+                        p.id     AS predicate_id,
+                        c.reltuples::bigint AS estimated_rows
+                    FROM _pg_ripple.predicates p
+                    JOIN pg_class c ON c.oid = p.table_oid
+                    WHERE p.table_oid IS NOT NULL
+                $$,
+                '5s'
+            )",
+        )
+        .unwrap_or_else(|e| {
+            pgrx::warning!("failed to create _pg_ripple.vp_cardinality stream table: {}", e);
+        });
+
+        // Create _pg_ripple.rare_predicate_candidates stream table with
+        // IMMEDIATE mode — replaces the merge-worker GROUP BY polling for
+        // VP promotion detection.
+        pgrx::Spi::run(
+            "SELECT pg_trickle.create_stream_table(
+                '_pg_ripple.rare_predicate_candidates',
+                $$
+                    SELECT p AS predicate_id, count(*) AS triple_count
+                    FROM _pg_ripple.vp_rare
+                    GROUP BY p
+                    HAVING count(*) >= current_setting('pg_ripple.vp_promotion_threshold')::bigint
+                $$,
+                'IMMEDIATE'
+            )",
+        )
+        .unwrap_or_else(|e| {
+            pgrx::warning!(
+                "failed to create _pg_ripple.rare_predicate_candidates stream table: {}",
+                e
+            );
+        });
+
+        true
+    }
+
     // ── Statistics (v0.6.0) ───────────────────────────────────────────────────
 
     /// Return extension statistics as JSONB.
     ///
     /// Includes total triple count, per-predicate storage sizes, delta/main
     /// split counts, and (when shared_preload_libraries is set) cache hit ratio.
+    /// When pg_trickle is installed and `enable_live_statistics()` has been
+    /// called, reads per-predicate counts from the `_pg_ripple.predicate_stats`
+    /// stream table (instant, no full scan) instead of re-scanning VP tables.
     ///
     /// ```sql
     /// SELECT pg_ripple.stats();
     /// ```
     #[pg_extern]
     fn stats() -> pgrx::JsonB {
-        let total: i64 = crate::storage::total_triple_count();
+        // When pg_trickle live statistics are enabled, the total triple count
+        // is read from the predicate_stats stream table (sum of triple_count
+        // across all predicates) — this avoids a full VP table scan and
+        // returns instantly.  Fall back to the full scan otherwise.
+        let use_live_stats = crate::has_live_statistics();
+
+        let total: i64 = if use_live_stats {
+            pgrx::Spi::get_one::<i64>(
+                "SELECT COALESCE(sum(triple_count), 0)::bigint \
+                 FROM _pg_ripple.predicate_stats",
+            )
+            .unwrap_or(None)
+            .unwrap_or_else(|| crate::storage::total_triple_count())
+        } else {
+            crate::storage::total_triple_count()
+        };
 
         let pred_count: i64 = pgrx::Spi::get_one::<i64>(
             "SELECT count(*)::bigint FROM _pg_ripple.predicates WHERE table_oid IS NOT NULL",
@@ -735,6 +898,10 @@ mod pg_ripple {
             serde_json::json!(delta_rows),
         );
         obj.insert("merge_worker_pid".to_string(), serde_json::json!(merge_pid));
+        obj.insert(
+            "live_statistics_enabled".to_string(),
+            serde_json::json!(use_live_stats),
+        );
 
         // v0.6.0: encode cache statistics.
         let cache_utilization_pct = crate::shmem::cache_utilization_pct() as i64;

@@ -463,7 +463,7 @@ Inline value encoding eliminates dictionary lookups for numeric and date FILTER 
   - Solves the "unbound object problem" by intercepting reverse-edge scattergun queries (`?s ?p <Object>`) in O(N) instead of forcing a `UNION ALL` across all VP tables
 - [x] **Statistics**
   - `pg_ripple.stats()` JSONB: triple count, per-predicate counts, cache hit ratio, delta/main sizes
-- [ ] **pg_trickle integration: live statistics** *(optional, when pg_trickle is installed)*
+- [x] **pg_trickle integration: live statistics** *(optional, when pg_trickle is installed)*
   - `pg_ripple.enable_live_statistics()` creates `_pg_ripple.predicate_stats` and `_pg_ripple.graph_stats` stream tables
   - `pg_ripple.stats()` reads from stream tables instead of full-scanning VP tables (100–1000× faster)
   - `_pg_ripple.rare_predicate_candidates` stream table (`IMMEDIATE` mode) replaces merge-worker GROUP BY polling for VP promotion detection ([§2.8](plans/ecosystem/pg_trickle.md))
@@ -490,7 +490,7 @@ Inline value encoding eliminates dictionary lookups for numeric and date FILTER 
   - Heavy concurrent insert (delta growth) + complex SPARQL queries on main partition
   - Measure merge worker latency, delta bloat growth, query latency under concurrent writes
   - Baseline: >100K triples/sec sustained bulk insert with <500 ms query latency
-- [ ] **Berlin SPARQL Benchmark (BSBM) execution** with HTAP workload mixing reads and writes
+- [x] **Berlin SPARQL Benchmark (BSBM) execution** with HTAP workload mixing reads and writes
   - Full BSBM query mix under concurrent insert workload
   - Comparison baselines with v0.5.0 (single-table, no-HTAP) results
 - [x] pg_regress: `htap_merge.sql`, `change_notification.sql`, `concurrent_write_merge.sql`, `htap_benchmarks.sql`
@@ -506,7 +506,7 @@ Inline value encoding eliminates dictionary lookups for numeric and date FILTER 
 - [x] `user-guide/best-practices/bulk-loading.md` expanded: HTAP delta-growth, bulk-load strategies
 - [x] `reference/troubleshooting.md` expanded: merge worker not starting, delta bloat, CDC not firing
 - [x] `reference/faq.md` expanded: `shared_preload_libraries`, merge worker, change notifications
-- [ ] `research/postgresql-deepdive.md` (mirror `plans/postgresql-triplestore-deep-dive.md`) *(deferred)*
+- [x] `research/postgresql-deepdive.md` (mirror `plans/postgresql-triplestore-deep-dive.md`)
 
 ### Exit Criteria
 
