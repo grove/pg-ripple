@@ -88,7 +88,8 @@ FROM pg_ripple.find_triples(
 -- ── 5. Merge-time dedup (dedup_on_merge = on) ────────────────────────────────
 -- Insert duplicates into a new predicate, compact with dedup enabled,
 -- confirm only 1 row survives in main.
-
+-- Set threshold = 1 so P3 immediately gets a dedicated HTAP VP table.
+SET pg_ripple.vp_promotion_threshold = 1;
 SELECT pg_ripple.insert_triple(
     '<http://dedup.test/S3>',
     '<http://dedup.test/P3>',
@@ -104,6 +105,7 @@ SELECT pg_ripple.insert_triple(
 SET pg_ripple.dedup_on_merge = true;
 SELECT pg_ripple.compact() >= 0 AS compact_with_dedup_ok;
 RESET pg_ripple.dedup_on_merge;
+RESET pg_ripple.vp_promotion_threshold;
 
 -- After merge+dedup: exactly 1 copy in main.
 SELECT count(*) AS count_after_merge_dedup

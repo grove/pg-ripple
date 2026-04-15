@@ -117,10 +117,7 @@ fn parse_shacl_turtle(data: &str) -> Result<Vec<Shape>, String> {
     let mut prefixes: std::collections::HashMap<String, String> = std::collections::HashMap::new();
 
     // Built-in prefixes.
-    prefixes.insert(
-        "sh".to_owned(),
-        "http://www.w3.org/ns/shacl#".to_owned(),
-    );
+    prefixes.insert("sh".to_owned(), "http://www.w3.org/ns/shacl#".to_owned());
     prefixes.insert(
         "rdf".to_owned(),
         "http://www.w3.org/1999/02/22-rdf-syntax-ns#".to_owned(),
@@ -174,6 +171,29 @@ fn parse_shacl_turtle(data: &str) -> Result<Vec<Shape>, String> {
     Ok(shapes)
 }
 
+/// Split `s` on `;` characters that are at bracket-depth 0 (i.e. not inside
+/// a `[…]` blank-node property block).  Returns a vector of borrowed slices.
+fn split_on_semicolon_top_level(s: &str) -> Vec<&str> {
+    let mut parts: Vec<&str> = Vec::new();
+    let bytes = s.as_bytes();
+    let mut depth = 0usize;
+    let mut start = 0usize;
+
+    for (i, &b) in bytes.iter().enumerate() {
+        match b {
+            b'[' => depth += 1,
+            b']' => depth = depth.saturating_sub(1),
+            b';' if depth == 0 => {
+                parts.push(&s[start..i]);
+                start = i + 1;
+            }
+            _ => {}
+        }
+    }
+    parts.push(&s[start..]);
+    parts
+}
+
 /// Split a flattened Turtle string on `.` boundaries, respecting string literals
 /// and bracketed blank-node blocks.
 fn split_turtle_statements(flat: &str) -> Vec<&str> {
@@ -181,12 +201,24 @@ fn split_turtle_statements(flat: &str) -> Vec<&str> {
     let bytes = flat.as_bytes();
     let mut depth = 0usize; // bracket depth
     let mut in_string = false;
+    let mut in_iri = false; // inside <...> angle-bracket IRI
     let mut start = 0usize;
 
     let mut i = 0;
     while i < bytes.len() {
         match bytes[i] {
-            b'"' if !in_string => { in_string = true; i += 1; }
+            b'<' if !in_string && !in_iri => {
+                in_iri = true;
+                i += 1;
+            }
+            b'>' if in_iri => {
+                in_iri = false;
+                i += 1;
+            }
+            b'"' if !in_string && !in_iri => {
+                in_string = true;
+                i += 1;
+            }
             b'"' if in_string => {
                 // Check for escaped quote.
                 if i > 0 && bytes[i - 1] != b'\\' {
@@ -194,12 +226,15 @@ fn split_turtle_statements(flat: &str) -> Vec<&str> {
                 }
                 i += 1;
             }
-            b'[' if !in_string => { depth += 1; i += 1; }
-            b']' if !in_string => {
-                if depth > 0 { depth -= 1; }
+            b'[' if !in_string && !in_iri => {
+                depth += 1;
                 i += 1;
             }
-            b'.' if !in_string && depth == 0 => {
+            b']' if !in_string && !in_iri => {
+                depth = depth.saturating_sub(1);
+                i += 1;
+            }
+            b'.' if !in_string && !in_iri && depth == 0 => {
                 let segment = flat[start..i].trim();
                 if !segment.is_empty() {
                     result.push(&flat[start..i]);
@@ -207,7 +242,9 @@ fn split_turtle_statements(flat: &str) -> Vec<&str> {
                 start = i + 1;
                 i += 1;
             }
-            _ => { i += 1; }
+            _ => {
+                i += 1;
+            }
         }
     }
     let trailing = flat[start..].trim();
@@ -249,13 +286,15 @@ fn parse_prefix_directive(
         return Err(format!("malformed prefix directive: '{stmt}'"));
     }
     let prefix_token = tokens[1]; // e.g. "ex:"
-    let iri_token = tokens[2];    // e.g. "<http://example.org/>"
+    let iri_token = tokens[2]; // e.g. "<http://example.org/>"
 
     let prefix = prefix_token.trim_end_matches(':');
     let iri = if iri_token.starts_with('<') && iri_token.ends_with('>') {
         iri_token[1..iri_token.len() - 1].to_owned()
     } else {
-        return Err(format!("expected IRI in prefix directive, got '{iri_token}'"));
+        return Err(format!(
+            "expected IRI in prefix directive, got '{iri_token}'"
+        ));
     };
 
     prefixes.insert(prefix.to_owned(), iri);
@@ -278,8 +317,10 @@ fn parse_shape_statement(
     // Expand subject IRI.
     let shape_iri = expand_iri(subject_token, prefixes)?;
 
-    // Parse predicate-object pairs separated by `;`.
-    let po_pairs: Vec<&str> = rest.split(';').collect();
+    // Parse predicate-object pairs separated by `;`, but `;` inside `[…]`
+    // brackets belongs to a nested property shape and must not be treated as
+    // a pair separator.
+    let po_pairs: Vec<&str> = split_on_semicolon_top_level(rest);
 
     let mut is_shape = false;
     let mut target = ShapeTarget::None;
@@ -402,7 +443,9 @@ fn parse_property_shape(
     let inner = if inner.starts_with('[') && inner.ends_with(']') {
         inner[1..inner.len() - 1].trim()
     } else {
-        return Err(format!("property shape must be enclosed in [ ], got: '{inner}'"));
+        return Err(format!(
+            "property shape must be enclosed in [ ], got: '{inner}'"
+        ));
     };
 
     let po_pairs: Vec<&str> = inner.split(';').collect();
@@ -433,8 +476,8 @@ fn parse_property_shape(
             }
             "http://www.w3.org/ns/shacl#name" => {
                 // Use sh:name as the blank-node label if available.
-                shape_iri = extract_string_literal(obj_rest.trim())
-                    .unwrap_or_else(|_| shape_iri.clone());
+                shape_iri =
+                    extract_string_literal(obj_rest.trim()).unwrap_or_else(|_| shape_iri.clone());
             }
             "http://www.w3.org/ns/shacl#minCount" => {
                 let n: i64 = obj_rest
@@ -490,13 +533,17 @@ fn parse_property_shape(
 fn extract_string_literal(token: &str) -> Result<String, String> {
     let token = token.trim();
     // Handle `"..."` (with optional `@lang` or `^^type` suffix).
-    if token.starts_with('"') {
-        let end = token[1..].find('"').ok_or_else(|| format!("unterminated string literal: '{token}'"))?;
-        return Ok(token[1..end + 1].to_owned());
+    if let Some(inner) = token.strip_prefix('"') {
+        let end = inner
+            .find('"')
+            .ok_or_else(|| format!("unterminated string literal: '{token}'"))?;
+        return Ok(inner[..end].to_owned());
     }
-    if token.starts_with('\'') {
-        let end = token[1..].find('\'').ok_or_else(|| format!("unterminated string literal: '{token}'"))?;
-        return Ok(token[1..end + 1].to_owned());
+    if let Some(inner) = token.strip_prefix('\'') {
+        let end = inner
+            .find('\'')
+            .ok_or_else(|| format!("unterminated string literal: '{token}'"))?;
+        return Ok(inner[..end].to_owned());
     }
     Err(format!("expected string literal, got: '{token}'"))
 }
@@ -510,7 +557,9 @@ fn parse_list_values(
     let inner = if token.starts_with('(') && token.ends_with(')') {
         token[1..token.len() - 1].trim()
     } else {
-        return Err(format!("sh:in expects a Turtle list ( ... ), got: '{token}'"));
+        return Err(format!(
+            "sh:in expects a Turtle list ( ... ), got: '{token}'"
+        ));
     };
     inner
         .split_whitespace()
@@ -633,22 +682,22 @@ fn validate_property_shape(
             // minCount violations may apply.
             for &focus in focus_nodes {
                 for c in &ps.constraints {
-                    if let ShapeConstraint::MinCount(n) = c {
-                        if *n > 0 {
-                            let focus_iri = crate::dictionary::decode(focus)
-                                .unwrap_or_else(|| format!("_id_{focus}"));
-                            violations.push(Violation {
-                                focus_node: focus_iri,
-                                shape_iri: shape_iri.to_owned(),
-                                path: Some(ps.path_iri.clone()),
-                                constraint: "sh:minCount".to_owned(),
-                                message: format!(
-                                    "expected at least {n} value(s) for <{}>, found 0",
-                                    ps.path_iri
-                                ),
-                                severity: "Violation".to_owned(),
-                            });
-                        }
+                    if let ShapeConstraint::MinCount(n) = c
+                        && *n > 0
+                    {
+                        let focus_iri = crate::dictionary::decode(focus)
+                            .unwrap_or_else(|| format!("_id_{focus}"));
+                        violations.push(Violation {
+                            focus_node: focus_iri,
+                            shape_iri: shape_iri.to_owned(),
+                            path: Some(ps.path_iri.clone()),
+                            constraint: "sh:minCount".to_owned(),
+                            message: format!(
+                                "expected at least {n} value(s) for <{}>, found 0",
+                                ps.path_iri
+                            ),
+                            severity: "Violation".to_owned(),
+                        });
                     }
                 }
             }
@@ -735,7 +784,9 @@ fn validate_property_shape(
                                 shape_iri: shape_iri.to_owned(),
                                 path: Some(ps.path_iri.clone()),
                                 constraint: "sh:in".to_owned(),
-                                message: format!("value node id {v_id} is not in the allowed value set"),
+                                message: format!(
+                                    "value node id {v_id} is not in the allowed value set"
+                                ),
                                 severity: "Violation".to_owned(),
                             });
                         }
@@ -744,8 +795,7 @@ fn validate_property_shape(
                 ShapeConstraint::Pattern(regex, _flags) => {
                     let value_ids = get_value_ids(focus, path_id, graph_id);
                     for v_id in value_ids {
-                        let lexical = crate::dictionary::decode(v_id)
-                            .unwrap_or_default();
+                        let lexical = crate::dictionary::decode(v_id).unwrap_or_default();
                         // Strip surrounding quotes for string literals.
                         let lexical = if lexical.starts_with('"') {
                             lexical
@@ -811,9 +861,6 @@ fn validate_property_shape(
                 ShapeConstraint::Node(_) => {
                     // Nested node shapes — v0.8.0; skip silently.
                 }
-                ShapeConstraint::MinCount(_) | ShapeConstraint::MaxCount(_) => {
-                    // Already handled above.
-                }
             }
         }
     }
@@ -866,9 +913,12 @@ fn count_values_in_graph(focus: i64, path_id: i64, graph_id: i64) -> i64 {
     // Use the unified VP view for the path predicate.
     let table = get_vp_table_name(path_id);
     let sql = format!("SELECT COUNT(*) FROM {table} WHERE s = $1 AND g = $2");
-    Spi::get_one_with_args::<i64>(&sql, &[DatumWithOid::from(focus), DatumWithOid::from(graph_id)])
-        .unwrap_or(None)
-        .unwrap_or(0)
+    Spi::get_one_with_args::<i64>(
+        &sql,
+        &[DatumWithOid::from(focus), DatumWithOid::from(graph_id)],
+    )
+    .unwrap_or(None)
+    .unwrap_or(0)
 }
 
 fn count_values_all_graphs(focus: i64, path_id: i64) -> i64 {
@@ -892,7 +942,8 @@ fn get_value_ids(focus: i64, path_id: i64, graph_id: i64) -> Vec<i64> {
         vec![DatumWithOid::from(focus), DatumWithOid::from(graph_id)]
     };
     Spi::connect(|c| {
-        let tup = c.select(&sql, None, &args)
+        let tup = c
+            .select(&sql, None, &args)
             .unwrap_or_else(|e| pgrx::error!("get_value_ids SPI error: {e}"));
         let mut ids: Vec<i64> = Vec::new();
         for row in tup {
@@ -917,7 +968,8 @@ fn get_subjects_with_type(rdf_type_id: i64, class_id: i64, graph_id: i64) -> Vec
         vec![DatumWithOid::from(class_id), DatumWithOid::from(graph_id)]
     };
     Spi::connect(|c| {
-        let tup = c.select(&sql, None, &args)
+        let tup = c
+            .select(&sql, None, &args)
             .unwrap_or_else(|e| pgrx::error!("get_subjects_with_type SPI error: {e}"));
         let mut ids: Vec<i64> = Vec::new();
         for row in tup {
@@ -942,7 +994,8 @@ fn get_subjects_of_predicate(pred_id: i64, graph_id: i64) -> Vec<i64> {
         vec![DatumWithOid::from(graph_id)]
     };
     Spi::connect(|c| {
-        let tup = c.select(&sql, None, &args)
+        let tup = c
+            .select(&sql, None, &args)
             .unwrap_or_else(|e| pgrx::error!("get_subjects_of_predicate SPI error: {e}"));
         let mut ids: Vec<i64> = Vec::new();
         for row in tup {
@@ -967,7 +1020,8 @@ fn get_objects_of_predicate(pred_id: i64, graph_id: i64) -> Vec<i64> {
         vec![DatumWithOid::from(graph_id)]
     };
     Spi::connect(|c| {
-        let tup = c.select(&sql, None, &args)
+        let tup = c
+            .select(&sql, None, &args)
             .unwrap_or_else(|e| pgrx::error!("get_objects_of_predicate SPI error: {e}"));
         let mut ids: Vec<i64> = Vec::new();
         for row in tup {
@@ -982,10 +1036,7 @@ fn get_objects_of_predicate(pred_id: i64, graph_id: i64) -> Vec<i64> {
 fn value_has_datatype(value_id: i64, dt_iri: &str) -> bool {
     Spi::get_one_with_args::<bool>(
         "SELECT EXISTS(SELECT 1 FROM _pg_ripple.dictionary WHERE id = $1 AND datatype = $2)",
-        &[
-            DatumWithOid::from(value_id),
-            DatumWithOid::from(dt_iri),
-        ],
+        &[DatumWithOid::from(value_id), DatumWithOid::from(dt_iri)],
     )
     .unwrap_or(None)
     .unwrap_or(false)

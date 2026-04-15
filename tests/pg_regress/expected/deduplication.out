@@ -1,78 +1,179 @@
+-- deduplication.sql — Explicit dedup functions and merge-time dedup tests
+--
+-- Covers:
+--   1. deduplicate_predicate() — removes duplicates from a single predicate VP table
+--   2. deduplicate_all() — deduplicates all predicates
+--   3. dedup_on_merge — verify no duplicates after merge when GUC is enabled
+--   4. vp_rare deduplication via deduplicate_predicate and deduplicate_all
+--
+-- Uses unique IRIs (<http://dedup.test/…>) to avoid interference with other tests.
+-- NOTE: setup.sql already does DROP/CREATE EXTENSION before this file.
+SET search_path TO pg_ripple, public;
+-- ── 1. Insert duplicate triples (same s, p, o, g) ────────────────────────────
+SELECT pg_ripple.insert_triple(
+    '<http://dedup.test/S1>',
+    '<http://dedup.test/P1>',
+    '<http://dedup.test/O1>'
+) > 0 AS dup1_ok;
  dup1_ok 
 ---------
  t
 (1 row)
 
+SELECT pg_ripple.insert_triple(
+    '<http://dedup.test/S1>',
+    '<http://dedup.test/P1>',
+    '<http://dedup.test/O1>'
+) > 0 AS dup2_ok;
  dup2_ok 
 ---------
  t
 (1 row)
 
+SELECT pg_ripple.insert_triple(
+    '<http://dedup.test/S1>',
+    '<http://dedup.test/P1>',
+    '<http://dedup.test/O1>'
+) > 0 AS dup3_ok;
  dup3_ok 
 ---------
  t
 (1 row)
 
+-- Before dedup: 3 rows visible (duplicates present in delta).
+SELECT count(*) AS count_before_dedup
+FROM pg_ripple.find_triples(
+    '<http://dedup.test/S1>',
+    '<http://dedup.test/P1>',
+    '<http://dedup.test/O1>'
+);
  count_before_dedup 
 --------------------
                   3
 (1 row)
 
+-- ── 2. deduplicate_predicate() ────────────────────────────────────────────────
+-- Returns the number of rows removed (should be 2: keep 1 of 3).
+SELECT pg_ripple.deduplicate_predicate('<http://dedup.test/P1>') AS rows_removed;
  rows_removed 
 --------------
             2
 (1 row)
 
+-- After dedup: exactly 1 row remains.
+SELECT count(*) AS count_after_dedup
+FROM pg_ripple.find_triples(
+    '<http://dedup.test/S1>',
+    '<http://dedup.test/P1>',
+    '<http://dedup.test/O1>'
+);
  count_after_dedup 
 -------------------
                  1
 (1 row)
 
+-- ── 3. Idempotency — second call removes 0 rows ───────────────────────────────
+SELECT pg_ripple.deduplicate_predicate('<http://dedup.test/P1>') AS idempotent_run;
  idempotent_run 
 ----------------
               0
 (1 row)
 
+-- Triple is still present.
+SELECT count(*) AS count_still_1
+FROM pg_ripple.find_triples(
+    '<http://dedup.test/S1>',
+    '<http://dedup.test/P1>',
+    '<http://dedup.test/O1>'
+);
  count_still_1 
 ---------------
              1
 (1 row)
 
+-- ── 4. deduplicate_all() ──────────────────────────────────────────────────────
+-- Insert duplicates on a different predicate (will stay rare if below threshold).
+SELECT pg_ripple.insert_triple(
+    '<http://dedup.test/S2>',
+    '<http://dedup.test/P2>',
+    '<http://dedup.test/O2>'
+) > 0 AS rare_dup1;
  rare_dup1 
 -----------
  t
 (1 row)
 
+SELECT pg_ripple.insert_triple(
+    '<http://dedup.test/S2>',
+    '<http://dedup.test/P2>',
+    '<http://dedup.test/O2>'
+) > 0 AS rare_dup2;
  rare_dup2 
 -----------
  t
 (1 row)
 
+-- deduplicate_all removes dupes across all predicates including rare ones.
+SELECT pg_ripple.deduplicate_all() >= 1 AS dedup_all_removed_some;
  dedup_all_removed_some 
 ------------------------
  t
 (1 row)
 
+-- Exactly 1 copy of the rare triple remains.
+SELECT count(*) AS rare_dedup_count
+FROM pg_ripple.find_triples(
+    '<http://dedup.test/S2>',
+    '<http://dedup.test/P2>',
+    '<http://dedup.test/O2>'
+);
  rare_dedup_count 
 ------------------
                 1
 (1 row)
 
+-- ── 5. Merge-time dedup (dedup_on_merge = on) ────────────────────────────────
+-- Insert duplicates into a new predicate, compact with dedup enabled,
+-- confirm only 1 row survives in main.
+-- Set threshold = 1 so P3 immediately gets a dedicated HTAP VP table.
+SET pg_ripple.vp_promotion_threshold = 1;
+SELECT pg_ripple.insert_triple(
+    '<http://dedup.test/S3>',
+    '<http://dedup.test/P3>',
+    '<http://dedup.test/O3>'
+) > 0 AS merge_dup1;
  merge_dup1 
 ------------
  t
 (1 row)
 
+SELECT pg_ripple.insert_triple(
+    '<http://dedup.test/S3>',
+    '<http://dedup.test/P3>',
+    '<http://dedup.test/O3>'
+) > 0 AS merge_dup2;
  merge_dup2 
 ------------
  t
 (1 row)
 
+-- Enable dedup_on_merge and compact.
+SET pg_ripple.dedup_on_merge = true;
+SELECT pg_ripple.compact() >= 0 AS compact_with_dedup_ok;
  compact_with_dedup_ok 
 -----------------------
  t
 (1 row)
 
+RESET pg_ripple.dedup_on_merge;
+RESET pg_ripple.vp_promotion_threshold;
+-- After merge+dedup: exactly 1 copy in main.
+SELECT count(*) AS count_after_merge_dedup
+FROM pg_ripple.find_triples(
+    '<http://dedup.test/S3>',
+    '<http://dedup.test/P3>',
+    '<http://dedup.test/O3>'
+);
  count_after_merge_dedup 
 -------------------------
                        1

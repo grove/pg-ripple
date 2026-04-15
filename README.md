@@ -13,9 +13,9 @@ pg_ripple is a PostgreSQL 18 extension building toward a fully-featured knowledg
 
 ---
 
-## What works today (v0.6.0)
+## What works today (v0.7.0)
 
-You can install the extension, store triples, bulk-load RDF datasets, manage named graphs, and query with full SPARQL 1.1. v0.6.0 adds HTAP write isolation so reads are never blocked by writes:
+You can install the extension, store triples, bulk-load RDF datasets, manage named graphs, query with full SPARQL 1.1, and now enforce data quality rules with W3C SHACL. v0.7.0 adds SHACL Core validation and on-demand deduplication:
 
 ```sql
 CREATE EXTENSION pg_ripple;
@@ -27,6 +27,34 @@ SELECT pg_ripple.insert_triple(
   'http://example.org/Bob'
 );
 
+-- Load a SHACL shape: every Person must have exactly one foaf:name
+SELECT pg_ripple.load_shacl('
+  @prefix sh: <http://www.w3.org/ns/shacl#> .
+  @prefix foaf: <http://xmlns.com/foaf/0.1/> .
+  @prefix ex: <http://example.org/> .
+  ex:PersonShape a sh:NodeShape ;
+    sh:targetClass ex:Person ;
+    sh:property [ sh:path foaf:name ; sh:minCount 1 ; sh:maxCount 1 ] .
+');
+
+-- Validate all existing data against active shapes
+SELECT pg_ripple.validate();
+
+-- Enable inline rejection: insert_triple() will error on SHACL violations
+SET pg_ripple.shacl_mode = 'sync';
+
+-- List all loaded shapes
+SELECT * FROM pg_ripple.list_shapes();
+
+-- Remove a shape by IRI
+SELECT pg_ripple.drop_shape('http://example.org/PersonShape');
+
+-- Remove duplicate triples for a specific predicate (keeps lowest SID)
+SELECT pg_ripple.deduplicate_predicate('<http://xmlns.com/foaf/0.1/knows>');
+
+-- Deduplicate all predicates at once
+SELECT pg_ripple.deduplicate_all();
+
 -- Query with property paths: find all people reachable via "knows" links
 SELECT * FROM pg_ripple.sparql('
   PREFIX foaf: <http://xmlns.com/foaf/0.1/>
@@ -35,57 +63,25 @@ SELECT * FROM pg_ripple.sparql('
   }
 ');
 
--- SPARQL CONSTRUCT: create new triples from a template
-SELECT * FROM pg_ripple.sparql_construct('
-  PREFIX foaf: <http://xmlns.com/foaf/0.1/>
-  CONSTRUCT { ?b foaf:knownBy ?a }
-  WHERE { ?a foaf:knows ?b }
-');
-
--- SPARQL DESCRIBE: get all available information about a resource
-SELECT * FROM pg_ripple.sparql_describe(
-  'DESCRIBE <http://example.org/Alice>'
-);
-
--- Insert and delete triples via SPARQL
-SELECT pg_ripple.sparql_update(
-  'INSERT DATA { <http://example.org/Alice> <http://example.org/age> "30"^^<http://www.w3.org/2001/XMLSchema#integer> }'
-);
-
--- Full-text search on literals
-SELECT * FROM pg_ripple.fts_search('semantic', '<http://example.org/abstract>');
-
--- Count people per company with GROUP BY and aggregates
-SELECT * FROM pg_ripple.sparql('
-  PREFIX ex: <http://example.org/>
-  SELECT ?company (COUNT(?person) AS ?count) WHERE {
-    ?person ex:worksAt ?company .
-  }
-  GROUP BY ?company
-');
-
--- Query by pattern (NULL = wildcard)
-SELECT * FROM pg_ripple.find_triples(
-  'http://example.org/Alice', NULL, NULL
-);
-
 -- Count all triples
 SELECT pg_ripple.triple_count();
 
--- HTAP: force merge of delta tables into main (v0.6.0)
+-- HTAP: force merge of delta tables into main
 SELECT pg_ripple.compact();
 
--- HTAP: extension statistics including merge worker state (v0.6.0)
+-- HTAP: extension statistics including merge worker state
 SELECT pg_ripple.stats();
 
--- CDC: subscribe to triple change notifications (v0.6.0)
+-- CDC: subscribe to triple change notifications
 SELECT pg_ripple.subscribe('<http://xmlns.com/foaf/0.1/knows>', 'foaf_changes');
 LISTEN foaf_changes;
 ```
 
 Every IRI, blank node, literal, and quoted triple is dictionary-encoded to a compact integer for fast joins. Numeric and date literals are automatically *inline-encoded* — stored as bit-packed integers with no dictionary overhead, making FILTER comparisons extremely fast. Facts are stored in separate tables per predicate (Vertical Partitioning).
 
-**v0.6.0 HTAP architecture**: each VP table is split into a write-optimised delta partition and a read-optimised main partition (BRIN-indexed). A background merge worker continuously promotes delta rows into main. Reads always see `(main EXCEPT tombstones) UNION ALL delta` — no blocking of read sessions during writes. An `ExecutorEnd` hook automatically pokes the merge worker latch when unmerged rows exceed `pg_ripple.latch_trigger_threshold`.
+**v0.6.0+ HTAP architecture**: each VP table is split into a write-optimised delta partition and a read-optimised main partition (BRIN-indexed). A background merge worker continuously promotes delta rows into main. Reads always see `(main EXCEPT tombstones) UNION ALL delta` — no blocking of read sessions during writes.
+
+**v0.7.0 SHACL Core**: load W3C SHACL shapes from Turtle; validate data on demand or enforce constraints inline at insert time (`shacl_mode = 'sync'`). Supported constraints: `sh:minCount`, `sh:maxCount`, `sh:datatype`, `sh:in`, `sh:pattern`, `sh:class`, `sh:targetClass`, `sh:targetNode`, `sh:targetSubjectsOf`, `sh:targetObjectsOf`.
 
 The SPARQL engine supports property paths (`+`, `*`, `?`), UNION/MINUS, aggregates, GROUP BY, subqueries, BIND, VALUES, OPTIONAL, and named graphs. All four SPARQL query forms (SELECT, CONSTRUCT, DESCRIBE, ASK) are fully supported.
 
