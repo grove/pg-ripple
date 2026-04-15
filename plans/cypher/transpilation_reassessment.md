@@ -65,16 +65,22 @@ This is a **multi-phase execution model** that a static transpiler cannot produc
 
 **TCK scenario**: Undirected variable-length path `*3..3` where the graph contains parallel edges (multiple edges of the same type between the same pair of nodes).
 
-**Why it fails**: RDF is a **set-based** model at the triple level. The triple `(s, p, o)` either exists or it does not — there is no concept of two distinct edges with the same subject, predicate, and object. This is a foundational RDF design choice:
+**Why it fails**: pg_ripple's VP tables _do_ store duplicate triples — `insert_triple` performs a plain `INSERT` without uniqueness constraints, and the same `(s, p, o, g)` tuple inserted three times produces three rows. Deduplication is explicit (`deduplicate_predicate()`) or opt-in at merge time (`dedup_on_merge` GUC). So the storage layer is not the problem.
 
-- LPG: edges have identity. `(alice)-[:KNOWS]->(bob)` can appear twice, and each instance is a distinct edge with its own ID.
-- RDF: `(:alice :knows :bob)` is a single fact. Inserting it twice is idempotent. VP tables enforce this via `(s, o)` uniqueness within a predicate table.
+The problem is in the **SPARQL property path semantics** used by the transpiler's target. SPARQL 1.1 property paths (Section 9.1 of the W3C spec) define path evaluation over the **set of triples** in the active graph — matching is against distinct `(s, p, o)` patterns, not against individual stored rows. When the transpiler compiles `[*3..3]` to a `WITH RECURSIVE` SQL query via SPARQL property path algebra:
 
-When the TCK scenario traverses an undirected path of exactly length 3 through parallel edges, LPG semantics count each parallel edge as a distinct traversal step. RDF semantics collapse the parallel edges into one triple, making the path impossible to traverse at the required length.
+- The recursive CTE traverses _edges_ (joins on VP table rows), but SPARQL semantics deduplicate at the pattern-match level
+- Even if three physical rows exist for `(alice, :KNOWS, bob)`, the SPARQL engine treats this as one edge for path traversal
+- LPG semantics count each parallel edge as a distinct traversal step — a path of length 3 through the same edge pair is valid if three parallel edges exist
 
-**This is not a storage limitation** — pg_ripple _could_ store duplicate triples by adding a synthetic edge ID column and removing the uniqueness constraint. But doing so would violate the RDF data model that the entire system is built on: the dictionary encoder, the SPARQL engine, the SHACL validator, and the Datalog reasoner all assume set semantics. Changing this assumption would be a fundamental architectural rework, not a bug fix.
+To make this work, the transpiler would need to:
+1. Detect that the source Cypher query relies on multigraph semantics
+2. Generate SQL that counts physical row multiplicity during path traversal
+3. Bypass SPARQL property path algebra entirely for these cases
 
-**Severity**: Multigraph support is important in some LPG use cases (e.g., temporal graphs where the same relationship exists at multiple time points, modeled as parallel edges rather than edge properties). However, the standard RDF modeling approach handles this via named graphs or reification/RDF-star, both of which pg_ripple supports.
+This is not impossible in a native Cypher engine (Option B), but it **cannot be expressed in SPARQL algebra** — the transpiler's target IR has no concept of edge multiplicity in path evaluation.
+
+**Severity**: Multigraph traversal is important in some LPG use cases (e.g., temporal graphs where the same relationship exists at multiple time points, modeled as parallel edges rather than edge properties). pg_ripple stores the data correctly; the limitation is purely in the SPARQL-algebra-based transpilation path.
 
 ---
 
@@ -101,7 +107,7 @@ When the TCK scenario traverses an undirected path of exactly length 3 through p
 | Pros | Cons |
 |---|---|
 | No semantic mismatch — Cypher semantics implemented directly | Duplicates significant SQL generation infrastructure |
-| Can implement multi-phase execution for Match4[8] | Still cannot solve Match6[14] (RDF set semantics) |
+| Can implement multi-phase execution for Match4[8] | Can solve Match6[14] (bypass SPARQL path algebra, use row-level traversal) |
 | Cleaner long-term maintenance | Estimated 50–70 person-weeks (nearly double the transpiler) |
 | Can adopt GQL standard changes without SPARQL compatibility layer | Two execution engines to maintain and optimize |
 | Higher TCK ceiling (~99%) | Optimization work (join reordering, filter pushdown) must be done twice |
@@ -150,7 +156,7 @@ When the TCK scenario traverses an undirected path of exactly length 3 through p
 
 1. **The transpiler difficulty is a signal, not a bug.** The semantic gap between Cypher and SPARQL is real and irreducible. Fighting it produces an ever-growing pile of compensating transformations that are hard to test and easy to regress. The prior art validates this: Stardog deprecated their Cypher endpoint in v10 after years of maintenance burden.
 
-2. **The two fundamental failures are unresolvable in an RDF system.** Match6[14] (multigraph) is a data model incompatibility, not an engineering problem. No architecture change within pg_ripple can fix it without abandoning RDF set semantics. Match4[8] (runtime path constraints) requires multi-phase execution that a static algebra pipeline cannot express. Even Option B (native engine) can only solve one of the two.
+2. **The two fundamental failures are unresolvable in a SPARQL-algebra transpiler.** Match6[14] (multigraph path traversal) works at the storage level — pg_ripple stores duplicate triples — but SPARQL property path semantics deduplicate at the pattern-match level, so the transpiler cannot express edge-multiplicity-aware traversal. Match4[8] (runtime path constraints) requires multi-phase execution that a static algebra pipeline cannot express. A native Cypher engine (Option B) could solve both, but at roughly double the engineering cost.
 
 3. **A limited, honest subset is more useful than a fragile full transpiler.** Users who write `MATCH (a:Person)-[:KNOWS]->(b:Person) WHERE a.age > 30 RETURN b.name` — which is the overwhelming majority of real-world Cypher queries — get correct results immediately. Users who need full Cypher/GQL semantics should use a native LPG database.
 
