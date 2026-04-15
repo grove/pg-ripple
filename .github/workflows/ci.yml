@@ -139,3 +139,65 @@ jobs:
 
       - name: Run pg_regress suite
         run: cargo pgrx regress pg18 --postgresql-conf "allow_system_table_mods=on"
+
+  migration:
+    name: Migration chain (pg18)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Install Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo registry
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-
+
+      - name: Cache cargo-pgrx binary
+        uses: actions/cache@v5
+        with:
+          path: ~/.cargo/bin/cargo-pgrx
+          key: ${{ runner.os }}-cargo-pgrx-${{ env.PGRX_VERSION }}
+
+      - name: Cache pgrx PostgreSQL build
+        uses: actions/cache@v5
+        with:
+          path: ~/.pgrx
+          key: ${{ runner.os }}-pgrx-pg18-${{ env.PGRX_VERSION }}
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            build-essential pkg-config libssl-dev libclang-dev clang \
+            libreadline-dev libicu-dev bison flex
+
+      - name: Install cargo-pgrx
+        run: |
+          if ! cargo pgrx --version 2>/dev/null | grep -q "${{ env.PGRX_VERSION }}"; then
+            cargo install cargo-pgrx --version "=${{ env.PGRX_VERSION }}" --locked
+          fi
+
+      - name: Initialise pgrx (PostgreSQL 18)
+        run: |
+          if ! ls ~/.pgrx/18.*/pgrx-install/bin/pg_config 2>/dev/null | grep -q .; then
+            cargo pgrx init --pg18 download
+          fi
+
+      - name: Start pgrx PostgreSQL 18
+        run: cargo pgrx start pg18
+
+      - name: Run migration chain test
+        run: bash tests/test_migration_chain.sh
+
+      - name: Stop pgrx PostgreSQL 18
+        if: always()
+        run: cargo pgrx stop pg18

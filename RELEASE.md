@@ -19,7 +19,8 @@ Complete every item before starting the release process.
   - `cargo fmt --all -- --check` (formatting)
   - `cargo clippy --features pg18 -- -D warnings` (lint, zero warnings)
   - `cargo pgrx test pg18` (unit + integration tests)
-  - `cargo pgrx regress pg18 --postgresql-conf "allow_system_table_mods=on"` (pg_regress suite)
+  - `cargo pgrx regress pg18 --postgresql-conf "allow_system_table_mods=on"` (pg_regress suite, includes `schema_state` migration schema check)
+  - `bash tests/test_migration_chain.sh` — **verify all migration SQL scripts apply cleanly in sequence** (requires `cargo pgrx start pg18` first; also run via `just test-migration`)
 - [ ] **`Cargo.toml` version field matches the release version**
   - e.g. `version = "0.2.0"` for a v0.2.0 release
 - [ ] **`pg_ripple.control` `default_version` matches the release version**
@@ -54,9 +55,10 @@ Perform these steps in order.
    cargo clippy --features pg18 -- -D warnings
    cargo pgrx test pg18
    cargo pgrx regress pg18 --postgresql-conf "allow_system_table_mods=on"
+   bash tests/test_migration_chain.sh
    ```
 
-   All four must pass with zero warnings and zero failures.
+   All five must pass with zero warnings and zero failures.
 
 2. **Tag the release**
 

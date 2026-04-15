@@ -63,6 +63,12 @@ cargo pgrx test pg18
 # Run pgregress suite
 cargo pgrx regress pg18
 
+# Run migration chain test (verifies all migration SQL scripts in sequence)
+# Requires pgrx PG18 running: cargo pgrx start pg18
+bash tests/test_migration_chain.sh
+# Or via justfile:
+just test-migration
+
 # Install into a local PG18 instance
 cargo pgrx install --pg-config $(which pg_config)
 ```

@@ -1,0 +1,302 @@
+#!/usr/bin/env bash
+# tests/test_migration_chain.sh
+#
+# Verifies that all migration SQL scripts apply cleanly in sequence from v0.1.0
+# to the current version, and that the final schema matches expectations.
+#
+# This script tests the SQL DDL content of migration scripts independently of
+# the PostgreSQL extension mechanism (no ALTER EXTENSION needed).  Every
+# migration script is applied via psql against an isolated test database, which
+# means we catch syntax errors, missing column references, and schema drift
+# before they reach a user running ALTER EXTENSION pg_ripple UPDATE.
+#
+# Prerequisites:
+#   - A pgrx-managed PostgreSQL 18 instance must be running (cargo pgrx start pg18 / just start)
+#   - The PGRX_HOST/PGRX_PORT environment variables must be set, OR the defaults
+#     ($HOME/.pgrx, port 28818) must be valid
+#
+# Usage:
+#   tests/test_migration_chain.sh                  # from project root
+#   just test-migration                            # via justfile
+
+set -euo pipefail
+
+# ── Connection defaults (match pgrx pg18 managed instance) ───────────────────
+#
+# pgrx starts PostgreSQL 18 on port 28818.
+# On macOS the unix socket lives in ~/.pgrx; on Linux pgrx uses the same
+# directory.  We default to the socket directory so both platforms work.
+# Set PGRX_HOST=localhost to force TCP (useful if the socket path is
+# non-standard, e.g. in some CI environments).
+
+PGRX_HOST="${PGRX_HOST:-${HOME}/.pgrx}"
+PGRX_PORT="${PGRX_PORT:-28818}"
+PGRX_USER="${PGRX_USER:-${USER}}"
+
+PSQL="psql -h ${PGRX_HOST} -p ${PGRX_PORT} -U ${PGRX_USER}"
+
+# ── Path helpers ──────────────────────────────────────────────────────────────
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+SQL_DIR="${PROJECT_ROOT}/sql"
+
+# ── Colour output ─────────────────────────────────────────────────────────────
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m' # No Colour
+
+info()  { echo -e "${YELLOW}[info]${NC}  $*"; }
+ok()    { echo -e "${GREEN}[  ok]${NC}  $*"; }
+fail()  { echo -e "${RED}[FAIL]${NC}  $*" >&2; }
+
+# ── Test database ─────────────────────────────────────────────────────────────
+
+TEST_DB="pg_ripple_migration_chain_$$"
+
+cleanup() {
+    info "cleaning up test database '${TEST_DB}'"
+    ${PSQL} -d postgres --quiet -c "DROP DATABASE IF EXISTS \"${TEST_DB}\";" 2>/dev/null || true
+}
+trap cleanup EXIT
+
+# ── helpers ───────────────────────────────────────────────────────────────────
+
+# Run SQL against the test database and return output.
+run_sql() {
+    ${PSQL} -d "${TEST_DB}" --no-psqlrc --tuples-only --no-align --quiet "$@"
+}
+
+# Assert that a SQL expression evaluates to a non-empty truthy result.
+assert_true() {
+    local label="$1"
+    local sql="$2"
+    local result
+    result=$(run_sql -c "SELECT CASE WHEN (${sql}) THEN 'yes' ELSE 'no' END;")
+    if [[ "${result}" == "yes" ]]; then
+        ok "${label}"
+    else
+        fail "${label}"
+        fail "  query: ${sql}"
+        fail "  result: ${result}"
+        exit 1
+    fi
+}
+
+# Assert that a column exists in a table in the given schema.
+assert_column() {
+    local schema="$1" table="$2" column="$3"
+    assert_true \
+        "column ${schema}.${table}.${column} exists" \
+        "EXISTS (
+            SELECT 1 FROM information_schema.columns
+            WHERE table_schema = '${schema}'
+              AND table_name   = '${table}'
+              AND column_name  = '${column}'
+        )"
+}
+
+# Assert that a column does not exist.
+assert_no_column() {
+    local schema="$1" table="$2" column="$3"
+    assert_true \
+        "column ${schema}.${table}.${column} absent" \
+        "NOT EXISTS (
+            SELECT 1 FROM information_schema.columns
+            WHERE table_schema = '${schema}'
+              AND table_name   = '${table}'
+              AND column_name  = '${column}'
+        )"
+}
+
+# Assert that a table exists.
+assert_table() {
+    local schema="$1" table="$2"
+    assert_true \
+        "table ${schema}.${table} exists" \
+        "EXISTS (
+            SELECT 1 FROM information_schema.tables
+            WHERE table_schema = '${schema}'
+              AND table_name   = '${table}'
+        )"
+}
+
+# Apply a SQL migration script file.
+apply_script() {
+    local path="$1"
+    local label="$2"
+    info "applying ${label}"
+    if run_sql -f "${path}" > /dev/null; then
+        ok "${label} applied successfully"
+    else
+        fail "${label} failed"
+        exit 1
+    fi
+}
+
+# ── Main ──────────────────────────────────────────────────────────────────────
+
+echo
+info "pg_ripple migration chain test"
+info "connecting to pgrx PG18 at host=${PGRX_HOST} port=${PGRX_PORT} user=${PGRX_USER}"
+echo
+
+# Verify connectivity before creating anything
+if ! ${PSQL} -d postgres --quiet -c "SELECT 1;" > /dev/null 2>&1; then
+    fail "cannot connect to PostgreSQL at host=${PGRX_HOST} port=${PGRX_PORT}"
+    fail "start the pgrx instance first: cargo pgrx start pg18  (or: just start)"
+    exit 1
+fi
+ok "PostgreSQL connection verified"
+
+# Create isolated test database
+${PSQL} -d postgres --quiet -c "CREATE DATABASE \"${TEST_DB}\";"
+ok "test database '${TEST_DB}' created"
+echo
+
+# ── Step 1: apply base schema (v0.1.0) ───────────────────────────────────────
+
+info "=== v0.1.0 base schema ==="
+apply_script "${SQL_DIR}/pg_ripple--0.1.0.sql" "pg_ripple--0.1.0.sql"
+
+# Verify base schema
+assert_table  "_pg_ripple" "dictionary"
+assert_table  "_pg_ripple" "predicates"
+assert_table  "_pg_ripple" "vp_rare"
+assert_column "_pg_ripple" "dictionary" "id"
+assert_column "_pg_ripple" "dictionary" "hash"
+assert_column "_pg_ripple" "dictionary" "value"
+assert_column "_pg_ripple" "dictionary" "kind"
+assert_column "_pg_ripple" "dictionary" "datatype"
+assert_column "_pg_ripple" "dictionary" "lang"
+assert_column "_pg_ripple" "vp_rare"    "p"
+assert_column "_pg_ripple" "vp_rare"    "s"
+assert_column "_pg_ripple" "vp_rare"    "o"
+assert_column "_pg_ripple" "vp_rare"    "g"
+assert_column "_pg_ripple" "vp_rare"    "i"
+assert_column "_pg_ripple" "vp_rare"    "source"
+
+# v0.1.0 must NOT have the qt_* columns (those are added in 0.3.0→0.4.0)
+assert_no_column "_pg_ripple" "dictionary" "qt_s"
+assert_no_column "_pg_ripple" "dictionary" "qt_p"
+assert_no_column "_pg_ripple" "dictionary" "qt_o"
+
+# Sequence must exist
+assert_true "statement_id_seq exists" \
+    "EXISTS (SELECT 1 FROM pg_class WHERE relname = 'statement_id_seq' AND relkind = 'S')"
+echo
+
+# ── Step 2: migrate 0.1.0 → 0.2.0 ───────────────────────────────────────────
+
+info "=== migration 0.1.0 → 0.2.0 ==="
+apply_script "${SQL_DIR}/pg_ripple--0.1.0--0.2.0.sql" "pg_ripple--0.1.0--0.2.0.sql"
+
+# No schema changes in this migration — verify tables are unchanged
+assert_table "_pg_ripple" "dictionary"
+assert_table "_pg_ripple" "predicates"
+assert_table "_pg_ripple" "vp_rare"
+assert_no_column "_pg_ripple" "dictionary" "qt_s"
+ok "schema unchanged (no DDL in 0.1.0→0.2.0)"
+echo
+
+# ── Step 3: migrate 0.2.0 → 0.3.0 ───────────────────────────────────────────
+
+info "=== migration 0.2.0 → 0.3.0 ==="
+apply_script "${SQL_DIR}/pg_ripple--0.2.0--0.3.0.sql" "pg_ripple--0.2.0--0.3.0.sql"
+
+# No schema changes in this migration
+assert_no_column "_pg_ripple" "dictionary" "qt_s"
+ok "schema unchanged (no DDL in 0.2.0→0.3.0)"
+echo
+
+# ── Step 4: migrate 0.3.0 → 0.4.0 ───────────────────────────────────────────
+
+info "=== migration 0.3.0 → 0.4.0 ==="
+apply_script "${SQL_DIR}/pg_ripple--0.3.0--0.4.0.sql" "pg_ripple--0.3.0--0.4.0.sql"
+
+# This migration adds qt_s, qt_p, qt_o to _pg_ripple.dictionary
+assert_column "_pg_ripple" "dictionary" "qt_s"
+assert_column "_pg_ripple" "dictionary" "qt_p"
+assert_column "_pg_ripple" "dictionary" "qt_o"
+
+# Verify the new columns are nullable BIGINTs (as specified)
+assert_true "qt_s is nullable bigint" \
+    "EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = '_pg_ripple'
+          AND table_name   = 'dictionary'
+          AND column_name  = 'qt_s'
+          AND data_type    = 'bigint'
+          AND is_nullable  = 'YES'
+    )"
+assert_true "qt_p is nullable bigint" \
+    "EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = '_pg_ripple'
+          AND table_name   = 'dictionary'
+          AND column_name  = 'qt_p'
+          AND data_type    = 'bigint'
+          AND is_nullable  = 'YES'
+    )"
+assert_true "qt_o is nullable bigint" \
+    "EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = '_pg_ripple'
+          AND table_name   = 'dictionary'
+          AND column_name  = 'qt_o'
+          AND data_type    = 'bigint'
+          AND is_nullable  = 'YES'
+    )"
+
+# Existing rows remain accessible (insert and query a row)
+run_sql -c "
+    INSERT INTO _pg_ripple.dictionary (hash, value, kind)
+    VALUES (decode(md5('test'), 'hex'), 'https://example.org/test', 0);
+" > /dev/null
+assert_true "row with NULL qt_* survives after migration" \
+    "(SELECT COUNT(*) FROM _pg_ripple.dictionary WHERE qt_s IS NULL) = 1"
+ok "qt_* columns present, existing data preserved"
+echo
+
+# ── Step 5: migrate 0.4.0 → 0.5.0 ───────────────────────────────────────────
+
+info "=== migration 0.4.0 → 0.5.0 ==="
+apply_script "${SQL_DIR}/pg_ripple--0.4.0--0.5.0.sql" "pg_ripple--0.4.0--0.5.0.sql"
+
+# No schema changes in this migration
+assert_column "_pg_ripple" "dictionary" "qt_s"
+ok "schema unchanged (no DDL in 0.4.0→0.5.0)"
+echo
+
+# ── Final state verification ──────────────────────────────────────────────────
+
+info "=== final schema verification (v0.5.0) ==="
+
+# Dictionary table columns
+for col in id hash value kind datatype lang qt_s qt_p qt_o; do
+    assert_column "_pg_ripple" "dictionary" "${col}"
+done
+
+# Predicates table columns
+for col in id table_oid triple_count; do
+    assert_column "_pg_ripple" "predicates" "${col}"
+done
+
+# vp_rare table columns
+for col in p s o g i source; do
+    assert_column "_pg_ripple" "vp_rare" "${col}"
+done
+
+# Views
+assert_true "view pg_ripple.predicate_stats exists" \
+    "EXISTS (
+        SELECT 1 FROM information_schema.views
+        WHERE table_schema = 'pg_ripple'
+          AND table_name   = 'predicate_stats'
+    )"
+
+echo
+echo -e "${GREEN}All migration chain tests passed.${NC}"
+echo

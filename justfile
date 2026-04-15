@@ -56,9 +56,14 @@ test:
 test-regress:
     cargo pgrx regress pg{{pg}} --postgresql-conf "allow_system_table_mods=on"
 
-# Run all tests (unit + pgrx + regress)
+# Verify all migration SQL scripts apply cleanly in sequence (pgrx pg18 must be running)
 [group: "test"]
-test-all: test test-regress
+test-migration:
+    bash tests/test_migration_chain.sh
+
+# Run all tests (unit + pgrx + regress + migration chain)
+[group: "test"]
+test-all: test test-regress test-migration
 
 # ── Development ───────────────────────────────────────────────────────────
 
