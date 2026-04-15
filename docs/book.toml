@@ -1,0 +1,19 @@
+[book]
+title = "pg_ripple"
+authors = ["pg_ripple contributors"]
+src = "src"
+language = "en"
+
+[build]
+build-dir = "book"
+
+[output.html]
+default-theme = "navy"
+preferred-dark-theme = "navy"
+git-repository-url = "https://github.com/grove/pg-ripple"
+edit-url-template = "https://github.com/grove/pg-ripple/edit/main/docs/src/{path}"
+
+[output.html.search]
+enable = true
+limit-results = 20
+use-boolean-and = true

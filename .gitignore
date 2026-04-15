@@ -5,3 +5,4 @@
 *.so
 *.dylib
 *.dll
+docs/book/

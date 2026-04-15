@@ -39,9 +39,16 @@ This release completes the SPARQL query engine with property paths, aggregates, 
 - **Numeric literal comparison**: xsd:integer/decimal/float/double literals in FILTER expressions now produce raw numeric SQL values instead of dictionary IDs — fixes `FILTER(?cnt >= 2)` and similar
 - **Plan cache staleness**: cache key now includes current `pg_ripple.max_path_depth` GUC value; changing depth mid-session no longer returns stale cached results
 
+### Documentation
+
+- **Docs site launched** — mdBook-based site at `docs/` with GitHub Pages auto-publish workflow (`.github/workflows/docs.yml`)
+- Catch-up pages for v0.1.0–v0.4.0: introduction, installation, getting-started, SQL reference (triple CRUD, bulk load, named graphs, SPARQL queries, RDF-star, dictionary, prefix), configuration (all GUCs), best-practices (data modeling, bulk loading, SPARQL patterns), FAQ (14 questions), troubleshooting, playground, security policy stub, research index
+- v0.5.0 pages: SPARQL query reference expanded (property paths, aggregates, UNION/MINUS, subqueries, BIND/VALUES), SPARQL patterns guide expanded (property path recipes, resource exhaustion safeguards), configuration expanded (`max_path_depth` GUC)
+
 ### Test infrastructure
 
 - All pg_regress test files are now fully idempotent via namespace-scoped `DELETE FROM _pg_ripple.vp_rare` cleanup blocks at the start of each file — safe to run multiple times against the same pgrx-managed database
+- `setup.sql` drops and recreates the extension before each run (`DROP EXTENSION IF EXISTS … CASCADE`) for full isolation
 - New tests: `property_paths.sql`, `aggregates.sql`, `resource_limits.sql`
 - All 12 tests pass on consecutive runs (12/12)
 

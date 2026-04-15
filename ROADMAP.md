@@ -319,31 +319,31 @@ Users can load RDF-star data (Turtle-star, N-Triples-star), query it with SPARQL
 > See [plans/documentation.md](plans/documentation.md) for the complete page-by-page specification. v0.5.0 carries the full catch-up backlog for v0.1.0–v0.4.0 in addition to new v0.5.0 pages.
 
 **Catch-up — v0.1.0 Foundation**
-- [ ] Docs site scaffold: `docs/book.toml`, `.github/workflows/docs.yml`, `docs/src/SUMMARY.md`
-- [ ] `user-guide/introduction.md`, `user-guide/installation.md`, `user-guide/getting-started.md`
-- [ ] `user-guide/sql-reference/index.md`, `triple-crud.md`, `dictionary.md`, `prefix.md`
-- [ ] `reference/changelog.md` (mirror), `reference/roadmap.md` (mirror), `reference/security.md` (stub), `research/index.md`
+- [x] Docs site scaffold: `docs/book.toml`, `.github/workflows/docs.yml`, `docs/src/SUMMARY.md`
+- [x] `user-guide/introduction.md`, `user-guide/installation.md`, `user-guide/getting-started.md`
+- [x] `user-guide/sql-reference/index.md`, `triple-crud.md`, `dictionary.md`, `prefix.md`
+- [x] `reference/changelog.md` (mirror), `reference/roadmap.md` (mirror), `reference/security.md` (stub), `research/index.md`
 
 **Catch-up — v0.2.0 Bulk Loading & Named Graphs**
-- [ ] `user-guide/sql-reference/bulk-load.md`, `user-guide/sql-reference/named-graphs.md`
-- [ ] `user-guide/best-practices/bulk-loading.md`
-- [ ] `user-guide/configuration.md` (initial: `vp_promotion_threshold`, `named_graph_optimized`, `plan_cache_size`)
-- [ ] `reference/faq.md` (seed: 10+ questions covering v0.1.0–v0.4.0)
+- [x] `user-guide/sql-reference/bulk-load.md`, `user-guide/sql-reference/named-graphs.md`
+- [x] `user-guide/best-practices/bulk-loading.md`
+- [x] `user-guide/configuration.md` (initial: `vp_promotion_threshold`, `named_graph_optimized`, `plan_cache_size`)
+- [x] `reference/faq.md` (seed: 10+ questions covering v0.1.0–v0.4.0)
 
 **Catch-up — v0.3.0 SPARQL Basic**
-- [ ] `user-guide/playground.md` — Docker sandbox ⭐
-- [ ] `user-guide/sql-reference/sparql-query.md` (initial: SELECT, ASK, EXPLAIN)
-- [ ] `user-guide/best-practices/sparql-patterns.md` (initial)
-- [ ] `reference/troubleshooting.md` (initial)
+- [x] `user-guide/playground.md` — Docker sandbox ⭐
+- [x] `user-guide/sql-reference/sparql-query.md` (initial: SELECT, ASK, EXPLAIN)
+- [x] `user-guide/best-practices/sparql-patterns.md` (initial)
+- [x] `reference/troubleshooting.md` (initial)
 
 **Catch-up — v0.4.0 RDF-star**
-- [ ] `user-guide/sql-reference/rdf-star.md`
-- [ ] `user-guide/best-practices/data-modeling.md` (initial)
+- [x] `user-guide/sql-reference/rdf-star.md`
+- [x] `user-guide/best-practices/data-modeling.md` (initial)
 
 **New in v0.5.0**
-- [ ] `user-guide/sql-reference/sparql-query.md` expanded: property paths, aggregates, UNION/MINUS, subqueries, BIND/VALUES
-- [ ] `user-guide/best-practices/sparql-patterns.md` expanded: property path recipes, resource exhaustion safeguards
-- [ ] `user-guide/configuration.md` expanded: `max_path_depth` GUC
+- [x] `user-guide/sql-reference/sparql-query.md` expanded: property paths, aggregates, UNION/MINUS, subqueries, BIND/VALUES
+- [x] `user-guide/best-practices/sparql-patterns.md` expanded: property path recipes, resource exhaustion safeguards
+- [x] `user-guide/configuration.md` expanded: `max_path_depth` GUC
 
 ### Exit Criteria
 

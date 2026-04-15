@@ -1,0 +1,150 @@
+# SPARQL Patterns
+
+Best practices for writing efficient SPARQL queries against pg_ripple.
+
+## Star patterns — let the planner collapse joins
+
+When a single subject has multiple predicates, express them as separate triple patterns in the same WHERE clause. The SQL generator collapses these into a single scan with multiple table joins:
+
+```sparql
+-- Good: star pattern — all predicates share the same subject variable
+SELECT ?person ?name ?age WHERE {
+  ?person <ex:worksAt> <ex:acme> .
+  ?person <ex:name>    ?name .
+  OPTIONAL { ?person <ex:age> ?age }
+}
+
+-- Avoid: separate subqueries for each predicate (forces extra joins)
+SELECT ?person ?name ?age WHERE {
+  { SELECT ?person WHERE { ?person <ex:worksAt> <ex:acme> } }
+  { SELECT ?person ?name WHERE { ?person <ex:name> ?name } }
+}
+```
+
+## Filter pushdown
+
+SPARQL FILTER expressions on dictionary-encoded constants are evaluated in the SQL WHERE clause at compile time. Constants are encoded to `BIGINT` before SQL is emitted — no dictionary lookups happen at query time.
+
+For best performance, apply filters as early as possible (close to the bound variable in the triple pattern) rather than late in a wrapping subquery.
+
+## OPTIONAL vs INNER JOIN
+
+Use `OPTIONAL` when a result row should still appear even if the optional pattern is not matched. This compiles to a `LEFT JOIN`. Use a plain triple pattern (inner join behavior) when all results must have the variable bound.
+
+```sparql
+-- All persons with worksAt, plus name if available (LEFT JOIN)
+SELECT ?person ?name WHERE {
+  ?person <ex:worksAt> ?company .
+  OPTIONAL { ?person <ex:name> ?name }
+}
+
+-- Only persons that have both worksAt and name (INNER JOIN)
+SELECT ?person ?name WHERE {
+  ?person <ex:worksAt> ?company .
+  ?person <ex:name>    ?name .
+}
+```
+
+## Plan cache hit rate
+
+Compiled SPARQL→SQL plans are cached per-backend in an LRU cache. Identical query strings (including whitespace) hit the cache. To maximize cache hit rate:
+
+- Parameterize queries by binding constants into `VALUES` inline data rather than embedding them as literal strings in the query text
+- Keep the cache large enough for your query workload via `pg_ripple.plan_cache_size`
+
+Check cache efficiency with `sparql_explain()` — repeated calls for the same query return instantly once the plan is cached.
+
+## Property path recipes
+
+### Transitive closure (follow all hops)
+
+```sparql
+SELECT ?target WHERE {
+  <ex:alice> <ex:knows>+ ?target
+}
+```
+
+Compiles to a `WITH RECURSIVE` CTE. Specify a depth limit to avoid runaway queries on dense graphs:
+
+```sql
+SET pg_ripple.max_path_depth = 10;
+```
+
+### Include the start node (zero or more hops)
+
+```sparql
+SELECT ?target WHERE {
+  <ex:alice> <ex:follows>* ?target
+}
+-- Returns alice herself plus all reachable nodes
+```
+
+### Multi-predicate path (alternative)
+
+```sparql
+SELECT ?contact WHERE {
+  <ex:alice> (<ex:knows>|<ex:follows>) ?contact
+}
+```
+
+### Sequence (two-hop join)
+
+```sparql
+SELECT ?friend_of_friend WHERE {
+  <ex:alice> <ex:knows>/<ex:knows> ?friend_of_friend
+}
+```
+
+The `/` operator compiles to a chained join — spargebra represents the intermediate variable as an anonymous blank node which pg_ripple handles by applying an equi-join constraint.
+
+### Inverse path (find who points to a node)
+
+```sparql
+SELECT ?who WHERE {
+  ?who ^<ex:knows> <ex:bob>
+}
+-- Equivalent to: <ex:bob> is the object, ?who is the subject
+```
+
+## Resource exhaustion safeguards
+
+For user-facing applications where input queries cannot be fully trusted:
+
+```sql
+-- Set a per-session depth cap
+SET pg_ripple.max_path_depth = 15;
+
+-- Set a per-query time limit
+SET statement_timeout = '5s';
+```
+
+Both settings can be applied in a connection pool `after_connect` hook or in a row-level security policy. The depth cap is included in the plan cache key and does not cause cross-session pollution.
+
+## VALUES for multi-value lookup
+
+`VALUES` compiles to SQL inline data and is efficient for looking up a known list of resources:
+
+```sparql
+SELECT ?person ?name WHERE {
+  VALUES ?person { <ex:alice> <ex:bob> <ex:carol> }
+  ?person <ex:name> ?name .
+}
+```
+
+This is more cache-friendly than embedding the values as individual FILTER clauses, since the query structure stays constant while only the VALUES rows change.
+
+## Debugging with sparql_explain
+
+Always inspect the generated SQL before blaming pg_ripple for slow results:
+
+```sql
+SELECT pg_ripple.sparql_explain(
+    'SELECT ?name WHERE { ?p <ex:name> ?name . FILTER(?name = "Alice") }',
+    false
+);
+```
+
+Look for:
+- `vp_rare` table scans where you expected a dedicated VP table — the predicate may not have been promoted yet
+- Missing `WHERE` clause conditions — a FILTER may have failed to encode its constant
+- Extra `UNION ALL` branches in property paths — expected for `*` and `?` operators
