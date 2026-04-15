@@ -13,55 +13,54 @@ pg_ripple is a PostgreSQL 18 extension building toward a fully-featured knowledg
 
 ---
 
-## What works today (v0.4.0)
+## What works today (v0.5.0)
 
-You can install the extension, store triples, bulk-load RDF datasets (including N-Triples-star), manage named graphs, query with SPARQL, and work with RDF-star quoted triples and statement identifiers:
+You can install the extension, store triples, bulk-load RDF datasets, manage named graphs, and query with full SPARQL 1.1:
 
 ```sql
 CREATE EXTENSION pg_ripple;
 
--- Store a single fact (returns the statement identifier, SID)
+-- Store a fact
 SELECT pg_ripple.insert_triple(
   'http://example.org/Alice',
   'http://xmlns.com/foaf/0.1/knows',
   'http://example.org/Bob'
 );
 
--- Bulk-load Turtle data (returns number of triples loaded)
-SELECT pg_ripple.load_turtle('
-  @prefix foaf: <http://xmlns.com/foaf/0.1/> .
-  <http://example.org/Alice> foaf:knows <http://example.org/Bob> .
-  <http://example.org/Bob>   foaf:name  "Bob" .
-');
-
--- Load N-Triples-star with quoted triples
-SELECT pg_ripple.load_ntriples('
-  << <http://example.org/Alice> <http://xmlns.com/foaf/0.1/knows> <http://example.org/Bob> >>
-      <http://example.org/assertedBy> <http://example.org/Carol> .
-');
-
--- Encode a quoted triple to its dictionary ID
-SELECT pg_ripple.encode_triple(
-  '<http://example.org/Alice>',
-  '<http://xmlns.com/foaf/0.1/knows>',
-  '<http://example.org/Bob>'
-);
-
--- Look up a triple by its statement identifier
-SELECT pg_ripple.get_statement(42);
-
--- Query with SPARQL SELECT (returns JSONB rows)
+-- Query with property paths: find all people reachable via "knows" links
 SELECT * FROM pg_ripple.sparql('
   PREFIX foaf: <http://xmlns.com/foaf/0.1/>
-  SELECT ?person ?name WHERE {
-    <http://example.org/Alice> foaf:knows ?person .
-    ?person foaf:name ?name .
+  SELECT ?person WHERE {
+    <http://example.org/Alice> foaf:knows+ ?person .
   }
 ');
 
--- Ask a yes/no question
-SELECT pg_ripple.sparql_ask('
-  ASK { <http://example.org/Alice> <http://xmlns.com/foaf/0.1/knows> ?who }
+-- Count people per company with GROUP BY and aggregates
+SELECT * FROM pg_ripple.sparql('
+  PREFIX ex: <http://example.org/>
+  SELECT ?company (COUNT(?person) AS ?count) WHERE {
+    ?person ex:worksAt ?company .
+  }
+  GROUP BY ?company
+');
+
+-- Combine two queries with UNION
+SELECT * FROM pg_ripple.sparql('
+  PREFIX foaf: <http://xmlns.com/foaf/0.1/>
+  SELECT ?person WHERE {
+    { <http://example.org/Alice> foaf:knows ?person . }
+    UNION
+    { <http://example.org/Bob> foaf:knows ?person . }
+  }
+');
+
+-- Use BIND to compute values
+SELECT * FROM pg_ripple.sparql('
+  PREFIX foaf: <http://xmlns.com/foaf/0.1/>
+  SELECT ?person ?fullName WHERE {
+    ?person foaf:givenName ?first ; foaf:familyName ?last .
+    BIND(CONCAT(?first, " ", ?last) AS ?fullName)
+  }
 ');
 
 -- Query by pattern (NULL = wildcard)
@@ -69,11 +68,11 @@ SELECT * FROM pg_ripple.find_triples(
   'http://example.org/Alice', NULL, NULL
 );
 
--- Count all triples in the store
+-- Count all triples
 SELECT pg_ripple.triple_count();
 ```
 
-Every IRI, blank node, literal, and quoted triple is dictionary-encoded to a compact integer for fast joins. Facts about different predicates are stored in separate tables (Vertical Partitioning) so queries that bind a predicate touch only one compact, indexed table. Bulk loaders accept Turtle, N-Triples (including N-Triples-star), N-Quads, and TriG formats. SPARQL SELECT, ASK, FILTER, OPTIONAL, named-graph patterns, and ground SPARQL-star triple term patterns are supported. No `shared_preload_libraries` configuration required.
+Every IRI, blank node, literal, and quoted triple is dictionary-encoded to a compact integer for fast joins. Facts are stored in separate tables per predicate (Vertical Partitioning). The SPARQL engine supports property paths (`+`, `*`, `?`), UNION/MINUS, aggregates, GROUP BY, subqueries, BIND, VALUES, OPTIONAL, and named graphs. No `shared_preload_libraries` configuration required.
 
 ---
 
