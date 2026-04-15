@@ -83,6 +83,15 @@ These are the mistakes most likely to produce silent bugs:
 ### Exit Criteria
 (copy exit criteria verbatim from ROADMAP.md, check each explicitly)
 
+### Pre-Release
+- [ ] **Extension migration script created** — **CRITICAL** (see [Extension Versioning & Migration Scripts](../../../AGENTS.md#extension-versioning--migration-scripts))
+  - File: `sql/pg_ripple--X.(Y-1).Z--X.Y.Z.sql`
+  - Include schema changes (ALTER TABLE, CREATE INDEX, etc.) if any exist
+  - Otherwise, write a comment header explaining what functionality is new
+  - Without this file, users on earlier versions cannot upgrade via `ALTER EXTENSION ... UPDATE`
+- [ ] Verify `Cargo.toml` version field matches X.Y.Z
+- [ ] Verify `pg_ripple.control` `default_version` matches X.Y.Z
+
 ### Git
 - [ ] All ROADMAP.md deliverable checkboxes for this version are ticked (`- [x]`)
 - [ ] CHANGELOG.md updated

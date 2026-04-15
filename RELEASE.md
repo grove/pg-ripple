@@ -23,6 +23,12 @@ Complete every item before starting the release process.
 - [ ] **`Cargo.toml` version field matches the release version**
   - e.g. `version = "0.2.0"` for a v0.2.0 release
 - [ ] **`pg_ripple.control` `default_version` matches the release version**
+- [ ] **Extension migration script created** — **CRITICAL**
+  - File: `sql/pg_ripple--X.(Y-1).Z--X.Y.Z.sql` where the previous version is X.(Y-1).Z
+  - If there are schema changes (ALTER TABLE, CREATE INDEX, etc.), include them in the script
+  - If there are no schema changes (new Rust functions), write only a comment header explaining what's new
+  - See [Extension Versioning & Migration Scripts](AGENTS.md#extension-versioning--migration-scripts) in AGENTS.md for the checklist and examples
+  - **Without this file, users on earlier versions cannot upgrade via `ALTER EXTENSION ... UPDATE`** — they must dump/restore
 - [ ] **CHANGELOG.md is up to date**
   - The `[Unreleased]` section has been moved under the new version heading
   - Written in plain, accessible language (see [Changelog Style](#changelog-style) below)
