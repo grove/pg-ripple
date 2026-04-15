@@ -259,6 +259,11 @@ jobs:
             cargo pgrx init --pg18 download
           fi
 
+      - name: Clean stale pgrx data
+        run: |
+          cargo pgrx stop pg18 2>/dev/null || true
+          rm -rf ~/.pgrx/data-18
+
       - name: Start pgrx PostgreSQL 18
         run: cargo pgrx start pg18 --postgresql-conf "shared_preload_libraries='pg_ripple' allow_system_table_mods=on"
 
