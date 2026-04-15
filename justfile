@@ -81,3 +81,19 @@ stop:
 [group: "dev"]
 install:
     cargo pgrx install --pg-config $(which pg_config)
+
+# ── Docker ────────────────────────────────────────────────────────────────
+
+# Build the Docker image locally
+[group: "docker"]
+docker-build tag="local":
+    docker build -t pg-ripple:{{tag}} .
+
+# Run the sandbox container (default postgres password: ripple)
+[group: "docker"]
+docker-run tag="local":
+    docker run --rm -p 5432:5432 -e POSTGRES_PASSWORD=ripple pg-ripple:{{tag}}
+
+# Build then run in one step
+[group: "docker"]
+docker tag="local": (docker-build tag) (docker-run tag)
