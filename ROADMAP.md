@@ -541,7 +541,7 @@ Writes do not block reads. Merge worker operates correctly under concurrent writ
 - [x] **SHACL management**
   - `pg_ripple.list_shapes() RETURNS TABLE`
   - `pg_ripple.drop_shape(shape_uri TEXT)`
-- [ ] **pg_trickle integration: SHACL violation monitors** *(optional)*
+- [x] **pg_trickle integration: SHACL violation monitors** *(optional)*
   - Simple cardinality/datatype constraints modeled as `IMMEDIATE` mode stream tables
   - Violations detected within the same transaction as the DML
   - `_pg_ripple.violation_summary` stream table aggregates dead-letter queue by shape/severity; feeds `/metrics` Prometheus endpoint without full queue scans ([§2.13](plans/ecosystem/pg_trickle.md))

@@ -36,6 +36,7 @@ This release adds **SHACL Core** data quality enforcement and explicit deduplica
 | `pg_ripple.drop_shape(shape_uri TEXT)` | `INTEGER` | Remove a shape by IRI |
 | `pg_ripple.deduplicate_predicate(p_iri TEXT)` | `BIGINT` | Remove duplicate triples for one predicate |
 | `pg_ripple.deduplicate_all()` | `BIGINT` | Deduplicate all predicates and vp_rare |
+| `pg_ripple.enable_shacl_monitors()` | `BOOLEAN` | Create `_pg_ripple.violation_summary` stream table via pg_trickle (optional) |
 
 ### New GUCs
 
@@ -51,6 +52,7 @@ This release adds **SHACL Core** data quality enforcement and explicit deduplica
 | `_pg_ripple.shacl_shapes` | Shape catalog: `shape_iri`, `shape_json` (JSONB IR), `active`, timestamps |
 | `_pg_ripple.validation_queue` | Async validation inbox (populated when `shacl_mode = 'async'`) |
 | `_pg_ripple.dead_letter_queue` | Async violations with JSONB violation report |
+| `_pg_ripple.violation_summary` | pg_trickle stream table: violation counts by shape IRI + severity (created by `enable_shacl_monitors()`) |
 
 ### New regression tests
 

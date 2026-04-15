@@ -1077,6 +1077,65 @@ mod pg_ripple {
         true
     }
 
+    // ── pg_trickle SHACL violation monitors (v0.7.0, optional) ──────────────
+
+    /// Enable SHACL violation monitors via pg_trickle stream tables.
+    ///
+    /// Creates the `_pg_ripple.violation_summary` stream table that aggregates
+    /// `_pg_ripple.dead_letter_queue` by shape IRI and severity.  This avoids
+    /// full `GROUP BY` scans of a potentially large dead-letter queue when
+    /// monitoring dashboards or Prometheus `/metrics` poll for violation counts.
+    ///
+    /// The stream table is refreshed every 5 seconds by pg_trickle's IVM engine.
+    ///
+    /// Returns `true` if the stream table was created, `false` if pg_trickle is
+    /// not installed.  No error is raised — pg_trickle is optional.
+    ///
+    /// ```sql
+    /// SELECT pg_ripple.enable_shacl_monitors();
+    /// -- Then query the summary:
+    /// SELECT * FROM _pg_ripple.violation_summary;
+    /// ```
+    #[pg_extern]
+    fn enable_shacl_monitors() -> bool {
+        if !crate::has_pg_trickle() {
+            pgrx::warning!(
+                "pg_trickle is not installed; SHACL violation monitors are unavailable. \
+                 Install pg_trickle and run SELECT pg_ripple.enable_shacl_monitors() to enable."
+            );
+            return false;
+        }
+
+        // violation_summary — aggregate dead_letter_queue by shape + severity + graph.
+        // Refreshed every 5 seconds via pg_trickle incremental view maintenance.
+        // Reading the summary is an index scan on a small table rather than a
+        // full GROUP BY over potentially millions of violation rows.
+        pgrx::Spi::run(
+            "SELECT pg_trickle.create_stream_table(
+                '_pg_ripple.violation_summary',
+                $$
+                    SELECT
+                        dlq.violation ->> 'shapeIRI'   AS shape_iri,
+                        dlq.violation ->> 'severity'   AS severity,
+                        dlq.g_id                       AS graph_id,
+                        COUNT(*)                       AS violation_count,
+                        MAX(dlq.detected_at)           AS last_seen
+                    FROM _pg_ripple.dead_letter_queue dlq
+                    GROUP BY 1, 2, 3
+                $$,
+                '5s'
+            )",
+        )
+        .unwrap_or_else(|e| {
+            pgrx::warning!(
+                "failed to create _pg_ripple.violation_summary stream table: {}",
+                e
+            );
+        });
+
+        true
+    }
+
     // ── Statistics (v0.6.0) ───────────────────────────────────────────────────
 
     /// Return extension statistics as JSONB.
