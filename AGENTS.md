@@ -117,3 +117,53 @@ Always write the PR description to a temporary file using the **`create_file` to
    ```bash
    gh pr view <number> --json body --jq '.body' | head -20
    ```
+
+## Extension Versioning & Migration Scripts
+
+**CRITICAL**: Every release must include a corresponding `sql/pg_ripple--X.Y.Z--X.Y.(Z+1).sql` migration script before the version is tagged, even if the script is empty. PostgreSQL's `ALTER EXTENSION pg_ripple UPDATE` requires explicit migration paths; without them, users on earlier versions cannot upgrade.
+
+### Release Checklist
+
+When preparing a new release (v0.X.Y):
+
+1. **Create the migration script** from the previous version:
+   - File: `sql/pg_ripple--X.(Y-1).Z--X.Y.Z.sql`
+   - If there are schema changes (ALTER TABLE, CREATE INDEX, etc.), include them in the script
+   - If there are no schema changes (only Rust function changes), add a comment header explaining what new functions/GUCs are provided and note that no SQL changes are required
+   - Examples:
+     - `pg_ripple--0.1.0--0.2.0.sql` — no schema changes (bulk load functions are compiled from Rust)
+     - `pg_ripple--0.3.0--0.4.0.sql` — adds `qt_s, qt_p, qt_o` columns to dictionary for RDF-star support
+
+2. **Update `pg_ripple.control`** to set `default_version = 'X.Y.Z'` to match the new release.
+
+3. **Update `CHANGELOG.md`** with the new version entry.
+
+4. **Tag the release** with `git tag vX.Y.Z` after all above are committed.
+
+### Why This Matters
+
+- **Forward upgrade path**: users on v0.1.0 can upgrade to v0.2.0, then v0.3.0, etc., via a simple `ALTER EXTENSION pg_ripple UPDATE`
+- **Without migration scripts**: upgrading fails with `ERROR: extension "pg_ripple" has no update path from version "X" to version "Y"` — users are forced to dump/restore or rebuild from scratch
+- **One-time cost**: writing a few lines of documentation (and SQL if needed) saves every user an expensive migration
+
+### Example Workflow
+
+```bash
+# Before tagging v0.5.0:
+
+# 1. Create the migration script
+cat > sql/pg_ripple--0.4.0--0.5.0.sql << 'EOF'
+-- Migration 0.4.0 → 0.5.0: Property paths, UNION, aggregates, subqueries
+-- Schema changes: None (pure query engine enhancements)
+EOF
+
+# 2. Update pg_ripple.control
+# (edit the file to set default_version = '0.5.0')
+
+# 3. Update CHANGELOG.md with release notes
+
+# 4. Commit and tag
+git add sql/pg_ripple--0.4.0--0.5.0.sql pg_ripple.control CHANGELOG.md
+git commit -m "v0.5.0: Prepare migration scripts and update control file"
+git tag v0.5.0
+```

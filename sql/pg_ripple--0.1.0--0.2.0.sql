@@ -1,0 +1,27 @@
+-- pg_ripple--0.1.0--0.2.0.sql
+-- Migration from v0.1.0 (Foundation) to v0.2.0 (Bulk Loading & Named Graphs)
+--
+-- Schema changes: None — all new functionality is provided by Rust-compiled SQL functions.
+--
+-- New functions added by the Rust binary:
+--   pg_ripple.load_ntriples(data TEXT) RETURNS BIGINT
+--   pg_ripple.load_nquads(data TEXT) RETURNS BIGINT
+--   pg_ripple.load_turtle(data TEXT) RETURNS BIGINT
+--   pg_ripple.load_trig(data TEXT) RETURNS BIGINT
+--   pg_ripple.load_ntriples_file(path TEXT) RETURNS BIGINT
+--   pg_ripple.load_nquads_file(path TEXT) RETURNS BIGINT
+--   pg_ripple.load_turtle_file(path TEXT) RETURNS BIGINT
+--   pg_ripple.load_trig_file(path TEXT) RETURNS BIGINT
+--   pg_ripple.register_prefix(prefix TEXT, expansion TEXT) RETURNS void
+--   pg_ripple.prefixes() RETURNS TABLE (prefix TEXT, expansion TEXT)
+--   pg_ripple.export_ntriples(graph TEXT) RETURNS TEXT
+--   pg_ripple.export_ntriples_streaming(graph TEXT) RETURNS SETOF TEXT
+--   pg_ripple.export_nquads(graph TEXT) RETURNS TEXT
+--   pg_ripple.export_nquads_streaming(graph TEXT) RETURNS SETOF TEXT
+--
+-- New GUCs:
+--   pg_ripple.vp_promotion_threshold (default: 1000)
+--   pg_ripple.default_graph (default: 'http://example.org/default')
+--
+-- No SQL required for this migration — the extension binary is reloaded
+-- and all functions are installed automatically via the Rust #[pg_extern] attributes.

@@ -1,0 +1,90 @@
+-- pg_regress test: SPARQL aggregates, UNION, MINUS, BIND, VALUES (v0.5.0)
+-- Uses unique predicate namespace https://agg.test/ to avoid interference.
+
+-- Setup: a small dataset for aggregate tests.
+-- Alice and Bob both work at Acme. Carol works at Widgets.
+-- Each person has an integer age (stored as xsd:integer literals).
+SELECT pg_ripple.load_ntriples(
+    '<https://agg.test/alice> <https://agg.test/worksAt> <https://agg.test/acme> .'   || E'\n' ||
+    '<https://agg.test/bob>   <https://agg.test/worksAt> <https://agg.test/acme> .'   || E'\n' ||
+    '<https://agg.test/carol> <https://agg.test/worksAt> <https://agg.test/widgets> .'|| E'\n' ||
+    '<https://agg.test/alice> <https://agg.test/name> "Alice" .'                       || E'\n' ||
+    '<https://agg.test/bob>   <https://agg.test/name> "Bob" .'                         || E'\n' ||
+    '<https://agg.test/carol> <https://agg.test/name> "Carol" .'
+) = 6 AS six_triples_loaded;
+
+-- COUNT(*): total triple count of worksAt triples = 3
+SELECT COUNT(*) = 3 AS works_at_count_correct
+FROM pg_ripple.sparql(
+    'SELECT (COUNT(*) AS ?total) WHERE { ?p <https://agg.test/worksAt> ?company }'
+);
+
+-- GROUP BY company: 2 rows (acme=2, widgets=1)
+SELECT COUNT(*) = 2 AS group_by_company
+FROM pg_ripple.sparql(
+    'SELECT ?company (COUNT(?p) AS ?cnt) WHERE { ?p <https://agg.test/worksAt> ?company } GROUP BY ?company'
+);
+
+-- UNION: names from both predicates (name) union'd with itself = same count
+SELECT COUNT(*) = 3 AS union_count
+FROM pg_ripple.sparql(
+    'SELECT ?n WHERE {
+       { ?p <https://agg.test/name> ?n } UNION { ?p <https://agg.test/name> ?n }
+     }'
+);
+
+-- UNION of two different patterns: worksAt UNION name = 6 triples total
+SELECT COUNT(*) = 6 AS union_worksAt_name
+FROM pg_ripple.sparql(
+    'SELECT ?s ?o WHERE {
+       { ?s <https://agg.test/worksAt> ?o } UNION { ?s <https://agg.test/name> ?o }
+     }'
+);
+
+-- MINUS: all persons MINUS those working at acme = Carol only
+SELECT COUNT(*) = 1 AS minus_count
+FROM pg_ripple.sparql(
+    'SELECT ?p WHERE {
+       ?p <https://agg.test/worksAt> ?company .
+       MINUS { ?p <https://agg.test/worksAt> <https://agg.test/acme> }
+     }'
+);
+
+-- BIND: assign a constant label variable
+SELECT COUNT(*) = 3 AS bind_count
+FROM pg_ripple.sparql(
+    'SELECT ?p ?label WHERE {
+       ?p <https://agg.test/worksAt> ?company .
+       BIND(<https://agg.test/worker> AS ?label)
+     }'
+);
+
+-- VALUES: inline data joining with existing triples
+-- VALUES gives us alice and bob; join with worksAt
+SELECT COUNT(*) = 2 AS values_join_count
+FROM pg_ripple.sparql(
+    'SELECT ?p ?company WHERE {
+       VALUES ?p { <https://agg.test/alice> <https://agg.test/bob> }
+       ?p <https://agg.test/worksAt> ?company .
+     }'
+);
+
+-- OPTIONAL (LeftJoin): all worksAt with optional name
+SELECT COUNT(*) = 3 AS optional_count
+FROM pg_ripple.sparql(
+    'SELECT ?p ?company ?name WHERE {
+       ?p <https://agg.test/worksAt> ?company .
+       OPTIONAL { ?p <https://agg.test/name> ?name }
+     }'
+);
+
+-- Subquery: count per company in a subquery, then select those with count >= 2
+SELECT COUNT(*) >= 1 AS subquery_count
+FROM pg_ripple.sparql(
+    'SELECT ?company ?cnt WHERE {
+       { SELECT ?company (COUNT(?p) AS ?cnt) WHERE {
+           ?p <https://agg.test/worksAt> ?company
+         } GROUP BY ?company }
+       FILTER(?cnt >= 2)
+     }'
+);

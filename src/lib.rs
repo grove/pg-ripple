@@ -62,6 +62,10 @@ pub static NAMED_GRAPH_OPTIMIZED: pgrx::GucSetting<bool> = pgrx::GucSetting::<bo
 /// Set to 0 to disable the plan cache.
 pub static PLAN_CACHE_SIZE: pgrx::GucSetting<i32> = pgrx::GucSetting::<i32>::new(256);
 
+/// GUC: maximum recursion depth for SPARQL property path queries (`+`, `*`).
+/// Prevents runaway recursive CTEs on cyclic or very deep graphs.
+pub static MAX_PATH_DEPTH: pgrx::GucSetting<i32> = pgrx::GucSetting::<i32>::new(100);
+
 /// Called once when the extension shared library is loaded.
 #[allow(non_snake_case)]
 #[pg_guard]
@@ -102,6 +106,17 @@ pub extern "C-unwind" fn _PG_init() {
         &PLAN_CACHE_SIZE,
         0,
         65536,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+
+    pgrx::GucRegistry::define_int_guc(
+        c"pg_ripple.max_path_depth",
+        c"Maximum recursion depth for SPARQL property path queries (+ and *); 0 = unlimited",
+        c"",
+        &MAX_PATH_DEPTH,
+        0,
+        10000,
         GucContext::Userset,
         GucFlags::default(),
     );

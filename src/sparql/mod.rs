@@ -17,6 +17,7 @@
 //! 7. Emit decoded rows as `JSONB`.
 
 mod plan_cache;
+mod property_path;
 mod sqlgen;
 
 use std::collections::HashMap;

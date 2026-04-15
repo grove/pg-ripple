@@ -1,0 +1,13 @@
+-- pg_ripple--0.4.0--0.5.0.sql
+-- Migration from v0.4.0 (RDF-star / Statement Identifiers) to v0.5.0 (SPARQL Query Engine Advanced)
+--
+-- This is a pure query-engine release with no schema changes.
+--
+-- New functions added by the Rust binary:
+--   (Property paths, UNION, MINUS, aggregates, subqueries compiled into SPARQL engine)
+--
+-- New GUCs:
+--   pg_ripple.max_path_depth (default: 10)
+--
+-- No SQL required for this migration — the extension binary is reloaded
+-- and all SPARQL features are installed automatically.

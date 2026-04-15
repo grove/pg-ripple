@@ -1,0 +1,2 @@
+# using postmaster on localhost, port 28818
+# diff command failed with status 512: diff  "/Users/geir.gronmo/projects/pg_ripple/tests/pg_regress/expected/aggregates.out" "/Users/geir.gronmo/projects/pg_ripple/tests/pg_regress/results/aggregates.out" > "/Users/geir.gronmo/projects/pg_ripple/tests/pg_regress/results/aggregates.out.diff"Bail out!

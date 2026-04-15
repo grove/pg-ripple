@@ -1,0 +1,15 @@
+-- pg_ripple--0.2.0--0.3.0.sql
+-- Migration from v0.2.0 (Bulk Loading & Named Graphs) to v0.3.0 (SPARQL Query Engine)
+--
+-- Schema changes: None — all new functionality is provided by Rust-compiled SQL functions.
+--
+-- New functions added by the Rust binary:
+--   pg_ripple.sparql(query TEXT) RETURNS SETOF JSONB
+--   pg_ripple.sparql_ask(query TEXT) RETURNS BOOLEAN
+--   pg_ripple.sparql_explain(query TEXT, analyze BOOLEAN) RETURNS TEXT
+--
+-- New GUCs:
+--   pg_ripple.plan_cache_size (default: 256)
+--
+-- No SQL required for this migration — the extension binary is reloaded
+-- and all functions are installed automatically via the Rust #[pg_extern] attributes.

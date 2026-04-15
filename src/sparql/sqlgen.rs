@@ -4,30 +4,36 @@
 //! SQL SELECT string.  All IRI/literal constants are encoded to `i64` before
 //! appearing in SQL — no raw strings ever reach the generated query.
 //!
-//! # Supported algebra nodes
+//! # Supported algebra nodes (v0.5.0)
 //!
 //! - `Bgp` — basic graph patterns  → flat JOIN across VP tables
+//! - `Path` — property path        → WITH RECURSIVE CTE (see property_path.rs)
 //! - `Join` — AND of two patterns   → merge fragments (implicit cross join)
 //! - `LeftJoin` — OPTIONAL          → SQL LEFT JOIN with a subquery
-//! - `Filter` — WHERE condition      → SQL WHERE clause
+//! - `Union` — UNION               → SQL UNION
+//! - `Minus` — MINUS               → SQL EXCEPT
+//! - `Filter` — WHERE condition      → SQL WHERE clause (or HAVING for Group)
 //! - `Graph` — GRAPH ?g / GRAPH <G> → filter on `g` column
+//! - `Group` — aggregates / GROUP BY → SQL GROUP BY + aggregate functions
+//! - `Extend` — BIND               → computed column alias
+//! - `Values` — VALUES inline data → SQL VALUES clause
 //! - `Project` — SELECT columns       → restrict output columns
 //! - `Distinct` — DISTINCT            → SQL DISTINCT
 //! - `Reduced` — treated same as Distinct for simplicity
 //! - `Slice` — LIMIT / OFFSET
 //! - `OrderBy` — ORDER BY
-//!
-//! Unsupported nodes (Union, Group, Extend, Service, etc.) fall back to an
-//! error message.
 
 use std::collections::HashMap;
 
 use pgrx::datum::DatumWithOid;
 use pgrx::prelude::*;
-use spargebra::algebra::{Expression, GraphPattern, OrderExpression};
-use spargebra::term::{Literal, NamedNodePattern, TermPattern};
+use spargebra::algebra::{
+    AggregateExpression, AggregateFunction, Expression, GraphPattern, OrderExpression,
+};
+use spargebra::term::{GroundTerm, Literal, NamedNodePattern, TermPattern};
 
 use crate::dictionary;
+use super::property_path::{compile_path, PathCtx};
 
 // ─── VP table resolution ─────────────────────────────────────────────────────
 
@@ -74,6 +80,7 @@ fn table_expr(src: &VpSource) -> String {
 struct Ctx {
     alias_counter: u32,
     opt_counter: u32,
+    path_counter: u32,
     /// Per-query IRI/literal encoding cache — avoids repeated SPI look-ups.
     per_query: HashMap<String, Option<i64>>,
 }
@@ -83,6 +90,7 @@ impl Ctx {
         Self {
             alias_counter: 0,
             opt_counter: 0,
+            path_counter: 0,
             per_query: HashMap::new(),
         }
     }
@@ -484,6 +492,15 @@ fn translate_pattern(pattern: &GraphPattern, ctx: &mut Ctx) -> Fragment {
         }
 
         GraphPattern::Filter { expr, inner } => {
+            // Special case: Filter wrapping Group → HAVING clause.
+            if let GraphPattern::Group {
+                inner: group_inner,
+                variables,
+                aggregates,
+            } = inner.as_ref()
+            {
+                return translate_group(group_inner, variables, aggregates, Some(expr), ctx);
+            }
             let mut frag = translate_pattern(inner, ctx);
             if let Some(cond) = translate_expr(expr, &frag.bindings, ctx) {
                 frag.conditions.push(cond);
@@ -539,12 +556,510 @@ fn translate_pattern(pattern: &GraphPattern, ctx: &mut Ctx) -> Fragment {
             translate_pattern(inner, ctx)
         }
 
+        // ── Property path (p+, p*, p?, p/q, p|q, ^p, !(p)) ────────────────────
+        GraphPattern::Path {
+            subject,
+            path,
+            object,
+        } => {
+            let max_depth = crate::MAX_PATH_DEPTH.get();
+            let mut path_ctx = PathCtx::new(ctx.path_counter);
+
+            // Determine bound constants for subject / object to push into the CTE.
+            let s_const: Option<String> =
+                ground_term_id(subject, ctx).map(|id| id.to_string());
+            let o_const: Option<String> =
+                ground_term_id(object, ctx).map(|id| id.to_string());
+
+            let path_sql = compile_path(
+                path,
+                s_const.as_deref(),
+                o_const.as_deref(),
+                &mut path_ctx,
+                max_depth,
+            );
+            ctx.path_counter = path_ctx.counter;
+
+            let alias = ctx.next_alias();
+            let mut frag = Fragment::empty();
+            frag.from_items.push((alias.clone(), path_sql));
+
+            // Bind subject variable if free.
+            match subject {
+                TermPattern::Variable(v) => {
+                    let vname = v.as_str().to_owned();
+                    let col = format!("{alias}.s");
+                    if let Some(existing) = frag.bindings.get(&vname) {
+                        frag.conditions.push(format!("{col} = {existing}"));
+                    } else {
+                        frag.bindings.insert(vname, col);
+                    }
+                }
+                TermPattern::NamedNode(nn) => {
+                    if s_const.is_none() {
+                        // Predicate not in dictionary → no rows
+                        frag.conditions.push("FALSE".to_owned());
+                    } else {
+                        // Already filtered inside path SQL
+                        let _ = nn;
+                    }
+                }
+                _ => {}
+            }
+
+            // Bind object variable if free.
+            match object {
+                TermPattern::Variable(v) => {
+                    let vname = v.as_str().to_owned();
+                    let col = format!("{alias}.o");
+                    if let Some(existing) = frag.bindings.get(&vname) {
+                        frag.conditions.push(format!("{col} = {existing}"));
+                    } else {
+                        frag.bindings.insert(vname, col);
+                    }
+                }
+                TermPattern::NamedNode(nn) => {
+                    if o_const.is_none() {
+                        frag.conditions.push("FALSE".to_owned());
+                    } else {
+                        let _ = nn;
+                    }
+                }
+                _ => {}
+            }
+
+            frag
+        }
+
+        // ── UNION ────────────────────────────────────────────────────────────
+        GraphPattern::Union { left, right } => {
+            translate_union(left, right, ctx)
+        }
+
+        // ── MINUS (EXCEPT) ──────────────────────────────────────────────────
+        GraphPattern::Minus { left, right } => {
+            translate_minus(left, right, ctx)
+        }
+
+        // ── GROUP BY / Aggregates ────────────────────────────────────────────
+        GraphPattern::Group {
+            inner,
+            variables,
+            aggregates,
+        } => translate_group(inner, variables, aggregates, None, ctx),
+
+        // ── BIND (Extend) ────────────────────────────────────────────────────
+        GraphPattern::Extend {
+            inner,
+            variable,
+            expression,
+        } => {
+            let mut frag = translate_pattern(inner, ctx);
+            // Try to compute the BIND expression as a SQL expression.
+            if let Some(sql_expr) = translate_expr(expression, &frag.bindings, ctx) {
+                frag.bindings
+                    .insert(variable.as_str().to_owned(), sql_expr);
+            }
+            // If the expression can't be translated, the variable is unbound (NULL).
+            frag
+        }
+
+        // ── VALUES ───────────────────────────────────────────────────────────
+        GraphPattern::Values {
+            variables,
+            bindings,
+        } => translate_values(variables, bindings, ctx),
+
         other => {
             // Return empty fragment with FALSE for unsupported patterns.
             let mut frag = Fragment::empty();
             frag.conditions.push("FALSE".to_owned());
             let _ = other; // silence unused var warning
             frag
+        }
+    }
+}
+
+// ─── UNION translator ─────────────────────────────────────────────────────────
+
+/// Translate UNION to SQL UNION of two subqueries.
+/// Both sides must expose the same set of variables; missing variables are NULL.
+fn translate_union(left: &GraphPattern, right: &GraphPattern, ctx: &mut Ctx) -> Fragment {
+    let left_frag = translate_pattern(left, ctx);
+    let right_frag = translate_pattern(right, ctx);
+
+    // Union of variable sets — each side may have different variables.
+    let mut all_vars: Vec<String> = left_frag
+        .bindings
+        .keys()
+        .chain(right_frag.bindings.keys())
+        .cloned()
+        .collect::<std::collections::HashSet<String>>()
+        .into_iter()
+        .collect();
+    all_vars.sort();
+
+    let build_union_arm = |frag: &Fragment| -> String {
+        let cols: Vec<String> = all_vars
+            .iter()
+            .map(|v| {
+                frag.bindings
+                    .get(v)
+                    .map(|col| format!("{col} AS _u_{v}"))
+                    .unwrap_or_else(|| format!("NULL::bigint AS _u_{v}"))
+            })
+            .collect();
+        let select_list = if cols.is_empty() {
+            "1 AS _dummy".to_owned()
+        } else {
+            cols.join(", ")
+        };
+        format!(
+            "SELECT {select_list} FROM {} {}",
+            frag.build_from(),
+            frag.build_where()
+        )
+    };
+
+    let left_sql = build_union_arm(&left_frag);
+    let right_sql = build_union_arm(&right_frag);
+
+    let alias = ctx.next_alias();
+    let union_subquery = format!("(({left_sql}) UNION ({right_sql}))");
+
+    let mut frag = Fragment::empty();
+    frag.from_items
+        .push((alias.clone(), union_subquery));
+
+    for v in &all_vars {
+        frag.bindings
+            .insert(v.clone(), format!("{alias}._u_{v}"));
+    }
+
+    frag
+}
+
+// ─── MINUS translator ────────────────────────────────────────────────────────
+
+/// Translate MINUS to SQL EXCEPT.
+fn translate_minus(left: &GraphPattern, right: &GraphPattern, ctx: &mut Ctx) -> Fragment {
+    let left_frag = translate_pattern(left, ctx);
+    let right_frag = translate_pattern(right, ctx);
+
+    // SPARQL MINUS excludes left rows that have a compatible match in right.
+    // Shared variables determine compatibility.
+    let shared_vars: Vec<String> = left_frag
+        .bindings
+        .keys()
+        .filter(|v| right_frag.bindings.contains_key(*v))
+        .cloned()
+        .collect();
+
+    let alias = ctx.next_alias();
+
+    if shared_vars.is_empty() {
+        // No shared variables → MINUS has no effect (return left unchanged).
+        return left_frag;
+    }
+
+    // Build left SELECT with shared columns.
+    let left_cols: Vec<String> = shared_vars
+        .iter()
+        .map(|v| {
+            let col = left_frag.bindings.get(v).unwrap();
+            format!("{col} AS _m_{v}")
+        })
+        .collect();
+    let left_all_cols: Vec<String> = left_frag
+        .bindings
+        .iter()
+        .map(|(v, col)| format!("{col} AS _ma_{v}"))
+        .collect();
+
+    let right_cols: Vec<String> = shared_vars
+        .iter()
+        .map(|v| {
+            let col = right_frag.bindings.get(v).unwrap();
+            col.clone()
+        })
+        .collect();
+
+    // Strategy: LEFT JOIN with right, keep rows where right side is null.
+    let left_sql = format!(
+        "SELECT {}, {} FROM {} {}",
+        left_all_cols.join(", "),
+        left_cols.join(", "),
+        left_frag.build_from(),
+        left_frag.build_where()
+    );
+    let right_sql = format!(
+        "SELECT {} FROM {} {}",
+        right_cols.join(", "),
+        right_frag.build_from(),
+        right_frag.build_where()
+    );
+
+    let on_clause: String = shared_vars
+        .iter()
+        .map(|v| format!("_lminus.{v} = _rminus._m_{v}"))
+        .collect::<Vec<_>>()
+        .join(" AND ");
+
+    let minus_sql = format!(
+        "(SELECT {lout} FROM ({left_sql}) AS _lminus \
+         LEFT JOIN ({right_sql}) AS _rminus ON {on_clause} \
+         WHERE {null_check})",
+        lout = left_frag
+            .bindings
+            .keys()
+            .map(|v| format!("_lminus._ma_{v} AS _mn_{v}"))
+            .collect::<Vec<_>>()
+            .join(", "),
+        null_check = shared_vars
+            .iter()
+            .map(|v| format!("_rminus._m_{v} IS NULL"))
+            .collect::<Vec<_>>()
+            .join(" AND ")
+    );
+
+    let mut frag = Fragment::empty();
+    frag.from_items.push((alias.clone(), minus_sql));
+    for v in left_frag.bindings.keys() {
+        frag.bindings
+            .insert(v.clone(), format!("{alias}._mn_{v}"));
+    }
+    frag
+}
+
+// ─── GROUP BY / Aggregate translator ──────────────────────────────────────────
+
+/// Translate a GROUP pattern (with optional HAVING expression) to SQL GROUP BY.
+fn translate_group(
+    inner: &GraphPattern,
+    group_vars: &[spargebra::term::Variable],
+    aggregates: &[(spargebra::term::Variable, AggregateExpression)],
+    having: Option<&Expression>,
+    ctx: &mut Ctx,
+) -> Fragment {
+    let inner_frag = translate_pattern(inner, ctx);
+
+    // Build the inner SQL.
+    let inner_sql = format!(
+        "SELECT * FROM {} {}",
+        inner_frag.build_from(),
+        inner_frag.build_where()
+    );
+
+    // Map group variables to inner column names.
+    let group_cols: Vec<(String, String)> = group_vars
+        .iter()
+        .filter_map(|v| {
+            inner_frag
+                .bindings
+                .get(v.as_str())
+                .map(|col| (v.as_str().to_owned(), col.clone()))
+        })
+        .collect();
+
+    // Build SELECT list: group-by columns + aggregate expressions.
+    let mut select_parts: Vec<String> = group_cols
+        .iter()
+        .map(|(v, col)| format!("{col} AS _g_{v}"))
+        .collect();
+
+    let mut agg_bindings: Vec<(String, String)> = Vec::new();
+    for (agg_var, agg_expr) in aggregates {
+        let sql_agg = translate_aggregate(agg_expr, &inner_frag.bindings);
+        let vname = agg_var.as_str().to_owned();
+        select_parts.push(format!("{sql_agg} AS _g_{vname}"));
+        agg_bindings.push((vname, sql_agg));
+    }
+
+    let group_by_clause = if group_cols.is_empty() {
+        String::new()
+    } else {
+        format!(
+            "GROUP BY {}",
+            group_cols
+                .iter()
+                .map(|(_, col)| col.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
+    };
+
+    // HAVING clause (from Filter wrapping Group in the caller).
+    let having_clause = if let Some(having_expr) = having {
+        // Build temporary bindings that include aggregate aliases for HAVING.
+        let mut having_bindings = inner_frag.bindings.clone();
+        for (vname, _) in &agg_bindings {
+            having_bindings.insert(vname.clone(), format!("_g_{vname}"));
+        }
+        translate_expr(having_expr, &having_bindings, ctx)
+            .map(|c| format!("HAVING {c}"))
+            .unwrap_or_default()
+    } else {
+        String::new()
+    };
+
+    let select_list = if select_parts.is_empty() {
+        "COUNT(*) AS _g__count".to_owned()
+    } else {
+        select_parts.join(", ")
+    };
+
+    let group_sql = format!(
+        "(SELECT {select_list} FROM ({inner_sql}) AS _grp_inner \
+         {group_by_clause} {having_clause})"
+    );
+
+    let alias = ctx.next_alias();
+    let mut frag = Fragment::empty();
+    frag.from_items.push((alias.clone(), group_sql));
+
+    // Bind group-by variables.
+    for (v, _) in &group_cols {
+        frag.bindings
+            .insert(v.clone(), format!("{alias}._g_{v}"));
+    }
+    // Bind aggregate output variables.
+    for (vname, _) in &agg_bindings {
+        frag.bindings
+            .insert(vname.clone(), format!("{alias}._g_{vname}"));
+    }
+
+    frag
+}
+
+/// Translate an AggregateExpression to a SQL aggregate expression string.
+fn translate_aggregate(agg: &AggregateExpression, bindings: &HashMap<String, String>) -> String {
+    match agg {
+        AggregateExpression::CountSolutions { distinct } => {
+            if *distinct {
+                "COUNT(DISTINCT *)".to_owned()
+            } else {
+                "COUNT(*)".to_owned()
+            }
+        }
+        AggregateExpression::FunctionCall {
+            name,
+            expr,
+            distinct,
+        } => {
+            let distinct_kw = if *distinct { "DISTINCT " } else { "" };
+            // Try to obtain the SQL column expression for the argument.
+            let arg = translate_agg_expr(expr, bindings)
+                .unwrap_or_else(|| "NULL".to_owned());
+            match name {
+                AggregateFunction::Count => format!("COUNT({distinct_kw}{arg})"),
+                AggregateFunction::Sum => format!("SUM({distinct_kw}{arg})"),
+                AggregateFunction::Avg => format!("AVG({distinct_kw}{arg})"),
+                AggregateFunction::Min => format!("MIN({arg})"),
+                AggregateFunction::Max => format!("MAX({arg})"),
+                AggregateFunction::GroupConcat { separator } => {
+                    let sep = separator.as_deref().unwrap_or(" ");
+                    format!(
+                        "STRING_AGG({arg}::text, {sep_lit} ORDER BY {arg})",
+                        sep_lit = quote_sql_string(sep)
+                    )
+                }
+                AggregateFunction::Sample => format!("MIN({arg})"),
+                AggregateFunction::Custom(_) => format!("MIN({arg})"),
+            }
+        }
+    }
+}
+
+/// Obtain a SQL column reference for an expression used inside an aggregate.
+fn translate_agg_expr(
+    expr: &Expression,
+    bindings: &HashMap<String, String>,
+) -> Option<String> {
+    match expr {
+        Expression::Variable(v) => bindings.get(v.as_str()).cloned(),
+        _ => None,
+    }
+}
+
+/// Quote a string as a SQL string literal (single quotes, escaping internal
+/// single quotes by doubling them).  Safe because the input comes from the
+/// SPARQL query string, not user-controlled raw SQL.
+fn quote_sql_string(s: &str) -> String {
+    format!("'{}'", s.replace('\'', "''"))
+}
+
+// ─── VALUES translator ────────────────────────────────────────────────────────
+
+fn translate_values(
+    variables: &[spargebra::term::Variable],
+    bindings: &[Vec<Option<GroundTerm>>],
+    ctx: &mut Ctx,
+) -> Fragment {
+    if variables.is_empty() || bindings.is_empty() {
+        // Empty VALUES: return a fragment that yields zero rows.
+        let mut frag = Fragment::empty();
+        frag.conditions.push("FALSE".to_owned());
+        return frag;
+    }
+
+    // Build a VALUES clause: VALUES (v1, v2, ...), (v1, v2, ...) ...
+    // Each cell is a dictionary ID (or NULL for unbound).
+    let mut rows: Vec<String> = Vec::with_capacity(bindings.len());
+    let mut encode_ctx: Ctx = Ctx::new();
+
+    for row in bindings {
+        let cells: Vec<String> = variables
+            .iter()
+            .zip(row.iter())
+            .map(|(_, cell)| match cell {
+                None => "NULL::bigint".to_owned(),
+                Some(gt) => {
+                    let id = encode_ground_term(gt, &mut encode_ctx);
+                    id.to_string()
+                }
+            })
+            .collect();
+        rows.push(format!("({})", cells.join(", ")));
+    }
+
+    let col_names: Vec<String> = variables
+        .iter()
+        .map(|v| format!("_val_{}", v.as_str()))
+        .collect();
+
+    let alias = ctx.next_alias();
+    let values_expr = format!(
+        "(VALUES {}) AS {alias}({})",
+        rows.join(", "),
+        col_names.join(", ")
+    );
+
+    let mut frag = Fragment::empty();
+    frag.from_items.push((alias.clone(), values_expr));
+
+    for v in variables {
+        frag.bindings.insert(
+            v.as_str().to_owned(),
+            format!("{alias}._val_{}", v.as_str()),
+        );
+    }
+
+    frag
+}
+
+/// Encode a `GroundTerm` (IRI or literal, no variables) to a dictionary ID.
+fn encode_ground_term(gt: &GroundTerm, ctx: &mut Ctx) -> i64 {
+    match gt {
+        GroundTerm::NamedNode(nn) => {
+            ctx.encode_iri(nn.as_str()).unwrap_or(0)
+        }
+        GroundTerm::Literal(lit) => ctx.encode_literal(lit),
+        // Triple terms (RDF-star) — look up quoted triple dictionary entry.
+        GroundTerm::Triple(t) => {
+            let s_id = ctx.encode_iri(t.subject.as_str()).unwrap_or(0);
+            let p_id = ctx.encode_iri(t.predicate.as_str()).unwrap_or(0);
+            let o_id = encode_ground_term(&t.object, ctx);
+            dictionary::lookup_quoted_triple(s_id, p_id, o_id).unwrap_or(0)
         }
     }
 }
