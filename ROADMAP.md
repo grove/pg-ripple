@@ -19,24 +19,24 @@ Each release below has two layers:
 
 | Version | Name | What it delivers (one sentence) | Effort |
 |---|---|---|---|
-| 0.1.0 | Foundation | Install the extension, store and retrieve facts (VP storage from day one) | 6–8 pw |
-| 0.2.0 | Bulk Loading & Named Graphs | Bulk data import, named graphs, rare-predicate consolidation, N-Triples export | 6–8 pw |
-| 0.3.0 | SPARQL Basic | Ask questions in the standard RDF query language (incl. GRAPH patterns) | 6–8 pw |
-| 0.4.0 | RDF-star / Statement IDs | Make statements about statements; LPG-ready storage | 8–10 pw |
-| 0.5.0 | SPARQL Advanced (Query) | Property paths, aggregates, UNION/MINUS, subqueries, BIND/VALUES | 6–8 pw |
-| 0.5.1 | SPARQL Advanced (Storage & Write) | Inline encoding, CONSTRUCT/DESCRIBE, INSERT/DELETE DATA, FTS | 6–8 pw |
-| 0.6.0 | HTAP Architecture | Heavy reads and writes at the same time; shared-memory cache | 8–10 pw |
-| 0.7.0 | SHACL Core | Define data quality rules; reject bad data on insert | 4–6 pw |
-| 0.8.0 | SHACL Advanced | Complex data quality rules with background checking | 4–6 pw |
-| 0.9.0 | Serialization | Import and export data in all standard RDF file formats | 3–4 pw |
-| 0.10.0 | Datalog Reasoning | Automatically derive new facts from rules and logic | 10–12 pw |
-| 0.11.0 | SPARQL & Datalog Views | Live, always-up-to-date dashboards from SPARQL and Datalog queries | 5–7 pw |
-| 0.12.0 | SPARQL Update (Advanced) | Pattern-based updates and graph management commands | 3–4 pw |
-| 0.13.0 | Performance | Speed tuning, benchmarks, production-grade throughput | 6–8 pw |
-| 0.14.0 | Admin & Security | Operations tooling, access control, docs, packaging | 4–6 pw |
-| 0.15.0 | SPARQL Protocol | Standard HTTP API so web apps and tools can query directly | 3–4 pw |
-| 0.16.0 | SPARQL Federation | Query remote SPARQL endpoints alongside local data | 4–6 pw |
-| 1.0.0 | Production Release | Standards conformance, stress testing, security audit | 6–8 pw |
+| [0.1.0](#v010-foundation) | Foundation | Install the extension, store and retrieve facts (VP storage from day one) | 6–8 pw |
+| [0.2.0](#v020-bulk-loading--named-graphs) | Bulk Loading & Named Graphs | Bulk data import, named graphs, rare-predicate consolidation, N-Triples export | 6–8 pw |
+| [0.3.0](#v030-sparql-query-engine-basic) | SPARQL Basic | Ask questions in the standard RDF query language (incl. GRAPH patterns) | 6–8 pw |
+| [0.4.0](#v040-rdf-star--statement-identifiers) | RDF-star / Statement IDs | Make statements about statements; LPG-ready storage | 8–10 pw |
+| [0.5.0](#v050-sparql-query-engine-advanced--query-completeness) | SPARQL Advanced (Query) | Property paths, aggregates, UNION/MINUS, subqueries, BIND/VALUES | 6–8 pw |
+| [0.5.1](#v051-sparql-advanced-storage-serialization--write) | SPARQL Advanced (Storage & Write) | Inline encoding, CONSTRUCT/DESCRIBE, INSERT/DELETE DATA, FTS | 6–8 pw |
+| [0.6.0](#v060-htap-architecture) | HTAP Architecture | Heavy reads and writes at the same time; shared-memory cache | 8–10 pw |
+| [0.7.0](#v070-shacl-validation-core) | SHACL Core | Define data quality rules; reject bad data on insert | 4–6 pw |
+| [0.8.0](#v080-shacl-advanced) | SHACL Advanced | Complex data quality rules with background checking | 4–6 pw |
+| [0.9.0](#v090-serialization-export--interop) | Serialization | Import and export data in all standard RDF file formats | 3–4 pw |
+| [0.10.0](#v0100-datalog-reasoning-engine) | Datalog Reasoning | Automatically derive new facts from rules and logic | 10–12 pw |
+| [0.11.0](#v0110-incremental-sparql-views-datalog-views--extvp) | SPARQL & Datalog Views | Live, always-up-to-date dashboards from SPARQL and Datalog queries | 5–7 pw |
+| [0.12.0](#v0120-sparql-update-advanced) | SPARQL Update (Advanced) | Pattern-based updates and graph management commands | 3–4 pw |
+| [0.13.0](#v0130-performance-hardening) | Performance | Speed tuning, benchmarks, production-grade throughput | 6–8 pw |
+| [0.14.0](#v0140-administrative--operational-readiness) | Admin & Security | Operations tooling, access control, docs, packaging | 4–6 pw |
+| [0.15.0](#v0150-sparql-protocol-http-endpoint) | SPARQL Protocol | Standard HTTP API so web apps and tools can query directly | 3–4 pw |
+| [0.16.0](#v0160-sparql-federation) | SPARQL Federation | Query remote SPARQL endpoints alongside local data | 4–6 pw |
+| [1.0.0](#v100-production-release) | Production Release | Standards conformance, stress testing, security audit | 6–8 pw |
 | | | **Total estimated effort** | **98–131 pw** |
 
 ---
