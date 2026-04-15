@@ -9,7 +9,60 @@ Versions correspond to the milestones in [ROADMAP.md](ROADMAP.md).
 
 ## [Unreleased]
 
-Development towards [v0.6.0 (HTAP Architecture)](ROADMAP.md).
+Development towards [v0.7.0 (SHACL Core + Deduplication)](ROADMAP.md).
+
+---
+
+## [0.6.0] — 2025-04-15 — HTAP Architecture
+
+This release introduces a full HTAP (Hybrid Transactional/Analytical Processing) storage architecture, separating write traffic from read traffic so both can proceed at full speed simultaneously. A background merge worker periodically promotes delta rows into a read-optimised main partition. Change Data Capture (CDC) enables event-driven subscription to triple changes via PostgreSQL `LISTEN/NOTIFY`.
+
+### What you can do
+
+- **Concurrent reads and writes** — all writes now land in a small `_delta` table (B-tree indexed); the read path sees both the BRIN-indexed `_main` table and `_delta` via `UNION ALL`, so queries never block writers
+- **Background merge worker** — when `pg_ripple` is loaded via `shared_preload_libraries`, a background worker periodically compacts delta tables into `_main` using a fresh-table generation merge (sort-ordered insertion, BRIN-optimal), then runs `ANALYZE`
+- **Tombstone-based cross-partition deletes** — deleting a triple that lives in `_main` inserts a row in `_pg_ripple.vp_{id}_tombstones`; the query view filters it out immediately and the merge worker eliminates it on next compaction
+- **`pg_ripple.compact()` RETURNS BIGINT** — trigger an immediate full merge of all HTAP VP tables; rebuilds `subject_patterns` and `object_patterns` in the same pass; returns the total row count after compaction
+- **Subject/object pattern tables** — `_pg_ripple.subject_patterns(s BIGINT, pattern BIGINT[])` and `_pg_ripple.object_patterns(o BIGINT, pattern BIGINT[])` are rebuilt by the merge worker after each generation; GIN-indexed for O(1) predicate lookup per subject/object
+- **Change notification / CDC** — `pg_ripple.subscribe(pattern TEXT, channel TEXT) RETURNS BIGINT` subscribes to triple changes matching a predicate pattern (use `'*'` for all); `pg_ripple.unsubscribe(channel TEXT) RETURNS BIGINT` removes subscriptions; notifications fire as `pg_notify(channel, '{"op":"insert|delete","s":...,"p":...,"o":...,"g":...}')` after each delta insert or delete
+- **Statistics** — `pg_ripple.stats() RETURNS JSONB` reports `total_triples`, `dedicated_predicates`, `htap_predicates`, `rare_triples`, `unmerged_delta_rows`, and `merge_worker_pid`
+
+### New GUCs
+
+| GUC | Default | Description |
+|-----|---------|-------------|
+| `pg_ripple.merge_threshold` | `10000` | Minimum delta rows before background merge triggers |
+| `pg_ripple.merge_interval_secs` | `60` | Max seconds between merge worker polling cycles |
+| `pg_ripple.merge_retention_seconds` | `60` | Seconds to keep previous main table before dropping |
+| `pg_ripple.latch_trigger_threshold` | `10000` | Batch rows before poking merge worker latch |
+| `pg_ripple.worker_database` | `postgres` | Database the merge worker connects to |
+| `pg_ripple.merge_watchdog_timeout` | `300` | Seconds of worker inactivity before a WARNING is logged |
+
+### New SQL functions
+
+| Function | Returns | Description |
+|----------|---------|-------------|
+| `pg_ripple.compact()` | `BIGINT` | Immediate full merge + pattern table rebuild |
+| `pg_ripple.htap_migrate_predicate(pred_id BIGINT)` | `void` | Migrate a flat VP table to HTAP split |
+| `pg_ripple.stats()` | `JSONB` | Storage and worker statistics |
+| `pg_ripple.subscribe(pattern TEXT, channel TEXT)` | `BIGINT` | Subscribe to CDC notifications |
+| `pg_ripple.unsubscribe(channel TEXT)` | `BIGINT` | Remove a CDC subscription |
+| `pg_ripple.subject_predicates(subject_id BIGINT)` | `BIGINT[]` | Predicates for a subject (from pattern table) |
+| `pg_ripple.object_predicates(object_id BIGINT)` | `BIGINT[]` | Predicates for an object (from pattern table) |
+
+### Migration
+
+Users upgrading from v0.5.1 must run:
+
+```sql
+ALTER EXTENSION pg_ripple UPDATE;
+```
+
+The migration script (`sql/pg_ripple--0.5.1--0.6.0.sql`) adds the `htap` column to `_pg_ripple.predicates`, creates the pattern tables and CDC infrastructure, and migrates every existing dedicated VP table to the delta/main/tombstones architecture in a single transaction. After migration, existing triples reside in delta tables; call `pg_ripple.compact()` to promote them to `_main` immediately.
+
+### Bug fixes
+
+- **`shmem::init()` race condition** — `SHMEM_READY` is now set inside a final `shmem_startup_hook` rather than immediately in `_PG_init`, eliminating the window where `SHMEM_READY = true` but `PgAtomic` inner pointers were still null
 
 ---
 

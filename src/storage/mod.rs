@@ -1,29 +1,32 @@
-//! Storage engine — VP table management and triple CRUD.
+//! Storage engine — VP table management and triple CRUD (v0.6.0 HTAP).
 //!
-//! # VP table layout
+//! # VP table layout (v0.6.0+)
 //!
-//! Each unique predicate gets its own table:
+//! Each predicate is split into three physical tables plus a read view:
+//!
 //! ```sql
-//! CREATE TABLE _pg_ripple.vp_{predicate_id} (
-//!     s      BIGINT NOT NULL,
-//!     o      BIGINT NOT NULL,
-//!     g      BIGINT NOT NULL DEFAULT 0,
-//!     i      BIGINT NOT NULL DEFAULT nextval('_pg_ripple.statement_id_seq'),
-//!     source SMALLINT NOT NULL DEFAULT 0     -- 0 = explicit, 1 = inferred
-//! );
-//! CREATE INDEX ON _pg_ripple.vp_{id} (s, o);
-//! CREATE INDEX ON _pg_ripple.vp_{id} (o, s);
+//! -- Write inbox (all INSERTs go here)
+//! CREATE TABLE _pg_ripple.vp_{id}_delta (s, o, g, i, source);
+//! -- Read-optimised archive (BRIN-indexed, populated by merge worker)
+//! CREATE TABLE _pg_ripple.vp_{id}_main  (s, o, g, i, source);
+//! -- Pending deletes from main
+//! CREATE TABLE _pg_ripple.vp_{id}_tombstones (s, o, g);
+//! -- Read view: (main − tombstones) UNION ALL delta
+//! CREATE VIEW  _pg_ripple.vp_{id} AS ...;
 //! ```
+//!
+//! The view `_pg_ripple.vp_{id}` maintains backward compatibility with
+//! the SPARQL query engine.  All new predicates are HTAP-split on creation.
 //!
 //! Predicates with fewer than `pg_ripple.vp_promotion_threshold` (default 1 000)
 //! triples are initially stored in `_pg_ripple.vp_rare (p, s, o, g, i, source)`.
-//! They are automatically promoted to a dedicated VP table once the threshold
-//! is crossed.
+//! vp_rare is not split (HTAP exemption) — see ROADMAP v0.6.0.
 //!
 //! # Named graphs
 //!
 //! The default graph has identifier `0`.  Named graphs have positive `i64` ids.
-//! Named graph management: `create_graph`, `drop_graph`, `list_graphs`.
+
+pub mod merge;
 
 use pgrx::datum::DatumWithOid;
 use pgrx::prelude::*;
@@ -262,6 +265,10 @@ pub fn initialize_schema() {
     )
     .unwrap_or_else(|e| pgrx::error!("prefixes table creation error: {e}"));
 
+    // v0.6.0: HTAP pattern tables + CDC schema + predicates.htap column.
+    merge::initialize_pattern_tables();
+    crate::cdc::initialize_cdc_schema();
+
     // Note: the predicate_stats view is created via extension_sql in lib.rs,
     // not here, to avoid deadlocks when initialize_schema() is called from
     // concurrent test transactions.
@@ -272,16 +279,12 @@ fn vp_promotion_threshold() -> i64 {
     crate::VPP_THRESHOLD.get() as i64
 }
 
-/// Returns true if named_graph_optimized GUC is enabled.
-fn named_graph_optimized() -> bool {
-    crate::NAMED_GRAPH_OPTIMIZED.get()
-}
-
-/// Ensure a dedicated VP table exists for `predicate_id`.
+/// Ensure a dedicated VP table (HTAP split) exists for `predicate_id`.
 ///
-/// Returns the fully-qualified table name `_pg_ripple.vp_{id}`.
+/// Returns the fully-qualified view name `_pg_ripple.vp_{id}`.
+/// In v0.6.0+, this creates delta + main + tombstones + view.
 fn ensure_vp_table(predicate_id: i64) -> String {
-    // Check whether a dedicated table already exists.
+    // Check whether a dedicated table/view already exists.
     let existing = match Spi::get_one_with_args::<String>(
         "SELECT '_pg_ripple.vp_' || id::text \
          FROM _pg_ripple.predicates WHERE id = $1 AND table_oid IS NOT NULL",
@@ -296,64 +299,13 @@ fn ensure_vp_table(predicate_id: i64) -> String {
         return table;
     }
 
-    let table = format!("_pg_ripple.vp_{predicate_id}");
+    // Create the HTAP split (delta + main + tombstones + view).
+    let view = merge::ensure_htap_tables(predicate_id);
 
-    Spi::run_with_args(
-        &format!(
-            "CREATE TABLE IF NOT EXISTS {table} ( \
-                 s      BIGINT NOT NULL, \
-                 o      BIGINT NOT NULL, \
-                 g      BIGINT NOT NULL DEFAULT 0, \
-                 i      BIGINT NOT NULL DEFAULT nextval('_pg_ripple.statement_id_seq'), \
-                 source SMALLINT NOT NULL DEFAULT 0 \
-             )"
-        ),
-        &[],
-    )
-    .unwrap_or_else(|e| pgrx::error!("VP table creation SPI error: {e}"));
+    // Install CDC trigger on the new delta table.
+    crate::cdc::install_trigger(predicate_id);
 
-    Spi::run_with_args(
-        &format!(
-            "CREATE INDEX IF NOT EXISTS idx_vp_{predicate_id}_s_o \
-         ON {table} (s, o)"
-        ),
-        &[],
-    )
-    .unwrap_or_else(|e| pgrx::error!("VP table index 1 SPI error: {e}"));
-
-    Spi::run_with_args(
-        &format!(
-            "CREATE INDEX IF NOT EXISTS idx_vp_{predicate_id}_o_s \
-         ON {table} (o, s)"
-        ),
-        &[],
-    )
-    .unwrap_or_else(|e| pgrx::error!("VP table index 2 SPI error: {e}"));
-
-    // Optional named-graph index when GUC is enabled.
-    if named_graph_optimized() {
-        Spi::run_with_args(
-            &format!(
-                "CREATE INDEX IF NOT EXISTS idx_vp_{predicate_id}_g_s_o \
-                 ON {table} (g, s, o)"
-            ),
-            &[],
-        )
-        .unwrap_or_else(|e| pgrx::error!("VP table g-s-o index SPI error: {e}"));
-    }
-
-    Spi::run_with_args(
-        "INSERT INTO _pg_ripple.predicates (id, table_oid, triple_count) \
-         VALUES ($1, $2::regclass::oid, 0) \
-         ON CONFLICT (id) DO UPDATE SET table_oid = EXCLUDED.table_oid",
-        &[
-            DatumWithOid::from(predicate_id),
-            DatumWithOid::from(table.as_str()),
-        ],
-    )
-    .unwrap_or_else(|e| pgrx::error!("predicate catalog insert SPI error: {e}"));
-
-    table
+    view
 }
 
 /// Check if a dedicated VP table exists for `predicate_id`.
@@ -393,14 +345,16 @@ fn insert_into_vp_rare(p_id: i64, s_id: i64, o_id: i64, g: i64) -> i64 {
     sid
 }
 
-/// Promote a single predicate from vp_rare to its own VP table.
+/// Promote a single predicate from vp_rare to its own VP table (HTAP split).
 fn promote_predicate(p_id: i64) {
-    let table = ensure_vp_table(p_id);
+    // ensure_vp_table creates the HTAP split (delta + main + tombstones + view).
+    ensure_vp_table(p_id);
+    let delta = format!("_pg_ripple.vp_{p_id}_delta");
 
-    // Move rows from vp_rare to the dedicated table.
+    // Move rows from vp_rare to the dedicated delta table.
     Spi::run_with_args(
         &format!(
-            "INSERT INTO {table} (s, o, g, i, source) \
+            "INSERT INTO {delta} (s, o, g, i, source) \
              SELECT s, o, g, i, source FROM _pg_ripple.vp_rare WHERE p = $1"
         ),
         &[DatumWithOid::from(p_id)],
@@ -457,10 +411,11 @@ pub fn insert_triple(s: &str, p: &str, o: &str, g: i64) -> i64 {
     let p_id = dictionary::encode(strip_angle_brackets(p), dictionary::KIND_IRI);
     let o_id = encode_rdf_term(o);
 
-    // Fast path: dedicated VP table already exists.
-    if let Some(table) = get_dedicated_vp_table(p_id) {
+    // Fast path: dedicated VP table (HTAP split) already exists — insert to delta.
+    if let Some(_view) = get_dedicated_vp_table(p_id) {
+        let delta = format!("_pg_ripple.vp_{p_id}_delta");
         let sid = Spi::get_one_with_args::<i64>(
-            &format!("INSERT INTO {table} (s, o, g) VALUES ($1, $2, $3) RETURNING i"),
+            &format!("INSERT INTO {delta} (s, o, g) VALUES ($1, $2, $3) RETURNING i"),
             &[
                 DatumWithOid::from(s_id),
                 DatumWithOid::from(o_id),
@@ -475,6 +430,9 @@ pub fn insert_triple(s: &str, p: &str, o: &str, g: i64) -> i64 {
             &[DatumWithOid::from(p_id)],
         )
         .unwrap_or_else(|e| pgrx::error!("predicate count update SPI error: {e}"));
+
+        // Update shmem delta counter for merge worker triggering.
+        crate::shmem::record_delta_inserts(1);
 
         return sid;
     }
@@ -503,9 +461,11 @@ pub fn insert_triple(s: &str, p: &str, o: &str, g: i64) -> i64 {
 /// Does NOT check/trigger promotion (bulk load calls promote_rare_predicates at end).
 #[allow(dead_code)]
 pub fn insert_encoded_triple(s_id: i64, p_id: i64, o_id: i64, g: i64) -> i64 {
-    if let Some(table) = get_dedicated_vp_table(p_id) {
+    if let Some(_view) = get_dedicated_vp_table(p_id) {
+        // Route insert to delta table (HTAP write inbox).
+        let delta = format!("_pg_ripple.vp_{p_id}_delta");
         let sid = Spi::get_one_with_args::<i64>(
-            &format!("INSERT INTO {table} (s, o, g) VALUES ($1, $2, $3) RETURNING i"),
+            &format!("INSERT INTO {delta} (s, o, g) VALUES ($1, $2, $3) RETURNING i"),
             &[
                 DatumWithOid::from(s_id),
                 DatumWithOid::from(o_id),
@@ -521,6 +481,7 @@ pub fn insert_encoded_triple(s_id: i64, p_id: i64, o_id: i64, g: i64) -> i64 {
         )
         .unwrap_or_else(|e| pgrx::error!("predicate count update SPI error: {e}"));
 
+        crate::shmem::record_delta_inserts(1);
         return sid;
     }
 
@@ -538,15 +499,17 @@ pub fn batch_insert_encoded(p_id: i64, rows: &[(i64, i64, i64)]) -> i64 {
 
     let table_opt = get_dedicated_vp_table(p_id);
 
-    if let Some(ref table) = table_opt {
+    if let Some(_view) = table_opt {
+        // Route batch insert to delta table.
+        let delta = format!("_pg_ripple.vp_{p_id}_delta");
         // Build a multi-row VALUES insert (all i64 integers — injection-safe).
         let values: Vec<String> = rows
             .iter()
             .map(|(s, o, g)| format!("({},{},{})", s, o, g))
             .collect();
-        let sql = format!("INSERT INTO {table} (s, o, g) VALUES {}", values.join(","));
+        let sql = format!("INSERT INTO {delta} (s, o, g) VALUES {}", values.join(","));
         Spi::run_with_args(&sql, &[])
-            .unwrap_or_else(|e| pgrx::error!("batch VP insert SPI error: {e}"));
+            .unwrap_or_else(|e| pgrx::error!("batch VP delta insert SPI error: {e}"));
 
         let cnt = rows.len() as i64;
         Spi::run_with_args(
@@ -554,6 +517,8 @@ pub fn batch_insert_encoded(p_id: i64, rows: &[(i64, i64, i64)]) -> i64 {
             &[DatumWithOid::from(p_id), DatumWithOid::from(cnt)],
         )
         .unwrap_or_else(|e| pgrx::error!("predicate count batch update SPI error: {e}"));
+
+        crate::shmem::record_delta_inserts(cnt);;
     } else {
         // Insert into vp_rare in bulk.
         let values: Vec<String> = rows
@@ -589,11 +554,15 @@ pub fn delete_triple(s: &str, p: &str, o: &str, g: i64) -> i64 {
 
     let mut deleted = 0i64;
 
-    // Try dedicated VP table first.
-    if let Some(table) = get_dedicated_vp_table(p_id) {
+    // Try dedicated VP table (HTAP split).
+    if let Some(_view) = get_dedicated_vp_table(p_id) {
+        let delta = format!("_pg_ripple.vp_{p_id}_delta");
+        let tombs = format!("_pg_ripple.vp_{p_id}_tombstones");
+
+        // 1. Try to delete from delta first (fast path).
         let d = Spi::get_one_with_args::<i64>(
             &format!(
-                "WITH d AS (DELETE FROM {table} WHERE s=$1 AND o=$2 AND g=$3 RETURNING 1) \
+                "WITH d AS (DELETE FROM {delta} WHERE s=$1 AND o=$2 AND g=$3 RETURNING 1) \
                  SELECT count(*)::bigint FROM d"
             ),
             &[
@@ -602,17 +571,50 @@ pub fn delete_triple(s: &str, p: &str, o: &str, g: i64) -> i64 {
                 DatumWithOid::from(g),
             ],
         )
-        .unwrap_or_else(|e| pgrx::error!("triple delete SPI error: {e}"))
+        .unwrap_or_else(|e| pgrx::error!("triple delete delta SPI error: {e}"))
         .unwrap_or(0);
 
         if d > 0 {
+            deleted += d;
+        } else {
+            // 2. Not in delta — add a tombstone to suppress it from main.
+            Spi::run_with_args(
+                &format!(
+                    "INSERT INTO {tombs} (s, o, g) VALUES ($1, $2, $3) \
+                     ON CONFLICT DO NOTHING"
+                ),
+                &[
+                    DatumWithOid::from(s_id),
+                    DatumWithOid::from(o_id),
+                    DatumWithOid::from(g),
+                ],
+            )
+            .unwrap_or_else(|e| pgrx::error!("tombstone insert SPI error: {e}"));
+
+            // Check if the triple actually existed in main.
+            let in_main = Spi::get_one_with_args::<i64>(
+                &format!(
+                    "SELECT count(*)::bigint FROM _pg_ripple.vp_{p_id}_main \
+                     WHERE s = $1 AND o = $2 AND g = $3"
+                ),
+                &[
+                    DatumWithOid::from(s_id),
+                    DatumWithOid::from(o_id),
+                    DatumWithOid::from(g),
+                ],
+            )
+            .unwrap_or(None)
+            .unwrap_or(0);
+            deleted += in_main;
+        }
+
+        if deleted > 0 {
             Spi::run_with_args(
                 "UPDATE _pg_ripple.predicates \
                  SET triple_count = GREATEST(0, triple_count - $2) WHERE id = $1",
-                &[DatumWithOid::from(p_id), DatumWithOid::from(d)],
+                &[DatumWithOid::from(p_id), DatumWithOid::from(deleted)],
             )
             .unwrap_or_else(|e| pgrx::error!("predicate count update SPI error: {e}"));
-            deleted += d;
         }
     }
 
@@ -904,17 +906,38 @@ pub fn drop_graph(graph_iri: &str) -> i64 {
     });
 
     for p_id in pred_ids {
-        let table = format!("_pg_ripple.vp_{p_id}");
-        let d = Spi::get_one_with_args::<i64>(
+        // For HTAP split: delete from delta + add tombstones for main rows.
+        let delta = format!("_pg_ripple.vp_{p_id}_delta");
+        let tombs = format!("_pg_ripple.vp_{p_id}_tombstones");
+        let main_t = format!("_pg_ripple.vp_{p_id}_main");
+
+        // Delete from delta.
+        let d_delta = Spi::get_one_with_args::<i64>(
             &format!(
-                "WITH d AS (DELETE FROM {table} WHERE g = $1 RETURNING 1) \
+                "WITH d AS (DELETE FROM {delta} WHERE g = $1 RETURNING 1) \
                  SELECT count(*)::bigint FROM d"
             ),
             &[DatumWithOid::from(g_id)],
         )
-        .unwrap_or_else(|e| pgrx::error!("drop_graph VP delete SPI error: {e}"))
+        .unwrap_or_else(|e| pgrx::error!("drop_graph delta delete SPI error: {e}"))
         .unwrap_or(0);
 
+        // Add tombstones for main rows (to suppress them from the view).
+        let d_main = Spi::get_one_with_args::<i64>(
+            &format!(
+                "WITH ins AS ( \
+                     INSERT INTO {tombs} (s, o, g) \
+                     SELECT s, o, g FROM {main_t} WHERE g = $1 \
+                     ON CONFLICT DO NOTHING \
+                     RETURNING 1 \
+                 ) SELECT count(*)::bigint FROM ins"
+            ),
+            &[DatumWithOid::from(g_id)],
+        )
+        .unwrap_or_else(|e| pgrx::error!("drop_graph tombstones SPI error: {e}"))
+        .unwrap_or(0);
+
+        let d = d_delta + d_main;
         if d > 0 {
             Spi::run_with_args(
                 "UPDATE _pg_ripple.predicates \
@@ -1147,11 +1170,14 @@ pub fn insert_triple_by_ids(s_id: i64, p_id: i64, o_id: i64, g_id: i64) -> i64 {
 pub fn delete_triple_by_ids(s_id: i64, p_id: i64, o_id: i64, g_id: i64) -> i64 {
     let mut deleted = 0i64;
 
-    // Try dedicated VP table.
-    if let Some(table) = get_dedicated_vp_table(p_id) {
+    // Try dedicated VP table (HTAP: delta first, then tombstone).
+    if let Some(_view) = get_dedicated_vp_table(p_id) {
+        let delta = format!("_pg_ripple.vp_{p_id}_delta");
+        let tombs = format!("_pg_ripple.vp_{p_id}_tombstones");
+
         let d = Spi::get_one_with_args::<i64>(
             &format!(
-                "WITH d AS (DELETE FROM {table} WHERE s=$1 AND o=$2 AND g=$3 RETURNING 1) \
+                "WITH d AS (DELETE FROM {delta} WHERE s=$1 AND o=$2 AND g=$3 RETURNING 1) \
                  SELECT count(*)::bigint FROM d"
             ),
             &[
@@ -1160,16 +1186,49 @@ pub fn delete_triple_by_ids(s_id: i64, p_id: i64, o_id: i64, g_id: i64) -> i64 {
                 DatumWithOid::from(g_id),
             ],
         )
-        .unwrap_or_else(|e| pgrx::error!("delete_triple_by_ids SPI error: {e}"))
+        .unwrap_or_else(|e| pgrx::error!("delete_triple_by_ids delta SPI error: {e}"))
         .unwrap_or(0);
+
         if d > 0 {
+            deleted += d;
+        } else {
+            // Add tombstone to suppress from main.
+            Spi::run_with_args(
+                &format!(
+                    "INSERT INTO {tombs} (s, o, g) VALUES ($1, $2, $3) \
+                     ON CONFLICT DO NOTHING"
+                ),
+                &[
+                    DatumWithOid::from(s_id),
+                    DatumWithOid::from(o_id),
+                    DatumWithOid::from(g_id),
+                ],
+            )
+            .unwrap_or_else(|e| pgrx::error!("tombstone insert SPI error: {e}"));
+
+            let in_main = Spi::get_one_with_args::<i64>(
+                &format!(
+                    "SELECT count(*)::bigint FROM _pg_ripple.vp_{p_id}_main \
+                     WHERE s = $1 AND o = $2 AND g = $3"
+                ),
+                &[
+                    DatumWithOid::from(s_id),
+                    DatumWithOid::from(o_id),
+                    DatumWithOid::from(g_id),
+                ],
+            )
+            .unwrap_or(None)
+            .unwrap_or(0);
+            deleted += in_main;
+        }
+
+        if deleted > 0 {
             Spi::run_with_args(
                 "UPDATE _pg_ripple.predicates \
                  SET triple_count = GREATEST(0, triple_count - $2) WHERE id = $1",
-                &[DatumWithOid::from(p_id), DatumWithOid::from(d)],
+                &[DatumWithOid::from(p_id), DatumWithOid::from(deleted)],
             )
             .unwrap_or_else(|e| pgrx::error!("predicate count update SPI error: {e}"));
-            deleted += d;
         }
     }
 

@@ -1019,9 +1019,10 @@ dependencies = [
 
 [[package]]
 name = "pg_ripple"
-version = "0.5.1"
+version = "0.6.0"
 dependencies = [
  "chrono",
+ "libc",
  "lru",
  "pgrx",
  "pgrx-tests",

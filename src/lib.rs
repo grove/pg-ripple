@@ -7,17 +7,23 @@
 //! tables in the `_pg_ripple` schema (see `src/storage/`).  SPARQL queries
 //! are parsed with `spargebra`, compiled to SQL, and executed via SPI
 //! (see `src/sparql/`).
+//!
+//! In v0.6.0 (HTAP Architecture), VP tables are split into delta + main
+//! partitions for non-blocking concurrent reads and writes.
 
 use pgrx::guc::{GucContext, GucFlags};
 use pgrx::prelude::*;
 
 mod bulk_load;
+mod cdc;
 mod dictionary;
 mod error;
 mod export;
 mod fts;
+mod shmem;
 mod sparql;
 mod storage;
+mod worker;
 
 pgrx::pg_module_magic!();
 
@@ -71,6 +77,27 @@ pub static MAX_PATH_DEPTH: pgrx::GucSetting<i32> = pgrx::GucSetting::<i32>::new(
 /// 'scbd' (Symmetric CBD, includes incoming arcs), 'simple' (one-hop only).
 pub static DESCRIBE_STRATEGY: pgrx::GucSetting<Option<std::ffi::CString>> =
     pgrx::GucSetting::<Option<std::ffi::CString>>::new(None);
+
+// ─── v0.6.0 GUCs ─────────────────────────────────────────────────────────────
+
+/// GUC: minimum rows in a delta table before triggering a merge.
+pub static MERGE_THRESHOLD: pgrx::GucSetting<i32> = pgrx::GucSetting::<i32>::new(10_000);
+
+/// GUC: maximum seconds between merge worker polling intervals.
+pub static MERGE_INTERVAL_SECS: pgrx::GucSetting<i32> = pgrx::GucSetting::<i32>::new(60);
+
+/// GUC: seconds to keep the old main table after a merge before dropping it.
+pub static MERGE_RETENTION_SECONDS: pgrx::GucSetting<i32> = pgrx::GucSetting::<i32>::new(60);
+
+/// GUC: number of rows written in one batch before poking the merge worker.
+pub static LATCH_TRIGGER_THRESHOLD: pgrx::GucSetting<i32> = pgrx::GucSetting::<i32>::new(10_000);
+
+/// GUC: database the merge background worker connects to.
+pub static WORKER_DATABASE: pgrx::GucSetting<Option<std::ffi::CString>> =
+    pgrx::GucSetting::<Option<std::ffi::CString>>::new(None);
+
+/// GUC: seconds before the merge worker watchdog logs a WARNING for inactivity.
+pub static MERGE_WATCHDOG_TIMEOUT: pgrx::GucSetting<i32> = pgrx::GucSetting::<i32>::new(300);
 
 /// Called once when the extension shared library is loaded.
 #[allow(non_snake_case)]
@@ -135,6 +162,82 @@ pub extern "C-unwind" fn _PG_init() {
         GucContext::Userset,
         GucFlags::default(),
     );
+
+    // ── v0.6.0 GUCs ──────────────────────────────────────────────────────────
+
+    pgrx::GucRegistry::define_int_guc(
+        c"pg_ripple.merge_threshold",
+        c"Minimum rows in a delta table before triggering a background merge (default: 10000)",
+        c"",
+        &MERGE_THRESHOLD,
+        1,
+        i32::MAX,
+        GucContext::Sighup,
+        GucFlags::default(),
+    );
+
+    pgrx::GucRegistry::define_int_guc(
+        c"pg_ripple.merge_interval_secs",
+        c"Maximum seconds between merge worker polling cycles (default: 60)",
+        c"",
+        &MERGE_INTERVAL_SECS,
+        1,
+        3600,
+        GucContext::Sighup,
+        GucFlags::default(),
+    );
+
+    pgrx::GucRegistry::define_int_guc(
+        c"pg_ripple.merge_retention_seconds",
+        c"Seconds to keep the previous main table after a merge before dropping it (default: 60)",
+        c"",
+        &MERGE_RETENTION_SECONDS,
+        0,
+        86400,
+        GucContext::Sighup,
+        GucFlags::default(),
+    );
+
+    pgrx::GucRegistry::define_int_guc(
+        c"pg_ripple.latch_trigger_threshold",
+        c"Rows written in one batch before poking the merge worker latch (default: 10000)",
+        c"",
+        &LATCH_TRIGGER_THRESHOLD,
+        1,
+        i32::MAX,
+        GucContext::Sighup,
+        GucFlags::default(),
+    );
+
+    pgrx::GucRegistry::define_string_guc(
+        c"pg_ripple.worker_database",
+        c"Database the background merge worker connects to (default: postgres)",
+        c"",
+        &WORKER_DATABASE,
+        GucContext::Sighup,
+        GucFlags::default(),
+    );
+
+    pgrx::GucRegistry::define_int_guc(
+        c"pg_ripple.merge_watchdog_timeout",
+        c"Seconds of merge worker inactivity before a WARNING is logged (default: 300)",
+        c"",
+        &MERGE_WATCHDOG_TIMEOUT,
+        10,
+        86400,
+        GucContext::Sighup,
+        GucFlags::default(),
+    );
+
+    // ── Shared memory initialisation (v0.6.0) ────────────────────────────────
+    // Only registers shmem hooks (pg_shmem_init!) when running in postmaster
+    // context (i.e. loaded via shared_preload_libraries).  When loaded via
+    // CREATE EXTENSION the hooks have already fired; skip to avoid the
+    // "PgAtomic was not initialized" panic.
+    if unsafe { pg_sys::IsPostmasterEnvironment } {
+        shmem::init();
+        worker::register_merge_worker();
+    }
 
     // Initialize schemas and base tables.
     storage::initialize_schema();
@@ -462,6 +565,137 @@ mod pg_ripple {
         let rows: Vec<(String, String, String)> =
             crate::fts::fts_search(query, predicate).collect();
         TableIterator::new(rows)
+    }
+
+    // ── HTAP maintenance (v0.6.0) ─────────────────────────────────────────────
+
+    /// Trigger an immediate full merge of all HTAP VP tables.
+    ///
+    /// Moves all rows from delta into main, rebuilds subject_patterns and
+    /// object_patterns, and runs ANALYZE on each merged table.
+    /// Returns the total number of rows in all merged main tables.
+    #[pg_extern]
+    fn compact() -> i64 {
+        crate::storage::merge::compact()
+    }
+
+    /// Migrate an existing flat VP table (pre-v0.6.0) to the HTAP partition split.
+    ///
+    /// Called automatically by the v0.5.1→v0.6.0 migration script, but can
+    /// also be called manually if needed.  The predicate is specified by its
+    /// dictionary integer ID.
+    #[pg_extern]
+    fn htap_migrate_predicate(pred_id: i64) {
+        crate::storage::merge::migrate_flat_to_htap(pred_id);
+    }
+
+    // ── Statistics (v0.6.0) ───────────────────────────────────────────────────
+
+    /// Return extension statistics as JSONB.
+    ///
+    /// Includes total triple count, per-predicate storage sizes, delta/main
+    /// split counts, and (when shared_preload_libraries is set) cache hit ratio.
+    ///
+    /// ```sql
+    /// SELECT pg_ripple.stats();
+    /// ```
+    #[pg_extern]
+    fn stats() -> pgrx::JsonB {
+        let total: i64 = crate::storage::total_triple_count();
+
+        let pred_count: i64 = pgrx::Spi::get_one::<i64>(
+            "SELECT count(*)::bigint FROM _pg_ripple.predicates WHERE table_oid IS NOT NULL",
+        )
+        .unwrap_or(None)
+        .unwrap_or(0);
+
+        let rare_count: i64 = pgrx::Spi::get_one::<i64>(
+            "SELECT count(*)::bigint FROM _pg_ripple.vp_rare",
+        )
+        .unwrap_or(None)
+        .unwrap_or(0);
+
+        let htap_count: i64 = pgrx::Spi::get_one::<i64>(
+            "SELECT count(*)::bigint FROM _pg_ripple.predicates WHERE htap = true",
+        )
+        .unwrap_or(None)
+        .unwrap_or(0);
+
+        let delta_rows: i64 = if crate::shmem::SHMEM_READY.load(std::sync::atomic::Ordering::Acquire) {
+            crate::shmem::TOTAL_DELTA_ROWS
+                .get()
+                .load(std::sync::atomic::Ordering::Relaxed)
+        } else {
+            -1 // shmem not available (loaded without shared_preload_libraries)
+        };
+
+        let merge_pid: i32 = if crate::shmem::SHMEM_READY.load(std::sync::atomic::Ordering::Acquire) {
+            crate::shmem::MERGE_WORKER_PID
+                .get()
+                .load(std::sync::atomic::Ordering::Relaxed)
+        } else {
+            0
+        };
+
+        let mut obj = serde_json::Map::new();
+        obj.insert("total_triples".to_string(), serde_json::json!(total));
+        obj.insert("dedicated_predicates".to_string(), serde_json::json!(pred_count));
+        obj.insert("htap_predicates".to_string(), serde_json::json!(htap_count));
+        obj.insert("rare_triples".to_string(), serde_json::json!(rare_count));
+        obj.insert("unmerged_delta_rows".to_string(), serde_json::json!(delta_rows));
+        obj.insert("merge_worker_pid".to_string(), serde_json::json!(merge_pid));
+
+        pgrx::JsonB(serde_json::Value::Object(obj))
+    }
+
+    // ── Change Data Capture (v0.6.0) ──────────────────────────────────────────
+
+    /// Subscribe to triple change notifications on a NOTIFY channel.
+    ///
+    /// `pattern` is a predicate IRI (e.g. `<https://schema.org/name>`) or
+    /// `'*'` for all predicates.  Notifications fire on INSERT and DELETE in
+    /// the matching VP delta tables.  Returns the subscription ID.
+    ///
+    /// ```sql
+    /// SELECT pg_ripple.subscribe('<https://schema.org/name>', 'my_channel');
+    /// LISTEN my_channel;
+    /// ```
+    #[pg_extern]
+    fn subscribe(pattern: &str, channel: &str) -> i64 {
+        crate::cdc::subscribe(pattern, channel)
+    }
+
+    /// Remove all subscriptions for a notification channel.  Returns count removed.
+    #[pg_extern]
+    fn unsubscribe(channel: &str) -> i64 {
+        crate::cdc::unsubscribe(channel)
+    }
+
+    // ── Subject / Object pattern index (v0.6.0) ───────────────────────────────
+
+    /// Return the sorted array of predicate IDs for a given subject ID.
+    ///
+    /// Uses the `_pg_ripple.subject_patterns` index populated by the merge worker.
+    /// Returns NULL if the subject has not been indexed yet (before first merge).
+    #[pg_extern]
+    fn subject_predicates(subject_id: i64) -> Option<Vec<i64>> {
+        pgrx::Spi::get_one_with_args::<Vec<i64>>(
+            "SELECT pattern FROM _pg_ripple.subject_patterns WHERE s = $1",
+            &[pgrx::datum::DatumWithOid::from(subject_id)],
+        )
+        .unwrap_or(None)
+    }
+
+    /// Return the sorted array of predicate IDs for a given object ID.
+    ///
+    /// Uses the `_pg_ripple.object_patterns` index populated by the merge worker.
+    #[pg_extern]
+    fn object_predicates(object_id: i64) -> Option<Vec<i64>> {
+        pgrx::Spi::get_one_with_args::<Vec<i64>>(
+            "SELECT pattern FROM _pg_ripple.object_patterns WHERE o = $1",
+            &[pgrx::datum::DatumWithOid::from(object_id)],
+        )
+        .unwrap_or(None)
     }
 }
 

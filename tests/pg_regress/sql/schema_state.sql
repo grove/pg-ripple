@@ -65,3 +65,27 @@ SELECT EXISTS (
     WHERE table_schema = 'pg_ripple'
       AND table_name   = 'predicate_stats'
 ) AS predicate_stats_view_exists;
+
+-- ── v0.6.0: predicates.htap column ───────────────────────────────────────────
+
+SELECT column_name, data_type, is_nullable
+FROM information_schema.columns
+WHERE table_schema = '_pg_ripple'
+  AND table_name   = 'predicates'
+  AND column_name  = 'htap';
+
+-- ── v0.6.0: subject_patterns and object_patterns tables ──────────────────────
+
+SELECT table_name
+FROM information_schema.tables
+WHERE table_schema = '_pg_ripple'
+  AND table_name IN ('subject_patterns', 'object_patterns')
+ORDER BY table_name;
+
+-- ── v0.6.0: cdc_subscriptions table ──────────────────────────────────────────
+
+SELECT EXISTS (
+    SELECT 1 FROM information_schema.tables
+    WHERE table_schema = '_pg_ripple'
+      AND table_name   = 'cdc_subscriptions'
+) AS cdc_subscriptions_exists;

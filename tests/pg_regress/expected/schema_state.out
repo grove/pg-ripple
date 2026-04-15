@@ -58,7 +58,8 @@ ORDER BY ordinal_position;
  id
  table_oid
  triple_count
-(3 rows)
+ htap
+(4 rows)
 
 -- ── vp_rare table (including source column from v0.1.0 base) ─────────────────
 SELECT column_name
@@ -97,6 +98,40 @@ SELECT EXISTS (
 ) AS predicate_stats_view_exists;
  predicate_stats_view_exists 
 -----------------------------
+ t
+(1 row)
+
+-- ── v0.6.0: predicates.htap column ───────────────────────────────────────────
+SELECT column_name, data_type, is_nullable
+FROM information_schema.columns
+WHERE table_schema = '_pg_ripple'
+  AND table_name   = 'predicates'
+  AND column_name  = 'htap';
+ column_name | data_type | is_nullable 
+-------------+-----------+-------------
+ htap        | boolean   | NO
+(1 row)
+
+-- ── v0.6.0: subject_patterns and object_patterns tables ──────────────────────
+SELECT table_name
+FROM information_schema.tables
+WHERE table_schema = '_pg_ripple'
+  AND table_name IN ('subject_patterns', 'object_patterns')
+ORDER BY table_name;
+    table_name    
+------------------
+ object_patterns
+ subject_patterns
+(2 rows)
+
+-- ── v0.6.0: cdc_subscriptions table ──────────────────────────────────────────
+SELECT EXISTS (
+    SELECT 1 FROM information_schema.tables
+    WHERE table_schema = '_pg_ripple'
+      AND table_name   = 'cdc_subscriptions'
+) AS cdc_subscriptions_exists;
+ cdc_subscriptions_exists 
+--------------------------
  t
 (1 row)
 

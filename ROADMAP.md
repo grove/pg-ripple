@@ -403,7 +403,7 @@ Inline value encoding eliminates dictionary lookups for numeric and date FILTER 
 
 ### Deliverables
 
-- [ ] **Delta/Main partition split — schema migration**
+- [x] **Delta/Main partition split — schema migration**
   - Each VP table is migrated from its flat single-table form (v0.1.0–v0.5.1) to a dual-partition form:
     1. `CREATE TABLE _pg_ripple.vp_{id}_delta AS SELECT * FROM _pg_ripple.vp_{id}` (copy existing rows to delta)
     2. `CREATE TABLE _pg_ripple.vp_{id}_main (LIKE _pg_ripple.vp_{id})` (empty main, BRIN-indexed)
@@ -415,17 +415,17 @@ Inline value encoding eliminates dictionary lookups for numeric and date FILTER 
   - `vp_rare` is **not** split (see vp_rare HTAP exemption below); all reads and writes target the single `vp_rare` table throughout
   - All writes target `_delta`; `_main` is append-only / read-optimized
   - Query path: `UNION ALL` of `_main` and `_delta`
-- [ ] **Tombstone table for cross-partition deletes**
+- [x] **Tombstone table for cross-partition deletes**
   - When deleting a triple that may exist in `_main`, the delete is recorded in `_pg_ripple.vp_{id}_tombstones (s BIGINT, o BIGINT, g BIGINT)`
   - Query path becomes: `(main EXCEPT tombstones) UNION ALL delta`
   - The merge worker applies tombstones against main during each generation merge, then truncates the tombstone table
   - Necessary because `_main` is read-only between merges — a DELETE targeting a main-resident triple cannot modify `_main` directly
-- [ ] **`vp_rare` HTAP exemption**
+- [x] **`vp_rare` HTAP exemption**
   - `vp_rare` is **not** given a delta/main split — it remains a single flat table
   - Rare predicates see few writes by definition; delta/main overhead would exceed the benefit
   - Concurrent reads and writes on `vp_rare` are safe via PostgreSQL standard heap row-level locking
   - The bloom filter treats `vp_rare` conservatively (always queries it, no delta-skip shortcut)
-- [ ] **Background merge worker**
+- [x] **Background merge worker**
   - pgrx `BackgroundWorker` implementation
   - Configurable merge threshold via `pg_ripple.merge_threshold` GUC
   - **Concurrency & Locking logic**: The rename/truncate step requires an `AccessExclusiveLock`. To prevent stalling the database, the merge worker uses a low `lock_timeout` and retry logic for the `ALTER TABLE ... RENAME` statement, ensuring concurrent `INSERT` and `SELECT` operations are not blocked entirely by a queued exclusive lock.
@@ -449,19 +449,19 @@ Inline value encoding eliminates dictionary lookups for numeric and date FILTER 
   - `pg_ripple.cache_budget` GUC — utilization cap for the pre-allocated shared memory block (dictionary cache + bloom filters + merge worker buffers)
   - Automatic eviction priority: bloom filters reclaimed first, then oldest LRU dictionary entries
   - Back-pressure on bulk loads when shared memory is >90% of `cache_budget` — throttle batch size to prevent OOM
-- [ ] **Shared-memory slot versioning**
+- [x] **Shared-memory slot versioning**
   - Each shared memory slot (declared via pgrx 0.17's `pg_shmem_init!` macro) carries a `[u8; 8]` magic constant (e.g. `*b"pg_tripl"`) followed by a `u32` layout version at its head
   - Version mismatch at `_PG_init` triggers a controlled re-initialization of the slot rather than corrupting state — essential for safe in-place upgrades
   - **pgrx 0.17 API note**: all shared memory sizes must be declared statically in `_PG_init`. The `pg_ripple.shared_memory_size` startup GUC determines the block size; it cannot be changed at runtime. Use the pgrx 0.17 `PgSharedObject` / `PgSharedMem::new_object` API (not the old `PgSharedMem` from ≤0.14) — verify against the [pgrx 0.17 shmem examples](https://github.com/pgcentralfoundation/pgrx/tree/develop/pgrx-examples/shmem)
-- [ ] **`subject_patterns` lookup table**
+- [x] **`subject_patterns` lookup table**
   - `_pg_ripple.subject_patterns(s BIGINT, predicates BIGINT[])` with a GIN index on `predicates`
   - Maintained by the merge worker after each generation merge (not on individual INSERTs — amortized cost)
   - Enables fast "which predicates does subject X have?" look-up for DESCRIBE queries and star-pattern rewriting in the algebra optimizer
-- [ ] **`object_patterns` lookup table**
+- [x] **`object_patterns` lookup table**
   - `_pg_ripple.object_patterns(o BIGINT, predicates BIGINT[])` with a GIN index on `predicates`
   - Maintained by the merge worker alongside `subject_patterns`
   - Solves the "unbound object problem" by intercepting reverse-edge scattergun queries (`?s ?p <Object>`) in O(N) instead of forcing a `UNION ALL` across all VP tables
-- [ ] **Statistics**
+- [x] **Statistics**
   - `pg_ripple.stats()` JSONB: triple count, per-predicate counts, cache hit ratio, delta/main sizes
 - [ ] **pg_trickle integration: live statistics** *(optional, when pg_trickle is installed)*
   - `pg_ripple.enable_live_statistics()` creates `_pg_ripple.predicate_stats` and `_pg_ripple.graph_stats` stream tables
@@ -469,7 +469,7 @@ Inline value encoding eliminates dictionary lookups for numeric and date FILTER 
   - `_pg_ripple.rare_predicate_candidates` stream table (`IMMEDIATE` mode) replaces merge-worker GROUP BY polling for VP promotion detection ([§2.8](plans/ecosystem/pg_trickle.md))
   - `_pg_ripple.vp_cardinality` stream table provides live per-predicate row counts for BGP join reordering without waiting for ANALYZE ([§2.10](plans/ecosystem/pg_trickle.md))
   - `_pg_ripple.subject_patterns` managed as a stream table — stays current between merge cycles for DESCRIBE and GIN queries ([§2.12](plans/ecosystem/pg_trickle.md))
-- [ ] **Change notification / CDC**
+- [x] **Change notification / CDC**
   - `pg_ripple.subscribe(pattern TEXT, channel TEXT)` — emit `NOTIFY` on triple changes matching a predicate/graph pattern
   - Thin trigger-based CDC on VP delta tables; fires on INSERT/DELETE
   - Payload: JSON with `{"op": "insert"|"delete", "s": ..., "p": ..., "o": ..., "g": ...}` (integer IDs)
@@ -490,7 +490,7 @@ Inline value encoding eliminates dictionary lookups for numeric and date FILTER 
 - [ ] **Berlin SPARQL Benchmark (BSBM) execution** with HTAP workload mixing reads and writes
   - Full BSBM query mix under concurrent insert workload
   - Comparison baselines with v0.5.0 (single-table, no-HTAP) results
-- [ ] pg_regress: `htap_merge.sql`, `change_notification.sql`, `concurrent_write_merge.sql`, `htap_benchmarks.sql`
+- [x] pg_regress: `htap_merge.sql`, `change_notification.sql`, `concurrent_write_merge.sql`, `htap_benchmarks.sql`
 
 ### Documentation
 
