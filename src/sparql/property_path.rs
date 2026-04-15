@@ -43,9 +43,7 @@ fn pred_table_expr(nn: &NamedNode) -> Option<String> {
         "SELECT table_oid::bigint FROM _pg_ripple.predicates WHERE id = $1",
         &[DatumWithOid::from(pred_id)],
     ) {
-        Ok(Some(_oid)) => Some(format!(
-            "SELECT s, o FROM _pg_ripple.vp_{pred_id}"
-        )),
+        Ok(Some(_oid)) => Some(format!("SELECT s, o FROM _pg_ripple.vp_{pred_id}")),
         Ok(None) => Some(format!(
             "SELECT s, o FROM _pg_ripple.vp_rare WHERE p = {pred_id}"
         )),
@@ -110,7 +108,10 @@ pub fn compile_path(
         PropertyPathExpression::Reverse(inner) => {
             // Swap s_filter and o_filter when descending.
             let inner_sql = compile_path(inner, o_filter, s_filter, ctx, max_depth);
-            format!("(SELECT o AS s, s AS o FROM {inner_sql} _prev{})", ctx.next())
+            format!(
+                "(SELECT o AS s, s AS o FROM {inner_sql} _prev{})",
+                ctx.next()
+            )
         }
 
         // ── Sequence: a/b → join on intermediate node ────────────────────────
@@ -287,9 +288,7 @@ pub fn compile_path(
             };
             // Also include dedicated VP tables by unioning vp_rare with all dedicated VPs.
             // For simplicity in v0.5.0, use vp_rare union + dedicated table scan.
-            format!(
-                "(SELECT s, o FROM _pg_ripple.vp_rare _neg{n} {where_clause})"
-            )
+            format!("(SELECT s, o FROM _pg_ripple.vp_rare _neg{n} {where_clause})")
         }
     }
 }

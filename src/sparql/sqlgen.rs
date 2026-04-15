@@ -32,8 +32,8 @@ use spargebra::algebra::{
 };
 use spargebra::term::{GroundTerm, Literal, NamedNodePattern, TermPattern};
 
+use super::property_path::{PathCtx, compile_path};
 use crate::dictionary;
-use super::property_path::{compile_path, PathCtx};
 
 // ─── VP table resolution ─────────────────────────────────────────────────────
 
@@ -79,6 +79,7 @@ fn table_expr(src: &VpSource) -> String {
 /// Mutable state carried through recursive translation.
 struct Ctx {
     alias_counter: u32,
+    #[allow(dead_code)]
     opt_counter: u32,
     path_counter: u32,
     /// Per-query IRI/literal encoding cache — avoids repeated SPI look-ups.
@@ -101,6 +102,7 @@ impl Ctx {
         format!("_t{n}")
     }
 
+    #[allow(dead_code)]
     fn next_opt(&mut self) -> String {
         let n = self.opt_counter;
         self.opt_counter += 1;
@@ -196,6 +198,7 @@ impl Fragment {
     }
 
     /// Render as a subquery SELECT for all bound variables.
+    #[allow(dead_code)]
     fn as_subquery(&self, prefix: &str) -> String {
         if self.bindings.is_empty() {
             return format!(
@@ -586,10 +589,8 @@ fn translate_pattern(pattern: &GraphPattern, ctx: &mut Ctx) -> Fragment {
             let mut path_ctx = PathCtx::new(ctx.path_counter);
 
             // Determine bound constants for subject / object to push into the CTE.
-            let s_const: Option<String> =
-                ground_term_id(subject, ctx).map(|id| id.to_string());
-            let o_const: Option<String> =
-                ground_term_id(object, ctx).map(|id| id.to_string());
+            let s_const: Option<String> = ground_term_id(subject, ctx).map(|id| id.to_string());
+            let o_const: Option<String> = ground_term_id(object, ctx).map(|id| id.to_string());
 
             let path_sql = compile_path(
                 path,
@@ -652,14 +653,10 @@ fn translate_pattern(pattern: &GraphPattern, ctx: &mut Ctx) -> Fragment {
         }
 
         // ── UNION ────────────────────────────────────────────────────────────
-        GraphPattern::Union { left, right } => {
-            translate_union(left, right, ctx)
-        }
+        GraphPattern::Union { left, right } => translate_union(left, right, ctx),
 
         // ── MINUS (EXCEPT) ──────────────────────────────────────────────────
-        GraphPattern::Minus { left, right } => {
-            translate_minus(left, right, ctx)
-        }
+        GraphPattern::Minus { left, right } => translate_minus(left, right, ctx),
 
         // ── GROUP BY / Aggregates ────────────────────────────────────────────
         GraphPattern::Group {
@@ -682,8 +679,7 @@ fn translate_pattern(pattern: &GraphPattern, ctx: &mut Ctx) -> Fragment {
             let sql_expr = translate_expr_value(expression, &frag.bindings, ctx)
                 .or_else(|| translate_expr(expression, &frag.bindings, ctx));
             if let Some(expr) = sql_expr {
-                frag.bindings
-                    .insert(variable.as_str().to_owned(), expr);
+                frag.bindings.insert(variable.as_str().to_owned(), expr);
             }
             frag
         }
@@ -752,12 +748,10 @@ fn translate_union(left: &GraphPattern, right: &GraphPattern, ctx: &mut Ctx) -> 
     let union_subquery = format!("(({left_sql}) UNION ({right_sql}))");
 
     let mut frag = Fragment::empty();
-    frag.from_items
-        .push((alias.clone(), union_subquery));
+    frag.from_items.push((alias.clone(), union_subquery));
 
     for v in &all_vars {
-        frag.bindings
-            .insert(v.clone(), format!("{alias}._u_{v}"));
+        frag.bindings.insert(v.clone(), format!("{alias}._u_{v}"));
     }
 
     frag
@@ -849,8 +843,7 @@ fn translate_minus(left: &GraphPattern, right: &GraphPattern, ctx: &mut Ctx) -> 
     let mut frag = Fragment::empty();
     frag.from_items.push((alias.clone(), minus_sql));
     for v in left_frag.bindings.keys() {
-        frag.bindings
-            .insert(v.clone(), format!("{alias}._mn_{v}"));
+        frag.bindings.insert(v.clone(), format!("{alias}._mn_{v}"));
     }
     frag
 }
@@ -961,8 +954,7 @@ fn translate_group(
 
     // Bind group-by variables.
     for (v, _) in &group_cols {
-        frag.bindings
-            .insert(v.clone(), format!("{alias}._g_{v}"));
+        frag.bindings.insert(v.clone(), format!("{alias}._g_{v}"));
     }
     // Bind aggregate output variables.
     for (vname, _) in &agg_bindings {
@@ -990,8 +982,7 @@ fn translate_aggregate(agg: &AggregateExpression, bindings: &HashMap<String, Str
         } => {
             let distinct_kw = if *distinct { "DISTINCT " } else { "" };
             // Try to obtain the SQL column expression for the argument.
-            let arg = translate_agg_expr(expr, bindings)
-                .unwrap_or_else(|| "NULL".to_owned());
+            let arg = translate_agg_expr(expr, bindings).unwrap_or_else(|| "NULL".to_owned());
             match name {
                 AggregateFunction::Count => format!("COUNT({distinct_kw}{arg})"),
                 AggregateFunction::Sum => format!("SUM({distinct_kw}{arg})"),
@@ -1013,10 +1004,7 @@ fn translate_aggregate(agg: &AggregateExpression, bindings: &HashMap<String, Str
 }
 
 /// Obtain a SQL column reference for an expression used inside an aggregate.
-fn translate_agg_expr(
-    expr: &Expression,
-    bindings: &HashMap<String, String>,
-) -> Option<String> {
+fn translate_agg_expr(expr: &Expression, bindings: &HashMap<String, String>) -> Option<String> {
     match expr {
         Expression::Variable(v) => bindings.get(v.as_str()).cloned(),
         _ => None,
@@ -1097,9 +1085,7 @@ fn translate_values(
 /// Encode a `GroundTerm` (IRI or literal, no variables) to a dictionary ID.
 fn encode_ground_term(gt: &GroundTerm, ctx: &mut Ctx) -> i64 {
     match gt {
-        GroundTerm::NamedNode(nn) => {
-            ctx.encode_iri(nn.as_str()).unwrap_or(0)
-        }
+        GroundTerm::NamedNode(nn) => ctx.encode_iri(nn.as_str()).unwrap_or(0),
         GroundTerm::Literal(lit) => ctx.encode_literal(lit),
         // Triple terms (RDF-star) — look up quoted triple dictionary entry.
         GroundTerm::Triple(t) => {
