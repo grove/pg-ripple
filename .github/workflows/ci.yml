@@ -36,6 +36,9 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: ${{ runner.os }}-cargo-
 
+      - name: Clean stale pgrx test data
+        run: rm -rf target/test-pgdata
+
       - name: Cache cargo-pgrx binary
         uses: actions/cache@v5
         with:
@@ -83,7 +86,6 @@ jobs:
       - name: Run pg_test suite
         env:
           RUST_TEST_THREADS: "1"
-        continue-on-error: true
         run: cargo pgrx test pg18
 
   regress:
@@ -194,10 +196,9 @@ jobs:
           fi
 
       - name: Start pgrx PostgreSQL 18
-        run: cargo pgrx start pg18
+        run: cargo pgrx start pg18 --postgresql-conf "allow_system_table_mods=on"
 
       - name: Run migration chain test
-        continue-on-error: true
         run: bash tests/test_migration_chain.sh
 
       - name: Stop pgrx PostgreSQL 18

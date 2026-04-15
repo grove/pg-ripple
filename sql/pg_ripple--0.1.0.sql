@@ -4,6 +4,11 @@
 --
 -- Objects in _pg_ripple are internal; objects in pg_ripple are user-visible.
 
+-- Allow creating 'pg_ripple' schema: PostgreSQL 18 reserves the 'pg_' prefix
+-- for system schemas. allow_system_table_mods lifts this restriction and is
+-- safe for extension DDL (it does not bypass other safety checks).
+SET allow_system_table_mods = on;
+
 -- Guard against double-installation.
 DO $$
 BEGIN

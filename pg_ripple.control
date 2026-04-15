@@ -2,7 +2,8 @@
 # See: https://www.postgresql.org/docs/current/extend-extensions.html
 
 comment = 'High-performance RDF triple store with native SPARQL query execution'
-default_version = '0.5.0'  # MUST match the current release version
+# MUST match the current release version (keep in sync with Cargo.toml)
+default_version = '0.5.0'
 module_pathname = '$libdir/pg_ripple'
 relocatable = false
 superuser = true
