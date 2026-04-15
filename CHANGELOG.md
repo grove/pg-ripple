@@ -2,7 +2,6 @@
 
 All notable changes to pg_ripple are documented in this file.
 
-The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versions correspond to the milestones in [ROADMAP.md](ROADMAP.md).
 
 ---
@@ -13,9 +12,11 @@ Development towards [v0.9.0 (Serialization)](ROADMAP.md).
 
 ---
 
-## [0.8.0] — 2026-04-15 — SHACL Advanced
+## [0.8.0] — 2026-04-15 — Advanced Data Quality Rules
 
-This release completes the SHACL implementation with complex shape combinators and a background async validation pipeline. Data quality rules can now express "must be one of these types" (`sh:or`), "must satisfy all rules" (`sh:and`), "must not be this type" (`sh:not`), nested shape references (`sh:node`), and qualified cardinality (`sh:qualifiedValueShape`). The async pipeline lets high-throughput inserts proceed without blocking, with violations collected in a dead-letter queue for later review.
+This release rounds out the data quality system with more expressive rules and a background validation mode that never slows down your inserts.
+
+**New in this release:** Until now, each validation rule applied to a single property in isolation. You can now combine rules — "this value must satisfy rule A *or* rule B", "must satisfy *all* of these rules", "must *not* match this rule" — and count how many values on a property actually conform to a sub-rule. A background mode queues violations for later review instead of blocking every write.
 
 ### What you can do
 
