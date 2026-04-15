@@ -115,4 +115,86 @@ These are the mistakes most likely to produce silent bugs:
 - [ ] All ROADMAP.md deliverable checkboxes for this version are ticked (`- [x]`)
 - [ ] CHANGELOG.md updated
 - [ ] Commit staged (do not run `git commit` without user approval)
+
+## Completion Report
+
+When the implementation checklist is complete and all tests pass, generate a completion report that includes:
+
+### Report Structure
+
+1. **Version Summary**
+   - Version number and delivery name
+   - List of completed deliverables (major features only, not every checkbox)
+   - Lines of code added (via `git diff`)
+
+2. **Remaining Work**
+   - **Blockedby next version** — List any deliverables in the next ROADMAP.md version that depend on this version, to clarify the critical path
+   - **Deferred items** — Any items from the original ROADMAP.md spec that were descoped or moved to a future version, with brief justification
+   - **Outstanding PRs or issues** — Any related GitHub issues or PRs that are still open and non-blocking
+   - **Technical debt** — Any known limitations, TODOs in code, or performance concerns that should be addressed in the next version
+
+3. **Next Steps for the Next Version**
+   - Prerequisites to unblock (e.g., "SPARQL optimizer should be moved to v0.5 to allow v0.6 property-paths to land")
+   - Suggested focus areas for the next milestone
+   - Links to relevant ROADMAP.md section and implementation_plan.md sections
+
+### How to Generate the Report
+
+1. **Completed deliverables**: Extract from ROADMAP.md for this version; count `[x]` checkboxes in code and documentation sections.
+2. **Next version blockers**: Read ROADMAP.md section for next version; identify deliverables with explicit prerequisites (e.g., "requires v0.4 storage layer").
+3. **Deferred items**: Search ROADMAP.md and git commit history for items marked "descoped for vX.Y.Z" or similar; include reason.
+4. **Outstanding items**: Run `gh issue list -R grove/pg-ripple --label "defer" --label "backlog"` and `gh pr list -R grove/pg-ripple --draft` to find open items.
+5. **Code TODOs**: Run `grep -rn "TODO\|FIXME\|XXX" src/ --include="*.rs" | head -20` to surface code-level concerns.
+6. **Git stats**: Run `git log vX.(Y-1).Z..HEAD --oneline | wc -l` and `git diff vX.(Y-1).Z HEAD --stat --summary | tail -3` for diff stats.
+
+### Example Report
+
+```
+## Completion Report — v0.4.0 (SPARQL Intermediate)
+
+### Version Summary
+Delivered:
+- ✓ FILTER algebra and SQL codegen (12+ data types, 20+ SPARQL functions)
+- ✓ UNION, OPTIONAL, property paths, aggregates, ORDER BY, LIMIT
+- ✓ Query plan caching via LRU (25K plan limit)
+- ✓ Full regression test suite (28 new tests)
+
+Commits: 34 | Files: 16 | +3,847 −1,292 lines
+
+### Remaining Work
+
+**Blocked by v0.4.0 (Prerequisites for v0.5.0)**
+- Discovery of blank-node scope in SPARQL (needed for CONSTRUCT)
+- Bulk-load triples (load_generation prefix for blank-node scoping)
+- RDF-star support in dictionary (qt_s, qt_p, qt_o columns)
+
+**Deferred to v0.6.0+**
+- SPARQL CONSTRUCT (requires blank-node scoping from v0.5.0)
+- Graph metrics (EXPLAIN for VP table cardinality)
+- Datalog ← Pushed to v0.7.0 to sequence SHACL first
+
+**Outstanding & Non-Blocking**
+- PR #45: Optimize filter constants (draft, can land anytime)
+- Issue #102: Case-insensitive string comparison (backlog)
+
+**Code-Level Concerns**
+- TODO in sqlgen.rs line 421: "Optimize self-join elimination for star patterns"
+- XXX in property_path.rs: "CYCLE clause cycles detection may panic on large graphs; add timeout"
+
+### Next Up: v0.5.0 (SPARQL Advanced)
+**Must unblock first:**
+- Blank-node scoping design doc (RFC in plans/)
+- Decision: load_generation vs. document-local blank nodes
+
+**Success metrics:**
+- 100% SPARQL 1.1 query feature coverage (minus FEDERATED SPARQL)
+- Bulk load 1M+ triples in <30 seconds
+- All 8 SHACL shapes in test suite validate correctly
+
+**See also:**
+- [ROADMAP.md § v0.5.0](../ROADMAP.md#v050-sparql-advanced-storage-serialization--write)
+- [plans/implementation_plan.md § 4.4 Blank Nodes](../plans/implementation_plan.md#44-blank-node-scoping)
+```
+
+**Generate this report at version completion as a summary message to the user.** It provides visibility into progress, highlights what depends on this version, and frames the next milestone clearly.
 ```
