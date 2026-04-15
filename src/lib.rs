@@ -317,27 +317,33 @@ pub extern "C-unwind" fn _PG_init() {
         GucFlags::default(),
     );
 
-    pgrx::GucRegistry::define_int_guc(
-        c"pg_ripple.dictionary_cache_size",
-        c"Shared-memory encode-cache capacity in entries (default: 4096; startup only)",
-        c"",
-        &DICTIONARY_CACHE_SIZE,
-        0,
-        1_000_000,
-        GucContext::Postmaster,
-        GucFlags::default(),
-    );
+    // ── Postmaster-only GUCs and shared memory (v0.6.0) ─────────────────────
+    // PGC_POSTMASTER GUCs can only be registered during shared_preload_libraries
+    // loading (postmaster context).  When loaded via CREATE EXTENSION (regular
+    // backend), skip them — they are read-only startup parameters anyway.
+    if unsafe { pg_sys::IsPostmasterEnvironment } {
+        pgrx::GucRegistry::define_int_guc(
+            c"pg_ripple.dictionary_cache_size",
+            c"Shared-memory encode-cache capacity in entries (default: 4096; startup only)",
+            c"",
+            &DICTIONARY_CACHE_SIZE,
+            0,
+            1_000_000,
+            GucContext::Postmaster,
+            GucFlags::default(),
+        );
 
-    pgrx::GucRegistry::define_int_guc(
-        c"pg_ripple.cache_budget",
-        c"Shared-memory budget cap in MB; bulk loads throttle when >90% utilised (default: 64; startup only)",
-        c"",
-        &CACHE_BUDGET_MB,
-        0,
-        65536,
-        GucContext::Postmaster,
-        GucFlags::default(),
-    );
+        pgrx::GucRegistry::define_int_guc(
+            c"pg_ripple.cache_budget",
+            c"Shared-memory budget cap in MB; bulk loads throttle when >90% utilised (default: 64; startup only)",
+            c"",
+            &CACHE_BUDGET_MB,
+            0,
+            65536,
+            GucContext::Postmaster,
+            GucFlags::default(),
+        );
+    }
 
     // ── Shared memory initialisation (v0.6.0) ────────────────────────────────
     // Only registers shmem hooks (pg_shmem_init!) when running in postmaster

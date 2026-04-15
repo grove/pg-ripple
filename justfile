@@ -87,22 +87,22 @@ install:
 # Load BSBM data (default: scale factor 1)
 [group: "bench"]
 bench-bsbm-load scale="1":
-    psql -v scale={{scale}} -f benchmarks/bsbm/bsbm_load.sql
+    psql -h ~/.pgrx -p 28818 -d postgres -v scale={{scale}} -f benchmarks/bsbm/bsbm_load.sql
 
 # Run BSBM query mix (12 standard BSBM queries)
 [group: "bench"]
 bench-bsbm-queries:
-    psql -f benchmarks/bsbm/bsbm_queries.sql
+    psql -h ~/.pgrx -p 28818 -d postgres -f benchmarks/bsbm/bsbm_queries.sql
 
 # Run BSBM HTAP concurrent workload (insert + query under load)
 [group: "bench"]
 bench-bsbm-htap:
-    psql -f benchmarks/bsbm/bsbm_htap.sql
+    psql -h ~/.pgrx -p 28818 -d postgres -f benchmarks/bsbm/bsbm_htap.sql
 
 # Run pgbench BSBM sustained throughput test
 [group: "bench"]
 bench-bsbm-pgbench duration="60" clients="10" jobs="4":
-    pgbench -f benchmarks/bsbm/bsbm_pgbench.sql -T {{duration}} -c {{clients}} -j {{jobs}} postgres
+    pgbench -h ~/.pgrx -p 28818 -d postgres -f benchmarks/bsbm/bsbm_pgbench.sql -T {{duration}} -c {{clients}} -j {{jobs}}
 
 # Run all BSBM benchmarks in sequence (load → queries → HTAP → pgbench)
 [group: "bench"]
