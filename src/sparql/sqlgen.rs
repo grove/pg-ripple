@@ -416,10 +416,10 @@ fn translate_pattern(pattern: &GraphPattern, ctx: &mut Ctx) -> Fragment {
             let mut right_frag = translate_pattern(right, ctx);
 
             // Add the OPTIONAL filter expression to the right fragment, if any.
-            if let Some(expr) = expression {
-                if let Some(cond) = translate_expr(expr, &right_frag.bindings, ctx) {
-                    right_frag.conditions.push(cond);
-                }
+            if let Some(expr) = expression
+                && let Some(cond) = translate_expr(expr, &right_frag.bindings, ctx)
+            {
+                right_frag.conditions.push(cond);
             }
 
             // Shared variables (present in both sides).

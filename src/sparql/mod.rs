@@ -539,10 +539,10 @@ pub fn sparql_update(query_text: &str) -> i64 {
                         }
                     };
                     // Only attempt delete if all terms exist in the dictionary.
-                    if let (Some(s), Some(p), Some(o)) = (s_id, p_id, o_id) {
-                        if g_id >= 0 {
-                            affected += storage::delete_triple_by_ids(s, p, o, g_id);
-                        }
+                    if let (Some(s), Some(p), Some(o)) = (s_id, p_id, o_id)
+                        && g_id >= 0
+                    {
+                        affected += storage::delete_triple_by_ids(s, p, o, g_id);
                     }
                 }
             }
