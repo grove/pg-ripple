@@ -285,6 +285,22 @@ pub fn reset_bloom_filter() {
 
 // ─── Shared-memory encode cache API ──────────────────────────────────────────
 
+/// Mix the current database OID into a term hash so that entries from different
+/// databases never share a cache slot.  Without this, loading data into database
+/// A populates the cache with A's dictionary IDs, and a subsequent load into
+/// database B would hit those stale IDs — inserting wrong foreign-key values
+/// into B's VP tables.
+///
+/// Only used for the shared-memory cache key; the dictionary table still stores
+/// the original `hash128`.
+fn db_scoped_hash(hash128: u128) -> u128 {
+    let db_oid = u32::from(unsafe { pg_sys::MyDatabaseId }) as u128;
+    // Multiplicative mixing spreads the OID bits across the hash so that
+    // shard selection (top 2 bits) and slot selection (low 10 bits) both
+    // change when the database changes.
+    hash128 ^ db_oid.wrapping_mul(0x9E3779B97F4A7C15)
+}
+
 /// Select the shard for `hash128` based on the top 2 bits.
 fn shard_for(hash128: u128) -> usize {
     ((hash128 >> 126) as usize) & 3
@@ -330,9 +346,10 @@ pub fn encode_cache_lookup(hash128: u128) -> Option<i64> {
     if !SHMEM_READY.load(Ordering::Acquire) {
         return None;
     }
-    let shard = shard_for(hash128);
-    let slot = slot_for(hash128);
-    let expected = split_hash(hash128);
+    let scoped = db_scoped_hash(hash128);
+    let shard = shard_for(scoped);
+    let slot = slot_for(scoped);
+    let expected = split_hash(scoped);
     with_shard_shared!(shard, |cache: &EncodeCacheShard| {
         let (stored_hash, stored_id) = cache[slot];
         if stored_hash == expected && stored_id != 0 {
@@ -353,9 +370,10 @@ pub fn encode_cache_insert(hash128: u128, id: i64) {
     if !SHMEM_READY.load(Ordering::Acquire) {
         return;
     }
-    let shard = shard_for(hash128);
-    let slot = slot_for(hash128);
-    let hash_parts = split_hash(hash128);
+    let scoped = db_scoped_hash(hash128);
+    let shard = shard_for(scoped);
+    let slot = slot_for(scoped);
+    let hash_parts = split_hash(scoped);
     with_shard_exclusive!(shard, |cache: &mut EncodeCacheShard| {
         let was_empty = cache[slot].0 == [0u64; 2];
         cache[slot] = (hash_parts, id);

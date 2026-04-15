@@ -74,6 +74,39 @@ fn table_expr(src: &VpSource) -> String {
     }
 }
 
+/// Build a UNION ALL subquery that covers every predicate — both dedicated VP
+/// tables and `vp_rare`.  Each branch projects `(p, s, o, g)` so the caller
+/// can bind the predicate variable.
+///
+/// The list of dedicated VP tables is fetched from `_pg_ripple.predicates` at
+/// query-translation time via SPI.
+fn build_all_predicates_union() -> String {
+    let mut branches: Vec<String> = Vec::new();
+
+    // Collect dedicated VP table predicate IDs.
+    Spi::connect(|client| {
+        let rows = client
+            .select(
+                "SELECT id FROM _pg_ripple.predicates WHERE table_oid IS NOT NULL",
+                None,
+                &[],
+            )
+            .unwrap_or_else(|e| pgrx::error!("variable-predicate SPI error: {e}"));
+        for row in rows {
+            if let Ok(Some(pred_id)) = row.get::<i64>(1) {
+                branches.push(format!(
+                    "SELECT {pred_id}::bigint AS p, s, o, g FROM _pg_ripple.vp_{pred_id}"
+                ));
+            }
+        }
+    });
+
+    // Always include vp_rare (it already has a `p` column).
+    branches.push("SELECT p, s, o, g FROM _pg_ripple.vp_rare".to_owned());
+
+    branches.join(" UNION ALL ")
+}
+
 // ─── Translation context ─────────────────────────────────────────────────────
 
 /// Mutable state carried through recursive translation.
@@ -338,12 +371,13 @@ fn translate_bgp(patterns: &[spargebra::term::TriplePattern], ctx: &mut Ctx) -> 
                 }
             }
             NamedNodePattern::Variable(v) => {
-                // Unbound predicate: scan vp_rare for all predicates.
-                // Generate a rare-all subquery and bind the predicate variable to `p`.
+                // Unbound predicate: build UNION ALL of every dedicated VP table
+                // plus vp_rare so that all predicates are covered.
                 let vname = v.as_str().to_owned();
                 let a = alias.clone();
+                let union_subquery = build_all_predicates_union();
                 frag.from_items
-                    .push((a.clone(), "_pg_ripple.vp_rare".to_owned()));
+                    .push((a.clone(), format!("({union_subquery})")));
                 if let Some(existing) = frag.bindings.get(&vname) {
                     frag.conditions.push(format!("{a}.p = {existing}"));
                 } else {

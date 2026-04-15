@@ -115,10 +115,14 @@ BEGIN
             '<http://www4.wiwiss.fu-berlin.de/bizer/bsbm/v01/instances/Product' || i || '> ' ||
             '<http://www.w3.org/2000/01/rdf-schema#comment> ' ||
             '"Description of product ' || i || '"@en .' || E'\n' ||
-            -- bsbm:productFeature
+            -- bsbm:productFeature (primary)
             '<http://www4.wiwiss.fu-berlin.de/bizer/bsbm/v01/instances/Product' || i || '> ' ||
             '<http://www4.wiwiss.fu-berlin.de/bizer/bsbm/v01/vocabulary/productFeature> ' ||
             '<http://www4.wiwiss.fu-berlin.de/bizer/bsbm/v01/instances/ProductFeature' || feat_id || '> .' || E'\n' ||
+            -- bsbm:productFeature (secondary — ensures multi-feature star patterns)
+            '<http://www4.wiwiss.fu-berlin.de/bizer/bsbm/v01/instances/Product' || i || '> ' ||
+            '<http://www4.wiwiss.fu-berlin.de/bizer/bsbm/v01/vocabulary/productFeature> ' ||
+            '<http://www4.wiwiss.fu-berlin.de/bizer/bsbm/v01/instances/ProductFeature' || ((i % n_feat) + 1 + (i % 3)) % n_feat + 1 || '> .' || E'\n' ||
             -- bsbm:producer (vendor)
             '<http://www4.wiwiss.fu-berlin.de/bizer/bsbm/v01/instances/Product' || i || '> ' ||
             '<http://www4.wiwiss.fu-berlin.de/bizer/bsbm/v01/vocabulary/producer> ' ||
