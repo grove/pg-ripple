@@ -320,10 +320,22 @@ fn split_hash(hash128: u128) -> [u64; 2] {
 macro_rules! with_shard_shared {
     ($shard:expr, $body:expr) => {
         match $shard {
-            0 => { let guard = ENCODE_CACHE_S0.share(); $body(&*guard) }
-            1 => { let guard = ENCODE_CACHE_S1.share(); $body(&*guard) }
-            2 => { let guard = ENCODE_CACHE_S2.share(); $body(&*guard) }
-            _ => { let guard = ENCODE_CACHE_S3.share(); $body(&*guard) }
+            0 => {
+                let guard = ENCODE_CACHE_S0.share();
+                $body(&*guard)
+            }
+            1 => {
+                let guard = ENCODE_CACHE_S1.share();
+                $body(&*guard)
+            }
+            2 => {
+                let guard = ENCODE_CACHE_S2.share();
+                $body(&*guard)
+            }
+            _ => {
+                let guard = ENCODE_CACHE_S3.share();
+                $body(&*guard)
+            }
         }
     };
 }
@@ -331,10 +343,22 @@ macro_rules! with_shard_shared {
 macro_rules! with_shard_exclusive {
     ($shard:expr, $body:expr) => {
         match $shard {
-            0 => { let mut guard = ENCODE_CACHE_S0.exclusive(); $body(&mut *guard) }
-            1 => { let mut guard = ENCODE_CACHE_S1.exclusive(); $body(&mut *guard) }
-            2 => { let mut guard = ENCODE_CACHE_S2.exclusive(); $body(&mut *guard) }
-            _ => { let mut guard = ENCODE_CACHE_S3.exclusive(); $body(&mut *guard) }
+            0 => {
+                let mut guard = ENCODE_CACHE_S0.exclusive();
+                $body(&mut *guard)
+            }
+            1 => {
+                let mut guard = ENCODE_CACHE_S1.exclusive();
+                $body(&mut *guard)
+            }
+            2 => {
+                let mut guard = ENCODE_CACHE_S2.exclusive();
+                $body(&mut *guard)
+            }
+            _ => {
+                let mut guard = ENCODE_CACHE_S3.exclusive();
+                $body(&mut *guard)
+            }
         }
     };
 }
