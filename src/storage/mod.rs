@@ -433,6 +433,8 @@ pub fn insert_triple(s: &str, p: &str, o: &str, g: i64) -> i64 {
 
         // Update shmem delta counter for merge worker triggering.
         crate::shmem::record_delta_inserts(1);
+        // Mark predicate as having delta rows in the bloom filter.
+        crate::shmem::set_predicate_delta_bit(p_id);
 
         return sid;
     }
@@ -482,6 +484,8 @@ pub fn insert_encoded_triple(s_id: i64, p_id: i64, o_id: i64, g: i64) -> i64 {
         .unwrap_or_else(|e| pgrx::error!("predicate count update SPI error: {e}"));
 
         crate::shmem::record_delta_inserts(1);
+        // Mark predicate as having delta rows in the bloom filter.
+        crate::shmem::set_predicate_delta_bit(p_id);
         return sid;
     }
 
@@ -519,6 +523,8 @@ pub fn batch_insert_encoded(p_id: i64, rows: &[(i64, i64, i64)]) -> i64 {
         .unwrap_or_else(|e| pgrx::error!("predicate count batch update SPI error: {e}"));
 
         crate::shmem::record_delta_inserts(cnt);
+        // Mark predicate as having delta rows in the bloom filter.
+        crate::shmem::set_predicate_delta_bit(p_id);
     } else {
         // Insert into vp_rare in bulk.
         let values: Vec<String> = rows

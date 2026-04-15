@@ -298,6 +298,9 @@ pub fn merge_predicate(pred_id: i64) -> i64 {
     Spi::run_with_args(&format!("ANALYZE {main}"), &[])
         .unwrap_or_else(|e| pgrx::error!("merge: ANALYZE error: {e}"));
 
+    // Clear the bloom filter bit — delta is now empty.
+    crate::shmem::clear_predicate_delta_bit(pred_id);
+
     // Update triple_count in predicates catalog.
     Spi::run_with_args(
         "UPDATE _pg_ripple.predicates SET triple_count = $1 WHERE id = $2",
@@ -436,6 +439,8 @@ pub fn compact() -> i64 {
     rebuild_object_patterns();
     // Signal the shmem counter to zero.
     crate::shmem::reset_delta_count();
+    // All deltas are now empty — reset the bloom filter entirely.
+    crate::shmem::reset_bloom_filter();
     merged
 }
 

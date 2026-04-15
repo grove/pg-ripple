@@ -85,21 +85,31 @@ fn term_hash(term: &str, kind: i16) -> u128 {
 /// Creates a new dictionary row if the term has not been seen before.
 /// The full 128-bit hash is stored in the `hash` column; the IDENTITY-
 /// generated `id` is the dense join key used in VP tables.
+///
+/// Lookup order:
+/// 1. Shared-memory encode cache (v0.6.0 — shared across all backends)
+/// 2. Backend-local LRU cache (fast, no lock)
+/// 3. SPI round-trip to `_pg_ripple.dictionary`
 pub fn encode(term: &str, kind: i16) -> i64 {
     let hash128 = term_hash(term, kind);
 
-    // Fast path: encode cache hit.
+    // Tier 1: shared-memory encode cache (v0.6.0).
+    if let Some(id) = crate::shmem::encode_cache_lookup(hash128) {
+        // Warm the backend-local cache too so subsequent lookups cost nothing.
+        ENCODE_CACHE.with(|c| c.borrow_mut().put(hash128, id));
+        return id;
+    }
+
+    // Tier 2: backend-local LRU cache.
     if let Some(id) = ENCODE_CACHE.with(|c| c.borrow_mut().get(&hash128).copied()) {
         return id;
     }
 
     let hash_bytes = hash128.to_be_bytes();
 
-    // Upsert + lookup in a single round-trip.  The CTE inserts the term when it
-    // is new (ON CONFLICT DO NOTHING) and the outer COALESCE returns the id
-    // whether the row was just inserted or already existed.  This always returns
-    // exactly one row, which is safe even in pgrx 0.17 where get_one_with_args
-    // returns Err(InvalidPosition) on 0-row results.
+    // Tier 3: upsert + lookup in a single SPI round-trip.  The CTE inserts the
+    // term when it is new (ON CONFLICT DO NOTHING) and the outer COALESCE
+    // returns the id whether the row was just inserted or already existed.
     let id: i64 = Spi::get_one_with_args::<i64>(
         "WITH ins AS ( \
              INSERT INTO _pg_ripple.dictionary (hash, value, kind) \
@@ -120,6 +130,8 @@ pub fn encode(term: &str, kind: i16) -> i64 {
     .unwrap_or_else(|e| pgrx::error!("dictionary encode SPI error: {e}"))
     .unwrap_or_else(|| pgrx::error!("dictionary encode: no id returned for term"));
 
+    // Populate both caches.
+    crate::shmem::encode_cache_insert(hash128, id);
     ENCODE_CACHE.with(|c| c.borrow_mut().put(hash128, id));
     DECODE_CACHE.with(|c| c.borrow_mut().put(id, term.to_owned()));
 
@@ -158,6 +170,12 @@ pub fn encode_typed_literal(value: &str, datatype: &str) -> i64 {
     let canonical = format!("\"{}\"^^<{}>", value, datatype);
     let hash128 = term_hash(&canonical, KIND_TYPED_LITERAL);
 
+    // Tier 1: shared-memory encode cache.
+    if let Some(id) = crate::shmem::encode_cache_lookup(hash128) {
+        ENCODE_CACHE.with(|c| c.borrow_mut().put(hash128, id));
+        return id;
+    }
+    // Tier 2: backend-local cache.
     if let Some(id) = ENCODE_CACHE.with(|c| c.borrow_mut().get(&hash128).copied()) {
         return id;
     }
@@ -185,6 +203,7 @@ pub fn encode_typed_literal(value: &str, datatype: &str) -> i64 {
     .unwrap_or_else(|e| pgrx::error!("dictionary encode_typed_literal SPI error: {e}"))
     .unwrap_or_else(|| pgrx::error!("dictionary encode_typed_literal: no id returned"));
 
+    crate::shmem::encode_cache_insert(hash128, id);
     ENCODE_CACHE.with(|c| c.borrow_mut().put(hash128, id));
     DECODE_CACHE.with(|c| c.borrow_mut().put(id, canonical));
 
@@ -196,6 +215,12 @@ pub fn encode_lang_literal(value: &str, lang: &str) -> i64 {
     let canonical = format!("\"{}\"@{}", value, lang);
     let hash128 = term_hash(&canonical, KIND_LANG_LITERAL);
 
+    // Tier 1: shared-memory encode cache.
+    if let Some(id) = crate::shmem::encode_cache_lookup(hash128) {
+        ENCODE_CACHE.with(|c| c.borrow_mut().put(hash128, id));
+        return id;
+    }
+    // Tier 2: backend-local cache.
     if let Some(id) = ENCODE_CACHE.with(|c| c.borrow_mut().get(&hash128).copied()) {
         return id;
     }
@@ -223,6 +248,7 @@ pub fn encode_lang_literal(value: &str, lang: &str) -> i64 {
     .unwrap_or_else(|e| pgrx::error!("dictionary encode_lang_literal SPI error: {e}"))
     .unwrap_or_else(|| pgrx::error!("dictionary encode_lang_literal: no id returned"));
 
+    crate::shmem::encode_cache_insert(hash128, id);
     ENCODE_CACHE.with(|c| c.borrow_mut().put(hash128, id));
     DECODE_CACHE.with(|c| c.borrow_mut().put(id, canonical));
 
@@ -258,6 +284,12 @@ fn quoted_triple_hash(s_id: i64, p_id: i64, o_id: i64) -> u128 {
 pub fn encode_quoted_triple(s_id: i64, p_id: i64, o_id: i64) -> i64 {
     let hash128 = quoted_triple_hash(s_id, p_id, o_id);
 
+    // Tier 1: shared-memory encode cache.
+    if let Some(id) = crate::shmem::encode_cache_lookup(hash128) {
+        ENCODE_CACHE.with(|c| c.borrow_mut().put(hash128, id));
+        return id;
+    }
+    // Tier 2: backend-local cache.
     if let Some(id) = ENCODE_CACHE.with(|c| c.borrow_mut().get(&hash128).copied()) {
         return id;
     }
@@ -294,6 +326,7 @@ pub fn encode_quoted_triple(s_id: i64, p_id: i64, o_id: i64) -> i64 {
     .unwrap_or_else(|e| pgrx::error!("dictionary encode_quoted_triple SPI error: {e}"))
     .unwrap_or_else(|| pgrx::error!("dictionary encode_quoted_triple: no id returned"));
 
+    crate::shmem::encode_cache_insert(hash128, id);
     ENCODE_CACHE.with(|c| c.borrow_mut().put(hash128, id));
     DECODE_CACHE.with(|c| c.borrow_mut().put(id, canonical));
     id

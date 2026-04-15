@@ -1,0 +1,47 @@
+DO
+ bulk_load_visible 
+-------------------
+ t                 
+(1 row)
+
+ p1_count 
+----------
+      100
+(1 row)
+
+ compact_merged_sufficient 
+---------------------------
+ t                         
+(1 row)
+
+ p1_after_compact 
+------------------
+              100
+(1 row)
+
+ p2_after_compact 
+------------------
+              100
+(1 row)
+
+DO
+ p1_mixed_count 
+----------------
+            200
+(1 row)
+
+ stats_total_ok 
+----------------
+ t              
+(1 row)
+
+ stats_cache_ok 
+----------------
+ t              
+(1 row)
+
+ stats_htap_ok 
+---------------
+ t             
+(1 row)
+

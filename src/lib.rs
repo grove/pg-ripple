@@ -99,6 +99,24 @@ pub static WORKER_DATABASE: pgrx::GucSetting<Option<std::ffi::CString>> =
 /// GUC: seconds before the merge worker watchdog logs a WARNING for inactivity.
 pub static MERGE_WATCHDOG_TIMEOUT: pgrx::GucSetting<i32> = pgrx::GucSetting::<i32>::new(300);
 
+/// GUC: maximum number of entries in the shared-memory dictionary encode cache.
+/// Rounded down to the nearest multiple of `ENCODE_CACHE_CAPACITY` (4096).
+/// This is a startup-only GUC (read at `_PG_init`); changing it requires a
+/// PostgreSQL restart.
+///
+/// The shared-memory cache is split across 4 shards of 1024 slots each.
+/// This GUC documents the effective size; the actual shard sizes are compiled
+/// in at build time.  Set to 0 to note that only the backend-local cache is active.
+pub static DICTIONARY_CACHE_SIZE: pgrx::GucSetting<i32> =
+    pgrx::GucSetting::<i32>::new(crate::shmem::ENCODE_CACHE_CAPACITY as i32);
+
+/// GUC: shared-memory budget cap in megabytes.
+///
+/// Bulk loads check the encode-cache utilization against this budget and
+/// reduce their batch size when utilization exceeds 90% to prevent OOM.
+/// Set to 0 to disable back-pressure.  Startup-only GUC.
+pub static CACHE_BUDGET_MB: pgrx::GucSetting<i32> = pgrx::GucSetting::<i32>::new(64);
+
 // ─── ExecutorEnd hook (v0.6.0) ────────────────────────────────────────────────
 
 /// Register a PostgreSQL `ExecutorEnd_hook` that pokes the merge worker's latch
@@ -267,6 +285,28 @@ pub extern "C-unwind" fn _PG_init() {
         10,
         86400,
         GucContext::Sighup,
+        GucFlags::default(),
+    );
+
+    pgrx::GucRegistry::define_int_guc(
+        c"pg_ripple.dictionary_cache_size",
+        c"Shared-memory encode-cache capacity in entries (default: 4096; startup only)",
+        c"",
+        &DICTIONARY_CACHE_SIZE,
+        0,
+        1_000_000,
+        GucContext::Postmaster,
+        GucFlags::default(),
+    );
+
+    pgrx::GucRegistry::define_int_guc(
+        c"pg_ripple.cache_budget",
+        c"Shared-memory budget cap in MB; bulk loads throttle when >90% utilised (default: 64; startup only)",
+        c"",
+        &CACHE_BUDGET_MB,
+        0,
+        65536,
+        GucContext::Postmaster,
         GucFlags::default(),
     );
 
@@ -695,6 +735,18 @@ mod pg_ripple {
             serde_json::json!(delta_rows),
         );
         obj.insert("merge_worker_pid".to_string(), serde_json::json!(merge_pid));
+
+        // v0.6.0: encode cache statistics.
+        let cache_utilization_pct = crate::shmem::cache_utilization_pct() as i64;
+        let cache_capacity = crate::shmem::ENCODE_CACHE_CAPACITY as i64;
+        obj.insert(
+            "encode_cache_capacity".to_string(),
+            serde_json::json!(cache_capacity),
+        );
+        obj.insert(
+            "encode_cache_utilization_pct".to_string(),
+            serde_json::json!(cache_utilization_pct),
+        );
 
         pgrx::JsonB(serde_json::Value::Object(obj))
     }

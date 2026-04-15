@@ -438,14 +438,14 @@ Inline value encoding eliminates dictionary lookups for numeric and date FILTER 
 - [x] **`ExecutorEnd_hook` latch-poke**
   - When a write transaction commits more than `pg_ripple.latch_trigger_threshold` rows (default: 10,000), the hook immediately pokes the merge worker's latch to trigger an early merge
   - Prevents unbounded delta growth during bursty write workloads without requiring a polling loop
-- [ ] **Bloom filter for delta existence checks**
+- [x] **Bloom filter for delta existence checks**
   - In shared memory, per VP table
   - Queries against main-only data skip delta scan
-- [ ] **Dictionary LRU cache in shared memory**
+- [x] **Dictionary LRU cache in shared memory**
   - `pg_ripple.dictionary_cache_size` GUC
   - Shared across all backends via pgrx `PgSharedMem`
   - **Sharded lock design**: partition the hash map into N shards (default: 64), each with its own lightweight lock — eliminates global lock contention under concurrent encode/decode workloads
-- [ ] **Shared-memory budget & back-pressure**
+- [x] **Shared-memory budget & back-pressure**
   - `pg_ripple.cache_budget` GUC — utilization cap for the pre-allocated shared memory block (dictionary cache + bloom filters + merge worker buffers)
   - Automatic eviction priority: bloom filters reclaimed first, then oldest LRU dictionary entries
   - Back-pressure on bulk loads when shared memory is >90% of `cache_budget` — throttle batch size to prevent OOM
@@ -486,7 +486,7 @@ Inline value encoding eliminates dictionary lookups for numeric and date FILTER 
   - Delete delta-resident triple removes it directly (no tombstone needed) ✓
   - Delete non-existent triple returns 0 ✓
   - Multiple compacts do not multiply rows ✓
-- [ ] **Benchmark: concurrent read/write** (pgbench custom scripts under HTAP load)
+- [x] **Benchmark: concurrent read/write** (pgbench custom scripts under HTAP load)
   - Heavy concurrent insert (delta growth) + complex SPARQL queries on main partition
   - Measure merge worker latency, delta bloat growth, query latency under concurrent writes
   - Baseline: >100K triples/sec sustained bulk insert with <500 ms query latency

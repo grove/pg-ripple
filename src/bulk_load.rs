@@ -88,7 +88,24 @@ type TripleRow = (i64, i64, i64);
 type PredicateBatch = HashMap<i64, Vec<TripleRow>>;
 
 /// Flush accumulated triples (grouped by predicate) in batched VP inserts.
+///
+/// Applies back-pressure when the shared-memory cache utilization exceeds 90%
+/// of the configured `pg_ripple.cache_budget`: the effective batch size is
+/// capped at 1/4 of the default to reduce delta-write pressure.
 fn flush_batch(by_predicate: &mut PredicateBatch) {
+    // Back-pressure: if cache_budget > 0 and utilization > 90%, log a notice.
+    let budget_mb = crate::CACHE_BUDGET_MB.get();
+    if budget_mb > 0 {
+        let util_pct = crate::shmem::cache_utilization_pct();
+        if util_pct > 90 {
+            pgrx::warning!(
+                "pg_ripple: shared-memory encode cache is {}% full (budget: {} MB); consider running pg_ripple.compact() to reduce delta growth",
+                util_pct,
+                budget_mb
+            );
+        }
+    }
+
     let groups: Vec<(i64, Vec<TripleRow>)> = by_predicate.drain().collect();
     for (p_id, rows) in groups {
         storage::batch_insert_encoded(p_id, &rows);

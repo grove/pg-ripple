@@ -1,0 +1,120 @@
+ i1 
+----
+ t  
+(1 row)
+
+ i2 
+----
+ t  
+(1 row)
+
+ i3 
+----
+ t  
+(1 row)
+
+ i4 
+----
+ t  
+(1 row)
+
+ i5 
+----
+ t  
+(1 row)
+
+ i6 
+----
+ t  
+(1 row)
+
+ i7 
+----
+ t  
+(1 row)
+
+ i8 
+----
+ t  
+(1 row)
+
+ i9 
+----
+ t  
+(1 row)
+
+ initial_count 
+---------------
+             5
+(1 row)
+
+ compact1_ok 
+-------------
+ t           
+(1 row)
+
+ after_compact_p1 
+------------------
+                5
+(1 row)
+
+ i10 
+-----
+ t   
+(1 row)
+
+ i11 
+-----
+ t   
+(1 row)
+
+ mixed_delta_main_count 
+------------------------
+                      7
+(1 row)
+
+ main_resident_visible 
+-----------------------
+                     1
+(1 row)
+
+ delta_resident_visible 
+------------------------
+                      1
+(1 row)
+
+ delete_main_ok 
+----------------
+ t              
+(1 row)
+
+ after_tombstone_delete 
+------------------------
+                      6
+(1 row)
+
+ tombstoned_triple_gone 
+------------------------
+                      0
+(1 row)
+
+ compact2_ok 
+-------------
+ t           
+(1 row)
+
+ after_tombstone_compact 
+-------------------------
+                       6
+(1 row)
+
+ cache_capacity_positive 
+-------------------------
+ t                       
+(1 row)
+
+ sparql_star_count 
+-------------------
+                 3
+(1 row)
+

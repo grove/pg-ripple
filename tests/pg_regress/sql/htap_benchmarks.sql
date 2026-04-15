@@ -1,0 +1,76 @@
+-- htap_benchmarks.sql — HTAP architecture functional benchmark.
+--
+-- Verifies that the HTAP infrastructure handles bulk write workloads correctly:
+--
+--  1. Bulk load 500 triples (5 predicates × 100 subjects) via load_ntriples.
+--  2. Verify all triples are visible immediately (delta path).
+--  3. compact() — promote delta to main.
+--  4. Verify triple count unchanged after promotion.
+--  5. Write 100 more triples after compact (delta path again).
+--  6. Verify mixed delta+main reads return correct counts.
+--  7. stats() reports sane values: triples > 0, cache capacity > 0.
+--
+-- NOTE: Wall-clock timing is not asserted here (pg_regress is unsuitable for
+-- latency targets).  The ROADMAP throughput targets are validated separately via
+-- pgbench scripts outside of pg_regress.
+-- Uses unique IRIs (<http://bench.test/…>) to avoid interference.
+
+SET search_path TO pg_ripple, public;
+
+-- ── 1. Generate 500-triple N-Triples payload and bulk load ───────────────────
+-- Build the payload by inserting 100 triples per predicate × 5 predicates.
+-- We use a DO block to generate the N-Triples string and load it.
+DO $$
+DECLARE
+    nt TEXT := '';
+    i  INT;
+BEGIN
+    FOR i IN 1..100 LOOP
+        nt := nt ||
+            '<http://bench.test/S' || i || '> <http://bench.test/P1> <http://bench.test/O' || i || '> .' || E'\n' ||
+            '<http://bench.test/S' || i || '> <http://bench.test/P2> "literal_' || i || '" .' || E'\n' ||
+            '<http://bench.test/S' || i || '> <http://bench.test/P3> <http://bench.test/Q' || i || '> .' || E'\n' ||
+            '<http://bench.test/S' || i || '> <http://bench.test/P4> <http://bench.test/R' || i || '> .' || E'\n' ||
+            '<http://bench.test/S' || i || '> <http://bench.test/P5> <http://bench.test/T' || i || '> .' || E'\n';
+    END LOOP;
+    PERFORM pg_ripple.load_ntriples(nt);
+END $$;
+
+-- ── 2. All 500 triples visible immediately (delta path) ───────────────────────
+SELECT pg_ripple.triple_count() >= 500 AS bulk_load_visible;
+
+SELECT count(*) AS p1_count
+FROM pg_ripple.find_triples(NULL, '<http://bench.test/P1>', NULL);
+
+-- ── 3. compact() — delta promoted to main ────────────────────────────────────
+SELECT pg_ripple.compact() >= 500 AS compact_merged_sufficient;
+
+-- ── 4. Triple count unchanged after promotion ─────────────────────────────────
+SELECT count(*) AS p1_after_compact
+FROM pg_ripple.find_triples(NULL, '<http://bench.test/P1>', NULL);
+
+SELECT count(*) AS p2_after_compact
+FROM pg_ripple.find_triples(NULL, '<http://bench.test/P2>', NULL);
+
+-- ── 5. Write 100 more triples after compact ───────────────────────────────────
+DO $$
+DECLARE
+    nt TEXT := '';
+    i  INT;
+BEGIN
+    FOR i IN 101..200 LOOP
+        nt := nt ||
+            '<http://bench.test/S' || i || '> <http://bench.test/P1> <http://bench.test/O' || i || '> .' || E'\n';
+    END LOOP;
+    PERFORM pg_ripple.load_ntriples(nt);
+END $$;
+
+-- ── 6. Mixed delta+main reads return correct counts ───────────────────────────
+-- P1 now has 100 (main) + 100 (delta) = 200
+SELECT count(*) AS p1_mixed_count
+FROM pg_ripple.find_triples(NULL, '<http://bench.test/P1>', NULL);
+
+-- ── 7. stats() sanity checks ─────────────────────────────────────────────────
+SELECT (pg_ripple.stats()->>'total_triples')::bigint >= 600 AS stats_total_ok;
+SELECT (pg_ripple.stats()->>'encode_cache_capacity')::int > 0 AS stats_cache_ok;
+SELECT (pg_ripple.stats()->>'htap_predicates')::int >= 5 AS stats_htap_ok;
