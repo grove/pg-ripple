@@ -720,6 +720,14 @@ fn translate_pattern(pattern: &GraphPattern, ctx: &mut Ctx) -> Fragment {
             if let Some(expr) = sql_expr {
                 frag.bindings.insert(variable.as_str().to_owned(), expr);
             }
+            // If the expression is a simple variable reference to a raw_numeric
+            // variable (e.g. the internal aggregate hash mapped to user-facing
+            // ?cnt via Extend), propagate the raw_numeric status to the new name.
+            if let Expression::Variable(src_var) = expression
+                && ctx.raw_numeric_vars.contains(src_var.as_str())
+            {
+                ctx.raw_numeric_vars.insert(variable.as_str().to_owned());
+            }
             frag
         }
 
@@ -1410,6 +1418,10 @@ fn extract_modifiers(mut p: &GraphPattern) -> Modifiers<'_> {
 pub struct Translation {
     pub sql: String,
     pub variables: Vec<String>,
+    /// Variables that hold raw SQL numbers (aggregates like COUNT, SUM).
+    /// These must NOT be dictionary-decoded; they should be emitted as JSON
+    /// numbers directly.
+    pub raw_numeric_vars: std::collections::HashSet<String>,
 }
 
 /// Translate a SPARQL SELECT query pattern to SQL.
@@ -1472,7 +1484,11 @@ pub fn translate_select(pattern: &GraphPattern) -> Translation {
         }
     );
 
-    Translation { sql, variables }
+    Translation {
+        sql,
+        variables,
+        raw_numeric_vars: ctx.raw_numeric_vars,
+    }
 }
 
 /// Translate a SPARQL ASK query pattern to SQL.

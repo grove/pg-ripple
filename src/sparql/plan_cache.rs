@@ -12,8 +12,8 @@ use lru::LruCache;
 use std::cell::RefCell;
 use std::num::NonZeroUsize;
 
-/// Cached translation: generated SQL + projected variable names in SELECT order.
-pub type CacheEntry = (String, Vec<String>);
+/// Cached translation: generated SQL + projected variable names + raw numeric variable names.
+pub type CacheEntry = (String, Vec<String>, std::collections::HashSet<String>);
 
 const DEFAULT_CAPACITY: usize = 256;
 

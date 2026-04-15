@@ -21,6 +21,7 @@ use pgrx::prelude::*;
 // ─── Schema setup ─────────────────────────────────────────────────────────────
 
 /// Create the `subject_patterns` and `object_patterns` tables if they are absent.
+#[allow(dead_code)]
 pub fn initialize_pattern_tables() {
     Spi::run_with_args(
         "CREATE TABLE IF NOT EXISTS _pg_ripple.subject_patterns ( \
@@ -247,6 +248,14 @@ pub fn merge_predicate(pred_id: i64) -> i64 {
     .unwrap_or_else(|e| pgrx::error!("merge: create main_new error: {e}"));
 
     // Step 2: BRIN index on new main (effective because rows arrive ordered by s).
+    // Drop any stale index from a previous merge cycle (the index name survives
+    // across table renames: when main_new is renamed to main, its index keeps
+    // the original name).
+    Spi::run_with_args(
+        &format!("DROP INDEX IF EXISTS _pg_ripple.idx_vp_{pred_id}_main_new_brin"),
+        &[],
+    )
+    .unwrap_or_else(|e| pgrx::error!("merge: drop stale BRIN index error: {e}"));
     Spi::run_with_args(
         &format!("CREATE INDEX idx_vp_{pred_id}_main_new_brin ON {main_new} USING BRIN (s)"),
         &[],
@@ -264,7 +273,7 @@ pub fn merge_predicate(pred_id: i64) -> i64 {
     Spi::run_with_args("SET LOCAL lock_timeout = '5s'", &[])
         .unwrap_or_else(|e| pgrx::error!("merge: set lock_timeout error: {e}"));
 
-    Spi::run_with_args(&format!("DROP TABLE IF EXISTS {main}"), &[])
+    Spi::run_with_args(&format!("DROP TABLE IF EXISTS {main} CASCADE"), &[])
         .unwrap_or_else(|e| pgrx::error!("merge: drop old main error: {e}"));
 
     Spi::run_with_args(
