@@ -1,0 +1,15 @@
+# Exclude build artifacts and test data — keeps the build context lean.
+# The Dockerfile only needs: src/, sql/, Cargo.toml, Cargo.lock,
+# build.rs, pg_ripple.control, and docker/.
+
+target/
+.git/
+.github/
+docs/
+plans/
+tests/
+secrets/
+*.md
+!README.md
+justfile
+LICENSE

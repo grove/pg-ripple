@@ -1,0 +1,90 @@
+# pg_ripple Docker image
+#
+# Multi-stage build:
+#   builder — compiles the pgrx extension against PostgreSQL 18 dev headers
+#   final   — slim postgres:18 image with the .so and SQL files installed
+#
+# Usage:
+#   docker build -t pg-ripple:local .
+#   docker run --rm -p 5432:5432 -e POSTGRES_PASSWORD=ripple pg-ripple:local
+#
+# The resulting image is also published to ghcr.io as part of each release:
+#   docker run --rm -p 5432:5432 -e POSTGRES_PASSWORD=ripple \
+#     ghcr.io/grove/pg-ripple:0.5.0
+
+# ── Build stage ───────────────────────────────────────────────────────────────
+FROM rust:1.85-bookworm AS builder
+
+ARG PGRX_VERSION=0.17.0
+
+# Add the PostgreSQL Global Development Group APT repository so we get the
+# exact PostgreSQL 18 server development headers that match postgres:18-bookworm.
+RUN apt-get update -qq \
+    && apt-get install -y --no-install-recommends gnupg curl ca-certificates \
+    && curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+       | gpg --dearmor -o /usr/share/keyrings/postgresql.gpg \
+    && echo "deb [signed-by=/usr/share/keyrings/postgresql.gpg] \
+https://apt.postgresql.org/pub/repos/apt bookworm-pgdg main" \
+       > /etc/apt/sources.list.d/pgdg.list \
+    && apt-get update -qq \
+    && apt-get install -y --no-install-recommends \
+       build-essential \
+       pkg-config \
+       libssl-dev \
+       libclang-dev \
+       clang \
+       libreadline-dev \
+       libicu-dev \
+       bison \
+       flex \
+       postgresql-server-dev-18 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install cargo-pgrx (pinned to match Cargo.toml)
+RUN cargo install cargo-pgrx --version "=${PGRX_VERSION}" --locked
+
+WORKDIR /build
+
+# Copy manifest files first so dependency layers are cached separately from src.
+COPY Cargo.toml Cargo.lock build.rs pg_ripple.control ./
+COPY src/   ./src/
+COPY sql/   ./sql/
+
+# Tell pgrx to use the system PostgreSQL 18 (avoids downloading a second copy).
+RUN cargo pgrx init --pg18 /usr/lib/postgresql/18/bin/pg_config
+
+# Package the extension into the standard PostgreSQL shared-library layout:
+#   target/release/pg_ripple-pg18/
+#     usr/lib/postgresql/18/lib/pg_ripple.so
+#     usr/share/postgresql/18/extension/pg_ripple.control
+#     usr/share/postgresql/18/extension/pg_ripple--*.sql
+RUN cargo pgrx package \
+      --pg-config /usr/lib/postgresql/18/bin/pg_config \
+      --features pg18
+
+# ── Runtime stage ─────────────────────────────────────────────────────────────
+FROM postgres:18-bookworm
+
+LABEL org.opencontainers.image.source="https://github.com/grove/pg-ripple"
+LABEL org.opencontainers.image.description="PostgreSQL 18 with pg_ripple RDF/SPARQL extension"
+LABEL org.opencontainers.image.licenses="Apache-2.0"
+
+# Copy shared library
+COPY --from=builder \
+    /build/target/release/pg_ripple-pg18/usr/lib/postgresql/18/lib/pg_ripple.so \
+    /usr/lib/postgresql/18/lib/
+
+# Copy extension control file and all SQL migration scripts
+COPY --from=builder \
+    /build/target/release/pg_ripple-pg18/usr/share/postgresql/18/extension/ \
+    /usr/share/postgresql/18/extension/
+
+# Initialization scripts — executed by the postgres entrypoint on first start,
+# in lexicographic order.  See comments in each file for details.
+COPY docker/ /docker-entrypoint-initdb.d/
+
+# pg_ripple creates a schema named "pg_ripple".  PostgreSQL 18 blocks creation
+# of schemas whose names start with "pg_" unless allow_system_table_mods is on.
+# Passing it as a command argument ensures the flag is active both during init
+# (when the entrypoint runs the scripts above) and at every subsequent start.
+CMD ["postgres", "-c", "allow_system_table_mods=on"]
