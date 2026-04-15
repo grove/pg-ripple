@@ -20,26 +20,22 @@ This release rounds out the data quality system with more expressive rules and a
 
 ### What you can do
 
-- **Use logical shape combinators** — `sh:or`, `sh:and`, `sh:not` in NodeShapes and PropertyShapes express complex validity rules
-- **Validate nested shapes** — `sh:node <ShapeIRI>` checks that each value node along a path conforms to a referenced shape (with cycle-safe recursion up to 32 levels deep)
-- **Qualified cardinality** — `sh:qualifiedValueShape` combined with `sh:qualifiedMinCount` / `sh:qualifiedMaxCount` counts only the value nodes that actually conform to a sub-shape
-- **Async validation** — set `pg_ripple.shacl_mode = 'async'` so that `insert_triple()` never blocks on validation; violations are queued and processed by the background worker
-- **Inspect violations** — `dead_letter_queue()` returns a JSON array of all async violations; `drain_dead_letter_queue()` clears it after review
-- **Manual queue drain** — `process_validation_queue(batch_size)` drains the queue on demand, useful in testing and batch pipelines
+- **Combine rules with logic** — use `sh:or`, `sh:and`, and `sh:not` to build validation rules that express complex conditions, such as "a contact must have either a phone number or an email address"
+- **Reference another rule from within a rule** — `sh:node <ShapeIRI>` checks that each value on a property also satisfies a separate named rule; rules can reference each other up to 32 levels deep without getting stuck in a loop
+- **Count qualifying values** — `sh:qualifiedValueShape` combined with `sh:qualifiedMinCount` / `sh:qualifiedMaxCount` counts only the values that actually pass a sub-rule, so you can say "at least two authors must be affiliated with a university"
+- **Validate without blocking writes** — set `pg_ripple.shacl_mode = 'async'` so that inserts complete immediately and violations are collected silently in the background; the background worker drains the queue automatically
+- **Inspect collected violations** — `pg_ripple.dead_letter_queue()` returns all async violations as a JSON array; `pg_ripple.drain_dead_letter_queue()` clears the queue once you have reviewed them
+- **Drain the queue manually** — `pg_ripple.process_validation_queue(batch_size)` processes violations on demand, useful in test pipelines or batch jobs
 
 ### New SQL functions
 
 | Function | Returns | Description |
 |----------|---------|-------------|
-| `pg_ripple.process_validation_queue(batch_size BIGINT DEFAULT 1000)` | `BIGINT` | Process up to N items from the async queue |
-| `pg_ripple.validation_queue_length()` | `BIGINT` | Pending items in the async validation queue |
-| `pg_ripple.dead_letter_count()` | `BIGINT` | Number of recorded violations |
-| `pg_ripple.dead_letter_queue()` | `JSONB` | All dead-letter entries as a JSON array |
-| `pg_ripple.drain_dead_letter_queue()` | `BIGINT` | Delete all dead-letter entries |
-
-### What happens behind the scenes
-
-The SHACL shape IR now includes `Or`, `And`, `Not`, and `QualifiedValueShape` constraint variants. Logical combinators (`sh:or`, `sh:and`, `sh:not`) trigger a recursive node conformance check via `node_conforms_to_shape()`, which walks up to 32 shape levels deep to prevent infinite loops on cyclic shape references. The background merge worker now also drains the async validation queue (`_pg_ripple.validation_queue`) after each merge cycle when `shacl_mode = 'async'`.
+| `pg_ripple.process_validation_queue(batch_size BIGINT DEFAULT 1000)` | `BIGINT` | Process up to N pending validation jobs |
+| `pg_ripple.validation_queue_length()` | `BIGINT` | How many jobs are waiting in the queue |
+| `pg_ripple.dead_letter_count()` | `BIGINT` | How many violations have been recorded |
+| `pg_ripple.dead_letter_queue()` | `JSONB` | All recorded violations as a JSON array |
+| `pg_ripple.drain_dead_letter_queue()` | `BIGINT` | Delete all recorded violations and return how many were removed |
 
 <details>
 <summary>Technical details</summary>
@@ -56,402 +52,318 @@ The SHACL shape IR now includes `Or`, `And`, `Not`, and `QualifiedValueShape` co
 
 ---
 
-## [0.7.0] — 2026-04-15 — SHACL Validation (Core) + Deduplication
+## [0.7.0] — 2026-04-15 — Data Quality Rules (Core)
 
-This release adds **SHACL Core** data quality enforcement and explicit deduplication utilities. SHACL shapes are loaded from Turtle and stored in the database; they can be enforced inline at insert time (`sync` mode) or evaluated on demand via `validate()`. Two new deduplication functions provide on-demand cleanup for datasets with duplicate triples.
+This release adds SHACL — a W3C standard for expressing data quality rules — and on-demand deduplication for datasets that have accumulated duplicate entries.
+
+**What this means in practice:** You define rules like "every Person must have a name, and the name must be a string", load them into the database once, and pg_ripple will check those rules on every insert or on demand. Violations are reported as structured JSON so they can be logged, monitored, or acted on automatically.
 
 ### What you can do
 
-- **Load SHACL shapes** — `pg_ripple.load_shacl(data TEXT)` parses W3C SHACL Turtle and stores each `sh:NodeShape` / `sh:PropertyShape` in `_pg_ripple.shacl_shapes`
-- **Validate data** — `pg_ripple.validate(graph TEXT DEFAULT NULL)` runs a full SHACL validation report against all active shapes; returns `{"conforms": bool, "violations": [...]}` as JSONB
-- **Inline rejection** — set `pg_ripple.shacl_mode = 'sync'` to have `insert_triple()` reject any triple that violates an active `sh:maxCount`, `sh:datatype`, `sh:in`, or `sh:pattern` constraint
-- **Manage shapes** — `list_shapes()` enumerates all loaded shapes; `drop_shape(uri)` removes one
-- **Deduplicate triples** — `deduplicate_predicate(p_iri)` removes duplicate `(s, o, g)` rows for one predicate, keeping the lowest-SID row; `deduplicate_all()` deduplicates everything
-- **Merge-time dedup** — `pg_ripple.dedup_on_merge = true` makes the HTAP merge worker use `DISTINCT ON` to eliminate duplicates during each generation merge cycle
+- **Define data quality rules** — `pg_ripple.load_shacl(data TEXT)` parses rules written in W3C SHACL Turtle format and stores them in the database; returns the number of rules loaded
+- **Check your data** — `pg_ripple.validate(graph TEXT DEFAULT NULL)` runs all active rules against your data and returns a JSON report: `{"conforms": true/false, "violations": [...]}`. Pass a graph name to validate only that graph
+- **Reject bad data on insert** — set `pg_ripple.shacl_mode = 'sync'` to have `insert_triple()` immediately reject any triple that violates a `sh:maxCount`, `sh:datatype`, `sh:in`, or `sh:pattern` rule
+- **Manage rules** — `pg_ripple.list_shapes()` lists all loaded rules; `pg_ripple.drop_shape(uri TEXT)` removes one rule by its IRI
+- **Remove duplicate triples** — `pg_ripple.deduplicate_predicate(p_iri TEXT)` removes duplicate entries for one property, keeping the earliest record; `pg_ripple.deduplicate_all()` deduplicates everything
+- **Deduplicate automatically on merge** — set `pg_ripple.dedup_on_merge = true` to eliminate duplicates each time the background worker compacts data (see v0.6.0)
 
 ### New SQL functions
 
 | Function | Returns | Description |
 |----------|---------|-------------|
-| `pg_ripple.load_shacl(data TEXT)` | `INTEGER` | Parse Turtle, store shapes, return count loaded |
-| `pg_ripple.validate(graph TEXT DEFAULT NULL)` | `JSONB` | Full SHACL validation report |
-| `pg_ripple.list_shapes()` | `TABLE(shape_iri TEXT, active BOOLEAN)` | All shapes in the catalog |
-| `pg_ripple.drop_shape(shape_uri TEXT)` | `INTEGER` | Remove a shape by IRI |
-| `pg_ripple.deduplicate_predicate(p_iri TEXT)` | `BIGINT` | Remove duplicate triples for one predicate |
-| `pg_ripple.deduplicate_all()` | `BIGINT` | Deduplicate all predicates and vp_rare |
-| `pg_ripple.enable_shacl_monitors()` | `BOOLEAN` | Create `_pg_ripple.violation_summary` stream table via pg_trickle (optional) |
+| `pg_ripple.load_shacl(data TEXT)` | `INTEGER` | Parse Turtle, store rules, return count loaded |
+| `pg_ripple.validate(graph TEXT DEFAULT NULL)` | `JSONB` | Full validation report |
+| `pg_ripple.list_shapes()` | `TABLE(shape_iri TEXT, active BOOLEAN)` | All rules in the catalog |
+| `pg_ripple.drop_shape(shape_uri TEXT)` | `INTEGER` | Remove a rule by IRI |
+| `pg_ripple.deduplicate_predicate(p_iri TEXT)` | `BIGINT` | Remove duplicates for one property |
+| `pg_ripple.deduplicate_all()` | `BIGINT` | Remove duplicates across all properties |
+| `pg_ripple.enable_shacl_monitors()` | `BOOLEAN` | Create a live violation-count stream table (requires pg_trickle) |
 
-### New GUCs
+### New configuration options
 
-| GUC | Default | Description |
-|-----|---------|-------------|
-| `pg_ripple.shacl_mode` | `'off'` | Validation mode: `'off'`, `'sync'`, `'async'` (async: v0.8.0) |
-| `pg_ripple.dedup_on_merge` | `false` | Enable merge-time deduplication via `DISTINCT ON` |
+| Option | Default | Description |
+|--------|---------|-------------|
+| `pg_ripple.shacl_mode` | `'off'` | When to validate: `'off'`, `'sync'` (block bad inserts), `'async'` (queue for later — see v0.8.0) |
+| `pg_ripple.dedup_on_merge` | `false` | Eliminate duplicate triples during each background merge |
 
-### New schema objects
+### New internal tables
 
-| Object | Description |
-|--------|-------------|
-| `_pg_ripple.shacl_shapes` | Shape catalog: `shape_iri`, `shape_json` (JSONB IR), `active`, timestamps |
-| `_pg_ripple.validation_queue` | Async validation inbox (populated when `shacl_mode = 'async'`) |
-| `_pg_ripple.dead_letter_queue` | Async violations with JSONB violation report |
-| `_pg_ripple.violation_summary` | pg_trickle stream table: violation counts by shape IRI + severity (created by `enable_shacl_monitors()`) |
+| Table | Description |
+|-------|-------------|
+| `_pg_ripple.shacl_shapes` | Stores each loaded rule with its IRI, parsed JSON, and active flag |
+| `_pg_ripple.validation_queue` | Inbox for inserts when `shacl_mode = 'async'` |
+| `_pg_ripple.dead_letter_queue` | Recorded violations with full JSONB violation reports |
+| `_pg_ripple.violation_summary` | Live violation counts by rule and severity (created by `enable_shacl_monitors()`) |
 
-### New regression tests
+### Supported validation constraints (v0.7.0)
 
-| Test | Description |
-|------|-------------|
-| `shacl_validation.sql` | load_shacl, validate, list_shapes, drop_shape, sync mode enforcement |
-| `shacl_malformed.sql` | Malformed shapes, missing sh:path, unknown prefix, circular sh:node |
-| `deduplication.sql` | Explicit dedup functions, idempotency, merge-time dedup with compact() |
+`sh:minCount`, `sh:maxCount`, `sh:datatype`, `sh:in`, `sh:pattern`, `sh:class`, `sh:targetClass`, `sh:targetNode`, `sh:targetSubjectsOf`, `sh:targetObjectsOf`. Logical combinators (`sh:or`, `sh:and`, `sh:not`) and qualified constraints are added in v0.8.0.
 
-### Documentation
-
-- `user-guide/sql-reference/shacl.md` — new: `load_shacl`, `validate`, `list_shapes`, `drop_shape`; validation report JSON structure; `shacl_mode` GUC
-- `user-guide/best-practices/shacl-patterns.md` — new: NodeShape vs PropertyShape, `sh:datatype`/`sh:minCount`/`sh:maxCount`, sync mode latency impact
-- `user-guide/pre-deployment.md` — expanded: SHACL mode selection, load shapes before bulk import
-- `reference/troubleshooting.md` — expanded: insert rejected by SHACL, shape parsing failures
-- `user-guide/sql-reference/admin.md` — expanded: `deduplicate_predicate`, `deduplicate_all`, `dedup_on_merge` GUC
-
-### Supported SHACL constraints (v0.7.0 Core)
-
-`sh:minCount`, `sh:maxCount`, `sh:datatype`, `sh:in`, `sh:pattern`, `sh:class`, `sh:targetClass`, `sh:targetNode`, `sh:targetSubjectsOf`, `sh:targetObjectsOf`. `sh:or`/`sh:and`/`sh:not` and qualified constraints are v0.8.0.
-
-### Migration
-
-Users upgrading from v0.6.0 must run:
+### Upgrading from v0.6.0
 
 ```sql
 ALTER EXTENSION pg_ripple UPDATE;
 ```
 
-The migration script (`sql/pg_ripple--0.6.0--0.7.0.sql`) creates the three new tables (`shacl_shapes`, `validation_queue`, `dead_letter_queue`) and their indexes. No existing tables are modified.
+The migration creates three new tables (`shacl_shapes`, `validation_queue`, `dead_letter_queue`) and their indexes. No existing tables are modified.
 
 ---
 
-## [0.6.0] — 2026-04-15 — HTAP Architecture
+## [0.6.0] — 2026-04-15 — High-Speed Reads and Writes at the Same Time
 
-This release introduces a full HTAP (Hybrid Transactional/Analytical Processing) storage architecture, separating write traffic from read traffic so both can proceed at full speed simultaneously. A background merge worker periodically promotes delta rows into a read-optimised main partition. Change Data Capture (CDC) enables event-driven subscription to triple changes via PostgreSQL `LISTEN/NOTIFY`.
+This release separates write traffic from read traffic so both can run at full speed simultaneously. It also adds change notifications so other systems can react to new triples in real time.
+
+**The problem this solves:** In earlier versions, heavy read queries could slow down writes and vice versa. Now, writes go into a small fast table and reads see everything via a transparent view. A background worker periodically merges the write table into an optimised read table without interrupting either operation.
 
 ### What you can do
 
-- **Concurrent reads and writes** — all writes now land in a small `_delta` table (B-tree indexed); the read path sees both the BRIN-indexed `_main` table and `_delta` via `UNION ALL`, so queries never block writers
-- **Background merge worker** — when `pg_ripple` is loaded via `shared_preload_libraries`, a background worker periodically compacts delta tables into `_main` using a fresh-table generation merge (sort-ordered insertion, BRIN-optimal), then runs `ANALYZE`
-- **Tombstone-based cross-partition deletes** — deleting a triple that lives in `_main` inserts a row in `_pg_ripple.vp_{id}_tombstones`; the query view filters it out immediately and the merge worker eliminates it on next compaction
-- **`pg_ripple.compact()` RETURNS BIGINT** — trigger an immediate full merge of all HTAP VP tables; rebuilds `subject_patterns` and `object_patterns` in the same pass; returns the total row count after compaction
-- **Subject/object pattern tables** — `_pg_ripple.subject_patterns(s BIGINT, pattern BIGINT[])` and `_pg_ripple.object_patterns(o BIGINT, pattern BIGINT[])` are rebuilt by the merge worker after each generation; GIN-indexed for O(1) predicate lookup per subject/object
-- **Change notification / CDC** — `pg_ripple.subscribe(pattern TEXT, channel TEXT) RETURNS BIGINT` subscribes to triple changes matching a predicate pattern (use `'*'` for all); `pg_ripple.unsubscribe(channel TEXT) RETURNS BIGINT` removes subscriptions; notifications fire as `pg_notify(channel, '{"op":"insert|delete","s":...,"p":...,"o":...,"g":...}')` after each delta insert or delete
-- **Statistics** — `pg_ripple.stats() RETURNS JSONB` reports `total_triples`, `dedicated_predicates`, `htap_predicates`, `rare_triples`, `unmerged_delta_rows`, and `merge_worker_pid`
-- **`ExecutorEnd_hook` latch-poke** — when `shared_preload_libraries` is set, an `ExecutorEnd_hook` monitors `TOTAL_DELTA_ROWS`; once it reaches `latch_trigger_threshold`, the hook pokes the merge worker latch to trigger an early merge without waiting for the next poll cycle
-
-### New GUCs
-
-| GUC | Default | Description |
-|-----|---------|-------------|
-| `pg_ripple.merge_threshold` | `10000` | Minimum delta rows before background merge triggers |
-| `pg_ripple.merge_interval_secs` | `60` | Max seconds between merge worker polling cycles |
-| `pg_ripple.merge_retention_seconds` | `60` | Seconds to keep previous main table before dropping |
-| `pg_ripple.latch_trigger_threshold` | `10000` | Batch rows before poking merge worker latch (ExecutorEnd hook) |
-| `pg_ripple.worker_database` | `postgres` | Database the merge worker connects to |
-| `pg_ripple.merge_watchdog_timeout` | `300` | Seconds of worker inactivity before a WARNING is logged |
+- **Write and read simultaneously without blocking** — inserts land in a fast write buffer; reads see both the buffer and the main read-optimised store through a transparent view
+- **Trigger a manual merge** — `pg_ripple.compact()` immediately merges all pending writes into the read store; returns the total number of triples after compaction
+- **Subscribe to changes** — `pg_ripple.subscribe(pattern TEXT, channel TEXT)` sends a PostgreSQL `LISTEN/NOTIFY` message to `channel` every time a triple matching `pattern` is inserted or deleted; use `'*'` to receive all changes
+- **Unsubscribe** — `pg_ripple.unsubscribe(channel TEXT)` stops notifications on a channel
+- **Get storage statistics** — `pg_ripple.stats()` reports total triple count, how many predicates have their own table, how many triples are still in the write buffer, and the background worker's process ID
 
 ### New SQL functions
 
 | Function | Returns | Description |
 |----------|---------|-------------|
-| `pg_ripple.compact()` | `BIGINT` | Immediate full merge + pattern table rebuild |
-| `pg_ripple.htap_migrate_predicate(pred_id BIGINT)` | `void` | Migrate a flat VP table to HTAP split |
-| `pg_ripple.stats()` | `JSONB` | Storage and worker statistics |
-| `pg_ripple.subscribe(pattern TEXT, channel TEXT)` | `BIGINT` | Subscribe to CDC notifications |
-| `pg_ripple.unsubscribe(channel TEXT)` | `BIGINT` | Remove a CDC subscription |
-| `pg_ripple.subject_predicates(subject_id BIGINT)` | `BIGINT[]` | Predicates for a subject (from pattern table) |
-| `pg_ripple.object_predicates(object_id BIGINT)` | `BIGINT[]` | Predicates for an object (from pattern table) |
+| `pg_ripple.compact()` | `BIGINT` | Merge all pending writes into the read store |
+| `pg_ripple.stats()` | `JSONB` | Storage and background worker statistics |
+| `pg_ripple.subscribe(pattern TEXT, channel TEXT)` | `BIGINT` | Subscribe to change notifications |
+| `pg_ripple.unsubscribe(channel TEXT)` | `BIGINT` | Stop notifications on a channel |
+| `pg_ripple.htap_migrate_predicate(pred_id BIGINT)` | `void` | Migrate one property table to the split-storage layout |
+| `pg_ripple.subject_predicates(subject_id BIGINT)` | `BIGINT[]` | All properties for a given subject (fast lookup) |
+| `pg_ripple.object_predicates(object_id BIGINT)` | `BIGINT[]` | All properties for a given object (fast lookup) |
 
-### New regression tests
+### New configuration options
 
-| Test | Description |
-|------|-------------|
-| `htap_merge.sql` | Delta→main promotion, tombstone-based deletes, compact idempotency |
-| `change_notification.sql` | CDC subscribe/notify, wildcard patterns, payload validation |
-| `merge_edge_cases.sql` | Edge cases: empty-delta compact, idempotency, delta-resident delete, non-existent delete |
+| Option | Default | Description |
+|--------|---------|-------------|
+| `pg_ripple.merge_threshold` | `10000` | Minimum pending writes before background merge starts |
+| `pg_ripple.merge_interval_secs` | `60` | Maximum seconds between merge cycles |
+| `pg_ripple.merge_retention_seconds` | `60` | How long to keep the previous read table before dropping it |
+| `pg_ripple.latch_trigger_threshold` | `10000` | Pending writes needed to wake the merge worker early |
+| `pg_ripple.worker_database` | `postgres` | Which database the merge worker connects to |
+| `pg_ripple.merge_watchdog_timeout` | `300` | Log a warning if the merge worker is silent for this many seconds |
 
-### Documentation
+### Bug fixes in this release
 
-- `user-guide/configuration.md` — expanded with all HTAP GUCs and descriptions
-- `user-guide/scaling.md` — new: HTAP architecture diagram, merge lifecycle, tuning guide
-- `user-guide/pre-deployment.md` — new: production checklist (`shared_preload_libraries`, memory sizing, monitoring)
-- `user-guide/sql-reference/admin.md` — new: `compact()`, `stats()`, `subscribe()`, `unsubscribe()`, `htap_migrate_predicate()`, `predicate_stats` view
-- `user-guide/best-practices/bulk-loading.md` — expanded with HTAP delta-growth strategies
-- `reference/troubleshooting.md` — expanded with merge worker not running, delta bloat, CDC not firing
-- `reference/faq.md` — expanded with `shared_preload_libraries`, merge worker, change notifications
+- **Startup race condition** — the extension's shared memory flag is now set inside the correct PostgreSQL startup hook, eliminating a rare crash window during server start
+- **GUC registration crash** — configuration parameters requiring postmaster-level access no longer crash when `CREATE EXTENSION pg_ripple` runs without the extension in `shared_preload_libraries`
+- **SPARQL aggregate decode bug** — `COUNT`, `SUM`, and similar aggregate results were incorrectly looked up in the string dictionary; they now pass through as plain numbers
+- **Merge worker: DROP TABLE without CASCADE** — the merge worker failed if old tables had dependent views; fixed by using `CASCADE` and recreating the view afterwards
+- **Merge worker: stale index name** — repeated `compact()` calls failed with "relation already exists" because the old index name survived a table rename; the stale index is now dropped before creating a new one
 
-### Migration
-
-Users upgrading from v0.5.1 must run:
+### Upgrading from v0.5.1
 
 ```sql
 ALTER EXTENSION pg_ripple UPDATE;
 ```
 
-The migration script (`sql/pg_ripple--0.5.1--0.6.0.sql`) adds the `htap` column to `_pg_ripple.predicates`, creates the pattern tables and CDC infrastructure, and migrates every existing dedicated VP table to the delta/main/tombstones architecture in a single transaction. After migration, existing triples reside in delta tables; call `pg_ripple.compact()` to promote them to `_main` immediately.
+The migration script adds a column to the predicate catalog, creates the pattern tables and change-notification infrastructure, and converts every existing property table to the split read/write layout in a single transaction. Existing triples land in the write buffer; call `pg_ripple.compact()` afterwards to move them into the read store immediately.
 
-### Bug fixes
+<details>
+<summary>Technical details</summary>
 
-- **`shmem::init()` race condition** — `SHMEM_READY` is now set inside a final `shmem_startup_hook` rather than immediately in `_PG_init`, eliminating the window where `SHMEM_READY = true` but `PgAtomic` inner pointers were still null
-- **Postmaster GUC registration crash** — `dictionary_cache_size` and `cache_budget` GUCs (both `GucContext::Postmaster`) are now only registered when `process_shared_preload_libraries_in_progress` is true, preventing `FATAL: cannot create PGC_POSTMASTER variables after startup` when `CREATE EXTENSION pg_ripple` runs without `shared_preload_libraries`
-- **SPARQL aggregate decode bug** — aggregate results (COUNT, SUM, etc.) were incorrectly dictionary-decoded instead of being emitted as raw numbers; the `raw_numeric_vars` set is now propagated through `Extend` nodes to `execute_select`
-- **Merge worker DROP TABLE without CASCADE** — the fresh-table generation merge failed when the old `_main` table had dependent views; `DROP TABLE` now uses `CASCADE` and the view is recreated afterward
-- **Merge worker stale BRIN index** — repeated `compact()` calls failed with "relation already exists" because the BRIN index name survived table renames; the merge now drops the stale index before creating a new one
+- HTAP split: writes → `vp_{id}_delta` (heap + B-tree); cross-partition deletes → `vp_{id}_tombstones`; query view = `(main EXCEPT tombstones) UNION ALL delta`
+- Background merge: sort-ordered insertion into a fresh `vp_{id}_main` (BRIN-indexed) + `ANALYZE`; previous main dropped after `merge_retention_seconds`
+- `ExecutorEnd_hook` pokes the merge worker latch when `TOTAL_DELTA_ROWS` reaches `latch_trigger_threshold`
+- Subject/object pattern tables (`_pg_ripple.subject_patterns`, `_pg_ripple.object_patterns`) — GIN-indexed `BIGINT[]` columns rebuilt by the merge worker; enable O(1) predicate lookup per node
+- CDC notifications fire as `pg_notify(channel, '{"op":"insert|delete","s":...,"p":...,"o":...,"g":...}')` via trigger on each delta table
 
-### Benchmarks & CI
-
-- **Insert throughput benchmark** — `benchmarks/insert_throughput.sql` measures 1M-triple insert throughput and query latency
-- **CI performance regression baseline** — `benchmarks/ci_benchmark.sh` records insert throughput and point-query latency; CI `benchmark` job uploads results as artifacts and can gate on >10% regression
-
-### New regression tests
-
-| Test | Description |
-|------|-------------|
-| `htap_merge.sql` | Delta→main promotion, tombstone-based deletes, compact idempotency |
-| `change_notification.sql` | CDC subscribe/notify, wildcard patterns, payload validation |
-| `merge_edge_cases.sql` | Edge cases: empty-delta compact, idempotency, delta-resident delete, non-existent delete |
-| `sparql_star_conformance.sql` | W3C SPARQL-star conformance gate: N-Triples-star parsing, dictionary round-trips, SID lifecycle, annotation patterns, ground triple patterns, data integrity, known-limitation documentation |
+</details>
 
 ---
 
-## [0.5.1] — 2025-04-15 — SPARQL Advanced (Storage, Serialization & Write)
+## [0.5.1] — 2026-04-15 — Compact Number Storage, CONSTRUCT/DESCRIBE, SPARQL Update, Full-Text Search
 
-This release introduces inline value encoding for numeric and date literals, completes all four SPARQL query forms with CONSTRUCT and DESCRIBE, adds basic SPARQL Update (INSERT DATA / DELETE DATA), and delivers full-text search on literal objects.
-
-### What you can do
-
-- **Inline value encoding** — `xsd:integer`, `xsd:boolean`, `xsd:date`, and `xsd:dateTime` literals are now stored as bit-packed `BIGINT` IDs in VP tables. FILTER comparisons on these types (`>`, `<`, `<=`, `>=`, `=`) require zero dictionary round-trips and execute as plain SQL integer comparisons
-- **SPARQL CONSTRUCT** — `pg_ripple.sparql_construct(query TEXT) RETURNS SETOF JSONB` — constructs new triples from a template and returns them as JSONB objects `{s, p, o}`; supports both explicit-template and bare CONSTRUCT WHERE forms
-- **SPARQL DESCRIBE** — `pg_ripple.sparql_describe(query TEXT, strategy TEXT) RETURNS SETOF JSONB` — returns Concise Bounded Description (CBD) or Symmetric CBD (SCBD) of named resources as JSONB triples; `pg_ripple.describe_strategy` GUC selects the default algorithm
-- **SPARQL UPDATE** — `pg_ripple.sparql_update(query TEXT) RETURNS BIGINT` — executes `INSERT DATA { … }` and `DELETE DATA { … }` statements; returns count of affected triples; supports typed literals including inline-encoded types
-- **Full-text search** — `pg_ripple.fts_index(predicate TEXT)` creates a GIN `tsvector` index on string-literal objects of a predicate; `pg_ripple.fts_search(query TEXT, predicate TEXT) RETURNS TABLE(s TEXT, p TEXT, o TEXT)` searches using PostgreSQL `tsquery` syntax
-
-### Bug fixes
-
-- `fts_index`: accepts N-Triples notation (`<IRI>`) for predicate — angle brackets are stripped before dictionary lookup
-- `fts_index`: index predicate changed from subquery-based partial index (unsupported by PostgreSQL) to a `WHERE kind = 2` partial index on all plain string literals — search correctness is ensured by the VP-table JOIN in `fts_search`
-- `batch_decode`: inline IDs are now decoded locally without a DB round-trip, fixing incorrect NULL returns for inline-encoded values in SPARQL SELECT results
-
-### New GUCs
-
-- `pg_ripple.describe_strategy` (TEXT, default `'cbd'`) — DESCRIBE expansion algorithm: `'cbd'` (Concise Bounded Description), `'scbd'` (Symmetric CBD), `'simple'` (single subject only)
-
-### Test infrastructure
-
-- 5 new pg_regress test files: `inline_encoding.sql`, `sparql_construct.sql`, `sparql_insert_data.sql`, `sparql_delete_data.sql`, `fts_search.sql`
-- Total: 19 pg_regress tests, all passing
-
-### Documentation
-
-- `user-guide/sql-reference/sparql-query.md` — CONSTRUCT / DESCRIBE, `describe_strategy` GUC
-- `user-guide/sql-reference/sparql-update.md` — `sparql_update()`, INSERT DATA / DELETE DATA
-- `user-guide/sql-reference/fts.md` — `fts_index`, `fts_search`
-- `user-guide/best-practices/update-patterns.md` — INSERT DATA vs bulk load, idempotent patterns
-
-## [0.5.0] — 2026-04-15 — SPARQL Advanced Query Engine
-
-This release completes the SPARQL query engine with property paths, aggregates, UNION/MINUS, subqueries, BIND/VALUES, and OPTIONAL. All standard SPARQL 1.1 graph pattern forms are now supported.
+This release stores common data types (integers, dates, booleans) as compact numbers instead of text, making range comparisons in queries much faster. It also adds the two remaining SPARQL query forms, write support via SPARQL Update, and full-text search on text values.
 
 ### What you can do
 
-- **Property paths** — `+`, `*`, `?`, `/`, `|`, `^` all compile to PostgreSQL `WITH RECURSIVE` CTEs with PG18 `CYCLE` clause for O(1) hash-based cycle detection; unbounded traversal on cyclic graphs terminates safely
-- **UNION / MINUS** — `UNION { ... } UNION { ... }` and `MINUS { ... }` compile to SQL `UNION` / `LEFT JOIN … WHERE NULL` anti-join
-- **Aggregates** — `COUNT`, `SUM`, `AVG`, `MIN`, `MAX`, `GROUP_CONCAT` with `GROUP BY` and `HAVING` compile to SQL aggregates
-- **Subqueries** — nested `{ SELECT … WHERE { … } }` patterns supported at any depth
-- **BIND / VALUES** — `BIND(<expr> AS ?var)` and `VALUES ?x { … }` compile to SQL expressions and inline data rows
-- **OPTIONAL** — `OPTIONAL { … }` compiles to a `LEFT JOIN` correctly preserving unbound variables
-- **Resource exhaustion safety** — `pg_ripple.max_path_depth` GUC limits recursive CTE depth; plan cache keyed on the GUC value so cache invalidation works correctly
+- **Faster comparisons on numbers and dates** — `xsd:integer`, `xsd:boolean`, `xsd:date`, and `xsd:dateTime` values are stored as compact integers; FILTER comparisons (`>`, `<`, `=`) run as plain integer comparisons with no string decoding
+- **SPARQL CONSTRUCT** — `pg_ripple.sparql_construct(query TEXT)` assembles new triples from a template and returns them as a set of `{s, p, o}` JSON objects; useful for transforming or exporting data
+- **SPARQL DESCRIBE** — `pg_ripple.sparql_describe(query TEXT, strategy TEXT)` returns the neighbourhood of a resource — all triples directly connected to it (Concise Bounded Description) or both incoming and outgoing triples (Symmetric CBD)
+- **SPARQL Update** — `pg_ripple.sparql_update(query TEXT)` executes `INSERT DATA { … }` and `DELETE DATA { … }` statements; returns the number of triples affected
+- **Full-text search** — `pg_ripple.fts_index(predicate TEXT)` indexes text values for a property; `pg_ripple.fts_search(query TEXT, predicate TEXT)` searches them using standard PostgreSQL text-search syntax
 
 ### Bug fixes
 
-- **Sequence paths (`p/q`)**: spargebra encodes intermediate variables as anonymous `BlankNode`s; `bind_term` now correctly applies equi-join constraints on blank nodes instead of treating them as wildcards (Cartesian product bug)
-- **ZeroOrMore (`p*`) CYCLE error**: PostgreSQL 18 requires exactly one non-recursive anchor in a `WITH RECURSIVE` CTE to use `CYCLE`; combined one-hop and zero-hop anchors into a single subquery
-- **LeftJoin alias bug**: `build_from` appended `AS alias` to an already-aliased expression; redesigned to use subquery projections with distinct `_lc_`/`_rc_` prefixes
-- **GROUP BY column refs**: inner query now uses explicit `_gi_{v}` column aliases instead of `SELECT *` to prevent `_t0.o` style references from going out of scope
-- **MINUS ON clause**: fixed `ON _lminus.{v}` → `ON _lminus._m_{v}` matching the alias assigned by `translate_minus`
-- **VALUES double alias**: removed duplicate `AS alias` from `(VALUES …) AS t AS t` pattern
-- **BIND/Extend expression**: `translate_extend` now uses `translate_expr_value` (raw column reference) instead of `translate_expr` (`IS NOT NULL` boolean predicate) — critical for `SELECT (COUNT(?p) AS ?cnt)` subquery patterns
-- **Numeric literal comparison**: xsd:integer/decimal/float/double literals in FILTER expressions now produce raw numeric SQL values instead of dictionary IDs — fixes `FILTER(?cnt >= 2)` and similar
-- **Plan cache staleness**: cache key now includes current `pg_ripple.max_path_depth` GUC value; changing depth mid-session no longer returns stale cached results
+- `fts_index` now accepts N-Triples `<IRI>` notation for the predicate argument
+- `fts_index` now uses a correct partial index that does not require PostgreSQL subquery support
+- Inline-encoded values (integers, dates) now decode correctly in SPARQL SELECT results instead of returning NULL
 
-### Documentation
+### New configuration options
 
-- **Docs site launched** — mdBook-based site at `docs/` with GitHub Pages auto-publish workflow (`.github/workflows/docs.yml`)
-- Catch-up pages for v0.1.0–v0.4.0: introduction, installation, getting-started, SQL reference (triple CRUD, bulk load, named graphs, SPARQL queries, RDF-star, dictionary, prefix), configuration (all GUCs), best-practices (data modeling, bulk loading, SPARQL patterns), FAQ (14 questions), troubleshooting, playground, security policy stub, research index
-- v0.5.0 pages: SPARQL query reference expanded (property paths, aggregates, UNION/MINUS, subqueries, BIND/VALUES), SPARQL patterns guide expanded (property path recipes, resource exhaustion safeguards), configuration expanded (`max_path_depth` GUC)
-
-### Test infrastructure
-
-- All pg_regress test files are now fully idempotent via namespace-scoped `DELETE FROM _pg_ripple.vp_rare` cleanup blocks at the start of each file — safe to run multiple times against the same pgrx-managed database
-- `setup.sql` drops and recreates the extension before each run (`DROP EXTENSION IF EXISTS … CASCADE`) for full isolation
-- New tests: `property_paths.sql`, `aggregates.sql`, `resource_limits.sql`
-- All 12 tests pass on consecutive runs (12/12)
+- `pg_ripple.describe_strategy` (default `'cbd'`) — DESCRIBE expansion algorithm: `'cbd'`, `'scbd'` (symmetric), or `'simple'` (subject only)
 
 ---
 
-## [0.4.0] — 2026-04-14 — RDF-star / Statement Identifiers
+## [0.5.0] — 2026-04-15 — Complete SPARQL 1.1 Query Engine
 
-This release adds RDF-star support: quoted triples, statement identifiers, and SPARQL-star query patterns. You can now make statements about statements — essential for provenance, temporal annotations, and LPG-style edge properties.
+This release completes SPARQL 1.1 query support. All standard query patterns — graph traversal, aggregates, unions, subqueries, optional matches, and computed values — are now supported.
 
 ### What you can do
 
-- **Load N-Triples-star data** — `pg_ripple.load_ntriples()` now accepts N-Triples-star input including subject-position and object-position quoted triples, and nested quoted triples
-- **Encode and decode quoted triples** — `pg_ripple.encode_triple(s, p, o) RETURNS BIGINT` encodes a quoted triple to its dictionary ID; `pg_ripple.decode_triple(id) RETURNS JSONB` reverses the lookup
-- **Use statement identifiers (SIDs)** — `pg_ripple.insert_triple()` now accepts an optional named graph and returns the statement SID; SIDs are stable `BIGINT` values that can appear as subjects or objects in other triples
-- **Look up statements by SID** — `pg_ripple.get_statement(i BIGINT) RETURNS JSONB` returns `{"s":...,"p":...,"o":...,"g":...}` for the statement with that identifier
-- **Query with SPARQL-star** — Ground (all-constant) triple term patterns in SPARQL WHERE clauses are supported; e.g. `WHERE { << :Alice :knows :Bob >> :assertedBy ?who }`
+- **Traverse graph relationships** — property paths (`+`, `*`, `?`, `/`, `|`, `^`) follow chains of relationships; cyclic graphs are handled safely using PostgreSQL's cycle detection
+- **Combine results from alternative patterns** — `UNION { ... } UNION { ... }` merges results from two or more patterns; `MINUS { ... }` removes results that match an unwanted pattern
+- **Aggregate and group results** — `COUNT`, `SUM`, `AVG`, `MIN`, `MAX`, `GROUP_CONCAT` work with `GROUP BY` and `HAVING` just as in SQL
+- **Use subqueries** — nest `{ SELECT … WHERE { … } }` patterns at any depth
+- **Compute new values** — `BIND(<expr> AS ?var)` assigns a calculated value to a variable; `VALUES ?x { … }` injects a fixed set of values into a pattern
+- **Optional matches** — `OPTIONAL { … }` returns results even when the optional pattern has no data, leaving those variables unbound
+- **Limit recursion depth** — `pg_ripple.max_path_depth` caps how deep property-path traversal can go, preventing runaway queries on very large graphs
 
-### Technical highlights
+### Bug fixes
 
-- `KIND_QUOTED_TRIPLE = 5` added to the dictionary; quoted triples stored with `qt_s`, `qt_p`, `qt_o` columns via non-destructive `ALTER TABLE … ADD COLUMN IF NOT EXISTS`
-- Custom recursive-descent N-Triples-star line parser — avoids the `oxrdf/rdf-12` + `spargebra` feature conflict by using only a pure-Rust parser with no new crate dependencies
-- `spargebra` and `sparopt` now use the `sparql-12` feature, which properly enables `TermPattern::Triple` with correct exhaustiveness guards
-- SPARQL-star ground patterns compile to a dictionary lookup + SQL equality condition; variable-inside-quoted-triple patterns emit a warning and match nothing (deferred to v0.5.x)
+- Sequence paths (`p/q`) no longer produce a Cartesian product when intermediate nodes are anonymous
+- `p*` (zero-or-more) paths no longer crash with a PostgreSQL CYCLE syntax error
+- `OPTIONAL` no longer produces incorrect results due to an alias collision in the generated SQL
+- `GROUP BY` column references no longer go out of scope in the outer query
+- `MINUS` join clause now uses the correct column alias
+- `VALUES` no longer generates a duplicate alias clause
+- `BIND` in aggregate subqueries (`SELECT (COUNT(?p) AS ?cnt)`) now produces the correct SQL expression
+- Numbers in FILTER expressions (`FILTER(?cnt >= 2)`) are now emitted as SQL integers instead of dictionary IDs
+- Changing `pg_ripple.max_path_depth` mid-session now correctly invalidates the plan cache
 
-### Known limitations
+<details>
+<summary>Technical details</summary>
+
+- Property paths compile to `WITH RECURSIVE … CYCLE` CTEs using PostgreSQL 18's hash-based `CYCLE` clause
+- All pg_regress test files are now idempotent — safe to run multiple times against the same database
+- `setup.sql` drops and recreates the extension for full isolation between runs
+- New tests: `property_paths.sql`, `aggregates.sql`, `resource_limits.sql` — 12/12 pass
+
+</details>
+
+---
+
+## [0.4.0] — 2026-04-14 — Statements About Statements (RDF-star)
+
+This release adds RDF-star: the ability to store facts *about* facts. For example, you can record not just "Alice knows Bob" but also "Alice knows Bob — according to Carol, since 2020". This is essential for provenance tracking, temporal data, and property graph–style edge annotations.
+
+### What you can do
+
+- **Load N-Triples-star data** — `pg_ripple.load_ntriples()` now accepts N-Triples-star, including nested quoted triples in both subject and object position
+- **Encode and decode quoted triples** — `pg_ripple.encode_triple(s, p, o)` stores a quoted triple and returns its ID; `pg_ripple.decode_triple(id)` converts it back to JSON
+- **Use statement identifiers** — `pg_ripple.insert_triple()` now returns the stable integer identifier of the stored statement; that identifier can itself appear as a subject or object in other triples
+- **Look up a statement by its identifier** — `pg_ripple.get_statement(i BIGINT)` returns `{"s":…,"p":…,"o":…,"g":…}` for any stored statement
+- **Query with SPARQL-star** — ground (all-constant) quoted triple patterns work in SPARQL `WHERE` clauses: `WHERE { << :Alice :knows :Bob >> :assertedBy ?who }`
+
+### Known limitations in this release
 
 - Turtle-star is not yet supported; use N-Triples-star for RDF-star bulk loading
 - Variable-inside-quoted-triple SPARQL patterns (e.g. `<< ?s :knows ?o >> :assertedBy ?who`) are deferred to v0.5.x
 - W3C SPARQL-star conformance test suite not yet run (deferred to v0.5.x)
 
----
-
-## [0.3.0] — 2026-04-14 — SPARQL Query Engine (Basic)
-
-This release introduces SPARQL SELECT and ASK queries. You can now ask questions over stored RDF data using the standard W3C query language, with results returned as JSONB rows.
-
-### What you can do
-
-- **Run SPARQL SELECT queries** — `pg_ripple.sparql(query TEXT) RETURNS SETOF JSONB` parses and executes a SPARQL SELECT, returning one JSONB object per result row with variable names as keys and N-Triples–formatted term strings as values
-- **Run SPARQL ASK queries** — `pg_ripple.sparql_ask(query TEXT) RETURNS BOOLEAN` returns `TRUE` if any results exist
-- **Inspect generated SQL** — `pg_ripple.sparql_explain(query TEXT, analyze BOOL DEFAULT false) RETURNS TEXT` shows the SQL generated from a SPARQL query; pass `analyze := true` to run EXPLAIN ANALYZE on it
-- **Tune plan cache size** — `pg_ripple.plan_cache_size` GUC (default: 256) controls how many SPARQL→SQL translations are cached per backend; set to `0` to disable
-
-### Supported SPARQL features
-
-- Basic Graph Patterns (BGP) with bound subjects, predicates, and objects
-- `FILTER` expressions: `=`, `!=`, `<`, `<=`, `>`, `>=`, `&&`, `||`, `!`, `BOUND()`
-- `OPTIONAL` (LEFT JOIN)
-- `GRAPH <iri> { ... }` and `GRAPH ?g { ... }` named-graph patterns
-- `PROJECT` (SELECT variable list), `DISTINCT`, `REDUCED`
-- `LIMIT`, `OFFSET`
-- `ORDER BY` (single variable, ASC/DESC)
-- Result pagination via `LIMIT`/`OFFSET`
-
-### How it works behind the scenes
-
-- SPARQL text is parsed by `spargebra 0.4` into a `GraphPattern` algebra tree
-- The SPARQL algebra is translated to SQL by `src/sparql/sqlgen.rs`: each BGP triple pattern maps to a VP-table join (integer equality on encoded IDs); every IRI and literal constant is encoded to an `i64` before appearing in SQL — SQL injection via SPARQL constants is structurally impossible
-- A per-query encoding cache (`Ctx.per_query`) avoids redundant SPI dictionary lookups for constants that appear multiple times in one query
-- Self-join elimination: BGP patterns that share a subject but use different predicates are compiled into a single scan with multiple predicates joined, not separate subqueries
-- Batch decode: all `i64` result columns are collected, deduplicated, and decoded in a single `SELECT ... WHERE id IN (...)` round-trip; no per-row dictionary queries
-- `sparopt 0.3` is in `Cargo.toml`; direct algebra-tree conversion between sparopt and spargebra types is not yet available (distinct type systems), so filter-pushdown and constant-folding are implemented inline in the SQL generator
-- A `vp_source` lookup bug was discovered and fixed: pgrx 0.17 returns `Err(InvalidPosition)` for zero-row queries rather than `Ok(None)`, so querying with `AND table_oid IS NOT NULL` incorrectly returned `VpSource::Empty` for rare-predicate tables
-
-### Technical Details
-
 <details>
-<summary>Click to expand implementation details</summary>
+<summary>Technical details</summary>
 
-- **New module `src/sparql/`**: `mod.rs` (public functions), `sqlgen.rs` (SPARQL algebra → SQL), `plan_cache.rs` (LRU translation cache)
-- **New functions**: `pg_ripple.sparql`, `pg_ripple.sparql_ask`, `pg_ripple.sparql_explain`
-- **New GUC**: `pg_ripple.plan_cache_size` (i32, default 256, range 0–65536)
-- **Dictionary additions** (`src/dictionary/mod.rs`): `lookup(term, kind)` and `lookup_iri(iri)` — read-only dictionary lookups that return `None` for unknown terms, used by the SPARQL translator to handle unresolvable IRIs without polluting the dictionary
-- **Dependencies added**: `spargebra = "0.4"`, `sparopt = "0.3"`
-- **Test deadlock fix**: added `RUST_TEST_THREADS = "1"` to `.cargo/config.toml` to serialize `cargo pgrx test` execution and prevent concurrent dictionary upsert deadlocks
-- **pg_test tests** (8 new, in `src/lib.rs`): `pg_test_sparql_select_empty`, `pg_test_sparql_select_one_triple`, `pg_test_sparql_ask_empty`, `pg_test_sparql_ask_match`, `pg_test_sparql_explain_returns_sql`, `pg_test_sparql_limit`, `pg_test_sparql_distinct`, `pg_test_sparql_filter_bound`
-- **pg_regress tests**: `sparql_queries.sql` (10 queries), `sparql_injection.sql` (7 adversarial inputs)
+- `KIND_QUOTED_TRIPLE = 5` added to the dictionary; quoted triples stored with `qt_s`, `qt_p`, `qt_o` columns via non-destructive `ALTER TABLE … ADD COLUMN IF NOT EXISTS`
+- Custom recursive-descent N-Triples-star line parser — avoids the `oxrdf/rdf-12` + `spargebra` feature conflict with no new crate dependencies
+- `spargebra` and `sparopt` now use the `sparql-12` feature, enabling `TermPattern::Triple` with correct exhaustiveness guards
+- SPARQL-star ground patterns compile to a dictionary lookup + SQL equality condition
 
 </details>
 
 ---
 
-## [0.2.0] — 2026-04-14 — Bulk Loading & Named Graphs
+## [0.3.0] — 2026-04-14 — SPARQL Query Language
 
-This release adds bulk data import, named graph management, N-Triples/N-Quads export, and rare-predicate consolidation. You can now load large RDF datasets in standard formats without inserting triples one at a time.
+This release introduces SPARQL, the standard W3C query language for RDF data. You can now ask questions over your stored facts using a familiar graph-pattern syntax, with results returned as JSON.
 
 ### What you can do
 
-- **Load RDF data in bulk** — `pg_ripple.load_ntriples(data TEXT)`, `load_nquads(data TEXT)`, `load_turtle(data TEXT)`, `load_trig(data TEXT)` accept standard RDF text and return the number of triples loaded
-- **Load from a server-side file** — `load_ntriples_file(path TEXT)` and its siblings read a file via `pg_read_file()` (superuser required); essential for datasets larger than ~1 GB
-- **Use named graphs** — group related triples into labelled collections with `pg_ripple.create_graph('<iri>')`, drop them with `drop_graph('<iri>')`, and list all graphs with `list_graphs()`
-- **Export data** — `pg_ripple.export_ntriples(graph)` and `export_nquads(graph)` serialise stored triples back to standard text formats; pass `NULL` to export all triples
-- **Register IRI prefixes** — `pg_ripple.register_prefix('ex', 'https://example.org/')` records abbreviations for use in future query features; `prefixes()` lists all registered mappings
-- **Promote rare predicates manually** — `pg_ripple.promote_rare_predicates()` moves any predicate that has accumulated enough triples into its own dedicated table
+- **Run SPARQL SELECT queries** — `pg_ripple.sparql(query TEXT)` executes a SPARQL SELECT and returns one JSON object per result row, with variable names as keys and values in standard N-Triples format
+- **Run SPARQL ASK queries** — `pg_ripple.sparql_ask(query TEXT)` returns `true` if any results exist, `false` otherwise
+- **Inspect the generated SQL** — `pg_ripple.sparql_explain(query TEXT, analyze BOOL DEFAULT false)` shows what SQL was generated from a SPARQL query; pass `analyze := true` for a full execution plan with timings
+- **Tune the query plan cache** — `pg_ripple.plan_cache_size` (default 256) controls how many SPARQL-to-SQL translations are cached per connection; set to `0` to disable caching
 
-### What happens behind the scenes
+### Supported query features
 
-- Predicates with fewer than 1,000 triples (configurable via `pg_ripple.vp_promotion_threshold`) are held in a shared `vp_rare` table rather than creating a separate table for each. Once a predicate crosses the threshold, its triples are automatically migrated to a dedicated table
-- Blank node identifiers from different load operations are isolated by a generation counter — `_:b0` from two separate load calls always produces two distinct dictionary entries, preventing unintended merging of blank nodes across files
-- After each bulk load, `ANALYZE` is run on the affected tables so the query planner has accurate row-count estimates ready for the SPARQL engine (v0.3.0)
-- The `_pg_ripple.statements` range-mapping catalog is created in this release; it maps statement-ID ranges to the VP tables they belong to. This table is populated by the merge worker in v0.6.0+ and is required by RDF-star in v0.4.0
-- Literals (plain, language-tagged, and typed) are now properly encoded in both the SQL API and the bulk loaders — `insert_triple('<s>', '<p>', '"hello"@en')` stores a language-tagged literal, and `insert_triple('<s>', '<p>', '"42"^^<xsd:integer>')` stores a typed literal
-
-### Technical Details
+- Basic graph patterns with bound or wildcard subjects, predicates, and objects
+- `FILTER` with comparisons (`=`, `!=`, `<`, `<=`, `>`, `>=`) and boolean operators (`&&`, `||`, `!`, `BOUND()`)
+- `OPTIONAL` (left-join)
+- `GRAPH <iri> { … }` and `GRAPH ?g { … }` for named graph scoping
+- `SELECT` with variable projection, `DISTINCT`, `REDUCED`
+- `LIMIT`, `OFFSET`, `ORDER BY`
 
 <details>
-<summary>Click to expand implementation details</summary>
+<summary>Technical details</summary>
 
-- **rio_turtle 0.8 / rio_api 0.8** added as dependencies for N-Triples, N-Quads, Turtle, and TriG parsing
-- **Blank node scoping** (`_pg_ripple.load_generation_seq`): each load call advances a shared sequence; blank node hashes are prefixed with `"{generation}:"` so cross-load merging is impossible
-- **Rare-predicate routing** (`src/storage/mod.rs`): `insert_triple` checks `_pg_ripple.predicates.table_oid IS NOT NULL` before routing to vp_rare. `batch_insert_encoded` in the bulk loader groups triples by predicate and issues a single multi-row INSERT per predicate group, reducing SPI round-trips. Promotion to a dedicated VP table is deferred to the end of each bulk load; `promote_rare_predicates()` can also be called manually
-- **Named graph support** (`src/storage/mod.rs`): `create_graph`, `drop_graph`, `list_graphs` operate on the `g` column already present in every VP table and vp_rare. A `(g, p, s, o)` index on vp_rare supports efficient graph-drop bulk-delete
-- **`pg_ripple.named_graph_optimized` GUC**: when enabled at table creation time, adds a `(g, s, o)` index to each dedicated VP table for fast graph-scoped queries
-- **`_pg_ripple.statements` catalog**: lightweight range-mapping table `(sid_min, sid_max, predicate_id, table_oid)` created now; populated in v0.6.0
-- **`_pg_ripple.prefixes` table**: `(prefix TEXT PRIMARY KEY, expansion TEXT)` for IRI prefix abbreviations
-- **Literal encoding** (`src/dictionary/mod.rs`): `encode_typed_literal`, `encode_lang_literal`, `encode_plain_literal`, `decode_full`, `format_ntriples` added to support proper RDF term types throughout the storage and export paths
-- **N-Triples / N-Quads export** (`src/export.rs`): `export_ntriples` and `export_nquads` decode i64 IDs in bulk via `format_ntriples` and assemble the output string
-- **GUCs added**: `pg_ripple.vp_promotion_threshold` (i32, default 1000), `pg_ripple.named_graph_optimized` (bool, default off)
-- **pg_regress tests**: `triple_crud.sql`, `named_graphs.sql`, `export_ntriples.sql`, `nquads_trig.sql`
+- SPARQL text → `spargebra 0.4` algebra tree → SQL via `src/sparql/sqlgen.rs`; all IRI and literal constants are encoded to `i64` before appearing in SQL — SQL injection via SPARQL constants is structurally impossible
+- Per-query encoding cache avoids redundant dictionary lookups for constants appearing multiple times in one query
+- Self-join elimination: patterns sharing a subject but using different predicates compile to a single scan, not separate subqueries
+- Batch decode: all integer result columns are decoded in a single `SELECT … WHERE id IN (…)` round-trip
+- `RUST_TEST_THREADS = "1"` in `.cargo/config.toml` prevents concurrent dictionary upsert deadlocks in the test suite
+- New pg_regress tests: `sparql_queries.sql` (10 queries), `sparql_injection.sql` (7 adversarial inputs)
 
 </details>
 
 ---
 
-## [0.1.0] — 2026-04-14 — Foundation
+## [0.2.0] — 2026-04-14 — Bulk Loading, Named Graphs, and Export
 
-pg_ripple can now be installed into a PostgreSQL 18 database. After installation, you can store facts (triples like "Alice knows Bob") and retrieve them by pattern. This is the first working release — no query language yet, just the basic building blocks.
+This release makes it practical to work with large RDF datasets. You can load standard RDF files, organise triples into named collections, export data back to standard formats, and register IRI prefixes for convenience.
 
 ### What you can do
 
-- **Install the extension** into any PostgreSQL 18 database with `CREATE EXTENSION pg_ripple` (requires database superuser)
+- **Load RDF files in bulk** — `pg_ripple.load_ntriples(data TEXT)`, `load_nquads(data TEXT)`, `load_turtle(data TEXT)`, and `load_trig(data TEXT)` accept standard RDF text and return the number of triples loaded
+- **Load from a file on the server** — `pg_ripple.load_ntriples_file(path TEXT)` and its siblings read a file directly from the server filesystem (requires superuser); essential for large datasets
+- **Organise triples into named graphs** — `pg_ripple.create_graph('<iri>')` creates a named collection; `pg_ripple.drop_graph('<iri>')` deletes it along with its triples; `pg_ripple.list_graphs()` lists all collections
+- **Export data** — `pg_ripple.export_ntriples(graph)` and `pg_ripple.export_nquads(graph)` serialise stored triples to standard text; pass `NULL` to export all triples
+- **Register IRI prefixes** — `pg_ripple.register_prefix('ex', 'https://example.org/')` records a shorthand; `pg_ripple.prefixes()` lists all registered mappings
+- **Promote rare properties manually** — `pg_ripple.promote_rare_predicates()` moves any property that has grown beyond the threshold into its own dedicated table
+
+### How rare properties work
+
+Properties with fewer than 1,000 triples (configurable via `pg_ripple.vp_promotion_threshold`) are stored in a shared table rather than creating a dedicated table for each one. Once a property crosses the threshold it is automatically migrated. This keeps the database tidy for datasets with many rarely-used properties.
+
+### How blank node scoping works
+
+Blank node identifiers (`_:b0`, `_:b1`, etc.) from different load calls are automatically isolated. Loading the same file twice will produce separate, independent blank nodes rather than merging them — which is almost always what you want.
+
+<details>
+<summary>Technical details</summary>
+
+- `rio_turtle 0.8` / `rio_api 0.8` added for N-Triples, N-Quads, Turtle, and TriG parsing
+- Blank node scoping via `_pg_ripple.load_generation_seq`: each load advances a shared sequence; blank node hashes are prefixed with `"{generation}:"` to prevent cross-load merging
+- `batch_insert_encoded` groups triples by predicate and issues one multi-row INSERT per predicate group, reducing round-trips
+- `_pg_ripple.statements` range-mapping table created (populated in v0.6.0)
+- `_pg_ripple.prefixes` table: `(prefix TEXT PRIMARY KEY, expansion TEXT)`
+- GUCs added: `pg_ripple.vp_promotion_threshold` (i32, default 1000), `pg_ripple.named_graph_optimized` (bool, default off)
+- New pg_regress tests: `triple_crud.sql`, `named_graphs.sql`, `export_ntriples.sql`, `nquads_trig.sql`
+
+</details>
+
+---
+
+## [0.1.0] — 2026-04-14 — First Working Release
+
+pg_ripple can now be installed into a PostgreSQL 18 database. After installation you can store facts — statements like "Alice knows Bob" — and retrieve them by pattern. This is the foundation that all later releases build on. No query language yet: just the core building blocks.
+
+### What you can do
+
+- **Install the extension** — `CREATE EXTENSION pg_ripple` in any PostgreSQL 18 database (requires superuser)
 - **Store facts** — `pg_ripple.insert_triple('<Alice>', '<knows>', '<Bob>')` saves a fact and returns a unique identifier for it
-- **Find facts by pattern** — `pg_ripple.find_triples('<Alice>', NULL, NULL)` finds everything about Alice; use NULL as a wildcard for any position
-- **Delete facts** — `pg_ripple.delete_triple(...)` removes a specific fact
+- **Find facts by pattern** — `pg_ripple.find_triples('<Alice>', NULL, NULL)` returns everything about Alice; `NULL` is a wildcard for any position
+- **Delete facts** — `pg_ripple.delete_triple(…)` removes a specific fact
 - **Count facts** — `pg_ripple.triple_count()` returns how many facts are stored
-- **Encode and decode terms** — `pg_ripple.encode_term(...)` converts a text term to its internal numeric ID; `pg_ripple.decode_id(...)` converts it back
+- **Encode and decode terms** — `pg_ripple.encode_term(…)` converts a text term to its internal numeric ID; `pg_ripple.decode_id(…)` converts it back
 
-### What happens behind the scenes
+### How storage works
 
-- Every piece of text (names, URLs, values) is converted to a compact number before storage, so lookups and joins are fast
-- Facts are automatically organized into one table per relationship type (called "vertical partitioning") — this makes pattern queries efficient
-- Rarely-used relationship types share a single table to avoid creating thousands of small tables
-- Every fact gets a globally unique identifier, which will be used in future versions for making statements about statements (RDF-star)
-- A continuous integration pipeline automatically checks code quality and runs all tests on every change
-
-### Technical Details
+Every piece of text — names, URLs, values — is converted to a compact integer before storage. Lookups and joins operate on integers, not strings, which is what makes queries fast. Facts are automatically organised into one table per relationship type, and relationship types with few facts share a single table to avoid creating thousands of tiny tables. Every fact receives a globally unique integer identifier that later versions use for RDF-star.
 
 <details>
-<summary>Click to expand implementation details</summary>
+<summary>Technical details</summary>
 
 - pgrx 0.17 project scaffolding targeting PostgreSQL 18
-- Extension bootstrap creates `pg_ripple` (user-visible) and `_pg_ripple` (internal) schemas
-  - `pg_ripple` schema requires `superuser = true` and a bootstrap `SET LOCAL allow_system_table_mods = on` due to PostgreSQL's `pg_` prefix restriction
-- **Dictionary encoder** (`src/dictionary/mod.rs`): unified `_pg_ripple.dictionary` table with hash-backed-sequence encoding (XXH3-128 full hash stored in BYTEA; dense IDENTITY sequence id as join key). Backend-local LRU caches for encode and decode paths. CTE-based upsert pattern avoids pgrx 0.17 `InvalidPosition` error on empty `RETURNING` results.
-- **Vertical partitioning** (`src/storage/mod.rs`): auto-created `_pg_ripple.vp_{predicate_id}` tables with dual B-tree indices on `(s,o)` and `(o,s)`. `_pg_ripple.predicates` catalog tracks table OIDs and triple counts. `_pg_ripple.vp_rare` consolidation table for low-frequency predicates. `_pg_ripple.statement_id_seq` shared sequence for globally-unique statement IDs.
-- **Error taxonomy** (`src/error.rs`): `thiserror`-based error types — PT001–PT099 (dictionary), PT100–PT199 (storage)
-- GUC parameter: `pg_ripple.default_graph`
-- GUC-gated lazy initialization: future subsystems (merge worker, SHACL, reasoning) start only when enabled
-- `pg_ripple.predicate_stats` view for human-readable statistics
-- pg_regress tests: `setup.sql`, `dictionary.sql`, `basic_crud.sql`
+- Extension bootstrap creates `pg_ripple` (user-visible) and `_pg_ripple` (internal) schemas; the `pg_` prefix requires `SET LOCAL allow_system_table_mods = on` during bootstrap
+- Dictionary encoder (`src/dictionary/mod.rs`): `_pg_ripple.dictionary` table; XXH3-128 hash stored in BYTEA; dense IDENTITY sequence as join key; backend-local LRU encode/decode caches; CTE-based upsert avoids pgrx 0.17 `InvalidPosition` error on empty `RETURNING` results
+- Vertical partitioning (`src/storage/mod.rs`): `_pg_ripple.vp_{predicate_id}` tables with dual B-tree indices on `(s,o)` and `(o,s)`; `_pg_ripple.predicates` catalog; `_pg_ripple.vp_rare` consolidation table; `_pg_ripple.statement_id_seq` for globally-unique statement IDs
+- Error taxonomy (`src/error.rs`): `thiserror`-based types — PT001–PT099 (dictionary), PT100–PT199 (storage)
+- GUC: `pg_ripple.default_graph`
 - CI pipeline: fmt, clippy, pg_test, pg_regress (`.github/workflows/ci.yml`)
+- pg_regress tests: `setup.sql`, `dictionary.sql`, `basic_crud.sql`
 
 </details>
-
-
-
