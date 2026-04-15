@@ -201,19 +201,25 @@ pub fn compile_path(
             let cte_name = format!("_zom{n}");
             let base_sql = compile_path(inner, None, None, ctx, max_depth);
             let depth_guard = depth_guard_clause(max_depth, &cte_name);
-            let anchor_where = s_filter
-                .map(|sf| format!(" WHERE _anchor{n}.s = {sf}"))
+            // Filters for anchor arms (subject-start constraint).
+            let sf_cond = s_filter
+                .map(|sf| format!(" WHERE s = {sf}"))
                 .unwrap_or_default();
             let final_where = o_filter
                 .map(|of| format!(" AND o = {of}"))
                 .unwrap_or_default();
+            // PostgreSQL requires the CYCLE clause to have exactly ONE non-recursive
+            // anchor term.  Combine the one-hop anchor and zero-hop (identity) rows
+            // into a single subquery so the CTE has the required shape:
+            //   (anchor_subquery) UNION ALL (recursive_step)
             format!(
                 "(WITH RECURSIVE {cte_name}(s, o, _depth) AS (\
-                 SELECT _anchor{n}.s, _anchor{n}.o, 1 \
-                 FROM {base_sql} AS _anchor{n}{anchor_where} \
-                 UNION ALL \
-                 SELECT s, s, 0 \
-                 FROM {base_sql} AS _zero{n}{anchor_where} \
+                 SELECT _anc{n}.s, _anc{n}.o, _anc{n}._depth \
+                 FROM (\
+                   SELECT s, o, 1 AS _depth FROM {base_sql} AS _b1{n}{sf_cond} \
+                   UNION ALL \
+                   SELECT s, s AS o, 0 AS _depth FROM {base_sql} AS _b0{n}{sf_cond} \
+                 ) AS _anc{n} \
                  UNION ALL \
                  SELECT {cte_name}.s, _step{n}.o, {cte_name}._depth + 1 \
                  FROM {cte_name} \

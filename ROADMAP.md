@@ -279,7 +279,7 @@ Users can load RDF-star data (Turtle-star, N-Triples-star), query it with SPARQL
 
 ### Deliverables
 
-- [ ] **Property path compilation**
+- [x] **Property path compilation**
   - `+` (one or more) → `WITH RECURSIVE` CTE
   - `*` (zero or more) → `WITH RECURSIVE` CTE with zero-hop anchor
   - `?` (zero or one) → `UNION` of direct + zero-hop
@@ -289,16 +289,16 @@ Users can load RDF-star data (Turtle-star, N-Triples-star), query it with SPARQL
   - Cycle detection via PG18 `CYCLE` clause (hash-based, replaces array-based visited tracking for $O(1)$ membership checks instead of $O(n)$ array scans)
   - `pg_ripple.max_path_depth` GUC
   - **Known performance constraint**: PostgreSQL materializes each level of a `WITH RECURSIVE` CTE into a work-table. For deep traversals (depth > ~15) or wide fan-out on graphs with 10M+ triples the per-level copy cost becomes the bottleneck. The <100 ms target in §13 benchmarks applies to bounded-depth paths (depth ≤ 10) on typical RDF datasets; unbounded paths on dense graphs will exceed it. A purpose-built graph traversal engine would outperform this approach at extreme depth/fan-out, but that is out of scope for v1.0.
-- [ ] **UNION / MINUS**
+- [x] **UNION / MINUS**
   - UNION → SQL `UNION`
   - MINUS → SQL `EXCEPT`
-- [ ] **Aggregates**
+- [x] **Aggregates**
   - COUNT, SUM, AVG, MIN, MAX, GROUP_CONCAT
   - GROUP BY → SQL GROUP BY
   - HAVING → SQL HAVING
-- [ ] **Subqueries**
+- [x] **Subqueries**
   - Nested SELECT in WHERE / FROM clause
-- [ ] **BIND / VALUES**
+- [x] **BIND / VALUES**
   - BIND → SQL column alias
   - VALUES → SQL VALUES clause
 - [ ] **Advanced join optimizations**
@@ -310,9 +310,9 @@ Users can load RDF-star data (Turtle-star, N-Triples-star), query it with SPARQL
   - Full query mix execution with timing
   - Comparison baselines documented
 - [ ] Benchmark: SP2Bench subset
-- [ ] **Resource exhaustion tests**: Cartesian-product queries, unbounded property paths on cyclic graphs, deeply nested subqueries — verify that `max_path_depth`, `statement_timeout`, and memory limits prevent runaway resource consumption
+- [x] **Resource exhaustion tests**: Cartesian-product queries, unbounded property paths on cyclic graphs, deeply nested subqueries — verify that `max_path_depth`, `statement_timeout`, and memory limits prevent runaway resource consumption
 - [ ] **Fuzz testing** (`cargo-fuzz`): continuous fuzzing of the SPARQL→SQL pipeline — feed random/mutated SPARQL strings through the parser and SQL generator; verify no panics, no invalid SQL emitted, no memory safety violations
-- [ ] pg_regress: `property_paths.sql`, `aggregates.sql`, `resource_limits.sql` (exhaustion tests)
+- [x] pg_regress: `property_paths.sql`, `aggregates.sql`, `resource_limits.sql` (exhaustion tests)
 
 ### Documentation
 

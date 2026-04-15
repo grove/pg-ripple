@@ -24,11 +24,22 @@ thread_local! {
 }
 
 /// Retrieve a cached translation for `query_text`, if available.
+/// The cache key incorporates GUC values that affect SQL generation
+/// (currently `max_path_depth`) so stale plans are never returned after
+/// a GUC change.
 pub fn get(query_text: &str) -> Option<CacheEntry> {
-    PLAN_CACHE.with(|c| c.borrow_mut().get(query_text).cloned())
+    let key = cache_key(query_text);
+    PLAN_CACHE.with(|c| c.borrow_mut().get(&key).cloned())
 }
 
 /// Store a translation in the cache.
 pub fn put(query_text: &str, entry: CacheEntry) {
-    PLAN_CACHE.with(|c| c.borrow_mut().put(query_text.to_owned(), entry));
+    let key = cache_key(query_text);
+    PLAN_CACHE.with(|c| c.borrow_mut().put(key, entry));
+}
+
+/// Build the cache key: query text + GUC values that influence SQL generation.
+fn cache_key(query_text: &str) -> String {
+    let max_depth = crate::MAX_PATH_DEPTH.get();
+    format!("{query_text}\x00max_depth={max_depth}")
 }

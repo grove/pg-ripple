@@ -9,7 +9,41 @@ Versions correspond to the milestones in [ROADMAP.md](ROADMAP.md).
 
 ## [Unreleased]
 
-Development towards [v0.5.0 (SPARQL Advanced Query)](ROADMAP.md) — property paths, aggregates, UNION/MINUS, subqueries, GROUP BY, BIND/VALUES.
+Development towards [v0.5.1 (Inline Value Encoding)](ROADMAP.md).
+
+---
+
+## [0.5.0] — 2026-04-15 — SPARQL Advanced Query Engine
+
+This release completes the SPARQL query engine with property paths, aggregates, UNION/MINUS, subqueries, BIND/VALUES, and OPTIONAL. All standard SPARQL 1.1 graph pattern forms are now supported.
+
+### What you can do
+
+- **Property paths** — `+`, `*`, `?`, `/`, `|`, `^` all compile to PostgreSQL `WITH RECURSIVE` CTEs with PG18 `CYCLE` clause for O(1) hash-based cycle detection; unbounded traversal on cyclic graphs terminates safely
+- **UNION / MINUS** — `UNION { ... } UNION { ... }` and `MINUS { ... }` compile to SQL `UNION` / `LEFT JOIN … WHERE NULL` anti-join
+- **Aggregates** — `COUNT`, `SUM`, `AVG`, `MIN`, `MAX`, `GROUP_CONCAT` with `GROUP BY` and `HAVING` compile to SQL aggregates
+- **Subqueries** — nested `{ SELECT … WHERE { … } }` patterns supported at any depth
+- **BIND / VALUES** — `BIND(<expr> AS ?var)` and `VALUES ?x { … }` compile to SQL expressions and inline data rows
+- **OPTIONAL** — `OPTIONAL { … }` compiles to a `LEFT JOIN` correctly preserving unbound variables
+- **Resource exhaustion safety** — `pg_ripple.max_path_depth` GUC limits recursive CTE depth; plan cache keyed on the GUC value so cache invalidation works correctly
+
+### Bug fixes
+
+- **Sequence paths (`p/q`)**: spargebra encodes intermediate variables as anonymous `BlankNode`s; `bind_term` now correctly applies equi-join constraints on blank nodes instead of treating them as wildcards (Cartesian product bug)
+- **ZeroOrMore (`p*`) CYCLE error**: PostgreSQL 18 requires exactly one non-recursive anchor in a `WITH RECURSIVE` CTE to use `CYCLE`; combined one-hop and zero-hop anchors into a single subquery
+- **LeftJoin alias bug**: `build_from` appended `AS alias` to an already-aliased expression; redesigned to use subquery projections with distinct `_lc_`/`_rc_` prefixes
+- **GROUP BY column refs**: inner query now uses explicit `_gi_{v}` column aliases instead of `SELECT *` to prevent `_t0.o` style references from going out of scope
+- **MINUS ON clause**: fixed `ON _lminus.{v}` → `ON _lminus._m_{v}` matching the alias assigned by `translate_minus`
+- **VALUES double alias**: removed duplicate `AS alias` from `(VALUES …) AS t AS t` pattern
+- **BIND/Extend expression**: `translate_extend` now uses `translate_expr_value` (raw column reference) instead of `translate_expr` (`IS NOT NULL` boolean predicate) — critical for `SELECT (COUNT(?p) AS ?cnt)` subquery patterns
+- **Numeric literal comparison**: xsd:integer/decimal/float/double literals in FILTER expressions now produce raw numeric SQL values instead of dictionary IDs — fixes `FILTER(?cnt >= 2)` and similar
+- **Plan cache staleness**: cache key now includes current `pg_ripple.max_path_depth` GUC value; changing depth mid-session no longer returns stale cached results
+
+### Test infrastructure
+
+- All pg_regress test files are now fully idempotent via namespace-scoped `DELETE FROM _pg_ripple.vp_rare` cleanup blocks at the start of each file — safe to run multiple times against the same pgrx-managed database
+- New tests: `property_paths.sql`, `aggregates.sql`, `resource_limits.sql`
+- All 12 tests pass on consecutive runs (12/12)
 
 ---
 

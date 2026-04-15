@@ -1,5 +1,14 @@
 -- pg_regress test: SPARQL aggregates, UNION, MINUS, BIND, VALUES (v0.5.0)
 -- Uses unique predicate namespace https://agg.test/ to avoid interference.
+-- Clean up any agg.test data from previous runs to ensure idempotent counts.
+DO $$
+BEGIN
+    DELETE FROM _pg_ripple.vp_rare
+    WHERE p IN (
+        SELECT id FROM _pg_ripple.dictionary
+        WHERE value IN ('https://agg.test/worksAt', 'https://agg.test/name')
+    );
+END $$;
 -- Setup: a small dataset for aggregate tests.
 -- Alice and Bob both work at Acme. Carol works at Widgets.
 -- Each person has an integer age (stored as xsd:integer literals).

@@ -1,5 +1,15 @@
 -- pg_regress test: triple CRUD with vp_rare routing and named graphs
 
+-- Clean up any example.org data from previous runs to ensure idempotent counts.
+DO $$
+BEGIN
+    DELETE FROM _pg_ripple.vp_rare
+    WHERE p IN (
+        SELECT id FROM _pg_ripple.dictionary
+        WHERE value IN ('https://example.org/knows', 'https://example.org/name')
+    );
+END $$;
+
 -- Insert into default graph (threshold 1000 not crossed → goes to vp_rare)
 SELECT pg_ripple.insert_triple(
     '<https://example.org/alice>',

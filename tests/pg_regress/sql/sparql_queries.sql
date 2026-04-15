@@ -1,6 +1,16 @@
 -- pg_regress test: SPARQL query engine (v0.3.0)
 -- Uses a unique predicate namespace to avoid interference from other tests.
 
+-- Clean up any q.test data from previous runs to ensure idempotent counts.
+DO $$
+BEGIN
+    DELETE FROM _pg_ripple.vp_rare
+    WHERE p IN (
+        SELECT id FROM _pg_ripple.dictionary
+        WHERE value IN ('https://q.test/knows', 'https://q.test/name')
+    );
+END $$;
+
 -- Setup: load a small dataset with unique-to-this-test predicates.
 SELECT pg_ripple.load_ntriples(
     '<https://q.test/alice> <https://q.test/knows> <https://q.test/bob> .' || E'\n' ||

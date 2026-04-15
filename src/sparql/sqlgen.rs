@@ -268,10 +268,17 @@ fn bind_term(
             let id = ctx.encode_literal(lit);
             conditions.push(format!("{col_expr} = {id}"));
         }
-        TermPattern::BlankNode(_) => {
-            // Blank nodes in query patterns are treated as variables in SPARQL;
-            // spargebra should have converted them to fresh variables already.
-            // As a fallback, treat as an unbound (wildcard) subject/object.
+        TermPattern::BlankNode(bnode) => {
+            // spargebra uses anonymous blank nodes as intermediate variables for
+            // property path sequences (e.g. `p/q` → two BGP patterns sharing a
+            // blank-node object/subject).  Treat them just like SPARQL variables:
+            // bind on first occurrence, equijoin on subsequent occurrences.
+            let vname = format!("_bn_{}", bnode);
+            if let Some(existing) = bindings.get(&vname) {
+                conditions.push(format!("{col_expr} = {existing}"));
+            } else {
+                bindings.insert(vname, col_expr);
+            }
         }
         TermPattern::Triple(_) => {
             // Quoted triple pattern — try to evaluate as a ground constant.
@@ -398,94 +405,107 @@ fn translate_pattern(pattern: &GraphPattern, ctx: &mut Ctx) -> Fragment {
             expression,
         } => {
             let left_frag = translate_pattern(left, ctx);
-            let right_frag_clone = translate_pattern(right, ctx);
+            let mut right_frag = translate_pattern(right, ctx);
 
-            // Identify shared variables (appear in both sides).
-            let shared: Vec<String> = right_frag_clone
-                .bindings
-                .keys()
-                .filter(|v| left_frag.bindings.contains_key(*v))
-                .cloned()
-                .collect();
-
-            let opt_alias = ctx.next_opt();
-
-            // Build a subquery SELECT for the right-hand side.
-            let mut right_frag_sq = translate_pattern(right, ctx);
-
-            // Add the OPTIONAL filter expression to the right subquery, if any.
+            // Add the OPTIONAL filter expression to the right fragment, if any.
             if let Some(expr) = expression {
-                if let Some(cond) = translate_expr(expr, &right_frag_sq.bindings, ctx) {
-                    right_frag_sq.conditions.push(cond);
+                if let Some(cond) = translate_expr(expr, &right_frag.bindings, ctx) {
+                    right_frag.conditions.push(cond);
                 }
             }
 
-            let right_subquery = right_frag_sq.as_subquery(&opt_alias);
-
-            // Build the combined fragment.
-            let mut frag = left_frag;
-
-            // Add the LEFT JOIN.
-            let left_from = frag.build_from();
-            let left_where = frag.build_where();
-
-            // Build ON condition.
-            let on_cond: Option<String> = if shared.is_empty() {
-                None
-            } else {
-                let parts: Vec<String> = shared
-                    .iter()
-                    .filter_map(|v| {
-                        let left_col = frag.bindings.get(v)?;
-                        Some(format!("{left_col} = {opt_alias}.{opt_alias}_{v}"))
-                    })
-                    .collect();
-                if parts.is_empty() {
-                    None
-                } else {
-                    Some(parts.join(" AND "))
-                }
-            };
-
-            // Reconstruct the fragment as a combined FROM with LEFT JOIN.
-            frag.from_items.clear();
-            frag.conditions.clear();
-            // Use a subquery for the left side to keep it self-contained.
-            let left_sq = format!(
-                "(SELECT {} FROM {left_from} {left_where}) AS _left_{}",
-                frag.bindings
-                    .iter()
-                    .map(|(v, col)| format!("{col} AS _left_{v}"))
-                    .collect::<Vec<_>>()
-                    .join(", "),
-                ctx.alias_counter
-            );
-            ctx.alias_counter += 1;
-
-            let left_alias = format!("_leftjoin_{}", ctx.opt_counter);
-            ctx.opt_counter += 1;
-
-            let on_clause = on_cond
-                .map(|c| format!("ON {c}"))
-                .unwrap_or_else(|| "ON TRUE".to_owned());
-
-            let combined =
-                format!("{left_sq} LEFT JOIN {right_subquery} AS {opt_alias} {on_clause}");
-            frag.from_items.push((left_alias.clone(), combined));
-
-            // Rebind left variables through the left subquery prefix.
-            let left_bind_remap: HashMap<String, String> = frag
+            // Shared variables (present in both sides).
+            let shared_vars: Vec<String> = left_frag
                 .bindings
                 .keys()
-                .map(|v| (v.clone(), format!("{left_alias}._left_{v}")))
+                .filter(|v| right_frag.bindings.contains_key(*v))
+                .cloned()
                 .collect();
-            frag.bindings = left_bind_remap;
 
-            // Add right-side variables as nullable columns.
-            let right_frag_for_bind = translate_pattern(right, ctx);
-            for v in right_frag_for_bind.bindings.keys() {
-                frag.bindings
-                    .insert(v.clone(), format!("{opt_alias}.{opt_alias}_{v}"));
+            // Build left subquery with safe unqualified column aliases (_lc_<v>).
+            let lft = ctx.next_alias();
+            let left_select_parts: Vec<String> = left_frag
+                .bindings
+                .iter()
+                .map(|(v, col)| format!("{col} AS _lc_{v}"))
+                .collect();
+            let left_select = if left_select_parts.is_empty() {
+                "1 AS _lc_dummy".to_owned()
+            } else {
+                left_select_parts.join(", ")
+            };
+            let left_subq = format!(
+                "(SELECT {left_select} FROM {} {})",
+                left_frag.build_from(),
+                left_frag.build_where()
+            );
+
+            // Build right subquery with safe unqualified column aliases (_rc_<v>).
+            let rgt = ctx.next_alias();
+            let right_select_parts: Vec<String> = right_frag
+                .bindings
+                .iter()
+                .map(|(v, col)| format!("{col} AS _rc_{v}"))
+                .collect();
+            let right_select = if right_select_parts.is_empty() {
+                "1 AS _rc_dummy".to_owned()
+            } else {
+                right_select_parts.join(", ")
+            };
+            let right_subq = format!(
+                "(SELECT {right_select} FROM {} {})",
+                right_frag.build_from(),
+                right_frag.build_where()
+            );
+
+            // ON clause using safe aliases.
+            let on_clause = if shared_vars.is_empty() {
+                "ON TRUE".to_owned()
+            } else {
+                format!(
+                    "ON {}",
+                    shared_vars
+                        .iter()
+                        .map(|v| format!("{lft}._lc_{v} = {rgt}._rc_{v}"))
+                        .collect::<Vec<_>>()
+                        .join(" AND ")
+                )
+            };
+
+            // Combined SELECT: left vars (always), right-only vars (nullable).
+            let mut combined_cols: Vec<String> = left_frag
+                .bindings
+                .keys()
+                .map(|v| format!("{lft}._lc_{v} AS _lj_{v}"))
+                .collect();
+            for v in right_frag.bindings.keys() {
+                if !left_frag.bindings.contains_key(v) {
+                    combined_cols.push(format!("{rgt}._rc_{v} AS _lj_{v}"));
+                }
+            }
+            let combined_select = if combined_cols.is_empty() {
+                "1 AS _dummy".to_owned()
+            } else {
+                combined_cols.join(", ")
+            };
+
+            let lj = ctx.next_alias();
+            let lj_sql = format!(
+                "(SELECT {combined_select} \
+                 FROM {left_subq} AS {lft} \
+                 LEFT JOIN {right_subq} AS {rgt} {on_clause})"
+            );
+
+            let mut frag = Fragment::empty();
+            frag.from_items.push((lj.clone(), lj_sql));
+
+            for v in left_frag.bindings.keys() {
+                frag.bindings.insert(v.clone(), format!("{lj}._lj_{v}"));
+            }
+            for v in right_frag.bindings.keys() {
+                if !left_frag.bindings.contains_key(v) {
+                    frag.bindings.insert(v.clone(), format!("{lj}._lj_{v}"));
+                }
             }
 
             frag
@@ -655,12 +675,16 @@ fn translate_pattern(pattern: &GraphPattern, ctx: &mut Ctx) -> Fragment {
             expression,
         } => {
             let mut frag = translate_pattern(inner, ctx);
-            // Try to compute the BIND expression as a SQL expression.
-            if let Some(sql_expr) = translate_expr(expression, &frag.bindings, ctx) {
+            // Use translate_expr_value first so Variable references are bound to
+            // their raw SQL column (not the boolean `IS NOT NULL` wrapper that
+            // translate_expr produces). This is critical for COUNT/SUM aggregate
+            // results re-bound via Extend (e.g. `SELECT (COUNT(?p) AS ?cnt)`).
+            let sql_expr = translate_expr_value(expression, &frag.bindings, ctx)
+                .or_else(|| translate_expr(expression, &frag.bindings, ctx));
+            if let Some(expr) = sql_expr {
                 frag.bindings
-                    .insert(variable.as_str().to_owned(), sql_expr);
+                    .insert(variable.as_str().to_owned(), expr);
             }
-            // If the expression can't be translated, the variable is unbound (NULL).
             frag
         }
 
@@ -780,7 +804,7 @@ fn translate_minus(left: &GraphPattern, right: &GraphPattern, ctx: &mut Ctx) -> 
         .iter()
         .map(|v| {
             let col = right_frag.bindings.get(v).unwrap();
-            col.clone()
+            format!("{col} AS _m_{v}")
         })
         .collect();
 
@@ -801,7 +825,7 @@ fn translate_minus(left: &GraphPattern, right: &GraphPattern, ctx: &mut Ctx) -> 
 
     let on_clause: String = shared_vars
         .iter()
-        .map(|v| format!("_lminus.{v} = _rminus._m_{v}"))
+        .map(|v| format!("_lminus._m_{v} = _rminus._m_{v}"))
         .collect::<Vec<_>>()
         .join(" AND ");
 
@@ -843,33 +867,51 @@ fn translate_group(
 ) -> Fragment {
     let inner_frag = translate_pattern(inner, ctx);
 
-    // Build the inner SQL.
+    // Build inner SQL with safe unqualified column aliases (_gi_<v>) so the
+    // outer GROUP BY and aggregate expressions can reference them without
+    // table-qualified names that become invalid inside a subquery wrapper.
+    let inner_select_parts: Vec<String> = inner_frag
+        .bindings
+        .iter()
+        .map(|(v, col)| format!("{col} AS _gi_{v}"))
+        .collect();
+    let inner_select = if inner_select_parts.is_empty() {
+        "1 AS _gi_dummy".to_owned()
+    } else {
+        inner_select_parts.join(", ")
+    };
     let inner_sql = format!(
-        "SELECT * FROM {} {}",
+        "SELECT {inner_select} FROM {} {}",
         inner_frag.build_from(),
         inner_frag.build_where()
     );
 
-    // Map group variables to inner column names.
+    // Build alias lookup: variable name → safe alias in _grp_inner.
+    let inner_alias: HashMap<String, String> = inner_frag
+        .bindings
+        .keys()
+        .map(|v| (v.clone(), format!("_gi_{v}")))
+        .collect();
+
+    // Map group variables to their safe aliases.
     let group_cols: Vec<(String, String)> = group_vars
         .iter()
         .filter_map(|v| {
-            inner_frag
-                .bindings
+            inner_alias
                 .get(v.as_str())
-                .map(|col| (v.as_str().to_owned(), col.clone()))
+                .map(|alias| (v.as_str().to_owned(), alias.clone()))
         })
         .collect();
 
     // Build SELECT list: group-by columns + aggregate expressions.
     let mut select_parts: Vec<String> = group_cols
         .iter()
-        .map(|(v, col)| format!("{col} AS _g_{v}"))
+        .map(|(v, alias)| format!("{alias} AS _g_{v}"))
         .collect();
 
     let mut agg_bindings: Vec<(String, String)> = Vec::new();
     for (agg_var, agg_expr) in aggregates {
-        let sql_agg = translate_aggregate(agg_expr, &inner_frag.bindings);
+        let sql_agg = translate_aggregate(agg_expr, &inner_alias);
         let vname = agg_var.as_str().to_owned();
         select_parts.push(format!("{sql_agg} AS _g_{vname}"));
         agg_bindings.push((vname, sql_agg));
@@ -882,7 +924,7 @@ fn translate_group(
             "GROUP BY {}",
             group_cols
                 .iter()
-                .map(|(_, col)| col.as_str())
+                .map(|(_, alias)| alias.as_str())
                 .collect::<Vec<_>>()
                 .join(", ")
         )
@@ -891,7 +933,7 @@ fn translate_group(
     // HAVING clause (from Filter wrapping Group in the caller).
     let having_clause = if let Some(having_expr) = having {
         // Build temporary bindings that include aggregate aliases for HAVING.
-        let mut having_bindings = inner_frag.bindings.clone();
+        let mut having_bindings = inner_alias.clone();
         for (vname, _) in &agg_bindings {
             having_bindings.insert(vname.clone(), format!("_g_{vname}"));
         }
@@ -1027,12 +1069,17 @@ fn translate_values(
         .map(|v| format!("_val_{}", v.as_str()))
         .collect();
 
-    let alias = ctx.next_alias();
+    let col_names_str = col_names.join(", ");
+    // Wrap in SELECT * so the outer build_from can add AS {alias} without
+    // creating a double-alias.  The VALUES alias (_vi{n}) is internal.
+    let n = ctx.alias_counter;
+    ctx.alias_counter += 1;
     let values_expr = format!(
-        "(VALUES {}) AS {alias}({})",
-        rows.join(", "),
-        col_names.join(", ")
+        "(SELECT * FROM (VALUES {}) AS _vi{n}({col_names_str}))",
+        rows.join(", ")
     );
+
+    let alias = ctx.next_alias();
 
     let mut frag = Fragment::empty();
     frag.from_items.push((alias.clone(), values_expr));
@@ -1161,8 +1208,23 @@ fn translate_expr_value(
             Some(id.to_string())
         }
         Expression::Literal(lit) => {
-            let id = ctx.encode_literal(lit);
-            Some(id.to_string())
+            let dt = lit.datatype().as_str();
+            // For numeric types, return the raw numeric value.
+            // Comparing dict IDs for numeric comparisons is semantically wrong
+            // (e.g. FILTER(?count >= 2) or FILTER(?age > 18)).
+            if dt == "http://www.w3.org/2001/XMLSchema#integer"
+                || dt == "http://www.w3.org/2001/XMLSchema#long"
+                || dt == "http://www.w3.org/2001/XMLSchema#int"
+                || dt == "http://www.w3.org/2001/XMLSchema#short"
+                || dt == "http://www.w3.org/2001/XMLSchema#decimal"
+                || dt == "http://www.w3.org/2001/XMLSchema#float"
+                || dt == "http://www.w3.org/2001/XMLSchema#double"
+            {
+                Some(lit.value().to_owned())
+            } else {
+                let id = ctx.encode_literal(lit);
+                Some(id.to_string())
+            }
         }
         _ => None,
     }
