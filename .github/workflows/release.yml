@@ -19,7 +19,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Install Rust (stable)
         uses: dtolnay/rust-toolchain@stable
@@ -27,7 +27,7 @@ jobs:
           components: rustfmt, clippy
 
       - name: Cache Cargo registry
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             ~/.cargo/registry
@@ -37,13 +37,13 @@ jobs:
           restore-keys: ${{ runner.os }}-cargo-
 
       - name: Cache cargo-pgrx binary
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.cargo/bin/cargo-pgrx
           key: ${{ runner.os }}-cargo-pgrx-${{ env.PGRX_VERSION }}
 
       - name: Cache pgrx PostgreSQL build
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.pgrx
           key: ${{ runner.os }}-pgrx-pg18-${{ env.PGRX_VERSION }}
@@ -93,13 +93,13 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Install Rust (stable)
         uses: dtolnay/rust-toolchain@stable
 
       - name: Cache Cargo registry
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             ~/.cargo/registry
@@ -109,13 +109,13 @@ jobs:
           restore-keys: ${{ runner.os }}-cargo-
 
       - name: Cache cargo-pgrx binary
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.cargo/bin/cargo-pgrx
           key: ${{ runner.os }}-cargo-pgrx-${{ env.PGRX_VERSION }}
 
       - name: Cache pgrx PostgreSQL build
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.pgrx
           key: ${{ runner.os }}-pgrx-pg18-${{ env.PGRX_VERSION }}
@@ -152,7 +152,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Extract version from tag
         id: version
