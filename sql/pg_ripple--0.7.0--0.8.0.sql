@@ -1,0 +1,32 @@
+-- Migration 0.7.0 → 0.8.0: SHACL Advanced
+--
+-- New Rust-compiled SQL functions (no schema changes required):
+--
+--   pg_ripple.process_validation_queue(batch_size BIGINT DEFAULT 1000) → BIGINT
+--       Manually drain up to batch_size items from _pg_ripple.validation_queue.
+--       Violations are moved to _pg_ripple.dead_letter_queue.
+--
+--   pg_ripple.validation_queue_length() → BIGINT
+--       Return count of pending items in the async validation queue.
+--
+--   pg_ripple.dead_letter_count() → BIGINT
+--       Return count of violation entries in _pg_ripple.dead_letter_queue.
+--
+--   pg_ripple.dead_letter_queue() → JSONB
+--       Return all dead-letter entries as a JSON array.
+--
+--   pg_ripple.drain_dead_letter_queue() → BIGINT
+--       Delete all dead-letter entries; returns count deleted.
+--
+-- SHACL constraint engine extended with:
+--   - sh:node   — value nodes validated against a nested shape
+--   - sh:or     — logical OR over a list of shapes
+--   - sh:and    — logical AND over a list of shapes
+--   - sh:not    — logical NOT of a shape
+--   - sh:qualifiedValueShape with sh:qualifiedMinCount / sh:qualifiedMaxCount
+--
+-- Background worker (merge worker) now also processes the async validation
+-- queue when pg_ripple.shacl_mode = 'async'.
+--
+-- The _pg_ripple.validation_queue and _pg_ripple.dead_letter_queue tables
+-- were already created in v0.7.0; no DDL changes are required here.

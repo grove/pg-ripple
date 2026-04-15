@@ -1348,6 +1348,90 @@ mod pg_ripple {
         rows_deleted as i32
     }
 
+    // ── Async validation pipeline (v0.8.0) ────────────────────────────────────
+
+    /// Manually process up to `batch_size` items from the async validation queue.
+    ///
+    /// Violations found are moved to `_pg_ripple.dead_letter_queue`.
+    /// Returns the number of items processed.
+    ///
+    /// Normally the background worker processes the queue automatically when
+    /// `pg_ripple.shacl_mode = 'async'`.  This function is useful for testing
+    /// or for draining the queue on demand.
+    #[pg_extern]
+    fn process_validation_queue(batch_size: default!(i64, "1000")) -> i64 {
+        crate::shacl::process_validation_batch(batch_size)
+    }
+
+    /// Return the number of items currently pending in the async validation queue.
+    #[pg_extern]
+    fn validation_queue_length() -> i64 {
+        pgrx::Spi::get_one::<i64>("SELECT count(*)::bigint FROM _pg_ripple.validation_queue")
+            .unwrap_or(None)
+            .unwrap_or(0)
+    }
+
+    /// Return the number of items in the dead-letter queue (async violations).
+    #[pg_extern]
+    fn dead_letter_count() -> i64 {
+        pgrx::Spi::get_one::<i64>("SELECT count(*)::bigint FROM _pg_ripple.dead_letter_queue")
+            .unwrap_or(None)
+            .unwrap_or(0)
+    }
+
+    /// Return all entries in the dead-letter queue as JSONB.
+    ///
+    /// Each row includes `s_id`, `p_id`, `o_id`, `g_id`, `stmt_id`,
+    /// `violation` (JSONB), and `detected_at` (timestamptz).
+    #[pg_extern]
+    fn dead_letter_queue() -> pgrx::JsonB {
+        let rows: Vec<serde_json::Value> = pgrx::Spi::connect(|c| {
+            let tup = c
+                .select(
+                    "SELECT s_id, p_id, o_id, g_id, stmt_id, violation::text, detected_at::text \
+                     FROM _pg_ripple.dead_letter_queue ORDER BY id ASC",
+                    None,
+                    &[],
+                )
+                .unwrap_or_else(|e| pgrx::error!("dead_letter_queue SPI error: {e}"));
+            let mut out: Vec<serde_json::Value> = Vec::new();
+            for row in tup {
+                let s_id: i64 = row.get::<i64>(1).ok().flatten().unwrap_or(0);
+                let p_id: i64 = row.get::<i64>(2).ok().flatten().unwrap_or(0);
+                let o_id: i64 = row.get::<i64>(3).ok().flatten().unwrap_or(0);
+                let g_id: i64 = row.get::<i64>(4).ok().flatten().unwrap_or(0);
+                let stmt_id: i64 = row.get::<i64>(5).ok().flatten().unwrap_or(0);
+                let violation_text: String =
+                    row.get::<&str>(6).ok().flatten().unwrap_or("").to_owned();
+                let detected_at: String =
+                    row.get::<&str>(7).ok().flatten().unwrap_or("").to_owned();
+                let violation_json: serde_json::Value =
+                    serde_json::from_str(&violation_text).unwrap_or(serde_json::Value::Null);
+                out.push(serde_json::json!({
+                    "s_id": s_id,
+                    "p_id": p_id,
+                    "o_id": o_id,
+                    "g_id": g_id,
+                    "stmt_id": stmt_id,
+                    "violation": violation_json,
+                    "detected_at": detected_at
+                }));
+            }
+            out
+        });
+        pgrx::JsonB(serde_json::Value::Array(rows))
+    }
+
+    /// Clear all entries from the dead-letter queue.
+    ///
+    /// Returns the number of rows deleted.
+    #[pg_extern]
+    fn drain_dead_letter_queue() -> i64 {
+        pgrx::Spi::get_one::<i64>("DELETE FROM _pg_ripple.dead_letter_queue RETURNING 1")
+            .unwrap_or(None)
+            .unwrap_or(0)
+    }
+
     // ── Deduplication functions (v0.7.0) ──────────────────────────────────────
 
     /// Remove duplicate `(s, o, g)` rows for a single predicate, keeping the

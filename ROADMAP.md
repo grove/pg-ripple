@@ -584,12 +584,12 @@ Delivered SHACL Core features are enforced at insert time with exact W3C semanti
 
 ### Deliverables
 
-- [ ] **Asynchronous validation pipeline**
+- [x] **Asynchronous validation pipeline**
   - Validation queue table: `_pg_ripple.validation_queue`
   - Background worker processes queue in batches
   - Dead letter queue for invalid triples with violation reports
   - `pg_ripple.shacl_mode = 'async'` GUC mode
-- [ ] **Complex shape support**
+- [x] **Complex shape support**
   - `sh:class` — type constraint via `rdf:type` lookup
   - `sh:node` — nested shape references
   - `sh:or` / `sh:and` / `sh:not` — logical constraint combinators
@@ -597,15 +597,15 @@ Delivered SHACL Core features are enforced at insert time with exact W3C semanti
 - [ ] **pg_trickle integration: multi-shape DAG validation** *(optional)*
   - Multiple SHACL shapes as a DAG of stream tables with topologically-ordered refresh
   - `violation_summary` DAG leaf node automatically clears counts when upstream shape violations resolve ([§2.13](plans/ecosystem/pg_trickle.md))
-- [ ] pg_regress: `shacl_advanced.sql`
+- [x] pg_regress: `shacl_advanced.sql`
 
 ### Documentation
 
 > See [plans/documentation.md](plans/documentation.md) for details.
 
-- [ ] `user-guide/sql-reference/shacl.md` expanded: async pipeline, validation queue, dead-letter queue
-- [ ] `user-guide/best-practices/shacl-patterns.md` expanded: `sh:or`/`sh:and`/`sh:not`, async mode for high-throughput ingestion, reading the dead-letter queue
-- [ ] `reference/troubleshooting.md` expanded: async violations not appearing, dead-letter queue backlog
+- [x] `user-guide/sql-reference/shacl.md` expanded: async pipeline, validation queue, dead-letter queue
+- [x] `user-guide/best-practices/shacl-patterns.md` expanded: `sh:or`/`sh:and`/`sh:not`, async mode for high-throughput ingestion, reading the dead-letter queue
+- [x] `reference/troubleshooting.md` expanded: async violations not appearing, dead-letter queue backlog
 
 ### Exit Criteria
 

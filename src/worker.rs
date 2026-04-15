@@ -71,10 +71,13 @@ pub extern "C-unwind" fn pg_ripple_merge_worker_main(_arg: pg_sys::Datum) {
             pgrx::log!("pg_ripple merge worker: SIGHUP received — configuration reloaded");
         }
 
-        // Run merge cycle in a transaction.
+        // Run merge cycle followed by async validation batch.
         let run_result = std::panic::catch_unwind(|| {
             BackgroundWorker::transaction(|| {
                 run_merge_cycle();
+            });
+            BackgroundWorker::transaction(|| {
+                run_validation_cycle();
             });
         });
 
@@ -117,6 +120,26 @@ pub extern "C-unwind" fn pg_ripple_merge_worker_main(_arg: pg_sys::Datum) {
         .store(0, Ordering::Release);
 
     pgrx::log!("pg_ripple merge worker stopped");
+}
+
+/// Run one async validation batch inside an open SPI transaction.
+///
+/// Only runs when `pg_ripple.shacl_mode = 'async'`.  Processes up to 1000
+/// queued triples per cycle.
+fn run_validation_cycle() {
+    let shacl_mode = crate::SHACL_MODE.get();
+    let mode_str = shacl_mode
+        .as_ref()
+        .and_then(|c| c.to_str().ok())
+        .unwrap_or("off");
+    if mode_str != "async" {
+        return;
+    }
+
+    let processed = crate::shacl::process_validation_batch(1000);
+    if processed > 0 {
+        pgrx::log!("pg_ripple merge worker: processed {processed} async validation item(s)");
+    }
 }
 
 /// Run one merge cycle inside an open SPI transaction.

@@ -62,6 +62,19 @@ pub enum ShapeConstraint {
     Class(String),
     /// `sh:node <shape-IRI>` — value nodes must conform to the referenced shape.
     Node(String),
+    // ── v0.8.0 complex constraints ────────────────────────────────────────────
+    /// `sh:or (shape1 shape2 ...)` — node/value must conform to at least one shape.
+    Or(Vec<String>),
+    /// `sh:and (shape1 shape2 ...)` — node/value must conform to all listed shapes.
+    And(Vec<String>),
+    /// `sh:not <shape-IRI>` — node/value must NOT conform to the referenced shape.
+    Not(String),
+    /// `sh:qualifiedValueShape <shape-IRI>` with optional min/max cardinality.
+    QualifiedValueShape {
+        shape_iri: String,
+        min_count: Option<i64>,
+        max_count: Option<i64>,
+    },
 }
 
 /// A SHACL PropertyShape (associated with a path via `sh:path`).
@@ -414,6 +427,19 @@ fn parse_shape_statement(
                     properties.push(ps);
                 }
             }
+            // ── v0.8.0 logical combinators ────────────────────────────────────
+            "http://www.w3.org/ns/shacl#or" => {
+                let shape_iris = parse_list_values(obj_rest.trim(), prefixes)?;
+                constraints.push(ShapeConstraint::Or(shape_iris));
+            }
+            "http://www.w3.org/ns/shacl#and" => {
+                let shape_iris = parse_list_values(obj_rest.trim(), prefixes)?;
+                constraints.push(ShapeConstraint::And(shape_iris));
+            }
+            "http://www.w3.org/ns/shacl#not" => {
+                let shape_iri = expand_iri(obj_rest.trim(), prefixes)?;
+                constraints.push(ShapeConstraint::Not(shape_iri));
+            }
             _ => {
                 // Unknown predicate — ignore (forward-compatible).
             }
@@ -452,6 +478,10 @@ fn parse_property_shape(
     let mut path_iri: Option<String> = None;
     let mut constraints: Vec<ShapeConstraint> = Vec::new();
     let mut shape_iri = format!("_blank_{}", uuid_short());
+    // Accumulators for sh:qualifiedValueShape (spans multiple predicates).
+    let mut qualified_shape_iri: Option<String> = None;
+    let mut qualified_min_count: Option<i64> = None;
+    let mut qualified_max_count: Option<i64> = None;
 
     for pair in &po_pairs {
         let pair = pair.trim();
@@ -513,8 +543,46 @@ fn parse_property_shape(
                 let iri = expand_iri(obj_rest.trim(), prefixes)?;
                 constraints.push(ShapeConstraint::Node(iri));
             }
+            // ── v0.8.0 logical combinators ────────────────────────────────────
+            "http://www.w3.org/ns/shacl#or" => {
+                let shape_iris = parse_list_values(obj_rest.trim(), prefixes)?;
+                constraints.push(ShapeConstraint::Or(shape_iris));
+            }
+            "http://www.w3.org/ns/shacl#and" => {
+                let shape_iris = parse_list_values(obj_rest.trim(), prefixes)?;
+                constraints.push(ShapeConstraint::And(shape_iris));
+            }
+            "http://www.w3.org/ns/shacl#not" => {
+                let shape_iri_val = expand_iri(obj_rest.trim(), prefixes)?;
+                constraints.push(ShapeConstraint::Not(shape_iri_val));
+            }
+            // ── v0.8.0 qualified value shapes ─────────────────────────────────
+            "http://www.w3.org/ns/shacl#qualifiedValueShape" => {
+                qualified_shape_iri = Some(expand_iri(obj_rest.trim(), prefixes)?);
+            }
+            "http://www.w3.org/ns/shacl#qualifiedMinCount" => {
+                let n: i64 = obj_rest.trim().parse().map_err(|_| {
+                    format!("sh:qualifiedMinCount value is not an integer: '{obj_rest}'")
+                })?;
+                qualified_min_count = Some(n);
+            }
+            "http://www.w3.org/ns/shacl#qualifiedMaxCount" => {
+                let n: i64 = obj_rest.trim().parse().map_err(|_| {
+                    format!("sh:qualifiedMaxCount value is not an integer: '{obj_rest}'")
+                })?;
+                qualified_max_count = Some(n);
+            }
             _ => {}
         }
+    }
+
+    // Emit QualifiedValueShape constraint if sh:qualifiedValueShape was seen.
+    if let Some(qvs_iri) = qualified_shape_iri {
+        constraints.push(ShapeConstraint::QualifiedValueShape {
+            shape_iri: qvs_iri,
+            min_count: qualified_min_count,
+            max_count: qualified_max_count,
+        });
     }
 
     let path = match path_iri {
@@ -664,6 +732,103 @@ pub struct Violation {
     pub severity: String,
 }
 
+// ── v0.8.0 helper: recursive shape conformance check ─────────────────────────
+
+/// Check whether the node identified by `node_id` conforms to the shape with
+/// IRI `shape_iri` in graph `graph_id`.
+///
+/// Returns `true` when the node conforms (or when the shape is not found —
+/// open-world assumption).  Depth-limited to 32 levels to prevent infinite
+/// recursion on cyclic shape references.
+fn node_conforms_to_shape(
+    node_id: i64,
+    shape_iri: &str,
+    graph_id: i64,
+    all_shapes: &[Shape],
+) -> bool {
+    node_conforms_to_shape_depth(node_id, shape_iri, graph_id, all_shapes, 0)
+}
+
+fn node_conforms_to_shape_depth(
+    node_id: i64,
+    shape_iri: &str,
+    graph_id: i64,
+    all_shapes: &[Shape],
+    depth: u32,
+) -> bool {
+    if depth > 32 {
+        // Cycle guard: treat as conformant to avoid false violations.
+        return true;
+    }
+    let shape = match all_shapes.iter().find(|s| s.shape_iri == shape_iri) {
+        Some(s) => s,
+        None => return true, // unknown shape → open world
+    };
+    if shape.deactivated {
+        return true;
+    }
+
+    // Check top-level node constraints.
+    for c in &shape.constraints {
+        if !node_satisfies_constraint(node_id, c, graph_id, all_shapes, depth) {
+            return false;
+        }
+    }
+
+    // Check property shape constraints.
+    for ps in &shape.properties {
+        let viols = validate_property_shape_depth(
+            ps,
+            &[node_id],
+            graph_id,
+            shape_iri,
+            all_shapes,
+            depth + 1,
+        );
+        if !viols.is_empty() {
+            return false;
+        }
+    }
+
+    true
+}
+
+/// Check a single top-level node constraint on `node_id`.
+/// Returns `true` when the node satisfies the constraint.
+fn node_satisfies_constraint(
+    node_id: i64,
+    constraint: &ShapeConstraint,
+    graph_id: i64,
+    all_shapes: &[Shape],
+    depth: u32,
+) -> bool {
+    match constraint {
+        ShapeConstraint::Or(shape_iris) => shape_iris
+            .iter()
+            .any(|s| node_conforms_to_shape_depth(node_id, s, graph_id, all_shapes, depth + 1)),
+        ShapeConstraint::And(shape_iris) => shape_iris
+            .iter()
+            .all(|s| node_conforms_to_shape_depth(node_id, s, graph_id, all_shapes, depth + 1)),
+        ShapeConstraint::Not(shape_iri) => {
+            !node_conforms_to_shape_depth(node_id, shape_iri, graph_id, all_shapes, depth + 1)
+        }
+        // Other node-level constraints are validated via property shapes.
+        _ => true,
+    }
+}
+
+/// Depth-aware variant of validate_property_shape for recursive calls.
+fn validate_property_shape_depth(
+    ps: &PropertyShape,
+    focus_nodes: &[i64],
+    graph_id: i64,
+    shape_iri: &str,
+    all_shapes: &[Shape],
+    _depth: u32,
+) -> Vec<Violation> {
+    validate_property_shape(ps, focus_nodes, graph_id, shape_iri, all_shapes)
+}
+
 /// Execute validation for a single `PropertyShape` against all focus nodes in
 /// graph `g` (0 = default graph, -1 = all graphs).
 /// Returns all violations found.
@@ -672,6 +837,7 @@ fn validate_property_shape(
     focus_nodes: &[i64],
     graph_id: i64,
     shape_iri: &str,
+    all_shapes: &[Shape],
 ) -> Vec<Violation> {
     let mut violations: Vec<Violation> = Vec::new();
     let path_id_opt = crate::dictionary::lookup_iri(&ps.path_iri);
@@ -858,8 +1024,132 @@ fn validate_property_shape(
                         }
                     }
                 }
-                ShapeConstraint::Node(_) => {
-                    // Nested node shapes — v0.8.0; skip silently.
+                ShapeConstraint::Node(ref_shape_iri) => {
+                    // Value nodes must conform to the referenced shape (v0.8.0).
+                    let value_ids = get_value_ids(focus, path_id, graph_id);
+                    for v_id in value_ids {
+                        if !node_conforms_to_shape(v_id, ref_shape_iri, graph_id, all_shapes) {
+                            let focus_iri = crate::dictionary::decode(focus)
+                                .unwrap_or_else(|| format!("_id_{focus}"));
+                            violations.push(Violation {
+                                focus_node: focus_iri,
+                                shape_iri: shape_iri.to_owned(),
+                                path: Some(ps.path_iri.clone()),
+                                constraint: "sh:node".to_owned(),
+                                message: format!(
+                                    "value node id {v_id} does not conform to shape <{ref_shape_iri}>"
+                                ),
+                                severity: "Violation".to_owned(),
+                            });
+                        }
+                    }
+                }
+                ShapeConstraint::Or(shape_iris) => {
+                    // Value nodes must conform to at least one listed shape.
+                    let value_ids = get_value_ids(focus, path_id, graph_id);
+                    for v_id in value_ids {
+                        let conforms = shape_iris
+                            .iter()
+                            .any(|s| node_conforms_to_shape(v_id, s, graph_id, all_shapes));
+                        if !conforms {
+                            let focus_iri = crate::dictionary::decode(focus)
+                                .unwrap_or_else(|| format!("_id_{focus}"));
+                            violations.push(Violation {
+                                focus_node: focus_iri,
+                                shape_iri: shape_iri.to_owned(),
+                                path: Some(ps.path_iri.clone()),
+                                constraint: "sh:or".to_owned(),
+                                message: format!(
+                                    "value node id {v_id} does not conform to any of the sh:or shapes"
+                                ),
+                                severity: "Violation".to_owned(),
+                            });
+                        }
+                    }
+                }
+                ShapeConstraint::And(shape_iris) => {
+                    // Value nodes must conform to all listed shapes.
+                    let value_ids = get_value_ids(focus, path_id, graph_id);
+                    for v_id in value_ids {
+                        for s in shape_iris {
+                            if !node_conforms_to_shape(v_id, s, graph_id, all_shapes) {
+                                let focus_iri = crate::dictionary::decode(focus)
+                                    .unwrap_or_else(|| format!("_id_{focus}"));
+                                violations.push(Violation {
+                                    focus_node: focus_iri,
+                                    shape_iri: shape_iri.to_owned(),
+                                    path: Some(ps.path_iri.clone()),
+                                    constraint: "sh:and".to_owned(),
+                                    message: format!(
+                                        "value node id {v_id} does not conform to sh:and shape <{s}>"
+                                    ),
+                                    severity: "Violation".to_owned(),
+                                });
+                            }
+                        }
+                    }
+                }
+                ShapeConstraint::Not(ref_shape_iri) => {
+                    // Value nodes must NOT conform to the referenced shape.
+                    let value_ids = get_value_ids(focus, path_id, graph_id);
+                    for v_id in value_ids {
+                        if node_conforms_to_shape(v_id, ref_shape_iri, graph_id, all_shapes) {
+                            let focus_iri = crate::dictionary::decode(focus)
+                                .unwrap_or_else(|| format!("_id_{focus}"));
+                            violations.push(Violation {
+                                focus_node: focus_iri,
+                                shape_iri: shape_iri.to_owned(),
+                                path: Some(ps.path_iri.clone()),
+                                constraint: "sh:not".to_owned(),
+                                message: format!(
+                                    "value node id {v_id} must not conform to shape <{ref_shape_iri}>"
+                                ),
+                                severity: "Violation".to_owned(),
+                            });
+                        }
+                    }
+                }
+                ShapeConstraint::QualifiedValueShape {
+                    shape_iri: qvs_iri,
+                    min_count,
+                    max_count,
+                } => {
+                    // Count how many value nodes along the path conform to the qualified shape.
+                    let value_ids = get_value_ids(focus, path_id, graph_id);
+                    let qualifying_count = value_ids
+                        .iter()
+                        .filter(|&&v| node_conforms_to_shape(v, qvs_iri, graph_id, all_shapes))
+                        .count() as i64;
+                    let focus_iri =
+                        crate::dictionary::decode(focus).unwrap_or_else(|| format!("_id_{focus}"));
+                    if let Some(min) = min_count
+                        && qualifying_count < *min
+                    {
+                        violations.push(Violation {
+                            focus_node: focus_iri.clone(),
+                            shape_iri: shape_iri.to_owned(),
+                            path: Some(ps.path_iri.clone()),
+                            constraint: "sh:qualifiedMinCount".to_owned(),
+                            message: format!(
+                                "expected at least {min} value(s) conforming to <{qvs_iri}>, found {qualifying_count}"
+                            ),
+                            severity: "Violation".to_owned(),
+                        });
+                    }
+                    if let Some(max) = max_count
+                        && qualifying_count > *max
+                    {
+                        violations.push(Violation {
+                            focus_node: focus_iri,
+                            shape_iri: shape_iri.to_owned(),
+                            path: Some(ps.path_iri.clone()),
+                            constraint: "sh:qualifiedMaxCount".to_owned(),
+                            message: format!(
+                                "expected at most {max} value(s) conforming to <{qvs_iri}>, found {qualifying_count}"
+                            ),
+                            severity: "Violation".to_owned(),
+                        });
+                    }
                 }
             }
         }
@@ -1103,9 +1393,73 @@ pub fn run_validate(graph: Option<&str>) -> pgrx::JsonB {
 
         let focus_nodes = collect_focus_nodes(&shape.target, graph_id);
 
+        // v0.8.0: validate top-level node constraints (sh:or, sh:and, sh:not).
+        for c in &shape.constraints {
+            match c {
+                ShapeConstraint::Or(shape_iris) => {
+                    for &focus in &focus_nodes {
+                        let ok = shape_iris
+                            .iter()
+                            .any(|s| node_conforms_to_shape(focus, s, graph_id, &shapes));
+                        if !ok {
+                            conforms = false;
+                            let focus_iri = crate::dictionary::decode(focus)
+                                .unwrap_or_else(|| format!("_id_{focus}"));
+                            all_violations.push(serde_json::json!({
+                                "focusNode":  focus_iri,
+                                "shapeIRI":   shape.shape_iri,
+                                "path":       serde_json::Value::Null,
+                                "constraint": "sh:or",
+                                "message":    "focus node does not conform to any sh:or shape",
+                                "severity":   "Violation"
+                            }));
+                        }
+                    }
+                }
+                ShapeConstraint::And(shape_iris) => {
+                    for &focus in &focus_nodes {
+                        for s in shape_iris {
+                            if !node_conforms_to_shape(focus, s, graph_id, &shapes) {
+                                conforms = false;
+                                let focus_iri = crate::dictionary::decode(focus)
+                                    .unwrap_or_else(|| format!("_id_{focus}"));
+                                all_violations.push(serde_json::json!({
+                                    "focusNode":  focus_iri,
+                                    "shapeIRI":   shape.shape_iri,
+                                    "path":       serde_json::Value::Null,
+                                    "constraint": "sh:and",
+                                    "message":    format!("focus node does not conform to sh:and shape <{s}>"),
+                                    "severity":   "Violation"
+                                }));
+                            }
+                        }
+                    }
+                }
+                ShapeConstraint::Not(ref_shape_iri) => {
+                    for &focus in &focus_nodes {
+                        if node_conforms_to_shape(focus, ref_shape_iri, graph_id, &shapes) {
+                            conforms = false;
+                            let focus_iri = crate::dictionary::decode(focus)
+                                .unwrap_or_else(|| format!("_id_{focus}"));
+                            all_violations.push(serde_json::json!({
+                                "focusNode":  focus_iri,
+                                "shapeIRI":   shape.shape_iri,
+                                "path":       serde_json::Value::Null,
+                                "constraint": "sh:not",
+                                "message":    format!("focus node must not conform to shape <{ref_shape_iri}>"),
+                                "severity":   "Violation"
+                            }));
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+
         // Validate property shapes.
         for ps in &shape.properties {
-            let violations = validate_property_shape(ps, &focus_nodes, graph_id, &shape.shape_iri);
+            let violations =
+                validate_property_shape(ps, &focus_nodes, graph_id, &shape.shape_iri, &shapes);
             for v in violations {
                 conforms = false;
                 all_violations.push(serde_json::json!({
@@ -1256,11 +1610,261 @@ pub fn validate_sync(s_id: i64, p_id: i64, o_id: i64, g_id: i64) -> Result<(), S
                     }
                     // minCount checked at query/validate time, not at insert time
                     // (it's about absence, which can't be detected on single insert).
-                    _ => {}
+                    ShapeConstraint::MinCount(_) => {}
+                    // ── v0.8.0 additions ─────────────────────────────────────
+                    ShapeConstraint::Class(class_iri) => {
+                        let class_id_opt = crate::dictionary::lookup_iri(class_iri);
+                        let rdf_type_id_opt = crate::dictionary::lookup_iri(
+                            "http://www.w3.org/1999/02/22-rdf-syntax-ns#type",
+                        );
+                        let has_class = match (class_id_opt, rdf_type_id_opt) {
+                            (Some(cid), Some(tid)) => value_has_rdf_type(o_id, tid, cid),
+                            _ => false,
+                        };
+                        if !has_class {
+                            let focus_iri = crate::dictionary::decode(s_id)
+                                .unwrap_or_else(|| format!("_id_{s_id}"));
+                            return Err(format!(
+                                "SHACL violation: <{}> sh:class <{class_iri}> for <{}>: \
+                                 object id {o_id} is not an instance of the required class",
+                                focus_iri, ps.path_iri
+                            ));
+                        }
+                    }
+                    ShapeConstraint::Node(ref_shape_iri) => {
+                        if !node_conforms_to_shape(o_id, ref_shape_iri, g_id, &shapes) {
+                            let focus_iri = crate::dictionary::decode(s_id)
+                                .unwrap_or_else(|| format!("_id_{s_id}"));
+                            return Err(format!(
+                                "SHACL violation: <{}> sh:node <{ref_shape_iri}> for <{}>: \
+                                 object id {o_id} does not conform to the referenced shape",
+                                focus_iri, ps.path_iri
+                            ));
+                        }
+                    }
+                    ShapeConstraint::Or(shape_iris) => {
+                        let conforms = shape_iris
+                            .iter()
+                            .any(|s| node_conforms_to_shape(o_id, s, g_id, &shapes));
+                        if !conforms {
+                            let focus_iri = crate::dictionary::decode(s_id)
+                                .unwrap_or_else(|| format!("_id_{s_id}"));
+                            return Err(format!(
+                                "SHACL violation: <{}> sh:or for <{}>: \
+                                 object id {o_id} does not conform to any of the sh:or shapes",
+                                focus_iri, ps.path_iri
+                            ));
+                        }
+                    }
+                    ShapeConstraint::And(shape_iris) => {
+                        for s in shape_iris {
+                            if !node_conforms_to_shape(o_id, s, g_id, &shapes) {
+                                let focus_iri = crate::dictionary::decode(s_id)
+                                    .unwrap_or_else(|| format!("_id_{s_id}"));
+                                return Err(format!(
+                                    "SHACL violation: <{}> sh:and <{s}> for <{}>: \
+                                     object id {o_id} does not conform to the required shape",
+                                    focus_iri, ps.path_iri
+                                ));
+                            }
+                        }
+                    }
+                    ShapeConstraint::Not(ref_shape_iri) => {
+                        if node_conforms_to_shape(o_id, ref_shape_iri, g_id, &shapes) {
+                            let focus_iri = crate::dictionary::decode(s_id)
+                                .unwrap_or_else(|| format!("_id_{s_id}"));
+                            return Err(format!(
+                                "SHACL violation: <{}> sh:not <{ref_shape_iri}> for <{}>: \
+                                 object id {o_id} must not conform to the referenced shape",
+                                focus_iri, ps.path_iri
+                            ));
+                        }
+                    }
+                    ShapeConstraint::QualifiedValueShape {
+                        shape_iri: qvs_iri,
+                        min_count: _,
+                        max_count,
+                    } => {
+                        // For sync (single insert), only sh:qualifiedMaxCount is checkable.
+                        if let Some(max) = max_count {
+                            let existing_qualifying =
+                                count_qualifying_values(s_id, p_id, g_id, qvs_iri, &shapes);
+                            if existing_qualifying + 1 > *max {
+                                let focus_iri = crate::dictionary::decode(s_id)
+                                    .unwrap_or_else(|| format!("_id_{s_id}"));
+                                return Err(format!(
+                                    "SHACL violation: <{}> sh:qualifiedMaxCount {max} for <{}>: \
+                                     found {} qualifying value(s), limit is {max}",
+                                    focus_iri, ps.path_iri, existing_qualifying
+                                ));
+                            }
+                        }
+                    }
                 }
             }
         }
     }
 
+    Ok(())
+}
+
+/// Count how many current values along `(s, p)` in graph `g_id` conform to
+/// the shape `qvs_iri`.  Used by the sync validator for `sh:qualifiedMaxCount`.
+fn count_qualifying_values(
+    s_id: i64,
+    p_id: i64,
+    g_id: i64,
+    qvs_iri: &str,
+    all_shapes: &[Shape],
+) -> i64 {
+    get_value_ids(s_id, p_id, g_id)
+        .iter()
+        .filter(|&&v| node_conforms_to_shape(v, qvs_iri, g_id, all_shapes))
+        .count() as i64
+}
+
+// ─── Async validation pipeline (v0.8.0) ──────────────────────────────────────
+
+/// Process up to `batch_size` rows from `_pg_ripple.validation_queue`.
+///
+/// For each queued triple, runs full SHACL validation.  Violations are
+/// inserted into `_pg_ripple.dead_letter_queue`.  Processed rows are removed
+/// from the queue.  Returns the number of rows processed.
+///
+/// Called by the merge background worker when `shacl_mode = 'async'` and by
+/// the manual `pg_ripple.process_validation_queue()` SQL function.
+pub fn process_validation_batch(batch_size: i64) -> i64 {
+    // Fetch a batch of queued triples.
+    struct QueuedRow {
+        id: i64,
+        s_id: i64,
+        p_id: i64,
+        o_id: i64,
+        g_id: i64,
+    }
+
+    let rows: Vec<QueuedRow> = Spi::connect(|c| {
+        let tup = c
+            .select(
+                "SELECT id, s_id, p_id, o_id, g_id \
+                 FROM _pg_ripple.validation_queue \
+                 ORDER BY id ASC \
+                 LIMIT $1",
+                None,
+                &[DatumWithOid::from(batch_size)],
+            )
+            .unwrap_or_else(|e| pgrx::error!("validation_queue select error: {e}"));
+        let mut out: Vec<QueuedRow> = Vec::new();
+        for row in tup {
+            let id: i64 = row.get::<i64>(1).ok().flatten().unwrap_or(0);
+            let s_id: i64 = row.get::<i64>(2).ok().flatten().unwrap_or(0);
+            let p_id: i64 = row.get::<i64>(3).ok().flatten().unwrap_or(0);
+            let o_id: i64 = row.get::<i64>(4).ok().flatten().unwrap_or(0);
+            let g_id: i64 = row.get::<i64>(5).ok().flatten().unwrap_or(0);
+            if id > 0 {
+                out.push(QueuedRow {
+                    id,
+                    s_id,
+                    p_id,
+                    o_id,
+                    g_id,
+                });
+            }
+        }
+        out
+    });
+
+    if rows.is_empty() {
+        return 0;
+    }
+
+    let shapes = load_shapes();
+    let processed_count = rows.len() as i64;
+
+    for row in &rows {
+        match validate_sync_with_shapes(row.s_id, row.p_id, row.o_id, row.g_id, &shapes) {
+            Ok(()) => {} // conforms — nothing to do
+            Err(msg) => {
+                // Insert into dead-letter queue.
+                let violation = serde_json::json!({
+                    "shapeIRI":   "unknown",
+                    "message":    msg,
+                    "detectedAt": "async"
+                });
+                let _ = Spi::run_with_args(
+                    "INSERT INTO _pg_ripple.dead_letter_queue \
+                     (s_id, p_id, o_id, g_id, stmt_id, violation) \
+                     VALUES ($1, $2, $3, $4, $5, $6::jsonb)",
+                    &[
+                        DatumWithOid::from(row.s_id),
+                        DatumWithOid::from(row.p_id),
+                        DatumWithOid::from(row.o_id),
+                        DatumWithOid::from(row.g_id),
+                        DatumWithOid::from(row.id), // stmt_id ← queue id
+                        DatumWithOid::from(violation.to_string().as_str()),
+                    ],
+                );
+            }
+        }
+    }
+
+    // Delete processed rows from the queue.
+    let ids: Vec<i64> = rows.iter().map(|r| r.id).collect();
+    // Build a parameterised ANY-array delete.
+    let _ = Spi::run_with_args(
+        "DELETE FROM _pg_ripple.validation_queue WHERE id = ANY($1)",
+        &[DatumWithOid::from(ids.as_slice())],
+    );
+
+    processed_count
+}
+
+/// Like `validate_sync` but accepts a pre-loaded shapes slice.
+/// Avoids reloading the shapes catalog on every call when processing batches.
+fn validate_sync_with_shapes(
+    s_id: i64,
+    p_id: i64,
+    o_id: i64,
+    g_id: i64,
+    shapes: &[Shape],
+) -> Result<(), String> {
+    for shape in shapes {
+        if shape.deactivated {
+            continue;
+        }
+
+        let is_focus = match &shape.target {
+            ShapeTarget::None => false,
+            ShapeTarget::Node(iris) => iris
+                .iter()
+                .any(|iri| crate::dictionary::lookup_iri(iri) == Some(s_id)),
+            ShapeTarget::Class(class_iri) => {
+                let class_id = match crate::dictionary::lookup_iri(class_iri) {
+                    Some(id) => id,
+                    None => continue,
+                };
+                let rdf_type_id = match crate::dictionary::lookup_iri(
+                    "http://www.w3.org/1999/02/22-rdf-syntax-ns#type",
+                ) {
+                    Some(id) => id,
+                    None => continue,
+                };
+                value_has_rdf_type(s_id, rdf_type_id, class_id)
+            }
+            ShapeTarget::SubjectsOf(pred_iri) => {
+                crate::dictionary::lookup_iri(pred_iri) == Some(p_id)
+            }
+            ShapeTarget::ObjectsOf(pred_iri) => {
+                crate::dictionary::lookup_iri(pred_iri) == Some(p_id)
+            }
+        };
+
+        if !is_focus {
+            continue;
+        }
+
+        // Delegate to the single-triple sync validator.
+        validate_sync(s_id, p_id, o_id, g_id)?;
+    }
     Ok(())
 }

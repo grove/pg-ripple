@@ -13,9 +13,9 @@ pg_ripple is a PostgreSQL 18 extension building toward a fully-featured knowledg
 
 ---
 
-## What works today (v0.7.0)
+## What works today (v0.8.0)
 
-You can install the extension, store triples, bulk-load RDF datasets, manage named graphs, query with full SPARQL 1.1, and now enforce data quality rules with W3C SHACL. v0.7.0 adds SHACL Core validation and on-demand deduplication:
+You can install the extension, store triples, bulk-load RDF datasets, manage named graphs, query with full SPARQL 1.1, enforce data quality rules with W3C SHACL, and use complex shape combinators with async violation tracking. v0.8.0 adds `sh:or`/`sh:and`/`sh:not`/`sh:node`/`sh:qualifiedValueShape` and an async validation pipeline:
 
 ```sql
 CREATE EXTENSION pg_ripple;
@@ -27,14 +27,16 @@ SELECT pg_ripple.insert_triple(
   'http://example.org/Bob'
 );
 
--- Load a SHACL shape: every Person must have exactly one foaf:name
+-- Load a SHACL shape with complex combinators: every Person must be either
+-- a VerifiedPerson or have a known affiliation
 SELECT pg_ripple.load_shacl('
   @prefix sh: <http://www.w3.org/ns/shacl#> .
   @prefix foaf: <http://xmlns.com/foaf/0.1/> .
   @prefix ex: <http://example.org/> .
   ex:PersonShape a sh:NodeShape ;
     sh:targetClass ex:Person ;
-    sh:property [ sh:path foaf:name ; sh:minCount 1 ; sh:maxCount 1 ] .
+    sh:property [ sh:path foaf:name ; sh:minCount 1 ; sh:maxCount 1 ] ;
+    sh:or (ex:VerifiedShape ex:AffiliatedShape) .
 ');
 
 -- Validate all existing data against active shapes
@@ -42,6 +44,15 @@ SELECT pg_ripple.validate();
 
 -- Enable inline rejection: insert_triple() will error on SHACL violations
 SET pg_ripple.shacl_mode = 'sync';
+
+-- Enable async mode: inserts never block; violations queued for background processing
+SET pg_ripple.shacl_mode = 'async';
+
+-- Inspect and drain the async violation queue
+SELECT pg_ripple.validation_queue_length();
+SELECT pg_ripple.process_validation_queue();
+SELECT pg_ripple.dead_letter_queue();
+SELECT pg_ripple.drain_dead_letter_queue();
 
 -- List all loaded shapes
 SELECT * FROM pg_ripple.list_shapes();
@@ -82,6 +93,8 @@ Every IRI, blank node, literal, and quoted triple is dictionary-encoded to a com
 **v0.6.0+ HTAP architecture**: each VP table is split into a write-optimised delta partition and a read-optimised main partition (BRIN-indexed). A background merge worker continuously promotes delta rows into main. Reads always see `(main EXCEPT tombstones) UNION ALL delta` — no blocking of read sessions during writes.
 
 **v0.7.0 SHACL Core**: load W3C SHACL shapes from Turtle; validate data on demand or enforce constraints inline at insert time (`shacl_mode = 'sync'`). Supported constraints: `sh:minCount`, `sh:maxCount`, `sh:datatype`, `sh:in`, `sh:pattern`, `sh:class`, `sh:targetClass`, `sh:targetNode`, `sh:targetSubjectsOf`, `sh:targetObjectsOf`.
+
+**v0.8.0 SHACL Advanced**: complex shape combinators (`sh:or`, `sh:and`, `sh:not`), nested shape references (`sh:node`), qualified cardinality (`sh:qualifiedValueShape`), and async validation pipeline (`shacl_mode = 'async'`) with dead-letter queue inspection.
 
 The SPARQL engine supports property paths (`+`, `*`, `?`), UNION/MINUS, aggregates, GROUP BY, subqueries, BIND, VALUES, OPTIONAL, and named graphs. All four SPARQL query forms (SELECT, CONSTRUCT, DESCRIBE, ASK) are fully supported.
 

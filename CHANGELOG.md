@@ -9,7 +9,49 @@ Versions correspond to the milestones in [ROADMAP.md](ROADMAP.md).
 
 ## [Unreleased]
 
-Development towards [v0.8.0 (SHACL Advanced)](ROADMAP.md).
+Development towards [v0.9.0 (Serialization)](ROADMAP.md).
+
+---
+
+## [0.8.0] — 2026-04-15 — SHACL Advanced
+
+This release completes the SHACL implementation with complex shape combinators and a background async validation pipeline. Data quality rules can now express "must be one of these types" (`sh:or`), "must satisfy all rules" (`sh:and`), "must not be this type" (`sh:not`), nested shape references (`sh:node`), and qualified cardinality (`sh:qualifiedValueShape`). The async pipeline lets high-throughput inserts proceed without blocking, with violations collected in a dead-letter queue for later review.
+
+### What you can do
+
+- **Use logical shape combinators** — `sh:or`, `sh:and`, `sh:not` in NodeShapes and PropertyShapes express complex validity rules
+- **Validate nested shapes** — `sh:node <ShapeIRI>` checks that each value node along a path conforms to a referenced shape (with cycle-safe recursion up to 32 levels deep)
+- **Qualified cardinality** — `sh:qualifiedValueShape` combined with `sh:qualifiedMinCount` / `sh:qualifiedMaxCount` counts only the value nodes that actually conform to a sub-shape
+- **Async validation** — set `pg_ripple.shacl_mode = 'async'` so that `insert_triple()` never blocks on validation; violations are queued and processed by the background worker
+- **Inspect violations** — `dead_letter_queue()` returns a JSON array of all async violations; `drain_dead_letter_queue()` clears it after review
+- **Manual queue drain** — `process_validation_queue(batch_size)` drains the queue on demand, useful in testing and batch pipelines
+
+### New SQL functions
+
+| Function | Returns | Description |
+|----------|---------|-------------|
+| `pg_ripple.process_validation_queue(batch_size BIGINT DEFAULT 1000)` | `BIGINT` | Process up to N items from the async queue |
+| `pg_ripple.validation_queue_length()` | `BIGINT` | Pending items in the async validation queue |
+| `pg_ripple.dead_letter_count()` | `BIGINT` | Number of recorded violations |
+| `pg_ripple.dead_letter_queue()` | `JSONB` | All dead-letter entries as a JSON array |
+| `pg_ripple.drain_dead_letter_queue()` | `BIGINT` | Delete all dead-letter entries |
+
+### What happens behind the scenes
+
+The SHACL shape IR now includes `Or`, `And`, `Not`, and `QualifiedValueShape` constraint variants. Logical combinators (`sh:or`, `sh:and`, `sh:not`) trigger a recursive node conformance check via `node_conforms_to_shape()`, which walks up to 32 shape levels deep to prevent infinite loops on cyclic shape references. The background merge worker now also drains the async validation queue (`_pg_ripple.validation_queue`) after each merge cycle when `shacl_mode = 'async'`.
+
+<details>
+<summary>Technical details</summary>
+
+- `ShapeConstraint` enum extended with `Or(Vec<String>)`, `And(Vec<String>)`, `Not(String)`, `QualifiedValueShape { shape_iri, min_count, max_count }`
+- `validate_property_shape()` refactored to accept `all_shapes: &[Shape]` for recursive nested shape evaluation
+- `node_conforms_to_shape()` added: depth-limited recursive conformance check (max depth 32)
+- `process_validation_batch(batch_size)` added: SPI-based batch drain of `_pg_ripple.validation_queue`, writes violations to `_pg_ripple.dead_letter_queue`
+- Merge worker (`src/worker.rs`) extended with `run_validation_cycle()` called after each merge transaction
+- `validate_sync()` now handles `Class`, `Node`, `Or`, `And`, `Not`, and `QualifiedValueShape` (max-count check only for sync)
+- `run_validate()` now checks top-level node `Or`/`And`/`Not` constraints in offline validation
+
+</details>
 
 ---
 

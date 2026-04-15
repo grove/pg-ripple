@@ -56,7 +56,11 @@ Parse `data` (Turtle-formatted SHACL shapes) and store every shape in `_pg_rippl
 | `sh:in (...)` | Allowed value set (Turtle list) |
 | `sh:pattern "regex"` | Regex match on lexical form |
 | `sh:class` | Required `rdf:type` for value nodes |
-| `sh:node` | Nested shape reference (accepted; evaluated in v0.8.0) |
+| `sh:node` | Nested shape reference — value nodes must conform to the referenced shape |
+| `sh:or (...)` | Value/focus node must conform to at least one listed shape (v0.8.0) |
+| `sh:and (...)` | Value/focus node must conform to all listed shapes (v0.8.0) |
+| `sh:not` | Value/focus node must NOT conform to the referenced shape (v0.8.0) |
+| `sh:qualifiedValueShape` | Combined with `sh:qualifiedMinCount`/`sh:qualifiedMaxCount` (v0.8.0) |
 
 **Supported target declarations:**
 
@@ -230,7 +234,128 @@ SELECT * FROM pg_ripple.list_shapes();
 
 ## Limitations (v0.7.0)
 
-- `sh:or`, `sh:and`, `sh:not`, and qualified-shape constraints are **not yet evaluated** — supported in v0.8.0.
-- `sh:node` references are accepted at load time but not evaluated during validation — v0.8.0.
 - Property paths beyond direct predicates (e.g., `sh:inversePath`, `sh:alternativePath`) are not supported.
 - `sh:minCount` is only checked by `validate()`, not during `insert_triple()` in sync mode (absence cannot be detected on a single insert).
+
+---
+
+## Async Validation Pipeline (v0.8.0)
+
+When `pg_ripple.shacl_mode = 'async'`, violations are **not** raised inline. Instead, every triple inserted via `insert_triple()` is recorded in `_pg_ripple.validation_queue`. A background worker (the merge worker) drains the queue in batches, running full SHACL validation against each triple. Triples that violate any active shape are written to `_pg_ripple.dead_letter_queue` with a structured violation report.
+
+### Management functions
+
+| Function | Returns | Description |
+|---|---|---|
+| `process_validation_queue(batch_size BIGINT DEFAULT 1000)` | `BIGINT` | Process up to `batch_size` items; returns count processed |
+| `validation_queue_length()` | `BIGINT` | Number of items pending in the queue |
+| `dead_letter_count()` | `BIGINT` | Number of violations recorded |
+| `dead_letter_queue()` | `JSONB` | All dead-letter entries as a JSON array |
+| `drain_dead_letter_queue()` | `BIGINT` | Delete all dead-letter entries; returns count deleted |
+
+```sql
+-- Enable async mode
+SET pg_ripple.shacl_mode = 'async';
+
+-- Inserts never raise errors — violations are queued
+SELECT pg_ripple.insert_triple(
+    '<https://example.org/thing>',
+    '<https://example.org/value>',
+    '"wrong-type"'
+);
+
+-- Check queue depth
+SELECT pg_ripple.validation_queue_length();
+
+-- Manually drain the queue (background worker also does this)
+SELECT pg_ripple.process_validation_queue();
+
+-- Inspect violations
+SELECT pg_ripple.dead_letter_queue();
+
+-- Clear after review
+SELECT pg_ripple.drain_dead_letter_queue();
+```
+
+### When to use async mode
+
+- **High-throughput ingestion** where inline SHACL overhead is unacceptable
+- **Batch imports** — validate after load by calling `process_validation_queue()` once
+- **Non-blocking pipelines** — violations are flagged asynchronously without interrupting writers
+
+> **Note**: The background worker processes the queue automatically; `process_validation_queue()` is a manual override useful in testing and one-shot pipelines.
+
+---
+
+## Complex Shape Constraints (v0.8.0)
+
+### `sh:or` — at least one shape must match
+
+```turtle
+ex:AgentShape
+    a sh:NodeShape ;
+    sh:targetClass ex:Agent ;
+    sh:or (ex:PersonShape ex:OrganizationShape) .
+```
+
+The focus node must conform to **at least one** of the listed shapes. Evaluated both in `validate()` and `sync` mode.
+
+### `sh:and` — all shapes must match
+
+```turtle
+ex:VerifiedPersonShape
+    a sh:NodeShape ;
+    sh:targetClass ex:VerifiedPerson ;
+    sh:and (ex:PersonShape ex:VerifiedShape) .
+```
+
+The focus node must conform to **every** listed shape.
+
+### `sh:not` — shape must not match
+
+```turtle
+ex:ActiveEntityShape
+    a sh:NodeShape ;
+    sh:targetClass ex:ActiveEntity ;
+    sh:not ex:BannedEntityShape .
+```
+
+The focus node must **not** conform to the referenced shape.
+
+### `sh:node` — nested shape for value nodes
+
+```turtle
+ex:CompanyShape
+    a sh:NodeShape ;
+    sh:targetClass ex:Company ;
+    sh:property [
+        sh:path ex:headquarterAddress ;
+        sh:node ex:AddressShape ;
+    ] .
+```
+
+Each value node along the path must conform to `ex:AddressShape`. Recursion is depth-limited at 32 levels.
+
+### `sh:qualifiedValueShape` — qualified cardinality
+
+```turtle
+ex:EmployerShape
+    a sh:NodeShape ;
+    sh:targetClass ex:Employer ;
+    sh:property [
+        sh:path ex:officeAddress ;
+        sh:qualifiedValueShape ex:USAddressShape ;
+        sh:qualifiedMinCount 1 ;
+        sh:qualifiedMaxCount 3 ;
+    ] .
+```
+
+At least `sh:qualifiedMinCount` (and at most `sh:qualifiedMaxCount`) value nodes along the path must conform to the qualified shape.
+
+---
+
+## Limitations (v0.8.0)
+
+- Property paths beyond direct predicates (e.g., `sh:inversePath`, `sh:alternativePath`) are not supported.
+- `sh:minCount` is only checked by `validate()`, not during `insert_triple()` in sync mode.
+- `sh:qualifiedMinCount` is only checked by `validate()` in sync mode (absence cannot be detected on a single insert).

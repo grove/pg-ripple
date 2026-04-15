@@ -215,10 +215,63 @@ ERROR:  SHACL violation: <https://example.org/alice> sh:maxCount 1 for
 - **Message**: "found N existing value(s), limit is M".
 
 **Resolutions**:
+
 1. Delete the conflicting existing triple first, then insert the new value.
-2. Temporarily set `pg_ripple.shacl_mode = 'off'` if you need to load data that violates current shapes and plan to2. Temporarily set `pg_ripple.shacl_mode = 'off'` if you need to load data that violates current---
+2. Temporarily set `pg_ripple.shacl_mode = 'off'` to load data that violates current shapes, then validate after with `SELECT pg_ripple.validate()`.
+3. Use `pg_ripple.shacl_mode = 'async'` for high-throughput inserts — violations are queued rather than rejected.
 
-## ## ## ## ## ## ## ## ## ## ## ## ##pto## ## ## ## ## ## ## ## ## ## ## ## ##pto## ## ## ## ## ## ## ## ## ##fail##: ## ## ## ## ## ## ## ## ## ## ## ## ##pto## ## ## ## ## ## ## ## ## #ha## ## ## ## ## ## ## ## ## ## ## ## ##pto## ## ## ## ## ## ## ## ## ## ##**#
+---
 
-1. **Unknown prefix**: The parser only knows `sh:`, `rdf:`, `rdfs:`, `xsd:`, and `owl:` built-in. All other prefixes must1. **Unknown prefix**: The parsectives1. **Unknown prefix**: The parser only knows `sh:`, `rdf:`, `rdfs:`, `xsd:`, and `owme1. **Unknown prefix**: The parser only knows `sh:`, `rdf:`,pe1. **Unknown prefix**: The parser only knows `sh:`, `rdf:`, `rdfs:`, `xsd:`, and  de1. **Unknown prefix**: The parser only knows `sh:`, `rsh:property [
-                                                                               . *                                                                               . *                                                                               . *                                                 e data contains no `sh:NodeShape` or `sh:PropertyShape` declarations, `load_shacl()` returns 0 and logs a warning — it does not raise an error.
+## Async violations not appearing (v0.8.0)
+
+**Symptom**: `pg_ripple.shacl_mode = 'async'` is set and data was inserted, but `dead_letter_count()` returns 0 even though violations are expected.
+
+**Possible causes**:
+
+1. **Queue not yet processed**: The background merge worker drains the queue periodically. Call `SELECT pg_ripple.process_validation_queue()` to drain manually.
+2. **No active shapes**: `SELECT count(*) FROM pg_ripple.list_shapes() WHERE active` must be > 0.
+3. **Extension not loaded via shared_preload_libraries**: The background worker only runs when the extension is loaded at startup. Without `shared_preload_libraries = 'pg_ripple'`, the worker does not start and the queue accumulates. Use `process_validation_queue()` to drain manually.
+
+```sql
+-- Manual drain
+SELECT pg_ripple.process_validation_queue();
+
+-- Check for violations
+SELECT pg_ripple.dead_letter_count();
+SELECT pg_ripple.dead_letter_queue();
+```
+
+---
+
+## Dead-letter queue backlog (v0.8.0)
+
+**Symptom**: `dead_letter_count()` returns a large number and keeps growing.
+
+**Causes**:
+
+- Data is being inserted that violates shapes, and `shacl_mode = 'async'` is set.
+- The background worker is processing the queue but the violation rate exceeds the drain rate.
+
+**Resolution**:
+
+1. Review violations: `SELECT pg_ripple.dead_letter_queue()`.
+2. Fix the upstream data source that is producing violating triples.
+3. After fixing, clear the queue: `SELECT pg_ripple.drain_dead_letter_queue()`.
+4. If the backlog is too large to process in one call, batch-drain: call `process_validation_queue(1000)` in a loop.
+
+---
+
+## Shape parsing failure (v0.7.0+)
+
+**Symptom**: `load_shacl()` raises an error like:
+
+```
+ERROR:  SHACL shape parsing failed: unknown prefix 'my' in token 'my:Foo'
+```
+
+**Causes and resolutions**:
+
+1. **Unknown prefix**: The parser only recognises built-in prefixes (`sh:`, `rdf:`, `rdfs:`, `xsd:`, `owl:`). Declare all custom prefixes with `@prefix` directives at the top of the Turtle document.
+2. **Missing `sh:path`**: Every `sh:property [...]` block must include `sh:path <predicate>`.
+3. **No shapes found**: If the Turtle data contains no `sh:NodeShape` or `sh:PropertyShape` declarations, `load_shacl()` returns 0 and logs a warning — it does not raise an error.
+
