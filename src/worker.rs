@@ -80,20 +80,30 @@ pub extern "C-unwind" fn pg_ripple_merge_worker_main(_arg: pg_sys::Datum) {
 
         if let Err(e) = run_result {
             consecutive_errors += 1;
+
+            // SAFETY: FlushErrorState resets PostgreSQL's ERRORDATA stack after
+            // a caught panic, preventing ERRORDATA_STACK_SIZE overflow on
+            // subsequent iterations.
+            unsafe {
+                pg_sys::FlushErrorState();
+            }
+
             pgrx::log!(
                 "pg_ripple merge worker: merge cycle panicked ({consecutive_errors}): {e:?}"
             );
-            // After a panic the PostgreSQL error stack may be dirty.
-            // Do NOT loop immediately — go back to wait_latch so the next
-            // iteration sleeps for the full interval, preventing a rapid
-            // panic loop that would overflow ERRORDATA_STACK_SIZE and
-            // PANIC the entire cluster.
+
             if consecutive_errors >= 5 {
                 pgrx::log!(
                     "pg_ripple merge worker: {consecutive_errors} consecutive errors, \
                      backing off to full interval"
                 );
             }
+
+            // Sleep explicitly before retrying.  We cannot rely on wait_latch
+            // because pending SIGHUP signals (sent by poke_merge_worker during
+            // bulk loads) cause it to return immediately, creating a rapid
+            // panic loop.
+            std::thread::sleep(Duration::from_secs(interval_secs));
             continue;
         }
 
