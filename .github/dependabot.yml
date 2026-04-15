@@ -1,0 +1,38 @@
+version: 2
+updates:
+  # Rust dependencies
+  - package-ecosystem: cargo
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+    open-pull-requests-limit: 10
+    reviewers:
+      - grove/pg-ripple-maintainers
+    allow:
+      - dependency-type: "direct"
+    groups:
+      # Group minor and patch updates together
+      non-major:
+        dependency-type: "development"
+        update-types:
+          - "minor"
+          - "patch"
+    # Prioritize security updates (bypass grouping)
+    pull-request-branch-name:
+      separator: "/"
+    commit-message:
+      prefix: chore
+      include: scope
+
+  # GitHub Actions
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+    open-pull-requests-limit: 5
+    reviewers:
+      - grove/pg-ripple-maintainers
