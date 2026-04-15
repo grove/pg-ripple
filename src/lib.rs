@@ -34,9 +34,135 @@ pgrx::extension_sql!(
     bootstrap
 );
 
-// Create the predicate_stats view as extension SQL so it runs once at
-// CREATE EXTENSION time rather than on every _PG_init call (which would
-// cause deadlocks when concurrent test transactions call initialize_schema).
+// Create all internal schema objects at CREATE EXTENSION time.
+// This runs inside the extension transaction so SPI/DDL is available, unlike
+// _PG_init() which may be called during shared_preload_libraries loading
+// before any transaction context exists.
+pgrx::extension_sql!(
+    r#"
+-- Internal schema
+CREATE SCHEMA IF NOT EXISTS _pg_ripple;
+
+-- Dictionary table (IRI / blank-node / literal → i64)
+CREATE TABLE IF NOT EXISTS _pg_ripple.dictionary (
+    id       BIGINT   GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    hash     BYTEA    NOT NULL,
+    value    TEXT     NOT NULL,
+    kind     SMALLINT NOT NULL DEFAULT 0,
+    datatype TEXT,
+    lang     TEXT,
+    qt_s     BIGINT,
+    qt_p     BIGINT,
+    qt_o     BIGINT
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_dictionary_hash
+    ON _pg_ripple.dictionary (hash);
+CREATE INDEX IF NOT EXISTS idx_dictionary_value_kind
+    ON _pg_ripple.dictionary (value, kind);
+
+-- Sequences
+CREATE SEQUENCE IF NOT EXISTS _pg_ripple.statement_id_seq
+    START 1 INCREMENT 1 CACHE 64 NO CYCLE;
+CREATE SEQUENCE IF NOT EXISTS _pg_ripple.load_generation_seq
+    START 1 INCREMENT 1 NO CYCLE;
+
+-- Predicate catalog
+CREATE TABLE IF NOT EXISTS _pg_ripple.predicates (
+    id           BIGINT  NOT NULL PRIMARY KEY,
+    table_oid    OID,
+    triple_count BIGINT  NOT NULL DEFAULT 0,
+    htap         BOOLEAN NOT NULL DEFAULT false
+);
+
+-- Rare-predicate consolidation table
+CREATE TABLE IF NOT EXISTS _pg_ripple.vp_rare (
+    p      BIGINT   NOT NULL,
+    s      BIGINT   NOT NULL,
+    o      BIGINT   NOT NULL,
+    g      BIGINT   NOT NULL DEFAULT 0,
+    i      BIGINT   NOT NULL DEFAULT nextval('_pg_ripple.statement_id_seq'),
+    source SMALLINT NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_vp_rare_p_s_o   ON _pg_ripple.vp_rare (p, s, o);
+CREATE INDEX IF NOT EXISTS idx_vp_rare_s_p     ON _pg_ripple.vp_rare (s, p);
+CREATE INDEX IF NOT EXISTS idx_vp_rare_g_p_s_o ON _pg_ripple.vp_rare (g, p, s, o);
+
+-- Statements range-mapping catalog (v0.2.0)
+CREATE TABLE IF NOT EXISTS _pg_ripple.statements (
+    sid_min      BIGINT NOT NULL,
+    sid_max      BIGINT NOT NULL,
+    predicate_id BIGINT NOT NULL,
+    table_oid    OID    NOT NULL,
+    PRIMARY KEY  (sid_min)
+);
+
+-- IRI prefix registry
+CREATE TABLE IF NOT EXISTS _pg_ripple.prefixes (
+    prefix    TEXT NOT NULL PRIMARY KEY,
+    expansion TEXT NOT NULL
+);
+
+-- HTAP star-pattern caches (v0.6.0)
+CREATE TABLE IF NOT EXISTS _pg_ripple.subject_patterns (
+    s       BIGINT   NOT NULL PRIMARY KEY,
+    pattern BIGINT[] NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_subject_patterns_gin
+    ON _pg_ripple.subject_patterns USING GIN (pattern);
+
+CREATE TABLE IF NOT EXISTS _pg_ripple.object_patterns (
+    o       BIGINT   NOT NULL PRIMARY KEY,
+    pattern BIGINT[] NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_object_patterns_gin
+    ON _pg_ripple.object_patterns USING GIN (pattern);
+
+-- CDC subscription registry (v0.6.0)
+CREATE TABLE IF NOT EXISTS _pg_ripple.cdc_subscriptions (
+    id                BIGSERIAL PRIMARY KEY,
+    channel           TEXT NOT NULL,
+    predicate_id      BIGINT,
+    predicate_pattern TEXT NOT NULL DEFAULT '*'
+);
+CREATE INDEX IF NOT EXISTS idx_cdc_subs_channel
+    ON _pg_ripple.cdc_subscriptions (channel);
+CREATE INDEX IF NOT EXISTS idx_cdc_subs_predicate
+    ON _pg_ripple.cdc_subscriptions (predicate_id);
+
+-- CDC notify trigger function (v0.6.0)
+CREATE OR REPLACE FUNCTION _pg_ripple.notify_triple_change()
+RETURNS TRIGGER LANGUAGE plpgsql AS $body$
+DECLARE
+    pred_id BIGINT := TG_ARGV[0]::bigint;
+    payload TEXT;
+    sub     RECORD;
+BEGIN
+    IF TG_OP = 'INSERT' THEN
+        payload := json_build_object(
+            'op', 'insert',
+            's', NEW.s, 'p', pred_id, 'o', NEW.o, 'g', NEW.g
+        )::text;
+    ELSE
+        payload := json_build_object(
+            'op', 'delete',
+            's', OLD.s, 'p', pred_id, 'o', OLD.o, 'g', OLD.g
+        )::text;
+    END IF;
+    FOR sub IN
+        SELECT channel FROM _pg_ripple.cdc_subscriptions
+        WHERE predicate_id = pred_id OR predicate_pattern = '*'
+    LOOP
+        PERFORM pg_notify(sub.channel, payload);
+    END LOOP;
+    RETURN NEW;
+END;
+$body$;
+"#,
+    name = "schema_setup",
+    requires = ["bootstrap_allow_system_mods"]
+);
+
+// Create the predicate_stats view after the base tables exist.
 pgrx::extension_sql!(
     r#"
 CREATE OR REPLACE VIEW pg_ripple.predicate_stats AS
@@ -49,6 +175,7 @@ JOIN _pg_ripple.dictionary d ON d.id = p.id
 ORDER BY p.triple_count DESC;
 "#,
     name = "predicate_stats_view",
+    requires = ["schema_setup"],
     finalize
 );
 
@@ -319,9 +446,10 @@ pub extern "C-unwind" fn _PG_init() {
 
     // ── Postmaster-only GUCs and shared memory (v0.6.0) ─────────────────────
     // PGC_POSTMASTER GUCs can only be registered during shared_preload_libraries
-    // loading (postmaster context).  When loaded via CREATE EXTENSION (regular
-    // backend), skip them — they are read-only startup parameters anyway.
-    if unsafe { pg_sys::IsPostmasterEnvironment } {
+    // loading.  `process_shared_preload_libraries_in_progress` is the correct
+    // flag — `IsPostmasterEnvironment` is true in every server process and
+    // cannot be used to distinguish this case.
+    if unsafe { pg_sys::process_shared_preload_libraries_in_progress } {
         pgrx::GucRegistry::define_int_guc(
             c"pg_ripple.dictionary_cache_size",
             c"Shared-memory encode-cache capacity in entries (default: 4096; startup only)",
@@ -346,20 +474,20 @@ pub extern "C-unwind" fn _PG_init() {
     }
 
     // ── Shared memory initialisation (v0.6.0) ────────────────────────────────
-    // Only registers shmem hooks (pg_shmem_init!) when running in postmaster
-    // context (i.e. loaded via shared_preload_libraries).  When loaded via
-    // CREATE EXTENSION the hooks have already fired; skip to avoid the
-    // "PgAtomic was not initialized" panic.
-    if unsafe { pg_sys::IsPostmasterEnvironment } {
+    // Only registers shmem hooks (pg_shmem_init!) when running in
+    // shared_preload_libraries context.  When loaded via CREATE EXTENSION the
+    // hooks have already fired; skip to avoid the "PgAtomic was not
+    // initialized" panic.
+    if unsafe { pg_sys::process_shared_preload_libraries_in_progress } {
         shmem::init();
         worker::register_merge_worker();
         // Register ExecutorEnd hook to poke the merge worker latch when the
         // accumulated unmerged delta row count crosses the trigger threshold.
         register_executor_end_hook();
     }
-
-    // Initialize schemas and base tables.
-    storage::initialize_schema();
+    // Schema and base tables are created by the `schema_setup` extension_sql!
+    // block, which runs inside the CREATE EXTENSION transaction where SPI and
+    // DDL are available.  Nothing to do here.
 }
 
 // ─── Public SQL-callable functions ────────────────────────────────────────────
