@@ -33,7 +33,7 @@ SELECT pg_ripple.register_prefix('xsd', 'http://www.w3.org/2001/XMLSchema#');
 
 DO $$
 DECLARE
-    scale     INT := COALESCE(current_setting('bsbm.scale', true)::int, 1);
+    scale     INT := COALESCE(NULLIF('$BSBM_SCALE', ''), '1')::int;
     n_prod    INT := scale * 1000;   -- products
     n_feat    INT := scale * 5;      -- product features (classes)
     n_vendor  INT := GREATEST(1, scale * 10);  -- vendors
