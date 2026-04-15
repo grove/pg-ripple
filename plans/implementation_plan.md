@@ -384,7 +384,7 @@ pg_ripple.compact(keep_old BOOL DEFAULT false) RETURNS VOID  -- trigger immediat
 
 #### 4.4.3 Join Optimization Strategies
 
-Optimizations fall into two categories: **structural rewrites** that are applied by the algebra optimizer during SPARQL→SQL translation (low overhead, no statistics required, active from v0.3.0) and **statistics-driven rewrites** that read PostgreSQL planner statistics at plan time (introduced in v0.13.0).
+Optimizations fall into two categories: **structural rewrites** that are applied by the algebra optimizer during SPARQL→SQL translation (low overhead, no statistics required, active from v0.3.0) and **statistics-driven rewrites** that read PostgreSQL planner statistics at plan time (introduced in v0.13.0 — Performance Hardening). Benchmarking infrastructure (BSBM, SP2Bench, fuzz testing) is built in v0.5.0+ and exercised in v0.6.0 (HTAP concurrent workload) and v0.13.0 to measure optimization effectiveness and validate performance targets.
 
 **Structural rewrites (v0.3.0+)**:
 1. **Self-join elimination**: Star patterns on the same subject collapse into a single scan of the subject across multiple VP tables, joined by subject ID equality
@@ -396,7 +396,7 @@ Optimizations fall into two categories: **structural rewrites** that are applied
 
 **Plan caching (v0.3.0+)**:
 
-SPI re-parses and re-plans the generated SQL string on every query invocation. The SPARQL-layer plan cache avoids this overhead for structurally identical queries by caching the SPARQL→SQL translation result keyed on a structural hash of the normalized algebra tree (variable names replaced with position indices). Controlled by `pg_ripple.plan_cache_size` GUC (default: 256; 0 = disabled). This is introduced in v0.3.0 — before the performance milestone — because re-translation overhead is observable from the first SPARQL-capable release. Benchmarked via BSBM from v0.5.0; statistics-driven and prepared-statement optimizations remain v0.13.0 work.
+SPI re-parses and re-plans the generated SQL string on every query invocation. The SPARQL-layer plan cache avoids this overhead for structurally identical queries by caching the SPARQL→SQL translation result keyed on a structural hash of the normalized algebra tree (variable names replaced with position indices). Controlled by `pg_ripple.plan_cache_size` GUC (default: 256; 0 = disabled). This is introduced in v0.3.0 — before the performance milestone — because re-translation overhead is observable from the first SPARQL-capable release. Additional optimization work (prepared statements, PostgreSQL plan caching instrumentation) remains v0.13.0 work. Benchmarked via BSBM from v0.5.0 onward.
 
 **Statistics-driven rewrites (v0.13.0+)**:
 7. **BGP join reordering**: The algebra optimizer reads `pg_stats.n_distinct` and `pg_class.reltuples` for each VP table involved in the query and reorders BGPs cheapest-first (most selective predicate scanned first). Only activated when statistics are available; falls back to source order otherwise. When active, emits `SET LOCAL join_collapse_limit = 1` before the generated SQL to lock the PostgreSQL planner into the computed join order, preventing it from re-ordering the already-optimized sequence.
@@ -729,10 +729,13 @@ All GUC parameters exposed by pg_ripple, listed alphabetically. GUCs marked **st
 
 ### 8.4 Fuzz Testing
 
+**Phase 1 (v0.13.0 — Performance Hardening)**: Fuzz testing infrastructure is built and integrated into CI in v0.13.0 as part of the performance hardening and production-readiness work. This ensures the SPARQL→SQL pipeline, Turtle parser, and Datalog rule parser are robust against adversarial or malformed inputs before the system is declared production-ready.
+
 - `cargo-fuzz` with libFuzzer on the SPARQL→SQL pipeline: feed random/mutated SPARQL strings through parser and SQL generator; verify no panics, no invalid SQL emitted, no memory safety violations
 - Fuzz targets for Turtle parser integration (complement `rio_turtle`'s own fuzz testing with pg_ripple's error propagation layer)
 - Fuzz targets for Datalog rule parser
 - Run in CI nightly (time-limited: 10 minutes per target)
+- Fuzz testing runs without panics or unsafe SQL generation across all parser surfaces
 
 ### 8.5 Concurrency Testing
 
@@ -744,18 +747,28 @@ All GUC parameters exposed by pg_ripple, listed alphabetically. GUCs marked **st
 ### 8.6 Performance Regression
 
 - **CI benchmark gate** (from v0.2.0): record insert throughput and point-query latency as baselines; fail CI if a commit regresses throughput by >10%
-- Baselines extended at each milestone: star queries (v0.3.0), BSBM full mix + property paths (v0.5.0), concurrent read/write (v0.6.0), join reordering (v0.13.0)
+- Baselines extended at each milestone:
+  - v0.3.0: star queries
+  - v0.5.0: BSBM full mix + property paths, resource exhaustion test suite validation
+  - v0.6.0: concurrent read/write (HTAP workload)
+  - v0.13.0: join reordering effectiveness, prepared statement reuse, fuzz testing coverage
 - Performance regression suite maintained as pgbench custom scripts in `sql/bench/`
+- **v0.13.0 consolidation**: All prior-version benchmarks are re-run and baseline values finalized; performance targets confirmed (<10ms simple BGP at 10M triples, >100K triples/sec bulk load, <5ms cached repeat queries)
 
 ### 8.7 Benchmarks
 
-- pgrx-bench integration for in-process pgbench
-- Berlin SPARQL Benchmark (BSBM) adapted to SQL function calls
-- SP2Bench for academic comparison points
-- Custom benchmarks:
-  - Bulk load: 1M, 10M, 100M triples
-  - Point queries vs star queries vs path queries
-  - Concurrent read/write under HTAP workload
+- **v0.5.0–v0.6.0 (Integration phase)**:
+  - pgrx-bench integration for in-process pgbench
+  - Berlin SPARQL Benchmark (BSBM) data generator adapted for bulk load
+  - SP2Bench benchmark subset
+  - Initial timing collection and baseline documentation
+  
+- **v0.13.0 (Finalization & Hardening)**:
+  - BSBM results published in release notes
+  - Benchmark workloads expanded: star patterns, property paths, aggregates, concurrent OLTP/OLAP
+  - Baseline comparisons with v0.5.0 (pre-HTAP) and other systems (QLever, RDF4J, Oxigraph)
+  - Each optimization in v0.13.0 validated against benchmarks for regression/improvement
+  - Docker benchmark container with pre-loaded datasets for easy reproduction
 
 ### 8.8 Conformance
 

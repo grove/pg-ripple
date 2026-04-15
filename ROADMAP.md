@@ -301,17 +301,7 @@ Users can load RDF-star data (Turtle-star, N-Triples-star), query it with SPARQL
 - [x] **BIND / VALUES**
   - BIND → SQL column alias
   - VALUES → SQL VALUES clause
-- [ ] **Advanced join optimizations**
-  - Optional-self-join elimination
-  - Self-union elimination (UNION → WHERE IN)
-  - Projection pushing for DISTINCT queries
-- [ ] **Berlin SPARQL Benchmark (BSBM) integration**
-  - Data generator adapted for pg_ripple bulk load
-  - Full query mix execution with timing
-  - Comparison baselines documented
-- [ ] Benchmark: SP2Bench subset
 - [x] **Resource exhaustion tests**: Cartesian-product queries, unbounded property paths on cyclic graphs, deeply nested subqueries — verify that `max_path_depth`, `statement_timeout`, and memory limits prevent runaway resource consumption
-- [ ] **Fuzz testing** (`cargo-fuzz`): continuous fuzzing of the SPARQL→SQL pipeline — feed random/mutated SPARQL strings through the parser and SQL generator; verify no panics, no invalid SQL emitted, no memory safety violations
 - [x] pg_regress: `property_paths.sql`, `aggregates.sql`, `resource_limits.sql` (exhaustion tests)
 
 ### Documentation
@@ -347,7 +337,7 @@ Users can load RDF-star data (Turtle-star, N-Triples-star), query it with SPARQL
 
 ### Exit Criteria
 
-SPARQL 1.1 Query coverage for property paths, UNION/MINUS, aggregates, subqueries, BIND/VALUES. Property path queries complete with hash-based cycle detection via PG18 `CYCLE` clause. Fuzz testing runs without panics or invalid SQL. Docs site is live on GitHub Pages with all catch-up pages written.
+SPARQL 1.1 Query coverage for property paths, UNION/MINUS, aggregates, subqueries, BIND/VALUES. Property path queries complete with hash-based cycle detection via PG18 `CYCLE` clause. Docs site is live on GitHub Pages with all catch-up pages written.
 
 ---
 
@@ -485,7 +475,6 @@ Inline value encoding eliminates dictionary lookups for numeric and date FILTER 
   - Payload: JSON with `{"op": "insert"|"delete", "s": ..., "p": ..., "o": ..., "g": ...}` (integer IDs)
   - `pg_ripple.unsubscribe(channel TEXT)` to remove subscriptions
   - Enables downstream event-driven architectures (CDC consumers, webhooks, cache invalidation)
-- [ ] Benchmark: concurrent read/write (pgbench custom scripts)
 - [ ] **Concurrency correctness tests**
   - Concurrent merge + write: verify no data loss when bulk insert and merge worker run simultaneously
   - Concurrent dictionary encode: two backends encoding the same IRI must return the same i64 (shard lock correctness)
@@ -494,7 +483,14 @@ Inline value encoding eliminates dictionary lookups for numeric and date FILTER 
   - Merge when delta is empty (no-op, no crash)
   - Merge interrupted by `kill -9` (crash recovery: data consistent after restart)
   - Merge when `cache_budget` is near capacity (back-pressure path exercised)
-- [ ] pg_regress: `htap_merge.sql`, `change_notification.sql`, `concurrent_write_merge.sql`
+- [ ] **Benchmark: concurrent read/write** (pgbench custom scripts under HTAP load)
+  - Heavy concurrent insert (delta growth) + complex SPARQL queries on main partition
+  - Measure merge worker latency, delta bloat growth, query latency under concurrent writes
+  - Baseline: >100K triples/sec sustained bulk insert with <500 ms query latency
+- [ ] **Berlin SPARQL Benchmark (BSBM) execution** with HTAP workload mixing reads and writes
+  - Full BSBM query mix under concurrent insert workload
+  - Comparison baselines with v0.5.0 (single-table, no-HTAP) results
+- [ ] pg_regress: `htap_merge.sql`, `change_notification.sql`, `concurrent_write_merge.sql`, `htap_benchmarks.sql`
 
 ### Documentation
 
@@ -868,8 +864,24 @@ Full SPARQL 1.1 Update operations work correctly. Pattern-based updates compile 
   - `_pg_ripple.extvp_candidates` stream table aggregates predicate co-occurrence from the SPARQL query log over a rolling 1-hour window
   - Admin function `pg_ripple.recommend_extvp()` reads the stream table and lists the top N predicate pairs to pre-compute
   - `pg_ripple.sparql_explain()` surfaces recommendations inline when a query would benefit from an ExtVP ([§2.14](plans/ecosystem/pg_trickle.md))
+- [ ] **Benchmarking infrastructure & execution**
+  - Berlin SPARQL Benchmark (BSBM) data generator integrated into test suite
+  - Full BSBM query mix with timing collection and baseline comparison
+  - SP2Bench subset adapted for pg_ripple
+  - Custom benchmarks: star patterns, property paths, aggregates, concurrent workloads
+  - Results documented in release notes and [user-guide/scaling.md](user-guide/scaling.md)
+- [ ] **Fuzz testing harness setup** (`cargo-fuzz` + libFuzzer)
+  - Fuzz target for SPARQL→SQL pipeline (parser, algebra, SQL generation)
+  - Fuzz target for Turtle parser integration
+  - Fuzz target for Datalog rule parser
+  - CI runs fuzz testing in nightly builds (10 minutes per target)
+  - No panics, no invalid SQL, no memory safety violations
 - [ ] Performance regression test suite (pgbench custom scripts)
-- [ ] pg_regress: `shacl_query_opt.sql`
+  - >100K triples/sec sustained bulk load baseline
+  - <10ms simple BGP queries at 10M triples
+  - <5ms cached repeat queries
+  - BSBM throughput comparison with v0.5.0
+- [ ] pg_regress: `shacl_query_opt.sql`, `fuzz_integration.sql` (fuzz results verification)
 
 ### Documentation
 
