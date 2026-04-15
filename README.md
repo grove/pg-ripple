@@ -13,12 +13,46 @@ pg_ripple is a PostgreSQL 18 extension building toward a fully-featured knowledg
 
 ---
 
-## What works today (v0.8.0)
+## What works today (v0.9.0)
 
-You can install the extension, store triples, bulk-load RDF datasets, manage named graphs, query with full SPARQL 1.1, enforce data quality rules with W3C SHACL, and use complex shape combinators with async violation tracking. v0.8.0 adds `sh:or`/`sh:and`/`sh:not`/`sh:node`/`sh:qualifiedValueShape` and an async validation pipeline:
+You can install the extension, store triples, bulk-load RDF datasets from N-Triples, Turtle, TriG, N-Quads, or RDF/XML, manage named graphs, query with full SPARQL 1.1, enforce data quality rules with W3C SHACL, and export data to Turtle, JSON-LD, N-Triples, or N-Quads. v0.9.0 completes full RDF I/O and adds Turtle/JSON-LD output for SPARQL CONSTRUCT and DESCRIBE:
 
 ```sql
 CREATE EXTENSION pg_ripple;
+
+-- Load RDF/XML (from Protégé or any OWL editor)
+SELECT pg_ripple.load_rdfxml('<?xml version="1.0"?>
+<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+         xmlns:ex="http://example.org/">
+  <rdf:Description rdf:about="http://example.org/Alice">
+    <ex:knows rdf:resource="http://example.org/Bob"/>
+    <ex:name>Alice</ex:name>
+  </rdf:Description>
+</rdf:RDF>');
+
+-- Export as Turtle
+SELECT pg_ripple.export_turtle();
+
+-- Export as JSON-LD (for REST APIs)
+SELECT pg_ripple.export_jsonld();
+
+-- Stream large graphs line-by-line (memory-efficient)
+SELECT line FROM pg_ripple.export_turtle_stream();
+
+-- SPARQL CONSTRUCT → Turtle
+SELECT pg_ripple.sparql_construct_turtle('
+  CONSTRUCT { ?s <http://xmlns.com/foaf/0.1/knows> ?o }
+  WHERE     { ?s <http://xmlns.com/foaf/0.1/knows> ?o }
+');
+
+-- SPARQL CONSTRUCT → JSON-LD (for APIs)
+SELECT pg_ripple.sparql_construct_jsonld('
+  CONSTRUCT { ?s ?p ?o }
+  WHERE { ?s a <http://schema.org/Person> ; ?p ?o }
+');
+
+-- DESCRIBE → Turtle
+SELECT pg_ripple.sparql_describe_turtle('DESCRIBE <http://example.org/Alice>');
 
 -- Store a fact
 SELECT pg_ripple.insert_triple(
@@ -26,45 +60,6 @@ SELECT pg_ripple.insert_triple(
   'http://xmlns.com/foaf/0.1/knows',
   'http://example.org/Bob'
 );
-
--- Load a SHACL shape with complex combinators: every Person must be either
--- a VerifiedPerson or have a known affiliation
-SELECT pg_ripple.load_shacl('
-  @prefix sh: <http://www.w3.org/ns/shacl#> .
-  @prefix foaf: <http://xmlns.com/foaf/0.1/> .
-  @prefix ex: <http://example.org/> .
-  ex:PersonShape a sh:NodeShape ;
-    sh:targetClass ex:Person ;
-    sh:property [ sh:path foaf:name ; sh:minCount 1 ; sh:maxCount 1 ] ;
-    sh:or (ex:VerifiedShape ex:AffiliatedShape) .
-');
-
--- Validate all existing data against active shapes
-SELECT pg_ripple.validate();
-
--- Enable inline rejection: insert_triple() will error on SHACL violations
-SET pg_ripple.shacl_mode = 'sync';
-
--- Enable async mode: inserts never block; violations queued for background processing
-SET pg_ripple.shacl_mode = 'async';
-
--- Inspect and drain the async violation queue
-SELECT pg_ripple.validation_queue_length();
-SELECT pg_ripple.process_validation_queue();
-SELECT pg_ripple.dead_letter_queue();
-SELECT pg_ripple.drain_dead_letter_queue();
-
--- List all loaded shapes
-SELECT * FROM pg_ripple.list_shapes();
-
--- Remove a shape by IRI
-SELECT pg_ripple.drop_shape('http://example.org/PersonShape');
-
--- Remove duplicate triples for a specific predicate (keeps lowest SID)
-SELECT pg_ripple.deduplicate_predicate('<http://xmlns.com/foaf/0.1/knows>');
-
--- Deduplicate all predicates at once
-SELECT pg_ripple.deduplicate_all();
 
 -- Query with property paths: find all people reachable via "knows" links
 SELECT * FROM pg_ripple.sparql('
@@ -79,13 +74,6 @@ SELECT pg_ripple.triple_count();
 
 -- HTAP: force merge of delta tables into main
 SELECT pg_ripple.compact();
-
--- HTAP: extension statistics including merge worker state
-SELECT pg_ripple.stats();
-
--- CDC: subscribe to triple change notifications
-SELECT pg_ripple.subscribe('<http://xmlns.com/foaf/0.1/knows>', 'foaf_changes');
-LISTEN foaf_changes;
 ```
 
 Every IRI, blank node, literal, and quoted triple is dictionary-encoded to a compact integer for fast joins. Numeric and date literals are automatically *inline-encoded* — stored as bit-packed integers with no dictionary overhead, making FILTER comparisons extremely fast. Facts are stored in separate tables per predicate (Vertical Partitioning).
@@ -96,7 +84,9 @@ Every IRI, blank node, literal, and quoted triple is dictionary-encoded to a com
 
 **v0.8.0 SHACL Advanced**: complex shape combinators (`sh:or`, `sh:and`, `sh:not`), nested shape references (`sh:node`), qualified cardinality (`sh:qualifiedValueShape`), and async validation pipeline (`shacl_mode = 'async'`) with dead-letter queue inspection.
 
-The SPARQL engine supports property paths (`+`, `*`, `?`), UNION/MINUS, aggregates, GROUP BY, subqueries, BIND, VALUES, OPTIONAL, and named graphs. All four SPARQL query forms (SELECT, CONSTRUCT, DESCRIBE, ASK) are fully supported.
+**v0.9.0 Serialization**: RDF/XML import (`load_rdfxml`), Turtle and JSON-LD export (`export_turtle`, `export_jsonld`), streaming export variants, and SPARQL CONSTRUCT/DESCRIBE Turtle/JSON-LD output formats.
+
+The SPARQL engine supports property paths (`+`, `*`, `?`), UNION/MINUS, aggregates, GROUP BY, subqueries, BIND, VALUES, OPTIONAL, and named graphs. All four SPARQL query forms (SELECT, CONSTRUCT, DESCRIBE, ASK) are fully supported, with output in JSONB, Turtle, or JSON-LD.
 
 ---
 

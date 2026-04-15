@@ -1,0 +1,125 @@
+-- pg_regress test: v0.9.0 serialization — RDF/XML, Turtle export, JSON-LD export
+-- Namespace: https://serial.test/
+
+DO $$
+BEGIN
+    DELETE FROM _pg_ripple.vp_rare
+    WHERE p IN (
+        SELECT id FROM _pg_ripple.dictionary
+        WHERE value LIKE 'https://serial.test/%'
+    );
+END $$;
+
+-- ── RDF/XML load ──────────────────────────────────────────────────────────────
+
+SELECT pg_ripple.load_rdfxml(
+    '<?xml version="1.0"?>' ||
+    '<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"' ||
+    '         xmlns:ex="https://serial.test/">' ||
+    '  <rdf:Description rdf:about="https://serial.test/alice">' ||
+    '    <ex:name>Alice</ex:name>' ||
+    '    <ex:knows rdf:resource="https://serial.test/bob"/>' ||
+    '  </rdf:Description>' ||
+    '  <rdf:Description rdf:about="https://serial.test/bob">' ||
+    '    <ex:name>Bob</ex:name>' ||
+    '  </rdf:Description>' ||
+    '</rdf:RDF>'
+) = 4 AS rdfxml_loaded_four_triples;
+ rdfxml_loaded_four_triples 
+----------------------------
+ t
+(1 row)
+
+-- Verify the triples were loaded
+SELECT count(*) >= 1 AS alice_name_found
+FROM pg_ripple.find_triples('<https://serial.test/alice>', '<https://serial.test/name>', NULL);
+ alice_name_found 
+------------------
+ t
+(1 row)
+
+SELECT count(*) >= 1 AS alice_knows_bob_found
+FROM pg_ripple.find_triples('<https://serial.test/alice>', '<https://serial.test/knows>', '<https://serial.test/bob>');
+ alice_knows_bob_found 
+-----------------------
+ t
+(1 row)
+
+-- ── Turtle export ─────────────────────────────────────────────────────────────
+
+-- export_turtle returns TEXT and should mention alice
+SELECT pg_ripple.export_turtle(NULL) LIKE '%serial.test/alice%' AS turtle_contains_alice;
+ turtle_contains_alice 
+-----------------------
+ t
+(1 row)
+
+-- export_turtle output ends with a triple dot
+SELECT pg_ripple.export_turtle(NULL) LIKE '% .' AS turtle_has_triple_dot;
+ turtle_has_triple_dot 
+-----------------------
+ t
+(1 row)
+
+-- ── JSON-LD export ────────────────────────────────────────────────────────────
+
+-- export_jsonld returns JSONB array
+SELECT jsonb_typeof(pg_ripple.export_jsonld(NULL)) = 'array' AS jsonld_is_array;
+ jsonld_is_array 
+-----------------
+ t
+(1 row)
+
+-- JSON-LD result contains @id entries
+SELECT count(*) >= 1 AS jsonld_has_id_entries
+FROM jsonb_array_elements(pg_ripple.export_jsonld(NULL)) AS elem
+WHERE elem ? '@id';
+ jsonld_has_id_entries 
+-----------------------
+ t
+(1 row)
+
+-- JSON-LD result contains alice
+SELECT count(*) >= 1 AS jsonld_contains_alice
+FROM jsonb_array_elements(pg_ripple.export_jsonld(NULL)) AS elem
+WHERE elem->>'@id' = 'https://serial.test/alice';
+ jsonld_contains_alice 
+-----------------------
+ t
+(1 row)
+
+-- ── Streaming Turtle export ───────────────────────────────────────────────────
+
+SELECT count(*) >= 1 AS turtle_stream_has_lines
+FROM pg_ripple.export_turtle_stream(NULL);
+ turtle_stream_has_lines 
+-------------------------
+ t
+(1 row)
+
+SELECT count(*) >= 1 AS turtle_stream_has_alice
+FROM pg_ripple.export_turtle_stream(NULL)
+WHERE line LIKE '%serial.test/alice%';
+ turtle_stream_has_alice 
+-------------------------
+ t
+(1 row)
+
+-- ── Streaming JSON-LD export ──────────────────────────────────────────────────
+
+SELECT count(*) >= 1 AS jsonld_stream_has_lines
+FROM pg_ripple.export_jsonld_stream(NULL);
+ jsonld_stream_has_lines 
+-------------------------
+ t
+(1 row)
+
+-- ── Round-trip: load RDF/XML → export Turtle → verify content ─────────────────
+
+-- After loading the RDF/XML data above, export_turtle should contain bob's name
+SELECT pg_ripple.export_turtle(NULL) LIKE '%serial.test/bob%' AS turtle_round_trip_ok;
+ turtle_round_trip_ok 
+----------------------
+ t
+(1 row)
+

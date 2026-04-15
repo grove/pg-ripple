@@ -1028,7 +1028,7 @@ dependencies = [
 
 [[package]]
 name = "pg_ripple"
-version = "0.8.0"
+version = "0.9.0"
 dependencies = [
  "chrono",
  "libc",
@@ -1037,6 +1037,7 @@ dependencies = [
  "pgrx-tests",
  "rio_api",
  "rio_turtle",
+ "rio_xml",
  "serde",
  "serde_json",
  "spargebra",
@@ -1279,6 +1280,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "quick-xml"
+version = "0.36.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f7649a7b4df05aed9ea7ec6f628c67c9953a43869b8bc50929569b2999d443fe"
+dependencies = [
+ "memchr",
+]
+
+[[package]]
 name = "quote"
 version = "1.0.45"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1403,6 +1413,18 @@ checksum = "a3f3dc0af61ab4b8e03bbe987dffeadd35eb7233c6e38314679da3a382428838"
 dependencies = [
  "oxilangtag",
  "oxiri",
+ "rio_api",
+]
+
+[[package]]
+name = "rio_xml"
+version = "0.8.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8111814da8ef23ea8207b7d33cfef491567ca7d87aaaff93f61057eccc8cb1a7"
+dependencies = [
+ "oxilangtag",
+ "oxiri",
+ "quick-xml",
  "rio_api",
 ]
 

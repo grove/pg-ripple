@@ -18,8 +18,38 @@ Not yet. A Cypher/GQL compatibility layer is on the v0.13.0 roadmap. The VP stor
 
 ### What RDF formats does pg_ripple support?
 
-- **Load**: N-Triples, N-Triples-star, Turtle, N-Quads, TriG
-- **Export**: N-Triples, Turtle (v0.9.0), JSON-LD (v0.9.0), RDF/XML (v0.9.0)
+**Import (loading):**
+- N-Triples and N-Triples-star (`load_ntriples`)
+- N-Quads (`load_nquads`)
+- Turtle and Turtle-star (`load_turtle`)
+- TriG (`load_trig`)
+- RDF/XML (`load_rdfxml`, v0.9.0)
+
+**Export:**
+- N-Triples (`export_ntriples`)
+- N-Quads (`export_nquads`)
+- Turtle (`export_turtle`, v0.9.0) — including Turtle-star for RDF-star data
+- JSON-LD expanded form (`export_jsonld`, v0.9.0)
+- Streaming Turtle or JSON-LD for large graphs (`export_turtle_stream`, `export_jsonld_stream`, v0.9.0)
+
+SPARQL CONSTRUCT and DESCRIBE results can be serialized directly to Turtle or JSON-LD via `sparql_construct_turtle`, `sparql_construct_jsonld`, `sparql_describe_turtle`, and `sparql_describe_jsonld` (v0.9.0).
+
+### Can I use pg_ripple with JSON-LD for REST APIs?
+
+Yes.  Use `export_jsonld()` or `sparql_construct_jsonld()` to produce JSON-LD responses:
+
+```sql
+-- Full graph as JSON-LD
+SELECT pg_ripple.export_jsonld('https://myapp.example.org/graph/users');
+
+-- SPARQL-driven selection as JSON-LD
+SELECT pg_ripple.sparql_construct_jsonld('
+  CONSTRUCT { ?s ?p ?o }
+  WHERE { ?s a <https://schema.org/Person> ; ?p ?o }
+');
+```
+
+The output is JSON-LD in expanded form — each subject is one array entry with IRI keys and typed value arrays.
 
 ---
 

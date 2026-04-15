@@ -625,27 +625,27 @@ Async validation pipeline operational. Complex SHACL shapes validated correctly 
 
 ### Deliverables
 
-- [ ] **RDF/XML parser**
+- [x] **RDF/XML parser**
   - `pg_ripple.load_rdfxml(data TEXT) RETURNS BIGINT`
-- [ ] **Export functions**
+- [x] **Export functions**
   - `pg_ripple.export_turtle(graph TEXT DEFAULT NULL) RETURNS TEXT`
   - `pg_ripple.export_jsonld(graph TEXT DEFAULT NULL) RETURNS JSONB`
   - Streaming variants returning `SETOF TEXT` for large graphs
-- [ ] **SPARQL CONSTRUCT / DESCRIBE serialization formats**
+- [x] **SPARQL CONSTRUCT / DESCRIBE serialization formats**
   - CONSTRUCT → returns triples as Turtle or JSON-LD (in addition to JSONB from v0.5.1)
   - DESCRIBE → Turtle and JSON-LD output options
-- [ ] **SPARQL-star in CONSTRUCT / DESCRIBE** *(builds on v0.4.0 RDF-star)*
+- [x] **SPARQL-star in CONSTRUCT / DESCRIBE** *(builds on v0.4.0 RDF-star)*
   - CONSTRUCT can produce quoted triples in output
   - Turtle-star and N-Triples-star serialization in export functions
-- [ ] pg_regress: `serialization.sql`, `sparql_construct.sql`, `rdf_star_construct.sql`
+- [x] pg_regress: `serialization.sql`, `sparql_construct.sql`, `rdf_star_construct.sql`
 
 ### Documentation
 
 > See [plans/documentation.md](plans/documentation.md) for details.
 
-- [ ] `user-guide/sql-reference/serialization.md` — `export_turtle`, `export_jsonld`, `load_rdfxml`, streaming variants, SPARQL CONSTRUCT Turtle/JSON-LD output, RDF-star serialization
-- [ ] `user-guide/best-practices/data-modeling.md` expanded: interop format guide (Protégé → RDF/XML; LinkedData Platform → JSON-LD; CLI → N-Triples/N-Quads)
-- [ ] `reference/faq.md` expanded: supported import/export formats, JSON-LD for REST APIs
+- [x] `user-guide/sql-reference/serialization.md` — `export_turtle`, `export_jsonld`, `load_rdfxml`, streaming variants, SPARQL CONSTRUCT Turtle/JSON-LD output, RDF-star serialization
+- [x] `user-guide/best-practices/data-modeling.md` expanded: interop format guide (Protégé → RDF/XML; LinkedData Platform → JSON-LD; CLI → N-Triples/N-Quads)
+- [x] `reference/faq.md` expanded: supported import/export formats, JSON-LD for REST APIs
 
 ### Exit Criteria
 

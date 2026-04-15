@@ -21,6 +21,7 @@
   - [Prefix Registry](user-guide/sql-reference/prefix.md)
   - [Administration](user-guide/sql-reference/admin.md)
   - [SHACL Validation](user-guide/sql-reference/shacl.md)
+  - [Serialization & Export](user-guide/sql-reference/serialization.md)
 - [Configuration](user-guide/configuration.md)
 - [Scaling & HTAP](user-guide/scaling.md)
 - [Pre-Deployment](user-guide/pre-deployment.md)

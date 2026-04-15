@@ -796,6 +796,15 @@ mod pg_ripple {
         crate::bulk_load::load_trig_file(path)
     }
 
+    /// Load RDF/XML data from a text string.  Returns the number of triples loaded.
+    ///
+    /// Parses conformant RDF/XML using `rio_xml`.  All triples are loaded into the
+    /// default graph (RDF/XML does not support named graphs).
+    #[pg_extern]
+    fn load_rdfxml(data: &str) -> i64 {
+        crate::bulk_load::load_rdfxml(data)
+    }
+
     // ── Named graph management ────────────────────────────────────────────────
 
     /// Register a named graph IRI.  Returns its dictionary id.
@@ -849,6 +858,52 @@ mod pg_ripple {
         crate::export::export_nquads(graph)
     }
 
+    /// Export triples as Turtle text.
+    ///
+    /// Groups triples by subject and emits compact Turtle blocks.  Includes
+    /// all `@prefix` declarations from the prefix registry.
+    /// RDF-star quoted triples are serialized in Turtle-star `<< s p o >>` notation.
+    /// Pass a graph IRI to export a specific named graph, or NULL for the default graph.
+    #[pg_extern]
+    fn export_turtle(graph: default!(Option<&str>, "NULL")) -> String {
+        crate::export::export_turtle(graph)
+    }
+
+    /// Export triples as JSON-LD (expanded form).
+    ///
+    /// Returns a JSON-LD document as a JSONB array where each element represents
+    /// one subject with all its predicates and objects.
+    /// Pass a graph IRI to export a specific named graph, or NULL for the default graph.
+    #[pg_extern]
+    fn export_jsonld(graph: default!(Option<&str>, "NULL")) -> pgrx::JsonB {
+        pgrx::JsonB(crate::export::export_jsonld(graph))
+    }
+
+    /// Streaming Turtle export — returns one `TEXT` row per triple.
+    ///
+    /// Yields `@prefix` declarations first, then one flat Turtle triple per line.
+    /// Suitable for large graphs where buffering the full document would be too
+    /// memory-intensive.
+    #[pg_extern]
+    fn export_turtle_stream(
+        graph: default!(Option<&str>, "NULL"),
+    ) -> TableIterator<'static, (name!(line, String),)> {
+        let lines = crate::export::export_turtle_stream(graph);
+        TableIterator::new(lines.into_iter().map(|l| (l,)))
+    }
+
+    /// Streaming JSON-LD export — returns one NDJSON line per subject.
+    ///
+    /// Each row is a JSON string representing one subject's complete node object.
+    /// Suitable for large graphs where buffering the full document is undesirable.
+    #[pg_extern]
+    fn export_jsonld_stream(
+        graph: default!(Option<&str>, "NULL"),
+    ) -> TableIterator<'static, (name!(line, String),)> {
+        let lines = crate::export::export_jsonld_stream(graph);
+        TableIterator::new(lines.into_iter().map(|l| (l,)))
+    }
+
     // ── SPARQL query engine ───────────────────────────────────────────────────
 
     /// Execute a SPARQL SELECT or ASK query.
@@ -894,6 +949,85 @@ mod pg_ripple {
     ) -> TableIterator<'static, (name!(result, pgrx::JsonB),)> {
         let rows = crate::sparql::sparql_describe(query, strategy);
         TableIterator::new(rows.into_iter().map(|r| (r,)))
+    }
+
+    /// Execute a SPARQL CONSTRUCT query; returns the result as Turtle text.
+    ///
+    /// Constructs triples according to the CONSTRUCT template and serializes them
+    /// as a Turtle document.  RDF-star quoted triples are emitted in Turtle-star
+    /// notation.
+    #[pg_extern]
+    fn sparql_construct_turtle(query: &str) -> String {
+        let rows = crate::sparql::sparql_construct(query);
+        let triples: Vec<(String, String, String)> = rows
+            .into_iter()
+            .filter_map(|jsonb| {
+                let obj = jsonb.0.as_object()?;
+                let s = obj.get("s")?.as_str()?.to_owned();
+                let p = obj.get("p")?.as_str()?.to_owned();
+                let o = obj.get("o")?.as_str()?.to_owned();
+                Some((s, p, o))
+            })
+            .collect();
+        crate::export::triples_to_turtle(&triples)
+    }
+
+    /// Execute a SPARQL CONSTRUCT query; returns the result as JSON-LD (JSONB).
+    ///
+    /// Constructs triples according to the CONSTRUCT template and serializes them
+    /// as a JSON-LD expanded-form array.  Suitable for REST API responses.
+    #[pg_extern]
+    fn sparql_construct_jsonld(query: &str) -> pgrx::JsonB {
+        let rows = crate::sparql::sparql_construct(query);
+        let triples: Vec<(String, String, String)> = rows
+            .into_iter()
+            .filter_map(|jsonb| {
+                let obj = jsonb.0.as_object()?;
+                let s = obj.get("s")?.as_str()?.to_owned();
+                let p = obj.get("p")?.as_str()?.to_owned();
+                let o = obj.get("o")?.as_str()?.to_owned();
+                Some((s, p, o))
+            })
+            .collect();
+        pgrx::JsonB(crate::export::triples_to_jsonld(&triples))
+    }
+
+    /// Execute a SPARQL DESCRIBE query; returns the description as Turtle text.
+    ///
+    /// `strategy` may be `'cbd'` (default), `'scbd'` (symmetric), or `'simple'`.
+    #[pg_extern]
+    fn sparql_describe_turtle(query: &str, strategy: default!(&str, "'cbd'")) -> String {
+        let rows = crate::sparql::sparql_describe(query, strategy);
+        let triples: Vec<(String, String, String)> = rows
+            .into_iter()
+            .filter_map(|jsonb| {
+                let obj = jsonb.0.as_object()?;
+                let s = obj.get("s")?.as_str()?.to_owned();
+                let p = obj.get("p")?.as_str()?.to_owned();
+                let o = obj.get("o")?.as_str()?.to_owned();
+                Some((s, p, o))
+            })
+            .collect();
+        crate::export::triples_to_turtle(&triples)
+    }
+
+    /// Execute a SPARQL DESCRIBE query; returns the description as JSON-LD (JSONB).
+    ///
+    /// `strategy` may be `'cbd'` (default), `'scbd'` (symmetric), or `'simple'`.
+    #[pg_extern]
+    fn sparql_describe_jsonld(query: &str, strategy: default!(&str, "'cbd'")) -> pgrx::JsonB {
+        let rows = crate::sparql::sparql_describe(query, strategy);
+        let triples: Vec<(String, String, String)> = rows
+            .into_iter()
+            .filter_map(|jsonb| {
+                let obj = jsonb.0.as_object()?;
+                let s = obj.get("s")?.as_str()?.to_owned();
+                let p = obj.get("p")?.as_str()?.to_owned();
+                let o = obj.get("o")?.as_str()?.to_owned();
+                Some((s, p, o))
+            })
+            .collect();
+        pgrx::JsonB(crate::export::triples_to_jsonld(&triples))
     }
 
     /// Execute a SPARQL Update statement (`INSERT DATA` or `DELETE DATA`).

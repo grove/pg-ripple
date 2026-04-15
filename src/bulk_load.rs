@@ -21,6 +21,7 @@ use pgrx::prelude::*;
 use rio_api::model::{GraphName, Literal, NamedNode, Subject, Term};
 use rio_api::parser::{QuadsParser, TriplesParser};
 use rio_turtle::{NQuadsParser, TriGParser, TurtleError, TurtleParser};
+use rio_xml::{RdfXmlError, RdfXmlParser};
 
 use crate::dictionary;
 use crate::storage;
@@ -316,6 +317,38 @@ pub fn load_turtle_file(path: &str) -> i64 {
 pub fn load_trig_file(path: &str) -> i64 {
     let content = read_file_content(path);
     load_trig(&content)
+}
+
+/// Load RDF/XML data from a text string.  Returns the number of triples loaded.
+///
+/// Uses `rio_xml::RdfXmlParser` for conformant RDF/XML parsing.  Named graphs
+/// are not supported in the RDF/XML format; all triples are loaded into the
+/// default graph.
+pub fn load_rdfxml(data: &str) -> i64 {
+    let generation = storage::next_load_generation();
+    let mut by_predicate: PredicateBatch = HashMap::new();
+    let mut touched: std::collections::HashSet<i64> = std::collections::HashSet::new();
+    let mut total = 0i64;
+
+    let mut parser = RdfXmlParser::new(data.as_bytes(), None);
+    parser
+        .parse_all::<RdfXmlError>(&mut |triple| {
+            let s_id = encode_subject(&triple.subject, generation);
+            let p_id = encode_named_node(&triple.predicate);
+            let o_id = encode_term(&triple.object, generation);
+            touched.insert(p_id);
+            by_predicate.entry(p_id).or_default().push((s_id, o_id, 0));
+            total += 1;
+            if total % BATCH_SIZE as i64 == 0 {
+                flush_batch(&mut by_predicate);
+            }
+            Ok(())
+        })
+        .unwrap_or_else(|e| pgrx::error!("RDF/XML parse error: {e}"));
+
+    flush_batch(&mut by_predicate);
+    post_load_cleanup(touched.into_iter().collect());
+    total
 }
 
 // ─── N-Triples-star custom parser ────────────────────────────────────────────

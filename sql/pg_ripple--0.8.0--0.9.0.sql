@@ -1,0 +1,17 @@
+-- Migration 0.8.0 → 0.9.0: Serialization, Export & Interop
+--
+-- Schema changes: None
+--
+-- New SQL functions (compiled from Rust):
+--   pg_ripple.load_rdfxml(data TEXT) RETURNS BIGINT
+--   pg_ripple.export_turtle(graph TEXT DEFAULT NULL) RETURNS TEXT
+--   pg_ripple.export_jsonld(graph TEXT DEFAULT NULL) RETURNS JSONB
+--   pg_ripple.export_turtle_stream(graph TEXT DEFAULT NULL) RETURNS SETOF TEXT
+--   pg_ripple.export_jsonld_stream(graph TEXT DEFAULT NULL) RETURNS SETOF TEXT
+--   pg_ripple.sparql_construct_turtle(query TEXT) RETURNS TEXT
+--   pg_ripple.sparql_construct_jsonld(query TEXT) RETURNS JSONB
+--   pg_ripple.sparql_describe_turtle(query TEXT, strategy TEXT DEFAULT 'cbd') RETURNS TEXT
+--   pg_ripple.sparql_describe_jsonld(query TEXT, strategy TEXT DEFAULT 'cbd') RETURNS JSONB
+--
+-- No existing tables or indexes are altered; no data migration is required.
+-- All new functions are registered by pgrx when the extension is updated.

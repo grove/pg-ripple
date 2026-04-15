@@ -75,3 +75,57 @@ RDF-star maps cleanly onto LPG edge properties:
 | Node property `name = "Alice"` | `<ex:alice> <ex:name> "Alice"` |
 
 This makes pg_ripple a natural backend for LPG data once the Cypher/GQL query layer is added (v0.13.0).
+
+## Interop format guide (v0.9.0)
+
+Choose the right serialization format for the tool or context you are integrating with:
+
+| Tool / Context | Recommended format | pg_ripple function |
+|---|---|---|
+| Protégé / OWL ontologies | RDF/XML | `load_rdfxml()` |
+| Linked Data Platform (LDP) REST APIs | JSON-LD | `export_jsonld()` / `sparql_construct_jsonld()` |
+| Command-line pipelines, streaming | N-Triples or N-Quads | `export_ntriples()` / `export_nquads()` |
+| Human-readable files, Git storage | Turtle | `export_turtle()` / `sparql_construct_turtle()` |
+| Large graph export (memory-efficient) | Streaming Turtle | `export_turtle_stream()` |
+| SPARQL query results for APIs | JSON-LD CONSTRUCT | `sparql_construct_jsonld()` |
+
+### Protégé → RDF/XML
+
+Protégé saves ontologies in OWL/RDF/XML by default.  Load them directly:
+
+```sql
+-- Read the file into PostgreSQL (superuser only)
+SELECT pg_ripple.load_rdfxml(pg_read_file('/data/ontology.owl'));
+```
+
+### Linked Data Platform → JSON-LD
+
+REST APIs built on LDP typically serve JSON-LD.  Use `export_jsonld()` to get the current state:
+
+```sql
+SELECT pg_ripple.export_jsonld('https://myapp.example.org/graph/users');
+```
+
+For SPARQL-driven responses:
+
+```sql
+SELECT pg_ripple.sparql_construct_jsonld('
+  CONSTRUCT { ?s ?p ?o }
+  WHERE     { ?s a <https://schema.org/Person> ; ?p ?o }
+');
+```
+
+### CLI / shell pipelines → N-Triples or N-Quads
+
+For processing with `rapper`, `riot`, `rdfpipe`, or `awk`/`grep` on the command line:
+
+```bash
+psql -c "COPY (SELECT pg_ripple.export_ntriples()) TO STDOUT" > snapshot.nt
+```
+
+For multi-graph exports:
+
+```bash
+psql -c "COPY (SELECT pg_ripple.export_nquads(NULL)) TO STDOUT" > snapshot.nq
+```
+
