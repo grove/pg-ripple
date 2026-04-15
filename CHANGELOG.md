@@ -82,6 +82,21 @@ The migration script (`sql/pg_ripple--0.5.1--0.6.0.sql`) adds the `htap` column 
 ### Bug fixes
 
 - **`shmem::init()` race condition** — `SHMEM_READY` is now set inside a final `shmem_startup_hook` rather than immediately in `_PG_init`, eliminating the window where `SHMEM_READY = true` but `PgAtomic` inner pointers were still null
+- **Postmaster GUC registration crash** — `dictionary_cache_size` and `cache_budget` GUCs (both `GucContext::Postmaster`) are now only registered when `process_shared_preload_libraries_in_progress` is true, preventing `FATAL: cannot create PGC_POSTMASTER variables after startup` when `CREATE EXTENSION pg_ripple` runs without `shared_preload_libraries`
+
+### Benchmarks & CI
+
+- **Insert throughput benchmark** — `benchmarks/insert_throughput.sql` measures 1M-triple insert throughput and query latency
+- **CI performance regression baseline** — `benchmarks/ci_benchmark.sh` records insert throughput and point-query latency; CI `benchmark` job uploads results as artifacts and can gate on >10% regression
+
+### New regression tests
+
+| Test | Description |
+|------|-------------|
+| `htap_merge.sql` | Delta→main promotion, tombstone-based deletes, compact idempotency |
+| `change_notification.sql` | CDC subscribe/notify, wildcard patterns, payload validation |
+| `merge_edge_cases.sql` | Edge cases: empty-delta compact, idempotency, delta-resident delete, non-existent delete |
+| `sparql_star_conformance.sql` | W3C SPARQL-star conformance gate: N-Triples-star parsing, dictionary round-trips, SID lifecycle, annotation patterns, ground triple patterns, data integrity, known-limitation documentation |
 
 ---
 

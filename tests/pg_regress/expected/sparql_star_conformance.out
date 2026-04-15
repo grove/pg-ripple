@@ -15,50 +15,70 @@
 -- Limitations documented:
 --   - Variable-inside-quoted-triple patterns emit a warning and
 --     are treated as no-match (deferred to a future milestone)
-
 SET search_path TO pg_ripple, public;
-
 -- ══════════════════════════════════════════════════════════════════════════════
 -- 1. N-Triples-star Parsing
 -- ══════════════════════════════════════════════════════════════════════════════
-
 -- 1.1 Standard N-Triples still work
 SELECT pg_ripple.load_ntriples(
     '<http://example.org/star/alice> <http://example.org/star/name> "Alice" .' || E'\n' ||
     '<http://example.org/star/bob> <http://example.org/star/name> "Bob" .' || E'\n' ||
     '<http://example.org/star/alice> <http://example.org/star/knows> <http://example.org/star/bob> .'
 ) = 3 AS nt_standard_parse_ok;
+ nt_standard_parse_ok 
+----------------------
+ t
+(1 row)
 
 -- 1.2 Object-position quoted triple
 SELECT pg_ripple.load_ntriples(
     E'<http://example.org/star/carol> <http://example.org/star/believes> << <http://example.org/star/alice> <http://example.org/star/knows> <http://example.org/star/bob> >> .'
 ) = 1 AS nt_object_quoted_ok;
+ nt_object_quoted_ok 
+---------------------
+ t
+(1 row)
 
 -- 1.3 Subject-position quoted triple
 SELECT pg_ripple.load_ntriples(
     E'<< <http://example.org/star/alice> <http://example.org/star/knows> <http://example.org/star/bob> >> <http://example.org/star/source> <http://example.org/star/survey2024> .'
 ) = 1 AS nt_subject_quoted_ok;
+ nt_subject_quoted_ok 
+----------------------
+ t
+(1 row)
 
 -- 1.4 Quoted triple with literal object
 SELECT pg_ripple.load_ntriples(
     E'<http://example.org/star/dave> <http://example.org/star/claims> << <http://example.org/star/bob> <http://example.org/star/age> "30"^^<http://www.w3.org/2001/XMLSchema#integer> >> .'
 ) = 1 AS nt_quoted_literal_object_ok;
+ nt_quoted_literal_object_ok 
+-----------------------------
+ t
+(1 row)
 
 -- 1.5 Nested quoted triples (quoted triple inside a quoted triple)
 SELECT pg_ripple.load_ntriples(
     E'<http://example.org/star/eve> <http://example.org/star/disputes> << <http://example.org/star/carol> <http://example.org/star/believes> << <http://example.org/star/alice> <http://example.org/star/knows> <http://example.org/star/bob> >> >> .'
 ) = 1 AS nt_nested_quoted_ok;
+ nt_nested_quoted_ok 
+---------------------
+ t
+(1 row)
 
 -- ══════════════════════════════════════════════════════════════════════════════
 -- 2. Dictionary Encoding Round-Trips (KIND_QUOTED_TRIPLE = 5)
 -- ══════════════════════════════════════════════════════════════════════════════
-
 -- 2.1 encode_triple returns a non-null ID
 SELECT pg_ripple.encode_triple(
     '<http://example.org/star/alice>',
     '<http://example.org/star/knows>',
     '<http://example.org/star/bob>'
 ) IS NOT NULL AS encode_triple_nonnull;
+ encode_triple_nonnull 
+-----------------------
+ t
+(1 row)
 
 -- 2.2 Same arguments → same ID (deterministic)
 SELECT pg_ripple.encode_triple(
@@ -70,6 +90,10 @@ SELECT pg_ripple.encode_triple(
     '<http://example.org/star/knows>',
     '<http://example.org/star/bob>'
 ) AS encode_triple_deterministic;
+ encode_triple_deterministic 
+-----------------------------
+ t
+(1 row)
 
 -- 2.3 Different arguments → different ID
 SELECT pg_ripple.encode_triple(
@@ -81,6 +105,10 @@ SELECT pg_ripple.encode_triple(
     '<http://example.org/star/knows>',
     '<http://example.org/star/alice>'
 ) AS encode_triple_distinct_ids;
+ encode_triple_distinct_ids 
+----------------------------
+ t
+(1 row)
 
 -- 2.4 decode_triple round-trip: subject
 SELECT (
@@ -92,6 +120,10 @@ SELECT (
         )
     ) ->> 's'
 ) = '<http://example.org/star/alice>' AS decode_subject_ok;
+ decode_subject_ok 
+-------------------
+ t
+(1 row)
 
 -- 2.5 decode_triple round-trip: predicate
 SELECT (
@@ -103,6 +135,10 @@ SELECT (
         )
     ) ->> 'p'
 ) = '<http://example.org/star/knows>' AS decode_predicate_ok;
+ decode_predicate_ok 
+---------------------
+ t
+(1 row)
 
 -- 2.6 decode_triple round-trip: object
 SELECT (
@@ -114,6 +150,10 @@ SELECT (
         )
     ) ->> 'o'
 ) = '<http://example.org/star/bob>' AS decode_object_ok;
+ decode_object_ok 
+------------------
+ t
+(1 row)
 
 -- 2.7 Quoted triple with typed literal object preserves type
 SELECT (
@@ -125,17 +165,24 @@ SELECT (
         )
     ) ->> 'o'
 ) LIKE '%30%' AS decode_typed_literal_ok;
+ decode_typed_literal_ok 
+-------------------------
+ t
+(1 row)
 
 -- ══════════════════════════════════════════════════════════════════════════════
 -- 3. Statement Identifiers (SID Lifecycle)
 -- ══════════════════════════════════════════════════════════════════════════════
-
 -- 3.1 insert_triple returns a valid SID
 SELECT pg_ripple.insert_triple(
     '<http://example.org/star/sid_test/s1>',
     '<http://example.org/star/sid_test/p1>',
     '<http://example.org/star/sid_test/o1>'
 ) > 0 AS insert_returns_positive_sid;
+ insert_returns_positive_sid 
+-----------------------------
+ t
+(1 row)
 
 -- 3.2 Different triples get different SIDs
 SELECT pg_ripple.insert_triple(
@@ -147,6 +194,10 @@ SELECT pg_ripple.insert_triple(
     '<http://example.org/star/sid_test/p3>',
     '<http://example.org/star/sid_test/o3>'
 ) AS distinct_sids;
+ distinct_sids 
+---------------
+ t
+(1 row)
 
 -- 3.3 get_statement retrieves a statement by SID
 DO $$
@@ -169,11 +220,9 @@ BEGIN
         'get_statement object mismatch: ' || (stmt ->> 'o');
     RAISE NOTICE 'get_statement round-trip: PASS';
 END $$;
-
 -- ══════════════════════════════════════════════════════════════════════════════
 -- 4. Edge Properties via SIDs (Annotation Pattern)
 -- ══════════════════════════════════════════════════════════════════════════════
-
 -- 4.1 Use a SID as the subject of annotation triples (LPG edge properties)
 DO $$
 DECLARE
@@ -220,14 +269,11 @@ BEGIN
 
     RAISE NOTICE 'annotation pattern: PASS';
 END $$;
-
 -- ══════════════════════════════════════════════════════════════════════════════
 -- 5. SPARQL-star Ground Triple Term Patterns
 -- ══════════════════════════════════════════════════════════════════════════════
-
 -- Set up data: Alice knows Bob, Carol believes << Alice knows Bob >>
 -- (Already loaded in section 1)
-
 -- 5.1 Verify the data exists via find_triples (proves storage is correct)
 SELECT count(*) = 1 AS data_exists_via_find_triples
 FROM pg_ripple.find_triples(
@@ -235,6 +281,10 @@ FROM pg_ripple.find_triples(
     '<http://example.org/star/believes>',
     NULL
 );
+ data_exists_via_find_triples 
+------------------------------
+ t
+(1 row)
 
 -- 5.2 SPARQL ground quoted triple in object position
 --     Known limitation: ground_term_id() lookup for quoted triples
@@ -248,6 +298,10 @@ FROM pg_ripple.sparql($$
              << <http://example.org/star/alice> <http://example.org/star/knows> <http://example.org/star/bob> >> .
     }
 $$);
+ sparql_star_object_ground_count 
+---------------------------------
+                               0
+(1 row)
 
 -- 5.3 SPARQL ground quoted triple in subject position
 SELECT count(*) AS sparql_star_subject_ground_count
@@ -257,11 +311,14 @@ FROM pg_ripple.sparql($$
             <http://example.org/star/source> ?src .
     }
 $$);
+ sparql_star_subject_ground_count 
+----------------------------------
+                                0
+(1 row)
 
 -- ══════════════════════════════════════════════════════════════════════════════
 -- 6. RDF-star Data Integrity
 -- ══════════════════════════════════════════════════════════════════════════════
-
 -- 6.1 Multiple loads of the same quoted triple yield the same dictionary ID
 DO $$
 DECLARE
@@ -281,7 +338,6 @@ BEGIN
     ASSERT id1 = id2, 'quoted triple encode not idempotent';
     RAISE NOTICE 'encode idempotency: PASS';
 END $$;
-
 -- 6.2 Distinct quoted triples (different predicate) get distinct IDs
 DO $$
 DECLARE
@@ -301,7 +357,6 @@ BEGIN
     ASSERT id1 != id2, 'different quoted triples got same ID';
     RAISE NOTICE 'encode distinctness: PASS';
 END $$;
-
 -- 6.3 Bulk load preserves quoted triple relationships
 DO $$
 DECLARE
@@ -323,11 +378,9 @@ BEGIN
     ASSERT cnt >= 1, 'annotation triple not found after bulk load';
     RAISE NOTICE 'bulk load star integrity: PASS';
 END $$;
-
 -- ══════════════════════════════════════════════════════════════════════════════
 -- 7. Known Limitations (documented, not failures)
 -- ══════════════════════════════════════════════════════════════════════════════
-
 -- 7.1 Variable-inside-quoted-triple patterns are not yet supported.
 --     The query should still execute (returning 0 rows) with a WARNING,
 --     not crash or error.
@@ -337,3 +390,9 @@ FROM pg_ripple.sparql($$
         ?x <http://example.org/star/believes> << ?s ?p ?o >> .
     }
 $$);
+WARNING:  SPARQL-star: variable inside quoted triple pattern is not yet supported; pattern treated as no-match
+ var_in_qt_returns_zero 
+------------------------
+                      0
+(1 row)
+

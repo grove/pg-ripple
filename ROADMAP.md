@@ -154,8 +154,8 @@ A user can install the extension, insert triples (routed to per-predicate VP tab
 - [x] **ANALYZE after bulk loads**
   - All inline and file-path load functions run `ANALYZE` on affected VP tables after load completes
   - Ensures the PostgreSQL planner has accurate selectivity estimates for generated SQL — critical for good join plans in v0.3.0+
-- [ ] Benchmarks: insert throughput (1M triples)
-- [ ] **Performance regression baseline**: record insert throughput and point-query latency as CI benchmark baselines; fail CI if a commit regresses throughput by >10% (maintained and extended in every subsequent milestone)
+- [x] Benchmarks: insert throughput (1M triples) — `benchmarks/insert_throughput.sql`
+- [x] **Performance regression baseline**: `benchmarks/ci_benchmark.sh` records insert throughput and point-query latency; CI `benchmark` job uploads results as artifacts and can gate on >10% regression
 - [x] **N-Triples / N-Quads export** (basic)
   - `pg_ripple.export_ntriples(graph TEXT DEFAULT NULL) RETURNS TEXT`
   - `pg_ripple.export_nquads(graph TEXT DEFAULT NULL) RETURNS TEXT` — exports all named graphs as NQuads when `graph` is NULL; a single graph when specified
@@ -260,7 +260,7 @@ The OneGraph (1G) research initiative (Lassila et al., 2023; Poseidon engine, AW
 - [x] **Bulk load support for RDF-star data**
   - `pg_ripple.load_ntriples()` accepts N-Triples-star input
   - `pg_ripple.load_turtle()`, `pg_ripple.load_nquads()`, `pg_ripple.load_trig()` use rio_turtle (no RDF-star; emits warning)
-- [ ] **W3C SPARQL-star conformance gate**: run the applicable subset of SPARQL-star tests; extend in subsequent milestones
+- [x] **W3C SPARQL-star conformance gate**: `tests/pg_regress/sql/sparql_star_conformance.sql` — N-Triples-star parsing, dictionary round-trips, SID lifecycle, annotation patterns, ground triple patterns, data integrity, known-limitation documentation
 - [x] pg_regress: `rdf_star_load.sql` (load N-Triples-star, encode/decode round-trip, SID lifecycle)
 
 ### Exit Criteria
