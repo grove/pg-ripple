@@ -107,7 +107,38 @@ pg_ripple.latch_trigger_threshold = 1000
 pg_ripple.merge_interval_secs    = 5
 ```
 
-## 7. Ensure allow_system_table_mods in pg_regress / CI
+## 8. SHACL Mode Selection (v0.7.0)
+
+Choose the right SHACL enforcement strategy before going live:
+
+| Mode | When to use | Latency impact |
+|---|---|---|
+| `off` (default) | Bulk ingestion pipelines, ETL, performance-critical paths | None |
+| `sync` | Interactive inserts where violations must be rejected immediately | Low-to-medium (per shape) |
+| `async` | (v0.8.0) High-throughput writes with post-hoc violation reporting | Minimal |
+
+```ini
+# postgresql.conf — only set shacl_mode if you want enforcement
+# pg_ripple.shacl_mode = 'sync'   # uncomment to enable inline rejection
+```
+
+**Best practice**: Load SHACL shapes **before** bulk importing data:
+
+```sql
+-- 1. Load shapes
+SELECT pg_ripple.load_shacl(pg_read_file('/etc/shapes/my-shapes.ttl'));
+
+-- 2. (Optional) Set mode for ongoing inserts
+SET pg_ripple.shacl_mode = 'sync';
+
+-- 3. Load data
+SELECT pg_ripple.load_turtle('...', '<https://example.org/my-graph>');
+
+-- 4. Validate after bulk load (always useful regardless of mode)
+SELECT pg_ripple.validate();
+```
+
+## 9. Ensure allow_system_table_mods in pg_regress / CI
 
 pg_ripple's bootstrap SQL includes `SET LOCAL allow_system_table_mods = on;`. In CI:
 
@@ -116,7 +147,7 @@ pg_ripple's bootstrap SQL includes `SET LOCAL allow_system_table_mods = on;`. In
 cargo pgrx regress pg18 --postgresql-conf "allow_system_table_mods=on"
 ```
 
-## 8. Production Checklist Summary
+## 10. Production Checklist Summary
 
 | Item | Command / File |
 |---|---|
@@ -127,4 +158,6 @@ cargo pgrx regress pg18 --postgresql-conf "allow_system_table_mods=on"
 | Worker PID non-zero | `SELECT pg_ripple.stats()` |
 | HTAP thresholds tuned | `postgresql.conf` |
 | `ANALYZE` run after initial load | `ANALYZE _pg_ripple.vp_rare` |
+| SHACL mode confirmed | `SHOW pg_ripple.shacl_mode` |
+| Shapes loaded before bulk import | `SELECT pg_ripple.list_shapes()` |
 | Monitoring configured | See [Administration](sql-reference/admin.md) |

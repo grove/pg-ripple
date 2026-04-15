@@ -1,0 +1,67 @@
+ shapes_loaded 
+--------------
+            1
+(1 row)
+
+ shape_count 
+-------------
+           1
+(1 row)
+
+ conforms_empty 
+----------------
+ t
+(1 row)
+
+ type_insert_ok 
+----------------
+ t
+(1 row)
+
+ name_insert_ok 
+----------------
+ t
+(1 row)
+
+ age_insert_ok 
+---------------
+ t
+(1 row)
+
+ bob_type_ok 
+-------------
+ t
+(1 row)
+
+ bob_name_ok 
+-------------
+ t
+(1 row)
+
+ has_violations 
+----------------
+ t
+(1 row)
+
+ carol_type_ok 
+---------------
+ t
+(1 row)
+
+ carol_age1_ok 
+---------------
+ t
+(1 row)
+
+NOTICE:  sync_rejected: true
+DO
+ dropped 
+---------
+       1
+(1 row)
+
+ shapes_after_drop 
+-------------------
+                 0
+(1 row)
+

@@ -1,0 +1,116 @@
+-- shacl_malformed.sql — Malformed SHACL shapes and error message tests
+--
+-- Verifies that:
+--   1. Malformed Turtle syntax produces a clear error (not a crash)
+--   2. A shape with a missing sh:path in a PropertyShape is rejected
+--   3. An unknown prefix is rejected with a clean error
+--   4. An empty data string returns 0 shapes (not an error)
+--   5. A circular/self-referencing sh:node is accepted at load time
+--      (recursive validation is a v0.8.0 feature — v0.7.0 silently skips sh:node)
+--
+-- NOTE: setup.sql already does DROP/CREATE EXTENSION before this file.
+
+SET search_path TO pg_ripple, public;
+
+-- ── 1. Empty data — should return 0, not an error ────────────────────────────
+SELECT pg_ripple.load_shacl('') AS loaded_empty;
+
+-- ── 2. Valid minimal shape — sanity check ────────────────────────────────────
+SELECT pg_ripple.load_shacl($SHACL$
+@prefix sh: <http://www.w3.org/ns/shacl#> .
+@prefix ex: <http://malformed.test/> .
+
+ex:MinimalShape
+    a sh:NodeShape ;
+    sh:targetClass ex:Thing .
+$SHACL$) AS loaded_minimal;
+
+-- Confirm it landed.
+SELECT count(*) AS minimal_shape_present
+FROM pg_ripple.list_shapes()
+WHERE shape_iri = 'http://malformed.test/MinimalShape';
+
+-- ── 3. Malformed Turtle — missing closing bracket ────────────────────────────
+-- Expect: ERROR with "SHACL shape parsing failed" message.
+DO $$
+BEGIN
+    BEGIN
+        PERFORM pg_ripple.load_shacl($BAD$
+@prefix sh: <http://www.w3.org/ns/shacl#> .
+@prefix ex: <http://malformed.test/> .
+
+ex:BadShape
+    a sh:NodeShape ;
+    sh:property [
+        sh:path ex:broken ;
+        sh:minCount 1
+        -- missing closing ] and . 
+$BAD$);
+        RAISE NOTICE 'malformed_rejected: false';
+    EXCEPTION WHEN OTHERS THEN
+        RAISE NOTICE 'malformed_rejected: true';
+    END;
+END;
+$$;
+
+-- ── 4. Property shape missing sh:path — error ────────────────────────────────
+DO $$
+BEGIN
+    BEGIN
+        PERFORM pg_ripple.load_shacl($BAD$
+@prefix sh: <http://www.w3.org/ns/shacl#> .
+@prefix ex: <http://malformed.test/> .
+
+ex:NoPathShape
+    a sh:NodeShape ;
+    sh:property [
+        sh:minCount 1
+    ] .
+$BAD$);
+        RAISE NOTICE 'missing_path_rejected: false';
+    EXCEPTION WHEN OTHERS THEN
+        RAISE NOTICE 'missing_path_rejected: true';
+    END;
+END;
+$$;
+
+-- ── 5. Unknown prefix — clean error ──────────────────────────────────────────
+DO $$
+BEGIN
+    BEGIN
+        PERFORM pg_ripple.load_shacl($BAD$
+@prefix sh: <http://www.w3.org/ns/shacl#> .
+
+ex:UnknownPrefixShape
+    a sh:NodeShape ;
+    sh:targetClass ex:UnknownClass .
+$BAD$);
+        RAISE NOTICE 'unknown_prefix_rejected: false';
+    EXCEPTION WHEN OTHERS THEN
+        RAISE NOTICE 'unknown_prefix_rejected: true';
+    END;
+END;
+$$;
+
+-- ── 6. sh:node in v0.7.0 — accepted silently (not evaluated until v0.8.0) ────
+SELECT pg_ripple.load_shacl($SHACL$
+@prefix sh: <http://www.w3.org/ns/shacl#> .
+@prefix ex: <http://malformed.test/> .
+
+ex:NodeRefShape
+    a sh:NodeShape ;
+    sh:targetClass ex:Item ;
+    sh:property [
+        sh:path ex:related ;
+        sh:node ex:NodeRefShape ;
+    ] .
+$SHACL$) AS loaded_node_ref;
+
+-- Confirm it was stored (sh:node is silently accepted).
+SELECT count(*) AS node_ref_present
+FROM pg_ripple.list_shapes()
+WHERE shape_iri = 'http://malformed.test/NodeRefShape';
+
+-- ── Cleanup ──────────────────────────────────────────────────────────────────
+SELECT pg_ripple.drop_shape('http://malformed.test/MinimalShape') > 0 AS drop1;
+SELECT pg_ripple.drop_shape('http://malformed.test/NodeRefShape') > 0 AS drop2;

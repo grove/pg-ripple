@@ -9,7 +9,78 @@ Versions correspond to the milestones in [ROADMAP.md](ROADMAP.md).
 
 ## [Unreleased]
 
-Development towards [v0.7.0 (SHACL Core + Deduplication)](ROADMAP.md).
+Development towards [v0.8.0 (SHACL Advanced)](ROADMAP.md).
+
+---
+
+## [0.7.0] — 2026-04-15 — SHACL Validation (Core) + Deduplication
+
+This release adds **SHACL Core** data quality enforcement and explicit deduplication utilities. SHACL shapes are loaded from Turtle and stored in the database; they can be enforced inline at insert time (`sync` mode) or evaluated on demand via `validate()`. Two new deduplication functions provide on-demand cleanup for datasets with duplicate triples.
+
+### What you can do
+
+- **Load SHACL shapes** — `pg_ripple.load_shacl(data TEXT)` parses W3C SHACL Turtle and stores each `sh:NodeShape` / `sh:PropertyShape` in `_pg_ripple.shacl_shapes`
+- **Validate data** — `pg_ripple.validate(graph TEXT DEFAULT NULL)` runs a full SHACL validation report against all active shapes; returns `{"conforms": bool, "violations": [...]}` as JSONB
+- **Inline rejection** — set `pg_ripple.shacl_mode = 'sync'` to have `insert_triple()` reject any triple that violates an active `sh:maxCount`, `sh:datatype`, `sh:in`, or `sh:pattern` constraint
+- **Manage shapes** — `list_shapes()` enumerates all loaded shapes; `drop_shape(uri)` removes one
+- **Deduplicate triples** — `deduplicate_predicate(p_iri)` removes duplicate `(s, o, g)` rows for one predicate, keeping the lowest-SID row; `deduplicate_all()` deduplicates everything
+- **Merge-time dedup** — `pg_ripple.dedup_on_merge = true` makes the HTAP merge worker use `DISTINCT ON` to eliminate duplicates during each generation merge cycle
+
+### New SQL functions
+
+| Function | Returns | Description |
+|----------|---------|-------------|
+| `pg_ripple.load_shacl(data TEXT)` | `INTEGER` | Parse Turtle, store shapes, return count loaded |
+| `pg_ripple.validate(graph TEXT DEFAULT NULL)` | `JSONB` | Full SHACL validation report |
+| `pg_ripple.list_shapes()` | `TABLE(shape_iri TEXT, active BOOLEAN)` | All shapes in the catalog |
+| `pg_ripple.drop_shape(shape_uri TEXT)` | `INTEGER` | Remove a shape by IRI |
+| `pg_ripple.deduplicate_predicate(p_iri TEXT)` | `BIGINT` | Remove duplicate triples for one predicate |
+| `pg_ripple.deduplicate_all()` | `BIGINT` | Deduplicate all predicates and vp_rare |
+
+### New GUCs
+
+| GUC | Default | Description |
+|-----|---------|-------------|
+| `pg_ripple.shacl_mode` | `'off'` | Validation mode: `'off'`, `'sync'`, `'async'` (async: v0.8.0) |
+| `pg_ripple.dedup_on_merge` | `false` | Enable merge-time deduplication via `DISTINCT ON` |
+
+### New schema objects
+
+| Object | Description |
+|--------|-------------|
+| `_pg_ripple.shacl_shapes` | Shape catalog: `shape_iri`, `shape_json` (JSONB IR), `active`, timestamps |
+| `_pg_ripple.validation_queue` | Async validation inbox (populated when `shacl_mode = 'async'`) |
+| `_pg_ripple.dead_letter_queue` | Async violations with JSONB violation report |
+
+### New regression tests
+
+| Test | Description |
+|------|-------------|
+| `shacl_validation.sql` | load_shacl, validate, list_shapes, drop_shape, sync mode enforcement |
+| `shacl_malformed.sql` | Malformed shapes, missing sh:path, unknown prefix, circular sh:node |
+| `deduplication.sql` | Explicit dedup functions, idempotency, merge-time dedup with compact() |
+
+### Documentation
+
+- `user-guide/sql-reference/shacl.md` — new: `load_shacl`, `validate`, `list_shapes`, `drop_shape`; validation report JSON structure; `shacl_mode` GUC
+- `user-guide/best-practices/shacl-patterns.md` — new: NodeShape vs PropertyShape, `sh:datatype`/`sh:minCount`/`sh:maxCount`, sync mode latency impact
+- `user-guide/pre-deployment.md` — expanded: SHACL mode selection, load shapes before bulk import
+- `reference/troubleshooting.md` — expanded: insert rejected by SHACL, shape parsing failures
+- `user-guide/sql-reference/admin.md` — expanded: `deduplicate_predicate`, `deduplicate_all`, `dedup_on_merge` GUC
+
+### Supported SHACL constraints (v0.7.0 Core)
+
+`sh:minCount`, `sh:maxCount`, `sh:datatype`, `sh:in`, `sh:pattern`, `sh:class`, `sh:targetClass`, `sh:targetNode`, `sh:targetSubjectsOf`, `sh:targetObjectsOf`. `sh:or`/`sh:and`/`sh:not` and qualified constraints are v0.8.0.
+
+### Migration
+
+Users upgrading from v0.6.0 must run:
+
+```sql
+ALTER EXTENSION pg_ripple UPDATE;
+```
+
+The migration script (`sql/pg_ripple--0.6.0--0.7.0.sql`) creates the three new tables (`shacl_shapes`, `validation_queue`, `dead_letter_queue`) and their indexes. No existing tables are modified.
 
 ---
 

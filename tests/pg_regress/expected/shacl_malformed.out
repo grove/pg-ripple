@@ -1,0 +1,41 @@
+ loaded_empty 
+--------------
+            0
+(1 row)
+
+ loaded_minimal 
+----------------
+              1
+(1 row)
+
+ minimal_shape_present 
+-----------------------
+                     1
+(1 row)
+
+NOTICE:  malformed_rejected: true
+DO
+NOTICE:  missing_path_rejected: true
+DO
+NOTICE:  unknown_prefix_rejected: true
+DO
+ loaded_node_ref 
+-----------------
+               1
+(1 row)
+
+ node_ref_present 
+------------------
+                1
+(1 row)
+
+ drop1 
+-------
+ t
+(1 row)
+
+ drop2 
+-------
+ t
+(1 row)
+

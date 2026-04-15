@@ -228,8 +228,27 @@ pub fn merge_predicate(pred_id: i64) -> i64 {
         .unwrap_or_else(|e| pgrx::error!("merge: drop leftover main_new error: {e}"));
 
     // Step 1: create fresh main_new from (main − tombstones UNION ALL delta) ORDER BY s.
-    Spi::run_with_args(
-        &format!(
+    // When dedup_on_merge is enabled, use DISTINCT ON (s,o,g) to deduplicate,
+    // keeping the row with the lowest SID (oldest assertion) per logical triple.
+    let dedup_on_merge = crate::DEDUP_ON_MERGE.get();
+    let create_sql = if dedup_on_merge {
+        format!(
+            "CREATE TABLE {main_new} AS \
+             SELECT DISTINCT ON (merged.s, merged.o, merged.g) \
+                    merged.s, merged.o, merged.g, merged.i, merged.source \
+             FROM ( \
+                 SELECT m.s, m.o, m.g, m.i, m.source \
+                 FROM {main} m \
+                 LEFT JOIN {tombs} t ON m.s = t.s AND m.o = t.o AND m.g = t.g \
+                 WHERE t.s IS NULL \
+                 UNION ALL \
+                 SELECT d.s, d.o, d.g, d.i, d.source \
+                 FROM {delta} d \
+             ) merged \
+             ORDER BY merged.s, merged.o, merged.g, merged.i ASC"
+        )
+    } else {
+        format!(
             "CREATE TABLE {main_new} AS \
              SELECT merged.s, merged.o, merged.g, merged.i, merged.source \
              FROM ( \
@@ -242,10 +261,10 @@ pub fn merge_predicate(pred_id: i64) -> i64 {
                  FROM {delta} d \
              ) merged \
              ORDER BY merged.s"
-        ),
-        &[],
-    )
-    .unwrap_or_else(|e| pgrx::error!("merge: create main_new error: {e}"));
+        )
+    };
+    Spi::run_with_args(&create_sql, &[])
+        .unwrap_or_else(|e| pgrx::error!("merge: create main_new error: {e}"));
 
     // Step 2: BRIN index on new main (effective because rows arrive ordered by s).
     // Drop any stale index from a previous merge cycle (the index name survives

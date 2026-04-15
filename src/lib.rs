@@ -20,6 +20,7 @@ mod dictionary;
 mod error;
 mod export;
 mod fts;
+mod shacl;
 mod shmem;
 mod sparql;
 mod storage;
@@ -129,6 +130,44 @@ CREATE INDEX IF NOT EXISTS idx_cdc_subs_channel
 CREATE INDEX IF NOT EXISTS idx_cdc_subs_predicate
     ON _pg_ripple.cdc_subscriptions (predicate_id);
 
+-- SHACL shapes catalog (v0.7.0)
+CREATE TABLE IF NOT EXISTS _pg_ripple.shacl_shapes (
+    shape_iri  TEXT        NOT NULL PRIMARY KEY,
+    shape_json JSONB       NOT NULL,
+    active     BOOLEAN     NOT NULL DEFAULT true,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_shacl_shapes_active
+    ON _pg_ripple.shacl_shapes (active);
+
+-- Async validation queue (v0.7.0 — populated when shacl_mode = 'async')
+CREATE TABLE IF NOT EXISTS _pg_ripple.validation_queue (
+    id         BIGSERIAL   PRIMARY KEY,
+    s_id       BIGINT      NOT NULL,
+    p_id       BIGINT      NOT NULL,
+    o_id       BIGINT      NOT NULL,
+    g_id       BIGINT      NOT NULL DEFAULT 0,
+    stmt_id    BIGINT      NOT NULL,
+    queued_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_validation_queue_queued
+    ON _pg_ripple.validation_queue (queued_at);
+
+-- Dead-letter queue for async SHACL violations (v0.7.0)
+CREATE TABLE IF NOT EXISTS _pg_ripple.dead_letter_queue (
+    id            BIGSERIAL   PRIMARY KEY,
+    s_id          BIGINT      NOT NULL,
+    p_id          BIGINT      NOT NULL,
+    o_id          BIGINT      NOT NULL,
+    g_id          BIGINT      NOT NULL DEFAULT 0,
+    stmt_id       BIGINT      NOT NULL,
+    violation     JSONB       NOT NULL,
+    detected_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_dead_letter_shape
+    ON _pg_ripple.dead_letter_queue ((violation->>'shapeIRI'));
+
 -- CDC notify trigger function (v0.6.0)
 CREATE OR REPLACE FUNCTION _pg_ripple.notify_triple_change()
 RETURNS TRIGGER LANGUAGE plpgsql AS $body$
@@ -225,6 +264,19 @@ pub static WORKER_DATABASE: pgrx::GucSetting<Option<std::ffi::CString>> =
 
 /// GUC: seconds before the merge worker watchdog logs a WARNING for inactivity.
 pub static MERGE_WATCHDOG_TIMEOUT: pgrx::GucSetting<i32> = pgrx::GucSetting::<i32>::new(300);
+
+// ─── v0.7.0 GUCs ─────────────────────────────────────────────────────────────
+
+/// GUC: SHACL validation mode — 'off', 'sync', or 'async'.
+/// 'sync' rejects violating triples inline; 'async' queues them for the
+/// background validation worker; 'off' disables all SHACL enforcement.
+pub static SHACL_MODE: pgrx::GucSetting<Option<std::ffi::CString>> =
+    pgrx::GucSetting::<Option<std::ffi::CString>>::new(None);
+
+/// GUC: when true, the HTAP generation merge deduplicates `(s, o, g)` rows
+/// using DISTINCT ON, keeping the row with the lowest SID.
+/// Zero insert-time overhead; effective after the next merge cycle.
+pub static DEDUP_ON_MERGE: pgrx::GucSetting<bool> = pgrx::GucSetting::<bool>::new(false);
 
 /// GUC: maximum number of entries in the shared-memory dictionary encode cache.
 /// Rounded down to the nearest multiple of `ENCODE_CACHE_CAPACITY` (4096).
@@ -444,6 +496,26 @@ pub extern "C-unwind" fn _PG_init() {
         GucFlags::default(),
     );
 
+    // ── v0.7.0 GUCs ──────────────────────────────────────────────────────────
+
+    pgrx::GucRegistry::define_string_guc(
+        c"pg_ripple.shacl_mode",
+        c"SHACL validation mode: 'off' (default), 'sync' (reject violations inline), 'async' (queue for background worker)",
+        c"",
+        &SHACL_MODE,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+
+    pgrx::GucRegistry::define_bool_guc(
+        c"pg_ripple.dedup_on_merge",
+        c"When true, the HTAP generation merge deduplicates (s,o,g) rows keeping the lowest SID (default: false)",
+        c"",
+        &DEDUP_ON_MERGE,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+
     // ── Postmaster-only GUCs and shared memory (v0.6.0) ─────────────────────
     // PGC_POSTMASTER GUCs can only be registered during shared_preload_libraries
     // loading.  `process_shared_preload_libraries_in_progress` is the correct
@@ -568,7 +640,51 @@ mod pg_ripple {
                 crate::dictionary::KIND_IRI,
             )
         });
-        crate::storage::insert_triple(s, p, o, g_id)
+
+        // ── v0.7.0: SHACL sync validation ──────────────────────────────────
+        let shacl_mode = crate::SHACL_MODE.get();
+        let shacl_mode_str = shacl_mode
+            .as_ref()
+            .and_then(|c| c.to_str().ok())
+            .unwrap_or("off");
+
+        if shacl_mode_str == "sync" {
+            // Pre-encode the triple terms to check constraints.
+            let s_id = crate::storage::encode_rdf_term(s);
+            let p_id = crate::dictionary::encode(
+                crate::storage::strip_angle_brackets_pub(p),
+                crate::dictionary::KIND_IRI,
+            );
+            let o_id = crate::storage::encode_rdf_term(o);
+            if let Err(msg) = crate::shacl::validate_sync(s_id, p_id, o_id, g_id) {
+                pgrx::error!("{msg}");
+            }
+        }
+
+        let sid = crate::storage::insert_triple(s, p, o, g_id);
+
+        // ── v0.7.0: SHACL async queue ───────────────────────────────────────
+        if shacl_mode_str == "async" && sid > 0 {
+            let s_id = crate::storage::encode_rdf_term(s);
+            let p_id = crate::dictionary::encode(
+                crate::storage::strip_angle_brackets_pub(p),
+                crate::dictionary::KIND_IRI,
+            );
+            let o_id = crate::storage::encode_rdf_term(o);
+            let _ = pgrx::Spi::run_with_args(
+                "INSERT INTO _pg_ripple.validation_queue (s_id, p_id, o_id, g_id, stmt_id) \
+                 VALUES ($1, $2, $3, $4, $5)",
+                &[
+                    pgrx::datum::DatumWithOid::from(s_id),
+                    pgrx::datum::DatumWithOid::from(p_id),
+                    pgrx::datum::DatumWithOid::from(o_id),
+                    pgrx::datum::DatumWithOid::from(g_id),
+                    pgrx::datum::DatumWithOid::from(sid),
+                ],
+            );
+        }
+
+        sid
     }
 
     /// Look up a statement by its globally-unique statement identifier (SID).
@@ -1109,6 +1225,95 @@ mod pg_ripple {
             &[pgrx::datum::DatumWithOid::from(object_id)],
         )
         .unwrap_or(None)
+    }
+
+    // ── SHACL management (v0.7.0) ─────────────────────────────────────────────
+
+    /// Load and store SHACL shapes from Turtle-formatted text.
+    ///
+    /// Parses the Turtle, extracts all NodeShape and PropertyShape definitions,
+    /// and upserts them into `_pg_ripple.shacl_shapes`.  Returns the number of
+    /// shapes loaded.
+    #[pg_extern]
+    fn load_shacl(data: &str) -> i32 {
+        use crate::shacl::parse_and_store_shapes;
+        parse_and_store_shapes(data)
+    }
+
+    /// Run a full SHACL validation report against all active shapes.
+    ///
+    /// `graph` selects which graph to validate:
+    /// - NULL or empty string: default graph (id 0)
+    /// - `'*'`: all graphs
+    /// - An IRI: the named graph with that IRI
+    ///
+    /// Returns a SHACL validation report as JSONB with `conforms` and `violations`.
+    #[pg_extern]
+    fn validate(graph: default!(Option<&str>, "NULL")) -> pgrx::JsonB {
+        crate::shacl::run_validate(graph)
+    }
+
+    /// Return a table of all loaded SHACL shapes.
+    #[pg_extern]
+    fn list_shapes() -> TableIterator<'static, (name!(shape_iri, String), name!(active, bool))> {
+        let rows = pgrx::Spi::connect(|c| {
+            let tup = c
+                .select(
+                    "SELECT shape_iri, active FROM _pg_ripple.shacl_shapes ORDER BY shape_iri",
+                    None,
+                    &[],
+                )
+                .unwrap_or_else(|e| pgrx::error!("list_shapes SPI error: {e}"));
+            let mut out: Vec<(String, bool)> = Vec::new();
+            for row in tup {
+                let iri: String = row.get::<&str>(1).unwrap_or(None).unwrap_or("").to_owned();
+                let active: bool = row.get::<bool>(2).unwrap_or(None).unwrap_or(false);
+                out.push((iri, active));
+            }
+            out
+        });
+        TableIterator::new(rows)
+    }
+
+    /// Deactivate and remove a SHACL shape by its IRI.
+    ///
+    /// Returns 1 if the shape was found and removed, 0 if not found.
+    #[pg_extern]
+    fn drop_shape(shape_uri: &str) -> i32 {
+        let rows_deleted = pgrx::Spi::get_one_with_args::<i64>(
+            "DELETE FROM _pg_ripple.shacl_shapes WHERE shape_iri = $1 RETURNING 1",
+            &[pgrx::datum::DatumWithOid::from(shape_uri)],
+        )
+        .unwrap_or(None)
+        .unwrap_or(0);
+        rows_deleted as i32
+    }
+
+    // ── Deduplication functions (v0.7.0) ──────────────────────────────────────
+
+    /// Remove duplicate `(s, o, g)` rows for a single predicate, keeping the
+    /// row with the lowest SID (oldest assertion).
+    ///
+    /// - In `_delta` tables: uses DELETE with a `ctid NOT IN (MIN(ctid) GROUP BY s,o,g)` pattern.
+    /// - In `_main` tables: inserts tombstone rows for duplicate-SID rows so they are
+    ///   filtered at query time and removed on the next merge cycle.
+    /// - In `vp_rare`: uses the same MIN(ctid) pattern with a `p = pred_id` filter.
+    ///
+    /// Runs ANALYZE on all affected tables after deduplication.
+    /// Returns the total count of rows removed.
+    #[pg_extern]
+    fn deduplicate_predicate(p_iri: &str) -> i64 {
+        crate::storage::deduplicate_predicate(p_iri)
+    }
+
+    /// Remove duplicate `(s, o, g)` rows across all predicates and `vp_rare`.
+    ///
+    /// Applies `deduplicate_predicate` for each predicate with a dedicated VP table,
+    /// then deduplicates `vp_rare`.
+    /// Returns the total count of rows removed.
+    #[pg_extern]
+    fn deduplicate_all() -> i64 {
+        crate::storage::deduplicate_all()
     }
 }
 

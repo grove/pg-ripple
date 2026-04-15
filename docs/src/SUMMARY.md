@@ -20,6 +20,7 @@
   - [Dictionary](user-guide/sql-reference/dictionary.md)
   - [Prefix Registry](user-guide/sql-reference/prefix.md)
   - [Administration](user-guide/sql-reference/admin.md)
+  - [SHACL Validation](user-guide/sql-reference/shacl.md)
 - [Configuration](user-guide/configuration.md)
 - [Scaling & HTAP](user-guide/scaling.md)
 - [Pre-Deployment](user-guide/pre-deployment.md)
@@ -28,6 +29,7 @@
   - [Bulk Loading](user-guide/best-practices/bulk-loading.md)
   - [SPARQL Patterns](user-guide/best-practices/sparql-patterns.md)
   - [Update Patterns](user-guide/best-practices/update-patterns.md)
+  - [SHACL Patterns](user-guide/best-practices/shacl-patterns.md)
 
 ---
 

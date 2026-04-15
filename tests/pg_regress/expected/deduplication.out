@@ -1,0 +1,80 @@
+ dup1_ok 
+---------
+ t
+(1 row)
+
+ dup2_ok 
+---------
+ t
+(1 row)
+
+ dup3_ok 
+---------
+ t
+(1 row)
+
+ count_before_dedup 
+--------------------
+                  3
+(1 row)
+
+ rows_removed 
+--------------
+            2
+(1 row)
+
+ count_after_dedup 
+-------------------
+                 1
+(1 row)
+
+ idempotent_run 
+----------------
+              0
+(1 row)
+
+ count_still_1 
+---------------
+             1
+(1 row)
+
+ rare_dup1 
+-----------
+ t
+(1 row)
+
+ rare_dup2 
+-----------
+ t
+(1 row)
+
+ dedup_all_removed_some 
+------------------------
+ t
+(1 row)
+
+ rare_dedup_count 
+------------------
+                1
+(1 row)
+
+ merge_dup1 
+------------
+ t
+(1 row)
+
+ merge_dup2 
+------------
+ t
+(1 row)
+
+ compact_with_dedup_ok 
+-----------------------
+ t
+(1 row)
+
+ count_after_merge_dedup 
+-------------------------
+                       1
+(1 row)
+

@@ -175,3 +175,39 @@ FROM pg_ripple.predicate_stats
 ORDER BY triple_count DESC
 LIMIT 10;
 ```
+
+---
+
+## deduplicate_predicate(p_iri TEXT) → BIGINT (v0.7.0)
+
+Remove duplicate `(s, o, g)` rows for a single predicate, keeping the row with the lowest SID (oldest assertion). Returns the count of rows removed.
+
+- **Delta tables** (`vp_{id}_delta`): duplicate rows are physically deleted — the minimum-SID row per group is kept.
+- **Main tables** (`vp_{id}_main`): tombstone rows are inserted for all but the minimum-SID duplicate, masking duplicates from queries immediately; they are physically removed on the next merge cycle.
+- **vp_rare**: duplicate rows are physically deleted (minimum SID kept).
+- ANALYZE is run on all modified tables after deduplication.
+
+```sql
+-- Remove duplicates for a specific predicate
+SELECT pg_ripple.deduplicate_predicate('<https://schema.org/name>');
+
+-- Returns: number of rows removed
+```
+
+**Typical usage**: call once after a bulk load that may contain duplicate triples.
+
+---
+
+
+--
+pical usage**: call once after a bulk load that may contain duplicate triples.
+imum-SID duplicaten `ipg_rimum-SID duplicaten `ipg_rimum-SID duplicaten `ipg_rimuen imum-SID duplicaten `ipg_rimum-SID duplicaten `ipg_rimum-SID duplicaten `ipg_rimuen imum-SID duplicaten `ipg_rimum-SID duplicaten `ipg_rimum-SID d andimum-SID duplicaten `ipg_rimum-SID duplicaten `ipg_rimum-SID duplicaten `ipg_rimuen imum-SID duplicaten `ipg_rimum-SIple.dedup_on_merge` | BOOL | `off` | When `on`, the HTAP generation merge deduplicates `(s, o, g)` rows using `DISTINCT ON`, keeping the lowest-SID row. |
+
+When enabled, the merge worker's fresh-table geWhen enabled, the merge worker's fresh-table geWhen enabled, the merguplicating projection:
+
+```sql
+-- Enable merge-time dedup
+SET pg_rSET p.dSET pg_rSET p.dSET pg_rSET p.dSET pg_rSET pdeduplication happens atomically during compaction)
+SELECT pg_ripple.compSELECT pg_ripple.compSELECT pg_r_meSge;
+SELECT pg_ripple.compSELECT pg_ripple.compSELECT pg_r_meSge;
+uplication happens a. Bupweenumerges, the `(main EXCEPT tombstones) UNION ALL delta` query view may observe shouplication happens a. Bupweenumerges, the `(main EXCEPT tombstones) UNION ALL delta` query view may observe shouplication happens a. Bupweenumerges, the `(main EXCEPT tombstones) UNION ALL delta` query view may observe shouplication happens a. Bupweenumerges, the `(main EXCEPT tombstones) UNION ALL delta` query view may observe shouplication happens a. Bupweenumerges, the `(main EXCEPT tombstones) UNION ALL delta` query view may observe shouplication happens a. Bupweenumerges, the `(main EXCEPT tomb annotation workloads.

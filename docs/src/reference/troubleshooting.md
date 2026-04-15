@@ -194,3 +194,31 @@ Then retry `ALTER EXTENSION pg_ripple UPDATE`.
    ```sql
    SELECT pg_ripple.subscribe('<https://schema.org/name>', 'my_channel');
    ```
+
+---
+
+## Insert rejected by SHACL (v0.7.0)
+
+**Symptom**: An `INSERT` via `insert_triple()` fails with an error like:
+
+```
+ERROR:  SHACL violation: <https://example.org/alice> sh:maxCount 1 for
+        <https://example.org/email>: found 1 existing value(s), limit is 1
+```
+
+**Cause**: `pg_ripple.shacl_mode = 'sync'` is set and the inserted triple would violate an active shape's constraint.
+
+**How to read the violation report**:
+- **Focus node** (`<https://example.org/alice>`): the subject of the rejected triple.
+- **Constraint** (`sh:maxCount 1`): the violated constraint.
+- **Path** (`<https://example.org/email>`): the predicate that triggered the check.
+- **Message**: "found N existing value(s), limit is M".
+
+**Resolutions**:
+1. Delete the conflicting existing triple first, then insert the new value.
+2. Temporarily set `pg_ripple.shacl_mode = 'off'` if you need to load data that violates current shapes and plan to2. Temporarily set `pg_ripple.shacl_mode = 'off'` if you need to load data that violates current---
+
+## ## ## ## ## ## ## ## ## ## ## ## ##pto## ## ## ## ## ## ## ## ## ## ## ## ##pto## ## ## ## ## ## ## ## ## ##fail##: ## ## ## ## ## ## ## ## ## ## ## ## ##pto## ## ## ## ## ## ## ## ## #ha## ## ## ## ## ## ## ## ## ## ## ## ##pto## ## ## ## ## ## ## ## ## ## ##**#
+
+1. **Unknown prefix**: The parser only knows `sh:`, `rdf:`, `rdfs:`, `xsd:`, and `owl:` built-in. All other prefixes must1. **Unknown prefix**: The parsectives1. **Unknown prefix**: The parser only knows `sh:`, `rdf:`, `rdfs:`, `xsd:`, and `owme1. **Unknown prefix**: The parser only knows `sh:`, `rdf:`,pe1. **Unknown prefix**: The parser only knows `sh:`, `rdf:`, `rdfs:`, `xsd:`, and  de1. **Unknown prefix**: The parser only knows `sh:`, `rsh:property [
+                                                                               . *                                                                               . *                                                                               . *                                                 e data contains no `sh:NodeShape` or `sh:PropertyShape` declarations, `load_shacl()` returns 0 and logs a warning — it does not raise an error.

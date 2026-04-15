@@ -524,49 +524,49 @@ Writes do not block reads. Merge worker operates correctly under concurrent writ
 
 ### Deliverables
 
-- [ ] **SHACL parser** (Turtle-based shapes)
+- [x] **SHACL parser** (Turtle-based shapes)
   - `pg_ripple.load_shacl(data TEXT)` — parse and store shapes
   - Internal shape IR stored in `_pg_ripple.shacl_shapes`
-- [ ] **Exact SHACL validator compilation**
+- [x] **Exact SHACL validator compilation**
   - Parse shapes to an internal IR that preserves W3C SHACL semantics
   - Compile validator plans over focus nodes and value nodes rather than reducing shapes to lossy table constraints
   - PostgreSQL constraints, triggers, and helper indices are allowed only as internal accelerators when semantics are proven equivalent for the specific shape pattern
-- [ ] **Synchronous validation mode**
+- [x] **Synchronous validation mode**
   - Triggered on `insert_triple()` when `pg_ripple.shacl_mode = 'sync'`
   - Returns validation error immediately on constraint violation
   - Uses the same exact validator semantics as offline validation; no fast path weakens or changes SHACL meaning
-- [ ] **Validation report**
+- [x] **Validation report**
   - `pg_ripple.validate(graph TEXT DEFAULT NULL) RETURNS JSONB`
   - Full SHACL validation report as JSON
-- [ ] **SHACL management**
+- [x] **SHACL management**
   - `pg_ripple.list_shapes() RETURNS TABLE`
   - `pg_ripple.drop_shape(shape_uri TEXT)`
 - [ ] **pg_trickle integration: SHACL violation monitors** *(optional)*
   - Simple cardinality/datatype constraints modeled as `IMMEDIATE` mode stream tables
   - Violations detected within the same transaction as the DML
   - `_pg_ripple.violation_summary` stream table aggregates dead-letter queue by shape/severity; feeds `/metrics` Prometheus endpoint without full queue scans ([§2.13](plans/ecosystem/pg_trickle.md))
-- [ ] pg_regress: `shacl_validation.sql`, `shacl_malformed.sql` (invalid shape definitions, circular references, undefined target classes — verify clean error messages)
-- [ ] **Explicit deduplication functions** (on-demand cleanup; zero insert-time overhead)
+- [x] pg_regress: `shacl_validation.sql`, `shacl_malformed.sql` (invalid shape definitions, circular references, undefined target classes — verify clean error messages)
+- [x] **Explicit deduplication functions** (on-demand cleanup; zero insert-time overhead)
   - `pg_ripple.deduplicate_predicate(p_iri TEXT) RETURNS BIGINT` — remove duplicate `(s, o, g)` rows for a single predicate, keeping the row with the lowest SID; returns count of rows removed
   - `pg_ripple.deduplicate_all() RETURNS BIGINT` — deduplicate all predicates across dedicated VP tables and `vp_rare`; returns total rows removed
   - Runs `ANALYZE` on all affected tables; safe to call at any time
   - Typical usage: call once after a bulk load that may contain duplicate triples
-- [ ] **Merge-time deduplication** (`pg_ripple.dedup_on_merge` GUC, default `false`)
+- [x] **Merge-time deduplication** (`pg_ripple.dedup_on_merge` GUC, default `false`)
   - When enabled, the HTAP generation merge (`src/storage/merge.rs`) changes from a plain `UNION ALL` accumulation to a deduplicating projection using `DISTINCT ON (s, o, g) ORDER BY s, o, g, i ASC`, retaining the lowest-SID row for each logical triple
   - Deduplication happens atomically during the regular background merge cycle — zero insert-time overhead; duplicates accumulate in the delta partition and are resolved when the merge worker fires
   - Between merges, queries through the `(main EXCEPT tombstones) UNION ALL delta` view may still observe short-lived duplicates from the delta portion
   - **RDF-star interaction**: SIDs of eliminated duplicate rows are not preserved; if RDF-star annotations exist on those SIDs, the annotations become orphaned. Use explicit dedup functions instead for datasets with active statement-level annotation workloads
-- [ ] pg_regress: `deduplication.sql` (explicit dedup functions; merge-time dedup via `dedup_on_merge`; verifies zero duplicates after each mechanism completes)
+- [x] pg_regress: `deduplication.sql` (explicit dedup functions; merge-time dedup via `dedup_on_merge`; verifies zero duplicates after each mechanism completes)
 
 ### Documentation
 
 > See [plans/documentation.md](plans/documentation.md) for details.
 
-- [ ] `user-guide/sql-reference/shacl.md` — `load_shacl`, `validate`, `list_shapes`, `drop_shape`; validation report JSON structure; `shacl_mode` GUC
-- [ ] `user-guide/best-practices/shacl-patterns.md` (initial: NodeShape vs PropertyShape, `sh:datatype`/`sh:minCount`/`sh:maxCount`, sync mode latency impact)
-- [ ] `user-guide/pre-deployment.md` expanded: SHACL mode selection, load shapes before bulk import
-- [ ] `reference/troubleshooting.md` expanded: insert rejected by SHACL, shape parsing failures
-- [ ] `user-guide/sql-reference/admin.md` expanded: `deduplicate_predicate`, `deduplicate_all`, `dedup_on_merge` GUC, merge-time dedup semantics and RDF-star interaction
+- [x] `user-guide/sql-reference/shacl.md` — `load_shacl`, `validate`, `list_shapes`, `drop_shape`; validation report JSON structure; `shacl_mode` GUC
+- [x] `user-guide/best-practices/shacl-patterns.md` (initial: NodeShape vs PropertyShape, `sh:datatype`/`sh:minCount`/`sh:maxCount`, sync mode latency impact)
+- [x] `user-guide/pre-deployment.md` expanded: SHACL mode selection, load shapes before bulk import
+- [x] `reference/troubleshooting.md` expanded: insert rejected by SHACL, shape parsing failures
+- [x] `user-guide/sql-reference/admin.md` expanded: `deduplicate_predicate`, `deduplicate_all`, `dedup_on_merge` GUC, merge-time dedup semantics and RDF-star interaction
 
 ### Exit Criteria
 
