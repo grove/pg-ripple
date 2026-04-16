@@ -13,13 +13,16 @@ pg_ripple is a PostgreSQL 18 extension building toward a fully-featured knowledg
 
 ---
 
-## What works today (v0.10.0)
+## What works today (v0.11.0)
 
-v0.10.0 delivers a full Datalog reasoning engine on top of the VP triple store — RDFS and OWL RL entailment, custom rules, and integrity constraints, all compiled to native PostgreSQL SQL.
+v0.11.0 adds always-fresh, incrementally-maintained stream tables for SPARQL and Datalog queries and Extended Vertical Partitioning (ExtVP) semi-join tables for multi-predicate star-pattern acceleration. All three features soft-require [pg_trickle](https://github.com/grove/pg-trickle); pg_ripple operates normally without it and returns a clear error with an install hint when the new functions are called.
 
 | Area | What's included |
 |---|---|
 | **Storage** | VP tables (one table per predicate), HTAP delta/main split, background merge worker, shared-memory dictionary cache; `source` column (`0`=explicit, `1`=derived) |
+| **SPARQL views** | `create_sparql_view(name, sparql, schedule, decode)` — always-fresh stream table from any SPARQL SELECT query; `drop_sparql_view`, `list_sparql_views` |
+| **Datalog views** | `create_datalog_view(name, rules, goal, ...)` — self-refreshing view from inline rules + goal; `create_datalog_view_from_rule_set`; `drop_datalog_view`, `list_datalog_views` |
+| **ExtVP** | `create_extvp(name, pred1_iri, pred2_iri, schedule)` — pre-computed semi-join stream table for multi-predicate star queries; `drop_extvp`, `list_extvp` |
 | **Encoding** | Dictionary encoding (IRI, blank node, literal → i64), inline encoding for numbers and dates, RDF-star / quoted triples; hot dictionary tier for high-frequency IRIs |
 | **Import** | N-Triples, Turtle, TriG, N-Quads, RDF/XML; named graphs; bulk load |
 | **SPARQL** | Full SPARQL 1.1 — SELECT, CONSTRUCT, DESCRIBE, ASK; property paths, aggregates, UNION/MINUS, subqueries, BIND, VALUES, OPTIONAL, named graphs; `include_derived` flag |
@@ -83,10 +86,6 @@ SELECT pg_ripple.infer('org_rules');
 ## Where we're headed
 
 Each release adds a self-contained layer of capability, building toward a complete knowledge graph platform inside PostgreSQL.
-
-### v0.11.0 — Incremental SPARQL & Datalog views
-
-Pin a SPARQL query or a Datalog rule set to a live, automatically-updated result table. Only changed rows are reprocessed, so updates are near-instantaneous. Requires the companion [pg_trickle](https://github.com/grove/pg-trickle) extension.
 
 ### v0.15.0 — SPARQL Protocol (HTTP)
 
@@ -284,7 +283,7 @@ CREATE EXTENSION pg_ripple;
 | **0.8.0** | **SHACL Advanced** | Complex shapes, async background validation pipeline | 4–6 pw | ✅ Done |
 | **0.9.0** | **Serialization** | Turtle/N-Triples/JSON-LD/RDF-XML export, RDF-star formats | 3–4 pw | ✅ Done |
 | **0.10.0** | **Datalog Reasoning** | RDFS (13 rules), OWL 2 RL (~20 core rules), custom rules, integrity constraints | 10–12 pw | ✅ Done |
-| 0.11.0 | SPARQL & Datalog Views | Incremental live views via pg_trickle, ExtVP | 5–7 pw | Planned |
+| **0.11.0** | **SPARQL & Datalog Views** | Incremental live views via pg_trickle, ExtVP | 5–7 pw | ✅ Done |
 | 0.12.0 | SPARQL Update (Advanced) | DELETE/INSERT WHERE, LOAD, CLEAR, DROP, CREATE | 3–4 pw | Planned |
 | 0.13.0 | Performance | BSBM benchmarks, prepared statements, planner statistics | 6–8 pw | Planned |
 | 0.14.0 | Admin & Security | Graph-level RLS, vacuum/reindex, packaging, full docs | 4–6 pw | Planned |
