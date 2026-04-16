@@ -24,6 +24,7 @@ pub struct Stratum {
     pub rules: Vec<Rule>,
     pub is_recursive: bool,
     /// Predicate IDs defined (derived) in this stratum.
+    #[allow(dead_code)]
     pub derived_predicates: Vec<i64>,
 }
 
@@ -207,7 +208,7 @@ fn topo_sort_sccs(
     // Build SCC dependency graph.
     let n = sccs.len();
     let mut scc_adj: Vec<HashSet<usize>> = vec![HashSet::new(); n];
-    let mut scc_neg_edge: Vec<bool> = vec![false; n]; // SCC-internal negative edge?
+    let _scc_neg_edge: Vec<bool> = vec![false; n]; // SCC-internal negative edge?
 
     for e in edges {
         let src_scc = pred_scc.get(&e.from).copied().unwrap_or(0);
@@ -325,13 +326,12 @@ pub fn stratify(rules: &[Rule]) -> Result<StratifiedProgram, String> {
 
     // Constraint rules go in stratum 0 (evaluated after all base data is ready).
     for rule in rules {
-        if rule.head.is_none() {
-            if strata_rules[0]
+        if rule.head.is_none()
+            && strata_rules[0]
                 .iter()
                 .all(|r| r.rule_text != rule.rule_text)
-            {
-                strata_rules[0].push(rule.clone());
-            }
+        {
+            strata_rules[0].push(rule.clone());
         }
     }
 

@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 //! SQL compiler for Datalog rules.
 //!
 //! Each Datalog rule is compiled to one or more SQL statements:
@@ -124,12 +125,11 @@ pub fn compile_single_rule(rule: &Rule) -> Result<String, String> {
 
 fn is_recursive_rule(rule: &Rule, head_pred: i64) -> bool {
     for lit in &rule.body {
-        if let BodyLiteral::Positive(atom) = lit {
-            if let Term::Const(p) = &atom.p {
-                if *p == head_pred {
-                    return true;
-                }
-            }
+        if let BodyLiteral::Positive(atom) = lit
+            && let Term::Const(p) = &atom.p
+            && *p == head_pred
+        {
+            return true;
         }
     }
     false
@@ -138,14 +138,13 @@ fn is_recursive_rule(rule: &Rule, head_pred: i64) -> bool {
 /// Compile a non-recursive rule to `INSERT … SELECT … ON CONFLICT DO NOTHING`.
 fn compile_nonrecursive_rule(
     rule: &Rule,
-    head_pred: i64,
+    _head_pred: i64,
     head_g_expr: &str,
     target: &str,
 ) -> Result<String, String> {
     let head = rule.head.as_ref().unwrap();
 
     let mut from_clauses: Vec<String> = Vec::new();
-    let mut join_conditions: Vec<String> = Vec::new();
     let mut where_clauses: Vec<String> = Vec::new();
     let mut var_map = VarMap::default();
     let mut atom_idx = 0usize;
@@ -293,7 +292,7 @@ fn compile_nonrecursive_rule(
 fn compile_recursive_rule(
     rule: &Rule,
     head_pred: i64,
-    head_g_expr: &str,
+    _head_g_expr: &str,
     target: &str,
 ) -> Result<String, String> {
     let head = rule.head.as_ref().unwrap();
@@ -345,7 +344,7 @@ fn compile_recursive_rule(
     };
 
     // Recursive step.
-    let rec_sql = if let Some(rec) = rec_atom {
+    let rec_sql = if let Some(_rec) = rec_atom {
         let base_pred = base_atoms
             .first()
             .and_then(|a| {
@@ -363,8 +362,6 @@ fn compile_recursive_rule(
         } else {
             ""
         };
-        let cycle_cols = if has_graph_var { "s, o, g" } else { "s, o" };
-
         format!(
             "SELECT base.s, r.o, base.g\n\
              FROM {} base\n\
@@ -385,24 +382,12 @@ fn compile_recursive_rule(
     let cycle_cols = if has_graph_var { "s, o, g" } else { "s, o" };
 
     let select_s = match &head.s {
-        Term::Var(v) => {
-            if v == "x" || v == "s" {
-                format!("{cte_name}.s")
-            } else {
-                format!("{cte_name}.s")
-            }
-        }
+        Term::Var(_) => format!("{cte_name}.s"),
         Term::Const(id) => const_sql(*id),
         _ => format!("{cte_name}.s"),
     };
     let select_o = match &head.o {
-        Term::Var(v) => {
-            if v == "z" || v == "o" {
-                format!("{cte_name}.o")
-            } else {
-                format!("{cte_name}.o")
-            }
-        }
+        Term::Var(_) => format!("{cte_name}.o"),
         Term::Const(id) => const_sql(*id),
         _ => format!("{cte_name}.o"),
     };
@@ -549,12 +534,11 @@ fn compile_recursive_cte_fragment(
     // Base case: non-recursive body atoms.
     let mut base_selects: Vec<String> = Vec::new();
     for lit in &rule.body {
-        if let BodyLiteral::Positive(atom) = lit {
-            if let Term::Const(p) = &atom.p {
-                if *p != head_pred {
-                    base_selects.push(format!("SELECT s, o, g FROM {}", vp_table(*p)));
-                }
-            }
+        if let BodyLiteral::Positive(atom) = lit
+            && let Term::Const(p) = &atom.p
+            && *p != head_pred
+        {
+            base_selects.push(format!("SELECT s, o, g FROM {}", vp_table(*p)));
         }
     }
 
@@ -569,12 +553,11 @@ fn compile_recursive_cte_fragment(
         .body
         .iter()
         .find_map(|lit| {
-            if let BodyLiteral::Positive(atom) = lit {
-                if let Term::Const(p) = &atom.p {
-                    if *p != head_pred {
-                        return Some(*p);
-                    }
-                }
+            if let BodyLiteral::Positive(atom) = lit
+                && let Term::Const(p) = &atom.p
+                && *p != head_pred
+            {
+                return Some(*p);
             }
             None
         })
@@ -603,7 +586,7 @@ fn compile_recursive_cte_fragment(
 
 fn compile_select_arm(rule: &Rule, head: &Atom) -> Result<String, String> {
     let mut from_clauses: Vec<String> = Vec::new();
-    let mut where_clauses: Vec<String> = Vec::new();
+    let where_clauses: Vec<String> = Vec::new();
     let mut var_map = VarMap::default();
     let mut atom_idx = 0usize;
 

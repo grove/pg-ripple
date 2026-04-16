@@ -327,7 +327,7 @@ fn try_parse_string_builtin(text: &str) -> Option<BodyLiteral> {
         // REGEX(?s, "pattern")
         let inner_end = text.rfind(')')?;
         let inner = &text[6..inner_end];
-        let mut parts = split_body(inner);
+        let parts = split_body(inner);
         if parts.len() < 2 {
             return None;
         }
@@ -342,11 +342,7 @@ fn try_parse_string_builtin(text: &str) -> Option<BodyLiteral> {
 
 /// Parse a variable name from `?var` or `?_` (wildcard).
 fn parse_variable(text: &str) -> Option<String> {
-    if text.starts_with('?') {
-        Some(text[1..].to_owned())
-    } else {
-        None
-    }
+    text.strip_prefix('?').map(|s| s.to_owned())
 }
 
 /// Parse a triple atom with optional GRAPH clause.
@@ -479,8 +475,7 @@ fn parse_term(text: &str) -> Result<Term, String> {
     let text = text.trim();
 
     // Variable
-    if text.starts_with('?') {
-        let name = &text[1..];
+    if let Some(name) = text.strip_prefix('?') {
         if name == "_" {
             return Ok(Term::Wildcard);
         }
@@ -505,22 +500,22 @@ fn parse_term(text: &str) -> Result<Term, String> {
     }
 
     // Typed literal "value"^^<datatype>
-    if text.starts_with('"') {
-        if let Some((val, rest)) = split_literal(text) {
-            if let Some(dt_str) = rest.strip_prefix("^^") {
-                let dt = dt_str.trim().trim_start_matches('<').trim_end_matches('>');
-                let dt_resolved = crate::datalog::resolve_prefix(dt);
-                let id = crate::dictionary::encode_typed_literal(&val, &dt_resolved);
-                return Ok(Term::Const(id));
-            }
-            if let Some(lang) = rest.strip_prefix('@') {
-                let id = crate::dictionary::encode_lang_literal(&val, lang);
-                return Ok(Term::Const(id));
-            }
-            // Plain literal
-            let id = crate::dictionary::encode(&val, crate::dictionary::KIND_LITERAL);
+    if text.starts_with('"')
+        && let Some((val, rest)) = split_literal(text)
+    {
+        if let Some(dt_str) = rest.strip_prefix("^^") {
+            let dt = dt_str.trim().trim_start_matches('<').trim_end_matches('>');
+            let dt_resolved = crate::datalog::resolve_prefix(dt);
+            let id = crate::dictionary::encode_typed_literal(&val, &dt_resolved);
             return Ok(Term::Const(id));
         }
+        if let Some(lang) = rest.strip_prefix('@') {
+            let id = crate::dictionary::encode_lang_literal(&val, lang);
+            return Ok(Term::Const(id));
+        }
+        // Plain literal
+        let id = crate::dictionary::encode(&val, crate::dictionary::KIND_LITERAL);
+        return Ok(Term::Const(id));
     }
 
     // Blank node _:name

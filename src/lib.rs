@@ -169,6 +169,15 @@ CREATE TABLE IF NOT EXISTS _pg_ripple.dead_letter_queue (
 CREATE INDEX IF NOT EXISTS idx_dead_letter_shape
     ON _pg_ripple.dead_letter_queue ((violation->>'shapeIRI'));
 
+-- SHACL DAG monitor catalog (v0.8.0)
+-- Tracks which shapes have been compiled into pg_trickle stream tables.
+CREATE TABLE IF NOT EXISTS _pg_ripple.shacl_dag_monitors (
+    shape_iri          TEXT        NOT NULL PRIMARY KEY,
+    stream_table_name  TEXT        NOT NULL,
+    constraint_summary TEXT        NOT NULL,
+    created_at         TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 -- CDC notify trigger function (v0.6.0)
 CREATE OR REPLACE FUNCTION _pg_ripple.notify_triple_change()
 RETURNS TRIGGER LANGUAGE plpgsql AS $body$
@@ -1366,6 +1375,80 @@ mod pg_ripple {
         });
 
         true
+    }
+
+    // ── pg_trickle SHACL DAG monitors (v0.8.0, optional) ────────────────────
+
+    /// Enable multi-shape DAG validation via pg_trickle stream tables.
+    ///
+    /// For each active, compilable SHACL shape in `_pg_ripple.shacl_shapes`,
+    /// creates a per-shape violation-detection stream table named
+    /// `_pg_ripple.shacl_viol_{shape_suffix}` (refreshed in `IMMEDIATE` mode
+    /// so violations are detected within the same transaction).  Supported
+    /// constraint types: `sh:minCount`, `sh:maxCount`, `sh:datatype`,
+    /// `sh:class`.  Complex combinators (`sh:or`, `sh:and`, `sh:not`,
+    /// `sh:qualifiedValueShape`) are not compiled to stream tables; shapes
+    /// that use only those constraints are skipped.
+    ///
+    /// After creating all per-shape tables, creates
+    /// `_pg_ripple.violation_summary_dag` — a pg_trickle stream table (5 s
+    /// refresh) that aggregates per-shape violation counts.  Because it reads
+    /// from the per-shape stream tables, pg_trickle refreshes them in
+    /// topological order (per-shape first, summary last).  When violations are
+    /// resolved the summary automatically drops to zero — unlike the
+    /// dead-letter-queue-based `_pg_ripple.violation_summary` from v0.7.0,
+    /// which requires manual cleanup.
+    ///
+    /// Returns the number of per-shape stream tables created.  Returns 0 with
+    /// a warning when pg_trickle is not installed.  No error is raised.
+    ///
+    /// ```sql
+    /// -- Load shapes, then enable DAG monitors:
+    /// SELECT pg_ripple.load_shacl('...');
+    /// SELECT pg_ripple.enable_shacl_dag_monitors();
+    /// -- Query the live summary:
+    /// SELECT * FROM _pg_ripple.violation_summary_dag;
+    /// ```
+    #[pg_extern]
+    fn enable_shacl_dag_monitors() -> i64 {
+        crate::shacl::compile_dag_monitors()
+    }
+
+    /// Disable SHACL DAG monitors by dropping all per-shape violation stream
+    /// tables and the `violation_summary_dag` aggregate table.
+    ///
+    /// Also clears the `_pg_ripple.shacl_dag_monitors` catalog.  Returns the
+    /// number of per-shape stream tables dropped.
+    ///
+    /// ```sql
+    /// SELECT pg_ripple.disable_shacl_dag_monitors();
+    /// ```
+    #[pg_extern]
+    fn disable_shacl_dag_monitors() -> i64 {
+        crate::shacl::drop_dag_monitors()
+    }
+
+    /// List all active SHACL DAG monitor stream tables.
+    ///
+    /// Returns one row per compiled shape with:
+    /// - `shape_iri` — the shape's IRI
+    /// - `stream_table` — fully-qualified name of the violation stream table
+    /// - `constraints` — human-readable summary of compiled constraints
+    ///
+    /// ```sql
+    /// SELECT * FROM pg_ripple.list_shacl_dag_monitors();
+    /// ```
+    #[pg_extern]
+    fn list_shacl_dag_monitors() -> TableIterator<
+        'static,
+        (
+            name!(shape_iri, String),
+            name!(stream_table, String),
+            name!(constraints, String),
+        ),
+    > {
+        let rows = crate::shacl::list_dag_monitors();
+        TableIterator::new(rows)
     }
 
     // ── Statistics (v0.6.0) ───────────────────────────────────────────────────

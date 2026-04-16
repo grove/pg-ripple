@@ -123,6 +123,7 @@ pub struct Rule {
 /// A named collection of rules.
 #[derive(Debug, Clone)]
 pub struct RuleSet {
+    #[allow(dead_code)]
     pub name: String,
     pub rules: Vec<Rule>,
 }
@@ -292,7 +293,7 @@ pub fn run_inference(rule_set_name: &str) -> i64 {
         };
 
         for rule in &rules {
-            match compile_rule_set(&[rule.clone()]) {
+            match compile_rule_set(std::slice::from_ref(rule)) {
                 Ok(sqls) => {
                     for sql in sqls {
                         match Spi::run_with_args(&sql, &[]) {
@@ -380,6 +381,7 @@ pub fn check_all_constraints(rule_set_filter: Option<&str>) -> Vec<pgrx::JsonB> 
 
 /// Build an on-demand CTE string for a derived predicate, to be prepended to
 /// SPARQL→SQL output.  Returns `None` if the predicate is not derived.
+#[allow(dead_code)]
 pub fn get_on_demand_cte(pred_id: i64) -> Option<String> {
     let rule_text: Option<String> = Spi::get_one_with_args::<String>(
         "SELECT r.rule_text FROM _pg_ripple.rules r \

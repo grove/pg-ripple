@@ -73,6 +73,7 @@ pub fn prewarm_hot_table() {
 /// Add a term to the hot table when it qualifies (IRI ≤512 bytes).
 ///
 /// Called after encoding a new predicate or prefix IRI.
+#[allow(dead_code)]
 pub fn add_to_hot(id: i64, hash_bytes: &[u8], value: &str, kind: i16) {
     if kind != 0 {
         return; // Only IRIs go into the hot table.
@@ -96,6 +97,7 @@ pub fn add_to_hot(id: i64, hash_bytes: &[u8], value: &str, kind: i16) {
 /// Lookup a term in the hot table by its 128-bit hash (stored as 16-byte BYTEA).
 ///
 /// Returns the dictionary `id` if found, or `None`.
+#[allow(dead_code)]
 pub fn lookup_hot(hash_bytes: &[u8]) -> Option<i64> {
     Spi::get_one_with_args::<i64>(
         "SELECT id FROM _pg_ripple.dictionary_hot WHERE hash = $1",
