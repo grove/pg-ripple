@@ -524,6 +524,28 @@ fn parse_term(text: &str) -> Result<Term, String> {
         return Ok(Term::Const(id));
     }
 
+    // Bare numeric literal (integer or decimal): 18, -3, 3.14
+    if text
+        .chars()
+        .next()
+        .map(|c| c.is_ascii_digit() || c == '-' || c == '+')
+        .unwrap_or(false)
+    {
+        let looks_numeric = text
+            .trim_start_matches(['+', '-'])
+            .chars()
+            .all(|c| c.is_ascii_digit() || c == '.');
+        if looks_numeric {
+            let dt = if text.contains('.') {
+                "http://www.w3.org/2001/XMLSchema#decimal"
+            } else {
+                "http://www.w3.org/2001/XMLSchema#integer"
+            };
+            let id = crate::dictionary::encode_typed_literal(text, dt);
+            return Ok(Term::Const(id));
+        }
+    }
+
     // Prefixed IRI: prefix:local — resolve via prefix registry
     if text.contains(':') && !text.contains(' ') {
         let iri = crate::datalog::resolve_prefix(text);
