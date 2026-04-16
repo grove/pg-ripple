@@ -89,3 +89,11 @@ SELECT EXISTS (
     WHERE table_schema = '_pg_ripple'
       AND table_name   = 'cdc_subscriptions'
 ) AS cdc_subscriptions_exists;
+
+-- ── v0.8.0: shacl_dag_monitors catalog table ──────────────────────────────────
+
+SELECT EXISTS (
+    SELECT 1 FROM information_schema.tables
+    WHERE table_schema = '_pg_ripple'
+      AND table_name   = 'shacl_dag_monitors'
+) AS shacl_dag_monitors_exists;

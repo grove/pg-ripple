@@ -60,6 +60,7 @@ jobs:
             libssl-dev \
             libclang-dev \
             clang \
+            lld \
             libreadline-dev \
             libicu-dev \
             bison \

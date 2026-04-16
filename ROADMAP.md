@@ -13,6 +13,8 @@ Each release below has two layers:
 
 **Effort estimates** are given as *person-weeks* — e.g. "6–8 pw" means the release would take roughly 6–8 weeks for a single full-time developer, or 3–4 weeks for a pair working together. The total estimated effort from v0.1.0 to v1.0.0 is **98–131 person-weeks** (~23–30 months for one developer; ~11–15 months for a pair).
 
+**"optional at runtime" items**: some deliverables are annotated *(optional at runtime — X must be installed)*. This means the feature depends on an external extension (e.g. pg_trickle) that may not be installed in every deployment. The feature is **required by this roadmap** and must be implemented; the Rust code gates on a runtime availability check and degrades gracefully (returns 0 / false / empty, emits a WARNING, never raises an ERROR) when the dependency is absent. These items are not optional from a delivery standpoint.
+
 ---
 
 ## Overview at a glance
@@ -594,10 +596,14 @@ Delivered SHACL Core features are enforced at insert time with exact W3C semanti
   - `sh:node` — nested shape references
   - `sh:or` / `sh:and` / `sh:not` — logical constraint combinators
   - `sh:qualifiedValueShape` — qualified cardinality
-- [ ] **pg_trickle integration: multi-shape DAG validation** *(optional)*
-  - Multiple SHACL shapes as a DAG of stream tables with topologically-ordered refresh
-  - `violation_summary` DAG leaf node automatically clears counts when upstream shape violations resolve ([§2.13](plans/ecosystem/pg_trickle.md))
-- [x] pg_regress: `shacl_advanced.sql`
+- [x] **pg_trickle integration: multi-shape DAG validation** *(optional at runtime — pg_trickle must be installed; required in this roadmap)*
+  - Multiple SHACL shapes compiled into per-shape `IMMEDIATE` pg_trickle stream tables (supported constraint types: `sh:minCount`, `sh:maxCount`, `sh:datatype`, `sh:class`); complex combinators (`sh:or`, `sh:and`, `sh:not`, `sh:qualifiedValueShape`) are not compiled to stream tables and are skipped gracefully
+  - `_pg_ripple.violation_summary_dag` DAG-leaf stream table aggregates per-shape violation counts; automatically clears when upstream shape violations resolve — unlike the dead-letter queue, no manual cleanup required ([§2.13](plans/ecosystem/pg_trickle.md))
+  - `pg_ripple.enable_shacl_dag_monitors()` — creates all stream tables; returns 0 with a WARNING (no ERROR) when pg_trickle is not installed
+  - `pg_ripple.disable_shacl_dag_monitors()` — drops all per-shape stream tables and the summary; safe to call when none are active
+  - `pg_ripple.list_shacl_dag_monitors()` — lists active DAG monitor stream tables and compiled constraints
+  - `_pg_ripple.shacl_dag_monitors` catalog table tracks all created monitors
+- [x] pg_regress: `shacl_advanced.sql`, `shacl_dag_monitors.sql`
 
 ### Documentation
 

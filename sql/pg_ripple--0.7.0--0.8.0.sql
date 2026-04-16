@@ -1,6 +1,6 @@
 -- Migration 0.7.0 → 0.8.0: SHACL Advanced
 --
--- New Rust-compiled SQL functions (no schema changes required):
+-- New Rust-compiled SQL functions (no schema changes required for async pipeline):
 --
 --   pg_ripple.process_validation_queue(batch_size BIGINT DEFAULT 1000) → BIGINT
 --       Manually drain up to batch_size items from _pg_ripple.validation_queue.
@@ -29,4 +29,33 @@
 -- queue when pg_ripple.shacl_mode = 'async'.
 --
 -- The _pg_ripple.validation_queue and _pg_ripple.dead_letter_queue tables
--- were already created in v0.7.0; no DDL changes are required here.
+-- were already created in v0.7.0; no DDL changes are required for those.
+--
+-- ─── pg_trickle multi-shape DAG validation (v0.8.0) ─────────────────────────
+--
+-- New catalog table for DAG monitor metadata:
+
+CREATE TABLE IF NOT EXISTS _pg_ripple.shacl_dag_monitors (
+    shape_iri          TEXT        NOT NULL PRIMARY KEY,
+    stream_table_name  TEXT        NOT NULL,
+    constraint_summary TEXT        NOT NULL,
+    created_at         TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- New SQL functions for pg_trickle DAG validation
+-- (optional at runtime — pg_trickle does not need to be installed):
+--
+--   pg_ripple.enable_shacl_dag_monitors() → BIGINT
+--       Compile all active, compilable SHACL shapes into per-shape pg_trickle
+--       stream tables.  Supported constraint types: sh:minCount, sh:maxCount,
+--       sh:datatype, sh:class.  Creates violation_summary_dag as the DAG leaf.
+--       Returns count of per-shape stream tables created.
+--       Returns 0 (with a warning) when pg_trickle is not installed.
+--
+--   pg_ripple.disable_shacl_dag_monitors() → BIGINT
+--       Drop all per-shape stream tables and violation_summary_dag.
+--       Returns count of tables dropped.
+--
+--   pg_ripple.list_shacl_dag_monitors()
+--         → TABLE(shape_iri TEXT, stream_table TEXT, constraints TEXT)
+--       List all active DAG monitor stream tables and their compiled constraints.
