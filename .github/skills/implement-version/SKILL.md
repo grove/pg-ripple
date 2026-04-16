@@ -22,6 +22,8 @@ This skill runs **end-to-end without pausing for approval** unless a genuine dec
 
 Everything else — compiler errors, clippy warnings, test failures, CI failures — is resolved autonomously. Do not ask for permission to fix these.
 
+**Pre-existing test failures must also be fixed.** If a test was already failing before the current changes, fix it anyway. Do not skip or ignore failures on the grounds that "I didn't break this". The codebase must be in a fully green state before tagging any version.
+
 ---
 
 ## Authoritative Sources
