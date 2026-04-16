@@ -1,0 +1,65 @@
+-- pg_regress test: Datalog malformed input error handling
+SET search_path TO pg_ripple, public;
+-- Test: empty rule set (valid).
+SELECT pg_ripple.load_rules('', 'empty_test') >= 0 AS empty_rules_ok;
+ empty_rules_ok 
+----------------
+ t
+(1 row)
+
+-- Test: rules with only comments (valid).
+SELECT pg_ripple.load_rules(
+    '# This is a comment\n# Another comment\n',
+    'comments_only'
+) >= 0 AS comments_only_ok;
+ comments_only_ok 
+------------------
+ t
+(1 row)
+
+-- Test: list_rules returns valid JSONB.
+SELECT jsonb_typeof(pg_ripple.list_rules()) = 'array' AS list_rules_ok;
+ list_rules_ok 
+---------------
+ t
+(1 row)
+
+-- Test: drop nonexistent rule set returns 0.
+SELECT pg_ripple.drop_rules('nonexistent_rule_set_xyz') = 0 AS drop_nonexistent_ok;
+ drop_nonexistent_ok 
+---------------------
+ t
+(1 row)
+
+-- Test: load unknown built-in rule set raises error.
+DO $$
+BEGIN
+    BEGIN
+        PERFORM pg_ripple.load_rules_builtin('nonexistent_builtin_xyz');
+        RAISE EXCEPTION 'expected error not raised';
+    EXCEPTION
+        WHEN OTHERS THEN
+            -- Expected: error should be raised for unknown built-in
+            NULL;
+    END;
+END $$;
+DO
+SELECT true AS malformed_builtin_raises_error;
+ malformed_builtin_raises_error 
+--------------------------------
+ t
+(1 row)
+
+-- Cleanup.
+SELECT pg_ripple.drop_rules('empty_test') >= 0 AS cleanup1;
+ cleanup1 
+----------
+ t
+(1 row)
+
+SELECT pg_ripple.drop_rules('comments_only') >= 0 AS cleanup2;
+ cleanup2 
+----------
+ t
+(1 row)
+

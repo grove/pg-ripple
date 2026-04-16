@@ -665,80 +665,80 @@ See [plans/ecosystem/datalog.md](plans/ecosystem/datalog.md) for the full design
 
 ### Deliverables
 
-- [ ] **Rule parser** (`src/datalog/parser.rs`)
+- [x] **Rule parser** (`src/datalog/parser.rs`)
   - Turtle-flavoured Datalog syntax: `head :- body₁, body₂, … .`
   - Variables (`?x`), prefixed IRIs, literals, named graph scoping (`GRAPH`)
   - Stratified negation via `NOT` keyword
   - Multi-head rules (`h₁, h₂ :- body .`) compiled to separate `INSERT … SELECT` statements within the same stratum
-- [ ] **`source` column in VP tables and `vp_rare`**
+- [x] **`source` column in VP tables and `vp_rare`**
   - `source SMALLINT DEFAULT 0` added to every dedicated VP table **and to `_pg_ripple.vp_rare`** in the v0.10.0 migration
   - `0` = explicitly asserted; `1` = derived (inferred by Datalog rules)
   - Enables filtering out inferred triples at scan time without a join
   - Migration script uses `ALTER TABLE … ADD COLUMN source SMALLINT NOT NULL DEFAULT 0` for each VP table and for `vp_rare`; zero-downtime because PostgreSQL fast-path adds the column with the stored default without rewriting the table
-- [ ] **Tiered hot/cold dictionary** (`src/dictionary/hot.rs`)
+- [x] **Tiered hot/cold dictionary** (`src/dictionary/hot.rs`)
   - `_pg_ripple.resources_hot` (UNLOGGED) holds IRIs ≤512B and all predicate/prefix IRIs — the working set that fits in shared buffers
   - Full `resources` table unchanged; encoder checks hot table first
   - `pg_prewarm` warms the hot table at server start via `_PG_init`
   - Dramatically reduces random I/O for the most-accessed terms at large scale (100M+ triples)
-- [ ] **Stratification engine** (`src/datalog/stratify.rs`)
+- [x] **Stratification engine** (`src/datalog/stratify.rs`)
   - Predicate dependency graph with positive/negative edges
   - SCC-based stratification with clear error messages for unstratifiable programs
-- [ ] **SQL compiler** (`src/datalog/compiler.rs`)
+- [x] **SQL compiler** (`src/datalog/compiler.rs`)
   - Non-recursive rules → `INSERT … SELECT … ON CONFLICT DO NOTHING`
   - Recursive rules → `WITH RECURSIVE … CYCLE`
   - Negation → `NOT EXISTS` (higher strata only)
   - All constants dictionary-encoded before SQL generation (integer joins everywhere)
-- [ ] **Arithmetic built-ins**
+- [x] **Arithmetic built-ins**
   - Comparison operators (`>`, `>=`, `<`, `<=`, `=`, `!=`) → SQL `WHERE` clause expressions
   - Arithmetic expressions (`?z IS ?x + ?y`) → SQL computed columns
   - String functions (`STRLEN`, `REGEX`) → SQL `LENGTH`, `~` with dictionary decode join
-- [ ] **Constraint rules (integrity constraints)**
+- [x] **Constraint rules (integrity constraints)**
   - Empty-head rules (`:- body .`) express patterns that must never hold
   - Compile to existence checks; materialized mode → pg_trickle IMMEDIATE stream tables for in-transaction validation
   - `pg_ripple.check_constraints()` returns violations as JSONB
   - `pg_ripple.enforce_constraints` GUC: `'error'` / `'warn'` / `'off'`
   - Directly complements and extends SHACL validation
-- [ ] **Built-in rule sets** (`src/datalog/builtins.rs`)
+- [x] **Built-in rule sets** (`src/datalog/builtins.rs`)
   - `pg_ripple.load_rules_builtin('rdfs')` — W3C RDFS entailment (13 rules)
   - `pg_ripple.load_rules_builtin('owl-rl')` — W3C OWL 2 RL profile (~80 rules)
-- [ ] **On-demand execution mode** (no pg_trickle needed)
+- [x] **On-demand execution mode** (no pg_trickle needed)
   - Derived predicates compiled to inline CTEs injected into SPARQL→SQL at query time
   - `SET pg_ripple.inference_mode = 'on_demand'`
-- [ ] **`dictionary_hot` incremental maintenance** *(optional, when pg_trickle is installed)*
+- [x] **`dictionary_hot` incremental maintenance** *(optional, when pg_trickle is installed)*
   - Model `_pg_ripple.dictionary_hot` as a stream table over `dictionary` filtered to hot-eligible IRIs
   - New predicate and prefix-registry IRIs appear in the hot table within 30s of being encoded — no manual rebuild ([§2.9](plans/ecosystem/pg_trickle.md))
-- [ ] **Materialized execution mode** *(optional, requires pg_trickle)*
+- [x] **Materialized execution mode** *(optional, requires pg_trickle)*
   - `pg_ripple.materialize_rules(schedule => '10s')` — derived predicates as stream tables
   - pg_trickle DAG scheduler respects stratum ordering automatically
-- [ ] **Catalog and management**
+- [x] **Catalog and management**
   - `_pg_ripple.rules` catalog table
   - `_pg_ripple.rule_sets` catalog: groups named rules with a `rule_hash BYTEA` (XXH3-64) for cache invalidation — re-activating a rule set with an unchanged hash resumes from prior derived state without re-derivation
   - Derived predicates registered in `_pg_ripple.predicates` with `derived = TRUE`
   - `pg_ripple.load_rules()`, `pg_ripple.list_rules()`, `pg_ripple.drop_rules()`
   - `pg_ripple.enable_rule_set(name TEXT)` / `pg_ripple.disable_rule_set(name TEXT)` — activate or deactivate a named rule set without dropping it
-- [ ] **SPARQL engine integration**
+- [x] **SPARQL engine integration**
   - Derived VP tables transparent to query planner (same look-up path as base VP tables)
   - On-demand mode prepends CTEs to generated SQL
   - `pg_ripple.sparql(query TEXT, include_derived BOOL DEFAULT true)` — when `false`, appends `AND source = 0` to all VP table scans to exclude inferred triples (no-inference mode)
-- [ ] **SHACL-AF `sh:rule` bridge**
+- [x] **SHACL-AF `sh:rule` bridge**
   - Detect `sh:rule` entries in loaded SHACL shapes that contain Datalog-compatible triple rules
   - Compile `sh:rule` bodies to Datalog IR and register in `_pg_ripple.rules`
   - Bidirectional: SHACL shapes inform Datalog constraints; Datalog-derived triples are visible to SHACL validation
   - `pg_ripple.load_shacl()` auto-registers any `sh:rule` triples as Datalog rules when `pg_ripple.inference_mode != 'off'`
-- [ ] **RDF-star integration in Datalog** *(builds on v0.4.0 RDF-star)*
+- [x] **RDF-star integration in Datalog** *(builds on v0.4.0 RDF-star)*
   - Quoted triples can appear in Datalog rule heads and bodies
   - Enables provenance rules: `<< ?s ?p ?o >> ex:derivedBy ex:rule1 :- ?s ?p ?o, RULE(ex:rule1) .`
   - Statement identifiers (SIDs) can be used in rule bodies to annotate derived triples
-- [ ] pg_regress: `datalog_rdfs.sql`, `datalog_owl_rl.sql`, `datalog_custom.sql`, `datalog_negation.sql`, `datalog_arithmetic.sql`, `datalog_constraints.sql`, `shacl_af_rule.sql`, `datalog_malformed.sql` (syntax errors, unstratifiable programs, unbound variables, cyclic rule dependencies — verify clear error messages), `rdf_star_datalog.sql`
+- [x] pg_regress: `datalog_rdfs.sql`, `datalog_owl_rl.sql`, `datalog_custom.sql`, `datalog_negation.sql`, `datalog_arithmetic.sql`, `datalog_constraints.sql`, `shacl_af_rule.sql`, `datalog_malformed.sql` (syntax errors, unstratifiable programs, unbound variables, cyclic rule dependencies — verify clear error messages), `rdf_star_datalog.sql`
 
 ### Documentation
 
 > See [plans/documentation.md](plans/documentation.md) for details.
 
-- [ ] `user-guide/sql-reference/datalog.md` — `load_rules`, `infer`, `list_rules`, `enable_rule_set`, `disable_rule_set`; rule syntax primer; stratification; built-in RDFS/OWL RL rule sets; `inference_mode` GUC
-- [ ] `user-guide/best-practices/datalog-patterns.md` — RDFS subclass/domain/range patterns, OWL RL profiles, `source` column (explicit vs inferred), rule count vs inference time
-- [ ] `user-guide/configuration.md` expanded: `inference_mode`, `enforce_constraints` GUCs
-- [ ] `reference/faq.md` expanded: OWL reasoning support, `source` column meaning
+- [x] `user-guide/sql-reference/datalog.md` — `load_rules`, `infer`, `list_rules`, `enable_rule_set`, `disable_rule_set`; rule syntax primer; stratification; built-in RDFS/OWL RL rule sets; `inference_mode` GUC
+- [x] `user-guide/best-practices/datalog-patterns.md` — RDFS subclass/domain/range patterns, OWL RL profiles, `source` column (explicit vs inferred), rule count vs inference time
+- [x] `user-guide/configuration.md` expanded: `inference_mode`, `enforce_constraints` GUCs
+- [x] `reference/faq.md` expanded: OWL reasoning support, `source` column meaning
 
 ### Exit Criteria
 

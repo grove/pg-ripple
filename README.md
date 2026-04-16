@@ -13,19 +13,20 @@ pg_ripple is a PostgreSQL 18 extension building toward a fully-featured knowledg
 
 ---
 
-## What works today (v0.9.0)
+## What works today (v0.10.0)
 
-v0.9.0 completes the core stack: store, query, validate, and exchange RDF data — all inside PostgreSQL.
+v0.10.0 delivers a full Datalog reasoning engine on top of the VP triple store — RDFS and OWL RL entailment, custom rules, and integrity constraints, all compiled to native PostgreSQL SQL.
 
 | Area | What's included |
 |---|---|
-| **Storage** | VP tables (one table per predicate), HTAP delta/main split, background merge worker, shared-memory dictionary cache |
-| **Encoding** | Dictionary encoding (IRI, blank node, literal → i64), inline encoding for numbers and dates, RDF-star / quoted triples |
+| **Storage** | VP tables (one table per predicate), HTAP delta/main split, background merge worker, shared-memory dictionary cache; `source` column (`0`=explicit, `1`=derived) |
+| **Encoding** | Dictionary encoding (IRI, blank node, literal → i64), inline encoding for numbers and dates, RDF-star / quoted triples; hot dictionary tier for high-frequency IRIs |
 | **Import** | N-Triples, Turtle, TriG, N-Quads, RDF/XML; named graphs; bulk load |
-| **SPARQL** | Full SPARQL 1.1 — SELECT, CONSTRUCT, DESCRIBE, ASK; property paths, aggregates, UNION/MINUS, subqueries, BIND, VALUES, OPTIONAL, named graphs |
+| **SPARQL** | Full SPARQL 1.1 — SELECT, CONSTRUCT, DESCRIBE, ASK; property paths, aggregates, UNION/MINUS, subqueries, BIND, VALUES, OPTIONAL, named graphs; `include_derived` flag |
 | **Output formats** | SELECT → JSONB; CONSTRUCT/DESCRIBE → JSONB, Turtle, or JSON-LD |
 | **Export** | `export_turtle()`, `export_jsonld()`, `export_ntriples()`, streaming variants |
-| **SHACL** | Core constraints (`sh:minCount`, `sh:maxCount`, `sh:datatype`, `sh:in`, `sh:pattern`, `sh:class`, …); combinators (`sh:or`, `sh:and`, `sh:not`); sync and async validation modes |
+| **SHACL** | Core constraints (`sh:minCount`, `sh:maxCount`, `sh:datatype`, `sh:in`, `sh:pattern`, `sh:class`, …); combinators (`sh:or`, `sh:and`, `sh:not`); sync and async validation modes; SHACL-AF `sh:rule` bridge |
+| **Datalog** | Custom inference rules (Turtle-flavoured syntax); built-in RDFS (13 rules) and OWL RL (~20 core rules); stratified negation; arithmetic/string built-ins; integrity constraints; on-demand execution mode |
 | **Write** | `insert_triple`, `delete_triple`, SPARQL INSERT/DELETE DATA, deduplication |
 | **Full-text search** | `fts_search()` over literal values via PostgreSQL GIN indexes |
 
@@ -59,6 +60,20 @@ SELECT pg_ripple.export_turtle();
 SELECT pg_ripple.sparql_construct_jsonld('
   CONSTRUCT { ?s ?p ?o } WHERE { ?s a <http://schema.org/Person> ; ?p ?o }
 ');
+
+-- Load RDFS entailment rules and run inference
+SELECT pg_ripple.load_rules_builtin('rdfs');
+SELECT pg_ripple.infer('rdfs');
+-- Now SPARQL sees inferred triples: if :Dog rdfs:subClassOf :Animal
+-- and :Rex rdf:type :Dog, then ?x rdf:type :Animal binds :Rex too
+
+-- Write custom rules (transitive management chain)
+SELECT pg_ripple.load_rules(
+  '?x ex:indirectManager ?z :- ?x ex:manager ?z .
+   ?x ex:indirectManager ?z :- ?x ex:manager ?y, ?y ex:indirectManager ?z .',
+  'org_rules'
+);
+SELECT pg_ripple.infer('org_rules');
 ```
 
 **Storage architecture**: every IRI, blank node, and literal is dictionary-encoded to a compact integer; numeric and date literals use *inline encoding* (bit-packed integers, no dictionary round-trip). Facts are stored in per-predicate VP tables. From v0.6.0, each VP table is split into a write-optimised delta and a read-optimised BRIN-indexed main partition — a background worker continuously merges them, so heavy reads and writes never block each other.
@@ -68,29 +83,6 @@ SELECT pg_ripple.sparql_construct_jsonld('
 ## Where we're headed
 
 Each release adds a self-contained layer of capability, building toward a complete knowledge graph platform inside PostgreSQL.
-
-### v0.10.0 — Datalog reasoning
-
-Automatically derive new facts from rules. Built-in rulesets cover RDFS (13 rules) and OWL 2 RL (~80 rules). You can also write custom rules. Once enabled, SPARQL queries see both explicit and inferred facts transparently.
-
-```sql
--- Load built-in RDFS entailment
-SELECT pg_ripple.load_rules_builtin('rdfs');
--- If :Dog rdfs:subClassOf :Animal, and :Rex rdf:type :Dog,
--- then pg_ripple automatically infers :Rex rdf:type :Animal
-
--- Or write custom rules to derive new relationships
-SELECT pg_ripple.load_rules('
-  -- Transitive manager relationship
-  ?x ex:indirectManager ?z :- ?x ex:manager ?z .
-  ?x ex:indirectManager ?z :- ?x ex:manager ?y, ?y ex:indirectManager ?z .
-
-  -- Flag people without an email (negation-as-failure)
-  ?x ex:missingEmail "true"^^xsd:boolean :- 
-    ?x rdf:type foaf:Person, 
-    NOT ?x foaf:mbox ?_ .
-', rule_set := 'company_data');
-```
 
 ### v0.11.0 — Incremental SPARQL & Datalog views
 
@@ -271,7 +263,7 @@ cargo pgrx install --pg-config $(which pg_config)
 CREATE EXTENSION pg_ripple;
 ```
 
-Datalog reasoning is coming in a later milestone — see the roadmap below.
+
 
 ---
 
@@ -291,7 +283,7 @@ Datalog reasoning is coming in a later milestone — see the roadmap below.
 | **0.7.0** | **SHACL Core** | Constraint shapes, synchronous validation on insert | 4–6 pw | ✅ Done |
 | **0.8.0** | **SHACL Advanced** | Complex shapes, async background validation pipeline | 4–6 pw | ✅ Done |
 | **0.9.0** | **Serialization** | Turtle/N-Triples/JSON-LD/RDF-XML export, RDF-star formats | 3–4 pw | ✅ Done |
-| 0.10.0 | Datalog Reasoning | RDFS (13 rules), OWL 2 RL (~80 rules), custom rules | 10–12 pw | Planned |
+| **0.10.0** | **Datalog Reasoning** | RDFS (13 rules), OWL 2 RL (~20 core rules), custom rules, integrity constraints | 10–12 pw | ✅ Done |
 | 0.11.0 | SPARQL & Datalog Views | Incremental live views via pg_trickle, ExtVP | 5–7 pw | Planned |
 | 0.12.0 | SPARQL Update (Advanced) | DELETE/INSERT WHERE, LOAD, CLEAR, DROP, CREATE | 3–4 pw | Planned |
 | 0.13.0 | Performance | BSBM benchmarks, prepared statements, planner statistics | 6–8 pw | Planned |

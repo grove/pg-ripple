@@ -3,7 +3,7 @@
 
 comment = 'High-performance RDF triple store with native SPARQL query execution'
 # MUST match the current release version (keep in sync with Cargo.toml)
-default_version = '0.9.0'
+default_version = '0.10.0'
 module_pathname = '$libdir/pg_ripple'
 relocatable = false
 superuser = true

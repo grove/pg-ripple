@@ -36,6 +36,7 @@
 //! and a decode `LruCache<i64, String>` (sequence id → term value).
 //! Shared-memory caches are introduced in v0.6.0.
 
+pub mod hot;
 pub mod inline;
 
 use lru::LruCache;

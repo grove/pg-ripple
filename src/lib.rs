@@ -16,6 +16,7 @@ use pgrx::prelude::*;
 
 mod bulk_load;
 mod cdc;
+mod datalog;
 mod dictionary;
 mod error;
 mod export;
@@ -201,6 +202,53 @@ $body$;
     requires = ["bootstrap_allow_system_mods"]
 );
 
+// v0.10.0: Datalog reasoning catalog tables.
+pgrx::extension_sql!(
+    r#"
+-- Datalog rules catalog (v0.10.0)
+CREATE TABLE IF NOT EXISTS _pg_ripple.rules (
+    id            BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    rule_set      TEXT NOT NULL,
+    rule_text     TEXT NOT NULL,
+    head_pred     BIGINT,
+    stratum       INT NOT NULL DEFAULT 0,
+    is_recursive  BOOLEAN NOT NULL DEFAULT false,
+    active        BOOLEAN NOT NULL DEFAULT true,
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_rules_rule_set
+    ON _pg_ripple.rules (rule_set);
+CREATE INDEX IF NOT EXISTS idx_rules_head_pred
+    ON _pg_ripple.rules (head_pred);
+
+-- Rule sets catalog (v0.10.0)
+CREATE TABLE IF NOT EXISTS _pg_ripple.rule_sets (
+    name          TEXT NOT NULL PRIMARY KEY,
+    rule_hash     BYTEA,
+    active        BOOLEAN NOT NULL DEFAULT true,
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Extend predicates table: mark derived predicates (v0.10.0)
+ALTER TABLE _pg_ripple.predicates
+    ADD COLUMN IF NOT EXISTS derived BOOLEAN NOT NULL DEFAULT FALSE,
+    ADD COLUMN IF NOT EXISTS rule_set TEXT;
+
+-- Hot dictionary table for frequently-accessed IRIs (v0.10.0)
+CREATE UNLOGGED TABLE IF NOT EXISTS _pg_ripple.dictionary_hot (
+    id       BIGINT   NOT NULL PRIMARY KEY,
+    hash     BYTEA    NOT NULL,
+    value    TEXT     NOT NULL,
+    kind     SMALLINT NOT NULL DEFAULT 0
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_dictionary_hot_hash
+    ON _pg_ripple.dictionary_hot (hash);
+"#,
+    name = "datalog_schema_setup",
+    requires = ["schema_setup"]
+);
+
+
 // Create the predicate_stats view after the base tables exist.
 pgrx::extension_sql!(
     r#"
@@ -295,6 +343,28 @@ pub static DICTIONARY_CACHE_SIZE: pgrx::GucSetting<i32> =
 /// reduce their batch size when utilization exceeds 90% to prevent OOM.
 /// Set to 0 to disable back-pressure.  Startup-only GUC.
 pub static CACHE_BUDGET_MB: pgrx::GucSetting<i32> = pgrx::GucSetting::<i32>::new(64);
+
+// ─── v0.10.0 GUCs ────────────────────────────────────────────────────────────
+
+/// GUC: Datalog inference execution mode.
+/// 'off' — inference disabled.
+/// 'on_demand' — derived predicates compiled as inline CTEs at query time.
+/// 'materialized' — derived predicates materialised as pg_trickle stream tables.
+pub static INFERENCE_MODE: pgrx::GucSetting<Option<std::ffi::CString>> =
+    pgrx::GucSetting::<Option<std::ffi::CString>>::new(None);
+
+/// GUC: Datalog constraint enforcement mode.
+/// 'off' — violations are detected but ignored.
+/// 'warn' — log a WARNING for each violation.
+/// 'error' — reject the transaction when a violation is detected.
+pub static ENFORCE_CONSTRAINTS: pgrx::GucSetting<Option<std::ffi::CString>> =
+    pgrx::GucSetting::<Option<std::ffi::CString>>::new(None);
+
+/// GUC: graph scope for unscoped body atoms (atoms without GRAPH clause).
+/// 'default' — match only g = 0 (the default graph); recommended.
+/// 'all' — match triples in any graph; useful for ontology-level rules.
+pub static RULE_GRAPH_SCOPE: pgrx::GucSetting<Option<std::ffi::CString>> =
+    pgrx::GucSetting::<Option<std::ffi::CString>>::new(None);
 
 // ─── pg_trickle runtime detection (v0.6.0) ───────────────────────────────────
 
@@ -512,6 +582,35 @@ pub extern "C-unwind" fn _PG_init() {
         c"When true, the HTAP generation merge deduplicates (s,o,g) rows keeping the lowest SID (default: false)",
         c"",
         &DEDUP_ON_MERGE,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+
+    // ── v0.10.0 GUCs ─────────────────────────────────────────────────────────
+
+    pgrx::GucRegistry::define_string_guc(
+        c"pg_ripple.inference_mode",
+        c"Datalog inference mode: 'off' (default), 'on_demand', 'materialized'",
+        c"",
+        &INFERENCE_MODE,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+
+    pgrx::GucRegistry::define_string_guc(
+        c"pg_ripple.enforce_constraints",
+        c"Constraint rule enforcement: 'off' (default), 'warn', 'error'",
+        c"",
+        &ENFORCE_CONSTRAINTS,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+
+    pgrx::GucRegistry::define_string_guc(
+        c"pg_ripple.rule_graph_scope",
+        c"Graph scope for unscoped Datalog atoms: 'default' (g=0 only) or 'all' (any graph)",
+        c"",
+        &RULE_GRAPH_SCOPE,
         GucContext::Userset,
         GucFlags::default(),
     );
@@ -1591,6 +1690,170 @@ mod pg_ripple {
     #[pg_extern]
     fn deduplicate_all() -> i64 {
         crate::storage::deduplicate_all()
+    }
+
+    // ── Datalog Reasoning Engine (v0.10.0) ────────────────────────────────────
+
+    /// Load Datalog rules from a text string.
+    ///
+    /// `rules` is a Turtle-flavoured Datalog rule set.
+    /// `rule_set` is the name for this group of rules (default: 'custom').
+    /// Returns the number of rules stored.
+    #[pg_extern]
+    fn load_rules(
+        rules: &str,
+        rule_set: default!(&str, "'custom'"),
+    ) -> i64 {
+        crate::datalog::builtins::register_standard_prefixes();
+        let rule_set_ir = match crate::datalog::parse_rules(rules, rule_set) {
+            Ok(rs) => rs,
+            Err(e) => pgrx::error!("rule parse error: {e}"),
+        };
+        crate::datalog::store_rules(rule_set, &rule_set_ir.rules)
+    }
+
+    /// Load a built-in rule set by name.
+    ///
+    /// Supported names: `'rdfs'`, `'owl-rl'`.
+    /// Returns the number of rules stored.
+    #[pg_extern]
+    fn load_rules_builtin(name: &str) -> i64 {
+        crate::datalog::builtins::register_standard_prefixes();
+        let text = match crate::datalog::builtins::get_builtin_rules(name) {
+            Ok(t) => t,
+            Err(e) => pgrx::error!("{e}"),
+        };
+        let rule_set_ir = match crate::datalog::parse_rules(text, name) {
+            Ok(rs) => rs,
+            Err(e) => pgrx::error!("built-in rule parse error: {e}"),
+        };
+        crate::datalog::store_rules(name, &rule_set_ir.rules)
+    }
+
+    /// List all stored Datalog rules as JSONB rows.
+    ///
+    /// Returns one row per rule with fields: id, rule_set, rule_text, head_pred,
+    /// stratum, is_recursive, active.
+    #[pg_extern]
+    fn list_rules() -> pgrx::JsonB {
+        crate::datalog::ensure_catalog();
+        let rows = pgrx::Spi::connect(|client| {
+            client
+                .select(
+                    "SELECT id, rule_set, rule_text, head_pred, stratum, is_recursive, active \
+                     FROM _pg_ripple.rules \
+                     ORDER BY rule_set, stratum, id",
+                    None,
+                    &[],
+                )
+                .unwrap_or_else(|e| pgrx::error!("list_rules SPI error: {e}"))
+                .map(|row| {
+                    let mut obj = serde_json::Map::new();
+                    obj.insert(
+                        "id".to_owned(),
+                        row.get::<i64>(1).ok().flatten().map(serde_json::Value::from)
+                            .unwrap_or(serde_json::Value::Null),
+                    );
+                    obj.insert(
+                        "rule_set".to_owned(),
+                        row.get::<String>(2).ok().flatten().map(serde_json::Value::String)
+                            .unwrap_or(serde_json::Value::Null),
+                    );
+                    obj.insert(
+                        "rule_text".to_owned(),
+                        row.get::<String>(3).ok().flatten().map(serde_json::Value::String)
+                            .unwrap_or(serde_json::Value::Null),
+                    );
+                    obj.insert(
+                        "stratum".to_owned(),
+                        row.get::<i32>(5).ok().flatten().map(|v| serde_json::Value::from(v as i64))
+                            .unwrap_or(serde_json::Value::Null),
+                    );
+                    obj.insert(
+                        "is_recursive".to_owned(),
+                        row.get::<bool>(6).ok().flatten().map(serde_json::Value::Bool)
+                            .unwrap_or(serde_json::Value::Null),
+                    );
+                    obj.insert(
+                        "active".to_owned(),
+                        row.get::<bool>(7).ok().flatten().map(serde_json::Value::Bool)
+                            .unwrap_or(serde_json::Value::Null),
+                    );
+                    serde_json::Value::Object(obj)
+                })
+                .collect::<Vec<_>>()
+        });
+        pgrx::JsonB(serde_json::Value::Array(rows))
+    }
+
+    /// Drop all rules in the named rule set.
+    ///
+    /// Returns the number of rules deleted.
+    #[pg_extern]
+    fn drop_rules(rule_set: &str) -> i64 {
+        crate::datalog::ensure_catalog();
+        pgrx::Spi::get_one_with_args::<i64>(
+            "WITH deleted AS ( \
+                 DELETE FROM _pg_ripple.rules WHERE rule_set = $1 RETURNING 1 \
+             ) SELECT count(*) FROM deleted",
+            &[pgrx::datum::DatumWithOid::from(rule_set)],
+        )
+        .unwrap_or(None)
+        .unwrap_or(0)
+    }
+
+    /// Enable a named rule set (set active = true).
+    #[pg_extern]
+    fn enable_rule_set(name: &str) {
+        crate::datalog::ensure_catalog();
+        let _ = pgrx::Spi::run_with_args(
+            "UPDATE _pg_ripple.rules SET active = true WHERE rule_set = $1; \
+             UPDATE _pg_ripple.rule_sets SET active = true WHERE name = $1",
+            &[pgrx::datum::DatumWithOid::from(name)],
+        );
+    }
+
+    /// Disable a named rule set (set active = false) without dropping it.
+    #[pg_extern]
+    fn disable_rule_set(name: &str) {
+        crate::datalog::ensure_catalog();
+        let _ = pgrx::Spi::run_with_args(
+            "UPDATE _pg_ripple.rules SET active = false WHERE rule_set = $1; \
+             UPDATE _pg_ripple.rule_sets SET active = false WHERE name = $1",
+            &[pgrx::datum::DatumWithOid::from(name)],
+        );
+    }
+
+    /// Run inference for the named rule set and materialise derived triples.
+    ///
+    /// Returns the number of triples derived.
+    #[pg_extern]
+    fn infer(rule_set: default!(&str, "'custom'")) -> i64 {
+        crate::datalog::run_inference(rule_set)
+    }
+
+    /// Check all active constraint rules and return violations as JSONB.
+    ///
+    /// Each element has fields: `rule` (text), `violated` (bool).
+    /// Pass `rule_set` to check only that rule set; pass NULL to check all.
+    #[pg_extern]
+    fn check_constraints(rule_set: default!(Option<&str>, "NULL")) -> pgrx::JsonB {
+        let violations = crate::datalog::check_all_constraints(rule_set);
+        pgrx::JsonB(serde_json::Value::Array(
+            violations.into_iter().map(|v| v.0).collect(),
+        ))
+    }
+
+    /// Prewarm the hot dictionary table by copying short IRIs and predicates.
+    ///
+    /// Returns the number of rows in the hot table after prewarm.
+    #[pg_extern]
+    fn prewarm_dictionary_hot() -> i64 {
+        crate::dictionary::hot::ensure_hot_table();
+        crate::dictionary::hot::prewarm_hot_table();
+        pgrx::Spi::get_one::<i64>("SELECT count(*) FROM _pg_ripple.dictionary_hot")
+            .unwrap_or(None)
+            .unwrap_or(0)
     }
 }
 
