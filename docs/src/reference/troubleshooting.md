@@ -275,3 +275,84 @@ ERROR:  SHACL shape parsing failed: unknown prefix 'my' in token 'my:Foo'
 2. **Missing `sh:path`**: Every `sh:property [...]` block must include `sh:path <predicate>`.
 3. **No shapes found**: If the Turtle data contains no `sh:NodeShape` or `sh:PropertyShape` declarations, `load_shacl()` returns 0 and logs a warning — it does not raise an error.
 
+---
+
+## Slow query diagnosis (v0.13.0)
+
+**Symptom**: A SPARQL query is slower than expected and you want to understand why.
+
+**Step 1 — get the generated SQL and plan:**
+
+```sql
+-- Get the generated SQL and EXPLAIN output
+SELECT pg_ripple.sparql_explain($$
+  SELECT ?s ?name WHERE { ?s <https://schema.org/name> ?name }
+$$, true);
+```
+
+The second argument `true` runs `EXPLAIN ANALYZE`, which shows actual row counts and execution times. The first argument `false` runs `EXPLAIN` only (no actual execution).
+
+**Step 2 — check plan cache efficiency:**
+
+```sql
+SELECT pg_ripple.plan_cache_stats();
+-- {"hits": 1234, "misses": 56, "size": 48, "capacity": 256, "hit_rate": 0.9567}
+```
+
+A low `hit_rate` (< 0.5) suggests queries are not being reused. Common causes:
+- Each invocation uses different literal values rather than variables — consider restructuring to use `VALUES` or bindings
+- Cache is too small: increase `pg_ripple.plan_cache_size`
+
+**Step 3 — check if BGP reordering is helping:**
+
+```sql
+SET pg_ripple.bgp_reorder = off;
+EXPLAIN ANALYZE ...;  -- baseline
+
+SET pg_ripple.bgp_reorder = on;
+EXPLAIN ANALYZE ...;  -- with reordering
+```
+
+If the plan is the same, run `ANALYZE _pg_ripple.vp_rare` and any promoted VP tables so the reordering optimizer has current statistics.
+
+**Step 4 — check statistics freshness:**
+
+```sql
+-- See when each VP table was last analyzed
+SELECT relname, last_analyze, last_autoanalyze, n_live_tup
+FROM pg_stat_user_tables
+WHERE relname LIKE 'vp_%'
+ORDER BY last_analyze NULLS FIRST;
+
+-- Force fresh statistics
+ANALYZE;
+```
+
+**Step 5 — check parallel execution:**
+
+```sql
+-- See if parallel workers are being used
+SHOW max_parallel_workers_per_gather;
+SHOW enable_parallel_hash;
+
+-- For multi-join SPARQL queries, set a lower threshold:
+SET pg_ripple.parallel_query_min_joins = 2;
+```
+
+---
+
+## plan_cache_stats() shows 0 hits (v0.13.0)
+
+**Symptom**: `plan_cache_stats()` returns `"hits": 0` even after running the same SPARQL query multiple times.
+
+**Causes**:
+
+1. **Cache was reset**: `plan_cache_reset()` was called, or the backend restarted (cache is per-backend).
+2. **bgp_reorder changed**: if `pg_ripple.bgp_reorder` was toggled between queries, the cache key differs and a cache hit cannot occur. Set a consistent value per session.
+3. **Cache disabled**: if `pg_ripple.plan_cache_size = 0`, the cache is disabled. Set to a positive value.
+
+```sql
+SHOW pg_ripple.plan_cache_size;
+SET pg_ripple.plan_cache_size = 256;  -- enable if it was 0
+```
+

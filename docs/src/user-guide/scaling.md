@@ -127,3 +127,97 @@ SELECT pg_ripple.htap_migrate_predicate(
 - The merge worker requires `shared_preload_libraries = 'pg_ripple'` in `postgresql.conf`. Without it, all writes go into delta and no background merges occur.
 - `compact()` can be called manually but it blocks the calling session until the merge finishes.
 - Very large predicates (>100M triples) may cause the merge to hold an exclusive lock briefly during the table swap. Schedule maintenance windows for extremely large merges.
+
+---
+
+## Performance Hardening (v0.13.0)
+
+### BGP Join Reordering
+
+By default (`pg_ripple.bgp_reorder = on`), triple patterns within a Basic Graph Pattern are reordered by estimated selectivity before SQL generation.
+
+**How it works:**
+1. At translation time, pg_ripple queries `pg_class.reltuples` and `pg_stats.n_distinct` for each VP table.
+2. Patterns are sorted cheapest-first using a greedy left-deep algorithm.
+3. `SET LOCAL join_collapse_limit = 1` is emitted before each query so the PostgreSQL planner follows the computed order.
+4. `SET LOCAL enable_mergejoin = on` is also set to exploit merge-join when join columns are sorted.
+
+**To disable** (e.g. for debugging, or when the planner already has good statistics):
+```sql
+SET pg_ripple.bgp_reorder = off;
+```
+
+### Parallel Query Exploitation
+
+Queries joining 3 or more VP tables automatically enable PostgreSQL parallel workers:
+```sql
+SET pg_ripple.parallel_query_min_joins = 3;  -- default
+```
+
+When the threshold is met, before query execution:
+```sql
+SET LOCAL max_parallel_workers_per_gather = 4;
+SET LOCAL enable_parallel_hash = on;
+SET LOCAL parallel_setup_cost = 10;
+```
+
+Verify with EXPLAIN:
+```sql
+SELECT pg_ripple.sparql_explain($$
+  SELECT ?s ?name ?age ?email WHERE {
+    ?s <https://schema.org/name>  ?name  .
+    ?s <https://schema.org/age>   ?age   .
+    ?s <https://schema.org/email> ?email .
+  }
+$$, true);
+-- Look for "Parallel Hash Join" in the EXPLAIN output
+```
+
+### Extended Statistics
+
+When a predicate is promoted from `vp_rare` to a dedicated VP table, pg_ripple automatically creates:
+```sql
+CREATE STATISTICS _pg_ripple.ext_stats_vp_{id}
+  (ndistinct, dependencies) ON s, o
+  FROM _pg_ripple.vp_{id}_delta;
+```
+
+This gives the PostgreSQL planner correlation data for `(s, o)` pairs, enabling more accurate cardinality estimates for multi-predicate star queries.
+
+### Plan Cache Monitoring
+
+Monitor cache efficiency with:
+```sql
+SELECT pg_ripple.plan_cache_stats();
+-- {"hits": 1234, "misses": 56, "size": 48, "capacity": 256, "hit_rate": 0.9567}
+```
+
+Tune the cache size:
+```sql
+SET pg_ripple.plan_cache_size = 512;  -- default: 256 (max: 65536, 0 = disabled)
+```
+
+Reset counters:
+```sql
+SELECT pg_ripple.plan_cache_reset();
+```
+
+### GUC Tuning Reference
+
+| Deployment size | `plan_cache_size` | `bgp_reorder` | `parallel_query_min_joins` | `merge_threshold` |
+|---|---|---|---|---|
+| Small (<1M triples) | 128 | on | 2 | 5,000 |
+| Medium (1M–100M triples) | 256 | on | 3 | 10,000 |
+| Large (>100M triples) | 512 | on | 3 | 50,000 |
+| Analytics (read-heavy) | 1024 | on | 2 | 100,000 |
+| OLTP (write-heavy) | 64 | on | 5 | 5,000 |
+
+### Index Strategy Per Workload
+
+| Pattern | Recommended strategy |
+|---|---|
+| Star patterns (same subject, many predicates) | Ensure ANALYZE has run; `bgp_reorder = on` reorders to start with bound subject |
+| Object lookups (find all subjects with object=X) | BRIN on `o` column; `(o, s)` B-tree index already present |
+| Named-graph scoped queries | `SET pg_ripple.named_graph_optimized = on` adds `(g, s, o)` index |
+| Time-series (monotonic SIDs) | BRIN on `main` partition already covers this |
+| Full-text search on literals | `pg_ripple.fts_index('<predicate_iri>')` creates GIN tsvector index |

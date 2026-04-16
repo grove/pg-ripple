@@ -161,3 +161,57 @@ cargo pgrx regress pg18 --postgresql-conf "allow_system_table_mods=on"
 | SHACL mode confirmed | `SHOW pg_ripple.shacl_mode` |
 | Shapes loaded before bulk import | `SELECT pg_ripple.list_shapes()` |
 | Monitoring configured | See [Administration](sql-reference/admin.md) |
+| `pg_stat_statements` enabled | See §11 below |
+| `work_mem` tuned for aggregates | See §12 below |
+
+## 11. Enable pg_stat_statements (v0.13.0+)
+
+pg_stat_statements records execution statistics for all SQL statements, including the generated SQL that pg_ripple emits for each SPARQL query. This lets you identify slow SPARQL queries by inspecting the underlying SQL.
+
+```ini
+# postgresql.conf
+shared_preload_libraries = 'pg_ripple,pg_stat_statements'
+pg_stat_statements.track = 'all'
+pg_stat_statements.max = 10000
+```
+
+After enabling:
+```sql
+-- Which SPARQL-generated SQL queries are slowest?
+SELECT
+  left(query, 80)   AS query_prefix,
+  calls,
+  round(mean_exec_time::numeric, 2) AS mean_ms,
+  round(total_exec_time::numeric, 2) AS total_ms
+FROM pg_stat_statements
+WHERE query LIKE '%_pg_ripple%'
+ORDER BY total_exec_time DESC
+LIMIT 20;
+```
+
+## 12. Tune work_mem for SPARQL Aggregates (v0.13.0+)
+
+SPARQL aggregates (`COUNT`, `SUM`, `GROUP BY`) generate SQL with `GROUP BY` and hash aggregation. Large aggregate queries benefit from higher `work_mem`:
+
+```ini
+# postgresql.conf (global default)
+work_mem = '64MB'          -- default is 4MB; too low for large SPARQL aggregates
+
+# Or set per-session before running analytical SPARQL queries:
+```
+
+```sql
+SET work_mem = '256MB';
+SELECT * FROM pg_ripple.sparql($$
+  SELECT ?type (COUNT(?s) AS ?count) WHERE {
+    ?s <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> ?type .
+  }
+  GROUP BY ?type
+  ORDER BY DESC(?count)
+$$);
+```
+
+**Rule of thumb for `work_mem`:**
+- Simple BGP queries: 16–32 MB is sufficient
+- Aggregates over 1M+ triples: 128–512 MB
+- Heavily concurrent deployments: keep the global default low (4–16 MB) and use per-session settings for analytical queries

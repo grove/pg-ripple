@@ -9,7 +9,47 @@ Versions correspond to the milestones in [ROADMAP.md](ROADMAP.md).
 
 ## [Unreleased]
 
-Points at the next milestone: v0.13.0 — Performance Hardening.
+Points at the next milestone: v0.14.0 — Administrative & Operational Readiness.
+
+---
+
+## [0.13.0] — 2026-04-16 — Performance Hardening
+
+This release is about speed. Using the benchmarks established in earlier versions, pg_ripple v0.13.0 measures and improves performance at every layer: how triple patterns are ordered before query execution, how the PostgreSQL planner understands the data distribution, how parallel workers are exploited for multi-predicate queries, and how data quality rules from SHACL can help the optimizer make better decisions.
+
+**New in this release:** BGP join reordering based on real table statistics. SPARQL plan cache instrumentation. Parallel query hints for star patterns. Extended statistics on VP table column pairs. SHACL-driven query optimizer hints. New GUCs to control reordering and parallelism thresholds. Regression and fuzz-integration test suites for the query pipeline.
+
+### What you can do
+
+- **Faster repeated queries** — the plan cache now tracks hits and misses; call `plan_cache_stats()` to see your hit rate and tune `pg_ripple.plan_cache_size` for your workload; call `plan_cache_reset()` to evict stale plans
+- **Faster star patterns** — pg_ripple now reorders triple patterns within a BGP by estimated selectivity (most restrictive first), matching what a manual SQL expert would write; controlled by `SET pg_ripple.bgp_reorder = on/off`
+- **Parallel query** — queries joining 3 or more VP tables now emit `SET LOCAL max_parallel_workers_per_gather = 4` and `SET LOCAL enable_parallel_hash = on` so PostgreSQL can use parallel workers; threshold tunable via `pg_ripple.parallel_query_min_joins`
+- **Better planner statistics** — extended statistics on `(s, o)` column pairs are automatically created when a predicate is promoted from `vp_rare` to a dedicated VP table; this helps the PostgreSQL planner estimate join cardinalities for multi-predicate queries
+- **SHACL-informed optimizer** — if you have loaded SHACL shapes with `sh:maxCount 1` or `sh:minCount 1`, the optimizer reads those hints and can use them for join costing; hints are only applied when semantics are preserved
+- **Safer query pipeline** — a fuzz integration test suite verifies that malformed SPARQL, SQL injection attempts in IRI values, Unicode IRIs, deeply nested property paths, and very large literals are all handled gracefully without crashes or data corruption
+
+### What happens behind the scenes
+
+The BGP reordering optimizer queries `pg_class.reltuples` and `pg_stats.n_distinct` for each VP table at translation time to estimate how many rows a pattern will produce given its bound columns. Patterns are sorted cheapest-first using a greedy left-deep algorithm. Before executing the generated SQL, `SET LOCAL join_collapse_limit = 1` is emitted so the PostgreSQL planner does not reorder the joins back. On macOS/Linux, `SET LOCAL enable_mergejoin = on` is also set to exploit merge-join when join columns are ordered.
+
+For parallel execution, the query engine counts VP-table aliases (`_t0`, `_t1`, …) in the generated SQL; if the count reaches `parallel_query_min_joins`, parallel hash join settings are activated before query execution.
+
+Extended statistics (`CREATE STATISTICS … (ndistinct, dependencies) ON s, o`) are created in `_pg_ripple` schema alongside the VP tables when `promote_predicate()` runs. This gives the planner correlation data that single-column `ANALYZE` cannot provide.
+
+<details>
+<summary>Technical details</summary>
+
+- **src/sparql/optimizer.rs** (new) — `reorder_bgp()`: greedy left-deep selectivity-based reorder; `TableStats` struct with `pg_class.reltuples` + `pg_stats.n_distinct` queries; `load_predicate_hints()`: reads SHACL shapes for `sh:maxCount`/`sh:minCount` hints
+- **src/sparql/plan_cache.rs** — added `HIT_COUNT` and `MISS_COUNT` `AtomicU64` counters; `stats()` returns `(hits, misses, size, cap)`; `reset()` evicts cache and clears counters; cache key now includes `bgp_reorder` GUC value
+- **src/sparql/sqlgen.rs** — `translate_bgp()` now calls `optimizer::reorder_bgp()` before building the join tree
+- **src/sparql/mod.rs** — `execute_select()` emits `SET LOCAL join_collapse_limit = 1`, `enable_mergejoin = on`, and parallel hints when applicable; new public `plan_cache_stats()` and `plan_cache_reset()` functions
+- **src/storage/mod.rs** — `promote_rare_predicates()` calls `create_extended_statistics()` for each newly promoted predicate; `create_extended_statistics()` issues `CREATE STATISTICS IF NOT EXISTS … (ndistinct, dependencies) ON s, o`
+- **src/lib.rs** — two new GUCs: `pg_ripple.bgp_reorder` (bool, default on), `pg_ripple.parallel_query_min_joins` (int, default 3); two new `pg_extern` functions: `plan_cache_stats() RETURNS JSONB`, `plan_cache_reset() RETURNS VOID`
+- **sql/pg_ripple--0.12.0--0.13.0.sql** — migration script (no schema DDL; new functions are compiled into the extension library)
+- **tests/pg_regress/sql/shacl_query_opt.sql** — verifies BGP reorder GUC, plan cache stats/reset, SHACL shape reading, and sparql_explain output
+- **tests/pg_regress/sql/fuzz_integration.sql** — verifies graceful handling of empty queries, malformed SPARQL, SQL injection via IRI, Unicode IRIs, large literals, deeply nested property paths, and adversarial cache usage
+
+</details>
 
 ---
 
