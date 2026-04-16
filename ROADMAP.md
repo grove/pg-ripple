@@ -35,7 +35,7 @@ Each release below has two layers:
 | [0.11.0](#v0110--incremental-sparql-views-datalog-views--extvp) | SPARQL & Datalog Views | Live, always-up-to-date dashboards from SPARQL and Datalog queries | 5–7 pw |
 | [0.12.0](#v0120--sparql-update-advanced) | SPARQL Update (Advanced) | Pattern-based updates and graph management commands | 3–4 pw |
 | [0.13.0](#v0130--performance-hardening) | Performance | Speed tuning, benchmarks, production-grade throughput | 6–8 pw |
-| [0.14.0](#v0140--administrative--operational-readiness) | Admin & Security | Operations tooling, access control, docs, packaging | 4–6 pw |
+| [0.14.0](#v0140--administrative--operational-readiness) | Admin & Security | Operations tooling, access control, graph-aware loaders, docs, packaging | 4–6 pw |
 | [0.15.0](#v0150--sparql-protocol-http-endpoint) | SPARQL Protocol | Standard HTTP API so web apps and tools can query directly | 3–4 pw |
 | [0.16.0](#v0160--sparql-federation) | SPARQL Federation | Query remote SPARQL endpoints alongside local data | 4–6 pw |
 | [1.0.0](#v100--production-release) | Production Release | Standards conformance, stress testing, security audit | 6–8 pw |
@@ -955,11 +955,20 @@ BSBM results documented. >100K triples/sec sustained bulk load. <10ms for simple
   - SPARQL queries automatically filter results to graphs the current role can read
   - Write operations (`insert_triple`, SPARQL UPDATE) enforce write permission
   - Superuser bypass via `pg_ripple.rls_bypass` GUC for admin operations
+- [ ] **Graph-aware bulk loader SQL functions**
+  - Expose the internal `load_ntriples_into_graph()`, `load_turtle_into_graph()`, `load_rdfxml_into_graph()` Rust functions (added in v0.10.0) as public SQL functions:
+    - `pg_ripple.load_ntriples_into_graph(data TEXT, graph_iri TEXT) RETURNS BIGINT`
+    - `pg_ripple.load_turtle_into_graph(data TEXT, graph_iri TEXT) RETURNS BIGINT`
+    - `pg_ripple.load_rdfxml_into_graph(data TEXT, graph_iri TEXT) RETURNS BIGINT`
+    - `pg_ripple.load_ntriples_file_into_graph(path TEXT, graph_iri TEXT) RETURNS BIGINT`
+    - `pg_ripple.load_turtle_file_into_graph(path TEXT, graph_iri TEXT) RETURNS BIGINT`
+  - Encode the `graph_iri` argument via the dictionary and delegate to the existing `*_into_graph(data, g_id)` internal functions
+  - Complementary to `load_nquads()` and `load_trig()` for workloads that have N-Triples / Turtle files and want to load them into a specific named graph without converting the format
 - [ ] **Packaging**
   - `cargo pgrx package` produces installable `.deb` and `.rpm`
   - Docker image with extension pre-installed
   - PGXN metadata
-- [ ] pg_regress: `admin_functions.sql` (vacuum, reindex, dictionary_stats, predicate_stats), `graph_rls.sql` (RLS policy enforcement, cross-role isolation, superuser bypass), `upgrade_path.sql` (install v0.1.0 → load data → sequential upgrade to current version → verify data integrity and query correctness at each step)
+- [ ] pg_regress: `admin_functions.sql` (vacuum, reindex, dictionary_stats, predicate_stats), `graph_rls.sql` (RLS policy enforcement, cross-role isolation, superuser bypass), `upgrade_path.sql` (install v0.1.0 → load data → sequential upgrade to current version → verify data integrity and query correctness at each step), `load_into_graph.sql` (round-trip: load N-Triples / Turtle into a named graph, verify via SPARQL GRAPH pattern)
 
 ### Documentation
 
