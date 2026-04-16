@@ -36,10 +36,10 @@ fi
 if LINE=$(grep -n "^host all all all scram-sha-256" "$PG_HBA" | head -1 | cut -d: -f1); then
   if [ -n "$LINE" ]; then
     # Use sed to insert the new rules BEFORE the scram-sha-256 line
-    # Linux sed: use -i without backup, multiple commands separated by \n
-    sed -i "${LINE}i host    all             all             0.0.0.0/0               trust
-host    all             all             ::/0                    trust
-" "$PG_HBA"
+    # Use backslash-escaped newlines for proper sed syntax on both macOS and Linux
+    sed -i "${LINE}i\\
+host    all             all             0.0.0.0/0               trust\\
+host    all             all             ::/0                    trust" "$PG_HBA"
     
     echo "✓ Modified pg_hba.conf to allow external TCP connections"
   fi
