@@ -205,3 +205,59 @@ curl -X POST http://localhost:7878/sparql \
   -H "Content-Type: application/sparql-update" \
   -d "INSERT DATA { <ex:s> <ex:p> \"hello\" }"
 ```
+
+---
+
+## CONSTRUCT views vs SELECT views (v0.18.0)
+
+Both CONSTRUCT views and SELECT views are pg_trickle stream tables that stay current as triples change. Choose based on what the downstream consumer needs.
+
+| Consideration | SELECT view | CONSTRUCT view |
+|---------------|-------------|----------------|
+| Output shape | Tabular (columns = SPARQL variables) | Triples (s, p, o, g BIGINT) |
+| Best for | Dashboards, APIs, SQL joins | Inference, denormalization, RDF export |
+| Template count | 1 row per solution | N rows per solution (N = template size) |
+| `decode = true` | Decodes each variable column | Decodes s, p, o to TEXT |
+
+### Materialising inference results
+
+Use a CONSTRUCT view to materialize RDFS/OWL entailments without running Datalog. This is faster for simple one-hop patterns:
+
+```sql
+-- Materialise rdfs:subClassOf inheritance one hop
+SELECT pg_ripple.create_construct_view(
+    'subclass_instances',
+    'CONSTRUCT { ?i <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> ?super }
+     WHERE {
+       ?i   <http://www.w3.org/1999/02/22-rdf-syntax-ns#type>     ?sub .
+       ?sub <http://www.w3.org/2000/01/rdf-schema#subClassOf>      ?super
+     }',
+    '5s'
+);
+```
+
+For multi-hop inference (transitive closure), use a Datalog view with the `rdfs` built-in rule set instead.
+
+### Using ASK views as live constraint monitors
+
+An ASK view maintains a single boolean result that flips as the data changes. Ideal for:
+
+- SHACL-style cardinality checks that are too expensive to run as triggers
+- Dashboard "health indicator" lights
+- Application-side event triggers (poll the stream table)
+
+```sql
+-- Alert when any order has been unshipped for more than 24 hours
+SELECT pg_ripple.create_ask_view(
+    'stale_orders',
+    'ASK { ?order <https://schema.org/orderStatus>
+                  <https://schema.org/OrderProcessing> .
+           FILTER NOT EXISTS { ?order <https://schema.org/estimatedDelivery> ?d } }',
+    '30s'
+);
+
+-- Application polls this:
+SELECT result FROM pg_ripple.ask_view_stale_orders;
+```
+
+When `result` flips from `false` to `true`, the constraint is violated. Use a PostgreSQL NOTIFY/LISTEN or pg_logical replication slot to push the change to application subscribers.

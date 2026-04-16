@@ -1238,7 +1238,7 @@ Standard SPARQL clients (YASGUI, Postman, RDF4J workbench, `curl`) can query and
 
 ### Deliverables
 
-- [ ] **CONSTRUCT view support** (`src/views.rs`)
+- [x] **CONSTRUCT view support** (`src/views.rs`)
   - Extend `create_sparql_view()` to accept CONSTRUCT queries, **or** add a dedicated `create_construct_view()` function (preferred — keeps catalog tables separate and the error message explicit)
   - Parse `spargebra::Query::Construct { template, pattern, .. }`; compile `pattern` via the existing `translate_select` pipeline; expand each triple in `template` as a SQL row expression
   - Generate a `UNION ALL` SQL SELECT that returns one row per template triple per solution: `SELECT encode(s_expr) AS s, encode(p_expr) AS p, encode(o_expr) AS o, 0 AS g`; named-graph template triples include the graph term
@@ -1246,16 +1246,16 @@ Standard SPARQL clients (YASGUI, Postman, RDF4J workbench, `curl`) can query and
   - Register result as a pg_trickle stream table with schema `pg_ripple.construct_view_{name}(s BIGINT, p BIGINT, o BIGINT, g BIGINT)`
   - When `decode = TRUE`, create a thin decoding view `pg_ripple.construct_view_{name}_decoded(s TEXT, p TEXT, o TEXT, g TEXT)` that joins `_pg_ripple.dictionary` for each column
   - Record metadata in `_pg_ripple.construct_views (name, sparql, generated_sql, schedule, decode, template_count, stream_table, created_at)`
-- [ ] **DESCRIBE view support** (`src/views.rs`)
+- [x] **DESCRIBE view support** (`src/views.rs`)
   - `create_describe_view(name, sparql, schedule, decode)` — parse `spargebra::Query::Describe { variables, pattern, .. }`; compile to SQL that enumerates all triples where the described resource appears as subject (and optionally object)
   - Stream table schema: `pg_ripple.describe_view_{name}(s BIGINT, p BIGINT, o BIGINT, g BIGINT)` — same shape as CONSTRUCT views
   - `describe_strategy` GUC (already present from v0.5.1) respected: `cbd` (Concise Bounded Description) vs `symmetric_cbd`
   - Record metadata in `_pg_ripple.describe_views (name, sparql, generated_sql, schedule, decode, stream_table, created_at)`
-- [ ] **ASK view support** (`src/views.rs`)
+- [x] **ASK view support** (`src/views.rs`)
   - `create_ask_view(name, sparql, schedule)` — parse `spargebra::Query::Ask { pattern, .. }`; compile to `SELECT EXISTS(...)` SQL
   - Stream table schema: `pg_ripple.ask_view_{name}(result BOOLEAN, evaluated_at TIMESTAMPTZ DEFAULT now())`
   - Record metadata in `_pg_ripple.ask_views (name, sparql, generated_sql, schedule, stream_table, created_at)`
-- [ ] **Lifecycle management SQL functions** (`src/lib.rs`)
+- [x] **Lifecycle management SQL functions** (`src/lib.rs`)
   - `pg_ripple.create_construct_view(name TEXT, sparql TEXT, schedule TEXT DEFAULT '1s', decode BOOLEAN DEFAULT FALSE) RETURNS BIGINT` — returns template triple count
   - `pg_ripple.drop_construct_view(name TEXT) RETURNS void`
   - `pg_ripple.list_construct_views() RETURNS TABLE(name TEXT, sparql TEXT, generated_sql TEXT, schedule TEXT, decode BOOLEAN, template_count BIGINT, stream_table TEXT, created_at TIMESTAMPTZ)`
@@ -1266,23 +1266,23 @@ Standard SPARQL clients (YASGUI, Postman, RDF4J workbench, `curl`) can query and
   - `pg_ripple.drop_ask_view(name TEXT) RETURNS void`
   - `pg_ripple.list_ask_views() RETURNS TABLE(name TEXT, sparql TEXT, generated_sql TEXT, schedule TEXT, stream_table TEXT, created_at TIMESTAMPTZ)`
   - All nine functions call `pg_trickle_available()` first and raise a descriptive error with an install hint when pg_trickle is absent; never error at extension load time
-- [ ] **Catalog tables** (SQL migration `sql/pg_ripple--0.17.0--0.18.0.sql`)
+- [x] **Catalog tables** (SQL migration `sql/pg_ripple--0.17.0--0.18.0.sql`)
   - `CREATE TABLE IF NOT EXISTS _pg_ripple.construct_views (...)`
   - `CREATE TABLE IF NOT EXISTS _pg_ripple.describe_views (...)`
   - `CREATE TABLE IF NOT EXISTS _pg_ripple.ask_views (...)`
-- [ ] **Error handling**
+- [x] **Error handling**
   - Passing a SELECT query to `create_construct_view()` → clear error: `"sparql must be a CONSTRUCT query"`
   - Passing a non-ASK query to `create_ask_view()` → clear error: `"sparql must be an ASK query"`
   - Unbound variables in CONSTRUCT template (variable present in template but not bound by the WHERE pattern) → error at view-creation time listing the unbound variables
   - Template contains a blank node (not expressible as a reusable `BIGINT` ID) → error advising the user to replace blank nodes with IRIs or skolemise them
-- [ ] pg_regress: `construct_views.sql` (create/drop/list; basic template; multi-triple template; named graph template; decode option; SELECT query rejected; unbound variable error; pg_trickle-absent error), `describe_views.sql` (create/drop/list; CBD vs symmetric_cbd; decode option), `ask_views.sql` (create/drop/list; result flips on insert/delete; pg_trickle-absent error)
+- [x] pg_regress: `construct_views.sql` (create/drop/list; basic template; multi-triple template; named graph template; decode option; SELECT query rejected; unbound variable error; pg_trickle-absent error), `describe_views.sql` (create/drop/list; CBD vs symmetric_cbd; decode option), `ask_views.sql` (create/drop/list; result flips on insert/delete; pg_trickle-absent error)
 
 ### Documentation
 
 > See [plans/documentation.md](plans/documentation.md) for details.
 
-- [ ] `user-guide/sql-reference/views.md` expanded: `create_construct_view`, `drop_construct_view`, `list_construct_views`; `create_describe_view`, `drop_describe_view`, `list_describe_views`; `create_ask_view`, `drop_ask_view`, `list_ask_views`; stream table schemas; decode views; worked examples
-- [ ] `user-guide/best-practices/sparql-patterns.md` expanded: when to use CONSTRUCT views vs SELECT views; materialising inference results; using ASK views as live constraint monitors
+- [x] `user-guide/sql-reference/views.md` expanded: `create_construct_view`, `drop_construct_view`, `list_construct_views`; `create_describe_view`, `drop_describe_view`, `list_describe_views`; `create_ask_view`, `drop_ask_view`, `list_ask_views`; stream table schemas; decode views; worked examples
+- [x] `user-guide/best-practices/sparql-patterns.md` expanded: when to use CONSTRUCT views vs SELECT views; materialising inference results; using ASK views as live constraint monitors
 
 ### Exit Criteria
 

@@ -384,6 +384,96 @@ CREATE TABLE IF NOT EXISTS _pg_ripple.framing_views (
     requires = ["views_schema_setup"]
 );
 
+// v0.18.0: CONSTRUCT, DESCRIBE, and ASK view catalog tables.
+pgrx::extension_sql!(
+    r#"
+-- CONSTRUCT views catalog (v0.18.0)
+CREATE TABLE IF NOT EXISTS _pg_ripple.construct_views (
+    name           TEXT        NOT NULL PRIMARY KEY,
+    sparql         TEXT        NOT NULL,
+    generated_sql  TEXT        NOT NULL,
+    schedule       TEXT        NOT NULL,
+    decode         BOOLEAN     NOT NULL DEFAULT false,
+    template_count BIGINT      NOT NULL DEFAULT 0,
+    stream_table   TEXT        NOT NULL,
+    created_at     TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- DESCRIBE views catalog (v0.18.0)
+CREATE TABLE IF NOT EXISTS _pg_ripple.describe_views (
+    name           TEXT        NOT NULL PRIMARY KEY,
+    sparql         TEXT        NOT NULL,
+    generated_sql  TEXT        NOT NULL,
+    schedule       TEXT        NOT NULL,
+    decode         BOOLEAN     NOT NULL DEFAULT false,
+    strategy       TEXT        NOT NULL DEFAULT 'cbd',
+    stream_table   TEXT        NOT NULL,
+    created_at     TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- ASK views catalog (v0.18.0)
+CREATE TABLE IF NOT EXISTS _pg_ripple.ask_views (
+    name           TEXT        NOT NULL PRIMARY KEY,
+    sparql         TEXT        NOT NULL,
+    generated_sql  TEXT        NOT NULL,
+    schedule       TEXT        NOT NULL,
+    stream_table   TEXT        NOT NULL,
+    created_at     TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Helper function for DESCRIBE views: enumerate all triples for a resource.
+-- For cbd (include_incoming=false): outgoing arcs only.
+-- For scbd (include_incoming=true): outgoing + incoming arcs.
+CREATE OR REPLACE FUNCTION _pg_ripple.triples_for_resource(
+    resource_id     BIGINT,
+    include_incoming BOOLEAN DEFAULT false
+) RETURNS TABLE(s BIGINT, p BIGINT, o BIGINT)
+LANGUAGE plpgsql STABLE AS $$
+DECLARE
+    r RECORD;
+BEGIN
+    -- Outgoing arcs from rare predicates table.
+    RETURN QUERY SELECT vr.s, vr.p, vr.o
+                 FROM _pg_ripple.vp_rare vr
+                 WHERE vr.s = resource_id;
+
+    -- Outgoing arcs from dedicated VP tables.
+    FOR r IN
+        SELECT pc.id AS pred_id
+        FROM _pg_ripple.predicates pc
+        WHERE pc.table_oid IS NOT NULL
+    LOOP
+        RETURN QUERY EXECUTE format(
+            'SELECT s, %L::bigint AS p, o FROM _pg_ripple.vp_%s WHERE s = $1',
+            r.pred_id, r.pred_id
+        ) USING resource_id;
+    END LOOP;
+
+    IF include_incoming THEN
+        -- Incoming arcs from rare predicates table.
+        RETURN QUERY SELECT vr.s, vr.p, vr.o
+                     FROM _pg_ripple.vp_rare vr
+                     WHERE vr.o = resource_id;
+
+        -- Incoming arcs from dedicated VP tables.
+        FOR r IN
+            SELECT pc.id AS pred_id
+            FROM _pg_ripple.predicates pc
+            WHERE pc.table_oid IS NOT NULL
+        LOOP
+            RETURN QUERY EXECUTE format(
+                'SELECT s, %L::bigint AS p, o FROM _pg_ripple.vp_%s WHERE o = $1',
+                r.pred_id, r.pred_id
+            ) USING resource_id;
+        END LOOP;
+    END IF;
+END;
+$$;
+"#,
+    name = "v018_views_schema_setup",
+    requires = ["framing_views_schema_setup"]
+);
+
 // Create the predicate_stats view after the base tables exist.
 pgrx::extension_sql!(
     r#"
@@ -2873,7 +2963,95 @@ mod pg_ripple {
         crate::views::list_framing_views()
     }
 
-    /// Create an Extended VP (ExtVP) semi-join stream table for two predicates.
+    // ── v0.18.0: SPARQL CONSTRUCT, DESCRIBE & ASK Views ──────────────────────
+
+    /// Create a CONSTRUCT view — an incrementally-maintained stream table
+    /// `pg_ripple.construct_view_{name}(s BIGINT, p BIGINT, o BIGINT, g BIGINT)`
+    /// whose rows reflect the CONSTRUCT template output at all times.
+    ///
+    /// When `decode = TRUE`, a thin TEXT-decoding view
+    /// `pg_ripple.construct_view_{name}_decoded` is also created.
+    ///
+    /// Returns the number of template triples registered.
+    ///
+    /// Errors if `sparql` is not a CONSTRUCT query, if template variables are
+    /// unbound, or if the template contains blank nodes.
+    #[pg_extern]
+    fn create_construct_view(
+        name: &str,
+        sparql: &str,
+        schedule: default!(&str, "'1s'"),
+        decode: default!(bool, "false"),
+    ) -> i64 {
+        crate::views::create_construct_view(name, sparql, schedule, decode)
+    }
+
+    /// Drop a CONSTRUCT view and its underlying pg_trickle stream table.
+    #[pg_extern]
+    fn drop_construct_view(name: &str) {
+        crate::views::drop_construct_view(name)
+    }
+
+    /// List all registered CONSTRUCT views as a JSONB array.
+    #[pg_extern]
+    fn list_construct_views() -> pgrx::JsonB {
+        crate::views::list_construct_views()
+    }
+
+    /// Create a DESCRIBE view — an incrementally-maintained stream table
+    /// `pg_ripple.describe_view_{name}(s BIGINT, p BIGINT, o BIGINT, g BIGINT)`
+    /// materialising the Concise Bounded Description (CBD) of the described resources.
+    ///
+    /// The `pg_ripple.describe_strategy` GUC controls CBD vs symmetric-CBD.
+    ///
+    /// When `decode = TRUE`, a thin TEXT-decoding view
+    /// `pg_ripple.describe_view_{name}_decoded` is also created.
+    ///
+    /// Errors if `sparql` is not a DESCRIBE query.
+    #[pg_extern]
+    fn create_describe_view(
+        name: &str,
+        sparql: &str,
+        schedule: default!(&str, "'1s'"),
+        decode: default!(bool, "false"),
+    ) {
+        crate::views::create_describe_view(name, sparql, schedule, decode)
+    }
+
+    /// Drop a DESCRIBE view and its underlying pg_trickle stream table.
+    #[pg_extern]
+    fn drop_describe_view(name: &str) {
+        crate::views::drop_describe_view(name)
+    }
+
+    /// List all registered DESCRIBE views as a JSONB array.
+    #[pg_extern]
+    fn list_describe_views() -> pgrx::JsonB {
+        crate::views::list_describe_views()
+    }
+
+    /// Create an ASK view — an incrementally-maintained single-row stream table
+    /// `pg_ripple.ask_view_{name}(result BOOLEAN, evaluated_at TIMESTAMPTZ)`
+    /// that updates whenever the underlying pattern's satisfiability changes.
+    ///
+    /// Errors if `sparql` is not an ASK query.
+    #[pg_extern]
+    fn create_ask_view(name: &str, sparql: &str, schedule: default!(&str, "'1s'")) {
+        crate::views::create_ask_view(name, sparql, schedule)
+    }
+
+    /// Drop an ASK view and its underlying pg_trickle stream table.
+    #[pg_extern]
+    fn drop_ask_view(name: &str) {
+        crate::views::drop_ask_view(name)
+    }
+
+    /// List all registered ASK views as a JSONB array.
+    #[pg_extern]
+    fn list_ask_views() -> pgrx::JsonB {
+        crate::views::list_ask_views()
+    }
+
     ///
     /// Pre-computes subjects that appear in triples of both `pred1_iri` and
     /// `pred2_iri`.  The SPARQL query engine uses these tables to accelerate

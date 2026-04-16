@@ -324,6 +324,171 @@ Example output:
 | `_pg_ripple.sparql_views` | Name, original SPARQL, generated SQL, schedule, decode mode, stream table name, variables |
 | `_pg_ripple.datalog_views` | Name, rules, rule set, goal, generated SQL, schedule, decode mode, stream table name, variables |
 | `_pg_ripple.extvp_tables` | Name, predicate IRIs, predicate IDs, generated SQL, schedule, stream table name |
+| `_pg_ripple.construct_views` | Name, SPARQL, generated SQL, schedule, decode mode, template count, stream table name |
+| `_pg_ripple.describe_views` | Name, SPARQL, generated SQL, schedule, decode mode, CBD strategy, stream table name |
+| `_pg_ripple.ask_views` | Name, SPARQL, generated SQL, schedule, stream table name |
+
+---
+
+## CONSTRUCT views (v0.18.0)
+
+A CONSTRUCT view compiles a SPARQL CONSTRUCT query into a pg_trickle stream table with schema `(s BIGINT, p BIGINT, o BIGINT, g BIGINT)`. Rows reflect the CONSTRUCT output at all times — inserting or deleting triples that affect the WHERE pattern causes the stream table to update automatically.
+
+### create_construct_view
+
+```sql
+pg_ripple.create_construct_view(
+    name     TEXT,
+    sparql   TEXT,
+    schedule TEXT    DEFAULT '1s',
+    decode   BOOLEAN DEFAULT false
+) → BIGINT
+```
+
+Returns the number of template triples registered. The stream table `pg_ripple.construct_view_{name}` is created automatically. When `decode = true`, a companion view `pg_ripple.construct_view_{name}_decoded(s TEXT, p TEXT, o TEXT, g BIGINT)` is also created.
+
+**Error conditions:**
+- `sparql` is not a CONSTRUCT query → `"sparql must be a CONSTRUCT query"`
+- Template contains an unbound variable → lists the unbound variables
+- Template contains a blank node → advises replacement with IRIs or skolemisation
+
+```sql
+-- Materialise inferred type triples: everything that is a foaf:Person is also a foaf:Agent
+SELECT pg_ripple.create_construct_view(
+    'inferred_agents',
+    'CONSTRUCT { ?person <http://www.w3.org/1999/02/22-rdf-syntax-ns#type>
+                          <http://xmlns.com/foaf/0.1/Agent> }
+     WHERE { ?person <http://www.w3.org/1999/02/22-rdf-syntax-ns#type>
+                     <http://xmlns.com/foaf/0.1/Person> }',
+    '5s'
+);
+
+-- The materialized triples are stored as BIGINT IDs.
+SELECT * FROM pg_ripple.construct_view_inferred_agents LIMIT 5;
+```
+
+### drop_construct_view
+
+```sql
+pg_ripple.drop_construct_view(name TEXT) → void
+```
+
+Drops the stream table and removes the catalog entry. Also drops the `_decoded` view if present.
+
+### list_construct_views
+
+```sql
+pg_ripple.list_construct_views() → JSONB
+```
+
+Returns a JSONB array of all registered CONSTRUCT views.
+
+```json
+[
+  {
+    "name": "inferred_agents",
+    "sparql": "CONSTRUCT { ... } WHERE { ... }",
+    "schedule": "5s",
+    "decode": false,
+    "template_count": 1,
+    "stream_table": "pg_ripple.construct_view_inferred_agents",
+    "created_at": "2026-04-16T10:00:00Z"
+  }
+]
+```
+
+---
+
+## DESCRIBE views (v0.18.0)
+
+A DESCRIBE view compiles a SPARQL DESCRIBE query into a pg_trickle stream table with schema `(s BIGINT, p BIGINT, o BIGINT, g BIGINT)`, materialising the Concise Bounded Description (CBD) of the described resources.
+
+The `pg_ripple.describe_strategy` GUC is respected: `cbd` (outgoing arcs only, default) or `scbd` (symmetric — outgoing + incoming arcs).
+
+### create_describe_view
+
+```sql
+pg_ripple.create_describe_view(
+    name     TEXT,
+    sparql   TEXT,
+    schedule TEXT    DEFAULT '1s',
+    decode   BOOLEAN DEFAULT false
+) → void
+```
+
+The stream table `pg_ripple.describe_view_{name}` is created automatically. When `decode = true`, a companion `_decoded` view is also created.
+
+```sql
+-- Materialise all triples about people with a given name
+SELECT pg_ripple.create_describe_view(
+    'named_people',
+    'DESCRIBE ?person WHERE {
+       ?person <http://xmlns.com/foaf/0.1/name> "Alice"
+     }',
+    '10s'
+);
+
+SELECT * FROM pg_ripple.describe_view_named_people;
+```
+
+### drop_describe_view
+
+```sql
+pg_ripple.drop_describe_view(name TEXT) → void
+```
+
+### list_describe_views
+
+```sql
+pg_ripple.list_describe_views() → JSONB
+```
+
+---
+
+## ASK views (v0.18.0)
+
+An ASK view compiles a SPARQL ASK query into a single-row stream table with schema `(result BOOLEAN, evaluated_at TIMESTAMPTZ)`. The `result` column flips whenever the underlying pattern's satisfiability changes — useful for live constraint monitors and dashboard indicators.
+
+### create_ask_view
+
+```sql
+pg_ripple.create_ask_view(
+    name     TEXT,
+    sparql   TEXT,
+    schedule TEXT DEFAULT '1s'
+) → void
+```
+
+The stream table `pg_ripple.ask_view_{name}` is created automatically.
+
+```sql
+-- Monitor whether any person lacks a name (constraint violation indicator)
+SELECT pg_ripple.create_ask_view(
+    'person_missing_name',
+    'ASK { ?person <http://www.w3.org/1999/02/22-rdf-syntax-ns#type>
+                   <http://xmlns.com/foaf/0.1/Person> .
+           FILTER NOT EXISTS { ?person <http://xmlns.com/foaf/0.1/name> ?name } }',
+    '5s'
+);
+
+-- Check the live result.
+SELECT result, evaluated_at FROM pg_ripple.ask_view_person_missing_name;
+--  result | evaluated_at
+-- --------+---------------------------
+--  f      | 2026-04-16 10:05:00+00
+```
+
+### drop_ask_view
+
+```sql
+pg_ripple.drop_ask_view(name TEXT) → void
+```
+
+### list_ask_views
+
+```sql
+pg_ripple.list_ask_views() → JSONB
+```
 
 ---
 
