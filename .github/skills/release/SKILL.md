@@ -6,6 +6,23 @@ argument-hint: 'Specify the version to release, e.g., "v0.1.0" or "v0.3.0"'
 
 # Release pg_ripple Version
 
+## Autonomous Execution Contract
+
+This skill runs **end-to-end without pausing for approval** once invoked. The agent:
+
+- Runs all verification checks and self-heals failures
+- Updates CHANGELOG.md, commits, and pushes
+- Waits for CI and resolves any failures via the `fix-ci` skill
+- Presents the final `git tag` command for the user to run
+
+**The only step the agent does NOT perform is `git tag`.** Tagging is a manual, irreversible act by the maintainer. Everything leading up to it is automated.
+
+**When to pause (genuine blockers only):**
+- A pre-release check fails that cannot be fixed without a new implementation commit (e.g. a failing test exposing a real bug)
+- The CHANGELOG entry requires information only the maintainer knows (external user reports, marketing context)
+
+---
+
 ## Authoritative Sources
 
 Always read these before starting a release:
@@ -28,7 +45,9 @@ cargo pgrx test pg18
 cargo pgrx regress pg18 --postgresql-conf "allow_system_table_mods=on"
 ```
 
-All four must pass with zero warnings and zero failures. Do not proceed if any check fails.
+If any check fails, **fix it autonomously** using the same self-healing loop as in the implement-version skill. Do not stop and ask the user — these are mechanical failures. Load the `fix-ci` skill if CI-specific patterns appear.
+
+All four must pass with zero warnings and zero failures before proceeding.
 
 ### 2. Verify version numbers match
 
@@ -37,11 +56,11 @@ grep '^version' Cargo.toml
 grep 'default_version' pg_ripple.control
 ```
 
-Both must show the target version (e.g. `0.2.0`).
+Both must show the target version (e.g. `0.2.0`). If they don't match, fix the discrepancy and commit before continuing.
 
 ### 3. Review the ROADMAP exit criteria
 
-Open the target version section in ROADMAP.md and verify each exit criterion explicitly. List them with pass/fail.
+Open the target version section in ROADMAP.md and verify each exit criterion explicitly. List them with pass/fail in the final summary.
 
 ### 4. Update CHANGELOG.md
 
@@ -49,9 +68,9 @@ Open the target version section in ROADMAP.md and verify each exit criterion exp
 
 ```bash
 # If there's a previous tag:
-git log --oneline v0.X.Y..HEAD
+git log --oneline v0.X.(Y-1)..HEAD
 
-# If this is the first release:
+# If no previous tag exists:
 git log --oneline
 ```
 
@@ -73,31 +92,54 @@ Move the `[Unreleased]` content under the new version heading. Reset `[Unrelease
 - Avoid jargon — "store and retrieve facts" not "triple CRUD via VP tables"
 - Do not use emoji
 
-### 5. Commit the changelog
+### 5. Verify migration script exists
+
+```bash
+ls sql/pg_ripple--*.sql | sort
+```
+
+There must be a `sql/pg_ripple--X.(Y-1).Z--X.Y.Z.sql` file. If it is missing, create it now (see AGENTS.md § Extension Versioning). This is a hard blocker — PostgreSQL cannot upgrade without it.
+
+### 6. Commit all release prep in one commit
 
 ```bash
 git add CHANGELOG.md
-git commit -m "docs: finalize changelog for vX.Y.Z"
+git commit -m "docs: finalize release notes for vX.Y.Z"
 git push origin main
 ```
 
-### 6. Wait for CI
+If other files were touched (migration script, version bumps), include them in the same commit.
 
-Verify CI passes on the pushed commit before tagging:
+### 7. Wait for CI and resolve any failures
 
 ```bash
 gh run list --limit 3
 ```
 
-### 7. Do NOT tag
+Poll until the run for the HEAD commit has a final status. If it fails, **immediately load the `fix-ci` skill** and resolve the failure. Push the fix and wait again. Repeat until CI is green.
 
-**Git tags are created manually by the maintainer.** The release skill must never run `git tag`. After completing steps 1–6, inform the user that the release is ready to tag with:
+Do not proceed to step 8 while CI is still running or red.
+
+### 8. Present the tag command
+
+When CI is green, output the exact commands for the maintainer to run:
 
 ```bash
 git tag -a vX.Y.Z -m "Release vX.Y.Z — <version name from ROADMAP>"
 git push origin vX.Y.Z
 ```
 
+Explain that pushing the tag triggers `.github/workflows/release.yml`, which runs the full test suite on the tagged commit and creates the GitHub release automatically using the CHANGELOG entry.
+
+## Common Pitfalls
+
+- **Do not create git tags** — tagging is always a manual step by the maintainer
+- **Do not use shell heredocs for release notes** — they corrupt Unicode; always use `create_file`
+- **Verify CI before informing the user to tag** — a tag on a broken commit is hard to undo
+- **Check both Cargo.toml and pg_ripple.control** — version mismatches cause confusing install failures
+- **pg_regress needs `--postgresql-conf "allow_system_table_mods=on"`** — the `pg_ripple` schema has a `pg_` prefix that PostgreSQL restricts by default
+- **Reset [Unreleased] after release** — otherwise the next version's changes have nowhere to go
+- **Migration script is a hard blocker** — never release without `sql/pg_ripple--prev--next.sql` in the repo
 ### 8. GitHub release is created automatically
 
 Pushing the tag triggers `.github/workflows/release.yml`, which:

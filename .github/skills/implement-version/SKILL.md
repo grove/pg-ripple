@@ -6,6 +6,24 @@ argument-hint: 'Specify the version to implement, e.g., "v0.3.0" or "SPARQL Basi
 
 # Implement pg_ripple Roadmap Version
 
+## Autonomous Execution Contract
+
+This skill runs **end-to-end without pausing for approval** unless a genuine decision blocker is hit (see "When to pause" below). The agent:
+
+- Commits and pushes code without asking first
+- Runs fmt/clippy/test and self-heals failures before each commit
+- Monitors CI after each push and loads the `fix-ci` skill to resolve failures autonomously
+- Only stops when CI is green and all exit criteria are met
+
+**When to pause (genuine blockers only):**
+- An architectural trade-off with no clear answer in ROADMAP.md or implementation_plan.md
+- A failing test that is caused by an ambiguity in the spec (not a bug)
+- A destructive migration (DROP TABLE, breaking API change) that was not in the spec
+
+Everything else — compiler errors, clippy warnings, test failures, CI failures — is resolved autonomously. Do not ask for permission to fix these.
+
+---
+
 ## Authoritative Sources
 
 Always read these before writing any code:
@@ -45,11 +63,63 @@ Items in the ROADMAP.md checklist are listed in dependency order — implement t
 4. Write the pg_regress `.sql` file
 5. **Tick the checkbox in ROADMAP.md** — change `- [ ]` to `- [x]` for that deliverable immediately after it is implemented and tested; do not batch this at the end
 
-### 5. Verify exit criteria
+### 5. Self-healing pre-commit loop
+
+**Run this before every `git commit` and fix all failures before committing:**
+
+```bash
+# Step A: format (auto-fix)
+cargo fmt --all
+
+# Step B: lint (auto-fix then verify)
+cargo clippy --fix --allow-dirty --features pg18
+cargo clippy --features pg18 -- -D warnings        # must be zero warnings
+
+# Step C: unit + integration tests
+cargo pgrx test pg18                               # must be zero failures
+
+# Step D: pg_regress
+cargo pgrx regress pg18 --postgresql-conf "allow_system_table_mods=on"
+```
+
+If Step B emits warnings after `--fix`, fix them manually — common patterns:
+- `#![allow(dead_code)]` for WIP modules not yet called from `pg_extern`
+- `std::slice::from_ref(x)` instead of `&[x.clone()]`
+- Let-chains (`if let ... && condition`) instead of nested if-let
+
+If Step C or D fails, fix the root cause before committing — do **not** suppress test failures with `#[ignore]` or `should_panic` unless that is the correct semantic.
+
+### 6. Commit and push discipline
+
+Group related changes into logical commits. Commit message style: lowercase first word, imperative mood, no trailing period. Push immediately after each commit:
+
+```bash
+git add <files>
+git commit -m "feat: <description>"
+git push origin main
+```
+
+### 7. Monitor CI and self-heal
+
+After pushing, check CI status with:
+
+```bash
+gh run list --limit 3
+```
+
+If CI fails, **immediately load the `fix-ci` skill** and resolve the failure autonomously. Do not pause and ask the user. Common CI-specific failures not caught locally:
+
+- Linux linker errors (GNU ld vs. lld flag differences)
+- Missing apt-get dependencies in the CI runner
+- pg_regress expected output mismatches due to platform differences
+
+When CI is green on the pushed commit, continue to the next deliverable.
+
+### 8. Verify exit criteria
 
 Before closing a version, check every exit criterion in ROADMAP.md explicitly. Do not mark a version done on partial evidence.
 
-### 6. Write documentation
+### 9. Write documentation
 
 Every ROADMAP.md version section contains a `### Documentation` subsection. Treat those checkboxes exactly like code deliverables.
 
@@ -114,7 +184,8 @@ These are the mistakes most likely to produce silent bugs:
 ### Git
 - [ ] All ROADMAP.md deliverable checkboxes for this version are ticked (`- [x]`)
 - [ ] CHANGELOG.md updated
-- [ ] Commit staged (do not run `git commit` without user approval)
+- [ ] All commits pushed to `origin/main`
+- [ ] CI is green on the latest pushed commit (`gh run list --limit 1`)
 
 ## Completion Report
 
