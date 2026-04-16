@@ -209,3 +209,29 @@ Start `pg_ripple_http` alongside your PostgreSQL instance. Point any SPARQL clie
 ### Can I run pg_ripple_http inside Docker?
 
 Yes. The Docker image bundles both PostgreSQL and `pg_ripple_http`. Use `docker compose up` with the provided `docker-compose.yml` to start both services. The SPARQL endpoint is exposed on port 7878 by default.
+
+---
+
+## JSON-LD Framing (v0.17.0)
+
+### What is JSON-LD Framing and how is it different from plain JSON-LD export?
+
+Plain JSON-LD export (`export_jsonld`) serializes every triple in the graph as a flat list of node objects. JSON-LD Framing lets you specify the desired output *shape* — which types to select, which properties to include, and how to nest related nodes — using a frame document. The result is a nested, structured JSON-LD document suitable for serving directly from a REST API.
+
+The key difference in performance: framing reads only the VP tables touched by the frame. A frame targeting 3 predicates on a graph with 10,000 predicates reads 3 VP tables, not 10,000.
+
+### Which W3C framing features are supported?
+
+pg_ripple v0.17.0 supports: `@type` matching, `@id` matching, property wildcards `{}`, absent-property patterns `[]`, `@reverse`, `@embed` (`@once`/`@always`/`@never`), `@explicit`, `@omitDefault`, `@default`, `@requireAll`, `@context` compaction, named graph `@graph` scoping, and `@omitGraph`.
+
+Value pattern matching (`@value`/`@language`/`@type` inside value objects) is deferred to a future release.
+
+### What is value pattern matching and why is it deferred?
+
+Value pattern matching would allow frames like `{"ex:name": {"@language": "en"}}` to select only English-language name literals. Implementing this correctly requires a full-graph scan to find matching literals — it cannot be done efficiently with the VP table join model. It is deferred until a targeted literal index is available.
+
+### What is the difference between framing views and SPARQL views?
+
+SPARQL views (`create_sparql_view`) store raw SPARQL SELECT results as integer ID columns in a stream table. Framing views (`create_framing_view`) run the full embedding and compaction pipeline over CONSTRUCT results, so each row in the stream table contains a ready-to-serve nested JSON-LD document rather than raw projection values.
+
+Use SPARQL views when you need low-level access to result bindings; use framing views when you want ready-to-serve nested JSON-LD for an API.

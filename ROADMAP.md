@@ -1132,12 +1132,12 @@ Standard SPARQL clients (YASGUI, Postman, RDF4J workbench, `curl`) can query and
 
 ### Deliverables
 
-- [ ] **JSON-LD Framing engine** (`src/framing/`)
+- [x] **JSON-LD Framing engine** (`src/framing/`)
   - `src/framing/mod.rs` — module root; exposes the public `frame()` entry point used by all SQL functions
   - `src/framing/frame_translator.rs` — translates a JSON-LD frame (parsed as `serde_json::Value`) into a `spargebra` CONSTRUCT algebra tree
   - `src/framing/embedder.rs` — takes flat CONSTRUCT result triples and applies the W3C embedding algorithm to produce a nested JSON-LD tree matching the frame structure
   - `src/framing/compactor.rs` — applies the `@context` from the frame to compact full IRIs to prefixed terms in the output
-- [ ] **Frame-to-SPARQL translation** (`src/framing/frame_translator.rs`)
+- [x] **Frame-to-SPARQL translation** (`src/framing/frame_translator.rs`)
   - Translate `@type` constraints → `?s a <IRI>` triple patterns in the CONSTRUCT WHERE clause
   - Translate property-value pairs with wildcard `{}` → `OPTIONAL { ?s <p> ?o }` patterns
   - Translate absent-property patterns `[]` → `OPTIONAL { ?s <p> ?o } FILTER(!bound(?o))` patterns
@@ -1147,7 +1147,7 @@ Standard SPARQL clients (YASGUI, Postman, RDF4J workbench, `curl`) can query and
   - Translate `@requireAll: true` → convert OPTIONAL joins to INNER joins for required properties
   - All IRI constants dictionary-encoded at translation time (integer joins in all VP table queries — no string comparisons)
   - Wildcards (`{}`) on `@type` and `@id` expand to unbound variables
-- [ ] **Tree-embedding algorithm** (`src/framing/embedder.rs`)
+- [x] **Tree-embedding algorithm** (`src/framing/embedder.rs`)
   - Implement the W3C JSON-LD 1.1 Framing §4.1 embedding algorithm over the flat CONSTRUCT result set
   - Build a subject-keyed node map from the CONSTRUCT rows (decoded to N-Triples strings)
   - Walk the frame tree recursively, embedding matching node objects as property values
@@ -1157,28 +1157,28 @@ Standard SPARQL clients (YASGUI, Postman, RDF4J workbench, `curl`) can query and
   - Honour `@default` values — substitute the declared default value for absent properties when `@omitDefault` is `false`
   - Reverse properties: collect subjects whose relevant predicate points to the current node and embed them under the `@reverse`-declared key
   - Named-graph scope: when `graph` is specified, restrict embedding to nodes from that named graph
-- [ ] **`@context` compaction** (`src/framing/compactor.rs`)
+- [x] **`@context` compaction** (`src/framing/compactor.rs`)
   - Extract the `@context` block from the input frame
   - Apply prefix substitution to all IRI strings in the output tree (full IRI → compact prefixed form using registered prefixes and inline `@context` mappings)
   - Inject the `@context` block as the first entry of the returned JSON-LD document
   - Fall back to full IRIs when no matching prefix is registered
-- [ ] **SQL functions** (`src/lib.rs`)
+- [x] **SQL functions** (`src/lib.rs`)
   - `pg_ripple.jsonld_frame_to_sparql(frame JSONB, graph TEXT DEFAULT NULL) RETURNS TEXT` — translate a frame to a SPARQL CONSTRUCT query string without executing it; primary debugging and inspection tool
   - `pg_ripple.export_jsonld_framed(frame JSONB, graph TEXT DEFAULT NULL, embed TEXT DEFAULT '@once', explicit BOOLEAN DEFAULT FALSE, ordered BOOLEAN DEFAULT FALSE) RETURNS JSONB` — primary end-user function: translate frame to CONSTRUCT, execute via the SPARQL engine, apply embedding and compaction, return framed JSON-LD
   - `pg_ripple.export_jsonld_framed_stream(frame JSONB, graph TEXT DEFAULT NULL) RETURNS SETOF TEXT` — streaming NDJSON variant (one JSON object per matched root node); avoids buffering large framed documents in memory
   - `pg_ripple.jsonld_frame(input JSONB, frame JSONB, embed TEXT DEFAULT '@once', explicit BOOLEAN DEFAULT FALSE, ordered BOOLEAN DEFAULT FALSE) RETURNS JSONB` — general-purpose framing primitive: apply the embedding algorithm to any already-expanded JSON-LD document, not necessarily from pg-ripple storage; useful for framing SPARQL CONSTRUCT results obtained via other means
-- [ ] **SPARQL plan cache integration**
+- [x] **SPARQL plan cache integration**
   - The translated CONSTRUCT query string is used as the cache key in the existing `src/sparql/plan_cache.rs` translation cache
   - Repeated calls to `export_jsonld_framed()` with the same frame and graph benefit from cached SPARQL→SQL translation automatically
-- [ ] **Named-graph support**
+- [x] **Named-graph support**
   - `graph NULL` → CONSTRUCT operates over the merged graph (all `g` values across all VP tables)
   - `graph '<IRI>'` → adds `FILTER(?g = <encoded_id>)` to each VP table join in the generated CONSTRUCT
   - Frame `@graph` entry → directs the embedder to scope node matching to the named graph's node set
-- [ ] **Error handling**
+- [x] **Error handling**
   - Invalid frame structure (not a JSON object, unrecognised `@embed` value) → `PT700`-range serialization error with the frame property path that failed
   - Frame references an IRI not present in any VP table → empty result (standard W3C framing behaviour, not an error)
   - Frame nested deeper than `pg_ripple.max_path_depth` → `PT200`-range error reusing the existing depth limit
-- [ ] **Incremental framing views** (`create_framing_view`) *(requires pg_trickle)*
+- [x] **Incremental framing views** (`create_framing_view`) *(requires pg_trickle)*
   - `pg_ripple.create_framing_view(name TEXT, frame JSONB, schedule TEXT DEFAULT '5s', decode BOOLEAN DEFAULT FALSE, output_format TEXT DEFAULT 'jsonld') RETURNS void` — translate the frame to a SPARQL CONSTRUCT query and register it as a pg_trickle stream table that stays incrementally up-to-date as triples are inserted or deleted
   - Stream table schema: `pg_ripple.framing_view_{name}(subject_id BIGINT, frame_tree JSONB, refreshed_at TIMESTAMPTZ)` — `subject_id` is the dictionary-encoded subject IRI; `frame_tree` is the fully embedded and compacted JSON-LD output for that root node
   - When `decode = TRUE`, a thin IRI-decoding view `pg_ripple.framing_view_{name}_decoded` is also created; the stream table itself stores integer IDs to minimise CDC surface
@@ -1186,7 +1186,7 @@ Standard SPARQL clients (YASGUI, Postman, RDF4J workbench, `curl`) can query and
   - `_pg_ripple.framing_views` catalog table: `name, frame, generated_construct, schedule, output_format, decode, stream_table_oid, created_at`
   - Refresh mode heuristics (same as `create_sparql_view`): `IMMEDIATE` for constraint-style frames (e.g. select `ex:Company` nodes that lack `ex:complianceOfficer` — any row in the view is a violation); `DIFFERENTIAL` + schedule for dashboard/API use cases (company directory refreshed every 10 s); `FULL` + long schedule for large full-graph framed exports intended for downstream consumers
   - `pg_ripple.pg_trickle_available()` check at call time — returns a clear error with an install hint when pg_trickle is absent; never raises an error at extension load time
-- [ ] pg_regress: `jsonld_framing.sql` (type-based selection, property wildcards, absent-property patterns `[]`, `@reverse`, `@embed @once/@always/@never`, `@explicit`, `@omitDefault`, `@default`, `@requireAll`, named-graph scope, empty frame, `jsonld_frame_to_sparql` inspection output, `jsonld_frame` general-purpose function, streaming variant), `jsonld_framing_views.sql` (create/drop/list framing views; `IMMEDIATE` constraint-mode view; `DIFFERENTIAL` dashboard view; `decode` option; pg_trickle-absent error message)
+- [x] pg_regress: `jsonld_framing.sql` (type-based selection, property wildcards, absent-property patterns `[]`, `@reverse`, `@embed @once/@always/@never`, `@explicit`, `@omitDefault`, `@default`, `@requireAll`, named-graph scope, empty frame, `jsonld_frame_to_sparql` inspection output, `jsonld_frame` general-purpose function, streaming variant), `jsonld_framing_views.sql` (create/drop/list framing views; `IMMEDIATE` constraint-mode view; `DIFFERENTIAL` dashboard view; `decode` option; pg_trickle-absent error message)
 
 ### Supported frame features (v0.17.0)
 
@@ -1211,10 +1211,10 @@ Standard SPARQL clients (YASGUI, Postman, RDF4J workbench, `curl`) can query and
 
 > See [plans/documentation.md](plans/documentation.md) for details.
 
-- [ ] `user-guide/sql-reference/serialization.md` expanded: `export_jsonld_framed`, `jsonld_frame_to_sparql`, `jsonld_frame`, `export_jsonld_framed_stream`; frame syntax primer; `@embed` / `@explicit` / `@omitDefault` / `@requireAll` flags; named graph scoping; supported feature table
-- [ ] `user-guide/sql-reference/framing-views.md` — `create_framing_view`, `drop_framing_view`, `list_framing_views`; stream table schema and decoding view; refresh mode selection (`IMMEDIATE` for constraints, `DIFFERENTIAL` for dashboards, `FULL` for exports); `decode` option; pg_trickle dependency and detection; worked example (company directory view refreshed every 10 s)
-- [ ] `user-guide/best-practices/data-modeling.md` expanded: JSON-LD Framing for REST APIs; frame-first API design pattern; using `jsonld_frame_to_sparql` for SPARQL query inspection; performance notes (frame-driven vs full-graph export); when to use `export_jsonld_framed` vs `create_framing_view`
-- [ ] `reference/faq.md` expanded: framing vs plain JSON-LD export; what W3C framing features are supported; value pattern matching deferral; framing views vs SPARQL views
+- [x] `user-guide/sql-reference/serialization.md` expanded: `export_jsonld_framed`, `jsonld_frame_to_sparql`, `jsonld_frame`, `export_jsonld_framed_stream`; frame syntax primer; `@embed` / `@explicit` / `@omitDefault` / `@requireAll` flags; named graph scoping; supported feature table
+- [x] `user-guide/sql-reference/framing-views.md` — `create_framing_view`, `drop_framing_view`, `list_framing_views`; stream table schema and decoding view; refresh mode selection (`IMMEDIATE` for constraints, `DIFFERENTIAL` for dashboards, `FULL` for exports); `decode` option; pg_trickle dependency and detection; worked example (company directory view refreshed every 10 s)
+- [x] `user-guide/best-practices/data-modeling.md` expanded: JSON-LD Framing for REST APIs; frame-first API design pattern; using `jsonld_frame_to_sparql` for SPARQL query inspection; performance notes (frame-driven vs full-graph export); when to use `export_jsonld_framed` vs `create_framing_view`
+- [x] `reference/faq.md` expanded: framing vs plain JSON-LD export; what W3C framing features are supported; value pattern matching deferral; framing views vs SPARQL views
 
 ### Exit Criteria
 

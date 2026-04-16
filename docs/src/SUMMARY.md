@@ -24,6 +24,7 @@
   - [Datalog Reasoning](user-guide/sql-reference/datalog.md)
   - [Materialized Views](user-guide/sql-reference/views.md)
   - [Serialization & Export](user-guide/sql-reference/serialization.md)
+  - [Framing Views](user-guide/sql-reference/framing-views.md)
   - [SPARQL Protocol (HTTP)](user-guide/sql-reference/http-endpoint.md)
   - [SPARQL Federation](user-guide/sql-reference/federation.md)
 - [Configuration](user-guide/configuration.md)

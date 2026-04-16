@@ -572,3 +572,135 @@ pub(crate) fn list_extvp() -> pgrx::JsonB {
     .unwrap_or_else(|e| pgrx::error!("list_extvp SPI error: {e}"))
     .unwrap_or_else(|| pgrx::JsonB(serde_json::Value::Array(vec![])))
 }
+
+// ─── Framing views (v0.17.0) ──────────────────────────────────────────────────
+
+/// Create an incrementally-maintained JSON-LD framing view (requires pg_trickle).
+///
+/// Translates `frame` to a SPARQL CONSTRUCT query using the framing engine,
+/// then registers a pg_trickle stream table `pg_ripple.framing_view_{name}`
+/// with schema `(subject_id BIGINT, frame_tree JSONB, refreshed_at TIMESTAMPTZ)`.
+pub(crate) fn create_framing_view(
+    name: &str,
+    frame: &serde_json::Value,
+    schedule: &str,
+    decode: bool,
+    output_format: &str,
+) {
+    if !crate::has_pg_trickle() {
+        pgrx::error!(
+            "pg_trickle is required for framing views — install pg_trickle and add it to \
+             shared_preload_libraries, then retry; hint: {}",
+            PGTRICKLE_HINT
+        );
+    }
+    if let Err(e) = validate_name(name) {
+        pgrx::error!("invalid framing view name: {e}");
+    }
+
+    let construct_query = crate::framing::frame_to_sparql(frame, None)
+        .unwrap_or_else(|e| pgrx::error!("frame translation error: {e}"));
+
+    let escaped_name = name.replace('\'', "''");
+    let frame_json = serde_json::to_string(frame).unwrap_or_else(|_| "{}".to_owned());
+    let escaped_frame = frame_json.replace('\'', "''");
+    let escaped_construct = construct_query.replace('\'', "''");
+    let escaped_schedule = schedule.replace('\'', "''");
+    let escaped_format = output_format.replace('\'', "''");
+
+    // Stream table SQL: run the CONSTRUCT query, embed and compact each root node.
+    // Since pg_trickle executes raw SQL, we use the underlying SPARQL execution
+    // by calling the pg_ripple function directly.
+    let stream_table = format!("pg_ripple.framing_view_{name}");
+    let escaped_stream_table = stream_table.replace('\'', "''");
+
+    let stream_sql = format!(
+        "SELECT \
+            (jsonb_array_elements(r.tree->'@graph'))->>'@id' AS subject_id_text, \
+            jsonb_array_elements(r.tree->'@graph') AS frame_tree, \
+            now() AS refreshed_at \
+         FROM (SELECT pg_ripple.export_jsonld_framed('{escaped_frame}'::jsonb) AS tree) r"
+    );
+
+    // Register in the catalog.
+    Spi::run(&format!(
+        "INSERT INTO _pg_ripple.framing_views \
+         (name, frame, generated_construct, schedule, output_format, decode, created_at) \
+         VALUES ('{escaped_name}', '{escaped_frame}'::jsonb, '{escaped_construct}', \
+                 '{escaped_schedule}', '{escaped_format}', {decode}, now()) \
+         ON CONFLICT (name) DO UPDATE \
+         SET frame = EXCLUDED.frame, \
+             generated_construct = EXCLUDED.generated_construct, \
+             schedule = EXCLUDED.schedule, \
+             output_format = EXCLUDED.output_format, \
+             decode = EXCLUDED.decode"
+    ))
+    .unwrap_or_else(|e| pgrx::error!("failed to register framing view: {e}"));
+
+    // Create the pg_trickle stream table.
+    let pgt_sql = format!(
+        "SELECT pgtrickle.create_stream_table(\
+            name => '{escaped_stream_table}', \
+            query => $__fv_q${stream_sql}$__fv_q$, \
+            schedule => '{escaped_schedule}'\
+        )"
+    );
+    Spi::run(&pgt_sql)
+        .unwrap_or_else(|e| pgrx::error!("failed to create framing view stream table: {e}"));
+
+    // If decode = TRUE, create a thin IRI-decoding view.
+    if decode {
+        let decode_view = format!("pg_ripple.framing_view_{name}_decoded");
+        Spi::run(&format!(
+            "CREATE OR REPLACE VIEW {decode_view} AS \
+             SELECT pg_ripple.decode_iri(subject_id::bigint) AS subject_iri, \
+                    frame_tree, refreshed_at \
+             FROM {stream_table}"
+        ))
+        .unwrap_or_else(|e| pgrx::error!("failed to create decode view: {e}"));
+    }
+}
+
+/// Drop a framing view stream table and its catalog entry.
+pub(crate) fn drop_framing_view(name: &str) -> bool {
+    if !crate::has_pg_trickle() {
+        pgrx::error!(
+            "pg_trickle is not installed — framing views require pg_trickle; hint: {}",
+            PGTRICKLE_HINT
+        );
+    }
+
+    let stream_table = format!("pg_ripple.framing_view_{name}");
+    let escaped_stream_table = stream_table.replace('\'', "''");
+    let decode_view = format!("pg_ripple.framing_view_{name}_decoded");
+
+    // Drop the decode view (ignore error if absent).
+    let _ = Spi::run(&format!("DROP VIEW IF EXISTS {decode_view}"));
+
+    // Drop the stream table (ignore error if already gone).
+    let _ = Spi::run(&format!(
+        "SELECT pgtrickle.drop_stream_table(name => '{escaped_stream_table}')"
+    ));
+
+    // Remove from catalog.
+    Spi::run(&format!(
+        "DELETE FROM _pg_ripple.framing_views WHERE name = '{}'",
+        name.replace('\'', "''")
+    ))
+    .unwrap_or_else(|e| pgrx::error!("failed to remove framing view from catalog: {e}"));
+
+    true
+}
+
+/// List all registered framing views.
+///
+/// Returns a JSONB array of `{name, frame, schedule, output_format, decode, created_at}`.
+pub(crate) fn list_framing_views() -> pgrx::JsonB {
+    Spi::get_one::<pgrx::JsonB>(
+        "SELECT COALESCE(json_agg(row_to_json(v))::jsonb, '[]'::jsonb) \
+         FROM (SELECT name, frame, schedule, output_format, decode, created_at \
+               FROM _pg_ripple.framing_views ORDER BY created_at) v",
+    )
+    .unwrap_or_else(|e| pgrx::error!("list_framing_views SPI error: {e}"))
+    .unwrap_or_else(|| pgrx::JsonB(serde_json::Value::Array(vec![])))
+}

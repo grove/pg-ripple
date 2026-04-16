@@ -43,7 +43,7 @@ use crate::storage;
 /// Decode a set of `i64` dictionary IDs to N-Triples–formatted strings in one
 /// SPI round-trip.  Inline-encoded values (bit 63 = 1) are decoded directly
 /// without a DB lookup; only true dictionary IDs are fetched from the table.
-fn batch_decode(ids: &[i64]) -> HashMap<i64, String> {
+pub(crate) fn batch_decode(ids: &[i64]) -> HashMap<i64, String> {
     if ids.is_empty() {
         return HashMap::new();
     }
@@ -318,6 +318,82 @@ pub fn sparql_explain(query_text: &str, analyze: bool) -> String {
 }
 
 // ─── SPARQL CONSTRUCT ─────────────────────────────────────────────────────────
+
+/// Execute a SPARQL CONSTRUCT query; returns raw `(s_id, p_id, o_id)` integer rows.
+///
+/// Used by the framing engine to obtain encoded triples that are then decoded
+/// in a single batch SPI round-trip.
+pub(crate) fn sparql_construct_rows(query_text: &str) -> Vec<(i64, i64, i64)> {
+    let query = SparqlParser::new()
+        .parse_query(query_text)
+        .unwrap_or_else(|e| pgrx::error!("SPARQL parse error: {}", e));
+
+    let (template, pattern) = match query {
+        spargebra::Query::Construct {
+            template, pattern, ..
+        } => (template, pattern),
+        _ => pgrx::error!("sparql_construct_rows() requires a CONSTRUCT query"),
+    };
+
+    let trans = sqlgen::translate_select(&pattern);
+    let (sql, variables) = (trans.sql, trans.variables);
+
+    let mut raw_rows: Vec<Vec<Option<i64>>> = Vec::new();
+    Spi::connect(|client| {
+        let rows = client
+            .select(&sql, None, &[])
+            .unwrap_or_else(|e| pgrx::error!("SPARQL CONSTRUCT SPI error: {e}"));
+        for row in rows {
+            let mut row_vals: Vec<Option<i64>> = Vec::with_capacity(variables.len());
+            for i in 1..=(variables.len() as i64) {
+                row_vals.push(row.get::<i64>(i as _).ok().flatten());
+            }
+            raw_rows.push(row_vals);
+        }
+    });
+
+    let var_set: std::collections::HashSet<&str> = variables.iter().map(|s| s.as_str()).collect();
+    let resolve_idx = |var: &str| variables.iter().position(|v| v == var);
+
+    let mut result = Vec::new();
+    for row_vals in &raw_rows {
+        for triple in &template {
+            let s_id = match &triple.subject {
+                spargebra::term::TermPattern::NamedNode(nn) => Some(crate::dictionary::encode(
+                    nn.as_str(),
+                    crate::dictionary::KIND_IRI,
+                )),
+                spargebra::term::TermPattern::Variable(v) if var_set.contains(v.as_str()) => {
+                    resolve_idx(v.as_str()).and_then(|i| row_vals.get(i).copied().flatten())
+                }
+                _ => None,
+            };
+            let p_id = match &triple.predicate {
+                spargebra::term::NamedNodePattern::NamedNode(nn) => Some(
+                    crate::dictionary::encode(nn.as_str(), crate::dictionary::KIND_IRI),
+                ),
+                spargebra::term::NamedNodePattern::Variable(v) if var_set.contains(v.as_str()) => {
+                    resolve_idx(v.as_str()).and_then(|i| row_vals.get(i).copied().flatten())
+                }
+                _ => None,
+            };
+            let o_id = match &triple.object {
+                spargebra::term::TermPattern::NamedNode(nn) => Some(crate::dictionary::encode(
+                    nn.as_str(),
+                    crate::dictionary::KIND_IRI,
+                )),
+                spargebra::term::TermPattern::Variable(v) if var_set.contains(v.as_str()) => {
+                    resolve_idx(v.as_str()).and_then(|i| row_vals.get(i).copied().flatten())
+                }
+                _ => None,
+            };
+            if let (Some(s), Some(p), Some(o)) = (s_id, p_id, o_id) {
+                result.push((s, p, o));
+            }
+        }
+    }
+    result
+}
 
 /// Execute a SPARQL CONSTRUCT query; returns one JSONB row per constructed triple.
 ///

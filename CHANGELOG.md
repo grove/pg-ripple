@@ -9,7 +9,49 @@ Versions correspond to the milestones in [ROADMAP.md](ROADMAP.md).
 
 ## [Unreleased]
 
-Points at the next milestone: v0.17.0 — JSON-LD Framing.
+Points at the next milestone: v0.18.0 — SPARQL CONSTRUCT, DESCRIBE & ASK Views.
+
+---
+
+## [0.17.0] — 2026-04-16 — JSON-LD Framing
+
+pg_ripple can now reshape any RDF graph into structured, nested JSON-LD using W3C JSON-LD 1.1 Framing — without requiring a separate framing library. Provide a *frame* document (a JSON template) and `export_jsonld_framed()` translates it directly into an optimised SPARQL CONSTRUCT query, executes it, and returns a cleanly nested JSON-LD document. Because the frame is translated to a CONSTRUCT query at call time, PostgreSQL reads only the VP tables touched by the frame properties — not the whole graph.
+
+**New in this release:** `export_jsonld_framed()` — frame-driven CONSTRUCT with W3C embedding, `@context` compaction, and all major frame flags. `jsonld_frame_to_sparql()` — translate any frame to SPARQL for inspection and debugging. `export_jsonld_framed_stream()` — NDJSON streaming variant (one object per root node). `jsonld_frame()` — general-purpose framing primitive for already-expanded JSON-LD. `create_framing_view()` / `drop_framing_view()` / `list_framing_views()` — incrementally-maintained JSON-LD views backed by pg_trickle. Migration script `pg_ripple--0.16.0--0.17.0.sql`.
+
+### What you can do
+
+- **Frame graph data for REST APIs** — `SELECT pg_ripple.export_jsonld_framed('{"@type": "https://schema.org/Organization", "https://schema.org/name": {}, "@reverse": {"https://schema.org/worksFor": {"https://schema.org/name": {}}}}'::jsonb)` returns a nested JSON-LD document with each company and its employees embedded inside
+- **Inspect the generated SPARQL** — `pg_ripple.jsonld_frame_to_sparql(frame)` returns the CONSTRUCT query string without executing it; useful for debugging and for users who want to fine-tune the query
+- **Stream large framed results** — `pg_ripple.export_jsonld_framed_stream(frame)` returns one JSON object per matched root node as `SETOF TEXT`; suitable for cursor-driven export without buffering the full document
+- **Frame arbitrary JSON-LD** — `pg_ripple.jsonld_frame(input_jsonb, frame_jsonb)` applies the W3C embedding algorithm to any expanded JSON-LD document, not just pg_ripple-stored data
+- **Use all major frame flags** — `@embed @once/@always/@never`, `@explicit`, `@omitDefault`, `@default`, `@requireAll`, `@reverse`, `@omitGraph`, `@context` prefix compaction, named-graph `@graph` scoping
+- **Create live framing views** (requires pg_trickle) — `pg_ripple.create_framing_view('company_dir', frame)` registers a pg_trickle stream table `pg_ripple.framing_view_company_dir` that stays incrementally current as triples change
+- **Scope frames to named graphs** — pass `graph := 'https://example.org/g1'` to any framing function to restrict matching to triples in that named graph
+
+### What happens behind the scenes
+
+`export_jsonld_framed()` calls `src/framing/frame_translator.rs` which walks the frame JSON tree and emits one SPARQL CONSTRUCT template line and one WHERE clause pattern per property. `@type` constraints become inner-join `?s a <IRI>` patterns; property wildcards `{}` become `OPTIONAL { ?s <p> ?o }` blocks; absent-property patterns `[]` become `OPTIONAL { ?s <p> ?o } FILTER(!bound(?o))` blocks; `@reverse` terms flip the BGP to `?o <p> ?s`. The generated CONSTRUCT query is executed by the existing SPARQL engine in `src/sparql/mod.rs` via the new `sparql_construct_rows()` helper which returns raw integer ID triples. Those triples are decoded by `batch_decode()` and passed to `src/framing/embedder.rs` which builds a subject-keyed node map and applies the W3C §4.1 embedding algorithm recursively. Finally `src/framing/compactor.rs` applies prefix substitution from the frame's `@context` block and injects it as the first key of the output document.
+
+<details>
+<summary>Technical details</summary>
+
+- **src/framing/mod.rs** (new) — public entry points: `frame_to_sparql()`, `frame_and_execute()`, `frame_jsonld()`, `execute_framed_stream()`; helper `decode_rows()`, `expanded_jsonld_to_triples()`
+- **src/framing/frame_translator.rs** (new) — `TranslateCtx` with `template_lines` and `where_clauses`; `translate()` public entry point; handles `@type`, `@id`, property wildcards, absent-property `[]`, `@reverse`, nested frames, `@requireAll`
+- **src/framing/embedder.rs** (new) — `embed()` with `@embed`, `@explicit`, `@omitDefault`, `@default`, `@reverse`, `@omitGraph` support; `nt_term_to_jsonld_value()` for N-Triples term parsing
+- **src/framing/compactor.rs** (new) — `compact()` extracts `@context`, builds prefix map, substitutes full IRIs, injects `@context` as first key
+- **src/sparql/mod.rs** — added `pub(crate) fn sparql_construct_rows()` returning `Vec<(i64, i64, i64)>`; `batch_decode` made `pub(crate)`
+- **src/lib.rs** — `framing_views_schema_setup` SQL block (`_pg_ripple.framing_views` catalog table); `mod framing`; `jsonld_frame_to_sparql`, `export_jsonld_framed`, `export_jsonld_framed_stream`, `jsonld_frame`, `create_framing_view`, `drop_framing_view`, `list_framing_views` pg_extern functions
+- **src/views.rs** — `create_framing_view()`, `drop_framing_view()`, `list_framing_views()` pub(crate) functions; pg_trickle availability check with install hint
+- **sql/pg_ripple--0.16.0--0.17.0.sql** — creates `_pg_ripple.framing_views` catalog table
+- **tests/pg_regress/sql/jsonld_framing.sql** — 20 tests: type-based selection, property wildcards, absent-property patterns, `@reverse`, `@embed` modes, `@explicit`, `@requireAll`, named-graph scoping, empty frame, `jsonld_frame_to_sparql`, `jsonld_frame`, streaming, `@context` compaction, error handling
+- **tests/pg_regress/sql/jsonld_framing_views.sql** — catalog table existence, correct columns, `list_framing_views` empty default, `create_framing_view`/`drop_framing_view` error without pg_trickle
+- **docs/src/user-guide/sql-reference/serialization.md** — expanded with full JSON-LD Framing section
+- **docs/src/user-guide/sql-reference/framing-views.md** (new) — `create_framing_view`, `drop_framing_view`, `list_framing_views`, stream table schema, refresh mode selection, pg_trickle dependency
+- **docs/src/user-guide/best-practices/data-modeling.md** — JSON-LD Framing for REST APIs section
+- **docs/src/reference/faq.md** — JSON-LD Framing FAQ entries
+
+</details>
 
 ---
 

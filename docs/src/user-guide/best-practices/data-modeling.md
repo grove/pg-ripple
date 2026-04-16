@@ -129,3 +129,39 @@ For multi-graph exports:
 psql -c "COPY (SELECT pg_ripple.export_nquads(NULL)) TO STDOUT" > snapshot.nq
 ```
 
+
+---
+
+## JSON-LD Framing for REST APIs (v0.17.0)
+
+### Frame-First API Design
+
+When building a REST API backed by pg_ripple, design your JSON-LD frames before writing application code. The frame defines the exact shape of the API response, and `export_jsonld_framed()` generates the optimised SPARQL CONSTRUCT query automatically.
+
+```sql
+-- A frame for a "company with employees" API endpoint.
+SELECT pg_ripple.export_jsonld_framed('{
+    "@context": {"schema": "https://schema.org/"},
+    "@type": "https://schema.org/Organization",
+    "https://schema.org/name": {},
+    "https://schema.org/employee": {
+        "https://schema.org/name": {},
+        "https://schema.org/email": {}
+    }
+}'::jsonb);
+```
+
+Only the 3 VP tables (`rdf:type`, `schema:name`, `schema:employee`) are scanned — not all 10,000 tables in a large graph.
+
+### Using `jsonld_frame_to_sparql` for Inspection
+
+Before deploying a frame-driven Before deploying a frame-driven Before deploying a frame-driven Before deploying a frame-driven Before deplps:B/schBefore deploying a frame-driven Before de": Before deploying a frame-theBefore deploying a frame-driven Before deploying a frame-driven Before deploying a frame-driven Before deploying a frame-driven Before deplps:B/schBefore deploying a frame-driven Before de": Before deploying a frame-theBefore deploying a frame-driven. Prefer framing for selective API responses.
+- **Named graph scoping**: Pass a `graph` IRI to restrict the CONSTRUCT to a single named graph, further reducing scan cost.
+- **Repeated calls**: Repeated call- **Repeated calls**: Repeated cam the SPARQL plan cache — the SPARQL�- **Repeated calls**: Repeated calche h- **Repeated calls**: Repeated call- fr-med` vs `create_f- ming_view`
+
+| Use case | Recommended approach |
+|---|---|
+| One-off API request | `export_jsonld_framed()` |
+| Live dashboard (high read throughput) | `create_framing_view()` with `DIFFERENTIAL` schedule |
+| Constraint monitoring (violation detection) | `create_framing_view()` with `IMMEDIATE` refresh |
+| Large export for data warehouse | `create_framing_view()` with `FULL` + long schedule |

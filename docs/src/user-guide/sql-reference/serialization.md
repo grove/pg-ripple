@@ -200,3 +200,133 @@ All export functions handle RDF-star quoted triples transparently:
 | JSON-LD | — | `export_jsonld` | No | Partial |
 
 **Tip:** Use RDF/XML for Protégé ontologies, JSON-LD for REST APIs, and Turtle for human-readable files.
+
+---
+
+## JSON-LD Framing (v0.17.0)
+
+JSON-LD Framing lets you reshape RDF graph data into a specific tree structure suited for a REST API or application. Instead of returning a flat list of facts, you provide a *frame* — a JSON template — and pg_ripple returns a cleanly nested JSON-LD document.
+
+### `export_jsonld_framed`
+
+```sql
+pg_ripple.export_jsonld_framed(
+    frame     JSONB,
+    graph     TEXT    DEFAULT NULL,   -- NULL = merged graph; IRI = named graph
+    embed     TEXT    DEFAULT '@once', -- @once | @always | @never
+    explicit  BOOLEAN DEFAULT FALSE,  -- omit properties not in frame
+    ordered   BOOLEAN DEFAULT FALSE   -- sort output keys lexicographically
+) RETURNS JSONB
+```
+
+Translates the frame to a SPARQL CONSTRUCT query, executes it, applies W3C embedding, compacts IRIs using the frame's `@context`, and returns the framed JSON-LD document.
+
+```sql
+-- Select all Person nodes with their names.
+SELECT pg_ripple.export_jsonld_framed('{
+    "@context": {"schema": "https://schema.org/"},
+    "@type": "https://schema.org/Person",
+    "https://schema.org/name": {}
+}'::jsonb);
+```
+
+### `jsonld_frame_to_sparql`
+
+```sql
+pg_ripple.jsonld_frame_to_sparql(
+    frame   JSONB,
+    graph   TEXT DEFAULT NULL
+) RETURNS TEXT
+```
+
+Translates a frame to its SPARQL CONSTRUCT query string without executing it. Use this to inspect or debug the generated query.
+
+```sql
+SELECT pg_ripple.jsonld_frame_to_sparql(
+    '{"@type": "https://schema.org/Person", "https://schema.org/name": {}}'::jsonb
+);
+```
+
+### `jsonld_frame`
+
+```sql
+pg_ripple.jsonld_frame(
+    input     JSONB,
+    frame     JSONB,
+    embed     TEXT    DEFAULT '@once',
+    explicit  BOOLEAN DEFAULT FALSE,
+    ordered   BOOLEAN DEFAULT FALSE
+) RETURNS JSONB
+```
+
+General-purpose framing primitive: apply the W3C embedding algorithm to any already-expanded JSON-LD JSONB value, not necessarily from pg_ripple storage. Useful for framing SPARQL CONSTRUCT results obtained via other means.
+
+### `export_jsonld_framed_stream`
+
+```sql
+pg_ripple.export_jsonld_framed_stream(
+    frame   JSONB,
+    graph   TEXT DEFAULT NULL
+) RETURNS SETOF TEXT
+```
+
+Streaming variant: returns one NDJSON line per matched root node, avoiding buffering large documents in memory.
+
+```sql
+-- Stream one line per matched Company.
+SELECT line FROM pg_ripple.export_jsonld_framed_stream(
+    '{"@type": "https://example.org/Company"}'::jsonb
+);
+```
+
+### Frame Syntax Primer
+
+A frame is a JSON object whose structure mirrors the desired output shape:
+
+| Frame construct | Meaning |
+|---|---|
+| `"@type": "ex:Foo"` | Select nodes whose RDF type is `ex:Foo` |
+| `"ex:prop": {}` | Include `ex:prop`; match any value (wildcard) |
+| `"ex:prop": []` | Select nodes that **lack** `ex:prop` |
+| `"ex:prop": { ... nested frame ... }` | Embed the referenced node recursively |
+| `"@reverse": { "ex:memberOf": {} }` | Collect subjects whose `ex:memberOf` points here |
+| `"@id": "http://ex.org/Alice"` | Restrict to a specific subject IRI |
+| `"@requireAll": true` | All listed properties are mandatory (no OPTIONAL joins) |
+
+### `@embed` / `@explicit` / `@omitDefault` / `@requireAll` Flags
+
+| Flag | Default | Description |
+|---|---|---|
+| `@embed` | `@once` | `@once` — embed each node once, use `{"@id":"..."}` reference for repeats; `@always` — always embed; `@never` — always use references |
+| `@explicit` | `false` | When `true`, omit properties not listed in the frame from output nodes |
+| `@omitDefault` | `false` | When `true`, omit absent properties instead of substituting `@default` |
+| `@requireAll` | `false` | When `true`, convert OPTIONAL joins to INNER joins; only nodes with all listed properties match |
+
+### Named Graph Scoping
+
+Pass `graph` to restrict the CONSTRUCT to a specific named graph:
+
+```sql
+SELECT pg_ripple.export_jsonld_framed(
+    '{"@type": "https://schema.org/Person"}'::jsonb,
+    'https://example.org/graph1'
+);
+```
+
+### Supported Frame Features
+
+| Feature | Supported |
+|---|---|
+| `@type` matching (single or array) | ✓ |
+| `@id` matching (single or array) | ✓ |
+| Property wildcard `{}` | ✓ |
+| Absent-property pattern `[]` | ✓ |
+| `@reverse` properties | ✓ |
+| `@embed`: `@once` / `@always` / `@never` | ✓ |
+| `@explicit` inclusion flag | ✓ |
+| `@omitDefault` flag | ✓ |
+| `@default` values | ✓ |
+| `@requireAll` flag | ✓ |
+| `@context` compaction | ✓ |
+| Named graph `@graph` scoping | ✓ |
+| Value pattern matching (`@value` / `@language` / `@type` in value objects) | ✗ (deferred) |

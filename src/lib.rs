@@ -20,6 +20,7 @@ mod datalog;
 mod dictionary;
 mod error;
 mod export;
+mod framing;
 mod fts;
 mod shacl;
 mod shmem;
@@ -362,6 +363,25 @@ CREATE INDEX IF NOT EXISTS idx_extvp_pred2 ON _pg_ripple.extvp_tables (pred2_id)
 "#,
     name = "views_schema_setup",
     requires = ["datalog_schema_setup"]
+);
+
+// v0.17.0: Framing views catalog table.
+pgrx::extension_sql!(
+    r#"
+-- Framing views catalog (v0.17.0)
+CREATE TABLE IF NOT EXISTS _pg_ripple.framing_views (
+    name               TEXT        NOT NULL PRIMARY KEY,
+    frame              JSONB       NOT NULL,
+    generated_construct TEXT       NOT NULL,
+    schedule           TEXT        NOT NULL,
+    output_format      TEXT        NOT NULL DEFAULT 'jsonld',
+    decode             BOOLEAN     NOT NULL DEFAULT false,
+    stream_table_oid   OID,
+    created_at         TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+"#,
+    name = "framing_views_schema_setup",
+    requires = ["views_schema_setup"]
 );
 
 // Create the predicate_stats view after the base tables exist.
@@ -1219,6 +1239,66 @@ mod pg_ripple {
     ) -> TableIterator<'static, (name!(line, String),)> {
         let lines = crate::export::export_jsonld_stream(graph);
         TableIterator::new(lines.into_iter().map(|l| (l,)))
+    }
+
+    // ── JSON-LD Framing (v0.17.0) ─────────────────────────────────────────────
+
+    /// Translate a JSON-LD frame to a SPARQL CONSTRUCT query string.
+    ///
+    /// Primary inspection and debugging tool: shows the generated CONSTRUCT
+    /// query without executing it. `graph` restricts to a named graph when set.
+    #[pg_extern]
+    fn jsonld_frame_to_sparql(frame: pgrx::JsonB, graph: default!(Option<&str>, "NULL")) -> String {
+        let val = &frame.0;
+        crate::framing::frame_to_sparql(val, graph).unwrap_or_else(|e| pgrx::error!("{}", e))
+    }
+
+    /// Primary end-user function: translate a JSON-LD frame into a SPARQL
+    /// CONSTRUCT query, execute it, apply the W3C embedding algorithm, compact
+    /// with the frame's `@context`, and return the framed JSON-LD document.
+    #[pg_extern]
+    fn export_jsonld_framed(
+        frame: pgrx::JsonB,
+        graph: default!(Option<&str>, "NULL"),
+        embed: default!(&str, "'@once'"),
+        explicit: default!(bool, "false"),
+        ordered: default!(bool, "false"),
+    ) -> pgrx::JsonB {
+        let val = &frame.0;
+        let result = crate::framing::frame_and_execute(val, graph, embed, explicit, ordered)
+            .unwrap_or_else(|e| pgrx::error!("{}", e));
+        pgrx::JsonB(result)
+    }
+
+    /// Streaming variant of `export_jsonld_framed` — returns one NDJSON line
+    /// per matched root node. Avoids buffering large framed documents in memory.
+    #[pg_extern]
+    fn export_jsonld_framed_stream(
+        frame: pgrx::JsonB,
+        graph: default!(Option<&str>, "NULL"),
+    ) -> TableIterator<'static, (name!(line, String),)> {
+        let val = frame.0.clone();
+        let lines = crate::framing::execute_framed_stream(&val, graph)
+            .unwrap_or_else(|e| pgrx::error!("{}", e));
+        TableIterator::new(lines.into_iter().map(|l| (l,)))
+    }
+
+    /// General-purpose framing primitive: apply the W3C JSON-LD Framing
+    /// embedding algorithm to any already-expanded JSON-LD JSONB document.
+    ///
+    /// `input` is expected to be a JSON-LD array of expanded node objects.
+    /// Useful for framing SPARQL CONSTRUCT results obtained via other means.
+    #[pg_extern]
+    fn jsonld_frame(
+        input: pgrx::JsonB,
+        frame: pgrx::JsonB,
+        embed: default!(&str, "'@once'"),
+        explicit: default!(bool, "false"),
+        ordered: default!(bool, "false"),
+    ) -> pgrx::JsonB {
+        let result = crate::framing::frame_jsonld(&input.0, &frame.0, embed, explicit, ordered)
+            .unwrap_or_else(|e| pgrx::error!("{}", e));
+        pgrx::JsonB(result)
     }
 
     // ── SPARQL query engine ───────────────────────────────────────────────────
@@ -2757,6 +2837,40 @@ mod pg_ripple {
     #[pg_extern]
     fn list_datalog_views() -> pgrx::JsonB {
         crate::views::list_datalog_views()
+    }
+
+    // ── v0.17.0: Framing views ────────────────────────────────────────────────
+
+    /// Create an incrementally-maintained JSON-LD framing view (requires pg_trickle).
+    ///
+    /// Translates `frame` to a SPARQL CONSTRUCT query and registers it as a
+    /// pg_trickle stream table `pg_ripple.framing_view_{name}` with schema
+    /// `(subject_id BIGINT, frame_tree JSONB, refreshed_at TIMESTAMPTZ)`.
+    ///
+    /// When `decode = TRUE` a thin IRI-decoding view is also created.
+    #[pg_extern]
+    fn create_framing_view(
+        name: &str,
+        frame: pgrx::JsonB,
+        schedule: default!(&str, "'5s'"),
+        decode: default!(bool, "false"),
+        output_format: default!(&str, "'jsonld'"),
+    ) {
+        crate::views::create_framing_view(name, &frame.0, schedule, decode, output_format)
+    }
+
+    /// Drop a framing view stream table and its catalog entry.
+    ///
+    /// Returns `true` on success.
+    #[pg_extern]
+    fn drop_framing_view(name: &str) -> bool {
+        crate::views::drop_framing_view(name)
+    }
+
+    /// List all registered framing views as a JSONB array.
+    #[pg_extern]
+    fn list_framing_views() -> pgrx::JsonB {
+        crate::views::list_framing_views()
     }
 
     /// Create an Extended VP (ExtVP) semi-join stream table for two predicates.
