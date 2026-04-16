@@ -351,6 +351,102 @@ pub fn load_rdfxml(data: &str) -> i64 {
     total
 }
 
+// ─── Graph-aware loaders (for SPARQL LOAD <url> INTO GRAPH <g>) ──────────────
+
+/// Load N-Triples data into a specific graph.  Returns the number of triples loaded.
+pub fn load_ntriples_into_graph(data: &str, g_id: i64) -> i64 {
+    let generation = storage::next_load_generation();
+    let mut by_predicate: PredicateBatch = HashMap::new();
+    let mut touched: std::collections::HashSet<i64> = std::collections::HashSet::new();
+    let mut total = 0i64;
+
+    for line in data.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        if let Some((s_id, p_id, o_id)) = parse_nt_star_full_line(trimmed, generation) {
+            touched.insert(p_id);
+            by_predicate
+                .entry(p_id)
+                .or_default()
+                .push((s_id, o_id, g_id));
+            total += 1;
+            if total % BATCH_SIZE as i64 == 0 {
+                flush_batch(&mut by_predicate);
+            }
+        } else {
+            pgrx::warning!("N-Triples parse error on: {}", trimmed);
+        }
+    }
+
+    flush_batch(&mut by_predicate);
+    post_load_cleanup(touched.into_iter().collect());
+    total
+}
+
+/// Load Turtle data into a specific graph.  Returns the number of triples loaded.
+pub fn load_turtle_into_graph(data: &str, g_id: i64) -> i64 {
+    let generation = storage::next_load_generation();
+    let mut by_predicate: PredicateBatch = HashMap::new();
+    let mut touched: std::collections::HashSet<i64> = std::collections::HashSet::new();
+    let mut total = 0i64;
+
+    let mut parser = TurtleParser::new(data.as_bytes(), None);
+    parser
+        .parse_all::<TurtleError>(&mut |triple| {
+            let s_id = encode_subject(&triple.subject, generation);
+            let p_id = encode_named_node(&triple.predicate);
+            let o_id = encode_term(&triple.object, generation);
+            touched.insert(p_id);
+            by_predicate
+                .entry(p_id)
+                .or_default()
+                .push((s_id, o_id, g_id));
+            total += 1;
+            if total % BATCH_SIZE as i64 == 0 {
+                flush_batch(&mut by_predicate);
+            }
+            Ok(())
+        })
+        .unwrap_or_else(|e| pgrx::error!("Turtle parse error: {e}"));
+
+    flush_batch(&mut by_predicate);
+    post_load_cleanup(touched.into_iter().collect());
+    total
+}
+
+/// Load RDF/XML data into a specific graph.  Returns the number of triples loaded.
+pub fn load_rdfxml_into_graph(data: &str, g_id: i64) -> i64 {
+    let generation = storage::next_load_generation();
+    let mut by_predicate: PredicateBatch = HashMap::new();
+    let mut touched: std::collections::HashSet<i64> = std::collections::HashSet::new();
+    let mut total = 0i64;
+
+    let mut parser = RdfXmlParser::new(data.as_bytes(), None);
+    parser
+        .parse_all::<RdfXmlError>(&mut |triple| {
+            let s_id = encode_subject(&triple.subject, generation);
+            let p_id = encode_named_node(&triple.predicate);
+            let o_id = encode_term(&triple.object, generation);
+            touched.insert(p_id);
+            by_predicate
+                .entry(p_id)
+                .or_default()
+                .push((s_id, o_id, g_id));
+            total += 1;
+            if total % BATCH_SIZE as i64 == 0 {
+                flush_batch(&mut by_predicate);
+            }
+            Ok(())
+        })
+        .unwrap_or_else(|e| pgrx::error!("RDF/XML parse error: {e}"));
+
+    flush_batch(&mut by_predicate);
+    post_load_cleanup(touched.into_iter().collect());
+    total
+}
+
 // ─── N-Triples-star custom parser ────────────────────────────────────────────
 //
 // Handles all N-Triples and N-Triples-star lines, including:

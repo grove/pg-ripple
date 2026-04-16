@@ -1,6 +1,6 @@
 diff -U3 /Users/geir.gronmo/projects/pg_ripple/tests/pg_regress/expected/datalog_arithmetic.out /Users/geir.gronmo/projects/pg_ripple/tests/pg_regress/results/datalog_arithmetic.out
 --- /Users/geir.gronmo/projects/pg_ripple/tests/pg_regress/expected/datalog_arithmetic.out	2026-04-16 07:47:51
-+++ /Users/geir.gronmo/projects/pg_ripple/tests/pg_regress/results/datalog_arithmetic.out	2026-04-16 09:34:12
++++ /Users/geir.gronmo/projects/pg_ripple/tests/pg_regress/results/datalog_arithmetic.out	2026-04-16 10:57:21
 @@ -14,11 +14,7 @@
  SELECT count(*) >= 0 AS arith_rules_stored
  FROM (SELECT * FROM pg_ripple.list_rules()) r
@@ -16,7 +16,7 @@ diff -U3 /Users/geir.gronmo/projects/pg_ripple/tests/pg_regress/expected/datalog
   cleanup_ok 
 diff -U3 /Users/geir.gronmo/projects/pg_ripple/tests/pg_regress/expected/datalog_custom.out /Users/geir.gronmo/projects/pg_ripple/tests/pg_regress/results/datalog_custom.out
 --- /Users/geir.gronmo/projects/pg_ripple/tests/pg_regress/expected/datalog_custom.out	2026-04-16 07:47:51
-+++ /Users/geir.gronmo/projects/pg_ripple/tests/pg_regress/results/datalog_custom.out	2026-04-16 09:34:12
++++ /Users/geir.gronmo/projects/pg_ripple/tests/pg_regress/results/datalog_custom.out	2026-04-16 10:57:21
 @@ -1,4 +1,5 @@
  -- pg_regress test: Datalog custom rules
 +-- Ensure extension is loaded.
@@ -70,7 +70,7 @@ diff -U3 /Users/geir.gronmo/projects/pg_ripple/tests/pg_regress/expected/datalog
   rdfs_cleanup 
 diff -U3 /Users/geir.gronmo/projects/pg_ripple/tests/pg_regress/expected/datalog_malformed.out /Users/geir.gronmo/projects/pg_ripple/tests/pg_regress/results/datalog_malformed.out
 --- /Users/geir.gronmo/projects/pg_ripple/tests/pg_regress/expected/datalog_malformed.out	2026-04-16 07:47:51
-+++ /Users/geir.gronmo/projects/pg_ripple/tests/pg_regress/results/datalog_malformed.out	2026-04-16 09:34:12
++++ /Users/geir.gronmo/projects/pg_ripple/tests/pg_regress/results/datalog_malformed.out	2026-04-16 10:57:21
 @@ -43,7 +43,6 @@
              NULL;
      END;
@@ -81,7 +81,7 @@ diff -U3 /Users/geir.gronmo/projects/pg_ripple/tests/pg_regress/expected/datalog
  --------------------------------
 diff -U3 /Users/geir.gronmo/projects/pg_ripple/tests/pg_regress/expected/datalog_negation.out /Users/geir.gronmo/projects/pg_ripple/tests/pg_regress/results/datalog_negation.out
 --- /Users/geir.gronmo/projects/pg_ripple/tests/pg_regress/expected/datalog_negation.out	2026-04-16 07:47:51
-+++ /Users/geir.gronmo/projects/pg_ripple/tests/pg_regress/results/datalog_negation.out	2026-04-16 09:34:13
++++ /Users/geir.gronmo/projects/pg_ripple/tests/pg_regress/results/datalog_negation.out	2026-04-16 10:57:21
 @@ -8,20 +8,12 @@
      E'# Note: uses raw IRIs\n',
      'negation_test'
@@ -107,7 +107,7 @@ diff -U3 /Users/geir.gronmo/projects/pg_ripple/tests/pg_regress/expected/datalog
   cleanup_ok 
 diff -U3 /Users/geir.gronmo/projects/pg_ripple/tests/pg_regress/expected/datalog_owl_rl.out /Users/geir.gronmo/projects/pg_ripple/tests/pg_regress/results/datalog_owl_rl.out
 --- /Users/geir.gronmo/projects/pg_ripple/tests/pg_regress/expected/datalog_owl_rl.out	2026-04-16 07:47:51
-+++ /Users/geir.gronmo/projects/pg_ripple/tests/pg_regress/results/datalog_owl_rl.out	2026-04-16 09:34:13
++++ /Users/geir.gronmo/projects/pg_ripple/tests/pg_regress/results/datalog_owl_rl.out	2026-04-16 10:57:22
 @@ -11,11 +11,7 @@
  SELECT count(*) > 10 AS owl_rl_has_many_rules
  FROM (SELECT * FROM pg_ripple.list_rules()) r
@@ -123,7 +123,7 @@ diff -U3 /Users/geir.gronmo/projects/pg_ripple/tests/pg_regress/expected/datalog
   disable_rule_set 
 diff -U3 /Users/geir.gronmo/projects/pg_ripple/tests/pg_regress/expected/datalog_rdfs.out /Users/geir.gronmo/projects/pg_ripple/tests/pg_regress/results/datalog_rdfs.out
 --- /Users/geir.gronmo/projects/pg_ripple/tests/pg_regress/expected/datalog_rdfs.out	2026-04-16 07:47:51
-+++ /Users/geir.gronmo/projects/pg_ripple/tests/pg_regress/results/datalog_rdfs.out	2026-04-16 09:34:13
++++ /Users/geir.gronmo/projects/pg_ripple/tests/pg_regress/results/datalog_rdfs.out	2026-04-16 10:57:22
 @@ -11,11 +11,7 @@
  SELECT count(*) > 5 AS rdfs_has_multiple_rules
  FROM (SELECT * FROM pg_ripple.list_rules()) r
@@ -139,7 +139,7 @@ diff -U3 /Users/geir.gronmo/projects/pg_ripple/tests/pg_regress/expected/datalog
   cleanup_ok 
 diff -U3 /Users/geir.gronmo/projects/pg_ripple/tests/pg_regress/expected/rdf_star_construct.out /Users/geir.gronmo/projects/pg_ripple/tests/pg_regress/results/rdf_star_construct.out
 --- /Users/geir.gronmo/projects/pg_ripple/tests/pg_regress/expected/rdf_star_construct.out	2026-04-16 07:21:40
-+++ /Users/geir.gronmo/projects/pg_ripple/tests/pg_regress/results/rdf_star_construct.out	2026-04-16 09:34:14
++++ /Users/geir.gronmo/projects/pg_ripple/tests/pg_regress/results/rdf_star_construct.out	2026-04-16 10:57:23
 @@ -1,6 +1,5 @@
  -- pg_regress test: v0.9.0 RDF-star in CONSTRUCT / DESCRIBE output
  -- Namespace: https://rdfstar.construct.test/
@@ -166,7 +166,7 @@ diff -U3 /Users/geir.gronmo/projects/pg_ripple/tests/pg_regress/expected/rdf_sta
  -- CONSTRUCT result as JSON-LD is an array
 diff -U3 /Users/geir.gronmo/projects/pg_ripple/tests/pg_regress/expected/rdf_star_datalog.out /Users/geir.gronmo/projects/pg_ripple/tests/pg_regress/results/rdf_star_datalog.out
 --- /Users/geir.gronmo/projects/pg_ripple/tests/pg_regress/expected/rdf_star_datalog.out	2026-04-16 07:47:51
-+++ /Users/geir.gronmo/projects/pg_ripple/tests/pg_regress/results/rdf_star_datalog.out	2026-04-16 09:34:14
++++ /Users/geir.gronmo/projects/pg_ripple/tests/pg_regress/results/rdf_star_datalog.out	2026-04-16 10:57:23
 @@ -17,11 +17,7 @@
      '<https://example.org/assertedBy>',
      '<https://example.org/carol>'
@@ -195,7 +195,7 @@ diff -U3 /Users/geir.gronmo/projects/pg_ripple/tests/pg_regress/expected/rdf_sta
   cleanup_ok 
 diff -U3 /Users/geir.gronmo/projects/pg_ripple/tests/pg_regress/expected/schema_state.out /Users/geir.gronmo/projects/pg_ripple/tests/pg_regress/results/schema_state.out
 --- /Users/geir.gronmo/projects/pg_ripple/tests/pg_regress/expected/schema_state.out	2026-04-16 08:16:45
-+++ /Users/geir.gronmo/projects/pg_ripple/tests/pg_regress/results/schema_state.out	2026-04-16 09:34:14
++++ /Users/geir.gronmo/projects/pg_ripple/tests/pg_regress/results/schema_state.out	2026-04-16 10:57:24
 @@ -59,7 +59,9 @@
   table_oid
   triple_count
@@ -209,7 +209,7 @@ diff -U3 /Users/geir.gronmo/projects/pg_ripple/tests/pg_regress/expected/schema_
  SELECT column_name
 diff -U3 /Users/geir.gronmo/projects/pg_ripple/tests/pg_regress/expected/serialization.out /Users/geir.gronmo/projects/pg_ripple/tests/pg_regress/results/serialization.out
 --- /Users/geir.gronmo/projects/pg_ripple/tests/pg_regress/expected/serialization.out	2026-04-16 07:21:40
-+++ /Users/geir.gronmo/projects/pg_ripple/tests/pg_regress/results/serialization.out	2026-04-16 09:34:15
++++ /Users/geir.gronmo/projects/pg_ripple/tests/pg_regress/results/serialization.out	2026-04-16 10:57:24
 @@ -1,6 +1,5 @@
  -- pg_regress test: v0.9.0 serialization — RDF/XML, Turtle export, JSON-LD export
  -- Namespace: https://serial.test/
@@ -283,7 +283,7 @@ diff -U3 /Users/geir.gronmo/projects/pg_ripple/tests/pg_regress/expected/seriali
   turtle_round_trip_ok 
 diff -U3 /Users/geir.gronmo/projects/pg_ripple/tests/pg_regress/expected/shacl_af_rule.out /Users/geir.gronmo/projects/pg_ripple/tests/pg_regress/results/shacl_af_rule.out
 --- /Users/geir.gronmo/projects/pg_ripple/tests/pg_regress/expected/shacl_af_rule.out	2026-04-16 07:47:51
-+++ /Users/geir.gronmo/projects/pg_ripple/tests/pg_regress/results/shacl_af_rule.out	2026-04-16 09:34:15
++++ /Users/geir.gronmo/projects/pg_ripple/tests/pg_regress/results/shacl_af_rule.out	2026-04-16 10:57:24
 @@ -14,17 +14,13 @@
      E'    ]\n'
      E'.'
@@ -327,7 +327,7 @@ diff -U3 /Users/geir.gronmo/projects/pg_ripple/tests/pg_regress/expected/shacl_a
   shapes_cleaned 
 diff -U3 /Users/geir.gronmo/projects/pg_ripple/tests/pg_regress/expected/shacl_dag_monitors.out /Users/geir.gronmo/projects/pg_ripple/tests/pg_regress/results/shacl_dag_monitors.out
 --- /Users/geir.gronmo/projects/pg_ripple/tests/pg_regress/expected/shacl_dag_monitors.out	2026-04-16 08:16:45
-+++ /Users/geir.gronmo/projects/pg_ripple/tests/pg_regress/results/shacl_dag_monitors.out	2026-04-16 09:34:15
++++ /Users/geir.gronmo/projects/pg_ripple/tests/pg_regress/results/shacl_dag_monitors.out	2026-04-16 10:57:24
 @@ -26,11 +26,7 @@
  
  -- ─── 2. disable_shacl_dag_monitors is safe with no monitors ─────────────────
@@ -390,7 +390,7 @@ diff -U3 /Users/geir.gronmo/projects/pg_ripple/tests/pg_regress/expected/shacl_d
   catalog_cleaned 
 diff -U3 /Users/geir.gronmo/projects/pg_ripple/tests/pg_regress/expected/shacl_validation.out /Users/geir.gronmo/projects/pg_ripple/tests/pg_regress/results/shacl_validation.out
 --- /Users/geir.gronmo/projects/pg_ripple/tests/pg_regress/expected/shacl_validation.out	2026-04-15 21:29:32
-+++ /Users/geir.gronmo/projects/pg_ripple/tests/pg_regress/results/shacl_validation.out	2026-04-16 09:34:15
++++ /Users/geir.gronmo/projects/pg_ripple/tests/pg_regress/results/shacl_validation.out	2026-04-16 10:57:25
 @@ -49,7 +49,7 @@
  SELECT (pg_ripple.validate() ->> 'conforms')::boolean AS conforms_empty;
   conforms_empty 
@@ -402,7 +402,7 @@ diff -U3 /Users/geir.gronmo/projects/pg_ripple/tests/pg_regress/expected/shacl_v
  -- ── 4. Insert conforming data — one Person with name and one age ──────────────
 diff -U3 /Users/geir.gronmo/projects/pg_ripple/tests/pg_regress/expected/sparql_construct.out /Users/geir.gronmo/projects/pg_ripple/tests/pg_regress/results/sparql_construct.out
 --- /Users/geir.gronmo/projects/pg_ripple/tests/pg_regress/expected/sparql_construct.out	2026-04-16 07:21:40
-+++ /Users/geir.gronmo/projects/pg_ripple/tests/pg_regress/results/sparql_construct.out	2026-04-16 09:34:15
++++ /Users/geir.gronmo/projects/pg_ripple/tests/pg_regress/results/sparql_construct.out	2026-04-16 10:57:25
 @@ -55,7 +55,6 @@
  (1 row)
  

@@ -513,7 +513,7 @@ fn describe_cbd(subject_id: i64, symmetric: bool) -> Vec<(i64, i64, i64)> {
     triples
 }
 
-// ─── SPARQL Update (INSERT DATA / DELETE DATA) ────────────────────────────────
+// ─── SPARQL Update (all operations) ──────────────────────────────────────────
 
 /// Execute a SPARQL Update statement.  Returns the total number of affected
 /// triples (inserted + deleted).
@@ -559,16 +559,326 @@ pub fn sparql_update(query_text: &str) -> i64 {
                     }
                 }
             }
-            other => {
-                pgrx::warning!(
-                    "SPARQL Update operation not supported in v0.5.1 (INSERT DATA / DELETE DATA only): {:?}",
-                    other
-                );
+            GraphUpdateOperation::DeleteInsert {
+                delete,
+                insert,
+                pattern,
+                ..
+            } => {
+                affected += execute_delete_insert(delete, insert, pattern);
+            }
+            GraphUpdateOperation::Load {
+                source,
+                destination,
+                silent,
+            } => {
+                let result = execute_load(source.as_str(), destination);
+                match result {
+                    Ok(n) => affected += n,
+                    Err(e) => {
+                        if *silent {
+                            pgrx::warning!("SPARQL LOAD failed (silent): {e}");
+                        } else {
+                            pgrx::error!("SPARQL LOAD error: {e}");
+                        }
+                    }
+                }
+            }
+            GraphUpdateOperation::Clear { graph, silent } => {
+                let result = execute_clear(graph);
+                match result {
+                    Ok(n) => affected += n,
+                    Err(e) => {
+                        if *silent {
+                            pgrx::warning!("SPARQL CLEAR failed (silent): {e}");
+                        } else {
+                            pgrx::error!("SPARQL CLEAR error: {e}");
+                        }
+                    }
+                }
+            }
+            GraphUpdateOperation::Create { graph, silent } => {
+                // Encode the graph IRI to register it in the dictionary.
+                let g_id = dictionary::encode(graph.as_str(), dictionary::KIND_IRI);
+                if g_id <= 0 && !silent {
+                    pgrx::error!("SPARQL CREATE GRAPH: failed to register graph IRI");
+                }
+                // No triples to count; graph is "created" by dictionary registration.
+            }
+            GraphUpdateOperation::Drop { graph, silent } => {
+                let result = execute_drop(graph);
+                match result {
+                    Ok(n) => affected += n,
+                    Err(e) => {
+                        if *silent {
+                            pgrx::warning!("SPARQL DROP failed (silent): {e}");
+                        } else {
+                            pgrx::error!("SPARQL DROP error: {e}");
+                        }
+                    }
+                }
             }
         }
     }
 
     affected
+}
+
+// ─── DELETE/INSERT WHERE ──────────────────────────────────────────────────────
+
+/// Execute a `DELETE/INSERT WHERE` pattern-based update.
+/// Returns the total number of triples deleted + inserted.
+fn execute_delete_insert(
+    delete_templates: &[spargebra::term::GroundQuadPattern],
+    insert_templates: &[spargebra::term::QuadPattern],
+    pattern: &spargebra::algebra::GraphPattern,
+) -> i64 {
+    // 1. Translate WHERE clause to SQL via the existing SELECT engine.
+    let trans = sqlgen::translate_select(pattern);
+    let (sql, variables) = (trans.sql, trans.variables);
+
+    // 2. Execute the WHERE query and collect bound result rows.
+    //    We get back raw i64 dictionary IDs per variable.
+    let mut raw_rows: Vec<Vec<Option<i64>>> = Vec::new();
+    Spi::connect(|client| {
+        let rows = client
+            .select(&sql, None, &[])
+            .unwrap_or_else(|e| pgrx::error!("DELETE/INSERT WHERE SPI error: {e}"));
+        for row in rows {
+            let mut row_vals: Vec<Option<i64>> = Vec::with_capacity(variables.len());
+            for i in 1..=(variables.len() as i64) {
+                row_vals.push(row.get::<i64>(i as _).ok().flatten());
+            }
+            raw_rows.push(row_vals);
+        }
+    });
+
+    if raw_rows.is_empty() {
+        return 0;
+    }
+
+    // Build a variable → column-index map.
+    let var_index: HashMap<&str, usize> = variables
+        .iter()
+        .enumerate()
+        .map(|(i, v)| (v.as_str(), i))
+        .collect();
+
+    let mut affected: i64 = 0;
+
+    // 3. For each bound row, resolve and execute deletes, then inserts.
+    for row_vals in &raw_rows {
+        // DELETE phase.
+        for qp in delete_templates {
+            let s_id = resolve_ground_term(&qp.subject, row_vals, &var_index);
+            let p_id = resolve_named_node_pattern(&qp.predicate, row_vals, &var_index);
+            let o_id = resolve_ground_term(&qp.object, row_vals, &var_index);
+            let g_id = resolve_graph_name_pattern(&qp.graph_name, row_vals, &var_index);
+            if let (Some(s), Some(p), Some(o), Some(g)) = (s_id, p_id, o_id, g_id) {
+                affected += storage::delete_triple_by_ids(s, p, o, g);
+            }
+        }
+
+        // INSERT phase.
+        for qp in insert_templates {
+            let s_id = resolve_term_pattern(&qp.subject, row_vals, &var_index);
+            let p_id = resolve_named_node_pattern(&qp.predicate, row_vals, &var_index);
+            let o_id = resolve_term_pattern(&qp.object, row_vals, &var_index);
+            let g_id = resolve_graph_name_pattern(&qp.graph_name, row_vals, &var_index);
+            if let (Some(s), Some(p), Some(o), Some(g)) = (s_id, p_id, o_id, g_id) {
+                storage::insert_triple_by_ids(s, p, o, g);
+                affected += 1;
+            }
+        }
+    }
+
+    affected
+}
+
+/// Resolve a `GroundTermPattern` to a dictionary i64.
+fn resolve_ground_term(
+    gtp: &spargebra::term::GroundTermPattern,
+    row: &[Option<i64>],
+    var_index: &HashMap<&str, usize>,
+) -> Option<i64> {
+    match gtp {
+        spargebra::term::GroundTermPattern::NamedNode(nn) => {
+            Some(dictionary::encode(nn.as_str(), dictionary::KIND_IRI))
+        }
+        spargebra::term::GroundTermPattern::Literal(lit) => Some(encode_literal_id(lit)),
+        spargebra::term::GroundTermPattern::Variable(v) => {
+            let idx = var_index.get(v.as_str())?;
+            *row.get(*idx)?
+        }
+        spargebra::term::GroundTermPattern::Triple(_) => None,
+    }
+}
+
+/// Resolve a `TermPattern` to a dictionary i64.
+fn resolve_term_pattern(
+    tp: &spargebra::term::TermPattern,
+    row: &[Option<i64>],
+    var_index: &HashMap<&str, usize>,
+) -> Option<i64> {
+    match tp {
+        spargebra::term::TermPattern::NamedNode(nn) => {
+            Some(dictionary::encode(nn.as_str(), dictionary::KIND_IRI))
+        }
+        spargebra::term::TermPattern::Literal(lit) => Some(encode_literal_id(lit)),
+        spargebra::term::TermPattern::BlankNode(bn) => {
+            let scoped = format!("{}:{}", storage::current_load_generation(), bn.as_str());
+            Some(dictionary::encode(&scoped, dictionary::KIND_BLANK))
+        }
+        spargebra::term::TermPattern::Variable(v) => {
+            let idx = var_index.get(v.as_str())?;
+            *row.get(*idx)?
+        }
+        spargebra::term::TermPattern::Triple(_) => None,
+    }
+}
+
+/// Resolve a `NamedNodePattern` to a dictionary i64.
+fn resolve_named_node_pattern(
+    nnp: &spargebra::term::NamedNodePattern,
+    row: &[Option<i64>],
+    var_index: &HashMap<&str, usize>,
+) -> Option<i64> {
+    match nnp {
+        spargebra::term::NamedNodePattern::NamedNode(nn) => {
+            Some(dictionary::encode(nn.as_str(), dictionary::KIND_IRI))
+        }
+        spargebra::term::NamedNodePattern::Variable(v) => {
+            let idx = var_index.get(v.as_str())?;
+            *row.get(*idx)?
+        }
+    }
+}
+
+/// Resolve a `GraphNamePattern` to a dictionary i64 (0 = default graph).
+fn resolve_graph_name_pattern(
+    gnp: &spargebra::term::GraphNamePattern,
+    row: &[Option<i64>],
+    var_index: &HashMap<&str, usize>,
+) -> Option<i64> {
+    match gnp {
+        spargebra::term::GraphNamePattern::DefaultGraph => Some(0i64),
+        spargebra::term::GraphNamePattern::NamedNode(nn) => {
+            Some(dictionary::encode(nn.as_str(), dictionary::KIND_IRI))
+        }
+        spargebra::term::GraphNamePattern::Variable(v) => {
+            let idx = var_index.get(v.as_str())?;
+            *row.get(*idx)?
+        }
+    }
+}
+
+/// Encode a `Literal` into a dictionary i64.
+fn encode_literal_id(lit: &spargebra::term::Literal) -> i64 {
+    let lang = lit.language();
+    let value = lit.value();
+    let dt = lit.datatype().as_str();
+    if let Some(l) = lang {
+        dictionary::encode_lang_literal(value, l)
+    } else if dt == "http://www.w3.org/2001/XMLSchema#string"
+        || dt == "http://www.w3.org/1999/02/22-rdf-syntax-ns#langString"
+    {
+        dictionary::encode(value, dictionary::KIND_LITERAL)
+    } else {
+        dictionary::encode_typed_literal(value, dt)
+    }
+}
+
+// ─── SPARQL LOAD ─────────────────────────────────────────────────────────────
+
+/// Fetch a URL via HTTP and load the RDF into the given graph.
+/// Supports Turtle (text/turtle, .ttl) and N-Triples (application/n-triples, .nt).
+/// Returns number of triples inserted, or an error message.
+fn execute_load(url: &str, destination: &GraphName) -> Result<i64, String> {
+    // Determine destination graph ID.
+    let g_id: i64 = match destination {
+        GraphName::DefaultGraph => 0i64,
+        GraphName::NamedNode(nn) => dictionary::encode(nn.as_str(), dictionary::KIND_IRI),
+    };
+
+    // Fetch the URL.
+    let response = ureq::get(url)
+        .call()
+        .map_err(|e| format!("HTTP fetch error for {url}: {e}"))?;
+
+    let content_type = response.content_type().to_ascii_lowercase();
+
+    let body = response
+        .into_string()
+        .map_err(|e| format!("HTTP body read error for {url}: {e}"))?;
+
+    // Detect format from Content-Type or URL extension.
+    let is_turtle = content_type.contains("turtle")
+        || content_type.contains("trig")
+        || url.ends_with(".ttl")
+        || url.ends_with(".trig");
+    let is_xml = content_type.contains("rdf+xml") || url.ends_with(".rdf") || url.ends_with(".owl");
+
+    if is_xml {
+        Ok(crate::bulk_load::load_rdfxml_into_graph(&body, g_id))
+    } else if is_turtle {
+        Ok(crate::bulk_load::load_turtle_into_graph(&body, g_id))
+    } else {
+        // Default to N-Triples.
+        Ok(crate::bulk_load::load_ntriples_into_graph(&body, g_id))
+    }
+}
+
+// ─── SPARQL CLEAR ────────────────────────────────────────────────────────────
+
+fn execute_clear(target: &spargebra::algebra::GraphTarget) -> Result<i64, String> {
+    match target {
+        spargebra::algebra::GraphTarget::NamedNode(nn) => {
+            let g_id = dictionary::encode(nn.as_str(), dictionary::KIND_IRI);
+            Ok(storage::clear_graph_by_id(g_id))
+        }
+        spargebra::algebra::GraphTarget::DefaultGraph => Ok(storage::clear_graph_by_id(0)),
+        spargebra::algebra::GraphTarget::NamedGraphs => {
+            let mut total = 0i64;
+            for g_id in storage::all_graph_ids() {
+                if g_id != 0 {
+                    total += storage::clear_graph_by_id(g_id);
+                }
+            }
+            Ok(total)
+        }
+        spargebra::algebra::GraphTarget::AllGraphs => {
+            let mut total = 0i64;
+            for g_id in storage::all_graph_ids() {
+                total += storage::clear_graph_by_id(g_id);
+            }
+            Ok(total)
+        }
+    }
+}
+
+// ─── SPARQL DROP ─────────────────────────────────────────────────────────────
+
+fn execute_drop(target: &spargebra::algebra::GraphTarget) -> Result<i64, String> {
+    match target {
+        spargebra::algebra::GraphTarget::NamedNode(nn) => Ok(storage::drop_graph(nn.as_str())),
+        spargebra::algebra::GraphTarget::DefaultGraph => Ok(storage::clear_graph_by_id(0)),
+        spargebra::algebra::GraphTarget::NamedGraphs => {
+            let mut total = 0i64;
+            for g_id in storage::all_graph_ids() {
+                if g_id != 0 {
+                    total += storage::clear_graph_by_id(g_id);
+                }
+            }
+            Ok(total)
+        }
+        spargebra::algebra::GraphTarget::AllGraphs => {
+            let mut total = 0i64;
+            for g_id in storage::all_graph_ids() {
+                total += storage::clear_graph_by_id(g_id);
+            }
+            Ok(total)
+        }
+    }
 }
 
 /// Encode a `NamedOrBlankNode` subject into a dictionary ID.

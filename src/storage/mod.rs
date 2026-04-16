@@ -894,6 +894,127 @@ pub fn create_graph(graph_iri: &str) -> i64 {
     dictionary::encode(strip_angle_brackets(graph_iri), dictionary::KIND_IRI)
 }
 
+/// Clear all triples in a named or default graph (identified by `g_id`).
+/// Like `drop_graph` but operates by numeric graph ID.  Returns triples deleted.
+pub fn clear_graph_by_id(g_id: i64) -> i64 {
+    let mut deleted = 0i64;
+
+    let pred_ids: Vec<i64> = Spi::connect(|c| {
+        c.select(
+            "SELECT id FROM _pg_ripple.predicates WHERE table_oid IS NOT NULL",
+            None,
+            &[],
+        )
+        .unwrap_or_else(|e| pgrx::error!("predicates scan SPI error: {e}"))
+        .filter_map(|row| row.get::<i64>(1).ok().flatten())
+        .collect()
+    });
+
+    for p_id in pred_ids {
+        let delta = format!("_pg_ripple.vp_{p_id}_delta");
+        let tombs = format!("_pg_ripple.vp_{p_id}_tombstones");
+        let main_t = format!("_pg_ripple.vp_{p_id}_main");
+
+        let d_delta = Spi::get_one_with_args::<i64>(
+            &format!(
+                "WITH d AS (DELETE FROM {delta} WHERE g = $1 RETURNING 1) \
+                 SELECT count(*)::bigint FROM d"
+            ),
+            &[DatumWithOid::from(g_id)],
+        )
+        .unwrap_or_else(|e| pgrx::error!("clear_graph_by_id delta delete SPI error: {e}"))
+        .unwrap_or(0);
+
+        let d_main = Spi::get_one_with_args::<i64>(
+            &format!(
+                "WITH ins AS ( \
+                     INSERT INTO {tombs} (s, o, g) \
+                     SELECT s, o, g FROM {main_t} WHERE g = $1 \
+                     ON CONFLICT DO NOTHING \
+                     RETURNING 1 \
+                 ) SELECT count(*)::bigint FROM ins"
+            ),
+            &[DatumWithOid::from(g_id)],
+        )
+        .unwrap_or_else(|e| pgrx::error!("clear_graph_by_id tombstones SPI error: {e}"))
+        .unwrap_or(0);
+
+        let d = d_delta + d_main;
+        if d > 0 {
+            Spi::run_with_args(
+                "UPDATE _pg_ripple.predicates \
+                 SET triple_count = GREATEST(0, triple_count - $2) WHERE id = $1",
+                &[DatumWithOid::from(p_id), DatumWithOid::from(d)],
+            )
+            .unwrap_or_else(|e| pgrx::error!("predicate count update SPI error: {e}"));
+            deleted += d;
+        }
+    }
+
+    let d = Spi::get_one_with_args::<i64>(
+        "WITH d AS (DELETE FROM _pg_ripple.vp_rare WHERE g = $1 RETURNING p) \
+         SELECT count(*)::bigint FROM d",
+        &[DatumWithOid::from(g_id)],
+    )
+    .unwrap_or_else(|e| pgrx::error!("clear_graph_by_id vp_rare delete SPI error: {e}"))
+    .unwrap_or(0);
+    deleted += d;
+
+    deleted
+}
+
+/// Collect all distinct graph IDs currently in the store (including default graph 0).
+pub fn all_graph_ids() -> Vec<i64> {
+    let mut g_ids: std::collections::HashSet<i64> = std::collections::HashSet::new();
+
+    let pred_ids: Vec<i64> = Spi::connect(|c| {
+        c.select(
+            "SELECT id FROM _pg_ripple.predicates WHERE table_oid IS NOT NULL",
+            None,
+            &[],
+        )
+        .unwrap_or_else(|e| pgrx::error!("predicates scan SPI error: {e}"))
+        .filter_map(|row| row.get::<i64>(1).ok().flatten())
+        .collect()
+    });
+
+    for p_id in &pred_ids {
+        let delta = format!("_pg_ripple.vp_{p_id}_delta");
+        let main_t = format!("_pg_ripple.vp_{p_id}_main");
+        Spi::connect(|c| {
+            for row in c
+                .select(&format!("SELECT DISTINCT g FROM {delta}"), None, &[])
+                .unwrap_or_else(|e| pgrx::error!("all_graph_ids delta scan: {e}"))
+            {
+                if let Some(g) = row.get::<i64>(1).ok().flatten() {
+                    g_ids.insert(g);
+                }
+            }
+            for row in c
+                .select(&format!("SELECT DISTINCT g FROM {main_t}"), None, &[])
+                .unwrap_or_else(|e| pgrx::error!("all_graph_ids main scan: {e}"))
+            {
+                if let Some(g) = row.get::<i64>(1).ok().flatten() {
+                    g_ids.insert(g);
+                }
+            }
+        });
+    }
+
+    Spi::connect(|c| {
+        for row in c
+            .select("SELECT DISTINCT g FROM _pg_ripple.vp_rare", None, &[])
+            .unwrap_or_else(|e| pgrx::error!("all_graph_ids vp_rare scan: {e}"))
+        {
+            if let Some(g) = row.get::<i64>(1).ok().flatten() {
+                g_ids.insert(g);
+            }
+        }
+    });
+
+    g_ids.into_iter().collect()
+}
+
 /// Drop all triples in a named graph.  Returns the number of triples deleted.
 pub fn drop_graph(graph_iri: &str) -> i64 {
     let g_id = dictionary::encode(strip_angle_brackets(graph_iri), dictionary::KIND_IRI);

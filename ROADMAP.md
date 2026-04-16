@@ -811,23 +811,23 @@ Users can create SPARQL views and Datalog views that stay incrementally up-to-da
 
 ### Deliverables
 
-- [ ] **DELETE/INSERT WHERE** (graph update)
+- [x] **DELETE/INSERT WHERE** (graph update)
   - Pattern-based update: `DELETE { … } INSERT { … } WHERE { … }`
   - Compile WHERE clause via existing SPARQL→SQL engine
   - Transactional: delete + insert in single statement
-- [ ] **LOAD / CLEAR / DROP / CREATE**
+- [x] **LOAD / CLEAR / DROP / CREATE**
   - `LOAD <url>` — fetch and load remote RDF data (HTTP GET + parser)
   - `CLEAR GRAPH <g>` — delete all triples in a named graph
   - `DROP GRAPH <g>` — clear + remove graph from registry
   - `CREATE GRAPH <g>` — register a new empty named graph
-- [ ] pg_regress: `sparql_update_where.sql`, `sparql_graph_management.sql`
+- [x] pg_regress: `sparql_update_where.sql`, `sparql_graph_management.sql`
 
 ### Documentation
 
 > See [plans/documentation.md](plans/documentation.md) for details.
 
-- [ ] `user-guide/sql-reference/sparql-update.md` expanded: DELETE/INSERT WHERE, LOAD / CLEAR / DROP / CREATE graph management
-- [ ] `user-guide/best-practices/update-patterns.md` expanded: pattern-based update recipes, graph lifecycle management
+- [x] `user-guide/sql-reference/sparql-update.md` expanded: DELETE/INSERT WHERE, LOAD / CLEAR / DROP / CREATE graph management
+- [x] `user-guide/best-practices/update-patterns.md` expanded: pattern-based update recipes, graph lifecycle management
 
 ### Exit Criteria
 

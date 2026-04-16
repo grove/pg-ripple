@@ -1,0 +1,18 @@
+-- Migration 0.11.0 → 0.12.0: SPARQL Update (Advanced)
+--
+-- This migration adds advanced SPARQL 1.1 Update support:
+--
+--   • DELETE/INSERT WHERE  — pattern-based updates that compile the WHERE
+--     clause through the existing SPARQL→SQL engine
+--   • LOAD <url>           — fetch and parse remote RDF via HTTP(S) into a
+--     named or default graph
+--   • CLEAR GRAPH / DEFAULT / NAMED / ALL  — delete triples from one or
+--     more graphs while preserving graph identity in the dictionary
+--   • DROP GRAPH / DEFAULT / NAMED / ALL   — remove all triples and
+--     deregister graphs
+--   • CREATE GRAPH         — register a new named graph in the dictionary
+--
+-- Schema changes: None (the new capabilities are compiled into the extension
+-- Rust library; no SQL schema objects need to be added or altered).
+--
+-- New Rust dependency: ureq 2.x (HTTP client for LOAD <url>).
