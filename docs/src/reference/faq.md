@@ -197,3 +197,15 @@ If triples are missing, check:
 1. The triple was committed (not inside an uncommitted transaction)
 2. The correct graph is being queried (default graph vs named graph)
 3. The correct predicate IRI spelling was used
+
+### What is the HTTP endpoint URL?
+
+The `pg_ripple_http` companion service listens on `http://localhost:7878/sparql` by default. Configure the port with `PG_TRIPLE_HTTP_PORT`. The URL accepts both GET and POST SPARQL requests per the W3C SPARQL 1.1 Protocol.
+
+### How do I connect SPARQL tools to pg_ripple?
+
+Start `pg_ripple_http` alongside your PostgreSQL instance. Point any SPARQL client (YASGUI, Protege, SPARQLWrapper, Jena) to `http://localhost:7878/sparql`. The endpoint supports standard content negotiation (`Accept: application/sparql-results+json`, `text/turtle`, etc.).
+
+### Can I run pg_ripple_http inside Docker?
+
+Yes. The Docker image bundles both PostgreSQL and `pg_ripple_http`. Use `docker compose up` with the provided `docker-compose.yml` to start both services. The SPARQL endpoint is exposed on port 7878 by default.

@@ -17,7 +17,7 @@ SELECT pg_ripple.insert_triple(
 );
  insert_triple 
 ---------------
-           898
+           962
 (1 row)
 
 -- grant_graph: add access for a role (even if it does not exist yet — just tests the function)

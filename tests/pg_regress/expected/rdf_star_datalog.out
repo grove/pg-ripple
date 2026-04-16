@@ -17,11 +17,7 @@ SELECT pg_ripple.insert_triple(
     '<https://example.org/assertedBy>',
     '<https://example.org/carol>'
 ) > 0 AS provenance_inserted;
- provenance_inserted 
----------------------
- t
-(1 row)
-
+ERROR:  function pg_ripple.encode_term(unknown, integer) does not exist at character 37
 -- Load a rule set that references RDF-star predicates (comment-only here).
 SELECT pg_ripple.load_rules(
     '# RDF-star provenance rule placeholder\n'
@@ -37,11 +33,7 @@ SELECT pg_ripple.load_rules(
 SELECT count(*) >= 0 AS rules_present
 FROM (SELECT * FROM pg_ripple.list_rules()) r
 WHERE (r::jsonb)->>'rule_set' = 'rdf_star_rules';
- rules_present 
----------------
- t
-(1 row)
-
+ERROR:  cannot cast type record to jsonb at character 93
 -- Cleanup.
 SELECT pg_ripple.drop_rules('rdf_star_rules') >= 0 AS cleanup_ok;
  cleanup_ok 

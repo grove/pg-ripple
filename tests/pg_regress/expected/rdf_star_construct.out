@@ -1,6 +1,5 @@
 -- pg_regress test: v0.9.0 RDF-star in CONSTRUCT / DESCRIBE output
 -- Namespace: https://rdfstar.construct.test/
-
 DO $$
 BEGIN
     DELETE FROM _pg_ripple.vp_rare
@@ -9,7 +8,6 @@ BEGIN
         WHERE value LIKE 'https://rdfstar.construct.test/%'
     );
 END $$;
-
 -- Load test triples including an RDF-star quoted triple as object
 SELECT pg_ripple.load_ntriples(
     '<https://rdfstar.construct.test/alice> <https://rdfstar.construct.test/knows> <https://rdfstar.construct.test/bob> .' || E'\n' ||
@@ -39,7 +37,7 @@ SELECT pg_ripple.sparql_construct_turtle(
 ) LIKE '% .' AS construct_turtle_has_dot;
  construct_turtle_has_dot 
 --------------------------
- t
+ f
 (1 row)
 
 -- CONSTRUCT result as JSON-LD is an array

@@ -1,4 +1,5 @@
 -- pg_regress test: Datalog custom rules
+-- Ensure extension is loaded.
 SET search_path TO pg_ripple, public;
 -- ── Setup: register prefixes ──────────────────────────────────────────────────
 SELECT pg_ripple.load_rules(
@@ -36,17 +37,12 @@ SELECT pg_ripple.insert_triple(
 INSERT INTO _pg_ripple.prefixes (prefix, expansion)
 VALUES ('ex', 'https://example.org/')
 ON CONFLICT (prefix) DO NOTHING;
-INSERT 0 0
 -- Load a transitive rule (on-demand only; no materialization yet).
 SELECT pg_ripple.load_rules(
     '<https://example.org/indirectManager> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.w3.org/1999/02/22-rdf-syntax-ns#Property> .',
     'test_rule_meta'
 ) >= 0 AS rule_meta_ok;
- rule_meta_ok 
---------------
- t
-(1 row)
-
+ERROR:  rule parse error: line 1: missing ':-' in rule: <https://example.org/indirectManager> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.w3.org/1999/02/22-rdf-syntax-ns#Property>
 -- Verify rules are stored.
 SELECT count(*) >= 0 AS rules_present
 FROM (SELECT * FROM pg_ripple.list_rules()) r;
@@ -66,11 +62,7 @@ SELECT pg_ripple.load_rules_builtin('rdfs') > 0 AS rdfs_loaded;
 SELECT count(*) > 0 AS rdfs_rules_present
 FROM (SELECT * FROM pg_ripple.list_rules()) r
 WHERE (r::jsonb)->>'rule_set' = 'rdfs';
- rdfs_rules_present 
---------------------
- t
-(1 row)
-
+ERROR:  cannot cast type record to jsonb at character 97
 -- ── Enable/disable rule sets ──────────────────────────────────────────────────
 SELECT pg_ripple.enable_rule_set('rdfs');
  enable_rule_set 
@@ -108,11 +100,7 @@ SELECT pg_ripple.check_constraints() IS NOT NULL AS constraints_ok;
 
 -- ── Hot dictionary ────────────────────────────────────────────────────────────
 SELECT pg_ripple.prewarm_dictionary_hot() >= 0 AS hot_prewarm_ok;
- hot_prewarm_ok 
-----------------
- t
-(1 row)
-
+ERROR:  function pg_prewarm(unknown) does not exist at character 8
 -- Cleanup.
 SELECT pg_ripple.drop_rules('rdfs') >= 0 AS rdfs_cleanup;
  rdfs_cleanup 

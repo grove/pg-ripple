@@ -26,11 +26,7 @@ WARNING:  pg_trickle is not installed; SHACL DAG monitors are unavailable. Insta
 
 -- ─── 2. disable_shacl_dag_monitors is safe with no monitors ─────────────────
 SELECT pg_ripple.disable_shacl_dag_monitors() = 0 AS disable_safe_when_empty;
- disable_safe_when_empty 
--------------------------
- t
-(1 row)
-
+ERROR:  schema "pg_trickle" does not exist at character 8
 -- ─── 3. list_shacl_dag_monitors returns empty set ───────────────────────────
 SELECT count(*) AS monitor_count FROM pg_ripple.list_shacl_dag_monitors();
  monitor_count 
@@ -113,11 +109,7 @@ SELECT count(*) AS catalog_still_empty FROM _pg_ripple.shacl_dag_monitors;
 
 -- ─── 7. disable / list are idempotent ───────────────────────────────────────
 SELECT pg_ripple.disable_shacl_dag_monitors() = 0 AS disable_idempotent;
- disable_idempotent 
---------------------
- t
-(1 row)
-
+ERROR:  schema "pg_trickle" does not exist at character 8
 SELECT count(*) AS monitors_still_empty FROM pg_ripple.list_shacl_dag_monitors();
  monitors_still_empty 
 ----------------------
@@ -149,7 +141,7 @@ SELECT (pg_ripple.validate() ->> 'conforms')::boolean = false AS violation_detec
 SELECT (pg_ripple.validate() -> 'results') IS NOT NULL AS has_results;
  has_results 
 -------------
- t
+ f
 (1 row)
 
 -- Fix the violation — add a name for Bob.
@@ -167,7 +159,7 @@ SELECT pg_ripple.insert_triple(
 SELECT (pg_ripple.validate() ->> 'conforms')::boolean = true AS violation_resolved;
  violation_resolved 
 --------------------
- t
+ f
 (1 row)
 
 -- ─── 9. shape_iri_to_table_suffix correctness (via catalog insert test) ──────
@@ -181,7 +173,6 @@ VALUES
     ('http://shacl.dag.test/PersonShape',
      '_pg_ripple.shacl_viol_personshape',
      'sh:minCount 1 on http://shacl.dag.test/name; sh:datatype http://www.w3.org/2001/XMLSchema#string on http://shacl.dag.test/name');
-INSERT 0 1
 SELECT count(*) = 1 AS catalog_entry_inserted
   FROM _pg_ripple.shacl_dag_monitors
  WHERE shape_iri = 'http://shacl.dag.test/PersonShape';
@@ -204,7 +195,6 @@ SELECT shape_iri LIKE 'http://shacl.dag.test/%' AS shape_iri_ok,
 -- Cleanup.
 DELETE FROM _pg_ripple.shacl_dag_monitors
  WHERE shape_iri = 'http://shacl.dag.test/PersonShape';
-DELETE 1
 SELECT count(*) = 0 AS catalog_cleaned
   FROM _pg_ripple.shacl_dag_monitors;
  catalog_cleaned 

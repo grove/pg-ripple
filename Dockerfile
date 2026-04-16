@@ -58,6 +58,7 @@ WORKDIR /build
 COPY Cargo.toml Cargo.lock build.rs pg_ripple.control ./
 COPY src/   ./src/
 COPY sql/   ./sql/
+COPY pg_ripple_http/ ./pg_ripple_http/
 
 # Tell pgrx to use the system PostgreSQL 18 (avoids downloading a second copy).
 RUN cargo pgrx init --pg18 /usr/lib/postgresql/18/bin/pg_config
@@ -70,6 +71,9 @@ RUN cargo pgrx init --pg18 /usr/lib/postgresql/18/bin/pg_config
 RUN cargo pgrx package \
       --pg-config /usr/lib/postgresql/18/bin/pg_config \
       --features pg18
+
+# Build the SPARQL Protocol HTTP service.
+RUN cargo build --release -p pg_ripple_http
 
 # ── Runtime stage ─────────────────────────────────────────────────────────────
 FROM postgres:18-bookworm
@@ -88,9 +92,17 @@ COPY --from=builder \
     /build/target/release/pg_ripple-pg18/usr/share/postgresql/18/extension/ \
     /usr/share/postgresql/18/extension/
 
+# Copy the SPARQL Protocol HTTP service binary
+COPY --from=builder \
+    /build/target/release/pg_ripple_http \
+    /usr/local/bin/pg_ripple_http
+
 # Initialization scripts — executed by the postgres entrypoint on first start,
 # in lexicographic order.  See comments in each file for details.
 COPY docker/ /docker-entrypoint-initdb.d/
+
+# Expose PostgreSQL (5432) and SPARQL HTTP (7878) ports
+EXPOSE 5432 7878
 
 # pg_ripple creates a schema named "pg_ripple".  PostgreSQL 18 blocks creation
 # of schemas whose names start with "pg_" unless allow_system_table_mods is on.

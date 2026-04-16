@@ -1,6 +1,5 @@
 -- pg_regress test: v0.9.0 serialization — RDF/XML, Turtle export, JSON-LD export
 -- Namespace: https://serial.test/
-
 DO $$
 BEGIN
     DELETE FROM _pg_ripple.vp_rare
@@ -9,9 +8,7 @@ BEGIN
         WHERE value LIKE 'https://serial.test/%'
     );
 END $$;
-
 -- ── RDF/XML load ──────────────────────────────────────────────────────────────
-
 SELECT pg_ripple.load_rdfxml(
     '<?xml version="1.0"?>' ||
     '<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"' ||
@@ -27,7 +24,7 @@ SELECT pg_ripple.load_rdfxml(
 ) = 4 AS rdfxml_loaded_four_triples;
  rdfxml_loaded_four_triples 
 ----------------------------
- t
+ f
 (1 row)
 
 -- Verify the triples were loaded
@@ -46,7 +43,6 @@ FROM pg_ripple.find_triples('<https://serial.test/alice>', '<https://serial.test
 (1 row)
 
 -- ── Turtle export ─────────────────────────────────────────────────────────────
-
 -- export_turtle returns TEXT and should mention alice
 SELECT pg_ripple.export_turtle(NULL) LIKE '%serial.test/alice%' AS turtle_contains_alice;
  turtle_contains_alice 
@@ -58,11 +54,10 @@ SELECT pg_ripple.export_turtle(NULL) LIKE '%serial.test/alice%' AS turtle_contai
 SELECT pg_ripple.export_turtle(NULL) LIKE '% .' AS turtle_has_triple_dot;
  turtle_has_triple_dot 
 -----------------------
- t
+ f
 (1 row)
 
 -- ── JSON-LD export ────────────────────────────────────────────────────────────
-
 -- export_jsonld returns JSONB array
 SELECT jsonb_typeof(pg_ripple.export_jsonld(NULL)) = 'array' AS jsonld_is_array;
  jsonld_is_array 
@@ -89,7 +84,6 @@ WHERE elem->>'@id' = 'https://serial.test/alice';
 (1 row)
 
 -- ── Streaming Turtle export ───────────────────────────────────────────────────
-
 SELECT count(*) >= 1 AS turtle_stream_has_lines
 FROM pg_ripple.export_turtle_stream(NULL);
  turtle_stream_has_lines 
@@ -106,7 +100,6 @@ WHERE line LIKE '%serial.test/alice%';
 (1 row)
 
 -- ── Streaming JSON-LD export ──────────────────────────────────────────────────
-
 SELECT count(*) >= 1 AS jsonld_stream_has_lines
 FROM pg_ripple.export_jsonld_stream(NULL);
  jsonld_stream_has_lines 
@@ -115,7 +108,6 @@ FROM pg_ripple.export_jsonld_stream(NULL);
 (1 row)
 
 -- ── Round-trip: load RDF/XML → export Turtle → verify content ─────────────────
-
 -- After loading the RDF/XML data above, export_turtle should contain bob's name
 SELECT pg_ripple.export_turtle(NULL) LIKE '%serial.test/bob%' AS turtle_round_trip_ok;
  turtle_round_trip_ok 

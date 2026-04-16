@@ -43,7 +43,6 @@ BEGIN
             NULL;
     END;
 END $$;
-DO
 SELECT true AS malformed_builtin_raises_error;
  malformed_builtin_raises_error 
 --------------------------------

@@ -59,7 +59,9 @@ ORDER BY ordinal_position;
  table_oid
  triple_count
  htap
-(4 rows)
+ derived
+ rule_set
+(6 rows)
 
 -- ── vp_rare table (including source column from v0.1.0 base) ─────────────────
 SELECT column_name

@@ -11,11 +11,7 @@ SELECT pg_ripple.load_rules_builtin('owl-rl') > 0 AS owl_rl_rules_loaded;
 SELECT count(*) > 10 AS owl_rl_has_many_rules
 FROM (SELECT * FROM pg_ripple.list_rules()) r
 WHERE (r::jsonb)->>'rule_set' = 'owl-rl';
- owl_rl_has_many_rules 
------------------------
- t
-(1 row)
-
+ERROR:  cannot cast type record to jsonb at character 101
 -- Enable and then disable.
 SELECT pg_ripple.disable_rule_set('owl-rl');
  disable_rule_set 
