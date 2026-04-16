@@ -101,7 +101,7 @@ async fn main() {
             .await
             .expect("pg_ripple extension not available — is it installed?");
         let count: i64 = row.get(0);
-        tracing::info!("connected to PostgreSQL, triple store contains {count} triples");
+        tracing::info!("connected to {pg_url} (port {port}), triple store contains {count} triples");
     }
 
     let state = Arc::new(AppState {
