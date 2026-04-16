@@ -400,7 +400,8 @@ pub fn load_predicate_hints(pred_ids: &[i64]) -> HashMap<i64, PredicateHints> {
 
     // Query shapes that reference any of the predicates.
     // We look for sh:path → predicate IRI in the shape JSON.
-    let query = "SELECT s.shape_json FROM _pg_ripple.shacl_shapes s WHERE s.active = true".to_owned();
+    let query =
+        "SELECT s.shape_json FROM _pg_ripple.shacl_shapes s WHERE s.active = true".to_owned();
 
     let _ = id_list; // currently we scan all active shapes; filter below
 
