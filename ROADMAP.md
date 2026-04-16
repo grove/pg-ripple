@@ -962,13 +962,20 @@ BSBM results documented. >100K triples/sec sustained bulk load. <10ms for simple
     - `pg_ripple.load_rdfxml_into_graph(data TEXT, graph_iri TEXT) RETURNS BIGINT`
     - `pg_ripple.load_ntriples_file_into_graph(path TEXT, graph_iri TEXT) RETURNS BIGINT`
     - `pg_ripple.load_turtle_file_into_graph(path TEXT, graph_iri TEXT) RETURNS BIGINT`
+    - `pg_ripple.load_rdfxml_file_into_graph(path TEXT, graph_iri TEXT) RETURNS BIGINT`
   - Encode the `graph_iri` argument via the dictionary and delegate to the existing `*_into_graph(data, g_id)` internal functions
-  - Complementary to `load_nquads()` and `load_trig()` for workloads that have N-Triples / Turtle files and want to load them into a specific named graph without converting the format
+  - `load_rdfxml_file_into_graph` reads the file via `pg_read_file()` (superuser-only) and delegates to `load_rdfxml_into_graph`
+  - Complementary to `load_nquads()` and `load_trig()` for workloads that have N-Triples / Turtle / RDF/XML files and want to load them into a specific named graph without converting the format
+- [ ] **Graph-aware triple deletion**
+  - The existing `pg_ripple.delete_triple(s, p, o)` only deletes from the default graph (`g=0`); the underlying `storage::delete_triple(s, p, o, g_id)` already accepts a graph parameter
+  - Expose: `pg_ripple.delete_triple_from_graph(s TEXT, p TEXT, o TEXT, graph_iri TEXT) RETURNS BIGINT`
+  - Also expose: `pg_ripple.clear_graph(graph_iri TEXT) RETURNS BIGINT` — wraps the existing `storage::clear_graph_by_id()` internal function to delete all triples in a named graph in one call (currently only accessible via `drop_graph()` which also unregisters the graph IRI)
+  - Without this, users have no SQL-level way to delete a specific triple from a named graph
 - [ ] **Packaging**
   - `cargo pgrx package` produces installable `.deb` and `.rpm`
   - Docker image with extension pre-installed
   - PGXN metadata
-- [ ] pg_regress: `admin_functions.sql` (vacuum, reindex, dictionary_stats, predicate_stats), `graph_rls.sql` (RLS policy enforcement, cross-role isolation, superuser bypass), `upgrade_path.sql` (install v0.1.0 → load data → sequential upgrade to current version → verify data integrity and query correctness at each step), `load_into_graph.sql` (round-trip: load N-Triples / Turtle into a named graph, verify via SPARQL GRAPH pattern)
+- [ ] pg_regress: `admin_functions.sql` (vacuum, reindex, dictionary_stats, predicate_stats), `graph_rls.sql` (RLS policy enforcement, cross-role isolation, superuser bypass), `upgrade_path.sql` (install v0.1.0 → load data → sequential upgrade to current version → verify data integrity and query correctness at each step), `load_into_graph.sql` (round-trip: load N-Triples / Turtle / RDF/XML into a named graph, verify via SPARQL GRAPH pattern), `graph_delete.sql` (delete_triple_from_graph, clear_graph, verify isolation from default graph)
 
 ### Documentation
 
@@ -982,7 +989,7 @@ BSBM results documented. >100K triples/sec sustained bulk load. <10ms for simple
 
 ### Exit Criteria
 
-Extension is installable, upgradable, and documented. Operational tooling sufficient for production use. Graph-level RLS enforces access control per named graph.
+Extension is installable, upgradable, and documented. Operational tooling sufficient for production use. Graph-level RLS enforces access control per named graph. All graph-scoped load and delete operations available as first-class SQL functions.
 
 ---
 
