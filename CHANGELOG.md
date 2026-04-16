@@ -9,7 +9,41 @@ Versions correspond to the milestones in [ROADMAP.md](ROADMAP.md).
 
 ## [Unreleased]
 
-Points at the next milestone: v0.18.0 — SPARQL CONSTRUCT, DESCRIBE & ASK Views.
+Points at the next milestone: v0.19.0 — Federation Performance.
+
+---
+
+## [0.18.0] — 2026-04-16 — SPARQL CONSTRUCT, DESCRIBE & ASK Views
+
+pg_ripple now lets you register any SPARQL CONSTRUCT, DESCRIBE, or ASK query as a *live view* — a pg_trickle stream table that stays incrementally current as triples are inserted or deleted. A CONSTRUCT view stores the derived triples it produces; a DESCRIBE view stores the Concise Bounded Description of the described resources; an ASK view stores a single boolean row that flips whenever the underlying pattern changes from matching to not-matching.
+
+**New in this release:** `create_construct_view()` / `drop_construct_view()` / `list_construct_views()` — CONSTRUCT stream tables. `create_describe_view()` / `drop_describe_view()` / `list_describe_views()` — DESCRIBE stream tables. `create_ask_view()` / `drop_ask_view()` / `list_ask_views()` — ASK stream tables. Migration script `pg_ripple--0.17.0--0.18.0.sql`.
+
+### What you can do
+
+- **Materialise inferred facts** — `pg_ripple.create_construct_view('inferred_agents', 'CONSTRUCT { ?person a <foaf:Agent> } WHERE { ?person a <foaf:Person> }')` creates a stream table `pg_ripple.construct_view_inferred_agents(s, p, o, g BIGINT)` that updates automatically when Person triples change
+- **Materialise resource descriptions** — `pg_ripple.create_describe_view('authors', 'DESCRIBE ?a WHERE { ?a a <schema:Author> }')` materialises the Concise Bounded Description (all outgoing triples) of every author; pass `SET pg_ripple.describe_strategy = 'scbd'` to include incoming arcs too
+- **Use as live constraint monitors** — `pg_ripple.create_ask_view('no_orphan_nodes', 'ASK { ?s <rdf:type> <myns:Item> . FILTER NOT EXISTS { ?s <myns:owner> ?o } }')` creates a single-row stream table whose `result` column flips to `true` whenever an orphan node appears — ideal for dashboard health indicators and application-side alerts
+- **Decode results automatically** — pass `decode := true` to any CONSTRUCT or DESCRIBE view to create a companion `_decoded` view that joins the dictionary, returning human-readable IRIs and literal strings instead of raw BIGINT IDs
+- **Query-form validation is instant** — passing a SELECT query to `create_construct_view()` or `create_ask_view()` immediately returns a clear error, even without pg_trickle installed
+
+### What happens behind the scenes
+
+Each view type compiles the SPARQL query at registration time. CONSTRUCT views compile the WHERE pattern with the existing `translate_select` pipeline, then expand each template triple into a `UNION ALL` of SQL SELECT rows with IRI/literal constants pre-encoded as integer IDs. DESCRIBE views use the new `_pg_ripple.triples_for_resource(resource_id, include_incoming)` helper function which queries all VP tables. ASK views wrap `translate_ask()` output as `SELECT EXISTS(...) AS result, now() AS evaluated_at`. All three types call `pgtrickle.create_stream_table()` with the compiled SQL. Metadata is stored in three new catalog tables: `_pg_ripple.construct_views`, `_pg_ripple.describe_views`, `_pg_ripple.ask_views`.
+
+<details>
+<summary>Technical details</summary>
+
+- **src/views.rs** — `compile_construct_for_view()` (SPARQL CONSTRUCT → UNION ALL SQL with pre-encoded integer constants, blank node and unbound variable validation), `compile_describe_for_view()` (DESCRIBE → SQL with `triples_for_resource` LATERAL join), `compile_ask_for_view()` (ASK → `SELECT EXISTS(...)` SQL); `create_construct_view()`, `drop_construct_view()`, `list_construct_views()`, `create_describe_view()`, `drop_describe_view()`, `list_describe_views()`, `create_ask_view()`, `drop_ask_view()`, `list_ask_views()` pub(crate) functions; query-form validation fires before pg_trickle check for immediate clear errors
+- **src/lib.rs** — `v018_views_schema_setup` SQL block: `_pg_ripple.{construct,describe,ask}_views` catalog tables; `_pg_ripple.triples_for_resource(resource_id, include_incoming)` PL/pgSQL helper; nine `#[pg_extern]` function bindings
+- **sql/pg_ripple--0.17.0--0.18.0.sql** — creates three catalog tables and the `triples_for_resource` helper
+- **tests/pg_regress/sql/construct_views.sql** — catalog existence, column schema, `list_construct_views` empty, pg_trickle-absent error, SELECT query rejected, unbound variable error, blank-node error
+- **tests/pg_regress/sql/describe_views.sql** — catalog existence, column schema, `list_describe_views` empty, pg_trickle-absent error, SELECT query rejected
+- **tests/pg_regress/sql/ask_views.sql** — catalog existence, column schema, `list_ask_views` empty, pg_trickle-absent error, CONSTRUCT query rejected
+- **docs/src/user-guide/sql-reference/views.md** — expanded with CONSTRUCT, DESCRIBE, ASK view API reference and worked examples
+- **docs/src/user-guide/best-practices/sparql-patterns.md** — expanded with CONSTRUCT vs SELECT view selection guide, inference materialisation pattern, ASK view constraint monitor pattern
+
+</details>
 
 ---
 
