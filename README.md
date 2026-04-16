@@ -13,24 +13,29 @@ pg_ripple is a PostgreSQL 18 extension building toward a fully-featured knowledg
 
 ---
 
-## What works today (v0.11.0)
+## What works today (v0.17.0)
 
-v0.11.0 adds always-fresh, incrementally-maintained stream tables for SPARQL and Datalog queries and Extended Vertical Partitioning (ExtVP) semi-join tables for multi-predicate star-pattern acceleration. All three features soft-require [pg_trickle](https://github.com/grove/pg-trickle); pg_ripple operates normally without it and returns a clear error with an install hint when the new functions are called.
+v0.17.0 is the JSON-LD Framing release. Seventeen versions in, pg_ripple covers the full SPARQL 1.1 stack, SHACL validation, Datalog reasoning, incremental live views, a standard HTTP endpoint, federated queries across remote SPARQL services, and now frame-driven JSON-LD export — all inside PostgreSQL with no separate process required.
 
 | Area | What's included |
 |---|---|
-| **Storage** | VP tables (one table per predicate), HTAP delta/main split, background merge worker, shared-memory dictionary cache; `source` column (`0`=explicit, `1`=derived) |
-| **SPARQL views** | `create_sparql_view(name, sparql, schedule, decode)` — always-fresh stream table from any SPARQL SELECT query; `drop_sparql_view`, `list_sparql_views` |
-| **Datalog views** | `create_datalog_view(name, rules, goal, ...)` — self-refreshing view from inline rules + goal; `create_datalog_view_from_rule_set`; `drop_datalog_view`, `list_datalog_views` |
-| **ExtVP** | `create_extvp(name, pred1_iri, pred2_iri, schedule)` — pre-computed semi-join stream table for multi-predicate star queries; `drop_extvp`, `list_extvp` |
+| **Storage** | VP tables (one per predicate), HTAP delta/main split, background merge worker, shared-memory dictionary cache; `source` column (`0`=explicit, `1`=derived) |
 | **Encoding** | Dictionary encoding (IRI, blank node, literal → i64), inline encoding for numbers and dates, RDF-star / quoted triples; hot dictionary tier for high-frequency IRIs |
-| **Import** | N-Triples, Turtle, TriG, N-Quads, RDF/XML; named graphs; bulk load |
-| **SPARQL** | Full SPARQL 1.1 — SELECT, CONSTRUCT, DESCRIBE, ASK; property paths, aggregates, UNION/MINUS, subqueries, BIND, VALUES, OPTIONAL, named graphs; `include_derived` flag |
+| **Import** | N-Triples, Turtle, TriG, N-Quads, RDF/XML; named-graph bulk loaders; file variants; remote `LOAD <url>` via SPARQL Update |
+| **SPARQL** | Full SPARQL 1.1 — SELECT, CONSTRUCT, DESCRIBE, ASK; property paths, aggregates, UNION/MINUS, subqueries, BIND, VALUES, OPTIONAL, named graphs; INSERT/DELETE DATA; pattern-based DELETE/INSERT WHERE; graph management (CLEAR, DROP, CREATE) |
 | **Output formats** | SELECT → JSONB; CONSTRUCT/DESCRIBE → JSONB, Turtle, or JSON-LD |
 | **Export** | `export_turtle()`, `export_jsonld()`, `export_ntriples()`, streaming variants |
+| **JSON-LD Framing** | `export_jsonld_framed(frame)` — frame-driven CONSTRUCT → nested JSON-LD; `jsonld_frame_to_sparql(frame)` — inspect the generated SPARQL; `export_jsonld_framed_stream(frame)` — NDJSON one object per root; `jsonld_frame(input, frame)` — general-purpose framing; `create_framing_view` / `drop_framing_view` / `list_framing_views` |
+| **HTTP API** | `pg_ripple_http` companion service: W3C SPARQL 1.1 Protocol over HTTP/HTTPS; content negotiation (JSON, XML, CSV, TSV, Turtle, N-Triples, JSON-LD); bearer/basic auth; CORS; Prometheus metrics; Docker Compose included |
+| **Federation** | `SERVICE <url> { … }` in any SPARQL query; SSRF-safe endpoint allowlist; `SERVICE SILENT`; configurable timeout, result cap, and error mode; health monitoring; local view rewrite |
+| **SPARQL views** | `create_sparql_view(name, sparql, schedule, decode)` — always-fresh stream table from any SPARQL SELECT; `drop_sparql_view`, `list_sparql_views` |
+| **Datalog views** | `create_datalog_view(name, rules, goal, …)` — self-refreshing table from inline rules + goal; `create_datalog_view_from_rule_set`; `drop_datalog_view`, `list_datalog_views` |
+| **Framing views** | `create_framing_view(name, frame)` — incrementally-maintained JSON-LD stream table (requires pg_trickle) |
+| **ExtVP** | `create_extvp(name, pred1_iri, pred2_iri, schedule)` — pre-computed semi-join stream table for star queries; `drop_extvp`, `list_extvp` |
 | **SHACL** | Core constraints (`sh:minCount`, `sh:maxCount`, `sh:datatype`, `sh:in`, `sh:pattern`, `sh:class`, …); combinators (`sh:or`, `sh:and`, `sh:not`); sync and async validation modes; SHACL-AF `sh:rule` bridge |
 | **Datalog** | Custom inference rules (Turtle-flavoured syntax); built-in RDFS (13 rules) and OWL RL (~20 core rules); stratified negation; arithmetic/string built-ins; integrity constraints; on-demand execution mode |
-| **Write** | `insert_triple`, `delete_triple`, SPARQL INSERT/DELETE DATA, deduplication |
+| **Performance** | Selectivity-based BGP reordering; plan cache with hit/miss stats; parallel query hints for star patterns; extended statistics on VP column pairs; SHACL-informed optimizer hints |
+| **Admin & Security** | `vacuum()`, `reindex()`, `vacuum_dictionary()`, `dictionary_stats()`; graph-level Row-Level Security via `enable_graph_rls`, `grant_graph`, `revoke_graph`; `rls_bypass` GUC for superuser sessions |
 | **Full-text search** | `fts_search()` over literal values via PostgreSQL GIN indexes |
 
 ```sql
@@ -85,30 +90,19 @@ SELECT pg_ripple.infer('org_rules');
 
 ## Where we're headed
 
-Each release adds a self-contained layer of capability, building toward a complete knowledge graph platform inside PostgreSQL.
+Three releases remain on the path to v1.0.0. Each adds a self-contained layer on top of what already works.
 
-### v0.15.0 — SPARQL Protocol (HTTP)
+### v0.18.0 — SPARQL CONSTRUCT, DESCRIBE & ASK Views
 
-A companion `pg_ripple_http` service exposes a standard W3C SPARQL 1.1 Protocol endpoint so browsers, dashboards (YASGUI, Metaphacts), and any SPARQL client can query over HTTP — no PostgreSQL driver needed.
+pg_ripple already lets you register a SPARQL SELECT query as a live stream table. This release extends that to the other three query forms. A **CONSTRUCT view** materialises the derived triples produced by a CONSTRUCT query — ideal for caching inferred facts or pre-building API responses. A **DESCRIBE view** stores all triples about the described resources. An **ASK view** keeps a single `BOOLEAN` row up to date as the underlying pattern changes — useful as a live constraint monitor or dashboard indicator. All three are backed by pg_trickle and update incrementally on every triple change.
 
-### v0.16.0 — SPARQL Federation
+### v0.19.0 — Federation Performance
 
-Query remote SPARQL endpoints alongside local data in a single query using the standard `SERVICE` keyword. Remote calls execute in parallel.
+The `SERVICE` clause works today but creates a new HTTP connection on every call. This release adds connection pooling (reuse TCP/TLS across calls), a configurable result cache with TTL, query rewriting to project only the variables the outer query needs, batching of multiple `SERVICE` clauses to the same endpoint into one HTTP request, and adaptive timeouts based on observed P95 latency. The result is significantly lower latency and better behaviour under load for federation-heavy workloads.
 
-```sql
-SELECT * FROM pg_ripple.sparql('
-  PREFIX ex:  <http://example.org/>
-  PREFIX dbo: <http://dbpedia.org/ontology/>
-  SELECT ?name ?abstract WHERE {
-    ?person ex:worksAt ex:AcmeCorp ;
-            ex:name    ?name .
-    SERVICE <https://dbpedia.org/sparql> {
-      ?person dbo:abstract ?abstract .
-      FILTER(LANG(?abstract) = "en")
-    }
-  }
-');
-```
+### v1.0.0 — Production Release
+
+The final release focuses on correctness and confidence rather than new features: full W3C SPARQL 1.1 conformance test suite pass, SHACL conformance suite pass, a security audit, stress testing at 100 M+ triple scale, and a hardened upgrade path from every prior version. This is the version intended for production deployments.
 
 ---
 
