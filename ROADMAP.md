@@ -38,8 +38,9 @@ Each release below has two layers:
 | [0.14.0](#v0140--administrative--operational-readiness) | Admin & Security | Operations tooling, access control, docs, packaging | 4–6 pw |
 | [0.15.0](#v0150--sparql-protocol-http-endpoint) | SPARQL Protocol | Standard HTTP API, graph-aware loaders and deletes as SQL functions | 3–4 pw |
 | [0.16.0](#v0160--sparql-federation) | SPARQL Federation | Query remote SPARQL endpoints alongside local data | 4–6 pw |
+| [0.17.0](#v0170--json-ld-framing) | JSON-LD Framing | Frame-driven CONSTRUCT queries producing nested JSON-LD | 3–4 pw |
 | [1.0.0](#v100--production-release) | Production Release | Standards conformance, stress testing, security audit | 6–8 pw |
-| | | **Total estimated effort** | **98–131 pw** |
+| | | **Total estimated effort** | **101–135 pw** |
 
 ---
 
@@ -987,36 +988,36 @@ Extension is installable, upgradable, and documented. Operational tooling suffic
 
 ### Deliverables
 
-- [x] **Companion HTTP service** (`pg_ripple_http` binary)
+- [ ] **Companion HTTP service** (`pg_ripple_http` binary)
   - Standalone Rust binary (not a PG background worker — avoids binding TCP ports inside PostgreSQL)
   - Connects to PostgreSQL via standard `libpq` / `tokio-postgres`
   - Configurable via environment variables or config file: `PG_TRIPLE_HTTP_PORT`, `PG_TRIPLE_HTTP_PG_URL`
-- [x] **W3C SPARQL 1.1 Protocol compliance**
+- [ ] **W3C SPARQL 1.1 Protocol compliance**
   - `GET /sparql?query=...` — URL-encoded query
   - `POST /sparql` with `application/sparql-query` body
   - `POST /sparql` with `application/x-www-form-urlencoded` body (`query=...` / `update=...`)
   - SPARQL Update via `POST /sparql` with `application/sparql-update` body
-- [x] **Content negotiation**
+- [ ] **Content negotiation**
   - `application/sparql-results+json` (default for SELECT/ASK)
   - `application/sparql-results+xml`
   - `text/csv` / `text/tab-separated-values`
   - `text/turtle` / `application/n-triples` (for CONSTRUCT/DESCRIBE)
   - `application/ld+json` (JSON-LD, for CONSTRUCT/DESCRIBE)
   - **RDF-star content types** *(builds on v0.4.0 RDF-star)*: Turtle-star and JSON-LD-star for CONSTRUCT/DESCRIBE results containing quoted triples
-- [x] **Connection pooling**
+- [ ] **Connection pooling**
   - Built-in connection pool (e.g. `deadpool-postgres`) to handle concurrent HTTP requests
   - `PG_TRIPLE_HTTP_POOL_SIZE` configuration
-- [x] **Security**
+- [ ] **Security**
   - Optional bearer token or Basic auth for access control
   - CORS configuration for browser-based SPARQL clients
   - Rate limiting GUC
-- [x] **Health and metrics**
+- [ ] **Health and metrics**
   - `GET /health` endpoint for load balancer probes
   - Prometheus-compatible `/metrics` endpoint (query count, latency histogram, error rate)
-- [x] **Docker integration**
+- [ ] **Docker integration**
   - Docker image bundles both PostgreSQL (with pg_ripple) and the HTTP service
   - Docker Compose example with separate PG and HTTP containers
-- [x] **Graph-aware bulk loader SQL functions**
+- [ ] **Graph-aware bulk loader SQL functions**
   - Expose the internal `load_ntriples_into_graph()`, `load_turtle_into_graph()`, `load_rdfxml_into_graph()` Rust functions (added in v0.10.0) as public SQL functions:
     - `pg_ripple.load_ntriples_into_graph(data TEXT, graph_iri TEXT) RETURNS BIGINT`
     - `pg_ripple.load_turtle_into_graph(data TEXT, graph_iri TEXT) RETURNS BIGINT`
@@ -1027,26 +1028,26 @@ Extension is installable, upgradable, and documented. Operational tooling suffic
   - Encode the `graph_iri` argument via the dictionary and delegate to the existing `*_into_graph(data, g_id)` internal functions
   - `load_rdfxml_file_into_graph` reads the file via `pg_read_file()` (superuser-only) and delegates to `load_rdfxml_into_graph`
   - Complementary to `load_nquads()` and `load_trig()` for workloads that have N-Triples / Turtle / RDF/XML files and want to load them into a specific named graph without converting the format
-- [x] **Graph-aware triple deletion**
+- [ ] **Graph-aware triple deletion**
   - The existing `pg_ripple.delete_triple(s, p, o)` only deletes from the default graph (`g=0`); the underlying `storage::delete_triple(s, p, o, g_id)` already accepts a graph parameter
   - Expose: `pg_ripple.delete_triple_from_graph(s TEXT, p TEXT, o TEXT, graph_iri TEXT) RETURNS BIGINT`
   - Also expose: `pg_ripple.clear_graph(graph_iri TEXT) RETURNS BIGINT` — wraps the existing `storage::clear_graph_by_id()` internal function to delete all triples in a named graph in one call (currently only accessible via `drop_graph()` which also unregisters the graph IRI)
   - Without this, users have no SQL-level way to delete a specific triple from a named graph
-- [x] **SQL API completeness gaps**
+- [ ] **SQL API completeness gaps**
   - **Missing file-path loader**: `pg_ripple.load_rdfxml_file(path TEXT) RETURNS BIGINT` — completes the set of `*_file` variants (N-Triples, N-Quads, Turtle, TriG all have file variants); reads via `pg_read_file()` (superuser-only)
   - **Graph parameter on find_triples**: `pg_ripple.find_triples(s TEXT, p TEXT, o TEXT, graph TEXT DEFAULT NULL) RETURNS TABLE` — exposes the unused `graph` parameter in `storage::find_triples(s, p, o, graph)` so users can pattern-match within a named graph without falling back to SPARQL; `graph := NULL` queries the default graph
   - **Per-graph triple count**: `pg_ripple.triple_count_in_graph(graph_iri TEXT) RETURNS BIGINT` — returns the count of triples in a specific named graph (existing `triple_count()` returns total across all graphs)
   - **Dictionary lookup diagnostics**: `pg_ripple.decode_id_full(id BIGINT) RETURNS JSONB` — exposes `dictionary::decode_full(id)` to return `{"kind": ..., "value": ..., "language": null|"...", "datatype": null|"..."}` structured term metadata (current `decode_id()` returns only the plain string); useful for debugging and inspection
   - **Dictionary term existence check**: `pg_ripple.lookup_iri(iri TEXT) RETURNS BIGINT DEFAULT NULL` — exposes `dictionary::lookup_iri(iri)` to check whether an IRI already exists in the dictionary without encoding it (useful for test assertions, cost estimation, and introspection)
-- [x] pg_regress: `sparql_protocol.sql` (protocol-level tests via `curl`), `load_into_graph.sql` (round-trip: load N-Triples / Turtle / RDF/XML into a named graph, verify via SPARQL GRAPH pattern), `graph_delete.sql` (delete_triple_from_graph, clear_graph, verify isolation from default graph), `sql_api_completeness.sql` (find_triples with graph param, triple_count_in_graph, decode_id_full, lookup_iri)
+- [ ] pg_regress: `sparql_protocol.sql` (protocol-level tests via `curl`), `load_into_graph.sql` (round-trip: load N-Triples / Turtle / RDF/XML into a named graph, verify via SPARQL GRAPH pattern), `graph_delete.sql` (delete_triple_from_graph, clear_graph, verify isolation from default graph), `sql_api_completeness.sql` (find_triples with graph param, triple_count_in_graph, decode_id_full, lookup_iri)
 
 ### Documentation
 
 > See [plans/documentation.md](plans/documentation.md) for details.
 
-- [x] `user-guide/sql-reference/sparql-query.md` expanded: HTTP protocol endpoint configuration, `Accept` header formats, SPARQL 1.1 Protocol conformance note
-- [x] `user-guide/best-practices/sparql-patterns.md` expanded: using the HTTP endpoint from Python (`SPARQLWrapper`), Java (Jena), `curl`; SPARQL IDE / Protégé direct connection
-- [x] `reference/faq.md` expanded: HTTP endpoint URL, connecting SPARQL tools directly
+- [ ] `user-guide/sql-reference/sparql-query.md` expanded: HTTP protocol endpoint configuration, `Accept` header formats, SPARQL 1.1 Protocol conformance note
+- [ ] `user-guide/best-practices/sparql-patterns.md` expanded: using the HTTP endpoint from Python (`SPARQLWrapper`), Java (Jena), `curl`; SPARQL IDE / Protégé direct connection
+- [ ] `reference/faq.md` expanded: HTTP endpoint URL, connecting SPARQL tools directly
 
 ### Exit Criteria
 
@@ -1095,9 +1096,127 @@ Standard SPARQL clients (YASGUI, Postman, RDF4J workbench, `curl`) can query and
   - Federation works via both SQL (`pg_ripple.sparql()`) and HTTP (`/sparql`) interfaces
 - [ ] pg_regress: `sparql_federation.sql`, `federation_timeout.sql`
 
+### Documentation
+
+> See [plans/documentation.md](plans/documentation.md) for details.
+
+- [ ] `user-guide/sql-reference/federation.md` — `SERVICE` keyword, endpoint registration (`register_endpoint`, `remove_endpoint`), variable endpoints with `VALUES` binding, bind-join optimisation, `federation_timeout` / `federation_max_results` / `federation_on_error` GUCs, SSRF protection via allow-list
+- [ ] `user-guide/configuration.md` expanded: `federation_timeout`, `federation_max_results`, `federation_on_error` GUCs
+- [ ] `user-guide/best-practices/sparql-patterns.md` expanded: federation query patterns, `SERVICE` performance tips (push FILTERs down, limit remote result size), combining local and remote data
+- [ ] `reference/faq.md` expanded: federation security model, configuring remote endpoints, timeout tuning
+- [ ] `reference/troubleshooting.md` expanded: federation timeouts, SSRF errors, endpoint unreachable
+
 ### Exit Criteria
 
 SPARQL queries with `SERVICE` clauses correctly fetch and join data from registered remote endpoints. Multiple SERVICE calls execute in parallel. Timeouts and error handling work as configured. No SSRF risk — only allowlisted endpoints are contacted.
+
+---
+
+## v0.17.0 — JSON-LD Framing
+
+**Theme**: Frame-driven SPARQL CONSTRUCT queries that produce structured, nested JSON-LD output.
+
+> **In plain language:** JSON-LD Framing is a W3C standard for reshaping RDF graph data into a specific tree structure suitable for a REST API or application. Instead of returning a flat list of disconnected facts, you provide a *frame* document — a JSON template that says "I want Company objects with their employees nested inside" — and pg_ripple automatically translates that into an optimised query, fetches only the data that matches, and returns a cleanly nested JSON-LD document. This makes pg_ripple a natural back-end for Linked Data APIs and JSON-centric applications without requiring a separate framing library.
+>
+> Unlike a naïve approach that fetches the entire graph and post-filters it, this implementation translates the frame directly into a SPARQL CONSTRUCT query. PostgreSQL then reads only the VP tables that are touched by the join — meaning a frame targeting 3 predicates on a graph with 10,000 predicates touches 3 VP tables, not 10,000. The `jsonld_frame_to_sparql()` inspection function exposes the generated SPARQL for debugging and for users who want to customise the query further before execution.
+>
+> **Effort estimate: 3–4 person-weeks**
+
+### Prerequisites
+
+- v0.5.1 SPARQL CONSTRUCT / DESCRIBE (JSONB output) — frame-to-SPARQL translation reuses the existing algebra and SQL generation pipeline.
+- v0.9.0 JSON-LD export — the `nt_term_to_jsonld_value` helper in `src/export.rs` is reused for the embedding step.
+- v0.3.0 SPARQL plan cache — framed queries benefit from cached SPARQL→SQL translation automatically.
+
+### Deliverables
+
+- [ ] **JSON-LD Framing engine** (`src/framing/`)
+  - `src/framing/mod.rs` — module root; exposes the public `frame()` entry point used by all SQL functions
+  - `src/framing/frame_translator.rs` — translates a JSON-LD frame (parsed as `serde_json::Value`) into a `spargebra` CONSTRUCT algebra tree
+  - `src/framing/embedder.rs` — takes flat CONSTRUCT result triples and applies the W3C embedding algorithm to produce a nested JSON-LD tree matching the frame structure
+  - `src/framing/compactor.rs` — applies the `@context` from the frame to compact full IRIs to prefixed terms in the output
+- [ ] **Frame-to-SPARQL translation** (`src/framing/frame_translator.rs`)
+  - Translate `@type` constraints → `?s a <IRI>` triple patterns in the CONSTRUCT WHERE clause
+  - Translate property-value pairs with wildcard `{}` → `OPTIONAL { ?s <p> ?o }` patterns
+  - Translate absent-property patterns `[]` → `OPTIONAL { ?s <p> ?o } FILTER(!bound(?o))` patterns
+  - Translate `@reverse` terms → flipped BGP triple patterns (`?o <p> ?s` instead of `?s <p> ?o`)
+  - Translate nested frame objects → recursive OPTIONAL joins, each level introducing a fresh variable
+  - Translate `@id` matching → bind target IRI as a constant in the WHERE clause
+  - Translate `@requireAll: true` → convert OPTIONAL joins to INNER joins for required properties
+  - All IRI constants dictionary-encoded at translation time (integer joins in all VP table queries — no string comparisons)
+  - Wildcards (`{}`) on `@type` and `@id` expand to unbound variables
+- [ ] **Tree-embedding algorithm** (`src/framing/embedder.rs`)
+  - Implement the W3C JSON-LD 1.1 Framing §4.1 embedding algorithm over the flat CONSTRUCT result set
+  - Build a subject-keyed node map from the CONSTRUCT rows (decoded to N-Triples strings)
+  - Walk the frame tree recursively, embedding matching node objects as property values
+  - Honour `@embed` flag: `@once` (default) — embed a node only once, use a `{"@id": "..."}` reference for subsequent occurrences; `@always` — embed every occurrence even if repeated; `@never` — always use a node reference
+  - Honour `@explicit: true` — omit properties not mentioned in the frame from the output node
+  - Honour `@omitDefault: true` — omit absent properties rather than outputting `null`
+  - Honour `@default` values — substitute the declared default value for absent properties when `@omitDefault` is `false`
+  - Reverse properties: collect subjects whose relevant predicate points to the current node and embed them under the `@reverse`-declared key
+  - Named-graph scope: when `graph` is specified, restrict embedding to nodes from that named graph
+- [ ] **`@context` compaction** (`src/framing/compactor.rs`)
+  - Extract the `@context` block from the input frame
+  - Apply prefix substitution to all IRI strings in the output tree (full IRI → compact prefixed form using registered prefixes and inline `@context` mappings)
+  - Inject the `@context` block as the first entry of the returned JSON-LD document
+  - Fall back to full IRIs when no matching prefix is registered
+- [ ] **SQL functions** (`src/lib.rs`)
+  - `pg_ripple.jsonld_frame_to_sparql(frame JSONB, graph TEXT DEFAULT NULL) RETURNS TEXT` — translate a frame to a SPARQL CONSTRUCT query string without executing it; primary debugging and inspection tool
+  - `pg_ripple.export_jsonld_framed(frame JSONB, graph TEXT DEFAULT NULL, embed TEXT DEFAULT '@once', explicit BOOLEAN DEFAULT FALSE, ordered BOOLEAN DEFAULT FALSE) RETURNS JSONB` — primary end-user function: translate frame to CONSTRUCT, execute via the SPARQL engine, apply embedding and compaction, return framed JSON-LD
+  - `pg_ripple.export_jsonld_framed_stream(frame JSONB, graph TEXT DEFAULT NULL) RETURNS SETOF TEXT` — streaming NDJSON variant (one JSON object per matched root node); avoids buffering large framed documents in memory
+  - `pg_ripple.jsonld_frame(input JSONB, frame JSONB, embed TEXT DEFAULT '@once', explicit BOOLEAN DEFAULT FALSE, ordered BOOLEAN DEFAULT FALSE) RETURNS JSONB` — general-purpose framing primitive: apply the embedding algorithm to any already-expanded JSON-LD document, not necessarily from pg-ripple storage; useful for framing SPARQL CONSTRUCT results obtained via other means
+- [ ] **SPARQL plan cache integration**
+  - The translated CONSTRUCT query string is used as the cache key in the existing `src/sparql/plan_cache.rs` translation cache
+  - Repeated calls to `export_jsonld_framed()` with the same frame and graph benefit from cached SPARQL→SQL translation automatically
+- [ ] **Named-graph support**
+  - `graph NULL` → CONSTRUCT operates over the merged graph (all `g` values across all VP tables)
+  - `graph '<IRI>'` → adds `FILTER(?g = <encoded_id>)` to each VP table join in the generated CONSTRUCT
+  - Frame `@graph` entry → directs the embedder to scope node matching to the named graph's node set
+- [ ] **Error handling**
+  - Invalid frame structure (not a JSON object, unrecognised `@embed` value) → `PT700`-range serialization error with the frame property path that failed
+  - Frame references an IRI not present in any VP table → empty result (standard W3C framing behaviour, not an error)
+  - Frame nested deeper than `pg_ripple.max_path_depth` → `PT200`-range error reusing the existing depth limit
+- [ ] **Incremental framing views** (`create_framing_view`) *(requires pg_trickle)*
+  - `pg_ripple.create_framing_view(name TEXT, frame JSONB, schedule TEXT DEFAULT '5s', decode BOOLEAN DEFAULT FALSE, output_format TEXT DEFAULT 'jsonld') RETURNS void` — translate the frame to a SPARQL CONSTRUCT query and register it as a pg_trickle stream table that stays incrementally up-to-date as triples are inserted or deleted
+  - Stream table schema: `pg_ripple.framing_view_{name}(subject_id BIGINT, frame_tree JSONB, refreshed_at TIMESTAMPTZ)` — `subject_id` is the dictionary-encoded subject IRI; `frame_tree` is the fully embedded and compacted JSON-LD output for that root node
+  - When `decode = TRUE`, a thin IRI-decoding view `pg_ripple.framing_view_{name}_decoded` is also created; the stream table itself stores integer IDs to minimise CDC surface
+  - `pg_ripple.drop_framing_view(name TEXT) RETURNS void` and `pg_ripple.list_framing_views() RETURNS TABLE(name TEXT, frame JSONB, schedule TEXT, output_format TEXT, decode BOOLEAN, row_count BIGINT, last_refresh TIMESTAMPTZ, stream_table_oid OID)` for lifecycle management
+  - `_pg_ripple.framing_views` catalog table: `name, frame, generated_construct, schedule, output_format, decode, stream_table_oid, created_at`
+  - Refresh mode heuristics (same as `create_sparql_view`): `IMMEDIATE` for constraint-style frames (e.g. select `ex:Company` nodes that lack `ex:complianceOfficer` — any row in the view is a violation); `DIFFERENTIAL` + schedule for dashboard/API use cases (company directory refreshed every 10 s); `FULL` + long schedule for large full-graph framed exports intended for downstream consumers
+  - `pg_ripple.pg_trickle_available()` check at call time — returns a clear error with an install hint when pg_trickle is absent; never raises an error at extension load time
+- [ ] pg_regress: `jsonld_framing.sql` (type-based selection, property wildcards, absent-property patterns `[]`, `@reverse`, `@embed @once/@always/@never`, `@explicit`, `@omitDefault`, `@default`, `@requireAll`, named-graph scope, empty frame, `jsonld_frame_to_sparql` inspection output, `jsonld_frame` general-purpose function, streaming variant), `jsonld_framing_views.sql` (create/drop/list framing views; `IMMEDIATE` constraint-mode view; `DIFFERENTIAL` dashboard view; `decode` option; pg_trickle-absent error message)
+
+### Supported frame features (v0.17.0)
+
+| Feature | Supported | Notes |
+|---|---|---|
+| `@type` matching | ✓ | Single IRI or array of IRIs |
+| `@id` matching | ✓ | Single IRI or array of IRIs |
+| Property wildcard `{}` | ✓ | Matches any value for a property |
+| Absent-property pattern `[]` | ✓ | Matches nodes lacking the property |
+| `@reverse` properties | ✓ | Flipped triple pattern in CONSTRUCT |
+| `@embed`: `@once` / `@always` / `@never` | ✓ | Full embedding control |
+| `@explicit` inclusion flag | ✓ | Omit unlisted properties from output |
+| `@omitDefault` flag | ✓ | Omit null-valued absent properties |
+| `@default` values | ✓ | Substitute defaults for absent properties |
+| `@requireAll` flag | ✓ | Turns OPTIONAL joins to INNER joins |
+| `@context` compaction | ✓ | Prefix substitution from frame `@context` |
+| Named graph `@graph` scoping | ✓ | Maps to `g` column filter on VP tables |
+| `@omitGraph` flag | ✓ | Single root node omits `@graph` wrapper |
+| Value pattern matching (`@value` / `@language` / `@type` in value objects) | ✗ | Deferred; requires full-graph scan to implement correctly |
+
+### Documentation
+
+> See [plans/documentation.md](plans/documentation.md) for details.
+
+- [ ] `user-guide/sql-reference/serialization.md` expanded: `export_jsonld_framed`, `jsonld_frame_to_sparql`, `jsonld_frame`, `export_jsonld_framed_stream`; frame syntax primer; `@embed` / `@explicit` / `@omitDefault` / `@requireAll` flags; named graph scoping; supported feature table
+- [ ] `user-guide/sql-reference/framing-views.md` — `create_framing_view`, `drop_framing_view`, `list_framing_views`; stream table schema and decoding view; refresh mode selection (`IMMEDIATE` for constraints, `DIFFERENTIAL` for dashboards, `FULL` for exports); `decode` option; pg_trickle dependency and detection; worked example (company directory view refreshed every 10 s)
+- [ ] `user-guide/best-practices/data-modeling.md` expanded: JSON-LD Framing for REST APIs; frame-first API design pattern; using `jsonld_frame_to_sparql` for SPARQL query inspection; performance notes (frame-driven vs full-graph export); when to use `export_jsonld_framed` vs `create_framing_view`
+- [ ] `reference/faq.md` expanded: framing vs plain JSON-LD export; what W3C framing features are supported; value pattern matching deferral; framing views vs SPARQL views
+
+### Exit Criteria
+
+`export_jsonld_framed()` correctly translates a JSON-LD frame into a SPARQL CONSTRUCT query touching only the VP tables required by the frame, executes it via the existing SPARQL engine, and returns a nested JSON-LD document with correct `@context` compaction and W3C-conformant embedding semantics. The `jsonld_frame_to_sparql()` function exposes the generated CONSTRUCT query string. The `jsonld_frame()` general-purpose primitive correctly frames any expanded JSON-LD JSONB input. `create_framing_view()` creates an incrementally-maintained pg_trickle stream table whose rows stay current as triples change; the `IMMEDIATE` refresh mode correctly detects constraint violations within the same transaction. All supported frame features in the table above pass the pg_regress test suite.
 
 ---
 

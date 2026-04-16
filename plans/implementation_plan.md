@@ -673,6 +673,212 @@ All GUC parameters exposed by pg_ripple, listed alphabetically. GUCs marked **st
 
 ---
 
+## 4.12 JSON-LD Framing Engine (`src/framing/`)
+
+**Introduced**: v0.17.0  
+**Purpose**: Translate a W3C JSON-LD 1.1 frame document into a SPARQL CONSTRUCT query, execute it via the existing SPARQL engine, and reshape the flat result into a nested JSON-LD tree.
+
+### Design rationale
+
+The naïve framing approach (used in option 1 considered during design) exports the entire RDF graph as flat JSON-LD, then feeds it to a general-purpose framing library. This is correct but expensive: a frame targeting 3 predicates on a graph with 10,000 predicates still forces a full scan of all VP tables.
+
+The frame-driven SPARQL approach (option 2, implemented here) instead translates the frame's structural constraints directly into a SPARQL CONSTRUCT query at the start. PostgreSQL then reads only the VP tables touched by the frame's join tree. For a frame that selects `ex:Company` nodes with their `ex:name` and `ex:employee` relations, only 3 VP table scans occur regardless of total graph size. Framed output is a natural consequence of the CONSTRUCT result shape — no external crate is needed.
+
+The `jsonld_frame_to_sparql()` SQL function exposes the intermediate CONSTRUCT query, making the translation debuggable and allowing users to copy, modify, and re-execute the generated SPARQL independently.
+
+### Module layout
+
+```
+src/framing/
+  mod.rs              — public entry point: frame(input_frame, graph, options) → serde_json::Value
+  frame_translator.rs — JSON-LD frame → spargebra CONSTRUCT algebra tree
+  embedder.rs         — flat CONSTRUCT rows → nested JSON-LD tree (W3C §4.1 algorithm)
+  compactor.rs        — @context prefix substitution on the output tree
+```
+
+### 4.12.1 Frame Translation (`frame_translator.rs`)
+
+The translator walks the frame JSON tree recursively and builds a `spargebra::algebra::GraphPattern` (CONSTRUCT form).
+
+**Input**: a `serde_json::Value` that is a valid JSON-LD frame object.  
+**Output**: a `spargebra::Query::Construct` with a WHERE clause and a CONSTRUCT template.
+
+**Mapping rules**:
+
+| Frame construct | Generated SPARQL |
+|---|---|
+| `"@type": "ex:Foo"` | `?s a <http://example.org/Foo>` in WHERE (inner join — type is mandatory for matching) |
+| `"@type": ["ex:A","ex:B"]` | `?s a ?_t . FILTER(?_t IN (<A>, <B>))` |
+| `"ex:prop": {}` | `OPTIONAL { ?s <ex:prop> ?_v0 }` |
+| `"ex:prop": []` | `OPTIONAL { ?s <ex:prop> ?_absent0 } FILTER(!bound(?_absent0))` |
+| `"ex:prop": { ... nested frame ... }` | `OPTIONAL { ?s <ex:prop> ?_n0 . ... recursive patterns for ?_n0 ... }` |
+| `"@reverse": { "ex:memberOf": { ... } }` | `OPTIONAL { ?_r0 <ex:memberOf> ?s . ... patterns for ?_r0 ... }` |
+| `"@id": "http://ex.org/Alice"` | `FILTER(?s = <http://ex.org/Alice>)` |
+| `"@id": ["http://ex.org/A", "http://ex.org/B"]` | `FILTER(?s IN (<A>, <B>))` |
+| `"@requireAll": true` on a frame object | Converts all `OPTIONAL` joins to inner joins within that frame object's scope |
+
+All IRI values are dictionary-encoded to `i64` before SQL generation — the resulting JOIN conditions are integer equality on VP table `s`/`o` columns, never string comparisons.
+
+Variable names are generated as `?_v{depth}_{index}` to avoid collisions across recursion levels. The CONSTRUCT template mirrors the WHERE clause variable bindings.
+
+### 4.12.2 Tree-Embedding Algorithm (`embedder.rs`)
+
+The embedder implements the W3C JSON-LD 1.1 Framing §4.1 algorithm, operating on the flat CONSTRUCT result set already in hand (not on a generic JSON-LD document from an external source).
+
+**Input**:
+- A list of `(subject_nt, predicate_nt, object_nt)` triple rows from the SPARQL engine (decoded N-Triples strings)
+- The original frame `serde_json::Value`
+- `embed`, `explicit`, `omit_default`, `ordered` option flags
+
+**Algorithm**:
+1. Build a **subject node map** (`HashMap<String, BTreeMap<String, Vec<Value>>>`) from the triple rows — keyed by subject N-Triples string, mapping predicate to list of object values converted via `nt_term_to_jsonld_value`
+2. Walk the frame tree recursively. For each frame level:
+   a. Collect subjects that match the frame's `@type` / `@id` / property constraints
+   b. For each matched subject, build an output node object:
+      - If `@embed = @once`: embed the node here and record it as embedded; subsequent occurrences of the same subject in other property positions emit `{"@id": "..."}` references only
+      - If `@embed = @always`: embed unconditionally (risk of circular output if the data is cyclic)
+      - If `@embed = @never`: always emit `{"@id": "..."}` reference
+   c. For each property in the output node, recurse into the frame's nested object for that property to embed child nodes
+   d. Apply `@explicit`: if `true`, omit output properties not listed in the frame
+   e. Apply `@default` / `@omitDefault`: for properties present in the frame but absent in the data, either include `{"@value": null}` or omit entirely
+   f. Apply `@reverse`: collect subjects from the node map whose specified predicate points to the current subject, and embed them under the reverse key
+3. Collect root-level matched nodes into the output array
+4. If result contains exactly one root node and `@omitGraph` is `true` (default for JSON-LD 1.1 mode), return the node directly without a `@graph` wrapper; otherwise wrap in `{"@context": ..., "@graph": [...]}`
+
+The embedder reuses `nt_term_to_jsonld_value` from `src/export.rs` for consistent N-Triples-to-JSON-LD value conversion.
+
+### 4.12.3 Compaction (`compactor.rs`)
+
+A lightweight prefix-substitution pass applied after embedding. No full JSON-LD compaction algorithm is implemented (that would require the `json-ld` crate); instead:
+
+1. Extract all `prefix → IRI` mappings from the frame's `@context` block
+2. Walk the output JSON tree and replace full IRI strings with their shortest matching compact form (e.g. `"http://xmlns.com/foaf/0.1/name"` → `"foaf:name"`)
+3. For `@id` values and `@type` values, apply compaction
+4. Inject the `@context` object from the frame as the first key of the output document
+
+This covers the overwhelming majority of real-world compaction needs without a full round-trip through the JSON-LD algorithm suite.
+
+### 4.12.4 SQL Function Signatures
+
+```sql
+-- Translate a frame to a SPARQL CONSTRUCT string (for debugging and inspection).
+pg_ripple.jsonld_frame_to_sparql(
+    frame   JSONB,
+    graph   TEXT    DEFAULT NULL   -- NULL = merged graph; IRI = restrict to named graph
+) RETURNS TEXT
+
+-- Primary end-user function: frame-driven fetch + embedding + compaction.
+pg_ripple.export_jsonld_framed(
+    frame     JSONB,
+    graph     TEXT    DEFAULT NULL,
+    embed     TEXT    DEFAULT '@once',   -- @once | @always | @never
+    explicit  BOOLEAN DEFAULT FALSE,     -- explicit inclusion flag
+    ordered   BOOLEAN DEFAULT FALSE      -- lexicographic ordering of output keys
+) RETURNS JSONB
+
+-- Streaming variant — one NDJSON line per matched root node.
+pg_ripple.export_jsonld_framed_stream(
+    frame   JSONB,
+    graph   TEXT DEFAULT NULL
+) RETURNS SETOF TEXT
+
+-- General-purpose primitive — frame any existing expanded JSON-LD JSONB.
+pg_ripple.jsonld_frame(
+    input     JSONB,
+    frame     JSONB,
+    embed     TEXT    DEFAULT '@once',
+    explicit  BOOLEAN DEFAULT FALSE,
+    ordered   BOOLEAN DEFAULT FALSE
+) RETURNS JSONB
+```
+
+### 4.12.5 Plan Cache Integration
+
+`export_jsonld_framed()` calls `jsonld_frame_to_sparql()` internally to produce the CONSTRUCT query string, then passes it through the existing `src/sparql/plan_cache.rs` translation cache using the CONSTRUCT string as the cache key. The embedding and compaction steps are not cached (they depend on the live data). Repeated calls with the same frame and graph skip SPARQL→SQL retranslation.
+
+### 4.12.6 Error Codes
+
+New `PT700`-range codes assigned for framing errors (within the existing Serialization / export range):
+
+| Code | Condition |
+|---|---|
+| `PT710` | Frame is not a JSON object |
+| `PT711` | Unrecognised `@embed` value |
+| `PT712` | Frame nesting depth exceeds `pg_ripple.max_path_depth` |
+| `PT713` | Frame `@context` is malformed |
+
+### 4.12.7 Framing Views (`create_framing_view`) *(requires pg_trickle)*
+
+**Introduced**: v0.17.0  
+**Dependency**: pg_trickle (soft — detected at call time via `pg_ripple.pg_trickle_available()`).
+
+Framing views extend the `create_sparql_view` pattern from §4.10 (v0.11.0) to JSON-LD framing. The frame is translated to a SPARQL CONSTRUCT query by `frame_translator.rs`; that CONSTRUCT string becomes the SQL definition of a pg_trickle stream table. Incremental refresh means that when triples are inserted or deleted, only the VP tables referenced in the CONSTRUCT query are rescanned — not the whole graph.
+
+**Catalog table** (`_pg_ripple.framing_views`):
+
+| Column | Type | Description |
+|---|---|---|
+| `name` | `TEXT` PRIMARY KEY | User-assigned view name |
+| `frame` | `JSONB` | Original frame document |
+| `generated_construct` | `TEXT` | SPARQL CONSTRUCT string from `frame_translator` |
+| `schedule` | `TEXT` | pg_trickle refresh schedule |
+| `output_format` | `TEXT` | `'jsonld'`, `'ndjson'`, `'turtle'` |
+| `decode` | `BOOLEAN` | Whether IRI-decoding view is created |
+| `stream_table_oid` | `OID` | OID of the pg_trickle stream table |
+| `created_at` | `TIMESTAMPTZ` | Creation timestamp |
+
+**Stream table schema** (auto-created as `pg_ripple.framing_view_{name}`):
+
+```
+subject_id   BIGINT       -- dictionary-encoded subject IRI (integer ID)
+frame_tree   JSONB        -- fully embedded + compacted frame output for this root node
+refreshed_at TIMESTAMPTZ  DEFAULT now()
+```
+
+When `decode = TRUE`, a thin decoding view `pg_ripple.framing_view_{name}_decoded` is additionally created. It calls `pg_ripple.decode_iri(subject_id)` to surface the `@id` value as a human-readable IRI string and expands the `frame_tree` JSONB inline. The stream table itself always stores integer IDs to minimise CDC surface area.
+
+**Refresh mode selection heuristics** (mirrors `create_sparql_view`):
+
+| Refresh mode | When to use |
+|---|---|
+| `IMMEDIATE` | Constraint-style frames: any matched root node in the view is a violation (e.g. select `ex:Company` nodes that lack `ex:complianceOfficer`). Fires within the same transaction as the DML. |
+| `DIFFERENTIAL` + schedule | Dashboard / API use cases: only changed subjects are reprocessed on each tick. Suitable for a company directory refreshed every 10 s. |
+| `FULL` + long schedule | Large full-graph framed exports intended for data warehouses or downstream consumers. Safe for frames with deep nesting or `@always` embedding. |
+
+**SQL function signatures**:
+
+```sql
+-- Create an incrementally-maintained framing view (requires pg_trickle).
+pg_ripple.create_framing_view(
+    name          TEXT,
+    frame         JSONB,
+    schedule      TEXT    DEFAULT '5s',
+    decode        BOOLEAN DEFAULT FALSE,
+    output_format TEXT    DEFAULT 'jsonld'
+) RETURNS void
+
+-- Drop the stream table and catalog entry.
+pg_ripple.drop_framing_view(name TEXT) RETURNS void
+
+-- List all active framing views.
+pg_ripple.list_framing_views() RETURNS TABLE(
+    name             TEXT,
+    frame            JSONB,
+    schedule         TEXT,
+    output_format    TEXT,
+    decode           BOOLEAN,
+    row_count        BIGINT,
+    last_refresh     TIMESTAMPTZ,
+    stream_table_oid OID
+)
+```
+
+**pg_trickle detection**: `create_framing_view()` calls `pg_ripple.pg_trickle_available()` as its first step and raises `ERROR: pg_trickle is required for framing views — install pg_trickle and add it to shared_preload_libraries, then retry` if absent. The error is raised at call time only; extension load never fails due to a missing pg_trickle.
+
+**Relationship to `create_sparql_view`**: Both functions internally produce a CONSTRUCT or SELECT query string, register it with pg_trickle's stream table machinery, and record the metadata in a `_pg_ripple.*_views` catalog table. The key difference is that `create_framing_view` applies the full embedding + compaction pipeline over the CONSTRUCT results before storing each row, so the stream table contains ready-to-serve nested JSON-LD rather than flat projection rows.
+
+---
+
 ## 5. Data Flow: Insert Path
 
 > **Target-state note**: The flow below is the **v0.6.0+ target architecture** after the HTAP split lands. In v0.1.0–v0.5.1, inserts write directly to the flat `_pg_ripple.vp_{predicate_id}` table.
