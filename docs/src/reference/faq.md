@@ -200,7 +200,7 @@ If triples are missing, check:
 
 ### What is the HTTP endpoint URL?
 
-The `pg_ripple_http` companion service listens on `http://localhost:7878/sparql` by default. Configure the port with `PG_TRIPLE_HTTP_PORT`. The URL accepts both GET and POST SPARQL requests per the W3C SPARQL 1.1 Protocol.
+The `pg_ripple_http` companion service listens on `http://localhost:7878/sparql` by default. Configure the port with `PG_RIPPLE_HTTP_PORT`. The URL accepts both GET and POST SPARQL requests per the W3C SPARQL 1.1 Protocol.
 
 ### How do I connect SPARQL tools to pg_ripple?
 

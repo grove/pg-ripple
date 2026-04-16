@@ -143,13 +143,13 @@ curl -G http://localhost:7878/sparql \
 
 | Variable | Description |
 |----------|-------------|
-| `PG_TRIPLE_HTTP_AUTH_TOKEN` | If set, all requests must include `Authorization: Bearer <token>` or `Authorization: Basic <token>` |
+| `PG_RIPPLE_HTTP_AUTH_TOKEN` | If set, all requests must include `Authorization: Bearer <token>` or `Authorization: Basic <token>` |
 
 When not set, authentication is disabled.
 
 ```bash
 # Start with bearer token auth
-PG_TRIPLE_HTTP_AUTH_TOKEN=my-secret-token ./pg_ripple_http
+PG_RIPPLE_HTTP_AUTH_TOKEN=my-secret-token ./pg_ripple_http
 
 # Query with auth
 curl -G http://localhost:7878/sparql \
@@ -171,20 +171,20 @@ All configuration is via environment variables:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `PG_TRIPLE_HTTP_PG_URL` | `postgresql://localhost/postgres` | Full PostgreSQL connection URL |
-| `PG_TRIPLE_HTTP_PORT` | `7878` | HTTP listening port |
-| `PG_TRIPLE_HTTP_POOL_SIZE` | `16` | Maximum connections in the pool |
-| `PG_TRIPLE_HTTP_AUTH_TOKEN` | (unset) | Bearer/Basic auth token |
-| `PG_TRIPLE_HTTP_RATE_LIMIT` | `0` | Max requests/sec per client IP (0 = disabled) |
-| `PG_TRIPLE_HTTP_CORS_ORIGINS` | `*` | Comma-separated allowed CORS origins |
+| `PG_RIPPLE_HTTP_PG_URL` | `postgresql://localhost/postgres` | Full PostgreSQL connection URL |
+| `PG_RIPPLE_HTTP_PORT` | `7878` | HTTP listening port |
+| `PG_RIPPLE_HTTP_POOL_SIZE` | `16` | Maximum connections in the pool |
+| `PG_RIPPLE_HTTP_AUTH_TOKEN` | (unset) | Bearer/Basic auth token |
+| `PG_RIPPLE_HTTP_RATE_LIMIT` | `0` | Max requests/sec per client IP (0 = disabled) |
+| `PG_RIPPLE_HTTP_CORS_ORIGINS` | `*` | Comma-separated allowed CORS origins |
 
 Example:
 
 ```bash
-export PG_TRIPLE_HTTP_PG_URL="postgresql://user:password@db-host:5432/mydb"
-export PG_TRIPLE_HTTP_PORT=8080
-export PG_TRIPLE_HTTP_POOL_SIZE=32
-export PG_TRIPLE_HTTP_AUTH_TOKEN="my-secret-token"
+export PG_RIPPLE_HTTP_PG_URL="postgresql://user:password@db-host:5432/mydb"
+export PG_RIPPLE_HTTP_PORT=8080
+export PG_RIPPLE_HTTP_POOL_SIZE=32
+export PG_RIPPLE_HTTP_AUTH_TOKEN="my-secret-token"
 ./pg_ripple_http
 ```
 

@@ -68,18 +68,18 @@ async fn main() {
         )
         .init();
 
-    let pg_url = env_or("PG_TRIPLE_HTTP_PG_URL", "postgresql://localhost/postgres");
-    let port: u16 = env_or("PG_TRIPLE_HTTP_PORT", "7878")
+    let pg_url = env_or("PG_RIPPLE_HTTP_PG_URL", "postgresql://localhost/postgres");
+    let port: u16 = env_or("PG_RIPPLE_HTTP_PORT", "7878")
         .parse()
-        .expect("PG_TRIPLE_HTTP_PORT must be a valid port number");
-    let pool_size: usize = env_or("PG_TRIPLE_HTTP_POOL_SIZE", "16")
+        .expect("PG_RIPPLE_HTTP_PORT must be a valid port number");
+    let pool_size: usize = env_or("PG_RIPPLE_HTTP_POOL_SIZE", "16")
         .parse()
-        .expect("PG_TRIPLE_HTTP_POOL_SIZE must be a positive integer");
-    let auth_token = std::env::var("PG_TRIPLE_HTTP_AUTH_TOKEN").ok();
-    let rate_limit: u32 = env_or("PG_TRIPLE_HTTP_RATE_LIMIT", "0")
+        .expect("PG_RIPPLE_HTTP_POOL_SIZE must be a positive integer");
+    let auth_token = std::env::var("PG_RIPPLE_HTTP_AUTH_TOKEN").ok();
+    let rate_limit: u32 = env_or("PG_RIPPLE_HTTP_RATE_LIMIT", "0")
         .parse()
-        .expect("PG_TRIPLE_HTTP_RATE_LIMIT must be a non-negative integer");
-    let cors_origins = env_or("PG_TRIPLE_HTTP_CORS_ORIGINS", "*");
+        .expect("PG_RIPPLE_HTTP_RATE_LIMIT must be a non-negative integer");
+    let cors_origins = env_or("PG_RIPPLE_HTTP_CORS_ORIGINS", "*");
 
     // Build connection pool.
     let mut cfg = Config::new();
@@ -95,7 +95,7 @@ async fn main() {
         let client = pool
             .get()
             .await
-            .expect("failed to connect to PostgreSQL — check PG_TRIPLE_HTTP_PG_URL");
+            .expect("failed to connect to PostgreSQL — check PG_RIPPLE_HTTP_PG_URL");
         let row = client
             .query_one("SELECT pg_ripple.triple_count()", &[])
             .await

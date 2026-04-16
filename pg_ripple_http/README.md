@@ -31,19 +31,19 @@ All configuration is via environment variables:
 
 | Variable | Default | Description |
 |---|---|---|
-| `PG_TRIPLE_HTTP_PG_URL` | `postgresql://localhost/postgres` | PostgreSQL connection URL |
-| `PG_TRIPLE_HTTP_PORT` | `7878` | HTTP listening port |
-| `PG_TRIPLE_HTTP_POOL_SIZE` | `16` | Database connection pool size |
-| `PG_TRIPLE_HTTP_AUTH_TOKEN` | (unset) | If set, requests must include `Authorization: Bearer <token>` |
-| `PG_TRIPLE_HTTP_RATE_LIMIT` | `0` | Max requests/sec per client IP (0 = disabled) |
-| `PG_TRIPLE_HTTP_CORS_ORIGINS` | `*` | Comma-separated allowed origins, or `*` for all |
+| `PG_RIPPLE_HTTP_PG_URL` | `postgresql://localhost/postgres` | PostgreSQL connection URL |
+| `PG_RIPPLE_HTTP_PORT` | `7878` | HTTP listening port |
+| `PG_RIPPLE_HTTP_POOL_SIZE` | `16` | Database connection pool size |
+| `PG_RIPPLE_HTTP_AUTH_TOKEN` | (unset) | If set, requests must include `Authorization: Bearer <token>` |
+| `PG_RIPPLE_HTTP_RATE_LIMIT` | `0` | Max requests/sec per client IP (0 = disabled) |
+| `PG_RIPPLE_HTTP_CORS_ORIGINS` | `*` | Comma-separated allowed origins, or `*` for all |
 
 Example:
 
 ```bash
-export PG_TRIPLE_HTTP_PG_URL="postgresql://user:password@db-host:5432/mydb"
-export PG_TRIPLE_HTTP_PORT=8080
-export PG_TRIPLE_HTTP_AUTH_TOKEN="my-secret-token"
+export PG_RIPPLE_HTTP_PG_URL="postgresql://user:password@db-host:5432/mydb"
+export PG_RIPPLE_HTTP_PORT=8080
+export PG_RIPPLE_HTTP_AUTH_TOKEN="my-secret-token"
 ./target/release/pg_ripple_http
 ```
 
@@ -118,7 +118,7 @@ curl -G http://localhost:7878/sparql \
 
 ## Authentication
 
-If `PG_TRIPLE_HTTP_AUTH_TOKEN` is set, every request must include the token:
+If `PG_RIPPLE_HTTP_AUTH_TOKEN` is set, every request must include the token:
 
 ```bash
 curl -G http://localhost:7878/sparql \

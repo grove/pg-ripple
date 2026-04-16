@@ -26,10 +26,10 @@ services:
     ports:
       - "7878:7878"
     environment:
-      PG_TRIPLE_HTTP_PG_URL: "postgresql://postgres:ripple@postgres/postgres"
-      PG_TRIPLE_HTTP_PORT: "7878"
-      PG_TRIPLE_HTTP_POOL_SIZE: "8"
-      PG_TRIPLE_HTTP_CORS_ORIGINS: "*"
+      PG_RIPPLE_HTTP_PG_URL: "postgresql://postgres:ripple@postgres/postgres"
+      PG_RIPPLE_HTTP_PORT: "7878"
+      PG_RIPPLE_HTTP_POOL_SIZE: "8"
+      PG_RIPPLE_HTTP_CORS_ORIGINS: "*"
     depends_on:
       postgres:
         condition: service_healthy

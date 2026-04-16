@@ -991,7 +991,7 @@ Extension is installable, upgradable, and documented. Operational tooling suffic
 - [x] **Companion HTTP service** (`pg_ripple_http` binary)
   - Standalone Rust binary (not a PG background worker — avoids binding TCP ports inside PostgreSQL)
   - Connects to PostgreSQL via standard `libpq` / `tokio-postgres`
-  - Configurable via environment variables or config file: `PG_TRIPLE_HTTP_PORT`, `PG_TRIPLE_HTTP_PG_URL`
+  - Configurable via environment variables or config file: `PG_RIPPLE_HTTP_PORT`, `PG_RIPPLE_HTTP_PG_URL`
 - [x] **W3C SPARQL 1.1 Protocol compliance**
   - `GET /sparql?query=...` — URL-encoded query
   - `POST /sparql` with `application/sparql-query` body
@@ -1006,7 +1006,7 @@ Extension is installable, upgradable, and documented. Operational tooling suffic
   - **RDF-star content types** *(builds on v0.4.0 RDF-star)*: Turtle-star and JSON-LD-star for CONSTRUCT/DESCRIBE results containing quoted triples
 - [x] **Connection pooling**
   - Built-in connection pool (e.g. `deadpool-postgres`) to handle concurrent HTTP requests
-  - `PG_TRIPLE_HTTP_POOL_SIZE` configuration
+  - `PG_RIPPLE_HTTP_POOL_SIZE` configuration
 - [x] **Security**
   - Optional bearer token or Basic auth for access control
   - CORS configuration for browser-based SPARQL clients

@@ -285,8 +285,8 @@ pg_ripple includes a companion HTTP service (`pg_ripple_http`) that implements t
 ### Starting the HTTP service
 
 ```bash
-export PG_TRIPLE_HTTP_PG_URL="postgresql://user:pass@localhost/mydb"
-export PG_TRIPLE_HTTP_PORT=7878
+export PG_RIPPLE_HTTP_PG_URL="postgresql://user:pass@localhost/mydb"
+export PG_RIPPLE_HTTP_PORT=7878
 pg_ripple_http
 ```
 
@@ -294,12 +294,12 @@ pg_ripple_http
 
 | Environment variable | Default | Description |
 |---|---|---|
-| `PG_TRIPLE_HTTP_PG_URL` | `postgresql://localhost/postgres` | PostgreSQL connection string |
-| `PG_TRIPLE_HTTP_PORT` | `7878` | HTTP listen port |
-| `PG_TRIPLE_HTTP_POOL_SIZE` | `16` | Connection pool size |
-| `PG_TRIPLE_HTTP_AUTH_TOKEN` | *(none)* | Bearer/Basic auth token |
-| `PG_TRIPLE_HTTP_CORS_ORIGINS` | `*` | Comma-separated CORS origins |
-| `PG_TRIPLE_HTTP_RATE_LIMIT` | `0` | Rate limit (0 = unlimited) |
+| `PG_RIPPLE_HTTP_PG_URL` | `postgresql://localhost/postgres` | PostgreSQL connection string |
+| `PG_RIPPLE_HTTP_PORT` | `7878` | HTTP listen port |
+| `PG_RIPPLE_HTTP_POOL_SIZE` | `16` | Connection pool size |
+| `PG_RIPPLE_HTTP_AUTH_TOKEN` | *(none)* | Bearer/Basic auth token |
+| `PG_RIPPLE_HTTP_CORS_ORIGINS` | `*` | Comma-separated CORS origins |
+| `PG_RIPPLE_HTTP_RATE_LIMIT` | `0` | Rate limit (0 = unlimited) |
 
 ### SPARQL 1.1 Protocol conformance
 
