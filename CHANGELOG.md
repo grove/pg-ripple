@@ -9,7 +9,45 @@ Versions correspond to the milestones in [ROADMAP.md](ROADMAP.md).
 
 ## [Unreleased]
 
-Points at the next milestone: v0.15.0 — SPARQL Protocol (HTTP Endpoint).
+Points at the next milestone: v0.16.0 — SPARQL Federation.
+
+---
+
+## [0.15.0] — 2026-04-16 — SPARQL Protocol (HTTP Endpoint)
+
+pg_ripple can now be queried over HTTP using the standard SPARQL protocol. Any SPARQL client — YASGUI, Protege, SPARQLWrapper, Jena, or plain curl — can connect to pg_ripple without any driver-specific configuration. This release also fills in SQL-level gaps: graph-aware loaders, graph-aware deletion, per-graph counts, and dictionary diagnostics.
+
+**New in this release:** Companion HTTP service (`pg_ripple_http`) with W3C SPARQL 1.1 Protocol compliance. Content negotiation for JSON, XML, CSV, TSV, Turtle, N-Triples, and JSON-LD. Connection pooling via deadpool-postgres. Bearer/Basic auth and CORS. Health check and Prometheus metrics endpoints. Graph-aware bulk loaders and file loaders for N-Triples, Turtle, and RDF/XML. Graph-aware delete and clear operations. Per-graph find and count. Dictionary diagnostics (decode_id_full, lookup_iri). Docker Compose for running PG and HTTP together. Four new pg_regress test suites.
+
+### What you can do
+
+- **Query over HTTP** — start `pg_ripple_http` alongside PostgreSQL and send SPARQL queries via `GET /sparql?query=...` or `POST /sparql` with any standard content type; results come back in JSON, XML, CSV, TSV, Turtle, N-Triples, or JSON-LD depending on the `Accept` header
+- **Load data into named graphs** — `pg_ripple.load_ntriples_into_graph(data, graph_iri)`, `load_turtle_into_graph`, `load_rdfxml_into_graph`, and their file variants load triples directly into a named graph without format conversion
+- **Delete from named graphs** — `delete_triple_from_graph(s, p, o, graph_iri)` removes a single triple from a specific graph; `clear_graph(graph_iri)` empties a graph without unregistering it
+- **Query within a graph** — `find_triples_in_graph(s, p, o, graph)` pattern-matches triples within a named graph; `triple_count_in_graph(graph_iri)` returns the count for a specific graph
+- **Inspect the dictionary** — `decode_id_full(id)` returns structured JSONB with kind, value, datatype, and language; `lookup_iri(iri)` checks whether an IRI exists without encoding it
+- **Run with Docker Compose** — `docker compose up` starts PostgreSQL with pg_ripple and the HTTP endpoint in separate containers
+
+### What happens behind the scenes
+
+The HTTP service is a standalone Rust binary built with axum and tokio. It connects to PostgreSQL via deadpool-postgres, translates HTTP requests into calls to `pg_ripple.sparql()`, `sparql_ask()`, `sparql_construct()`, `sparql_describe()`, and `sparql_update()`, then formats the results according to the requested content type. The Prometheus `/metrics` endpoint exposes query count, error count, and total query duration.
+
+Graph-aware loaders encode the `graph_iri` argument via the dictionary and delegate to the existing internal `*_into_graph(data, g_id)` functions. File variants read via `pg_read_file()` (superuser-only). `clear_graph` wraps `storage::clear_graph_by_id()` which deletes from delta tables and adds tombstones for main table rows.
+
+<details>
+<summary>Technical details</summary>
+
+- **pg_ripple_http/src/main.rs** — axum router with `/sparql` (GET+POST), `/health`, `/metrics`; content negotiation; bearer/basic auth; CORS via tower-http
+- **pg_ripple_http/src/metrics.rs** — atomic counter-based Prometheus metrics
+- **src/lib.rs** — new `#[pg_extern]` functions: `load_ntriples_into_graph`, `load_turtle_into_graph`, `load_rdfxml_into_graph`, `load_ntriples_file_into_graph`, `load_turtle_file_into_graph`, `load_rdfxml_file_into_graph`, `load_rdfxml_file`, `delete_triple_from_graph`, `clear_graph`, `find_triples_in_graph`, `triple_count_in_graph`, `decode_id_full`, `lookup_iri`
+- **src/bulk_load.rs** — `load_rdfxml_file`, `load_ntriples_file_into_graph`, `load_turtle_file_into_graph`, `load_rdfxml_file_into_graph`
+- **src/storage/mod.rs** — `triple_count_in_graph(g_id)` scans all VP tables for a specific graph
+- **sql/pg_ripple--0.14.0--0.15.0.sql** — migration script (no schema changes; all new features are compiled functions)
+- **docker-compose.yml** — two-service Compose with postgres and sparql containers
+- **Dockerfile** — updated to build and bundle `pg_ripple_http` binary
+- **tests/pg_regress/sql/** — `load_into_graph.sql`, `graph_delete.sql`, `sql_api_completeness.sql`, `sparql_protocol.sql`
+
+</details>
 
 ---
 
