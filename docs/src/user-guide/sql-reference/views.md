@@ -51,6 +51,28 @@ SELECT pg_ripple.create_sparql_view(
 SELECT * FROM pg_ripple.people_names;
 ```
 
+Example output (with `decode = true`):
+
+```
+          person          |        name
+-------------------------+--------------------
+ http://example.org/alice | Alice Smith
+ http://example.org/bob   | Bob Johnson
+ http://example.org/carol | Carol Williams
+(3 rows)
+```
+
+With `decode = false`, columns contain raw dictionary IDs (BIGINT):
+
+```
+      person      |        name
+-----------------+--------------------
+ 4728391847263   | 4728391847264
+ 4728391847265   | 4728391847266
+ 4728391847267   | 4728391847268
+(3 rows)
+```
+
 ### drop_sparql_view
 
 ```sql
@@ -66,6 +88,33 @@ pg_ripple.list_sparql_views() → JSONB
 ```
 
 Returns a JSONB array of all registered SPARQL views, including name, original query, schedule, and decode mode.
+
+```sql
+SELECT pg_ripple.list_sparql_views();
+```
+
+Example output:
+
+```json
+[
+  {
+    "name": "people_names",
+    "sparql": "SELECT ?person ?name WHERE { ?person <http://xmlns.com/foaf/0.1/name> ?name }",
+    "schedule": "5s",
+    "decode": true,
+    "stream_table_name": "pg_ripple.people_names",
+    "variables": ["person", "name"]
+  },
+  {
+    "name": "all_students",
+    "sparql": "SELECT ?s WHERE { ?s <http://xmlns.com/foaf/0.1/isPrimaryTopicOf> ?doc }",
+    "schedule": "10s",
+    "decode": false,
+    "stream_table_name": "pg_ripple.all_students",
+    "variables": ["s"]
+  }
+]
+```
 
 ---
 
@@ -104,6 +153,17 @@ SELECT pg_ripple.create_datalog_view(
 SELECT * FROM pg_ripple.grandparents;
 ```
 
+Example output (inferred from explicit parent triples):
+
+```
+      ?x       |      ?z
+--------------+--------------
+ john         | grandpa
+ jane         | grandpa
+ bob          | grandma
+(3 rows)
+```
+
 ### create_datalog_view_from_rule_set
 
 ```sql
@@ -130,6 +190,20 @@ SELECT pg_ripple.create_datalog_view_from_rule_set(
     '30s',
     true
 );
+
+SELECT * FROM pg_ripple.all_types;
+```
+
+Example output (includes explicit types + inferred RDFS subclass/domain types):
+
+```
+       ?x        |               ?t
+---------------+-------------------------------
+ alice         | http://example.org/Person
+ bob           | http://example.org/Person
+ alice         | http://xmlns.com/foaf/0.1/Agent
+ bob           | http://xmlns.com/foaf/0.1/Agent
+(4 rows)
 ```
 
 ### drop_datalog_view / list_datalog_views
@@ -140,6 +214,35 @@ pg_ripple.list_datalog_views() → JSONB
 ```
 
 Same lifecycle management as SPARQL views.
+
+```sql
+SELECT pg_ripple.list_datalog_views();
+```
+
+Example output:
+
+```json
+[
+  {
+    "name": "grandparents",
+    "rule_set": "family",
+    "goal": "?x <http://example.org/grandparent> ?z",
+    "schedule": "10s",
+    "decode": true,
+    "stream_table_name": "pg_ripple.grandparents",
+    "variables": ["?x", "?z"]
+  },
+  {
+    "name": "all_types",
+    "rule_set": "rdfs",
+    "goal": "?x <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> ?t",
+    "schedule": "30s",
+    "decode": true,
+    "stream_table_name": "pg_ripple.all_types",
+    "variables": ["?x", "?t"]
+  }
+]
+```
 
 ---
 
@@ -168,6 +271,19 @@ SELECT pg_ripple.create_extvp(
     '<http://xmlns.com/foaf/0.1/knows>',
     '10s'
 );
+
+SELECT * FROM pg_ripple.name_knows;
+```
+
+Example output (semi-join of subjects from both predicates):
+
+```
+         s
+------------------
+ alice
+ bob
+ carol
+(3 rows)
 ```
 
 When the SPARQL engine encounters a star pattern joining these two predicates, it will use the ExtVP table instead of joining the two VP tables at query time.
@@ -177,6 +293,26 @@ When the SPARQL engine encounters a star pattern joining these two predicates, i
 ```sql
 pg_ripple.drop_extvp(name TEXT) → BOOLEAN
 pg_ripple.list_extvp() → JSONB
+```
+
+```sql
+SELECT pg_ripple.list_extvp();
+```
+
+Example output:
+
+```json
+[
+  {
+    "name": "name_knows",
+    "pred1_iri": "<http://xmlns.com/foaf/0.1/name>",
+    "pred2_iri": "<http://xmlns.com/foaf/0.1/knows>",
+    "pred1_id": 5632187461234,
+    "pred2_id": 5632187461245,
+    "schedule": "10s",
+    "stream_table_name": "pg_ripple.name_knows"
+  }
+]
 ```
 
 ---
