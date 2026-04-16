@@ -879,6 +879,171 @@ pg_ripple.list_framing_views() RETURNS TABLE(
 
 ---
 
+## 4.13 SPARQL CONSTRUCT, DESCRIBE & ASK Views (`src/views.rs`)
+
+**Introduced**: v0.18.0  
+**Depends on**: v0.5.1 CONSTRUCT/DESCRIBE SQL generation; v0.11.0 stream-table registration machinery  
+**Soft-requires**: pg_trickle (same availability check as v0.11.0)
+
+### Overview
+
+v0.11.0 restricts `create_sparql_view()` to SELECT queries because the SQL output of CONSTRUCT/DESCRIBE/ASK has a different shape than a SELECT projection. v0.18.0 adds three dedicated functions — `create_construct_view`, `create_describe_view`, and `create_ask_view` — that handle the respective algebra variants and register pg_trickle stream tables with appropriate schemas.
+
+### CONSTRUCT Views
+
+**SQL generation** (`src/views.rs` → `compile_construct_for_view`):
+
+1. Parse the query as `spargebra::Query::Construct { template, pattern, .. }`.
+2. Compile `pattern` via the existing `sqlgen::translate_select` pipeline to produce an inner CTE `_inner`.
+3. For each triple `(s_term, p_term, o_term)` in `template`, emit a SQL row expression:
+   - Variables → reference the corresponding `_inner.{varname}` column.
+   - IRI/literal constants → dictionary-encoded at view-creation time to their `BIGINT` ID; no string operations at refresh time.
+   - Named-graph template triples include a `g` expression; default-graph triples emit `0 AS g`.
+4. Combine all row expressions with `UNION ALL` to produce a flat `SELECT s, p, o, g` result set.
+
+**Unbound variable check**: If any variable in the template does not appear in the WHERE pattern's projected variables, `compile_construct_for_view` returns an error listing the unbound names — caught at view-creation time, not at refresh time.
+
+**Blank node rejection**: Blank nodes in a CONSTRUCT template cannot be assigned stable `BIGINT` IDs across refresh cycles. The compiler rejects them with a clear error advising skolemisation.
+
+**Stream table schema**:
+
+```sql
+pg_ripple.construct_view_{name}(
+    s  BIGINT NOT NULL,
+    p  BIGINT NOT NULL,
+    o  BIGINT NOT NULL,
+    g  BIGINT NOT NULL DEFAULT 0
+)
+```
+
+When `decode = TRUE`, a thin decoding view is also created:
+
+```sql
+CREATE VIEW pg_ripple.construct_view_{name}_decoded AS
+SELECT
+    (SELECT value FROM _pg_ripple.dictionary WHERE id = s) AS s,
+    (SELECT value FROM _pg_ripple.dictionary WHERE id = p) AS p,
+    (SELECT value FROM _pg_ripple.dictionary WHERE id = o) AS o,
+    (SELECT value FROM _pg_ripple.dictionary WHERE id = g) AS g
+FROM pg_ripple.construct_view_{name};
+```
+
+**Catalog table** (`_pg_ripple.construct_views`):
+
+```sql
+CREATE TABLE _pg_ripple.construct_views (
+    name           TEXT        NOT NULL PRIMARY KEY,
+    sparql         TEXT        NOT NULL,
+    generated_sql  TEXT        NOT NULL,
+    schedule       TEXT        NOT NULL,
+    decode         BOOLEAN     NOT NULL DEFAULT false,
+    template_count BIGINT      NOT NULL,
+    stream_table   TEXT        NOT NULL,
+    created_at     TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+```
+
+### DESCRIBE Views
+
+DESCRIBE resolves to a set of triples about the described resources. The SQL generation reuses the existing `describe_strategy` GUC logic from v0.5.1:
+
+- `cbd` (Concise Bounded Description, default): `SELECT s, p, o, g FROM <all VP tables> WHERE s = <encoded_resource>` for each resource in the result set.
+- `symmetric_cbd`: additionally includes triples where the resource appears as object.
+
+Stream table schema is identical to CONSTRUCT views: `(s BIGINT, p BIGINT, o BIGINT, g BIGINT)`. Catalog table: `_pg_ripple.describe_views`.
+
+### ASK Views
+
+ASK compiles to a `SELECT EXISTS(...)` SQL expression. The stream table contains a single row:
+
+```sql
+pg_ripple.ask_view_{name}(
+    result       BOOLEAN     NOT NULL,
+    evaluated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+)
+```
+
+pg_trickle replaces the row on each refresh cycle. Because ASK is a scalar, refresh mode is always `IMMEDIATE` — the result is re-evaluated in-transaction on every write that touches a VP table referenced by the WHERE pattern.
+
+Catalog table: `_pg_ripple.ask_views`.
+
+### Public SQL API
+
+```sql
+-- CONSTRUCT views
+pg_ripple.create_construct_view(
+    name     TEXT,
+    sparql   TEXT,
+    schedule TEXT    DEFAULT '1s',
+    decode   BOOLEAN DEFAULT FALSE
+) RETURNS BIGINT  -- template triple count
+
+pg_ripple.drop_construct_view(name TEXT) RETURNS void
+
+pg_ripple.list_construct_views() RETURNS TABLE(
+    name           TEXT,
+    sparql         TEXT,
+    generated_sql  TEXT,
+    schedule       TEXT,
+    decode         BOOLEAN,
+    template_count BIGINT,
+    stream_table   TEXT,
+    created_at     TIMESTAMPTZ
+)
+
+-- DESCRIBE views
+pg_ripple.create_describe_view(
+    name     TEXT,
+    sparql   TEXT,
+    schedule TEXT    DEFAULT '1s',
+    decode   BOOLEAN DEFAULT FALSE
+) RETURNS void
+
+pg_ripple.drop_describe_view(name TEXT) RETURNS void
+
+pg_ripple.list_describe_views() RETURNS TABLE(
+    name          TEXT,
+    sparql        TEXT,
+    generated_sql TEXT,
+    schedule      TEXT,
+    decode        BOOLEAN,
+    stream_table  TEXT,
+    created_at    TIMESTAMPTZ
+)
+
+-- ASK views
+pg_ripple.create_ask_view(
+    name     TEXT,
+    sparql   TEXT,
+    schedule TEXT DEFAULT '1s'
+) RETURNS void
+
+pg_ripple.drop_ask_view(name TEXT) RETURNS void
+
+pg_ripple.list_ask_views() RETURNS TABLE(
+    name          TEXT,
+    sparql        TEXT,
+    generated_sql TEXT,
+    schedule      TEXT,
+    stream_table  TEXT,
+    created_at    TIMESTAMPTZ
+)
+```
+
+All nine functions call `pg_trickle_available()` as their first step and raise an error with the standard install hint when pg_trickle is absent. Extension load never fails due to a missing pg_trickle.
+
+### Relationship to Other View Types
+
+| View type | Query form | Stream table schema | Decode view? |
+|-----------|-----------|---------------------|--------------|
+| `create_sparql_view` (v0.11.0) | SELECT | `(varname BIGINT, ...)` — one col per variable | Yes |
+| `create_construct_view` (v0.18.0) | CONSTRUCT | `(s, p, o, g BIGINT)` | Yes |
+| `create_describe_view` (v0.18.0) | DESCRIBE | `(s, p, o, g BIGINT)` | Yes |
+| `create_ask_view` (v0.18.0) | ASK | `(result BOOLEAN, evaluated_at TIMESTAMPTZ)` | No |
+| `create_framing_view` (v0.17.0) | CONSTRUCT (via frame) | `(subject_id BIGINT, frame_tree JSONB, refreshed_at TIMESTAMPTZ)` | Yes (IRI decode only) |
+
+---
+
 ## 5. Data Flow: Insert Path
 
 > **Target-state note**: The flow below is the **v0.6.0+ target architecture** after the HTAP split lands. In v0.1.0–v0.5.1, inserts write directly to the flat `_pg_ripple.vp_{predicate_id}` table.

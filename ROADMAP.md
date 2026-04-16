@@ -39,8 +39,9 @@ Each release below has two layers:
 | [0.15.0](#v0150--sparql-protocol-http-endpoint) | SPARQL Protocol | Standard HTTP API, graph-aware loaders and deletes as SQL functions | 3–4 pw |
 | [0.16.0](#v0160--sparql-federation) | SPARQL Federation | Query remote SPARQL endpoints alongside local data | 4–6 pw |
 | [0.17.0](#v0170--json-ld-framing) | JSON-LD Framing | Frame-driven CONSTRUCT queries producing nested JSON-LD | 3–4 pw |
+| [0.18.0](#v0180--sparql-construct-describe--ask-views) | SPARQL CONSTRUCT & ASK Views | Materialize CONSTRUCT and ASK queries as live, incrementally-updated stream tables | 2–3 pw |
 | [1.0.0](#v100--production-release) | Production Release | Standards conformance, stress testing, security audit | 6–8 pw |
-| | | **Total estimated effort** | **101–135 pw** |
+| | | **Total estimated effort** | **103–138 pw** |
 
 ---
 
@@ -1217,6 +1218,74 @@ SPARQL queries with `SERVICE` clauses correctly fetch and join data from registe
 ### Exit Criteria
 
 `export_jsonld_framed()` correctly translates a JSON-LD frame into a SPARQL CONSTRUCT query touching only the VP tables required by the frame, executes it via the existing SPARQL engine, and returns a nested JSON-LD document with correct `@context` compaction and W3C-conformant embedding semantics. The `jsonld_frame_to_sparql()` function exposes the generated CONSTRUCT query string. The `jsonld_frame()` general-purpose primitive correctly frames any expanded JSON-LD JSONB input. `create_framing_view()` creates an incrementally-maintained pg_trickle stream table whose rows stay current as triples change; the `IMMEDIATE` refresh mode correctly detects constraint violations within the same transaction. All supported frame features in the table above pass the pg_regress test suite.
+
+---
+
+## v0.18.0 — SPARQL CONSTRUCT, DESCRIBE & ASK Views
+
+**Theme**: Materialize the three non-SELECT SPARQL query forms as incrementally-maintained pg_trickle stream tables.
+
+> **In plain language:** pg_ripple already supports SPARQL CONSTRUCT, DESCRIBE, and ASK as one-shot queries. This release lets you register any of those query forms as a *live view* — a stream table that pg_trickle keeps incrementally up-to-date as triples are inserted or deleted. A CONSTRUCT view stores the derived triples it produces in a `(s, p, o, g)` table; this is ideal for materialising inferred facts, denormalised projections, or cached API responses. A DESCRIBE view stores all triples about the described resources. An ASK view stores a single `BOOLEAN` row that flips whenever the underlying pattern changes from matching to not-matching — useful for live constraint monitors and dashboard indicators.
+>
+> **Effort estimate: 2–3 person-weeks** *(the hard parts — CONSTRUCT/DESCRIBE SQL generation, spargebra algebra parsing, and pg_trickle stream table registration — are all already in place from v0.5.1 and v0.11.0)*
+
+### Prerequisites
+
+- v0.5.1 SPARQL CONSTRUCT / DESCRIBE (JSONB output) — the CONSTRUCT algebra and SQL generation pipeline is reused directly.
+- v0.11.0 SPARQL SELECT views — the pg_trickle stream table registration machinery (`register_stream_table`, decode-view creation, catalog tables) is extended rather than rewritten.
+- v0.11.0 `pg_trickle_available()` — all three new view functions gate on the same availability check.
+
+### Deliverables
+
+- [ ] **CONSTRUCT view support** (`src/views.rs`)
+  - Extend `create_sparql_view()` to accept CONSTRUCT queries, **or** add a dedicated `create_construct_view()` function (preferred — keeps catalog tables separate and the error message explicit)
+  - Parse `spargebra::Query::Construct { template, pattern, .. }`; compile `pattern` via the existing `translate_select` pipeline; expand each triple in `template` as a SQL row expression
+  - Generate a `UNION ALL` SQL SELECT that returns one row per template triple per solution: `SELECT encode(s_expr) AS s, encode(p_expr) AS p, encode(o_expr) AS o, 0 AS g`; named-graph template triples include the graph term
+  - All IRI/literal constants in the template dictionary-encoded at view-creation time (integer joins only — no string comparisons at refresh time)
+  - Register result as a pg_trickle stream table with schema `pg_ripple.construct_view_{name}(s BIGINT, p BIGINT, o BIGINT, g BIGINT)`
+  - When `decode = TRUE`, create a thin decoding view `pg_ripple.construct_view_{name}_decoded(s TEXT, p TEXT, o TEXT, g TEXT)` that joins `_pg_ripple.dictionary` for each column
+  - Record metadata in `_pg_ripple.construct_views (name, sparql, generated_sql, schedule, decode, template_count, stream_table, created_at)`
+- [ ] **DESCRIBE view support** (`src/views.rs`)
+  - `create_describe_view(name, sparql, schedule, decode)` — parse `spargebra::Query::Describe { variables, pattern, .. }`; compile to SQL that enumerates all triples where the described resource appears as subject (and optionally object)
+  - Stream table schema: `pg_ripple.describe_view_{name}(s BIGINT, p BIGINT, o BIGINT, g BIGINT)` — same shape as CONSTRUCT views
+  - `describe_strategy` GUC (already present from v0.5.1) respected: `cbd` (Concise Bounded Description) vs `symmetric_cbd`
+  - Record metadata in `_pg_ripple.describe_views (name, sparql, generated_sql, schedule, decode, stream_table, created_at)`
+- [ ] **ASK view support** (`src/views.rs`)
+  - `create_ask_view(name, sparql, schedule)` — parse `spargebra::Query::Ask { pattern, .. }`; compile to `SELECT EXISTS(...)` SQL
+  - Stream table schema: `pg_ripple.ask_view_{name}(result BOOLEAN, evaluated_at TIMESTAMPTZ DEFAULT now())`
+  - Record metadata in `_pg_ripple.ask_views (name, sparql, generated_sql, schedule, stream_table, created_at)`
+- [ ] **Lifecycle management SQL functions** (`src/lib.rs`)
+  - `pg_ripple.create_construct_view(name TEXT, sparql TEXT, schedule TEXT DEFAULT '1s', decode BOOLEAN DEFAULT FALSE) RETURNS BIGINT` — returns template triple count
+  - `pg_ripple.drop_construct_view(name TEXT) RETURNS void`
+  - `pg_ripple.list_construct_views() RETURNS TABLE(name TEXT, sparql TEXT, generated_sql TEXT, schedule TEXT, decode BOOLEAN, template_count BIGINT, stream_table TEXT, created_at TIMESTAMPTZ)`
+  - `pg_ripple.create_describe_view(name TEXT, sparql TEXT, schedule TEXT DEFAULT '1s', decode BOOLEAN DEFAULT FALSE) RETURNS void`
+  - `pg_ripple.drop_describe_view(name TEXT) RETURNS void`
+  - `pg_ripple.list_describe_views() RETURNS TABLE(name TEXT, sparql TEXT, generated_sql TEXT, schedule TEXT, decode BOOLEAN, stream_table TEXT, created_at TIMESTAMPTZ)`
+  - `pg_ripple.create_ask_view(name TEXT, sparql TEXT, schedule TEXT DEFAULT '1s') RETURNS void`
+  - `pg_ripple.drop_ask_view(name TEXT) RETURNS void`
+  - `pg_ripple.list_ask_views() RETURNS TABLE(name TEXT, sparql TEXT, generated_sql TEXT, schedule TEXT, stream_table TEXT, created_at TIMESTAMPTZ)`
+  - All nine functions call `pg_trickle_available()` first and raise a descriptive error with an install hint when pg_trickle is absent; never error at extension load time
+- [ ] **Catalog tables** (SQL migration `sql/pg_ripple--0.17.0--0.18.0.sql`)
+  - `CREATE TABLE IF NOT EXISTS _pg_ripple.construct_views (...)`
+  - `CREATE TABLE IF NOT EXISTS _pg_ripple.describe_views (...)`
+  - `CREATE TABLE IF NOT EXISTS _pg_ripple.ask_views (...)`
+- [ ] **Error handling**
+  - Passing a SELECT query to `create_construct_view()` → clear error: `"sparql must be a CONSTRUCT query"`
+  - Passing a non-ASK query to `create_ask_view()` → clear error: `"sparql must be an ASK query"`
+  - Unbound variables in CONSTRUCT template (variable present in template but not bound by the WHERE pattern) → error at view-creation time listing the unbound variables
+  - Template contains a blank node (not expressible as a reusable `BIGINT` ID) → error advising the user to replace blank nodes with IRIs or skolemise them
+- [ ] pg_regress: `construct_views.sql` (create/drop/list; basic template; multi-triple template; named graph template; decode option; SELECT query rejected; unbound variable error; pg_trickle-absent error), `describe_views.sql` (create/drop/list; CBD vs symmetric_cbd; decode option), `ask_views.sql` (create/drop/list; result flips on insert/delete; pg_trickle-absent error)
+
+### Documentation
+
+> See [plans/documentation.md](plans/documentation.md) for details.
+
+- [ ] `user-guide/sql-reference/views.md` expanded: `create_construct_view`, `drop_construct_view`, `list_construct_views`; `create_describe_view`, `drop_describe_view`, `list_describe_views`; `create_ask_view`, `drop_ask_view`, `list_ask_views`; stream table schemas; decode views; worked examples
+- [ ] `user-guide/best-practices/sparql-patterns.md` expanded: when to use CONSTRUCT views vs SELECT views; materialising inference results; using ASK views as live constraint monitors
+
+### Exit Criteria
+
+`create_construct_view()` compiles a SPARQL CONSTRUCT query into a pg_trickle stream table whose rows reflect the CONSTRUCT output at all times; inserting or deleting triples that affect the WHERE pattern causes the stream table to update automatically. `create_describe_view()` correctly materialises the CBD of the described resources. `create_ask_view()` correctly updates the single-row result when the pattern's satisfiability changes. All three view types correctly reject wrong query forms with a clear error. The pg_trickle-absent error message is consistent with v0.11.0 behaviour. All new pg_regress tests pass.
 
 ---
 
