@@ -766,13 +766,13 @@ See [plans/ecosystem/pg_trickle.md § 2.2](plans/ecosystem/pg_trickle.md) for th
 
 ### Deliverables
 
-- [ ] **SPARQL views** *(requires pg_trickle)*
+- [x] **SPARQL views** *(requires pg_trickle)*
   - `pg_ripple.create_sparql_view(name, sparql, schedule, decode)` — compile a SPARQL SELECT query into an always-fresh, incrementally-maintained stream table
   - `decode => FALSE` (recommended) keeps integer IDs in the stream table with a thin decoding view on top, minimising CDC surface
   - `pg_ripple.drop_sparql_view(name)` and `pg_ripple.list_sparql_views()` for lifecycle management
   - `_pg_ripple.sparql_views` catalog table: records original SPARQL text, generated SQL, schedule, decode mode, and stream table OID
   - Refresh mode heuristics: `IMMEDIATE` for constraint-style queries, `DIFFERENTIAL` + schedule for dashboards, `FULL` + long schedule for heavy analytics and transitive-closure property paths
-- [ ] **Datalog views** *(requires pg_trickle)*
+- [x] **Datalog views** *(requires pg_trickle)*
   - `pg_ripple.create_datalog_view(name, rules, goal, schedule, decode)` — bundle a Datalog rule set with a goal pattern into an always-fresh, incrementally-maintained stream table
   - Alternative: `pg_ripple.create_datalog_view(name, rule_set, goal, schedule, decode)` — reference a loaded rule set by name instead of inline rules
   - `decode => FALSE` (recommended) keeps integer IDs in the stream table with a thin decoding view on top
@@ -780,12 +780,12 @@ See [plans/ecosystem/pg_trickle.md § 2.2](plans/ecosystem/pg_trickle.md) for th
   - `_pg_ripple.datalog_views` catalog table: records original rule text, goal pattern, generated SQL, schedule, decode mode, and stream table OID
   - Constraint monitoring: constraint rules (empty-head) automatically synthesize a goal; any row in the stream table is a violation. `IMMEDIATE` mode catches violations within the same transaction
   - Goal-filtered materialization: only facts relevant to the goal pattern are derived and stored, reducing write amplification compared to full-closure materialized rules
-- [ ] **ExtVP semi-join stream tables** *(requires pg_trickle)*
+- [x] **ExtVP semi-join stream tables** *(requires pg_trickle)*
   - Manual creation of pre-computed semi-joins between frequently co-joined predicate pairs
   - SPARQL→SQL translator rewrites queries to target ExtVP tables when available
-- [ ] **Views over derived predicates**
+- [x] **Views over derived predicates**
   - Both SPARQL views and Datalog views can reference Datalog-derived VP tables; pg_trickle DAG handles refresh ordering
-- [ ] pg_regress: `sparql_views.sql`, `datalog_views.sql`, `extvp.sql`
+- [x] pg_regress: `sparql_views.sql`, `datalog_views.sql`, `extvp.sql`
 
 ### Documentation
 

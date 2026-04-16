@@ -25,6 +25,7 @@ mod shacl;
 mod shmem;
 mod sparql;
 mod storage;
+mod views;
 mod worker;
 
 pgrx::pg_module_magic!();
@@ -255,6 +256,54 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_dictionary_hot_hash
 "#,
     name = "datalog_schema_setup",
     requires = ["schema_setup"]
+);
+
+// v0.11.0: SPARQL views, Datalog views, and ExtVP catalog tables.
+pgrx::extension_sql!(
+    r#"
+-- SPARQL views catalog (v0.11.0)
+CREATE TABLE IF NOT EXISTS _pg_ripple.sparql_views (
+    name          TEXT        NOT NULL PRIMARY KEY,
+    sparql        TEXT        NOT NULL,
+    generated_sql TEXT        NOT NULL,
+    schedule      TEXT        NOT NULL,
+    decode        BOOLEAN     NOT NULL DEFAULT false,
+    stream_table  TEXT        NOT NULL,
+    variables     JSONB       NOT NULL DEFAULT '[]'::jsonb,
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Datalog views catalog (v0.11.0)
+CREATE TABLE IF NOT EXISTS _pg_ripple.datalog_views (
+    name          TEXT        NOT NULL PRIMARY KEY,
+    rules         TEXT,
+    rule_set      TEXT        NOT NULL,
+    goal          TEXT        NOT NULL,
+    generated_sql TEXT        NOT NULL,
+    schedule      TEXT        NOT NULL,
+    decode        BOOLEAN     NOT NULL DEFAULT false,
+    stream_table  TEXT        NOT NULL,
+    variables     JSONB       NOT NULL DEFAULT '[]'::jsonb,
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- ExtVP semi-join tables catalog (v0.11.0)
+CREATE TABLE IF NOT EXISTS _pg_ripple.extvp_tables (
+    name          TEXT        NOT NULL PRIMARY KEY,
+    pred1_iri     TEXT        NOT NULL,
+    pred2_iri     TEXT        NOT NULL,
+    pred1_id      BIGINT      NOT NULL,
+    pred2_id      BIGINT      NOT NULL,
+    generated_sql TEXT        NOT NULL,
+    schedule      TEXT        NOT NULL,
+    stream_table  TEXT        NOT NULL,
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_extvp_pred1 ON _pg_ripple.extvp_tables (pred1_id);
+CREATE INDEX IF NOT EXISTS idx_extvp_pred2 ON _pg_ripple.extvp_tables (pred2_id);
+"#,
+    name = "views_schema_setup",
+    requires = ["datalog_schema_setup"]
 );
 
 // Create the predicate_stats view after the base tables exist.
@@ -1951,6 +2000,151 @@ mod pg_ripple {
         pgrx::Spi::get_one::<i64>("SELECT count(*) FROM _pg_ripple.dictionary_hot")
             .unwrap_or(None)
             .unwrap_or(0)
+    }
+
+    // ── v0.11.0: SPARQL Views, Datalog Views, ExtVP ───────────────────────────
+
+    /// Return `true` when the pg_trickle extension is installed in the current database.
+    ///
+    /// SPARQL views, Datalog views, and ExtVP all require pg_trickle.
+    /// Call this function to check availability before calling the view functions.
+    #[pg_extern]
+    fn pg_trickle_available() -> bool {
+        crate::views::pg_trickle_available()
+    }
+
+    /// Create a named, incrementally-maintained SPARQL SELECT result table.
+    ///
+    /// Compiles the SPARQL query to SQL, registers a pg_trickle stream table
+    /// under `pg_ripple.{name}`, and records the view in `_pg_ripple.sparql_views`.
+    ///
+    /// - `name` — view name (alphanumeric + underscores, ≤ 63 chars)
+    /// - `sparql` — SPARQL SELECT query
+    /// - `schedule` — pg_trickle schedule, e.g. `'1s'`, `'IMMEDIATE'`, `'30s'`
+    /// - `decode` — when `false` (recommended), the stream table stores BIGINT IDs;
+    ///              when `true`, stores decoded TEXT values
+    ///
+    /// Returns the number of projected variables (stream table columns).
+    #[pg_extern]
+    fn create_sparql_view(
+        name: &str,
+        sparql: &str,
+        schedule: default!(&str, "'1s'"),
+        decode: default!(bool, false),
+    ) -> i64 {
+        crate::views::create_sparql_view(name, sparql, schedule, decode)
+    }
+
+    /// Drop a SPARQL view and its underlying pg_trickle stream table.
+    ///
+    /// Returns `true` on success.
+    #[pg_extern]
+    fn drop_sparql_view(name: &str) -> bool {
+        crate::views::drop_sparql_view(name)
+    }
+
+    /// List all registered SPARQL views as a JSONB array.
+    #[pg_extern]
+    fn list_sparql_views() -> pgrx::JsonB {
+        crate::views::list_sparql_views()
+    }
+
+    /// Create a Datalog view from inline rules and a SPARQL SELECT goal.
+    ///
+    /// The rules are parsed, stratified, and stored under `rule_set_name`.
+    /// The goal query is compiled to SQL and registered as a pg_trickle stream
+    /// table under `pg_ripple.{name}`.
+    ///
+    /// - `name` — view name
+    /// - `rules` — Datalog rules in Turtle-flavoured Datalog syntax
+    /// - `rule_set_name` — logical name for the stored rule set
+    /// - `goal` — SPARQL SELECT query selecting from derived predicates
+    /// - `schedule` — pg_trickle schedule
+    /// - `decode` — as for `create_sparql_view`
+    ///
+    /// Returns the number of projected variables in the goal query.
+    #[pg_extern]
+    fn create_datalog_view(
+        name: &str,
+        rules: &str,
+        goal: &str,
+        rule_set_name: default!(&str, "'custom'"),
+        schedule: default!(&str, "'10s'"),
+        decode: default!(bool, false),
+    ) -> i64 {
+        crate::views::create_datalog_view_from_rules(
+            name,
+            rules,
+            rule_set_name,
+            goal,
+            schedule,
+            decode,
+        )
+    }
+
+    /// Create a Datalog view referencing an existing named rule set.
+    ///
+    /// The rule set must have been previously loaded with `load_rules`.
+    /// The goal query is compiled to SQL and registered as a pg_trickle stream table.
+    #[pg_extern]
+    fn create_datalog_view_from_rule_set(
+        name: &str,
+        rule_set: &str,
+        goal: &str,
+        schedule: default!(&str, "'10s'"),
+        decode: default!(bool, false),
+    ) -> i64 {
+        crate::views::create_datalog_view_from_rule_set(name, rule_set, goal, schedule, decode)
+    }
+
+    /// Drop a Datalog view and its underlying pg_trickle stream table.
+    ///
+    /// Returns `true` on success.
+    #[pg_extern]
+    fn drop_datalog_view(name: &str) -> bool {
+        crate::views::drop_datalog_view(name)
+    }
+
+    /// List all registered Datalog views as a JSONB array.
+    #[pg_extern]
+    fn list_datalog_views() -> pgrx::JsonB {
+        crate::views::list_datalog_views()
+    }
+
+    /// Create an Extended VP (ExtVP) semi-join stream table for two predicates.
+    ///
+    /// Pre-computes subjects that appear in triples of both `pred1_iri` and
+    /// `pred2_iri`.  The SPARQL query engine uses these tables to accelerate
+    /// star-pattern queries that reference both predicates.
+    ///
+    /// - `name` — ExtVP name
+    /// - `pred1_iri` — IRI of the first predicate
+    /// - `pred2_iri` — IRI of the second predicate
+    /// - `schedule` — pg_trickle schedule
+    ///
+    /// Returns the number of rows in the stream table after the first refresh.
+    #[pg_extern]
+    fn create_extvp(
+        name: &str,
+        pred1_iri: &str,
+        pred2_iri: &str,
+        schedule: default!(&str, "'10s'"),
+    ) -> i64 {
+        crate::views::create_extvp(name, pred1_iri, pred2_iri, schedule)
+    }
+
+    /// Drop an ExtVP table and remove it from the catalog.
+    ///
+    /// Returns `true` on success.
+    #[pg_extern]
+    fn drop_extvp(name: &str) -> bool {
+        crate::views::drop_extvp(name)
+    }
+
+    /// List all registered ExtVP tables as a JSONB array.
+    #[pg_extern]
+    fn list_extvp() -> pgrx::JsonB {
+        crate::views::list_extvp()
     }
 }
 

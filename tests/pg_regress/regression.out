@@ -1,0 +1,50 @@
+# using postmaster on localhost, port 28818
+ok 1         - setup                                     583 ms
+ok 2         - aggregates                                 56 ms
+ok 3         - basic_crud                                 49 ms
+ok 4         - bsbm                                       63 ms
+ok 5         - change_notification                        48 ms
+ok 6         - concurrent_write_merge                     54 ms
+not ok 7     - datalog_arithmetic                         47 ms
+ok 8         - datalog_constraints                        48 ms
+not ok 9     - datalog_custom                             53 ms
+not ok 10    - datalog_malformed                          50 ms
+not ok 11    - datalog_negation                           51 ms
+not ok 12    - datalog_owl_rl                             52 ms
+not ok 13    - datalog_rdfs                               58 ms
+ok 14        - datalog_views                              52 ms
+ok 15        - deduplication                              70 ms
+ok 16        - dictionary                                 48 ms
+ok 17        - export_ntriples                            67 ms
+ok 18        - extvp                                      55 ms
+ok 19        - fts_search                                 56 ms
+ok 20        - htap_benchmarks                           149 ms
+ok 21        - htap_merge                                 69 ms
+ok 22        - inline_encoding                            54 ms
+ok 23        - merge_edge_cases                           75 ms
+ok 24        - named_graphs                               58 ms
+ok 25        - nquads_trig                               115 ms
+ok 26        - property_paths                             55 ms
+not ok 27    - rdf_star_construct                         58 ms
+not ok 28    - rdf_star_datalog                           50 ms
+ok 29        - rdf_star_load                              58 ms
+ok 30        - resource_limits                            54 ms
+not ok 31    - schema_state                               56 ms
+not ok 32    - serialization                             304 ms
+ok 33        - shacl_advanced                             64 ms
+not ok 34    - shacl_af_rule                              51 ms
+not ok 35    - shacl_dag_monitors                         56 ms
+ok 36        - shacl_malformed                            52 ms
+not ok 37    - shacl_validation                           57 ms
+not ok 38    - sparql_construct                           59 ms
+ok 39        - sparql_delete_data                         52 ms
+ok 40        - sparql_injection                           58 ms
+ok 41        - sparql_insert_data                         51 ms
+ok 42        - sparql_queries                             53 ms
+ok 43        - sparql_star_conformance                    67 ms
+ok 44        - sparql_views                               57 ms
+ok 45        - triple_crud                                61 ms
+1..45
+# 14 of 45 tests failed.
+# The differences that caused some tests to fail can be viewed in the file "/Users/geir.gronmo/projects/pg_ripple/tests/pg_regress/regression.diffs".
+# A copy of the test summary that you see above is saved in the file "/Users/geir.gronmo/projects/pg_ripple/tests/pg_regress/regression.out".

@@ -21,7 +21,7 @@
 
 mod plan_cache;
 mod property_path;
-mod sqlgen;
+pub(crate) mod sqlgen;
 
 use std::collections::HashMap;
 

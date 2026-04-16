@@ -1,0 +1,121 @@
+-- pg_regress test: SPARQL views (v0.11.0)
+--
+-- These tests verify the SPARQL view catalog and lifecycle management.
+-- When pg_trickle is not installed, pg_trickle_available() returns false
+-- and create_sparql_view() raises an error (tested via expected output).
+
+SET search_path TO pg_ripple, public;
+
+-- ── pg_trickle availability check ────────────────────────────────────────────
+
+-- pg_trickle_available() always returns a BOOLEAN; the exact value depends on
+-- whether pg_trickle is installed in the test database.
+SELECT pg_ripple.pg_trickle_available() IN (true, false) AS available_is_boolean;
+
+-- ── Catalog tables exist ──────────────────────────────────────────────────────
+
+SELECT EXISTS (
+    SELECT 1 FROM pg_class c
+    JOIN pg_namespace n ON n.oid = c.relnamespace
+    WHERE n.nspname = '_pg_ripple' AND c.relname = 'sparql_views'
+) AS sparql_views_catalog_exists;
+
+SELECT EXISTS (
+    SELECT 1 FROM pg_class c
+    JOIN pg_namespace n ON n.oid = c.relnamespace
+    WHERE n.nspname = '_pg_ripple' AND c.relname = 'datalog_views'
+) AS datalog_views_catalog_exists;
+
+SELECT EXISTS (
+    SELECT 1 FROM pg_class c
+    JOIN pg_namespace n ON n.oid = c.relnamespace
+    WHERE n.nspname = '_pg_ripple' AND c.relname = 'extvp_tables'
+) AS extvp_catalog_exists;
+
+-- ── list_sparql_views() returns empty JSON array when no views exist ──────────
+
+SELECT pg_ripple.list_sparql_views() = '[]'::jsonb AS no_views_yet;
+
+-- ── Catalog schema check ──────────────────────────────────────────────────────
+
+-- Verify _pg_ripple.sparql_views has the expected columns.
+SELECT COUNT(*) = 8 AS sparql_views_column_count
+FROM information_schema.columns
+WHERE table_schema = '_pg_ripple'
+  AND table_name = 'sparql_views'
+  AND column_name IN ('name','sparql','generated_sql','schedule','decode',
+                       'stream_table','variables','created_at');
+
+-- Verify _pg_ripple.datalog_views has the expected columns.
+SELECT COUNT(*) = 9 AS datalog_views_column_count
+FROM information_schema.columns
+WHERE table_schema = '_pg_ripple'
+  AND table_name = 'datalog_views'
+  AND column_name IN ('name','rules','rule_set','goal','generated_sql',
+                       'schedule','decode','stream_table','variables');
+
+-- Verify _pg_ripple.extvp_tables has the expected columns.
+SELECT COUNT(*) = 9 AS extvp_column_count
+FROM information_schema.columns
+WHERE table_schema = '_pg_ripple'
+  AND table_name = 'extvp_tables'
+  AND column_name IN ('name','pred1_iri','pred2_iri','pred1_id','pred2_id',
+                       'generated_sql','schedule','stream_table','created_at');
+
+-- ── pg_extern functions exist in pg_ripple schema ────────────────────────────
+
+SELECT COUNT(*) = 1 AS create_sparql_view_exists
+FROM pg_proc p
+JOIN pg_namespace n ON n.oid = p.pronamespace
+WHERE n.nspname = 'pg_ripple' AND p.proname = 'create_sparql_view';
+
+SELECT COUNT(*) = 1 AS drop_sparql_view_exists
+FROM pg_proc p
+JOIN pg_namespace n ON n.oid = p.pronamespace
+WHERE n.nspname = 'pg_ripple' AND p.proname = 'drop_sparql_view';
+
+SELECT COUNT(*) = 1 AS list_sparql_views_exists
+FROM pg_proc p
+JOIN pg_namespace n ON n.oid = p.pronamespace
+WHERE n.nspname = 'pg_ripple' AND p.proname = 'list_sparql_views';
+
+SELECT COUNT(*) = 1 AS create_datalog_view_exists
+FROM pg_proc p
+JOIN pg_namespace n ON n.oid = p.pronamespace
+WHERE n.nspname = 'pg_ripple' AND p.proname = 'create_datalog_view';
+
+SELECT COUNT(*) = 1 AS drop_datalog_view_exists
+FROM pg_proc p
+JOIN pg_namespace n ON n.oid = p.pronamespace
+WHERE n.nspname = 'pg_ripple' AND p.proname = 'drop_datalog_view';
+
+SELECT COUNT(*) = 1 AS list_datalog_views_exists
+FROM pg_proc p
+JOIN pg_namespace n ON n.oid = p.pronamespace
+WHERE n.nspname = 'pg_ripple' AND p.proname = 'list_datalog_views';
+
+SELECT COUNT(*) = 1 AS create_extvp_exists
+FROM pg_proc p
+JOIN pg_namespace n ON n.oid = p.pronamespace
+WHERE n.nspname = 'pg_ripple' AND p.proname = 'create_extvp';
+
+SELECT COUNT(*) = 1 AS drop_extvp_exists
+FROM pg_proc p
+JOIN pg_namespace n ON n.oid = p.pronamespace
+WHERE n.nspname = 'pg_ripple' AND p.proname = 'drop_extvp';
+
+SELECT COUNT(*) = 1 AS list_extvp_exists
+FROM pg_proc p
+JOIN pg_namespace n ON n.oid = p.pronamespace
+WHERE n.nspname = 'pg_ripple' AND p.proname = 'list_extvp';
+
+SELECT COUNT(*) = 1 AS pg_trickle_available_exists
+FROM pg_proc p
+JOIN pg_namespace n ON n.oid = p.pronamespace
+WHERE n.nspname = 'pg_ripple' AND p.proname = 'pg_trickle_available';
+
+-- ── list functions return JSONB arrays ────────────────────────────────────────
+
+SELECT jsonb_typeof(pg_ripple.list_sparql_views())  = 'array' AS sparql_views_is_array;
+SELECT jsonb_typeof(pg_ripple.list_datalog_views()) = 'array' AS datalog_views_is_array;
+SELECT jsonb_typeof(pg_ripple.list_extvp())         = 'array' AS extvp_is_array;

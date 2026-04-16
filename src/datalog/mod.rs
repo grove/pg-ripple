@@ -200,6 +200,19 @@ pub fn encode_iri(iri: &str) -> i64 {
     crate::dictionary::encode(iri, crate::dictionary::KIND_IRI)
 }
 
+/// Parse rules text and store them under the given rule set name.
+///
+/// Convenience wrapper used by the views module so it can load rules inline
+/// without going through the full `pg_extern` path.
+/// Returns the number of rules stored.
+pub fn load_and_store_rules(rules_text: &str, rule_set_name: &str) -> i64 {
+    let rule_set = match parse_rules(rules_text, rule_set_name) {
+        Ok(rs) => rs,
+        Err(e) => pgrx::error!("Datalog rule parse error: {e}"),
+    };
+    store_rules(rule_set_name, &rule_set.rules)
+}
+
 /// Store rules into the catalog, computing strata.
 /// Returns the number of rules stored.
 pub fn store_rules(rule_set: &str, rules: &[Rule]) -> i64 {
