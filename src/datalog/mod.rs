@@ -39,9 +39,9 @@ pub mod compiler;
 pub mod parser;
 pub mod stratify;
 
+pub use compiler::compile_rule_set;
 pub use parser::parse_rules;
 pub use stratify::stratify;
-pub use compiler::compile_rule_set;
 
 use pgrx::prelude::*;
 
@@ -366,10 +366,7 @@ pub fn check_all_constraints(rule_set_filter: Option<&str>) -> Vec<pgrx::JsonB> 
                             "rule".to_owned(),
                             serde_json::Value::String(rule.rule_text.clone()),
                         );
-                        obj.insert(
-                            "violated".to_owned(),
-                            serde_json::Value::Bool(true),
-                        );
+                        obj.insert("violated".to_owned(), serde_json::Value::Bool(true));
                         violations.push(pgrx::JsonB(serde_json::Value::Object(obj)));
                     }
                 }

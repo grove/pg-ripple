@@ -706,7 +706,9 @@ pub fn parse_and_store_shapes(data: &str) -> i32 {
     if infer_mode != "off" {
         let registered = bridge_shacl_rules(data);
         if registered > 0 {
-            pgrx::warning!("load_shacl: auto-registered {registered} sh:rule entries as Datalog rules");
+            pgrx::warning!(
+                "load_shacl: auto-registered {registered} sh:rule entries as Datalog rules"
+            );
         }
     }
 
@@ -746,7 +748,7 @@ pub fn bridge_shacl_rules(data: &str) -> i32 {
              VALUES ('shacl-af', $1, NULL, 0, false, true) \
              ON CONFLICT DO NOTHING",
             &[pgrx::datum::DatumWithOid::from(
-                "# SHACL-AF sh:rule detected; full compilation pending"
+                "# SHACL-AF sh:rule detected; full compilation pending",
             )],
         );
     }

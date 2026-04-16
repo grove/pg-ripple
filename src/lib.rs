@@ -248,7 +248,6 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_dictionary_hot_hash
     requires = ["schema_setup"]
 );
 
-
 // Create the predicate_stats view after the base tables exist.
 pgrx::extension_sql!(
     r#"
@@ -1700,10 +1699,7 @@ mod pg_ripple {
     /// `rule_set` is the name for this group of rules (default: 'custom').
     /// Returns the number of rules stored.
     #[pg_extern]
-    fn load_rules(
-        rules: &str,
-        rule_set: default!(&str, "'custom'"),
-    ) -> i64 {
+    fn load_rules(rules: &str, rule_set: default!(&str, "'custom'")) -> i64 {
         crate::datalog::builtins::register_standard_prefixes();
         let rule_set_ir = match crate::datalog::parse_rules(rules, rule_set) {
             Ok(rs) => rs,
@@ -1751,32 +1747,50 @@ mod pg_ripple {
                     let mut obj = serde_json::Map::new();
                     obj.insert(
                         "id".to_owned(),
-                        row.get::<i64>(1).ok().flatten().map(serde_json::Value::from)
+                        row.get::<i64>(1)
+                            .ok()
+                            .flatten()
+                            .map(serde_json::Value::from)
                             .unwrap_or(serde_json::Value::Null),
                     );
                     obj.insert(
                         "rule_set".to_owned(),
-                        row.get::<String>(2).ok().flatten().map(serde_json::Value::String)
+                        row.get::<String>(2)
+                            .ok()
+                            .flatten()
+                            .map(serde_json::Value::String)
                             .unwrap_or(serde_json::Value::Null),
                     );
                     obj.insert(
                         "rule_text".to_owned(),
-                        row.get::<String>(3).ok().flatten().map(serde_json::Value::String)
+                        row.get::<String>(3)
+                            .ok()
+                            .flatten()
+                            .map(serde_json::Value::String)
                             .unwrap_or(serde_json::Value::Null),
                     );
                     obj.insert(
                         "stratum".to_owned(),
-                        row.get::<i32>(5).ok().flatten().map(|v| serde_json::Value::from(v as i64))
+                        row.get::<i32>(5)
+                            .ok()
+                            .flatten()
+                            .map(|v| serde_json::Value::from(v as i64))
                             .unwrap_or(serde_json::Value::Null),
                     );
                     obj.insert(
                         "is_recursive".to_owned(),
-                        row.get::<bool>(6).ok().flatten().map(serde_json::Value::Bool)
+                        row.get::<bool>(6)
+                            .ok()
+                            .flatten()
+                            .map(serde_json::Value::Bool)
                             .unwrap_or(serde_json::Value::Null),
                     );
                     obj.insert(
                         "active".to_owned(),
-                        row.get::<bool>(7).ok().flatten().map(serde_json::Value::Bool)
+                        row.get::<bool>(7)
+                            .ok()
+                            .flatten()
+                            .map(serde_json::Value::Bool)
                             .unwrap_or(serde_json::Value::Null),
                     );
                     serde_json::Value::Object(obj)

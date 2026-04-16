@@ -97,9 +97,7 @@ pub fn compile_single_rule(rule: &Rule) -> Result<String, String> {
 
     let head_pred = match &head.p {
         Term::Const(id) => *id,
-        Term::Var(_) => {
-            return Err("variable predicate in rule head is not supported".to_owned())
-        }
+        Term::Var(_) => return Err("variable predicate in rule head is not supported".to_owned()),
         _ => return Err("invalid predicate term in rule head".to_owned()),
     };
 
@@ -160,7 +158,7 @@ fn compile_nonrecursive_rule(
                 let pred_id = match &atom.p {
                     Term::Const(id) => *id,
                     Term::Var(_) => {
-                        return Err("variable predicate in rule body not supported".to_owned())
+                        return Err("variable predicate in rule body not supported".to_owned());
                     }
                     _ => return Err("invalid predicate term in rule body".to_owned()),
                 };
@@ -241,21 +239,19 @@ fn compile_nonrecursive_rule(
                 // This needs to appear as a column in SELECT; handled separately.
                 let _ = (var, l, r, op_str); // placeholder
             }
-            BodyLiteral::StringBuiltin(builtin) => {
-                match builtin {
-                    StringBuiltin::Strlen(term, op, rhs_term) => {
-                        let col = render_comparison_term(term, &var_map);
-                        let r = render_comparison_term(rhs_term, &var_map);
-                        let op_str = compare_op_sql(op);
-                        where_clauses.push(format!("LENGTH({col}::text) {op_str} {r}"));
-                    }
-                    StringBuiltin::Regex(term, pattern) => {
-                        let col = render_comparison_term(term, &var_map);
-                        let escaped = pattern.replace('\'', "''");
-                        where_clauses.push(format!("{col}::text ~ '{escaped}'"));
-                    }
+            BodyLiteral::StringBuiltin(builtin) => match builtin {
+                StringBuiltin::Strlen(term, op, rhs_term) => {
+                    let col = render_comparison_term(term, &var_map);
+                    let r = render_comparison_term(rhs_term, &var_map);
+                    let op_str = compare_op_sql(op);
+                    where_clauses.push(format!("LENGTH({col}::text) {op_str} {r}"));
                 }
-            }
+                StringBuiltin::Regex(term, pattern) => {
+                    let col = render_comparison_term(term, &var_map);
+                    let escaped = pattern.replace('\'', "''");
+                    where_clauses.push(format!("{col}::text ~ '{escaped}'"));
+                }
+            },
         }
     }
 
@@ -333,11 +329,12 @@ fn compile_recursive_rule(
                 .and_then(|c| c.to_str().ok())
                 .unwrap_or("default")
                 .to_owned();
-            let g_filter = if scope == "default" { "WHERE g = 0" } else { "" };
-            base_selects.push(format!(
-                "SELECT s, o, g FROM {} {g_filter}",
-                vp_table(*p)
-            ));
+            let g_filter = if scope == "default" {
+                "WHERE g = 0"
+            } else {
+                ""
+            };
+            base_selects.push(format!("SELECT s, o, g FROM {} {g_filter}", vp_table(*p)));
         }
     }
 
@@ -366,11 +363,7 @@ fn compile_recursive_rule(
         } else {
             ""
         };
-        let cycle_cols = if has_graph_var {
-            "s, o, g"
-        } else {
-            "s, o"
-        };
+        let cycle_cols = if has_graph_var { "s, o, g" } else { "s, o" };
 
         format!(
             "SELECT base.s, r.o, base.g\n\
@@ -543,9 +536,7 @@ pub fn compile_on_demand_cte(rules: &[Rule], pred_id: i64) -> Result<String, Str
     }
 
     let union_body = selects.join("\nUNION ALL\n");
-    Ok(format!(
-        "WITH {cte_name}(s, o, g) AS (\n{union_body}\n)"
-    ))
+    Ok(format!("WITH {cte_name}(s, o, g) AS (\n{union_body}\n)"))
 }
 
 fn compile_recursive_cte_fragment(
@@ -590,7 +581,11 @@ fn compile_recursive_cte_fragment(
         .unwrap_or(head_pred);
 
     let has_graph_var = matches!(&head.g, Term::Var(_));
-    let join_g = if has_graph_var { "AND r.g = base.g" } else { "" };
+    let join_g = if has_graph_var {
+        "AND r.g = base.g"
+    } else {
+        ""
+    };
     let cycle_cols = if has_graph_var { "s, o, g" } else { "s, o" };
 
     Ok(format!(
@@ -741,7 +736,9 @@ fn build_not_exists_conds(atom: &Atom, var_map: &VarMap) -> Vec<String> {
 
 fn render_comparison_term(term: &Term, var_map: &VarMap) -> String {
     match term {
-        Term::Var(v) => var_map.col_ref(v).unwrap_or_else(|| format!("NULL /* unbound ?{v} */")),
+        Term::Var(v) => var_map
+            .col_ref(v)
+            .unwrap_or_else(|| format!("NULL /* unbound ?{v} */")),
         Term::Const(id) => const_sql(*id),
         Term::Wildcard => "NULL".to_owned(),
         Term::DefaultGraph => "0".to_owned(),

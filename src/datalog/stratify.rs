@@ -71,12 +71,20 @@ fn build_dependency_graph(rules: &[Rule]) -> Vec<Edge> {
             match lit {
                 BodyLiteral::Positive(atom) => {
                     if let Some(p) = atom_pred(atom) {
-                        edges.push(Edge { from: h, to: p, negative: false });
+                        edges.push(Edge {
+                            from: h,
+                            to: p,
+                            negative: false,
+                        });
                     }
                 }
                 BodyLiteral::Negated(atom) => {
                     if let Some(p) = atom_pred(atom) {
-                        edges.push(Edge { from: h, to: p, negative: true });
+                        edges.push(Edge {
+                            from: h,
+                            to: p,
+                            negative: true,
+                        });
                     }
                 }
                 _ => {}
@@ -109,10 +117,7 @@ fn collect_predicates(rules: &[Rule]) -> HashSet<PredicateId> {
 }
 
 /// Compute SCCs using Kosaraju's two-pass DFS.
-fn compute_sccs(
-    nodes: &HashSet<PredicateId>,
-    edges: &[Edge],
-) -> Vec<Vec<PredicateId>> {
+fn compute_sccs(nodes: &HashSet<PredicateId>, edges: &[Edge]) -> Vec<Vec<PredicateId>> {
     // Build adjacency lists (forward and reverse).
     let mut adj: HashMap<i64, Vec<i64>> = HashMap::new();
     let mut radj: HashMap<i64, Vec<i64>> = HashMap::new();
@@ -321,7 +326,10 @@ pub fn stratify(rules: &[Rule]) -> Result<StratifiedProgram, String> {
     // Constraint rules go in stratum 0 (evaluated after all base data is ready).
     for rule in rules {
         if rule.head.is_none() {
-            if strata_rules[0].iter().all(|r| r.rule_text != rule.rule_text) {
+            if strata_rules[0]
+                .iter()
+                .all(|r| r.rule_text != rule.rule_text)
+            {
                 strata_rules[0].push(rule.clone());
             }
         }

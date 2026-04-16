@@ -18,9 +18,7 @@
 //! Variable      ::= '?' [a-zA-Z_][a-zA-Z0-9_]*
 //! ```
 
-use crate::datalog::{
-    Atom, ArithOp, BodyLiteral, CompareOp, Rule, RuleSet, StringBuiltin, Term,
-};
+use crate::datalog::{ArithOp, Atom, BodyLiteral, CompareOp, Rule, RuleSet, StringBuiltin, Term};
 
 // ─── Public API ──────────────────────────────────────────────────────────────
 
@@ -365,9 +363,9 @@ fn parse_atom(text: &str) -> Result<Atom, String> {
     if upper.starts_with("GRAPH") {
         let rest = text[5..].trim();
         // Find the graph term (up to the '{')
-        let brace = rest.find('{').ok_or_else(|| {
-            format!("missing '{{' in GRAPH pattern: {text}")
-        })?;
+        let brace = rest
+            .find('{')
+            .ok_or_else(|| format!("missing '{{' in GRAPH pattern: {text}"))?;
         let graph_term_str = rest[..brace].trim();
         let inner = rest[brace + 1..].trim();
         let inner = inner
