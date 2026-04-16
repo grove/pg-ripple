@@ -9,6 +9,46 @@ Versions correspond to the milestones in [ROADMAP.md](ROADMAP.md).
 
 ## [Unreleased]
 
+Points at the next milestone: v0.13.0 — Performance Hardening.
+
+---
+
+## [0.12.0] — 2026-04-16 — SPARQL Update (Advanced)
+
+This release completes the full SPARQL 1.1 Update specification. Building on the `INSERT DATA` / `DELETE DATA` support from v0.5.1, pg_ripple now supports pattern-based updates, remote RDF loading, and full named-graph lifecycle management.
+
+**New in this release:** Find-and-replace data using SPARQL patterns with `DELETE/INSERT WHERE`. Fetch and load remote RDF documents from any HTTP(S) URL with `LOAD <url>`. Clear, drop, or create named graphs with a single SPARQL Update call.
+
+### What you can do
+
+- **Pattern-based updates** — `DELETE { … } INSERT { … } WHERE { … }` finds matching triples using the full SPARQL→SQL engine and then deletes and inserts triples for each result row; both the DELETE and INSERT templates may reference WHERE-bound variables
+- **INSERT WHERE** — omit the DELETE clause to insert a triple for every WHERE match
+- **DELETE WHERE** — omit the INSERT clause to remove all triples matching a pattern
+- **LOAD remote RDF** — `LOAD <url>` fetches a Turtle, N-Triples, or RDF/XML document via HTTP(S) and inserts all triples; `LOAD <url> INTO GRAPH <g>` targets a named graph; `LOAD SILENT <url>` suppresses network errors
+- **Clear a graph** — `CLEAR GRAPH <g>` removes all triples from a named graph without touching the default graph; `CLEAR DEFAULT`, `CLEAR NAMED`, `CLEAR ALL` let you clear one or all graphs in a single call
+- **Drop a graph** — `DROP GRAPH <g>` clears and deregisters a graph; `DROP SILENT` suppresses errors on non-existent graphs; `DROP ALL` clears the entire store
+- **Create a graph** — `CREATE GRAPH <g>` pre-registers a named graph in the dictionary; `CREATE SILENT` is a no-op if the graph already exists
+
+### What happens behind the scenes
+
+When `DELETE/INSERT WHERE` runs, the WHERE clause is compiled through the existing SPARQL→SQL engine into a SELECT query. The result rows are collected in memory, and then for each row the DELETE phase removes any matched triples from VP storage, followed by the INSERT phase adding new ones. This keeps the operation transactional inside a single PostgreSQL call.
+
+`LOAD` uses `ureq` (a lightweight Rust HTTP client) to fetch the URL. The response body is parsed by the same rio_turtle / rio_xml parsers used for local bulk loading; triples are inserted in batches using the standard VP storage path.
+
+`CLEAR` and `DROP` call a new `clear_graph_by_id()` helper that deletes from both the HTAP delta tables and tombstones the main-partition rows — the same mechanism used by the existing `drop_graph()` function.
+
+<details>
+<summary>Technical details</summary>
+
+- **src/sparql/mod.rs** — `sparql_update()` extended to handle all `GraphUpdateOperation` variants: `DeleteInsert`, `Load`, `Clear`, `Create`, `Drop`; new helpers `execute_delete_insert()`, `execute_load()`, `execute_clear()`, `execute_drop()`, `resolve_ground_term()`, `resolve_term_pattern()`, `resolve_named_node_pattern()`, `resolve_graph_name_pattern()`, `encode_literal_id()`
+- **src/storage/mod.rs** — new `clear_graph_by_id(g_id)` mirrors `drop_graph()` but takes a pre-encoded ID; new `all_graph_ids()` collects all distinct graph IDs across VP tables and `vp_rare`
+- **src/bulk_load.rs** — new graph-aware loaders `load_ntriples_into_graph()`, `load_turtle_into_graph()`, `load_rdfxml_into_graph()` accept a target `g_id` instead of always writing to the default graph (g=0)
+- **Cargo.toml** — added `ureq = { version = "2", features = ["tls"] }` for `LOAD <url>` HTTP support
+- **sql/pg_ripple--0.11.0--0.12.0.sql** — migration script (schema unchanged; new capabilities compiled into the extension library)
+- **pg_regress** — new test suites: `sparql_update_where.sql`, `sparql_graph_management.sql`; both PASS
+
+</details>
+
 ---
 
 ## [0.11.0] — 2026-04-16 — SPARQL & Datalog Views
