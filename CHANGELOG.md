@@ -9,7 +9,42 @@ Versions correspond to the milestones in [ROADMAP.md](ROADMAP.md).
 
 ## [Unreleased]
 
-Points at the next milestone: v0.16.0 — SPARQL Federation.
+Points at the next milestone: v0.17.0 — JSON-LD Framing.
+
+---
+
+## [0.16.0] — 2026-04-16 — SPARQL Federation
+
+pg_ripple can now query remote SPARQL endpoints from within a single SPARQL query using the standard `SERVICE` keyword. Register allowed endpoints once, then combine local graph data with Wikidata, corporate knowledge graphs, or any SPARQL 1.1 endpoint — all in one query, with full SSRF protection.
+
+**New in this release:** `SERVICE <url> { ... }` clause support in all SPARQL queries. SSRF-safe allowlist via `_pg_ripple.federation_endpoints`. Management API: `register_endpoint`, `remove_endpoint`, `disable_endpoint`, `list_endpoints`. Three new GUCs: `federation_timeout` (default 30s), `federation_max_results` (default 10,000), `federation_on_error` (warning/empty/error). Health monitoring via `_pg_ripple.federation_health`. Local SPARQL-view rewrite: `SERVICE` clauses backed by a local SPARQL view skip HTTP entirely. Migration script `pg_ripple--0.15.0--0.16.0.sql`.
+
+### What you can do
+
+- **Query remote endpoints** — write `SERVICE <https://query.wikidata.org/sparql> { ?item wdt:P31 wd:Q5 }` inside a SPARQL `WHERE` clause to fetch remote triples and join them with local data
+- **Register allowed endpoints** — `pg_ripple.register_endpoint('https://query.wikidata.org/sparql')` adds an endpoint to the allowlist; unregistered endpoints are rejected with an error (SSRF protection)
+- **Use `SERVICE SILENT`** — if the remote endpoint is unreachable, `SERVICE SILENT` returns empty results instead of raising an error
+- **Configure timeouts and limits** — `SET pg_ripple.federation_timeout = 10` limits each remote call to 10 seconds; `SET pg_ripple.federation_max_results = 500` caps result rows; `SET pg_ripple.federation_on_error = 'error'` turns connection failures into hard errors
+- **Rewrite to local views** — `pg_ripple.register_endpoint('https://...', 'my_stream_table')` makes `SERVICE` calls to that URL scan the local pre-materialised SPARQL view instead — no HTTP at all
+- **Monitor endpoint health** — the `_pg_ripple.federation_health` table records success/failure and latency for each SERVICE call; unhealthy endpoints (< 10% success rate over 5 min) are skipped automatically
+
+### What happens behind the scenes
+
+`SERVICE` clauses are translated in `src/sparql/sqlgen.rs` via the `GraphPattern::Service` arm. For each SERVICE call, the inner SPARQL pattern is serialised and sent as an HTTP GET to the remote endpoint using `ureq`. The `application/sparql-results+json` response is parsed, each result term is encoded to a local dictionary ID, and the full result set is injected into the SQL as an inline `VALUES` clause — making it a standard SQL join for the PostgreSQL planner. `SERVICE SILENT` and `federation_on_error = 'empty'` return a zero-row fragment instead of raising.
+
+<details>
+<summary>Technical details</summary>
+
+- **src/sparql/federation.rs** (new) — `is_endpoint_allowed`, `execute_remote`, `parse_sparql_results_json`, `encode_results`, `record_health`, `is_endpoint_healthy`, `get_local_view`, `get_view_variables`
+- **src/sparql/sqlgen.rs** — added `Fragment::zero_rows()`, `GraphPattern::Service` arm calling `translate_service()`, `translate_service_local()`, `translate_service_values()`
+- **src/sparql/mod.rs** — added `pub(crate) mod federation`; SERVICE queries skip plan cache
+- **src/lib.rs** — `federation_schema_setup` SQL block; GUC statics `FEDERATION_TIMEOUT`, `FEDERATION_MAX_RESULTS`, `FEDERATION_ON_ERROR`; `register_endpoint`, `remove_endpoint`, `disable_endpoint`, `list_endpoints` pg_extern functions
+- **sql/pg_ripple--0.15.0--0.16.0.sql** — creates `federation_endpoints` and `federation_health` tables with index
+- **tests/pg_regress/sql/sparql_federation.sql** — endpoint management, SSRF enforcement, SERVICE SILENT, GUC modes, health table
+- **tests/pg_regress/sql/sparql_federation_timeout.sql** — GUC defaults, boundary tests, timeout with unreachable endpoint
+- **docs/src/user-guide/sql-reference/federation.md** (new) — full user documentation
+
+</details>
 
 ---
 

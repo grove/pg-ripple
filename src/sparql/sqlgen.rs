@@ -22,6 +22,7 @@
 //! - `Reduced` — treated same as Distinct for simplicity
 //! - `Slice` — LIMIT / OFFSET
 //! - `OrderBy` — ORDER BY
+//! - `Service` — SPARQL SERVICE (v0.16.0) → inline VALUES from remote endpoint
 
 use std::collections::HashMap;
 
@@ -32,6 +33,7 @@ use spargebra::algebra::{
 };
 use spargebra::term::{GroundTerm, Literal, NamedNodePattern, TermPattern};
 
+use super::federation;
 use super::property_path::{PathCtx, compile_path};
 use crate::dictionary;
 
@@ -192,6 +194,15 @@ impl Fragment {
     fn empty() -> Self {
         Self {
             from_items: vec![],
+            conditions: vec![],
+            bindings: HashMap::new(),
+        }
+    }
+
+    /// Return a fragment that produces exactly zero rows (for SILENT error cases).
+    fn zero_rows() -> Self {
+        Self {
+            from_items: vec![("_zero".to_owned(), "(SELECT 1 LIMIT 0)".to_owned())],
             conditions: vec![],
             bindings: HashMap::new(),
         }
@@ -741,13 +752,12 @@ fn translate_pattern(pattern: &GraphPattern, ctx: &mut Ctx) -> Fragment {
             bindings,
         } => translate_values(variables, bindings, ctx),
 
-        other => {
-            // Return empty fragment with FALSE for unsupported patterns.
-            let mut frag = Fragment::empty();
-            frag.conditions.push("FALSE".to_owned());
-            let _ = other; // silence unused var warning
-            frag
-        }
+        // ── SERVICE (SPARQL federation, v0.16.0) ─────────────────────────────
+        GraphPattern::Service {
+            name,
+            inner,
+            silent,
+        } => translate_service(name, inner, *silent, ctx),
     }
 }
 
@@ -1142,6 +1152,191 @@ fn translate_values(
             v.as_str().to_owned(),
             format!("{alias}._val_{}", v.as_str()),
         );
+    }
+
+    frag
+}
+
+// ─── SERVICE translator (v0.16.0) ─────────────────────────────────────────────
+
+/// Translate a SPARQL `SERVICE` clause.
+///
+/// Execution strategy:
+/// 1. Resolve endpoint URL from the `name` pattern.
+/// 2. Check SSRF allowlist; error on unregistered endpoint.
+/// 3. If a local SPARQL view covers this endpoint, scan its stream table.
+/// 4. Otherwise, execute the inner pattern as a remote SPARQL SELECT.
+/// 5. Dictionary-encode remote results and inject as an inline VALUES fragment.
+///
+/// Multiple SERVICE clauses in one query execute sequentially (SPI context
+/// does not support concurrent HTTP + SPI).
+fn translate_service(
+    name: &NamedNodePattern,
+    inner: &GraphPattern,
+    silent: bool,
+    ctx: &mut Ctx,
+) -> Fragment {
+    // ── 1. Resolve URL ────────────────────────────────────────────────────────
+    let url = match name {
+        NamedNodePattern::NamedNode(nn) => nn.as_str().to_string(),
+        NamedNodePattern::Variable(v) => {
+            // Variable endpoint: look up bound value in per-query cache.
+            // If not bound at translation time, error (runtime binding not
+            // supported in this version).
+            pgrx::warning!(
+                "SERVICE with variable endpoint ?{} is not yet supported; returning empty results",
+                v.as_str()
+            );
+            let mut frag = Fragment::empty();
+            frag.conditions.push("FALSE".to_owned());
+            return frag;
+        }
+    };
+
+    // ── 2. SSRF allowlist check ───────────────────────────────────────────────
+    if !federation::is_endpoint_allowed(&url) {
+        if silent {
+            pgrx::warning!("SERVICE endpoint not registered (SILENT skipping): {url}");
+            return Fragment::zero_rows();
+        }
+        pgrx::error!(
+            "federation endpoint not registered: {}; use pg_ripple.register_endpoint() to allow it",
+            url
+        );
+    }
+
+    // ── 2b. Health check (skip unhealthy endpoints) ───────────────────────────
+    if !federation::is_endpoint_healthy(&url) {
+        if silent {
+            pgrx::warning!("SERVICE endpoint {url} is unhealthy (success_rate < 10%); skipping");
+            return Fragment::zero_rows();
+        }
+        pgrx::warning!("SERVICE endpoint {url} is unhealthy; proceeding anyway");
+    }
+
+    // ── 3. Local SPARQL view rewrite ──────────────────────────────────────────
+    if let Some(stream_table) = federation::get_local_view(&url) {
+        return translate_service_local(&stream_table, ctx);
+    }
+
+    // ── 4. Remote SPARQL execution ────────────────────────────────────────────
+    // Serialise the inner pattern as a SPARQL SELECT query.
+    // spargebra's Display impl emits valid SPARQL graph pattern syntax.
+    let inner_text = format!("SELECT * WHERE {{ {inner} }}");
+
+    let timeout_secs = crate::FEDERATION_TIMEOUT.get();
+    let max_results = crate::FEDERATION_MAX_RESULTS.get();
+
+    let start = std::time::Instant::now();
+
+    let result = federation::execute_remote(&url, &inner_text, timeout_secs, max_results);
+
+    let latency_ms = start.elapsed().as_millis() as i64;
+
+    let (variables, rows) = match result {
+        Ok(r) => {
+            federation::record_health(&url, true, latency_ms);
+            r
+        }
+        Err(e) => {
+            federation::record_health(&url, false, latency_ms);
+            let on_error = crate::FEDERATION_ON_ERROR.get();
+            let on_error_str = on_error
+                .as_ref()
+                .and_then(|c| c.to_str().ok())
+                .unwrap_or("warning");
+            if silent || on_error_str == "empty" {
+                pgrx::warning!("SERVICE {url} failed (returning empty): {e}");
+                return Fragment::zero_rows();
+            } else if on_error_str == "error" {
+                pgrx::error!("SERVICE {url} failed: {e}");
+            } else {
+                // default: warning + empty
+                pgrx::warning!("SERVICE {url} failed (returning empty): {e}");
+                return Fragment::zero_rows();
+            }
+        }
+    };
+
+    if variables.is_empty() || rows.is_empty() {
+        return Fragment::zero_rows();
+    }
+
+    // ── 5. Encode results and inject as VALUES ────────────────────────────────
+    let (variables, encoded_rows) = federation::encode_results(variables, rows);
+
+    translate_service_values(&variables, &encoded_rows, ctx)
+}
+
+/// Translate a local SPARQL view rewrite: scan the pre-materialised stream
+/// table directly instead of making an HTTP call.
+fn translate_service_local(stream_table: &str, ctx: &mut Ctx) -> Fragment {
+    let vars = federation::get_view_variables(stream_table);
+    if vars.is_empty() {
+        let mut frag = Fragment::empty();
+        frag.conditions.push("FALSE".to_owned());
+        return frag;
+    }
+
+    let alias = ctx.next_alias();
+    let mut frag = Fragment::empty();
+    // Fully-qualify the stream table name; it lives in _pg_ripple schema.
+    // If it already has a schema prefix, use it as-is.
+    let qualified = if stream_table.contains('.') {
+        stream_table.to_owned()
+    } else {
+        format!("_pg_ripple.{stream_table}")
+    };
+    frag.from_items.push((alias.clone(), qualified));
+
+    for v in &vars {
+        frag.bindings.insert(v.clone(), format!("{alias}._v_{v}"));
+    }
+
+    frag
+}
+
+/// Build a VALUES fragment from pre-encoded (i64) remote results.
+fn translate_service_values(
+    variables: &[String],
+    encoded_rows: &[Vec<Option<i64>>],
+    ctx: &mut Ctx,
+) -> Fragment {
+    if variables.is_empty() || encoded_rows.is_empty() {
+        return Fragment::empty();
+    }
+
+    let col_names: Vec<String> = variables.iter().map(|v| format!("_svc_{v}")).collect();
+
+    let col_names_str = col_names.join(", ");
+
+    let rows_sql: Vec<String> = encoded_rows
+        .iter()
+        .map(|row| {
+            let cells: Vec<String> = row
+                .iter()
+                .map(|cell| match cell {
+                    None => "NULL::bigint".to_owned(),
+                    Some(id) => id.to_string(),
+                })
+                .collect();
+            format!("({})", cells.join(", "))
+        })
+        .collect();
+
+    let n = ctx.alias_counter;
+    ctx.alias_counter += 1;
+    let values_expr = format!(
+        "(SELECT * FROM (VALUES {}) AS _svi{n}({col_names_str}))",
+        rows_sql.join(", ")
+    );
+
+    let alias = ctx.next_alias();
+    let mut frag = Fragment::empty();
+    frag.from_items.push((alias.clone(), values_expr));
+
+    for v in variables {
+        frag.bindings.insert(v.clone(), format!("{alias}._svc_{v}"));
     }
 
     frag

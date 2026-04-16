@@ -1,0 +1,219 @@
+-- pg_regress test: SPARQL federation (v0.16.0)
+-- Tests for SERVICE clause endpoint registration, allowlist enforcement,
+-- error handling, local view rewrite, and management API.
+--
+-- NOTE: These tests do NOT make real HTTP calls to external endpoints.
+-- They verify the allowlist, management API, and error-handling semantics
+-- using a fake (unregistered) URL and a pre-registered test endpoint.
+-- ─── Endpoint management API ─────────────────────────────────────────────────
+-- Register an endpoint; it should appear in list_endpoints().
+SELECT pg_ripple.register_endpoint('http://sparql.test/endpoint');
+ register_endpoint 
+-------------------
+ 
+(1 row)
+
+-- list_endpoints() must return the newly registered endpoint.
+SELECT url, enabled, local_view_name
+FROM pg_ripple.list_endpoints()
+WHERE url = 'http://sparql.test/endpoint';
+             url             | enabled | local_view_name 
+-----------------------------+---------+-----------------
+ http://sparql.test/endpoint | t       | 
+(1 row)
+
+-- Register a second endpoint with a local_view_name override.
+SELECT pg_ripple.register_endpoint(
+    'http://sparql.local/view-endpoint',
+    'test_stream'
+);
+ register_endpoint 
+-------------------
+ 
+(1 row)
+
+-- Verify local_view_name is stored.
+SELECT url, local_view_name
+FROM pg_ripple.list_endpoints()
+WHERE url = 'http://sparql.local/view-endpoint';
+                url                | local_view_name 
+-----------------------------------+-----------------
+ http://sparql.local/view-endpoint | test_stream
+(1 row)
+
+-- Disable an endpoint.
+SELECT pg_ripple.disable_endpoint('http://sparql.test/endpoint');
+ disable_endpoint 
+------------------
+ 
+(1 row)
+
+-- Disabled endpoint should show enabled = false.
+SELECT url, enabled
+FROM pg_ripple.list_endpoints()
+WHERE url = 'http://sparql.test/endpoint';
+             url             | enabled 
+-----------------------------+---------
+ http://sparql.test/endpoint | f
+(1 row)
+
+-- Re-enable via register_endpoint.
+SELECT pg_ripple.register_endpoint('http://sparql.test/endpoint');
+ register_endpoint 
+-------------------
+ 
+(1 row)
+
+SELECT url, enabled
+FROM pg_ripple.list_endpoints()
+WHERE url = 'http://sparql.test/endpoint';
+             url             | enabled 
+-----------------------------+---------
+ http://sparql.test/endpoint | t
+(1 row)
+
+-- Remove an endpoint.
+SELECT pg_ripple.remove_endpoint('http://sparql.local/view-endpoint');
+ remove_endpoint 
+-----------------
+ 
+(1 row)
+
+-- It should no longer appear in list_endpoints().
+SELECT COUNT(*) AS removed_count
+FROM pg_ripple.list_endpoints()
+WHERE url = 'http://sparql.local/view-endpoint';
+ removed_count 
+---------------
+             0
+(1 row)
+
+-- ─── Allowlist enforcement ────────────────────────────────────────────────────
+-- Attempting to use an unregistered endpoint in a SERVICE clause must raise
+-- an ERROR (SSRF protection). We wrap in a DO block to catch the error.
+DO $$
+DECLARE
+    raised BOOLEAN := false;
+BEGIN
+    BEGIN
+        PERFORM pg_ripple.sparql(
+            'SELECT ?s WHERE { SERVICE <http://unregistered.test/sparql> { ?s ?p ?o } }'
+        );
+    EXCEPTION WHEN OTHERS THEN
+        IF SQLERRM LIKE '%federation endpoint not registered%' THEN
+            raised := true;
+        END IF;
+    END;
+    IF NOT raised THEN
+        RAISE EXCEPTION 'Expected "federation endpoint not registered" error was not raised';
+    END IF;
+END $$;
+SELECT 'unregistered endpoint raises error' AS ssrf_protection_check;
+       ssrf_protection_check        
+------------------------------------
+ unregistered endpoint raises error
+(1 row)
+
+-- SERVICE SILENT on unregistered endpoint must return empty (no error).
+-- With SILENT, a warning is emitted and results are empty.
+SELECT COUNT(*) AS silent_unregistered_count
+FROM pg_ripple.sparql(
+    'SELECT ?s WHERE { SERVICE SILENT <http://also-unregistered.test/sparql> { ?s ?p ?o } }'
+);
+WARNING:  SERVICE endpoint not registered (SILENT skipping): http://also-unregistered.test/sparql
+ silent_unregistered_count 
+---------------------------
+                         0
+(1 row)
+
+-- ─── Direct _pg_ripple.federation_endpoints table checks ─────────────────────
+-- Verify the enabled endpoint is stored correctly.
+SELECT url, enabled
+FROM _pg_ripple.federation_endpoints
+WHERE url = 'http://sparql.test/endpoint';
+             url             | enabled 
+-----------------------------+---------
+ http://sparql.test/endpoint | t
+(1 row)
+
+-- ─── federation_on_error GUC ─────────────────────────────────────────────────
+-- Default: SERVICE failure on registered-but-unreachable endpoint returns
+-- empty (warning mode). Test using a registered but unreachable URL.
+SELECT pg_ripple.register_endpoint('http://127.0.0.1:19999/sparql');
+ register_endpoint 
+-------------------
+ 
+(1 row)
+
+-- With default federation_on_error = 'warning', a failed SERVICE call returns
+-- empty results (and emits a WARNING). The test checks the count is 0.
+SET pg_ripple.federation_on_error = 'empty';
+SET pg_ripple.federation_timeout = 2;
+SELECT COUNT(*) AS unreachable_empty_count
+FROM pg_ripple.sparql(
+    'SELECT ?s WHERE { SERVICE <http://127.0.0.1:19999/sparql> { ?s ?p ?o } }'
+);
+WARNING:  SERVICE http://127.0.0.1:19999/sparql failed (returning empty): federation HTTP error calling http://127.0.0.1:19999/sparql: http://127.0.0.1:19999/sparql?query=SELECT+*+WHERE+%7B+%3Fs+%3Fp+%3Fo+.+%7D: Connection Failed: Connect error: Connection refused (os error 61)
+ unreachable_empty_count 
+-------------------------
+                       0
+(1 row)
+
+-- With federation_on_error = 'error', a failed call raises an ERROR.
+SET pg_ripple.federation_on_error = 'error';
+DO $$
+DECLARE
+    raised BOOLEAN := false;
+BEGIN
+    BEGIN
+        PERFORM pg_ripple.sparql(
+            'SELECT ?s WHERE { SERVICE <http://127.0.0.1:19999/sparql> { ?s ?p ?o } }'
+        );
+    EXCEPTION WHEN OTHERS THEN
+        raised := true;
+    END;
+    IF NOT raised THEN
+        RAISE EXCEPTION 'Expected ERROR for unreachable endpoint was not raised';
+    END IF;
+END $$;
+SELECT 'federation_on_error=error raises on failure' AS on_error_error_check;
+            on_error_error_check             
+---------------------------------------------
+ federation_on_error=error raises on failure
+(1 row)
+
+-- Reset GUC to defaults.
+RESET pg_ripple.federation_on_error;
+RESET pg_ripple.federation_timeout;
+-- ─── Health table existence ───────────────────────────────────────────────────
+-- The federation_health table must exist after extension install.
+SELECT EXISTS(
+    SELECT 1 FROM pg_class c
+    JOIN pg_namespace n ON n.oid = c.relnamespace
+    WHERE n.nspname = '_pg_ripple' AND c.relname = 'federation_health'
+) AS health_table_exists;
+ health_table_exists 
+---------------------
+ t
+(1 row)
+
+-- ─── Cleanup ──────────────────────────────────────────────────────────────────
+SELECT pg_ripple.remove_endpoint('http://sparql.test/endpoint');
+ remove_endpoint 
+-----------------
+ 
+(1 row)
+
+SELECT pg_ripple.remove_endpoint('http://127.0.0.1:19999/sparql');
+ remove_endpoint 
+-----------------
+ 
+(1 row)
+
+SELECT COUNT(*) AS endpoints_after_cleanup
+FROM _pg_ripple.federation_endpoints;
+ endpoints_after_cleanup 
+-------------------------
+                       0
+(1 row)
+

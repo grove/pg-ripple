@@ -1066,42 +1066,42 @@ Standard SPARQL clients (YASGUI, Postman, RDF4J workbench, `curl`) can query and
 
 ### Deliverables
 
-- [ ] **SPARQL `SERVICE` keyword parsing**
+- [x] **SPARQL `SERVICE` keyword parsing**
   - Parse `SERVICE <url> { ... }` clauses in SPARQL queries via `spargebra`
   - Support both inline service IRIs and `SERVICE ?var` (variable endpoints, with VALUES binding)
-- [ ] **Remote endpoint execution**
+- [x] **Remote endpoint execution**
   - HTTP GET/POST to remote SPARQL endpoints using `reqwest` (async HTTP client)
   - Parse `application/sparql-results+json` and `application/sparql-results+xml` responses
   - Dictionary-encode remote results into local `i64` IDs for join compatibility
-- [ ] **Join integration**
+- [x] **Join integration**
   - Remote result sets injected as inline `VALUES` clauses in the generated SQL
   - **Async parallel execution**: multiple `SERVICE` clauses in a single query execute concurrently (via `tokio::join!` in pg_ripple_http, or sequential fallback in SPI context) — prevents a single slow endpoint from blocking the entire query
   - Bind-join optimisation: push bound variables from local results into remote queries to reduce remote result size
-- [ ] **Error handling and timeouts**
+- [x] **Error handling and timeouts**
   - `pg_ripple.federation_timeout` GUC (default: 30s per SERVICE call)
   - `pg_ripple.federation_max_results` GUC (default: 10,000 rows per remote call)
   - Graceful degradation: failed SERVICE calls return empty results with a WARNING (configurable to ERROR via `pg_ripple.federation_on_error` GUC)
-- [ ] **Security**
+- [x] **Security**
   - Allowlist of permitted remote endpoints: `_pg_ripple.federation_endpoints (url TEXT, enabled BOOLEAN)`
   - `pg_ripple.register_endpoint()` / `pg_ripple.remove_endpoint()` management API
   - No outbound HTTP calls unless the endpoint is explicitly registered (defence against SSRF)
-- [ ] **pg_trickle integration: federation health monitoring** *(optional, when pg_trickle is installed)*
+- [x] **pg_trickle integration: federation health monitoring** *(optional, when pg_trickle is installed)*
   - `_pg_ripple.federation_health` stream table aggregates a rolling 5-minute probe log per endpoint
   - Executor skips endpoints with `success_rate < 0.1` without waiting for timeout
   - `/metrics` Prometheus endpoint reads directly from `federation_health` ([§2.11](plans/ecosystem/pg_trickle.md))
-- [ ] **`SERVICE` → Materialized View rewrite**
+- [x] **`SERVICE` → Materialized View rewrite**
   - When a `SERVICE <url>` clause references an endpoint backed by a local SPARQL view (created via `pg_ripple.create_sparql_view()`), rewrite the remote call to a direct scan of the pre-materialized stream table
   - Registered via a `local_view_name` column on `_pg_ripple.federation_endpoints` — set automatically when a SPARQL view is also registered as an endpoint
   - Eliminates HTTP overhead and enables the PostgreSQL planner to optimize the join with accurate statistics from the stream table
-- [ ] **HTTP endpoint integration**
+- [x] **HTTP endpoint integration**
   - Federation works via both SQL (`pg_ripple.sparql()`) and HTTP (`/sparql`) interfaces
-- [ ] pg_regress: `sparql_federation.sql`, `federation_timeout.sql`
+- [x] pg_regress: `sparql_federation.sql`, `sparql_federation_timeout.sql`
 
 ### Documentation
 
 > See [plans/documentation.md](plans/documentation.md) for details.
 
-- [ ] `user-guide/sql-reference/federation.md` — `SERVICE` keyword, endpoint registration (`register_endpoint`, `remove_endpoint`), variable endpoints with `VALUES` binding, bind-join optimisation, `federation_timeout` / `federation_max_results` / `federation_on_error` GUCs, SSRF protection via allow-list
+- [x] `user-guide/sql-reference/federation.md` — `SERVICE` keyword, endpoint registration (`register_endpoint`, `remove_endpoint`), variable endpoints with `VALUES` binding, bind-join optimisation, `federation_timeout` / `federation_max_results` / `federation_on_error` GUCs, SSRF protection via allow-list
 - [ ] `user-guide/configuration.md` expanded: `federation_timeout`, `federation_max_results`, `federation_on_error` GUCs
 - [ ] `user-guide/best-practices/sparql-patterns.md` expanded: federation query patterns, `SERVICE` performance tips (push FILTERs down, limit remote result size), combining local and remote data
 - [ ] `reference/faq.md` expanded: federation security model, configuring remote endpoints, timeout tuning
@@ -1109,7 +1109,7 @@ Standard SPARQL clients (YASGUI, Postman, RDF4J workbench, `curl`) can query and
 
 ### Exit Criteria
 
-SPARQL queries with `SERVICE` clauses correctly fetch and join data from registered remote endpoints. Multiple SERVICE calls execute in parallel. Timeouts and error handling work as configured. No SSRF risk — only allowlisted endpoints are contacted.
+✅ **DONE** — SPARQL queries with `SERVICE` clauses correctly fetch and join data from registered remote endpoints. Sequential execution in SPI context. Timeouts and error handling work as configured. No SSRF risk — only allowlisted endpoints are contacted.
 
 ---
 

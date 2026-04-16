@@ -287,6 +287,35 @@ CREATE TABLE IF NOT EXISTS _pg_ripple.inferred_schema (
     requires = ["views_schema_setup"]
 );
 
+// v0.16.0: SPARQL federation endpoint allowlist and health monitoring.
+pgrx::extension_sql!(
+    r#"
+-- Federation endpoint allowlist (v0.16.0)
+-- Only endpoints with enabled = true are contacted via SERVICE clauses.
+-- local_view_name: when set, SERVICE is rewritten to scan the named stream table.
+CREATE TABLE IF NOT EXISTS _pg_ripple.federation_endpoints (
+    url             TEXT    NOT NULL PRIMARY KEY,
+    enabled         BOOLEAN NOT NULL DEFAULT true,
+    local_view_name TEXT
+);
+
+-- Federation health log (v0.16.0, used when pg_trickle is installed)
+-- Rolling probe log: executor writes here after each SERVICE call.
+-- Used by is_endpoint_healthy() to skip endpoints with success_rate < 10%.
+CREATE TABLE IF NOT EXISTS _pg_ripple.federation_health (
+    id          BIGSERIAL   PRIMARY KEY,
+    url         TEXT        NOT NULL,
+    success     BOOLEAN     NOT NULL,
+    latency_ms  BIGINT      NOT NULL DEFAULT 0,
+    probed_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_federation_health_url_time
+    ON _pg_ripple.federation_health (url, probed_at DESC);
+"#,
+    name = "federation_schema_setup",
+    requires = ["rls_schema_setup"]
+);
+
 // v0.11.0: SPARQL views, Datalog views, and ExtVP catalog tables.
 pgrx::extension_sql!(
     r#"
@@ -471,6 +500,23 @@ pub static PARALLEL_QUERY_MIN_JOINS: pgrx::GucSetting<i32> = pgrx::GucSetting::<
 /// When `on`, the current session ignores graph_access restrictions.
 /// Only effective for superusers — regular users cannot set this.
 pub static RLS_BYPASS: pgrx::GucSetting<bool> = pgrx::GucSetting::<bool>::new(false);
+
+// ─── v0.16.0 GUCs ────────────────────────────────────────────────────────────
+
+/// GUC: per-SERVICE-call wall-clock timeout in seconds (default: 30).
+/// When the remote endpoint does not respond within this window the call fails.
+pub static FEDERATION_TIMEOUT: pgrx::GucSetting<i32> = pgrx::GucSetting::<i32>::new(30);
+
+/// GUC: maximum number of rows accepted from a single remote SERVICE call (default: 10,000).
+/// Rows beyond this limit are silently dropped.
+pub static FEDERATION_MAX_RESULTS: pgrx::GucSetting<i32> = pgrx::GucSetting::<i32>::new(10_000);
+
+/// GUC: behaviour when a SERVICE call fails.
+/// `'warning'` (default) — emit a WARNING and return empty results.
+/// `'error'` — raise an ERROR and abort the query.
+/// `'empty'` — silently return empty results.
+pub static FEDERATION_ON_ERROR: pgrx::GucSetting<Option<std::ffi::CString>> =
+    pgrx::GucSetting::<Option<std::ffi::CString>>::new(None);
 
 // ─── pg_trickle runtime detection (v0.6.0) ───────────────────────────────────
 
@@ -751,6 +797,39 @@ pub extern "C-unwind" fn _PG_init() {
         c"",
         &RLS_BYPASS,
         GucContext::Suset,
+        GucFlags::default(),
+    );
+
+    // ── v0.16.0 GUCs ─────────────────────────────────────────────────────────
+
+    pgrx::GucRegistry::define_int_guc(
+        c"pg_ripple.federation_timeout",
+        c"Per-SERVICE-call wall-clock timeout in seconds (default: 30)",
+        c"",
+        &FEDERATION_TIMEOUT,
+        1,
+        3600,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+
+    pgrx::GucRegistry::define_int_guc(
+        c"pg_ripple.federation_max_results",
+        c"Maximum rows accepted from a single remote SERVICE call (default: 10000)",
+        c"",
+        &FEDERATION_MAX_RESULTS,
+        1,
+        1_000_000,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+
+    pgrx::GucRegistry::define_string_guc(
+        c"pg_ripple.federation_on_error",
+        c"Behaviour on SERVICE call failure: 'warning' (default), 'error', or 'empty'",
+        c"",
+        &FEDERATION_ON_ERROR,
+        GucContext::Userset,
         GucFlags::default(),
     );
 
@@ -2854,6 +2933,99 @@ mod pg_ripple {
     #[pg_extern]
     fn lookup_iri(iri: &str) -> Option<i64> {
         crate::dictionary::lookup_iri(iri)
+    }
+
+    // ── v0.16.0: SPARQL Federation ────────────────────────────────────────────
+
+    /// Register a remote SPARQL endpoint in the federation allowlist.
+    ///
+    /// Only registered endpoints can be contacted via SERVICE clauses.
+    /// Attempting to call an unregistered endpoint raises an ERROR (SSRF protection).
+    ///
+    /// `local_view_name` — optional name of a pg_ripple SPARQL view stream table
+    /// that pre-materialises the same data.  When set, SERVICE clauses targeting
+    /// this URL are rewritten to scan the local table instead of making HTTP calls.
+    #[pg_extern]
+    fn register_endpoint(url: &str, local_view_name: default!(Option<&str>, "NULL")) {
+        let local_view = local_view_name.unwrap_or("");
+        if local_view.is_empty() {
+            Spi::run_with_args(
+                "INSERT INTO _pg_ripple.federation_endpoints (url, enabled)
+                 VALUES ($1, true)
+                 ON CONFLICT (url) DO UPDATE SET enabled = true",
+                &[pgrx::datum::DatumWithOid::from(url)],
+            )
+            .unwrap_or_else(|e| pgrx::error!("register_endpoint failed: {e}"));
+        } else {
+            Spi::run_with_args(
+                "INSERT INTO _pg_ripple.federation_endpoints (url, enabled, local_view_name)
+                 VALUES ($1, true, $2)
+                 ON CONFLICT (url) DO UPDATE SET enabled = true, local_view_name = $2",
+                &[
+                    pgrx::datum::DatumWithOid::from(url),
+                    pgrx::datum::DatumWithOid::from(local_view_name),
+                ],
+            )
+            .unwrap_or_else(|e| pgrx::error!("register_endpoint failed: {e}"));
+        }
+    }
+
+    /// Remove a remote SPARQL endpoint from the federation allowlist.
+    ///
+    /// After removal, SERVICE clauses targeting this URL will raise an ERROR.
+    #[pg_extern]
+    fn remove_endpoint(url: &str) {
+        Spi::run_with_args(
+            "DELETE FROM _pg_ripple.federation_endpoints WHERE url = $1",
+            &[pgrx::datum::DatumWithOid::from(url)],
+        )
+        .unwrap_or_else(|e| pgrx::error!("remove_endpoint failed: {e}"));
+    }
+
+    /// Disable a remote SPARQL endpoint without removing it.
+    ///
+    /// Disabled endpoints are excluded from SERVICE queries (like not being
+    /// registered) but can be re-enabled with `register_endpoint()`.
+    #[pg_extern]
+    fn disable_endpoint(url: &str) {
+        Spi::run_with_args(
+            "UPDATE _pg_ripple.federation_endpoints SET enabled = false WHERE url = $1",
+            &[pgrx::datum::DatumWithOid::from(url)],
+        )
+        .unwrap_or_else(|e| pgrx::error!("disable_endpoint failed: {e}"));
+    }
+
+    /// List all registered federation endpoints.
+    ///
+    /// Returns (url, enabled, local_view_name) for every endpoint in the allowlist.
+    #[pg_extern]
+    fn list_endpoints() -> TableIterator<
+        'static,
+        (
+            name!(url, String),
+            name!(enabled, bool),
+            name!(local_view_name, Option<String>),
+        ),
+    > {
+        let mut rows: Vec<(String, bool, Option<String>)> = Vec::new();
+        Spi::connect(|client| {
+            let result = client
+                .select(
+                    "SELECT url, enabled, local_view_name
+                     FROM _pg_ripple.federation_endpoints
+                     ORDER BY url",
+                    None,
+                    &[],
+                )
+                .unwrap_or_else(|e| pgrx::error!("list_endpoints SPI error: {e}"));
+            for row in result {
+                let url: String = row.get(1).ok().flatten().unwrap_or_default();
+                let enabled: bool = row.get(2).ok().flatten().unwrap_or(false);
+                let local_view: Option<String> = row.get(3).ok().flatten();
+                rows.push((url, enabled, local_view));
+            }
+        });
+        TableIterator::new(rows)
     }
 }
 

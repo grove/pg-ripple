@@ -25,6 +25,7 @@
   - [Materialized Views](user-guide/sql-reference/views.md)
   - [Serialization & Export](user-guide/sql-reference/serialization.md)
   - [SPARQL Protocol (HTTP)](user-guide/sql-reference/http-endpoint.md)
+  - [SPARQL Federation](user-guide/sql-reference/federation.md)
 - [Configuration](user-guide/configuration.md)
 - [Scaling & HTAP](user-guide/scaling.md)
 - [Pre-Deployment](user-guide/pre-deployment.md)
