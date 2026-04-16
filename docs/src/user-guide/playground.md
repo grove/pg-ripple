@@ -7,16 +7,15 @@ The quickest way to try pg_ripple is with Docker. No PostgreSQL installation req
 ```bash
 docker run --rm -p 5432:5432 \
   -e POSTGRES_PASSWORD=ripple \
-  ghcr.io/grove/pg-ripple:0.5.0
+  ghcr.io/grove/pg-ripple:latest
 ```
 
-> **Image note**: The Docker image is published as part of each release. If the image is not yet available for your version, see [Building locally](#building-locally) below.
+> **Note**: The sandbox container is configured for development/testing and uses trust authentication for external TCP connections. For production use, see [Installation](installation.md) and [Security](../reference/security.md).
 
-Connect with any PostgreSQL client:
+Connect with any PostgreSQL client (no password required):
 
 ```bash
 psql -h localhost -U postgres -d postgres
-# password: ripple
 ```
 
 ## Pre-loaded example dataset

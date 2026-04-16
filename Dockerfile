@@ -7,10 +7,16 @@
 # Usage:
 #   docker build -t pg-ripple:local .
 #   docker run --rm -p 5432:5432 -e POSTGRES_PASSWORD=ripple pg-ripple:local
+#   psql -h localhost -U postgres -d postgres  # no password required
 #
 # The resulting image is also published to ghcr.io as part of each release:
 #   docker run --rm -p 5432:5432 -e POSTGRES_PASSWORD=ripple \
-#     ghcr.io/grove/pg-ripple:0.5.1
+#     ghcr.io/grove/pg-ripple:latest
+#
+# Authentication:
+#   The container is configured for development/testing with trust authentication
+#   enabled for external TCP connections. See docker/00-pg_hba.sh for details.
+#   For production deployments, use password-based authentication instead.
 
 # ── Build stage ───────────────────────────────────────────────────────────────
 # pgrx 0.17 uses let_chains (stabilised in Rust 1.88). The Cargo.toml
