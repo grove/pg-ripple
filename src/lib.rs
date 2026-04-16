@@ -291,13 +291,16 @@ CREATE TABLE IF NOT EXISTS _pg_ripple.inferred_schema (
 // v0.16.0: SPARQL federation endpoint allowlist and health monitoring.
 pgrx::extension_sql!(
     r#"
--- Federation endpoint allowlist (v0.16.0)
+-- Federation endpoint allowlist (v0.16.0, extended v0.19.0)
 -- Only endpoints with enabled = true are contacted via SERVICE clauses.
 -- local_view_name: when set, SERVICE is rewritten to scan the named stream table.
+-- complexity (v0.19.0): 'fast', 'normal', or 'slow' — used to order multi-endpoint queries.
 CREATE TABLE IF NOT EXISTS _pg_ripple.federation_endpoints (
     url             TEXT    NOT NULL PRIMARY KEY,
     enabled         BOOLEAN NOT NULL DEFAULT true,
-    local_view_name TEXT
+    local_view_name TEXT,
+    complexity      TEXT    NOT NULL DEFAULT 'normal'
+                    CHECK (complexity IN ('fast', 'normal', 'slow'))
 );
 
 -- Federation health log (v0.16.0, used when pg_trickle is installed)
@@ -315,6 +318,27 @@ CREATE INDEX IF NOT EXISTS idx_federation_health_url_time
 "#,
     name = "federation_schema_setup",
     requires = ["rls_schema_setup"]
+);
+
+// v0.19.0: federation result cache table.
+pgrx::extension_sql!(
+    r#"
+-- Federation result cache (v0.19.0)
+-- Caches SPARQL SELECT results from remote endpoints keyed by (url, query_hash).
+-- TTL-based expiry; expired rows are cleaned up by the merge background worker.
+CREATE TABLE IF NOT EXISTS _pg_ripple.federation_cache (
+    url         TEXT        NOT NULL,
+    query_hash  BIGINT      NOT NULL,
+    result_jsonb JSONB      NOT NULL,
+    cached_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+    expires_at  TIMESTAMPTZ NOT NULL,
+    PRIMARY KEY (url, query_hash)
+);
+CREATE INDEX IF NOT EXISTS idx_federation_cache_expires
+    ON _pg_ripple.federation_cache (expires_at);
+"#,
+    name = "v019_federation_cache_setup",
+    requires = ["federation_schema_setup"]
 );
 
 // v0.11.0: SPARQL views, Datalog views, and ExtVP catalog tables.
@@ -628,6 +652,29 @@ pub static FEDERATION_MAX_RESULTS: pgrx::GucSetting<i32> = pgrx::GucSetting::<i3
 pub static FEDERATION_ON_ERROR: pgrx::GucSetting<Option<std::ffi::CString>> =
     pgrx::GucSetting::<Option<std::ffi::CString>>::new(None);
 
+// ─── v0.19.0 GUCs ────────────────────────────────────────────────────────────
+
+/// GUC: number of idle connections to keep per remote endpoint in the
+/// thread-local ureq connection pool (default: 4, range: 1–32).
+pub static FEDERATION_POOL_SIZE: pgrx::GucSetting<i32> = pgrx::GucSetting::<i32>::new(4);
+
+/// GUC: TTL in seconds for cached SERVICE results in `_pg_ripple.federation_cache`.
+/// 0 (default) disables caching.  When > 0, successful remote results are cached
+/// and reused for this many seconds before the remote endpoint is re-queried.
+pub static FEDERATION_CACHE_TTL: pgrx::GucSetting<i32> = pgrx::GucSetting::<i32>::new(0);
+
+/// GUC: behaviour when a SERVICE call delivers rows then fails.
+/// `'empty'` (default) — discard all partial results, return empty.
+/// `'use'` — use however many rows were received before the failure.
+pub static FEDERATION_ON_PARTIAL: pgrx::GucSetting<Option<std::ffi::CString>> =
+    pgrx::GucSetting::<Option<std::ffi::CString>>::new(None);
+
+/// GUC: when `on`, derive the effective per-endpoint timeout from P95 latency
+/// observed in `_pg_ripple.federation_health` instead of using the fixed
+/// `pg_ripple.federation_timeout` value (default: off).
+pub static FEDERATION_ADAPTIVE_TIMEOUT: pgrx::GucSetting<bool> =
+    pgrx::GucSetting::<bool>::new(false);
+
 // ─── pg_trickle runtime detection (v0.6.0) ───────────────────────────────────
 
 /// Returns `true` when the pg_trickle extension is installed in the current database.
@@ -939,6 +986,48 @@ pub extern "C-unwind" fn _PG_init() {
         c"Behaviour on SERVICE call failure: 'warning' (default), 'error', or 'empty'",
         c"",
         &FEDERATION_ON_ERROR,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+
+    // ── v0.19.0 GUCs ─────────────────────────────────────────────────────────
+
+    pgrx::GucRegistry::define_int_guc(
+        c"pg_ripple.federation_pool_size",
+        c"Idle connections per remote endpoint kept in the thread-local HTTP pool (default: 4, range: 1-32)",
+        c"",
+        &FEDERATION_POOL_SIZE,
+        1,
+        32,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+
+    pgrx::GucRegistry::define_int_guc(
+        c"pg_ripple.federation_cache_ttl",
+        c"TTL in seconds for cached SERVICE results; 0 disables caching (default: 0, range: 0-86400)",
+        c"",
+        &FEDERATION_CACHE_TTL,
+        0,
+        86400,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+
+    pgrx::GucRegistry::define_string_guc(
+        c"pg_ripple.federation_on_partial",
+        c"Behaviour on mid-stream SERVICE failure: 'empty' (default, discard) or 'use' (keep partial rows)",
+        c"",
+        &FEDERATION_ON_PARTIAL,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+
+    pgrx::GucRegistry::define_bool_guc(
+        c"pg_ripple.federation_adaptive_timeout",
+        c"When on, derive per-endpoint timeout from P95 latency in federation_health (default: off)",
+        c"",
+        &FEDERATION_ADAPTIVE_TIMEOUT,
         GucContext::Userset,
         GucFlags::default(),
     );
@@ -3237,29 +3326,58 @@ mod pg_ripple {
     /// `local_view_name` — optional name of a pg_ripple SPARQL view stream table
     /// that pre-materialises the same data.  When set, SERVICE clauses targeting
     /// this URL are rewritten to scan the local table instead of making HTTP calls.
+    ///
+    /// `complexity` (v0.19.0) — optional hint for query planning: `'fast'`, `'normal'`
+    /// (default), or `'slow'`.  Fast endpoints execute first in multi-endpoint queries.
     #[pg_extern]
-    fn register_endpoint(url: &str, local_view_name: default!(Option<&str>, "NULL")) {
+    fn register_endpoint(
+        url: &str,
+        local_view_name: default!(Option<&str>, "NULL"),
+        complexity: default!(Option<&str>, "NULL"),
+    ) {
         let local_view = local_view_name.unwrap_or("");
+        let cx = complexity.unwrap_or("normal");
         if local_view.is_empty() {
             Spi::run_with_args(
-                "INSERT INTO _pg_ripple.federation_endpoints (url, enabled)
-                 VALUES ($1, true)
-                 ON CONFLICT (url) DO UPDATE SET enabled = true",
-                &[pgrx::datum::DatumWithOid::from(url)],
+                "INSERT INTO _pg_ripple.federation_endpoints (url, enabled, complexity)
+                 VALUES ($1, true, $2)
+                 ON CONFLICT (url) DO UPDATE SET enabled = true, complexity = $2",
+                &[
+                    pgrx::datum::DatumWithOid::from(url),
+                    pgrx::datum::DatumWithOid::from(cx),
+                ],
             )
             .unwrap_or_else(|e| pgrx::error!("register_endpoint failed: {e}"));
         } else {
             Spi::run_with_args(
-                "INSERT INTO _pg_ripple.federation_endpoints (url, enabled, local_view_name)
-                 VALUES ($1, true, $2)
-                 ON CONFLICT (url) DO UPDATE SET enabled = true, local_view_name = $2",
+                "INSERT INTO _pg_ripple.federation_endpoints (url, enabled, local_view_name, complexity)
+                 VALUES ($1, true, $2, $3)
+                 ON CONFLICT (url) DO UPDATE SET enabled = true, local_view_name = $2, complexity = $3",
                 &[
                     pgrx::datum::DatumWithOid::from(url),
                     pgrx::datum::DatumWithOid::from(local_view_name),
+                    pgrx::datum::DatumWithOid::from(cx),
                 ],
             )
             .unwrap_or_else(|e| pgrx::error!("register_endpoint failed: {e}"));
         }
+    }
+
+    /// Set the complexity hint for a registered endpoint (v0.19.0).
+    ///
+    /// Allowed values: `'fast'`, `'normal'`, `'slow'`.
+    /// Fast endpoints execute first in queries with multiple SERVICE clauses
+    /// targeting different endpoints, enabling earlier failure detection.
+    #[pg_extern]
+    fn set_endpoint_complexity(url: &str, complexity: &str) {
+        Spi::run_with_args(
+            "UPDATE _pg_ripple.federation_endpoints SET complexity = $2 WHERE url = $1",
+            &[
+                pgrx::datum::DatumWithOid::from(url),
+                pgrx::datum::DatumWithOid::from(complexity),
+            ],
+        )
+        .unwrap_or_else(|e| pgrx::error!("set_endpoint_complexity failed: {e}"));
     }
 
     /// Remove a remote SPARQL endpoint from the federation allowlist.
@@ -3289,7 +3407,7 @@ mod pg_ripple {
 
     /// List all registered federation endpoints.
     ///
-    /// Returns (url, enabled, local_view_name) for every endpoint in the allowlist.
+    /// Returns (url, enabled, local_view_name, complexity) for every endpoint in the allowlist.
     #[pg_extern]
     fn list_endpoints() -> TableIterator<
         'static,
@@ -3297,13 +3415,14 @@ mod pg_ripple {
             name!(url, String),
             name!(enabled, bool),
             name!(local_view_name, Option<String>),
+            name!(complexity, String),
         ),
     > {
-        let mut rows: Vec<(String, bool, Option<String>)> = Vec::new();
+        let mut rows: Vec<(String, bool, Option<String>, String)> = Vec::new();
         Spi::connect(|client| {
             let result = client
                 .select(
-                    "SELECT url, enabled, local_view_name
+                    "SELECT url, enabled, local_view_name, complexity
                      FROM _pg_ripple.federation_endpoints
                      ORDER BY url",
                     None,
@@ -3314,7 +3433,12 @@ mod pg_ripple {
                 let url: String = row.get(1).ok().flatten().unwrap_or_default();
                 let enabled: bool = row.get(2).ok().flatten().unwrap_or(false);
                 let local_view: Option<String> = row.get(3).ok().flatten();
-                rows.push((url, enabled, local_view));
+                let cx: String = row
+                    .get(4)
+                    .ok()
+                    .flatten()
+                    .unwrap_or_else(|| "normal".to_owned());
+                rows.push((url, enabled, local_view, cx));
             }
         });
         TableIterator::new(rows)

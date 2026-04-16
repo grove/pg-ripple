@@ -9,7 +9,41 @@ Versions correspond to the milestones in [ROADMAP.md](ROADMAP.md).
 
 ## [Unreleased]
 
-Points at the next milestone: v0.19.0 — Federation Performance.
+Points at the next milestone: v1.0.0 — Production Release.
+
+---
+
+## [0.19.0] — 2026-04-16 — Federation Performance
+
+Remote SPARQL endpoints accessed via `SERVICE` are now significantly faster for repeated or heavy workloads. Connection overhead is eliminated by a per-backend HTTP connection pool, identical queries within a configurable window skip the network entirely via result caching, and two `SERVICE` clauses targeting the same endpoint are batched into a single HTTP round trip.
+
+**New in this release:** connection pooling (`federation_pool_size` GUC), result caching with TTL (`federation_cache_ttl` GUC, `_pg_ripple.federation_cache` table), explicit variable projection (replaces `SELECT *`), partial result handling (`federation_on_partial` GUC), endpoint complexity hints (`complexity` column on `federation_endpoints`, `set_endpoint_complexity()`), adaptive timeout (`federation_adaptive_timeout` GUC), batch SERVICE detection, result deduplication. Migration script `pg_ripple--0.18.0--0.19.0.sql`.
+
+### What you can do
+
+- **Reuse HTTP connections** — TCP and TLS sessions are kept alive across all `SERVICE` calls in a backend session; set `pg_ripple.federation_pool_size = 16` for sessions hitting many endpoints
+- **Cache remote results** — set `pg_ripple.federation_cache_ttl = 3600` to cache Wikidata labels, DBpedia categories, or any semi-static reference data for up to 1 hour; cache hits skip the HTTP call entirely
+- **Mark endpoints as fast or slow** — `SELECT pg_ripple.set_endpoint_complexity('https://fast.example.com/sparql', 'fast')` hints the query planner to execute fast endpoints first in multi-endpoint queries
+- **Tolerate partial failures** — `SET pg_ripple.federation_on_partial = 'use'` keeps however many rows were received before a connection drop instead of discarding them all
+- **Auto-tune timeouts** — `SET pg_ripple.federation_adaptive_timeout = on` derives the effective timeout per endpoint from P95 observed latency, so fast endpoints aren't penalised by a global conservative timeout
+
+### What happens behind the scenes
+
+A `thread_local!` `ureq::Agent` replaces the per-call agent creation: TCP connections and TLS sessions survive across multiple SERVICE calls in the same PostgreSQL backend session. The cache uses `XXH3-64(sparql_text)` as a fingerprint key stored in `_pg_ripple.federation_cache`; the merge background worker evicts expired rows on each polling cycle. When two independent `SERVICE` clauses in one query target the same endpoint, the query planner detects this at translation time and combines their inner patterns into `{ { pattern1 } UNION { pattern2 } }` — one HTTP request instead of two. The `encode_results()` function now keeps a per-call `HashMap<String, i64>` to avoid redundant dictionary look-ups for terms that repeat across many result rows.
+
+<details>
+<summary>Technical details</summary>
+
+- **src/sparql/federation.rs** — `thread_local!` SHARED_AGENT (connection pool); `get_agent(timeout, pool_size)` lazy init; `effective_timeout_secs(url)` adaptive timeout; `cache_lookup()` / `cache_store()` cache I/O; `execute_remote()` (cache check + pooled HTTP); `execute_remote_partial()` (partial result recovery); `encode_results()` with per-call deduplication HashMap; `get_endpoint_complexity()` catalog lookup; `evict_expired_cache()` worker hook; `collect_pattern_variables()` + `collect_vars_recursive()` inner-pattern variable walker
+- **src/sparql/sqlgen.rs** — `translate_service()` updated: explicit variable projection `SELECT ?v1 ?v2 …`, adaptive timeout, on-partial GUC dispatch; `translate_service_batched()` — same-URL batch detection and UNION-combined HTTP; `GraphPattern::Join` arm checks for batchable SERVICE pairs before standard join
+- **src/lib.rs** — `v019_federation_cache_setup` SQL block: `_pg_ripple.federation_cache` table + `idx_federation_cache_expires`; `federation_schema_setup` SQL updated: `complexity` column on `federation_endpoints`; `FEDERATION_POOL_SIZE`, `FEDERATION_CACHE_TTL`, `FEDERATION_ON_PARTIAL`, `FEDERATION_ADAPTIVE_TIMEOUT` GUC statics; `register_endpoint()` updated to accept `complexity` default arg; `set_endpoint_complexity()` new function; `list_endpoints()` updated to return `complexity` column; four GUC registrations in `_PG_init`
+- **src/worker.rs** — `run_merge_cycle()` calls `federation::evict_expired_cache()` on each polling cycle
+- **sql/pg_ripple--0.18.0--0.19.0.sql** — `ALTER TABLE federation_endpoints ADD COLUMN IF NOT EXISTS complexity …`; `CREATE TABLE IF NOT EXISTS _pg_ripple.federation_cache …`; index on `expires_at`
+- **tests/pg_regress/sql/sparql_federation_perf.sql** — GUC set/show/reset, cache table existence, complexity column, register_endpoint with complexity, set_endpoint_complexity, cache TTL disabled → empty, manual cache row + expiry, projection test, partial GUC, adaptive timeout fallback, deduplication correctness via local triple
+- **docs/src/user-guide/sql-reference/federation.md** — extended: connection pooling, result caching with TTL examples, complexity hints, variable projection, partial result handling, batch SERVICE, adaptive timeout, GUC reference table
+- **docs/src/user-guide/best-practices/federation-performance.md** — new page: choosing cache TTL, complexity hints usage, variable projection design, monitoring with federation_health and federation_cache, sidecar vs in-process, connection pool tips
+
+</details>
 
 ---
 

@@ -193,6 +193,9 @@ fn run_merge_cycle() {
 
         pgrx::log!("pg_ripple merge worker: merge cycle complete");
     }
+
+    // Evict expired federation cache entries on each polling cycle (v0.19.0).
+    crate::sparql::federation::evict_expired_cache();
 }
 
 // ─── GUC helpers ─────────────────────────────────────────────────────────────

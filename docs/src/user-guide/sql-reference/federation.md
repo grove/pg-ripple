@@ -174,8 +174,130 @@ This prevents queries from being used as a vector to probe internal network serv
 
 Within a PostgreSQL session (SPI context), multiple `SERVICE` clauses in a single query execute **sequentially** to avoid conflict between HTTP I/O and SPI transactions. The pg_ripple_http sidecar process can execute federation calls in parallel via its async runtime; performance-critical federation workloads should use the HTTP interface.
 
+---
+
+## v0.19.0: Performance improvements
+
+### Connection pooling
+
+A per-backend thread-local `ureq::Agent` reuses TCP and TLS sessions across `SERVICE` calls within a session. Previously each call opened and discarded a new TCP connection.
+
+| GUC | Default | Description |
+|---|---|---|
+| `pg_ripple.federation_pool_size` | 4 | Idle connections kept per endpoint in the pool (1–32) |
+
+```sql
+-- Use a larger pool for latency-sensitive workloads with many endpoints
+SET pg_ripple.federation_pool_size = 16;
+```
+
+### Result caching with TTL
+
+When `pg_ripple.federation_cache_ttl > 0`, successful remote results are stored in `_pg_ripple.federation_cache`. Repeat calls with the same endpoint URL and SPARQL text within the TTL window skip the HTTP call entirely.
+
+The cache key is `(url, XXH3-64(sparql_text))`. Expired rows are cleaned up by the merge background worker on each polling cycle.
+
+| GUC | Default | Description |
+|---|---|---|
+| `pg_ripple.federation_cache_ttl` | 0 | Cache TTL in seconds; 0 = disabled (0–86400) |
+
+```sql
+-- Cache Wikidata label results for 10 minutes
+SET pg_ripple.federation_cache_ttl = 600;
+
+-- Inspect the cache
+SELECT url, query_hash, cached_at, expires_at
+FROM _pg_ripple.federation_cache
+ORDER BY cached_at DESC;
+
+-- Clear the cache manually
+DELETE FROM _pg_ripple.federation_cache;
+```
+
+**When to use caching:**
+- Reference datasets that update infrequently (Wikidata labels, DBpedia categories, controlled vocabularies).
+- Queries where the same sub-pattern is evaluated many times (e.g. inside a loop or repeated SPARQL calls from an application).
+
+**When not to use caching:**
+- Live event streams, sensor data, or any endpoint where freshness matters.
+- Endpoints that return large variable result sets (high cache miss rate, high storage cost).
+
+### Endpoint complexity hints
+
+Register an endpoint with a performance hint to guide multi-endpoint query ordering. Fast endpoints execute first, enabling earlier failure detection and lower total wall-clock time.
+
+```sql
+-- Register with a hint
+SELECT pg_ripple.register_endpoint(
+    'https://fast-kb.example.com/sparql',
+    NULL,        -- local_view_name
+    'fast'       -- complexity: 'fast', 'normal', or 'slow'
+);
+
+-- Update after registration
+SELECT pg_ripple.set_endpoint_complexity('https://slow-kb.example.com/sparql', 'slow');
+
+-- View all endpoints with complexity
+SELECT url, enabled, complexity FROM pg_ripple.list_endpoints();
+```
+
+### Variable projection rewrite
+
+Instead of sending `SELECT * WHERE { … }` to the remote endpoint, pg_ripple now sends an explicit `SELECT ?v1 ?v2 … WHERE { … }` listing the variables that appear in the inner pattern. This:
+
+- Reduces data transfer when the remote supports projection pushdown.
+- Produces a stable, deterministic query text for cache key matching.
+- Makes it easier to inspect the SPARQL sent (visible in WARNING messages on failure).
+
+### Partial result handling
+
+When `pg_ripple.federation_on_partial = 'use'`, a connection drop mid-response uses however many rows were received rather than discarding them entirely. A WARNING names the endpoint, the row count received, and the error.
+
+| GUC | Default | Description |
+|---|---|---|
+| `pg_ripple.federation_on_partial` | `'empty'` | `'empty'` = discard all, `'use'` = keep partial rows |
+
+```sql
+SET pg_ripple.federation_on_partial = 'use';
+```
+
+### Adaptive timeout
+
+When `pg_ripple.federation_adaptive_timeout = on`, the effective per-endpoint timeout is derived from `max(1s, p95_latency_ms × 3 / 1000)` observed in `_pg_ripple.federation_health`. Fast endpoints get a tighter timeout; slow endpoints get more room. Falls back to `pg_ripple.federation_timeout` when no health data is available.
+
+| GUC | Default | Description |
+|---|---|---|
+| `pg_ripple.federation_adaptive_timeout` | `off` | Derive timeout from P95 health data |
+
+```sql
+SET pg_ripple.federation_adaptive_timeout = on;
+```
+
+### Batch SERVICE calls
+
+When a single query contains two or more `SERVICE` clauses targeting the **same** registered endpoint with **independent** inner patterns (no shared variables), pg_ripple combines them into a single HTTP request:
+
+```sparql
+SELECT * WHERE {
+  SERVICE <https://kb.example.com/sparql> { ?s <ex:label> ?label }
+  SERVICE <https://kb.example.com/sparql> { ?s <ex:type>  ?type  }
+  # ^ One HTTP request: SELECT * WHERE { { ?s <ex:label> ?label } UNION { ?s <ex:type> ?type } }
+}
+```
+
+This halves the HTTP round trips for queries that pull multiple independent properties from the same endpoint.
+
+### GUC reference (v0.19.0 additions)
+
+| GUC | Type | Default | Range | Description |
+|---|---|---|---|---|
+| `pg_ripple.federation_pool_size` | INT | 4 | 1–32 | Idle connections per endpoint in the thread-local pool |
+| `pg_ripple.federation_cache_ttl` | INT | 0 | 0–86400 | Result cache TTL in seconds (0 = disabled) |
+| `pg_ripple.federation_on_partial` | STRING | `'empty'` | `'empty'`, `'use'` | Behaviour when SERVICE delivers rows then fails |
+| `pg_ripple.federation_adaptive_timeout` | BOOL | off | — | Derive timeout from P95 health latency |
+
 ## Limitations
 
-- **No bind-join pushdown** at runtime: the full inner pattern is sent to the remote endpoint without pre-binding known variables. (Planned for v0.17+.)
+- **No bind-join pushdown** at runtime: the full inner pattern is sent to the remote endpoint without pre-binding known variables.
 - **SPARQL results+JSON only**: XML response format is not yet supported for the direct SPI path.
 - **No streaming**: remote results are fully buffered in memory before being dictionary-encoded. Large result sets should use `federation_max_results` to cap memory usage.

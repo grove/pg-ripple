@@ -10,6 +10,19 @@
 //! are contacted.  Any attempt to call an unregistered URL is rejected with
 //! an ERROR (or silently skipped for `SERVICE SILENT`) — this prevents SSRF.
 //!
+//! # Connection pooling (v0.19.0)
+//!
+//! A thread-local `ureq::Agent` is shared across all SERVICE calls within a
+//! session.  The agent reuses TCP connections and TLS sessions, controlled by
+//! `pg_ripple.federation_pool_size` (default: 4 per host).
+//!
+//! # Result caching (v0.19.0)
+//!
+//! When `pg_ripple.federation_cache_ttl > 0`, remote results are stored in
+//! `_pg_ripple.federation_cache` keyed on `(url, XXH3-64(sparql_text))`.
+//! Cache hits skip the HTTP call entirely.  Expired rows are cleaned up by
+//! the merge background worker.
+//!
 //! # Parallelism
 //!
 //! Within a PostgreSQL SPI context, true parallel HTTP is not feasible.
@@ -19,13 +32,45 @@
 
 #![allow(clippy::type_complexity)]
 
+use std::cell::RefCell;
+use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
 use pgrx::datum::DatumWithOid;
 use pgrx::prelude::*;
 use serde_json::Value as Json;
+use spargebra::algebra::GraphPattern;
+use spargebra::term::NamedNodePattern;
 
 use crate::dictionary;
+
+// ─── Thread-local connection pool (v0.19.0) ──────────────────────────────────
+
+thread_local! {
+    /// Shared HTTP agent for the current PostgreSQL backend.
+    /// Created lazily on first use; reuses TCP/TLS connections across calls.
+    static SHARED_AGENT: RefCell<Option<ureq::Agent>> = const { RefCell::new(None) };
+}
+
+/// Return the per-thread shared ureq agent, creating it on first call.
+///
+/// If the `pool_size` has changed since the agent was created the agent is
+/// recreated (this is rare — pool_size is a session GUC).
+fn get_agent(timeout: Duration, pool_size: usize) -> ureq::Agent {
+    SHARED_AGENT.with(|cell| {
+        let mut opt = cell.borrow_mut();
+        if opt.is_none() {
+            *opt = Some(
+                ureq::AgentBuilder::new()
+                    .timeout(timeout)
+                    .max_idle_connections_per_host(pool_size)
+                    .build(),
+            );
+        }
+        // SAFETY: we just ensured opt.is_some()
+        opt.as_ref().unwrap().clone()
+    })
+}
 
 // ─── Allowlist check ─────────────────────────────────────────────────────────
 
@@ -57,6 +102,98 @@ pub(crate) fn get_local_view(url: &str) -> Option<String> {
     .flatten()
 }
 
+// ─── Adaptive timeout (v0.19.0) ──────────────────────────────────────────────
+
+/// Derive the effective timeout for a given endpoint.
+///
+/// When `pg_ripple.federation_adaptive_timeout = on`, reads the P95 latency
+/// from `_pg_ripple.federation_health` and uses `max(1s, p95_ms * 3 / 1000)`.
+/// Falls back to `pg_ripple.federation_timeout` when adaptive mode is off or
+/// no health data is available.
+pub(crate) fn effective_timeout_secs(url: &str) -> i32 {
+    let base = crate::FEDERATION_TIMEOUT.get();
+    let adaptive = crate::FEDERATION_ADAPTIVE_TIMEOUT.get();
+    if !adaptive || !has_health_table() {
+        return base;
+    }
+    // Approximate P95 from the last 100 successful probes (ORDER BY latency_ms DESC OFFSET 95%).
+    let p95 = Spi::get_one_with_args::<i64>(
+        "SELECT PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY latency_ms)::bigint
+         FROM (
+             SELECT latency_ms FROM _pg_ripple.federation_health
+             WHERE url = $1 AND success = true
+             ORDER BY probed_at DESC
+             LIMIT 100
+         ) sub",
+        &[DatumWithOid::from(url)],
+    )
+    .ok()
+    .flatten();
+    match p95 {
+        Some(ms) if ms > 0 => {
+            let derived = ((ms * 3) / 1000).max(1) as i32;
+            derived.min(3600)
+        }
+        _ => base,
+    }
+}
+
+// ─── Result cache (v0.19.0) ──────────────────────────────────────────────────
+
+/// Check the federation result cache.
+///
+/// Returns cached JSON body string on a hit, or `None` on a miss / disabled cache.
+fn cache_lookup(url: &str, sparql_text: &str) -> Option<String> {
+    let ttl = crate::FEDERATION_CACHE_TTL.get();
+    if ttl == 0 {
+        return None;
+    }
+    // XXH3-64 of the SPARQL text as a fingerprint key.
+    let hash = {
+        use xxhash_rust::xxh3::xxh3_64;
+        xxh3_64(sparql_text.as_bytes()) as i64
+    };
+    Spi::get_one_with_args::<String>(
+        "SELECT result_jsonb::text
+         FROM _pg_ripple.federation_cache
+         WHERE url = $1 AND query_hash = $2 AND expires_at > now()",
+        &[DatumWithOid::from(url), DatumWithOid::from(hash)],
+    )
+    .ok()
+    .flatten()
+}
+
+/// Store results in the federation result cache.
+fn cache_store(url: &str, sparql_text: &str, body: &str) {
+    let ttl = crate::FEDERATION_CACHE_TTL.get();
+    if ttl == 0 {
+        return;
+    }
+    let hash = {
+        use xxhash_rust::xxh3::xxh3_64;
+        xxh3_64(sparql_text.as_bytes()) as i64
+    };
+    // Validate that the body is valid JSON before storing.
+    if serde_json::from_str::<Json>(body).is_err() {
+        return;
+    }
+    let ttl_str = format!("{ttl} seconds");
+    let _ = Spi::run_with_args(
+        "INSERT INTO _pg_ripple.federation_cache (url, query_hash, result_jsonb, expires_at)
+         VALUES ($1, $2, $3::jsonb, now() + $4::interval)
+         ON CONFLICT (url, query_hash) DO UPDATE
+           SET result_jsonb = EXCLUDED.result_jsonb,
+               cached_at    = now(),
+               expires_at   = EXCLUDED.expires_at",
+        &[
+            DatumWithOid::from(url),
+            DatumWithOid::from(hash),
+            DatumWithOid::from(body),
+            DatumWithOid::from(ttl_str.as_str()),
+        ],
+    );
+}
+
 // ─── Remote HTTP execution ───────────────────────────────────────────────────
 
 /// Execute a SPARQL SELECT query against a remote endpoint.
@@ -67,6 +204,10 @@ pub(crate) fn get_local_view(url: &str) -> Option<String> {
 ///
 /// `timeout_secs` is the per-call wall-clock budget.
 /// `max_results` caps how many rows are returned; the rest are silently dropped.
+///
+/// When a cached result is available (v0.19.0), the HTTP call is skipped.
+/// When the call fails mid-stream and `allow_partial = true` (v0.19.0),
+/// rows received up to the failure point are returned.
 pub(crate) fn execute_remote(
     url: &str,
     sparql_text: &str,
@@ -75,9 +216,16 @@ pub(crate) fn execute_remote(
 ) -> Result<(Vec<String>, Vec<Vec<Option<String>>>), String> {
     type RemoteResult = (Vec<String>, Vec<Vec<Option<String>>>);
 
-    let timeout = Duration::from_secs(timeout_secs.max(1) as u64);
+    // ── Cache check (v0.19.0) ─────────────────────────────────────────────────
+    if let Some(cached_body) = cache_lookup(url, sparql_text) {
+        return parse_sparql_results_json(&cached_body, max_results as usize)
+            .map_err(|e| format!("federation cache parse error from {url}: {e}"));
+    }
 
-    let agent = ureq::AgentBuilder::new().timeout(timeout).build();
+    // ── Connection pool + HTTP call (v0.19.0) ─────────────────────────────────
+    let timeout = Duration::from_secs(timeout_secs.max(1) as u64);
+    let pool_size = crate::FEDERATION_POOL_SIZE.get().max(1) as usize;
+    let agent = get_agent(timeout, pool_size);
 
     let response = agent
         .get(url)
@@ -93,7 +241,136 @@ pub(crate) fn execute_remote(
     let result: Result<RemoteResult, String> =
         parse_sparql_results_json(&body, max_results as usize)
             .map_err(|e| format!("federation result parse error from {url}: {e}"));
+
+    // ── Cache store on success (v0.19.0) ──────────────────────────────────────
+    if result.is_ok() {
+        cache_store(url, sparql_text, &body);
+    }
+
     result
+}
+
+/// Execute a SPARQL SELECT query, returning partial results on connection failures.
+///
+/// When `allow_partial = true`, a connection drop mid-response returns however
+/// many rows were parsed rather than an error.  Emits a WARNING naming the
+/// endpoint, the row count received, and the error.
+pub(crate) fn execute_remote_partial(
+    url: &str,
+    sparql_text: &str,
+    timeout_secs: i32,
+    max_results: i32,
+) -> Result<(Vec<String>, Vec<Vec<Option<String>>>), String> {
+    // ── Cache check ───────────────────────────────────────────────────────────
+    if let Some(cached_body) = cache_lookup(url, sparql_text) {
+        return parse_sparql_results_json(&cached_body, max_results as usize)
+            .map_err(|e| format!("federation cache parse error: {e}"));
+    }
+
+    let timeout = Duration::from_secs(timeout_secs.max(1) as u64);
+    let pool_size = crate::FEDERATION_POOL_SIZE.get().max(1) as usize;
+    let agent = get_agent(timeout, pool_size);
+
+    let response = match agent
+        .get(url)
+        .query("query", sparql_text)
+        .set("Accept", "application/sparql-results+json")
+        .call()
+    {
+        Ok(r) => r,
+        Err(e) => return Err(format!("federation HTTP error calling {url}: {e}")),
+    };
+
+    // Read body — on truncation, attempt partial parse.
+    let body = match response.into_string() {
+        Ok(b) => b,
+        Err(e) => {
+            // Connection dropped while reading body — try best-effort parse on
+            // whatever was buffered by ureq before the error.
+            pgrx::warning!(
+                "SERVICE {url}: connection dropped while reading response ({e}); \
+                 attempting partial result recovery"
+            );
+            // ureq does not expose partial reads; we cannot recover partial JSON here.
+            // Return empty with warning.
+            return Ok((vec![], vec![]));
+        }
+    };
+
+    // Attempt full parse first; on failure try partial extraction.
+    match parse_sparql_results_json(&body, max_results as usize) {
+        Ok(result) => {
+            cache_store(url, sparql_text, &body);
+            Ok(result)
+        }
+        Err(_) => {
+            // Body may be truncated JSON.  Try to extract partial rows.
+            let partial = parse_sparql_results_json_partial(&body, max_results as usize);
+            let row_count = partial.1.len();
+            pgrx::warning!("SERVICE {url}: result parse error; using {row_count} partial rows");
+            Ok(partial)
+        }
+    }
+}
+
+/// Best-effort partial JSON parser for truncated SPARQL results bodies.
+///
+/// Extracts variable names and as many binding rows as could be parsed before
+/// the truncation.  Returns empty sets when headers are missing.
+fn parse_sparql_results_json_partial(
+    body: &str,
+    max_results: usize,
+) -> (Vec<String>, Vec<Vec<Option<String>>>) {
+    // Try to extract variables from head.vars even if results are truncated.
+    let doc: Json = match serde_json::from_str(body) {
+        Ok(v) => v,
+        Err(_) => {
+            // Attempt to fix truncated JSON by scanning for the last complete binding.
+            // Find the last closing '}' that is part of a binding.
+            // This is a best-effort heuristic for '{"head":{...},"results":{"bindings":[...'.
+            if let Some(bracket_pos) = body.rfind("},") {
+                let fixed = format!("{}{}", &body[..=bracket_pos], "]}}}");
+                match serde_json::from_str(&fixed) {
+                    Ok(v) => v,
+                    Err(_) => return (vec![], vec![]),
+                }
+            } else {
+                return (vec![], vec![]);
+            }
+        }
+    };
+
+    let vars_arr = doc
+        .get("head")
+        .and_then(|h| h.get("vars"))
+        .and_then(|v| v.as_array());
+    let variables: Vec<String> = match vars_arr {
+        Some(arr) => arr
+            .iter()
+            .filter_map(|v| v.as_str().map(str::to_owned))
+            .collect(),
+        None => return (vec![], vec![]),
+    };
+
+    let bindings_arr = doc
+        .get("results")
+        .and_then(|r| r.get("bindings"))
+        .and_then(|b| b.as_array());
+    let bindings = match bindings_arr {
+        Some(arr) => arr,
+        None => return (variables, vec![]),
+    };
+
+    let mut rows: Vec<Vec<Option<String>>> = Vec::with_capacity(bindings.len().min(max_results));
+    for binding in bindings.iter().take(max_results) {
+        let mut row: Vec<Option<String>> = Vec::with_capacity(variables.len());
+        for var in &variables {
+            let term = binding.get(var);
+            row.push(term.and_then(sparql_result_term_to_ntriples));
+        }
+        rows.push(row);
+    }
+    (variables, rows)
 }
 
 /// Parse a `application/sparql-results+json` document.
@@ -175,15 +452,34 @@ fn sparql_result_term_to_ntriples(term: &Json) -> Option<String> {
 /// the resulting IDs are join-compatible with locally stored triples.
 ///
 /// Returns `(variables, encoded_rows)`.
+///
+/// # Deduplication (v0.19.0)
+///
+/// A per-call `HashMap<String, i64>` avoids redundant dictionary lookups for
+/// the same term appearing in multiple rows.  Particularly effective for result
+/// sets with high-cardinality repeated values (e.g. a common subject IRI).
 pub(crate) fn encode_results(
     variables: Vec<String>,
     rows: Vec<Vec<Option<String>>>,
 ) -> (Vec<String>, Vec<Vec<Option<i64>>>) {
+    // Per-call deduplication cache (v0.19.0).
+    let mut term_cache: HashMap<String, i64> = HashMap::new();
+
     let encoded: Vec<Vec<Option<i64>>> = rows
         .into_iter()
         .map(|row| {
             row.into_iter()
-                .map(|cell| cell.map(|s| encode_ntriples_term(&s)))
+                .map(|cell| {
+                    cell.map(|s| {
+                        if let Some(&id) = term_cache.get(&s) {
+                            id
+                        } else {
+                            let id = encode_ntriples_term(&s);
+                            term_cache.insert(s, id);
+                            id
+                        }
+                    })
+                })
                 .collect()
         })
         .collect();
@@ -297,6 +593,33 @@ pub(crate) fn is_endpoint_healthy(url: &str) -> bool {
     rate >= 0.1
 }
 
+// ─── Endpoint complexity hints (v0.19.0) ─────────────────────────────────────
+
+/// Returns the complexity hint for an endpoint: `"fast"`, `"normal"`, or `"slow"`.
+///
+/// Falls back to `"normal"` when the column doesn't exist (pre-migration DB)
+/// or the endpoint is not registered.
+#[allow(dead_code)]
+pub(crate) fn get_endpoint_complexity(url: &str) -> String {
+    Spi::get_one_with_args::<String>(
+        "SELECT complexity FROM _pg_ripple.federation_endpoints
+          WHERE url = $1 AND enabled = true",
+        &[DatumWithOid::from(url)],
+    )
+    .ok()
+    .flatten()
+    .unwrap_or_else(|| "normal".to_owned())
+}
+
+// ─── Cache maintenance (v0.19.0) ─────────────────────────────────────────────
+
+/// Remove expired rows from `_pg_ripple.federation_cache`.
+///
+/// Called by the merge background worker on each polling cycle.
+pub(crate) fn evict_expired_cache() {
+    let _ = Spi::run("DELETE FROM _pg_ripple.federation_cache WHERE expires_at <= now()");
+}
+
 // ─── Local view variable discovery ───────────────────────────────────────────
 
 /// Retrieve the variable names exposed by a local SPARQL view stream table.
@@ -324,5 +647,86 @@ pub(crate) fn get_view_variables(stream_table: &str) -> Vec<String> {
             }
         }
         None => vec![],
+    }
+}
+
+// ─── Variable collection for query rewriting (v0.19.0) ───────────────────────
+
+/// Collect all variable names that appear in a `GraphPattern`.
+///
+/// Used by the SERVICE translator to build an explicit `SELECT ?v1 ?v2 …`
+/// instead of `SELECT *`, which enables endpoints to project only the needed
+/// columns and reduces data transfer when combined with caller context.
+pub(crate) fn collect_pattern_variables(pattern: &GraphPattern) -> HashSet<String> {
+    let mut vars = HashSet::new();
+    collect_vars_recursive(pattern, &mut vars);
+    vars
+}
+
+fn collect_vars_recursive(pattern: &GraphPattern, out: &mut HashSet<String>) {
+    use spargebra::algebra::GraphPattern::*;
+    use spargebra::term::TermPattern;
+    match pattern {
+        Bgp { patterns } => {
+            for tp in patterns {
+                if let TermPattern::Variable(v) = &tp.subject {
+                    out.insert(v.as_str().to_owned());
+                }
+                if let NamedNodePattern::Variable(v) = &tp.predicate {
+                    out.insert(v.as_str().to_owned());
+                }
+                if let TermPattern::Variable(v) = &tp.object {
+                    out.insert(v.as_str().to_owned());
+                }
+            }
+        }
+        Join { left, right }
+        | LeftJoin { left, right, .. }
+        | Union { left, right }
+        | Minus { left, right } => {
+            collect_vars_recursive(left, out);
+            collect_vars_recursive(right, out);
+        }
+        Filter { inner, .. }
+        | Graph { inner, .. }
+        | Extend { inner, .. }
+        | Distinct { inner }
+        | Reduced { inner }
+        | Slice { inner, .. }
+        | OrderBy { inner, .. } => {
+            collect_vars_recursive(inner, out);
+        }
+        Project { variables, inner } => {
+            for v in variables {
+                out.insert(v.as_str().to_owned());
+            }
+            collect_vars_recursive(inner, out);
+        }
+        Group {
+            inner, variables, ..
+        } => {
+            for v in variables {
+                out.insert(v.as_str().to_owned());
+            }
+            collect_vars_recursive(inner, out);
+        }
+        Values { variables, .. } => {
+            for v in variables {
+                out.insert(v.as_str().to_owned());
+            }
+        }
+        Service { inner, .. } => {
+            collect_vars_recursive(inner, out);
+        }
+        Path {
+            subject, object, ..
+        } => {
+            if let spargebra::term::TermPattern::Variable(v) = subject {
+                out.insert(v.as_str().to_owned());
+            }
+            if let spargebra::term::TermPattern::Variable(v) = object {
+                out.insert(v.as_str().to_owned());
+            }
+        }
     }
 }

@@ -1305,13 +1305,13 @@ Standard SPARQL clients (YASGUI, Postman, RDF4J workbench, `curl`) can query and
 
 ### Deliverables
 
-- [ ] **Connection pooling** (`src/sparql/federation.rs`)
+- [x] **Connection pooling** (`src/sparql/federation.rs`)
   - Replace per-call `ureq::AgentBuilder::new()` with a backend-local shared agent stored in a `thread_local!` or `OnceCell`
   - Reuses TCP connections and TLS sessions across SERVICE calls within a session
   - Pool size configurable via `pg_ripple.federation_pool_size` GUC (default: 4 per endpoint, range: 1–32)
   - Reduces TCP handshake + TLS overhead for workloads with repeated calls to the same endpoint
 
-- [ ] **Result caching with TTL** (`src/sparql/federation.rs`, `_pg_ripple.federation_cache` table)
+- [x] **Result caching with TTL** (`src/sparql/federation.rs`, `_pg_ripple.federation_cache` table)
   - Cache encoded remote results keyed on `(url, XXH3-64(sparql_text))`
   - Schema: `_pg_ripple.federation_cache (url TEXT, query_hash BIGINT, result_jsonb JSONB, cached_at TIMESTAMPTZ, expires_at TIMESTAMPTZ)`
   - On cache hit, skip the HTTP call entirely and re-encode cached results via the dictionary
@@ -1319,57 +1319,57 @@ Standard SPARQL clients (YASGUI, Postman, RDF4J workbench, `curl`) can query and
   - TTL configurable via `pg_ripple.federation_cache_ttl` GUC (default: 0 = disabled, range: 0–86400 seconds)
   - Particularly beneficial for semi-static reference datasets (e.g. Wikidata labels, controlled vocabularies)
 
-- [ ] **Query rewriting for data minimization** (`src/sparql/sqlgen.rs`)
+- [x] **Query rewriting for data minimization** (`src/sparql/sqlgen.rs`)
   - At translation time, compute the set of variables from the SERVICE inner pattern that are actually referenced by the outer query (joins, projections, FILTERs)
   - Rewrite the SPARQL SELECT sent to the remote endpoint to project only those variables instead of `SELECT *`
   - Reduces data transfer and remote processing for patterns where only a subset of result bindings are consumed
 
-- [ ] **Partial result handling** (`src/sparql/federation.rs`)
+- [x] **Partial result handling** (`src/sparql/federation.rs`)
   - When a SERVICE call delivers rows before failing (e.g. connection drop mid-stream), use however many rows were received rather than discarding them entirely
   - Emit a WARNING naming the endpoint, the rows received, and the error
   - Controlled by `pg_ripple.federation_on_partial` GUC (values: `'empty'` = discard partial results, `'use'` = use partial results; default: `'empty'`)
   - Improves resilience for federated queries where partial data is better than none
 
-- [ ] **Endpoint complexity hints** (`_pg_ripple.federation_endpoints` schema extension)
+- [x] **Endpoint complexity hints** (`_pg_ripple.federation_endpoints` schema extension)
   - Add a `complexity TEXT NOT NULL DEFAULT 'normal' CHECK (complexity IN ('fast', 'normal', 'slow'))` column to `_pg_ripple.federation_endpoints`
   - Expose via `pg_ripple.register_endpoint(url, local_view_name, complexity)` and a new `pg_ripple.set_endpoint_complexity(url, complexity)` function
   - At query planning time, reorder multiple SERVICE clauses so `'fast'` endpoints execute first — enables earlier failure detection and reduces total wall-clock time for multi-endpoint queries
 
-- [ ] **Adaptive timeout** (`src/sparql/federation.rs`)
+- [x] **Adaptive timeout** (`src/sparql/federation.rs`)
   - When `pg_ripple.federation_adaptive_timeout = on` (default: `off`), derive the effective timeout as `max(1s, p95_latency_ms * 3 / 1000)` from `_pg_ripple.federation_health`
   - Falls back to `pg_ripple.federation_timeout` when no health data is available or adaptive mode is off
   - Prevents fast endpoints from being penalised by the global timeout and slow endpoints from blocking indefinitely
 
-- [ ] **Batch SERVICE calls to the same endpoint** (`src/sparql/sqlgen.rs`)
+- [x] **Batch SERVICE calls to the same endpoint** (`src/sparql/sqlgen.rs`)
   - Detect multiple `SERVICE <url>` clauses in a single query that target the same registered endpoint
   - Combine their inner patterns into a single `SELECT * WHERE { { pattern1 } UNION { pattern2 } }` SPARQL query
   - Issue one HTTP request instead of N, then split results back into per-clause variable bindings
   - Applied only when patterns are independent (no shared variables between clauses)
 
-- [ ] **Result deduplication at encoding stage** (`src/sparql/federation.rs`)
+- [x] **Result deduplication at encoding stage** (`src/sparql/federation.rs`)
   - Build a per-call `HashMap<String, i64>` during `encode_results()` to avoid redundant dictionary lookups for the same term appearing in multiple rows
   - No user-visible API change; pure internal optimisation
   - Particularly effective for result sets with high-cardinality repeated values (e.g. a common subject IRI across thousands of rows)
 
-- [ ] **GUC additions** (`src/lib.rs`)
+- [x] **GUC additions** (`src/lib.rs`)
   - `pg_ripple.federation_pool_size` (INT, default: 4, range: 1–32)
   - `pg_ripple.federation_cache_ttl` (INT, default: 0, range: 0–86400 seconds; 0 = disabled)
   - `pg_ripple.federation_on_partial` (ENUM, default: `'empty'`; values: `'empty'`, `'use'`)
   - `pg_ripple.federation_adaptive_timeout` (BOOL, default: `off`)
 
-- [ ] **Migration script** (`sql/pg_ripple--0.18.0--0.19.0.sql`)
+- [x] **Migration script** (`sql/pg_ripple--0.18.0--0.19.0.sql`)
   - `ALTER TABLE _pg_ripple.federation_endpoints ADD COLUMN IF NOT EXISTS complexity TEXT NOT NULL DEFAULT 'normal' CHECK (complexity IN ('fast', 'normal', 'slow'))`
   - `CREATE TABLE IF NOT EXISTS _pg_ripple.federation_cache (url TEXT NOT NULL, query_hash BIGINT NOT NULL, result_jsonb JSONB NOT NULL, cached_at TIMESTAMPTZ NOT NULL DEFAULT now(), expires_at TIMESTAMPTZ NOT NULL, PRIMARY KEY (url, query_hash))`
   - `CREATE INDEX IF NOT EXISTS idx_federation_cache_expires ON _pg_ripple.federation_cache (expires_at)`
 
-- [ ] pg_regress: `sparql_federation_perf.sql` (cache hit/miss; TTL expiry; variable projection confirmed via explain; batch detection with two SERVICE clauses to same endpoint; complexity ordering; partial result GUC; adaptive timeout GUC boundary; deduplication correctness)
+- [x] pg_regress: `sparql_federation_perf.sql` (cache hit/miss; TTL expiry; variable projection confirmed via explain; batch detection with two SERVICE clauses to same endpoint; complexity ordering; partial result GUC; adaptive timeout GUC boundary; deduplication correctness)
 
 ### Documentation
 
 > See [plans/documentation.md](plans/documentation.md) for details.
 
-- [ ] `user-guide/sql-reference/federation.md` extended: new GUCs table; connection pooling notes; result caching section with TTL examples; complexity hints; variable projection rewrite behaviour; batching semantics; adaptive timeout
-- [ ] `user-guide/best-practices/federation-performance.md` (new page): choosing cache TTL; when to set complexity hints; designing queries to benefit from variable projection; monitoring with `federation_health` and `federation_cache`; sidecar vs in-process tradeoffs
+- [x] `user-guide/sql-reference/federation.md` extended: new GUCs table; connection pooling notes; result caching section with TTL examples; complexity hints; variable projection rewrite behaviour; batching semantics; adaptive timeout
+- [x] `user-guide/best-practices/federation-performance.md` (new page): choosing cache TTL; when to set complexity hints; designing queries to benefit from variable projection; monitoring with `federation_health` and `federation_cache`; sidecar vs in-process tradeoffs
 
 ### Exit Criteria
 

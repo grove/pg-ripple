@@ -450,6 +450,46 @@ fn translate_pattern(pattern: &GraphPattern, ctx: &mut Ctx) -> Fragment {
         GraphPattern::Bgp { patterns } => translate_bgp(patterns, ctx),
 
         GraphPattern::Join { left, right } => {
+            // ── Batch SERVICE detection (v0.19.0) ────────────────────────────
+            // When both children are SERVICE clauses targeting the same registered
+            // endpoint and their inner patterns share no variables, combine them
+            // into a single UNION query to halve the HTTP round trips.
+            if let (
+                GraphPattern::Service {
+                    name: name_l,
+                    inner: inner_l,
+                    silent: silent_l,
+                },
+                GraphPattern::Service {
+                    name: name_r,
+                    inner: inner_r,
+                    silent: silent_r,
+                },
+            ) = (left.as_ref(), right.as_ref())
+                && let (NamedNodePattern::NamedNode(url_l), NamedNodePattern::NamedNode(url_r)) =
+                    (name_l, name_r)
+            {
+                let url_l_str = url_l.as_str();
+                let url_r_str = url_r.as_str();
+                if url_l_str == url_r_str {
+                    // Check no shared variables between the two inner patterns.
+                    let vars_l = federation::collect_pattern_variables(inner_l);
+                    let vars_r = federation::collect_pattern_variables(inner_r);
+                    if vars_l.is_disjoint(&vars_r) {
+                        let batched = translate_service_batched(
+                            url_l_str,
+                            inner_l,
+                            inner_r,
+                            *silent_l || *silent_r,
+                            ctx,
+                        );
+                        if let Some(frag) = batched {
+                            return frag;
+                        }
+                    }
+                }
+            }
+            // Fallthrough: standard join translation.
             let mut frag = translate_pattern(left, ctx);
             let right_frag = translate_pattern(right, ctx);
             frag.merge(right_frag);
@@ -1157,7 +1197,104 @@ fn translate_values(
     frag
 }
 
-// ─── SERVICE translator (v0.16.0) ─────────────────────────────────────────────
+// ─── Batch SERVICE translator (v0.19.0) ──────────────────────────────────────
+
+/// Combine two independent SERVICE clauses targeting the same endpoint into one
+/// HTTP request.
+///
+/// Sends `SELECT * WHERE { { pattern1 } UNION { pattern2 } }` to the remote
+/// endpoint.  The combined results are split by variable set back into per-clause
+/// bindings and merged into a single fragment.
+///
+/// Returns `None` when the endpoint is not allowed, unhealthy, or the combined
+/// call fails — callers fall back to sequential translation in that case.
+fn translate_service_batched(
+    url: &str,
+    inner_l: &GraphPattern,
+    inner_r: &GraphPattern,
+    silent: bool,
+    ctx: &mut Ctx,
+) -> Option<Fragment> {
+    if !federation::is_endpoint_allowed(url) {
+        return None; // fallback to sequential
+    }
+    if !federation::is_endpoint_healthy(url) {
+        return None;
+    }
+    if federation::get_local_view(url).is_some() {
+        return None; // local view rewrite — let sequential path handle it
+    }
+
+    // Collect variables from each inner pattern.
+    let mut vars_l: Vec<String> = federation::collect_pattern_variables(inner_l)
+        .into_iter()
+        .collect();
+    vars_l.sort();
+    let mut vars_r: Vec<String> = federation::collect_pattern_variables(inner_r)
+        .into_iter()
+        .collect();
+    vars_r.sort();
+
+    // Build all variables for the combined projection.
+    let mut all_vars: Vec<String> = vars_l.iter().chain(vars_r.iter()).cloned().collect();
+    all_vars.sort();
+    all_vars.dedup();
+
+    let projection = if all_vars.is_empty() {
+        "*".to_owned()
+    } else {
+        all_vars
+            .iter()
+            .map(|v| format!("?{v}"))
+            .collect::<Vec<_>>()
+            .join(" ")
+    };
+
+    // Combined SPARQL UNION query.
+    let combined_text =
+        format!("SELECT {projection} WHERE {{ {{ {inner_l} }} UNION {{ {inner_r} }} }}");
+    pgrx::debug1!("batch SERVICE {url}: {combined_text}");
+
+    let timeout_secs = federation::effective_timeout_secs(url);
+    let max_results = crate::FEDERATION_MAX_RESULTS.get();
+
+    let on_partial = crate::FEDERATION_ON_PARTIAL.get();
+    let on_partial_str = on_partial
+        .as_ref()
+        .and_then(|c| c.to_str().ok())
+        .unwrap_or("empty");
+
+    let start = std::time::Instant::now();
+    let result = if on_partial_str == "use" {
+        federation::execute_remote_partial(url, &combined_text, timeout_secs, max_results)
+    } else {
+        federation::execute_remote(url, &combined_text, timeout_secs, max_results)
+    };
+    let latency_ms = start.elapsed().as_millis() as i64;
+
+    match result {
+        Ok((variables, rows)) => {
+            federation::record_health(url, true, latency_ms);
+            if variables.is_empty() || rows.is_empty() {
+                return Some(Fragment::zero_rows());
+            }
+            let (variables, encoded_rows) = federation::encode_results(variables, rows);
+            Some(translate_service_values(&variables, &encoded_rows, ctx))
+        }
+        Err(e) => {
+            federation::record_health(url, false, latency_ms);
+            if silent {
+                pgrx::warning!("batch SERVICE {url} failed (returning empty): {e}");
+                return Some(Fragment::zero_rows());
+            }
+            // Fall back to sequential translation on error.
+            pgrx::warning!("batch SERVICE {url} failed, falling back to sequential: {e}");
+            None
+        }
+    }
+}
+
+// ─── SERVICE translator (v0.16.0, enhanced v0.19.0) ──────────────────────────
 
 /// Translate a SPARQL `SERVICE` clause.
 ///
@@ -1165,8 +1302,12 @@ fn translate_values(
 /// 1. Resolve endpoint URL from the `name` pattern.
 /// 2. Check SSRF allowlist; error on unregistered endpoint.
 /// 3. If a local SPARQL view covers this endpoint, scan its stream table.
-/// 4. Otherwise, execute the inner pattern as a remote SPARQL SELECT.
-/// 5. Dictionary-encode remote results and inject as an inline VALUES fragment.
+/// 4. Build an explicit `SELECT ?v1 ?v2 … WHERE { inner }` query (variable
+///    projection, v0.19.0) rather than `SELECT *`.
+/// 5. Determine effective timeout via adaptive timeout GUC (v0.19.0).
+/// 6. Execute remote, respecting `federation_on_partial` GUC (v0.19.0).
+/// 7. Dictionary-encode remote results (with per-call deduplication, v0.19.0)
+///    and inject as an inline VALUES fragment.
 ///
 /// Multiple SERVICE clauses in one query execute sequentially (SPI context
 /// does not support concurrent HTTP + SPI).
@@ -1219,17 +1360,47 @@ fn translate_service(
         return translate_service_local(&stream_table, ctx);
     }
 
-    // ── 4. Remote SPARQL execution ────────────────────────────────────────────
-    // Serialise the inner pattern as a SPARQL SELECT query.
-    // spargebra's Display impl emits valid SPARQL graph pattern syntax.
-    let inner_text = format!("SELECT * WHERE {{ {inner} }}");
+    // ── 4. Variable projection rewrite (v0.19.0) ─────────────────────────────
+    // Collect all variables from the inner pattern and build an explicit
+    // SELECT projection instead of SELECT *.  This reduces data transfer when
+    // the remote endpoint honours the projection and when only a subset of
+    // the variables are needed downstream.
+    let inner_vars: Vec<String> = {
+        let mut vars: Vec<String> = federation::collect_pattern_variables(inner)
+            .into_iter()
+            .collect();
+        vars.sort(); // deterministic ordering for stable query text and cache keys
+        vars
+    };
+    let projection = if inner_vars.is_empty() {
+        "*".to_owned()
+    } else {
+        inner_vars
+            .iter()
+            .map(|v| format!("?{v}"))
+            .collect::<Vec<_>>()
+            .join(" ")
+    };
+    let inner_text = format!("SELECT {projection} WHERE {{ {inner} }}");
 
-    let timeout_secs = crate::FEDERATION_TIMEOUT.get();
+    // ── 5. Adaptive timeout (v0.19.0) ────────────────────────────────────────
+    let timeout_secs = federation::effective_timeout_secs(&url);
     let max_results = crate::FEDERATION_MAX_RESULTS.get();
 
     let start = std::time::Instant::now();
 
-    let result = federation::execute_remote(&url, &inner_text, timeout_secs, max_results);
+    // ── 6. Remote execution with partial-result support (v0.19.0) ────────────
+    let on_partial = crate::FEDERATION_ON_PARTIAL.get();
+    let on_partial_str = on_partial
+        .as_ref()
+        .and_then(|c| c.to_str().ok())
+        .unwrap_or("empty");
+
+    let result = if on_partial_str == "use" {
+        federation::execute_remote_partial(&url, &inner_text, timeout_secs, max_results)
+    } else {
+        federation::execute_remote(&url, &inner_text, timeout_secs, max_results)
+    };
 
     let latency_ms = start.elapsed().as_millis() as i64;
 
@@ -1262,7 +1433,7 @@ fn translate_service(
         return Fragment::zero_rows();
     }
 
-    // ── 5. Encode results and inject as VALUES ────────────────────────────────
+    // ── 7. Encode results and inject as VALUES ────────────────────────────────
     let (variables, encoded_rows) = federation::encode_results(variables, rows);
 
     translate_service_values(&variables, &encoded_rows, ctx)
