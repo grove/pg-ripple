@@ -654,6 +654,10 @@ All GUC parameters exposed by pg_ripple, listed alphabetically. GUCs marked **st
 | `pg_ripple.federation_max_results` | `INT` | `10000` | 1 – 1,000,000 | v0.16.0 | Maximum rows accepted from a single remote `SERVICE` call |
 | `pg_ripple.federation_on_error` | `ENUM` | `'warn'` | `'warn'`, `'error'`, `'ignore'` | v0.16.0 | How to handle a failed remote `SERVICE` call |
 | `pg_ripple.federation_timeout` | `INT` | `30` | 1 – 3600 (seconds) | v0.16.0 | Per-`SERVICE` HTTP timeout |
+| `pg_ripple.federation_pool_size` | `INT` | `4` | 1 – 32 | v0.19.0 | Idle HTTP connections kept per endpoint host |
+| `pg_ripple.federation_cache_ttl` | `INT` | `0` | 0 – 86400 (seconds) | v0.19.0 | Remote result cache TTL; 0 = disabled |
+| `pg_ripple.federation_on_partial` | `ENUM` | `'empty'` | `'empty'`, `'use'` | v0.19.0 | Behaviour when a remote call delivers partial results before failing |
+| `pg_ripple.federation_adaptive_timeout` | `BOOL` | `off` | — | v0.19.0 | Use P95 latency from `federation_health` to set per-call timeout |
 | `pg_ripple.inference_mode` | `ENUM` | `'off'` | `'off'`, `'on_demand'`, `'materialized'` | v0.10.0 | Controls the Datalog reasoning engine; `'materialized'` requires pg_trickle |
 | `pg_ripple.latch_trigger_threshold` | `INT` | `10000` | 0 – 10,000,000 | v0.6.0 | Row count at which a committing write transaction pokes the merge worker latch immediately |
 | `pg_ripple.max_path_depth` | `INT` | `100` | 1 – 10,000 | v0.5.0 | Maximum recursion depth for property path (`+`, `*`) queries |
@@ -1044,7 +1048,72 @@ All nine functions call `pg_trickle_available()` as their first step and raise a
 
 ---
 
-## 5. Data Flow: Insert Path
+## 4.14 Federation Performance Optimizations (`src/sparql/federation.rs`)
+
+**Introduced**: v0.19.0
+
+This section covers the performance layer built on top of the v0.16.0 federation executor. All optimizations are backward-compatible: the public API is unchanged and all new behaviour is gated on GUCs that default to their conservative (pre-0.19.0-equivalent) values.
+
+### Connection Pooling
+
+The v0.16.0 executor calls `ureq::AgentBuilder::new()` on every SERVICE invocation, creating a fresh HTTP client with no connection reuse. v0.19.0 replaces this with a backend-local shared agent stored in `thread_local! { static AGENT: OnceCell<ureq::Agent> }`. The agent is initialized once per backend on first use and reused for all subsequent SERVICE calls within the session, preserving TCP and TLS sessions.
+
+`pg_ripple.federation_pool_size` (INT, default: 4) controls the maximum number of idle connections kept per host. The value is passed to `ureq::AgentBuilder::max_idle_connections_per_host()`.
+
+### Result Caching
+
+Caching is disabled by default (`pg_ripple.federation_cache_ttl = 0`). When enabled, the executor computes `XXH3-64(sparql_text)` for the serialised inner SPARQL SELECT, then checks `_pg_ripple.federation_cache` for a live row with matching `(url, query_hash)` and `expires_at > now()`. On a cache hit the stored `result_jsonb` is decoded in-process exactly as a live HTTP response would be. On a miss the result is stored with `expires_at = now() + interval '{ttl} seconds'`.
+
+The merge background worker runs `DELETE FROM _pg_ripple.federation_cache WHERE expires_at < now()` during each merge cycle to prevent unbounded growth. `idx_federation_cache_expires` makes this deletion fast.
+
+**Security note**: result_jsonb is stored as received from the remote endpoint. The executor already validates and re-encodes all terms via the dictionary during `encode_results()` — stale or tampered cache entries cannot inject arbitrary dictionary IDs because every term goes through the same `encode_ntriples_term()` path.
+
+### Variable Projection Rewriting
+
+When the SQL generator translates a SERVICE clause it now walks the outer query context (`Ctx`) to collect the set of SPARQL variables that are referenced outside the SERVICE block (in outer projections, JOINs, or FILTERs). The inner `SELECT *` is replaced with `SELECT ?v1 ?v2 ...` listing only those variables.
+
+The rewrite is skipped when the outer context is a bare `SELECT *` (all variables projected) or when the set cannot be determined statically (e.g. variable endpoint). In those cases the executor falls back to `SELECT *` as before.
+
+### Batch SERVICE Calls
+
+When the SQL generator detects two or more `SERVICE <url>` clauses targeting the same endpoint within a single query, and those clauses share no variables between them (determined by inspecting their variable sets in the spargebra algebra), they are merged into a single HTTP call:
+
+```sparql
+SELECT * WHERE { { inner1 } UNION { inner2 } }
+```
+
+The combined result set is then partitioned back into per-clause bindings by matching on which variables each row has bound. This eliminates redundant TCP round-trips and remote parse overhead.
+
+Batching is only applied when patterns are provably independent. Any shared variable between two SERVICE clauses disables batching for that pair and falls back to sequential execution.
+
+### Result Deduplication at Encoding
+
+`encode_results()` builds a per-call `HashMap<String, i64>` (term string → dictionary ID). For each cell, it checks the map before calling `dictionary::encode()`. On a hit the cached ID is reused directly; on a miss the ID is inserted into the map. This eliminates repeated dictionary SPI calls for high-cardinality result sets where the same IRI or literal appears thousands of times.
+
+### Adaptive Timeout
+
+When `pg_ripple.federation_adaptive_timeout = on`, `execute_remote()` reads the P95 latency for the target endpoint from `_pg_ripple.federation_health`:
+
+```sql
+SELECT PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY latency_ms)
+FROM _pg_ripple.federation_health
+WHERE url = $1 AND probed_at >= now() - INTERVAL '5 minutes'
+```
+
+The effective timeout is `max(1000, p95_ms * 3)` milliseconds. If no health data is available or the feature is disabled, `pg_ripple.federation_timeout` is used as before. The adaptive value is never less than 1 second regardless of reported latency.
+
+### Endpoint Complexity Ordering
+
+The `complexity` column on `_pg_ripple.federation_endpoints` (`'fast'` / `'normal'` / `'slow'`) annotates expected endpoint speed. When a query contains multiple SERVICE clauses the SQL generator sorts them by complexity ascending before emitting SQL — `'fast'` endpoints are queried first. This is a static hint; it does not affect runtime scheduling once execution begins.
+
+### New GUCs (v0.19.0)
+
+| GUC | Type | Default | Range / Values | Description |
+|---|---|---|---|---|
+| `pg_ripple.federation_pool_size` | INT | 4 | 1–32 | Idle HTTP connections kept per endpoint host |
+| `pg_ripple.federation_cache_ttl` | INT | 0 | 0–86400 s | Remote result cache TTL; 0 = disabled |
+| `pg_ripple.federation_on_partial` | ENUM | `'empty'` | `'empty'`, `'use'` | Behaviour when a remote call delivers partial results before failing |
+| `pg_ripple.federation_adaptive_timeout` | BOOL | `off` | — | Use P95 latency from federation_health to set per-call timeout |
 
 > **Target-state note**: The flow below is the **v0.6.0+ target architecture** after the HTAP split lands. In v0.1.0–v0.5.1, inserts write directly to the flat `_pg_ripple.vp_{predicate_id}` table.
 
