@@ -8,17 +8,20 @@
 //! - `sparql_construct(query TEXT) RETURNS SETOF JSONB` — execute CONSTRUCT
 //! - `sparql_describe(iri TEXT) RETURNS SETOF JSONB` — execute DESCRIBE (CBD)
 //! - `sparql_update(query TEXT) RETURNS BIGINT` — execute INSERT/DELETE DATA
+//! - `plan_cache_stats() RETURNS JSONB` — hit/miss/size/capacity counters
+//! - `plan_cache_reset() RETURNS VOID` — evict all cached plans and reset counters
 //!
 //! # Pipeline
 //!
 //! 1. Parse with `spargebra::SparqlParser` (spargebra 0.4).
 //! 2. Optimize with `sparopt::Optimizer::optimize_graph_pattern`.
-//! 3. Translate to SQL via `sqlgen`.
+//! 3. Translate to SQL via `sqlgen` (with BGP reordering if enabled).
 //! 4. Check query plan cache; skip translation if hit.
 //! 5. Execute via SPI; collect all i64 result values.
 //! 6. Batch-decode i64s via a single `WHERE id = ANY(...)` query.
 //! 7. Emit decoded rows as `JSONB`.
 
+mod optimizer;
 mod plan_cache;
 mod property_path;
 pub(crate) mod sqlgen;
@@ -154,7 +157,25 @@ fn execute_select(
     // First pass: collect result rows of i64s.
     let mut raw_rows: Vec<Vec<Option<i64>>> = Vec::new();
 
-    Spi::connect(|client| {
+    Spi::connect_mut(|client| {
+        // v0.13.0: When BGP reordering is active, lock the planner into our
+        // computed join order by disabling join reordering heuristics.
+        // Use connect_mut + update() (read_only=false) so that SET LOCAL is
+        // accepted by PostgreSQL's SPI layer.
+        if crate::BGP_REORDER.get() {
+            let _ = client.update("SET LOCAL join_collapse_limit = 1", None, &[]);
+            let _ = client.update("SET LOCAL enable_mergejoin = on", None, &[]);
+        }
+
+        // v0.13.0: Enable parallel query for queries that join multiple VP tables.
+        // Count approximate number of VP-table scans by alias pattern in the SQL.
+        let min_joins = crate::PARALLEL_QUERY_MIN_JOINS.get() as usize;
+        let join_count = sql.matches(" AS _t").count();
+        if join_count >= min_joins {
+            let _ = client.update("SET LOCAL max_parallel_workers_per_gather = 4", None, &[]);
+            let _ = client.update("SET LOCAL enable_parallel_hash = on", None, &[]);
+            let _ = client.update("SET LOCAL parallel_setup_cost = 10", None, &[]);
+        }
         let rows = client
             .select(sql, None, &[])
             .unwrap_or_else(|e| pgrx::error!("SPARQL execute SPI error: {e}"));
@@ -974,4 +995,52 @@ fn lookup_ground_term_value(term: &spargebra::term::GroundTerm) -> Option<i64> {
             dictionary::lookup_quoted_triple(s_id, p_id, o_id)
         }
     }
+}
+
+// ─── Plan cache monitoring (v0.13.0) ─────────────────────────────────────────
+
+/// Return SPARQL plan cache statistics as JSONB.
+///
+/// Returns: `{"hits": N, "misses": N, "size": N, "capacity": N, "hit_rate": 0.xx}`
+pub fn plan_cache_stats() -> pgrx::JsonB {
+    let (hits, misses, size, cap) = plan_cache::stats();
+    let total = hits + misses;
+    let hit_rate = if total > 0 {
+        hits as f64 / total as f64
+    } else {
+        0.0_f64
+    };
+    let mut obj = serde_json::Map::new();
+    obj.insert(
+        "hits".to_owned(),
+        serde_json::Value::Number(serde_json::Number::from(hits)),
+    );
+    obj.insert(
+        "misses".to_owned(),
+        serde_json::Value::Number(serde_json::Number::from(misses)),
+    );
+    obj.insert(
+        "size".to_owned(),
+        serde_json::Value::Number(serde_json::Number::from(size as u64)),
+    );
+    obj.insert(
+        "capacity".to_owned(),
+        serde_json::Value::Number(serde_json::Number::from(cap as u64)),
+    );
+    // hit_rate as a JSON number with limited precision.
+    let hit_rate_rounded = (hit_rate * 10000.0).round() / 10000.0;
+    if let Some(n) = serde_json::Number::from_f64(hit_rate_rounded) {
+        obj.insert("hit_rate".to_owned(), serde_json::Value::Number(n));
+    } else {
+        obj.insert(
+            "hit_rate".to_owned(),
+            serde_json::Value::Number(serde_json::Number::from(0)),
+        );
+    }
+    pgrx::JsonB(serde_json::Value::Object(obj))
+}
+
+/// Evict all cached SPARQL plans and reset hit/miss counters.
+pub fn plan_cache_reset() {
+    plan_cache::reset();
 }

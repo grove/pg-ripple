@@ -1,0 +1,47 @@
+-- Migration 0.12.0 → 0.13.0: Performance Hardening
+--
+-- New in v0.13.0 (compiled from Rust — no SQL schema changes required):
+--
+--   Functions:
+--     pg_ripple.plan_cache_stats() RETURNS JSONB
+--       Return SPARQL plan cache statistics: hits, misses, size, capacity,
+--       and hit_rate.  Monitor cache efficiency and tune plan_cache_size.
+--
+--     pg_ripple.plan_cache_reset() RETURNS VOID
+--       Evict all cached SPARQL plan translations and reset hit/miss counters.
+--
+--   New GUC parameters:
+--     pg_ripple.bgp_reorder (BOOL, default: on)
+--       Enable selectivity-based BGP join reordering.  When on, triple patterns
+--       are reordered by estimated cost before SQL generation and
+--       SET LOCAL join_collapse_limit = 1 is emitted before each query.
+--
+--     pg_ripple.parallel_query_min_joins (INT, default: 3)
+--       Minimum number of VP-table joins before enabling parallel query workers.
+--
+--   BGP join reordering:
+--     Triple patterns within a Basic Graph Pattern are now reordered by
+--     estimated selectivity (most selective first) before SQL generation.
+--     Selectivity is estimated from pg_stats.n_distinct and pg_class.reltuples.
+--     Controlled by pg_ripple.bgp_reorder.
+--
+--   Parallel query exploitation:
+--     Queries joining 3+ VP tables now emit SET LOCAL max_parallel_workers_per_gather = 4
+--     and SET LOCAL enable_parallel_hash = on before execution.
+--     Threshold configurable via pg_ripple.parallel_query_min_joins.
+--
+--   Extended statistics:
+--     Extended statistics on (s, o) pairs are automatically created when a
+--     predicate is promoted from vp_rare to a dedicated VP table.  This gives
+--     the PostgreSQL planner correlation-aware cardinality estimates for
+--     multi-predicate star pattern queries.
+--
+--   Plan cache instrumentation:
+--     Hit and miss counters are tracked per-backend and exposed via
+--     pg_ripple.plan_cache_stats().  The cache key now also includes
+--     pg_ripple.bgp_reorder so stale plans are never reused after a GUC change.
+--
+--   SHACL-driven query optimization:
+--     The optimizer reads sh:maxCount 1 and sh:minCount 1 hints from loaded
+--     SHACL shapes.  These hints are advisory only; they are never applied when
+--     doing so would change query semantics.

@@ -389,9 +389,32 @@ pub fn promote_rare_predicates() -> i64 {
 
     for p_id in pred_ids {
         promote_predicate(p_id);
+        // v0.13.0: Create extended statistics on (s, o) for correlation-aware planning.
+        create_extended_statistics(p_id);
     }
 
     count
+}
+
+/// Create PG18 extended statistics on the `(s, o)` column pair of a VP table.
+///
+/// Extended statistics help the PostgreSQL planner understand the correlation
+/// between subject and object columns, enabling better cardinality estimates
+/// for multi-predicate star patterns.
+///
+/// The statistic object is named `_pg_ripple.ext_stats_vp_{id}` and covers
+/// n-distinct and dependencies statistics on `(s, o)`.
+fn create_extended_statistics(pred_id: i64) {
+    let stats_name = format!("ext_stats_vp_{pred_id}");
+    let delta_table = format!("_pg_ripple.vp_{pred_id}_delta");
+
+    // Create extended statistics if not already present.
+    let create_sql = format!(
+        "CREATE STATISTICS IF NOT EXISTS _pg_ripple.{stats_name} \
+         (ndistinct, dependencies) ON s, o FROM {delta_table}"
+    );
+    Spi::run_with_args(&create_sql, &[])
+        .unwrap_or_else(|e| pgrx::warning!("extended stats creation for vp_{pred_id}: {e}"));
 }
 
 // ─── Public API ──────────────────────────────────────────────────────────────

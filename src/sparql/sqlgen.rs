@@ -342,6 +342,10 @@ fn bind_term(
 // ─── Core graph-pattern translator ───────────────────────────────────────────
 
 fn translate_bgp(patterns: &[spargebra::term::TriplePattern], ctx: &mut Ctx) -> Fragment {
+    // v0.13.0: reorder patterns by estimated selectivity for minimum intermediate results.
+    let reordered = super::optimizer::reorder_bgp(patterns, &mut |iri| ctx.encode_iri(iri));
+    let patterns = reordered.as_slice();
+
     let mut frag = Fragment::empty();
 
     // Self-join elimination: detect duplicate triple patterns, only scan once.

@@ -423,6 +423,19 @@ pub static ENFORCE_CONSTRAINTS: pgrx::GucSetting<Option<std::ffi::CString>> =
 pub static RULE_GRAPH_SCOPE: pgrx::GucSetting<Option<std::ffi::CString>> =
     pgrx::GucSetting::<Option<std::ffi::CString>>::new(None);
 
+// ─── v0.13.0 GUCs ────────────────────────────────────────────────────────────
+
+/// GUC: enable BGP join reordering based on pg_stats selectivity estimates.
+/// When true, triple patterns in a BGP are reordered before SQL generation
+/// so the most selective pattern (fewest estimated rows) is evaluated first.
+/// Also emits `SET LOCAL join_collapse_limit = 1` and `enable_mergejoin = on`
+/// before each SPARQL SELECT execution to lock the computed join order.
+pub static BGP_REORDER: pgrx::GucSetting<bool> = pgrx::GucSetting::<bool>::new(true);
+
+/// GUC: minimum number of VP table joins in a query before trying to exploit
+/// PostgreSQL parallel query workers.  Queries with fewer joins use serial plans.
+pub static PARALLEL_QUERY_MIN_JOINS: pgrx::GucSetting<i32> = pgrx::GucSetting::<i32>::new(3);
+
 // ─── pg_trickle runtime detection (v0.6.0) ───────────────────────────────────
 
 /// Returns `true` when the pg_trickle extension is installed in the current database.
@@ -668,6 +681,28 @@ pub extern "C-unwind" fn _PG_init() {
         c"Graph scope for unscoped Datalog atoms: 'default' (g=0 only) or 'all' (any graph)",
         c"",
         &RULE_GRAPH_SCOPE,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+
+    // ── v0.13.0 GUCs ─────────────────────────────────────────────────────────
+
+    pgrx::GucRegistry::define_bool_guc(
+        c"pg_ripple.bgp_reorder",
+        c"Reorder BGP triple patterns by estimated selectivity before SQL generation (default: on)",
+        c"",
+        &BGP_REORDER,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+
+    pgrx::GucRegistry::define_int_guc(
+        c"pg_ripple.parallel_query_min_joins",
+        c"Minimum number of VP-table joins before enabling parallel query workers (default: 3)",
+        c"",
+        &PARALLEL_QUERY_MIN_JOINS,
+        1,
+        100,
         GucContext::Userset,
         GucFlags::default(),
     );
@@ -1192,6 +1227,23 @@ mod pg_ripple {
     #[pg_extern]
     fn sparql_update(query: &str) -> i64 {
         crate::sparql::sparql_update(query)
+    }
+
+    // ── Plan cache monitoring (v0.13.0) ──────────────────────────────────────
+
+    /// Return SPARQL plan cache statistics as JSONB.
+    ///
+    /// Returns `{"hits": N, "misses": N, "size": N, "capacity": N, "hit_rate": 0.xx}`.
+    /// Counters accumulate from backend start; reset with `plan_cache_reset()`.
+    #[pg_extern]
+    fn plan_cache_stats() -> pgrx::JsonB {
+        crate::sparql::plan_cache_stats()
+    }
+
+    /// Evict all cached SPARQL plan translations and reset hit/miss counters.
+    #[pg_extern]
+    fn plan_cache_reset() {
+        crate::sparql::plan_cache_reset()
     }
 
     // ── Full-text search ─────────────────────────────────────────────────────
