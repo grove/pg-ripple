@@ -1,0 +1,25 @@
+[package]
+name = "pg_ripple_http"
+version = "0.15.0"
+edition = "2024"
+description = "SPARQL 1.1 Protocol HTTP endpoint for pg_ripple"
+license = "Apache-2.0"
+repository = "https://github.com/grove/pg-ripple"
+rust-version = "1.88"
+
+[[bin]]
+name = "pg_ripple_http"
+path = "src/main.rs"
+
+[dependencies]
+axum = "0.8"
+tokio = { version = "1", features = ["full"] }
+tokio-postgres = { version = "0.7", features = ["with-serde_json-1"] }
+deadpool-postgres = "0.14"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tower-http = { version = "0.6", features = ["cors"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+percent-encoding = "2"
+serde_urlencoded = "0.7"

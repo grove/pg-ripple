@@ -319,6 +319,30 @@ pub fn load_trig_file(path: &str) -> i64 {
     load_trig(&content)
 }
 
+/// Load RDF/XML from a server-side file path (superuser required).
+pub fn load_rdfxml_file(path: &str) -> i64 {
+    let content = read_file_content(path);
+    load_rdfxml(&content)
+}
+
+/// Load N-Triples from a server-side file into a specific graph.
+pub fn load_ntriples_file_into_graph(path: &str, g_id: i64) -> i64 {
+    let content = read_file_content(path);
+    load_ntriples_into_graph(&content, g_id)
+}
+
+/// Load Turtle from a server-side file into a specific graph.
+pub fn load_turtle_file_into_graph(path: &str, g_id: i64) -> i64 {
+    let content = read_file_content(path);
+    load_turtle_into_graph(&content, g_id)
+}
+
+/// Load RDF/XML from a server-side file into a specific graph.
+pub fn load_rdfxml_file_into_graph(path: &str, g_id: i64) -> i64 {
+    let content = read_file_content(path);
+    load_rdfxml_into_graph(&content, g_id)
+}
+
 /// Load RDF/XML data from a text string.  Returns the number of triples loaded.
 ///
 /// Uses `rio_xml::RdfXmlParser` for conformant RDF/XML parsing.  Named graphs

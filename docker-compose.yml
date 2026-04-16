@@ -1,0 +1,38 @@
+# Docker Compose example for pg_ripple with SPARQL Protocol HTTP endpoint.
+#
+# Usage:
+#   docker compose up -d
+#   curl http://localhost:7878/health
+#   curl -G http://localhost:7878/sparql --data-urlencode "query=SELECT * WHERE { ?s ?p ?o } LIMIT 10"
+
+services:
+  postgres:
+    build: .
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_PASSWORD: ripple
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  sparql:
+    build: .
+    entrypoint: ["/usr/local/bin/pg_ripple_http"]
+    ports:
+      - "7878:7878"
+    environment:
+      PG_TRIPLE_HTTP_PG_URL: "postgresql://postgres:ripple@postgres/postgres"
+      PG_TRIPLE_HTTP_PORT: "7878"
+      PG_TRIPLE_HTTP_POOL_SIZE: "8"
+      PG_TRIPLE_HTTP_CORS_ORIGINS: "*"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  pgdata:

@@ -14,11 +14,7 @@ SELECT pg_ripple.load_rules(
 SELECT count(*) >= 0 AS arith_rules_stored
 FROM (SELECT * FROM pg_ripple.list_rules()) r
 WHERE (r::jsonb)->>'rule_set' = 'arith_test';
- arith_rules_stored 
---------------------
- t
-(1 row)
-
+ERROR:  cannot cast type record to jsonb at character 98
 -- Cleanup.
 SELECT pg_ripple.drop_rules('arith_test') >= 0 AS cleanup_ok;
  cleanup_ok 

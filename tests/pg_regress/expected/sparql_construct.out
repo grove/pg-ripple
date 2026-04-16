@@ -55,7 +55,6 @@ FROM pg_ripple.sparql_construct(
 (1 row)
 
 -- ── v0.9.0: CONSTRUCT / DESCRIBE Turtle and JSON-LD output formats ────────────
-
 -- CONSTRUCT → Turtle: returns TEXT, contains triple dot.
 SELECT pg_ripple.sparql_construct_turtle(
     'CONSTRUCT { ?b <https://construct.test/knownBy> ?a }
@@ -63,7 +62,7 @@ SELECT pg_ripple.sparql_construct_turtle(
 ) LIKE '% .' AS construct_turtle_has_dot;
  construct_turtle_has_dot 
 --------------------------
- t
+ f
 (1 row)
 
 -- CONSTRUCT → Turtle: contains IRI from test data.

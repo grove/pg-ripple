@@ -379,17 +379,87 @@ SELECT pg_ripple.enable_schema_summary();
 
 ---
 
+## deduplicate_all() → bigint (v0.7.0)
 
+```sql
+pg_ripple.deduplicate_all() → bigint
+```
 
---
-pical usage**: call once after a bulk load that may contain duplicate triples.
-imum-SID duplicaten `ipg_rimum-SID duplicaten `ipg_rimum-SID duplicaten `ipg_rimuen imum-SID duplicaten `ipg_rimum-SID duplicaten `ipg_rimum-SID duplicaten `ipg_rimuen imum-SID duplicaten `ipg_rimum-SID duplicaten `ipg_rimum-SID d andimum-SID duplicaten `ipg_rimum-SID duplicaten `ipg_rimum-SID duplicaten `ipg_rimuen imum-SID duplicaten `ipg_rimum-SIple.dedup_on_merge` | BOOL | `off` | When `on`, the HTAP generation merge deduplicates `(s, o, g)` rows using `DISTINCT ON`, keeping the lowest-SID row. |
+Removes duplicate `(s, o, g)` rows across all predicates, keeping the row with the lowest SID. Returns the total number of duplicate rows removed.
 
-When enabled, the merge worker's fresh-table geWhen enabled, the merge worker's fresh-table geWhen enabled, the merguplicating projection:
+```sql
+SELECT pg_ripple.deduplicate_all();
+```
+
+---
+
+## dedup_on_merge (GUC)
+
+| GUC | Type | Default | Description |
+|-----|------|---------|-------------|
+| `pg_ripple.dedup_on_merge` | `boolean` | `off` | When `on`, the HTAP merge worker deduplicates `(s, o, g)` rows using `DISTINCT ON` during compaction, keeping the lowest-SID row |
 
 ```sql
 -- Enable merge-time dedup
-SET pg_rSET p.dSET pg_rSET p.dSET pg_rSET p.dSET pg_rSET pdeduplication happens atomically during compaction)
-SELECT pg_ripple.compSELECT pg_ripple.compSELECT pg_r_meSge;
-SELECT pg_ripple.compSELECT pg_ripple.compSELECT pg_r_meSge;
-uplication happens a. Bupweenumerges, the `(main EXCEPT tombstones) UNION ALL delta` query view may observe shouplication happens a. Bupweenumerges, the `(main EXCEPT tombstones) UNION ALL delta` query view may observe shouplication happens a. Bupweenumerges, the `(main EXCEPT tombstones) UNION ALL delta` query view may observe shouplication happens a. Bupweenumerges, the `(main EXCEPT tombstones) UNION ALL delta` query view may observe shouplication happens a. Bupweenumerges, the `(main EXCEPT tombstones) UNION ALL delta` query view may observe shouplication happens a. Bupweenumerges, the `(main EXCEPT tomb annotation workloads.
+SET pg_ripple.dedup_on_merge = true;
+
+-- Trigger a merge (deduplication happens atomically during compaction)
+SELECT pg_ripple.compact();
+```
+
+Between merges, the `(main EXCEPT tombstones) UNION ALL delta` query view may observe short-lived duplicates. This is harmless for most workloads.
+
+---
+
+## plan_cache_stats() → jsonb (v0.13.0)
+
+```sql
+pg_ripple.plan_cache_stats() → jsonb
+```
+
+Returns statistics about the SPARQL plan cache as a JSONB object. Use this to monitor cache effectiveness and tune `pg_ripple.plan_cache_size`.
+
+| Field | Description |
+|-------|-------------|
+| `hits` | Number of cache hits since startup |
+| `misses` | Number of cache misses (recompilations) |
+| `size` | Current number of cached plans |
+| `capacity` | Maximum cache capacity |
+
+```sql
+SELECT pg_ripple.plan_cache_stats();
+-- {"hits": 1523, "misses": 42, "size": 38, "capacity": 128}
+```
+
+A high miss rate (> 50%) suggests either too many distinct query shapes or too small a cache. Try increasing `pg_ripple.plan_cache_size` or parameterizing queries with `VALUES` blocks.
+
+---
+
+## plan_cache_reset() → void (v0.13.0)
+
+```sql
+pg_ripple.plan_cache_reset() → void
+```
+
+Evicts all cached SPARQL→SQL plans and resets the hit/miss counters. Useful after schema changes, VP promotions, or when switching `pg_ripple.bgp_reorder` on/off.
+
+```sql
+SELECT pg_ripple.plan_cache_reset();
+```
+
+---
+
+## promote_rare_predicates() → bigint (v0.2.0)
+
+```sql
+pg_ripple.promote_rare_predicates() → bigint
+```
+
+Scans `_pg_ripple.vp_rare` for predicates whose triple count has exceeded `pg_ripple.vp_promotion_threshold` and promotes each to a dedicated VP table. Returns the number of predicates promoted.
+
+```sql
+SELECT pg_ripple.promote_rare_predicates();
+-- 3
+```
+
+Promotion is normally automatic during inserts. Use this after changing the threshold or after a bulk load where auto-promotion was deferred.

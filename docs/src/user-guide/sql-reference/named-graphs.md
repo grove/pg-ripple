@@ -92,3 +92,66 @@ GRAPH <https://example.org/graph1> {
 ## Default graph
 
 The default graph has internal ID `0`. Triples inserted without a graph argument land in the default graph. SPARQL patterns without a `GRAPH` clause match against the default graph.
+
+---
+
+## Graph-aware operations (v0.15.0)
+
+### find_triples_in_graph
+
+```sql
+pg_ripple.find_triples_in_graph(s TEXT, p TEXT, o TEXT, graph TEXT) → SETOF RECORD
+```
+
+Pattern-matches triples within a specific named graph. Same wildcard rules as `find_triples()` — pass `NULL` for any position.
+
+```sql
+SELECT * FROM pg_ripple.find_triples_in_graph(
+    NULL, NULL, NULL,
+    '<https://example.org/graph1>'
+);
+```
+
+### triple_count_in_graph
+
+```sql
+pg_ripple.triple_count_in_graph(graph_iri TEXT) → BIGINT
+```
+
+Returns the number of triples in a specific named graph.
+
+```sql
+SELECT pg_ripple.triple_count_in_graph('<https://example.org/graph1>');
+-- 42
+```
+
+### delete_triple_from_graph
+
+```sql
+pg_ripple.delete_triple_from_graph(s TEXT, p TEXT, o TEXT, graph_iri TEXT) → BIGINT
+```
+
+Removes a single triple from a specific named graph. Returns the number of rows deleted.
+
+```sql
+SELECT pg_ripple.delete_triple_from_graph(
+    '<https://example.org/alice>',
+    '<https://example.org/knows>',
+    '<https://example.org/bob>',
+    '<https://example.org/graph1>'
+);
+```
+
+### clear_graph
+
+```sql
+pg_ripple.clear_graph(graph_iri TEXT) → BIGINT
+```
+
+Removes all triples from a named graph without unregistering it. Returns the number of triples deleted. Unlike `drop_graph()`, the graph IRI stays in the dictionary — useful when you plan to reload data into the same graph.
+
+```sql
+SELECT pg_ripple.clear_graph('<https://example.org/graph1>');
+```
+
+> **Tip**: Use `clear_graph()` for a "truncate and reload" workflow. Use `drop_graph()` when you want to permanently remove the graph.

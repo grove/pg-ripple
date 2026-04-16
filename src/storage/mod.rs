@@ -682,6 +682,43 @@ pub fn total_triple_count() -> i64 {
         .unwrap_or(0)
 }
 
+/// Return the number of triples in a specific named graph.
+pub fn triple_count_in_graph(g_id: i64) -> i64 {
+    let mut total = 0i64;
+
+    let pred_ids: Vec<i64> = Spi::connect(|c| {
+        c.select(
+            "SELECT id FROM _pg_ripple.predicates WHERE table_oid IS NOT NULL",
+            None,
+            &[],
+        )
+        .unwrap_or_else(|e| pgrx::error!("predicates scan SPI error: {e}"))
+        .filter_map(|row| row.get::<i64>(1).ok().flatten())
+        .collect()
+    });
+
+    for p_id in pred_ids {
+        let table = format!("_pg_ripple.vp_{p_id}");
+        let cnt = Spi::get_one_with_args::<i64>(
+            &format!("SELECT count(*)::bigint FROM {table} WHERE g = $1"),
+            &[DatumWithOid::from(g_id)],
+        )
+        .unwrap_or(None)
+        .unwrap_or(0);
+        total += cnt;
+    }
+
+    let rare_cnt = Spi::get_one_with_args::<i64>(
+        "SELECT count(*)::bigint FROM _pg_ripple.vp_rare WHERE g = $1",
+        &[DatumWithOid::from(g_id)],
+    )
+    .unwrap_or(None)
+    .unwrap_or(0);
+    total += rare_cnt;
+
+    total
+}
+
 /// Find triples matching the supplied pattern (includes vp_rare).
 ///
 /// Any argument may be `None` to act as a wildcard.  Returns decoded text tuples

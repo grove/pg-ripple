@@ -1,0 +1,26 @@
+-- Migration 0.14.0 → 0.15.0: SPARQL Protocol (HTTP Endpoint)
+--
+-- No new schema objects required.  All v0.15.0 features are compiled functions:
+--
+-- Graph-aware bulk loaders:
+--   pg_ripple.load_ntriples_into_graph(data, graph_iri)
+--   pg_ripple.load_turtle_into_graph(data, graph_iri)
+--   pg_ripple.load_rdfxml_into_graph(data, graph_iri)
+--   pg_ripple.load_ntriples_file_into_graph(path, graph_iri)
+--   pg_ripple.load_turtle_file_into_graph(path, graph_iri)
+--   pg_ripple.load_rdfxml_file_into_graph(path, graph_iri)
+--   pg_ripple.load_rdfxml_file(path)
+--
+-- Graph-aware deletion:
+--   pg_ripple.delete_triple_from_graph(s, p, o, graph_iri)
+--   pg_ripple.clear_graph(graph_iri)
+--
+-- SQL API completeness:
+--   pg_ripple.find_triples_in_graph(s, p, o, graph)
+--   pg_ripple.triple_count_in_graph(graph_iri)
+--   pg_ripple.decode_id_full(id)
+--   pg_ripple.lookup_iri(iri)
+--
+-- Companion HTTP service (pg_ripple_http binary, not a PG extension):
+--   W3C SPARQL 1.1 Protocol endpoint at /sparql
+--   Health check at /health, Prometheus metrics at /metrics

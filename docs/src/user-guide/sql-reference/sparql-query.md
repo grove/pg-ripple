@@ -276,3 +276,94 @@ SELECT * FROM pg_ripple.sparql_describe(
 
 > **Note**: CONSTRUCT and DESCRIBE return JSONB in v0.5.1. Turtle and JSON-LD serialization output are planned for v0.9.0.
 
+---
+
+## HTTP Protocol Endpoint
+
+pg_ripple includes a companion HTTP service (`pg_ripple_http`) that implements the W3C SPARQL 1.1 Protocol, allowing standard SPARQL clients to connect without any pg_ripple-specific drivers.
+
+### Starting the HTTP service
+
+```bash
+export PG_TRIPLE_HTTP_PG_URL="postgresql://user:pass@localhost/mydb"
+export PG_TRIPLE_HTTP_PORT=7878
+pg_ripple_http
+```
+
+### Configuration
+
+| Environment variable | Default | Description |
+|---|---|---|
+| `PG_TRIPLE_HTTP_PG_URL` | `postgresql://localhost/postgres` | PostgreSQL connection string |
+| `PG_TRIPLE_HTTP_PORT` | `7878` | HTTP listen port |
+| `PG_TRIPLE_HTTP_POOL_SIZE` | `16` | Connection pool size |
+| `PG_TRIPLE_HTTP_AUTH_TOKEN` | *(none)* | Bearer/Basic auth token |
+| `PG_TRIPLE_HTTP_CORS_ORIGINS` | `*` | Comma-separated CORS origins |
+| `PG_TRIPLE_HTTP_RATE_LIMIT` | `0` | Rate limit (0 = unlimited) |
+
+### SPARQL 1.1 Protocol conformance
+
+The endpoint at `/sparql` supports all standard request forms:
+
+- `GET /sparql?query=...` (URL-encoded query)
+- `POST /sparql` with `Content-Type: application/sparql-query`
+- `POST /sparql` with `Content-Type: application/sparql-update`
+- `POST /sparql` with `Content-Type: application/x-www-form-urlencoded` (`query=...` or `update=...`)
+
+### Accept header formats
+
+| Accept header | Used for | MIME type |
+|---|---|---|
+| `application/sparql-results+json` | SELECT, ASK (default) | JSON Results |
+| `application/sparql-results+xml` | SELECT, ASK | XML Results |
+| `text/csv` | SELECT | CSV |
+| `text/tab-separated-values` | SELECT | TSV |
+| `text/turtle` | CONSTRUCT, DESCRIBE (default) | Turtle |
+| `application/n-triples` | CONSTRUCT, DESCRIBE | N-Triples |
+| `application/ld+json` | CONSTRUCT, DESCRIBE | JSON-LD |
+
+### Examples
+
+```bash
+# SELECT query
+curl -G http://localhost:7878/sparql \
+  --data-urlencode "query=SELECT ?s ?p ?o WHERE { ?s ?p ?o } LIMIT 10"
+
+# ASK query with JSON results
+curl -G http://localhost:7878/sparql \
+  --data-urlencode "query=ASK { <http://example.org/alice> ?p ?o }"
+
+# CONSTRUCT query with Turtle output
+curl -H "Accept: text/turtle" -G http://localhost:7878/sparql \
+  --data-urlencode "query=CONSTRUCT { ?s ?p ?o } WHERE { ?s ?p ?o } LIMIT 10"
+
+# SPARQL Update via POST
+curl -X POST http://localhost:7878/sparql \
+  -H "Content-Type: application/sparql-update" \
+  -d "INSERT DATA { <http://example.org/s> <http://example.org/p> \"value\" }"
+
+# Health check
+curl http://localhost:7878/health
+
+# Prometheus metrics
+curl http://localhost:7878/metrics
+```
+
+### Docker
+
+Use Docker Compose to run PostgreSQL with pg_ripple and the HTTP endpoint together:
+
+```bash
+docker compose up -d
+curl http://localhost:7878/health
+```
+
+### Connecting SPARQL tools
+
+The `/sparql` endpoint is compatible with standard SPARQL tools:
+
+- **YASGUI**: Set endpoint URL to `http://localhost:7878/sparql`
+- **Python SPARQLWrapper**: `sparql = SPARQLWrapper("http://localhost:7878/sparql")`
+- **Apache Jena**: `QueryExecutionFactory.sparqlService("http://localhost:7878/sparql", query)`
+- **Protege**: Add SPARQL tab, set endpoint to `http://localhost:7878/sparql`
+

@@ -148,3 +148,60 @@ Look for:
 - `vp_rare` table scans where you expected a dedicated VP table — the predicate may not have been promoted yet
 - Missing `WHERE` clause conditions — a FILTER may have failed to encode its constant
 - Extra `UNION ALL` branches in property paths — expected for `*` and `?` operators
+
+---
+
+## Using the HTTP endpoint
+
+The `pg_ripple_http` companion service exposes a standard SPARQL endpoint for use with any SPARQL-compatible tool or library.
+
+### Python (SPARQLWrapper)
+
+```python
+from SPARQLWrapper import SPARQLWrapper, JSON
+
+sparql = SPARQLWrapper("http://localhost:7878/sparql")
+sparql.setQuery("""
+    SELECT ?name WHERE {
+        ?person <https://example.org/name> ?name
+    } LIMIT 10
+""")
+sparql.setReturnFormat(JSON)
+results = sparql.query().convert()
+
+for result in results["results"]["bindings"]:
+    print(result["name"]["value"])
+```
+
+### Java (Apache Jena)
+
+```java
+import org.apache.jena.query.*;
+
+String endpoint = "http://localhost:7878/sparql";
+String queryStr = "SELECT ?s ?p ?o WHERE { ?s ?p ?o } LIMIT 10";
+Query query = QueryFactory.create(queryStr);
+
+try (QueryExecution qexec = QueryExecutionFactory.sparqlService(endpoint, query)) {
+    ResultSet results = qexec.execSelect();
+    ResultSetFormatter.out(System.out, results, query);
+}
+```
+
+### curl
+
+```bash
+# URL-encoded GET
+curl -G http://localhost:7878/sparql \
+  --data-urlencode "query=SELECT ?s WHERE { ?s ?p ?o } LIMIT 5"
+
+# POST with SPARQL body
+curl -X POST http://localhost:7878/sparql \
+  -H "Content-Type: application/sparql-query" \
+  -d "SELECT ?s WHERE { ?s ?p ?o } LIMIT 5"
+
+# SPARQL Update
+curl -X POST http://localhost:7878/sparql \
+  -H "Content-Type: application/sparql-update" \
+  -d "INSERT DATA { <ex:s> <ex:p> \"hello\" }"
+```

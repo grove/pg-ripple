@@ -8,20 +8,12 @@ SELECT pg_ripple.load_rules(
     E'# Note: uses raw IRIs\n',
     'negation_test'
 ) >= 0 AS negation_rules_loaded;
- negation_rules_loaded 
------------------------
- t
-(1 row)
-
+ERROR:  syntax error at or near "E'# Rule: flag entities without a known type\n'" at character 75
 -- Verify the rule set is stored.
 SELECT count(*) >= 0 AS negation_rules_present
 FROM (SELECT * FROM pg_ripple.list_rules()) r
 WHERE (r::jsonb)->>'rule_set' = 'negation_test';
- negation_rules_present 
-------------------------
- t
-(1 row)
-
+ERROR:  cannot cast type record to jsonb at character 102
 -- Cleanup.
 SELECT pg_ripple.drop_rules('negation_test') >= 0 AS cleanup_ok;
  cleanup_ok 

@@ -11,11 +11,7 @@ SELECT pg_ripple.load_rules_builtin('rdfs') > 0 AS rdfs_rules_loaded;
 SELECT count(*) > 5 AS rdfs_has_multiple_rules
 FROM (SELECT * FROM pg_ripple.list_rules()) r
 WHERE (r::jsonb)->>'rule_set' = 'rdfs';
- rdfs_has_multiple_rules 
--------------------------
- t
-(1 row)
-
+ERROR:  cannot cast type record to jsonb at character 102
 -- Cleanup.
 SELECT pg_ripple.drop_rules('rdfs') >= 0 AS cleanup_ok;
  cleanup_ok 

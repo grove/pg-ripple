@@ -85,6 +85,63 @@ ex:alice ex:name "Alice" .
 ');
 ```
 
+## Graph-aware loaders (v0.15.0)
+
+Starting with v0.15.0, each format has a graph-aware variant that loads triples directly into a named graph. File variants are also available (superuser-only).
+
+### Inline loaders
+
+```sql
+pg_ripple.load_ntriples_into_graph(data TEXT, graph_iri TEXT) RETURNS BIGINT
+pg_ripple.load_turtle_into_graph(data TEXT, graph_iri TEXT) RETURNS BIGINT
+pg_ripple.load_rdfxml_into_graph(data TEXT, graph_iri TEXT) RETURNS BIGINT
+```
+
+```sql
+SELECT pg_ripple.load_turtle_into_graph('
+@prefix ex: <https://example.org/> .
+ex:alice ex:knows ex:bob .
+', '<https://example.org/graph1>');
+-- Returns: 1
+```
+
+### File loaders
+
+```sql
+pg_ripple.load_ntriples_file_into_graph(path TEXT, graph_iri TEXT) RETURNS BIGINT
+pg_ripple.load_turtle_file_into_graph(path TEXT, graph_iri TEXT) RETURNS BIGINT
+pg_ripple.load_rdfxml_file_into_graph(path TEXT, graph_iri TEXT) RETURNS BIGINT
+```
+
+```sql
+SELECT pg_ripple.load_ntriples_file_into_graph(
+    '/data/people.nt',
+    '<https://example.org/people>'
+);
+```
+
+### RDF/XML loader (v0.9.0)
+
+```sql
+pg_ripple.load_rdfxml(data TEXT) RETURNS BIGINT
+pg_ripple.load_rdfxml_file(path TEXT) RETURNS BIGINT
+```
+
+Parses conformant RDF/XML — the format produced by Protégé, OWL editors, and many ontology tools.
+
+```sql
+SELECT pg_ripple.load_rdfxml('
+<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+         xmlns:ex="https://example.org/">
+  <rdf:Description rdf:about="https://example.org/alice">
+    <ex:name>Alice</ex:name>
+  </rdf:Description>
+</rdf:RDF>
+');
+```
+
+---
+
 ## Blank-node scoping
 
 Each call to a bulk-load function is an independent **blank-node scope**. `_:b0` in one `load_ntriples()` call and `_:b0` in a later call get different dictionary IDs. This matches the SPARQL/RDF blank-node scoping rules and prevents accidental merging of blank nodes across document loads.

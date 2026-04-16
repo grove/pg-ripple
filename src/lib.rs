@@ -2715,6 +2715,146 @@ mod pg_ripple {
     fn list_extvp() -> pgrx::JsonB {
         crate::views::list_extvp()
     }
+
+    // ── v0.15.0: Graph-aware bulk loaders ─────────────────────────────────────
+
+    /// Load N-Triples data into a specific named graph.  Returns triples loaded.
+    #[pg_extern]
+    fn load_ntriples_into_graph(data: &str, graph_iri: &str) -> i64 {
+        let g_id = crate::dictionary::encode(graph_iri, crate::dictionary::KIND_IRI);
+        crate::bulk_load::load_ntriples_into_graph(data, g_id)
+    }
+
+    /// Load Turtle data into a specific named graph.  Returns triples loaded.
+    #[pg_extern]
+    fn load_turtle_into_graph(data: &str, graph_iri: &str) -> i64 {
+        let g_id = crate::dictionary::encode(graph_iri, crate::dictionary::KIND_IRI);
+        crate::bulk_load::load_turtle_into_graph(data, g_id)
+    }
+
+    /// Load RDF/XML data into a specific named graph.  Returns triples loaded.
+    #[pg_extern]
+    fn load_rdfxml_into_graph(data: &str, graph_iri: &str) -> i64 {
+        let g_id = crate::dictionary::encode(graph_iri, crate::dictionary::KIND_IRI);
+        crate::bulk_load::load_rdfxml_into_graph(data, g_id)
+    }
+
+    /// Load N-Triples from a server-side file into a named graph (superuser required).
+    #[pg_extern]
+    fn load_ntriples_file_into_graph(path: &str, graph_iri: &str) -> i64 {
+        let g_id = crate::dictionary::encode(graph_iri, crate::dictionary::KIND_IRI);
+        crate::bulk_load::load_ntriples_file_into_graph(path, g_id)
+    }
+
+    /// Load Turtle from a server-side file into a named graph (superuser required).
+    #[pg_extern]
+    fn load_turtle_file_into_graph(path: &str, graph_iri: &str) -> i64 {
+        let g_id = crate::dictionary::encode(graph_iri, crate::dictionary::KIND_IRI);
+        crate::bulk_load::load_turtle_file_into_graph(path, g_id)
+    }
+
+    /// Load RDF/XML from a server-side file into a named graph (superuser required).
+    #[pg_extern]
+    fn load_rdfxml_file_into_graph(path: &str, graph_iri: &str) -> i64 {
+        let g_id = crate::dictionary::encode(graph_iri, crate::dictionary::KIND_IRI);
+        crate::bulk_load::load_rdfxml_file_into_graph(path, g_id)
+    }
+
+    /// Load RDF/XML from a server-side file path (superuser required).
+    #[pg_extern]
+    fn load_rdfxml_file(path: &str) -> i64 {
+        crate::bulk_load::load_rdfxml_file(path)
+    }
+
+    // ── v0.15.0: Graph-aware triple deletion ──────────────────────────────────
+
+    /// Delete a specific triple from a named graph.  Returns 0 or 1.
+    #[pg_extern]
+    fn delete_triple_from_graph(s: &str, p: &str, o: &str, graph_iri: &str) -> i64 {
+        let g_id = crate::dictionary::encode(graph_iri, crate::dictionary::KIND_IRI);
+        crate::storage::delete_triple(s, p, o, g_id)
+    }
+
+    /// Delete all triples in a named graph without unregistering it.
+    /// Returns the number of triples deleted.
+    #[pg_extern]
+    fn clear_graph(graph_iri: &str) -> i64 {
+        let g_id = crate::dictionary::encode(graph_iri, crate::dictionary::KIND_IRI);
+        crate::storage::clear_graph_by_id(g_id)
+    }
+
+    // ── v0.15.0: SQL API completeness gaps ────────────────────────────────────
+
+    /// Pattern-match triples within a specific named graph (or default graph if NULL).
+    #[pg_extern]
+    fn find_triples_in_graph(
+        s: Option<&str>,
+        p: Option<&str>,
+        o: Option<&str>,
+        graph: Option<&str>,
+    ) -> TableIterator<
+        'static,
+        (
+            name!(s, String),
+            name!(p, String),
+            name!(o, String),
+            name!(g, String),
+        ),
+    > {
+        let g_id = graph.map(|g| crate::dictionary::encode(g, crate::dictionary::KIND_IRI));
+        let rows = crate::storage::find_triples(s, p, o, g_id);
+        TableIterator::new(rows)
+    }
+
+    /// Return the number of triples in a specific named graph.
+    #[pg_extern]
+    fn triple_count_in_graph(graph_iri: &str) -> i64 {
+        let g_id = crate::dictionary::encode(graph_iri, crate::dictionary::KIND_IRI);
+        crate::storage::triple_count_in_graph(g_id)
+    }
+
+    /// Decode a dictionary ID to its full structured representation as JSONB.
+    /// Returns {"kind": ..., "value": ..., "language": null|"...", "datatype": null|"..."}.
+    #[pg_extern]
+    fn decode_id_full(id: i64) -> Option<pgrx::JsonB> {
+        crate::dictionary::decode_full(id).map(|info| {
+            let kind_label = match info.kind {
+                0 => "iri",
+                1 => "blank_node",
+                2 => "literal",
+                3 => "typed_literal",
+                4 => "lang_literal",
+                5 => "quoted_triple",
+                _ => "unknown",
+            };
+            let mut obj = serde_json::Map::new();
+            obj.insert(
+                "kind".to_owned(),
+                serde_json::Value::String(kind_label.to_owned()),
+            );
+            obj.insert("value".to_owned(), serde_json::Value::String(info.value));
+            obj.insert(
+                "datatype".to_owned(),
+                info.datatype
+                    .map(serde_json::Value::String)
+                    .unwrap_or(serde_json::Value::Null),
+            );
+            obj.insert(
+                "language".to_owned(),
+                info.lang
+                    .map(serde_json::Value::String)
+                    .unwrap_or(serde_json::Value::Null),
+            );
+            pgrx::JsonB(serde_json::Value::Object(obj))
+        })
+    }
+
+    /// Look up an IRI in the dictionary without encoding it.
+    /// Returns the dictionary ID if the IRI exists, NULL otherwise.
+    #[pg_extern]
+    fn lookup_iri(iri: &str) -> Option<i64> {
+        crate::dictionary::lookup_iri(iri)
+    }
 }
 
 // ─── Tests ───────────────────────────────────────────────────────────────────
