@@ -1032,7 +1032,13 @@ Extension is installable, upgradable, and documented. Operational tooling suffic
   - Expose: `pg_ripple.delete_triple_from_graph(s TEXT, p TEXT, o TEXT, graph_iri TEXT) RETURNS BIGINT`
   - Also expose: `pg_ripple.clear_graph(graph_iri TEXT) RETURNS BIGINT` — wraps the existing `storage::clear_graph_by_id()` internal function to delete all triples in a named graph in one call (currently only accessible via `drop_graph()` which also unregisters the graph IRI)
   - Without this, users have no SQL-level way to delete a specific triple from a named graph
-- [ ] pg_regress: `sparql_protocol.sql` (protocol-level tests via `curl`), `load_into_graph.sql` (round-trip: load N-Triples / Turtle / RDF/XML into a named graph, verify via SPARQL GRAPH pattern), `graph_delete.sql` (delete_triple_from_graph, clear_graph, verify isolation from default graph)
+- [ ] **SQL API completeness gaps**
+  - **Missing file-path loader**: `pg_ripple.load_rdfxml_file(path TEXT) RETURNS BIGINT` — completes the set of `*_file` variants (N-Triples, N-Quads, Turtle, TriG all have file variants); reads via `pg_read_file()` (superuser-only)
+  - **Graph parameter on find_triples**: `pg_ripple.find_triples(s TEXT, p TEXT, o TEXT, graph TEXT DEFAULT NULL) RETURNS TABLE` — exposes the unused `graph` parameter in `storage::find_triples(s, p, o, graph)` so users can pattern-match within a named graph without falling back to SPARQL; `graph := NULL` queries the default graph
+  - **Per-graph triple count**: `pg_ripple.triple_count_in_graph(graph_iri TEXT) RETURNS BIGINT` — returns the count of triples in a specific named graph (existing `triple_count()` returns total across all graphs)
+  - **Dictionary lookup diagnostics**: `pg_ripple.decode_id_full(id BIGINT) RETURNS JSONB` — exposes `dictionary::decode_full(id)` to return `{"kind": ..., "value": ..., "language": null|"...", "datatype": null|"..."}` structured term metadata (current `decode_id()` returns only the plain string); useful for debugging and inspection
+  - **Dictionary term existence check**: `pg_ripple.lookup_iri(iri TEXT) RETURNS BIGINT DEFAULT NULL` — exposes `dictionary::lookup_iri(iri)` to check whether an IRI already exists in the dictionary without encoding it (useful for test assertions, cost estimation, and introspection)
+- [ ] pg_regress: `sparql_protocol.sql` (protocol-level tests via `curl`), `load_into_graph.sql` (round-trip: load N-Triples / Turtle / RDF/XML into a named graph, verify via SPARQL GRAPH pattern), `graph_delete.sql` (delete_triple_from_graph, clear_graph, verify isolation from default graph), `sql_api_completeness.sql` (find_triples with graph param, triple_count_in_graph, decode_id_full, lookup_iri)
 
 ### Documentation
 
@@ -1044,7 +1050,7 @@ Extension is installable, upgradable, and documented. Operational tooling suffic
 
 ### Exit Criteria
 
-Standard SPARQL clients (YASGUI, Postman, RDF4J workbench, `curl`) can query and update pg_ripple over HTTP without any pg_ripple-specific configuration. Content negotiation returns correct formats. All graph-scoped load and delete operations available as first-class SQL functions.
+Standard SPARQL clients (YASGUI, Postman, RDF4J workbench, `curl`) can query and update pg_ripple over HTTP without any pg_ripple-specific configuration. Content negotiation returns correct formats. All graph-scoped load and delete operations available as first-class SQL functions. SQL API fully exposes internal capabilities (graph parameters, per-graph counts, diagnostic functions).
 
 ---
 
