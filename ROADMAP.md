@@ -988,36 +988,36 @@ Extension is installable, upgradable, and documented. Operational tooling suffic
 
 ### Deliverables
 
-- [ ] **Companion HTTP service** (`pg_ripple_http` binary)
+- [x] **Companion HTTP service** (`pg_ripple_http` binary)
   - Standalone Rust binary (not a PG background worker — avoids binding TCP ports inside PostgreSQL)
   - Connects to PostgreSQL via standard `libpq` / `tokio-postgres`
   - Configurable via environment variables or config file: `PG_TRIPLE_HTTP_PORT`, `PG_TRIPLE_HTTP_PG_URL`
-- [ ] **W3C SPARQL 1.1 Protocol compliance**
+- [x] **W3C SPARQL 1.1 Protocol compliance**
   - `GET /sparql?query=...` — URL-encoded query
   - `POST /sparql` with `application/sparql-query` body
   - `POST /sparql` with `application/x-www-form-urlencoded` body (`query=...` / `update=...`)
   - SPARQL Update via `POST /sparql` with `application/sparql-update` body
-- [ ] **Content negotiation**
+- [x] **Content negotiation**
   - `application/sparql-results+json` (default for SELECT/ASK)
   - `application/sparql-results+xml`
   - `text/csv` / `text/tab-separated-values`
   - `text/turtle` / `application/n-triples` (for CONSTRUCT/DESCRIBE)
   - `application/ld+json` (JSON-LD, for CONSTRUCT/DESCRIBE)
   - **RDF-star content types** *(builds on v0.4.0 RDF-star)*: Turtle-star and JSON-LD-star for CONSTRUCT/DESCRIBE results containing quoted triples
-- [ ] **Connection pooling**
+- [x] **Connection pooling**
   - Built-in connection pool (e.g. `deadpool-postgres`) to handle concurrent HTTP requests
   - `PG_TRIPLE_HTTP_POOL_SIZE` configuration
-- [ ] **Security**
+- [x] **Security**
   - Optional bearer token or Basic auth for access control
   - CORS configuration for browser-based SPARQL clients
   - Rate limiting GUC
-- [ ] **Health and metrics**
+- [x] **Health and metrics**
   - `GET /health` endpoint for load balancer probes
   - Prometheus-compatible `/metrics` endpoint (query count, latency histogram, error rate)
-- [ ] **Docker integration**
+- [x] **Docker integration**
   - Docker image bundles both PostgreSQL (with pg_ripple) and the HTTP service
   - Docker Compose example with separate PG and HTTP containers
-- [ ] **Graph-aware bulk loader SQL functions**
+- [x] **Graph-aware bulk loader SQL functions**
   - Expose the internal `load_ntriples_into_graph()`, `load_turtle_into_graph()`, `load_rdfxml_into_graph()` Rust functions (added in v0.10.0) as public SQL functions:
     - `pg_ripple.load_ntriples_into_graph(data TEXT, graph_iri TEXT) RETURNS BIGINT`
     - `pg_ripple.load_turtle_into_graph(data TEXT, graph_iri TEXT) RETURNS BIGINT`
@@ -1028,26 +1028,26 @@ Extension is installable, upgradable, and documented. Operational tooling suffic
   - Encode the `graph_iri` argument via the dictionary and delegate to the existing `*_into_graph(data, g_id)` internal functions
   - `load_rdfxml_file_into_graph` reads the file via `pg_read_file()` (superuser-only) and delegates to `load_rdfxml_into_graph`
   - Complementary to `load_nquads()` and `load_trig()` for workloads that have N-Triples / Turtle / RDF/XML files and want to load them into a specific named graph without converting the format
-- [ ] **Graph-aware triple deletion**
+- [x] **Graph-aware triple deletion**
   - The existing `pg_ripple.delete_triple(s, p, o)` only deletes from the default graph (`g=0`); the underlying `storage::delete_triple(s, p, o, g_id)` already accepts a graph parameter
   - Expose: `pg_ripple.delete_triple_from_graph(s TEXT, p TEXT, o TEXT, graph_iri TEXT) RETURNS BIGINT`
   - Also expose: `pg_ripple.clear_graph(graph_iri TEXT) RETURNS BIGINT` — wraps the existing `storage::clear_graph_by_id()` internal function to delete all triples in a named graph in one call (currently only accessible via `drop_graph()` which also unregisters the graph IRI)
   - Without this, users have no SQL-level way to delete a specific triple from a named graph
-- [ ] **SQL API completeness gaps**
+- [x] **SQL API completeness gaps**
   - **Missing file-path loader**: `pg_ripple.load_rdfxml_file(path TEXT) RETURNS BIGINT` — completes the set of `*_file` variants (N-Triples, N-Quads, Turtle, TriG all have file variants); reads via `pg_read_file()` (superuser-only)
   - **Graph parameter on find_triples**: `pg_ripple.find_triples(s TEXT, p TEXT, o TEXT, graph TEXT DEFAULT NULL) RETURNS TABLE` — exposes the unused `graph` parameter in `storage::find_triples(s, p, o, graph)` so users can pattern-match within a named graph without falling back to SPARQL; `graph := NULL` queries the default graph
   - **Per-graph triple count**: `pg_ripple.triple_count_in_graph(graph_iri TEXT) RETURNS BIGINT` — returns the count of triples in a specific named graph (existing `triple_count()` returns total across all graphs)
   - **Dictionary lookup diagnostics**: `pg_ripple.decode_id_full(id BIGINT) RETURNS JSONB` — exposes `dictionary::decode_full(id)` to return `{"kind": ..., "value": ..., "language": null|"...", "datatype": null|"..."}` structured term metadata (current `decode_id()` returns only the plain string); useful for debugging and inspection
   - **Dictionary term existence check**: `pg_ripple.lookup_iri(iri TEXT) RETURNS BIGINT DEFAULT NULL` — exposes `dictionary::lookup_iri(iri)` to check whether an IRI already exists in the dictionary without encoding it (useful for test assertions, cost estimation, and introspection)
-- [ ] pg_regress: `sparql_protocol.sql` (protocol-level tests via `curl`), `load_into_graph.sql` (round-trip: load N-Triples / Turtle / RDF/XML into a named graph, verify via SPARQL GRAPH pattern), `graph_delete.sql` (delete_triple_from_graph, clear_graph, verify isolation from default graph), `sql_api_completeness.sql` (find_triples with graph param, triple_count_in_graph, decode_id_full, lookup_iri)
+- [x] pg_regress: `sparql_protocol.sql` (protocol-level tests via `curl`), `load_into_graph.sql` (round-trip: load N-Triples / Turtle / RDF/XML into a named graph, verify via SPARQL GRAPH pattern), `graph_delete.sql` (delete_triple_from_graph, clear_graph, verify isolation from default graph), `sql_api_completeness.sql` (find_triples with graph param, triple_count_in_graph, decode_id_full, lookup_iri)
 
 ### Documentation
 
 > See [plans/documentation.md](plans/documentation.md) for details.
 
-- [ ] `user-guide/sql-reference/sparql-query.md` expanded: HTTP protocol endpoint configuration, `Accept` header formats, SPARQL 1.1 Protocol conformance note
-- [ ] `user-guide/best-practices/sparql-patterns.md` expanded: using the HTTP endpoint from Python (`SPARQLWrapper`), Java (Jena), `curl`; SPARQL IDE / Protégé direct connection
-- [ ] `reference/faq.md` expanded: HTTP endpoint URL, connecting SPARQL tools directly
+- [x] `user-guide/sql-reference/sparql-query.md` expanded: HTTP protocol endpoint configuration, `Accept` header formats, SPARQL 1.1 Protocol conformance note
+- [x] `user-guide/best-practices/sparql-patterns.md` expanded: using the HTTP endpoint from Python (`SPARQLWrapper`), Java (Jena), `curl`; SPARQL IDE / Protégé direct connection
+- [x] `reference/faq.md` expanded: HTTP endpoint URL, connecting SPARQL tools directly
 
 ### Exit Criteria
 
