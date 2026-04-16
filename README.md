@@ -15,123 +15,59 @@ pg_ripple is a PostgreSQL 18 extension building toward a fully-featured knowledg
 
 ## What works today (v0.9.0)
 
-You can install the extension, store triples, bulk-load RDF datasets from N-Triples, Turtle, TriG, N-Quads, or RDF/XML, manage named graphs, query with full SPARQL 1.1, enforce data quality rules with W3C SHACL, and export data to Turtle, JSON-LD, N-Triples, or N-Quads. v0.9.0 completes full RDF I/O and adds Turtle/JSON-LD output for SPARQL CONSTRUCT and DESCRIBE:
+v0.9.0 completes the core stack: store, query, validate, and exchange RDF data — all inside PostgreSQL.
+
+| Area | What's included |
+|---|---|
+| **Storage** | VP tables (one table per predicate), HTAP delta/main split, background merge worker, shared-memory dictionary cache |
+| **Encoding** | Dictionary encoding (IRI, blank node, literal → i64), inline encoding for numbers and dates, RDF-star / quoted triples |
+| **Import** | N-Triples, Turtle, TriG, N-Quads, RDF/XML; named graphs; bulk load |
+| **SPARQL** | Full SPARQL 1.1 — SELECT, CONSTRUCT, DESCRIBE, ASK; property paths, aggregates, UNION/MINUS, subqueries, BIND, VALUES, OPTIONAL, named graphs |
+| **Output formats** | SELECT → JSONB; CONSTRUCT/DESCRIBE → JSONB, Turtle, or JSON-LD |
+| **Export** | `export_turtle()`, `export_jsonld()`, `export_ntriples()`, streaming variants |
+| **SHACL** | Core constraints (`sh:minCount`, `sh:maxCount`, `sh:datatype`, `sh:in`, `sh:pattern`, `sh:class`, …); combinators (`sh:or`, `sh:and`, `sh:not`); sync and async validation modes |
+| **Write** | `insert_triple`, `delete_triple`, SPARQL INSERT/DELETE DATA, deduplication |
+| **Full-text search** | `fts_search()` over literal values via PostgreSQL GIN indexes |
 
 ```sql
 CREATE EXTENSION pg_ripple;
 
--- Load RDF/XML (from Protégé or any OWL editor)
-SELECT pg_ripple.load_rdfxml('<?xml version="1.0"?>
-<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
-         xmlns:ex="http://example.org/">
-  <rdf:Description rdf:about="http://example.org/Alice">
-    <ex:knows rdf:resource="http://example.org/Bob"/>
-    <ex:name>Alice</ex:name>
-  </rdf:Description>
-</rdf:RDF>');
+-- Import a Turtle file
+SELECT pg_ripple.load_turtle(pg_read_file('/data/people.ttl'));
 
--- Export as Turtle
-SELECT pg_ripple.export_turtle();
-
--- Export as JSON-LD (for REST APIs)
-SELECT pg_ripple.export_jsonld();
-
--- Stream large graphs line-by-line (memory-efficient)
-SELECT line FROM pg_ripple.export_turtle_stream();
-
--- SPARQL CONSTRUCT → Turtle
-SELECT pg_ripple.sparql_construct_turtle('
-  CONSTRUCT { ?s <http://xmlns.com/foaf/0.1/knows> ?o }
-  WHERE     { ?s <http://xmlns.com/foaf/0.1/knows> ?o }
-');
-
--- SPARQL CONSTRUCT → JSON-LD (for APIs)
-SELECT pg_ripple.sparql_construct_jsonld('
-  CONSTRUCT { ?s ?p ?o }
-  WHERE { ?s a <http://schema.org/Person> ; ?p ?o }
-');
-
--- DESCRIBE → Turtle
-SELECT pg_ripple.sparql_describe_turtle('DESCRIBE <http://example.org/Alice>');
-
--- Store a fact
-SELECT pg_ripple.insert_triple(
-  'http://example.org/Alice',
-  'http://xmlns.com/foaf/0.1/knows',
-  'http://example.org/Bob'
-);
-
--- Query with property paths: find all people reachable via "knows" links
+-- Query with a property path: everyone Alice can reach via "knows"
 SELECT * FROM pg_ripple.sparql('
   PREFIX foaf: <http://xmlns.com/foaf/0.1/>
-  SELECT ?person WHERE {
+  SELECT ?name WHERE {
     <http://example.org/Alice> foaf:knows+ ?person .
+    ?person foaf:name ?name .
   }
 ');
 
--- Count all triples
-SELECT pg_ripple.triple_count();
+-- Enforce a SHACL constraint: every Person must have exactly one name
+SELECT pg_ripple.load_shacl('
+  @prefix sh: <http://www.w3.org/ns/shacl#> .
+  <http://example.org/PersonShape> a sh:NodeShape ;
+    sh:targetClass <http://example.org/Person> ;
+    sh:property [ sh:path foaf:name ; sh:minCount 1 ; sh:maxCount 1 ] .
+');
 
--- HTAP: force merge of delta tables into main
-SELECT pg_ripple.compact();
+-- Export the whole graph as Turtle
+SELECT pg_ripple.export_turtle();
+
+-- SPARQL CONSTRUCT → JSON-LD for a REST API
+SELECT pg_ripple.sparql_construct_jsonld('
+  CONSTRUCT { ?s ?p ?o } WHERE { ?s a <http://schema.org/Person> ; ?p ?o }
+');
 ```
 
-Every IRI, blank node, literal, and quoted triple is dictionary-encoded to a compact integer for fast joins. Numeric and date literals are automatically *inline-encoded* — stored as bit-packed integers with no dictionary overhead, making FILTER comparisons extremely fast. Facts are stored in separate tables per predicate (Vertical Partitioning).
-
-**v0.6.0+ HTAP architecture**: each VP table is split into a write-optimised delta partition and a read-optimised main partition (BRIN-indexed). A background merge worker continuously promotes delta rows into main. Reads always see `(main EXCEPT tombstones) UNION ALL delta` — no blocking of read sessions during writes.
-
-**v0.7.0 SHACL Core**: load W3C SHACL shapes from Turtle; validate data on demand or enforce constraints inline at insert time (`shacl_mode = 'sync'`). Supported constraints: `sh:minCount`, `sh:maxCount`, `sh:datatype`, `sh:in`, `sh:pattern`, `sh:class`, `sh:targetClass`, `sh:targetNode`, `sh:targetSubjectsOf`, `sh:targetObjectsOf`.
-
-**v0.8.0 SHACL Advanced**: complex shape combinators (`sh:or`, `sh:and`, `sh:not`), nested shape references (`sh:node`), qualified cardinality (`sh:qualifiedValueShape`), and async validation pipeline (`shacl_mode = 'async'`) with dead-letter queue inspection.
-
-**v0.9.0 Serialization**: RDF/XML import (`load_rdfxml`), Turtle and JSON-LD export (`export_turtle`, `export_jsonld`), streaming export variants, and SPARQL CONSTRUCT/DESCRIBE Turtle/JSON-LD output formats.
-
-The SPARQL engine supports property paths (`+`, `*`, `?`), UNION/MINUS, aggregates, GROUP BY, subqueries, BIND, VALUES, OPTIONAL, and named graphs. All four SPARQL query forms (SELECT, CONSTRUCT, DESCRIBE, ASK) are fully supported, with output in JSONB, Turtle, or JSON-LD.
+**Storage architecture**: every IRI, blank node, and literal is dictionary-encoded to a compact integer; numeric and date literals use *inline encoding* (bit-packed integers, no dictionary round-trip). Facts are stored in per-predicate VP tables. From v0.6.0, each VP table is split into a write-optimised delta and a read-optimised BRIN-indexed main partition — a background worker continuously merges them, so heavy reads and writes never block each other.
 
 ---
 
 ## Where we're headed
 
 Each release adds a self-contained layer of capability, building toward a complete knowledge graph platform inside PostgreSQL.
-
-### v0.5.0 — Advanced SPARQL queries
-
-Property paths, aggregates, subqueries, and UNION. Property paths let you follow relationship chains of arbitrary length — find all colleagues reachable through any number of "works with" links, or count how many steps separate two people.
-
-```sql
--- Find everyone Alice can reach through "knows" (any depth)
-SELECT * FROM pg_ripple.sparql('
-  PREFIX foaf: <http://xmlns.com/foaf/0.1/>
-  SELECT ?name (COUNT(?hop) AS ?distance) WHERE {
-    <http://example.org/Alice> foaf:knows+ ?person .
-    ?person foaf:name ?name .
-  }
-  GROUP BY ?name ORDER BY ?distance
-');
-```
-
-### v0.6.0 — HTAP architecture
-
-Concurrent heavy reads and writes without blocking each other. Writes land in a small, fast delta partition; a background worker merges them into a read-optimised main partition. A shared-memory dictionary cache cuts lookup latency to microseconds.
-
-### v0.7.0–v0.8.0 — SHACL data quality
-
-Define data integrity rules using the W3C SHACL standard and reject bad data on insert. Synchronous validation blocks writes that violate constraints; an async pipeline catches violations in bulk-loaded data without blocking imports.
-
-```sql
-SELECT pg_ripple.load_shacl('
-  @prefix sh: <http://www.w3.org/ns/shacl#> .
-  <http://example.org/PersonShape> a sh:NodeShape ;
-    sh:targetClass <http://example.org/Person> ;
-    sh:property [
-      sh:path <http://xmlns.com/foaf/0.1/name> ;
-      sh:minCount 1 ;
-      sh:maxCount 1 ;
-      sh:datatype <http://www.w3.org/2001/XMLSchema#string>
-    ] .
-');
--- Every Person must now have exactly one foaf:name string
-```
 
 ### v0.10.0 — Datalog reasoning
 
@@ -155,6 +91,10 @@ SELECT pg_ripple.load_rules('
     NOT ?x foaf:mbox ?_ .
 ', rule_set := 'company_data');
 ```
+
+### v0.11.0 — Incremental SPARQL & Datalog views
+
+Pin a SPARQL query or a Datalog rule set to a live, automatically-updated result table. Only changed rows are reprocessed, so updates are near-instantaneous. Requires the companion [pg_trickle](https://github.com/grove/pg-trickle) extension.
 
 ### v0.15.0 — SPARQL Protocol (HTTP)
 
@@ -331,7 +271,7 @@ cargo pgrx install --pg-config $(which pg_config)
 CREATE EXTENSION pg_ripple;
 ```
 
-SHACL validation and Datalog reasoning are coming in later milestones — see the roadmap below.
+Datalog reasoning is coming in a later milestone — see the roadmap below.
 
 ---
 
@@ -344,13 +284,13 @@ SHACL validation and Datalog reasoning are coming in later milestones — see th
 | **0.1.0** | **Foundation** | Dictionary encoding, VP storage, basic triple CRUD | 6–8 pw | ✅ Done |
 | **0.2.0** | **Bulk Loading & Named Graphs** | Turtle/N-Triples/N-Quads/TriG import, named graphs, rare-predicate table | 6–8 pw | ✅ Done |
 | **0.3.0** | **SPARQL Basic** | SELECT, ASK, BGPs, FILTER, OPTIONAL, GRAPH patterns, plan cache | 6–8 pw | ✅ Done |
-| 0.4.0 | RDF-star | Quoted triples, statement metadata, LPG-ready storage | 8–10 pw | Planned |
-| 0.5.0 | SPARQL Advanced (Query) | Property paths, aggregates, UNION/MINUS, subqueries, BIND/VALUES | 6–8 pw | Planned |
-| 0.5.1 | SPARQL Advanced (Write) | Inline encoding, CONSTRUCT/DESCRIBE, INSERT/DELETE DATA, full-text search | 6–8 pw | Planned |
-| 0.6.0 | HTAP Architecture | Concurrent reads/writes, shared-memory dictionary cache | 8–10 pw | Planned |
-| 0.7.0 | SHACL Core | Constraint shapes, synchronous validation on insert | 4–6 pw | Planned |
-| 0.8.0 | SHACL Advanced | Complex shapes, async background validation pipeline | 4–6 pw | Planned |
-| 0.9.0 | Serialization | Turtle/N-Triples/JSON-LD/RDF-XML export, RDF-star formats | 3–4 pw | Planned |
+| **0.4.0** | **RDF-star** | Quoted triples, statement metadata, LPG-ready storage | 8–10 pw | ✅ Done |
+| **0.5.0** | **SPARQL Advanced (Query)** | Property paths, aggregates, UNION/MINUS, subqueries, BIND/VALUES | 6–8 pw | ✅ Done |
+| **0.5.1** | **SPARQL Advanced (Write)** | Inline encoding, CONSTRUCT/DESCRIBE, INSERT/DELETE DATA, full-text search | 6–8 pw | ✅ Done |
+| **0.6.0** | **HTAP Architecture** | Concurrent reads/writes, shared-memory dictionary cache | 8–10 pw | ✅ Done |
+| **0.7.0** | **SHACL Core** | Constraint shapes, synchronous validation on insert | 4–6 pw | ✅ Done |
+| **0.8.0** | **SHACL Advanced** | Complex shapes, async background validation pipeline | 4–6 pw | ✅ Done |
+| **0.9.0** | **Serialization** | Turtle/N-Triples/JSON-LD/RDF-XML export, RDF-star formats | 3–4 pw | ✅ Done |
 | 0.10.0 | Datalog Reasoning | RDFS (13 rules), OWL 2 RL (~80 rules), custom rules | 10–12 pw | Planned |
 | 0.11.0 | SPARQL & Datalog Views | Incremental live views via pg_trickle, ExtVP | 5–7 pw | Planned |
 | 0.12.0 | SPARQL Update (Advanced) | DELETE/INSERT WHERE, LOAD, CLEAR, DROP, CREATE | 3–4 pw | Planned |

@@ -36,9 +36,13 @@ Complete every item before starting the release process.
   - All significant user-visible changes are included
   - Date is set to today's date
 - [ ] **README.md is updated**
-  - The "What works today (v0.X.Y)" section reflects the current release
+  - The "What works today (v0.X.Y)" section heading and body reflect the current release
   - Describes only functionality implemented and merged in this version
   - Remove planned features that haven't shipped yet
+  - The **Roadmap table** in the `## Roadmap` section is updated:
+    - The newly released version row is bolded and its status cell is changed to `✅ Done`
+    - Any in-progress sentence above the table (e.g. "X is coming in a later milestone") no longer mentions capabilities that have now shipped
+  - The **"Where we're headed"** section no longer lists the just-released version as upcoming — move it to a "What works today" bullet or remove it
 - [ ] **No uncommitted changes** — `git status` is clean
 - [ ] **Main branch is up to date** — `git pull origin main`
 
