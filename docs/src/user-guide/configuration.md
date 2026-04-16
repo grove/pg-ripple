@@ -156,3 +156,201 @@ Name of the database the background merge worker connects to. Must match the dat
 | Restart required | No (SIGHUP) |
 
 Seconds of merge worker inactivity before a `WARNING` is logged. This helps diagnose situations where the worker is alive but blocked (e.g. lock contention, out-of-disk). Normal operation resets the watchdog on every successful merge poll.
+
+---
+
+## SHACL & Data Quality Parameters (v0.7.0+)
+
+### shacl_mode
+
+| Property | Value |
+|---|---|
+| Type | `enum` |
+| Default | `'off'` |
+| Values | `'off'`, `'sync'`, `'async'` |
+| Restart required | No |
+
+Controls when SHACL validation runs:
+
+- **`'off'`** — no automatic validation; call `validate()` on demand
+- **`'sync'`** — `insert_triple()` immediately rejects triples that violate `sh:maxCount`, `sh:datatype`, `sh:in`, or `sh:pattern` constraints
+- **`'async'`** — inserts complete immediately; violations are queued in `_pg_ripple.validation_queue` for background processing
+
+```sql
+SET pg_ripple.shacl_mode = 'sync';
+```
+
+---
+
+### dedup_on_merge
+
+| Property | Value |
+|---|---|
+| Type | `boolean` |
+| Default | `false` |
+| Restart required | No |
+
+When `true`, the HTAP merge worker deduplicates `(s, o, g)` rows during compaction, keeping the row with the lowest SID. Eliminates duplicates automatically without a separate `deduplicate_all()` call.
+
+```sql
+SET pg_ripple.dedup_on_merge = true;
+```
+
+---
+
+## SPARQL Parameters (v0.5.1+)
+
+### describe_strategy
+
+| Property | Value |
+|---|---|
+| Type | `enum` |
+| Default | `'cbd'` |
+| Values | `'cbd'`, `'scbd'`, `'simple'` |
+| Restart required | No |
+
+Default DESCRIBE expansion algorithm:
+
+- **`'cbd'`** — Concise Bounded Description: all outgoing triples from the resource
+- **`'scbd'`** — Symmetric CBD: outgoing and incoming triples
+- **`'simple'`** — subject triples only (fastest)
+
+```sql
+SET pg_ripple.describe_strategy = 'scbd';
+```
+
+---
+
+## Datalog Parameters (v0.10.0)
+
+### inference_mode
+
+| Property | Value |
+|---|---|
+| Type | `enum` |
+| Default | `'on_demand'` |
+| Values | `'off'`, `'on_demand'`, `'materialized'` |
+| Restart required | No |
+
+Controls how the Datalog reasoning engine operates:
+
+- **`'off'`** — engine disabled; `infer()` is a no-op
+- **`'on_demand'`** — inference runs via CTEs when `infer()` is called
+- **`'materialized'`** — uses pg_trickle stream tables for automatic refresh
+
+```sql
+SET pg_ripple.inference_mode = 'on_demand';
+```
+
+---
+
+### enforce_constraints
+
+| Property | Value |
+|---|---|
+| Type | `enum` |
+| Default | `'warn'` |
+| Values | `'off'`, `'warn'`, `'error'` |
+| Restart required | No |
+
+Controls how Datalog constraint violations (rules with empty heads) are handled:
+
+- **`'off'`** — violations are silenced
+- **`'warn'`** — violations are logged as warnings
+- **`'error'`** — violations raise an exception
+
+```sql
+SET pg_ripple.enforce_constraints = 'error';
+```
+
+---
+
+### rule_graph_scope
+
+| Property | Value |
+|---|---|
+| Type | `enum` |
+| Default | `'default'` |
+| Values | `'default'`, `'all'` |
+| Restart required | No |
+
+Controls which graphs Datalog rules apply to:
+
+- **`'default'`** — rules only apply to the default graph
+- **`'all'`** — rules apply across all named graphs
+
+```sql
+SET pg_ripple.rule_graph_scope = 'all';
+```
+
+---
+
+## Performance Parameters (v0.13.0)
+
+### bgp_reorder
+
+| Property | Value |
+|---|---|
+| Type | `boolean` |
+| Default | `true` |
+| Restart required | No |
+
+When enabled, the SPARQL engine reorders triple patterns within a Basic Graph Pattern (BGP) by estimated selectivity — most restrictive first. Uses `pg_class.reltuples` and `pg_stats.n_distinct` to estimate row counts at translation time.
+
+Disable if you need deterministic query plan ordering for debugging:
+
+```sql
+SET pg_ripple.bgp_reorder = off;
+```
+
+---
+
+### parallel_query_min_joins
+
+| Property | Value |
+|---|---|
+| Type | `integer` |
+| Default | `3` |
+| Min / Max | `1 / 100` |
+| Restart required | No |
+
+Minimum number of VP table joins in a SPARQL query before parallel query hints are emitted. When the threshold is met, the engine sets `max_parallel_workers_per_gather = 4` and `enable_parallel_hash = on` for that query.
+
+Lower the threshold for queries with few but large VP tables. Raise it if parallel overhead hurts small queries:
+
+```sql
+SET pg_ripple.parallel_query_min_joins = 2;
+```
+
+---
+
+## Security Parameters (v0.14.0)
+
+### rls_bypass
+
+| Property | Value |
+|---|---|
+| Type | `boolean` |
+| Default | `false` |
+| Context | Superuser only (`GUC_SUSET`) |
+| Restart required | No |
+
+When `true`, skips Row-Level Security checks on VP tables. Only a superuser can set this. Used for administrative operations that need to read/write all graphs regardless of RLS policies.
+
+```sql
+-- Superuser only
+SET pg_ripple.rls_bypass = on;
+```
+
+---
+
+## Quick tuning reference
+
+| Workload | Key parameters |
+|----------|----------------|
+| **Small (< 1M triples)** | Defaults work well |
+| **Medium (1–50M triples)** | `dictionary_cache_size = 131072`, `merge_threshold = 50000` |
+| **Large (50M+)** | `dictionary_cache_size = 262144`, `bgp_reorder = on`, `parallel_query_min_joins = 2` |
+| **Write-heavy OLTP** | `merge_interval_secs = 10`, `latch_trigger_threshold = 5000`, `shacl_mode = 'async'` |
+| **Analytics / OLAP** | `plan_cache_size = 512`, `bgp_reorder = on`, `parallel_query_min_joins = 2` |
+| **Reasoning workload** | `inference_mode = 'on_demand'`, `dictionary_cache_size = 262144` |
