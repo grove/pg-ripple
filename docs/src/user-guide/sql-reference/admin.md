@@ -198,6 +198,188 @@ SELECT pg_ripple.deduplicate_predicate('<https://schema.org/name>');
 
 ---
 
+## vacuum() → bigint (v0.14.0)
+
+```sql
+pg_ripple.vacuum() → bigint
+```
+
+Forces a full delta→main merge on all HTAP VP tables, then runs `ANALYZE` on every VP table (delta, main, tombstones) and `vp_rare`.
+
+**Returns**: the number of VP table groups analyzed.
+
+```sql
+SELECT pg_ripple.vacuum();
+-- 42
+```
+
+> **Note**: `ANALYZE` updates planner statistics. PostgreSQL's `VACUUM` itself cannot run inside a transaction block; call it separately if you need dead-tuple reclamation.
+
+---
+
+## reindex() → bigint (v0.14.0)
+
+```sql
+pg_ripple.reindex() → bigint
+```
+
+Rebuilds all indices on every VP table (delta and main) and `vp_rare` using `REINDEX TABLE`. Run this after large bulk deletes or to recover from index corruption.
+
+**Returns**: the number of VP table groups reindexed.
+
+```sql
+SELECT pg_ripple.reindex();
+-- 42
+```
+
+---
+
+## vacuum_dictionary() → bigint (v0.14.0)
+
+```sql
+pg_ripple.vacuum_dictionary() → bigint
+```
+
+Removes dictionary entries that are no longer referenced by any VP table. Orphaned entries accumulate after bulk deletes.
+
+Uses an advisory transaction lock (key `0x7269706c`) to prevent concurrent runs. Safe to run during normal operation — may miss very recently orphaned entries, which are cleaned on the next run.
+
+**Returns**: the number of dictionary entries removed.
+
+```sql
+SELECT pg_ripple.vacuum_dictionary();
+-- 128
+```
+
+**Typical usage**: run periodically after bulk deletes, or after `drop_graph()`.
+
+---
+
+## dictionary_stats() → jsonb (v0.14.0)
+
+```sql
+pg_ripple.dictionary_stats() → jsonb
+```
+
+Returns detailed metrics about the dictionary and cache configuration.
+
+| Field | Description |
+|---|---|
+| `total_entries` | Total rows in the dictionary |
+| `hot_entries` | Rows in the unlogged hot dictionary cache |
+| `cache_capacity` | Shared-memory encode cache capacity (entries) |
+| `cache_budget_mb` | Configured cache budget cap in MB |
+| `shmem_ready` | Whether shared memory is initialized |
+
+```sql
+SELECT pg_ripple.dictionary_stats();
+-- {
+--   "total_entries":   450000,
+--   "hot_entries":     1024,
+--   "cache_capacity":  4096,
+--   "cache_budget_mb": 64,
+--   "shmem_ready":     true
+-- }
+```
+
+---
+
+## enable_graph_rls() → boolean (v0.14.0)
+
+```sql
+pg_ripple.enable_graph_rls() → boolean
+```
+
+Activates Row-Level Security policies on `_pg_ripple.vp_rare` using the `g` column and the `_pg_ripple.graph_access` mapping table. Default graph (g = 0) is always accessible. Named graphs require an explicit grant.
+
+Returns `true` on success.
+
+```sql
+SELECT pg_ripple.enable_graph_rls();
+-- true
+```
+
+---
+
+## grant_graph(role, graph, permission) (v0.14.0)
+
+```sql
+pg_ripple.grant_graph(role text, graph text, permission text) → void
+```
+
+Grants `permission` (`'read'`, `'write'`, or `'admin'`) on a named graph to a PostgreSQL role.
+
+```sql
+SELECT pg_ripple.grant_graph('app_user', '<https://example.org/graph1>', 'read');
+SELECT pg_ripple.grant_graph('admin_user', '<https://example.org/graph1>', 'admin');
+```
+
+---
+
+## revoke_graph(role, graph [, permission]) (v0.14.0)
+
+```sql
+pg_ripple.revoke_graph(role text, graph text, permission text DEFAULT NULL) → void
+```
+
+Revokes a permission on a named graph from a role. Pass `NULL` (or omit) for `permission` to revoke all permissions for that role on that graph.
+
+```sql
+-- Revoke specific permission
+SELECT pg_ripple.revoke_graph('app_user', '<https://example.org/graph1>', 'read');
+
+-- Revoke all permissions
+SELECT pg_ripple.revoke_graph('app_user', '<https://example.org/graph1>');
+```
+
+---
+
+## list_graph_access() → jsonb (v0.14.0)
+
+```sql
+pg_ripple.list_graph_access() → jsonb
+```
+
+Returns all graph access control entries as a JSONB array. Each element has `role`, `graph` (decoded IRI), and `permission`.
+
+```sql
+SELECT * FROM jsonb_array_elements(pg_ripple.list_graph_access());
+```
+
+---
+
+## schema_summary() → jsonb (v0.14.0)
+
+```sql
+pg_ripple.schema_summary() → jsonb
+```
+
+Returns a live class→property→cardinality summary as a JSONB array. When `enable_schema_summary()` has been called (requires pg_trickle), reads from the materialized `_pg_ripple.inferred_schema` stream table.
+
+Each element: `{"class": "...", "property": "...", "cardinality": N}`.
+
+```sql
+SELECT * FROM jsonb_array_elements(pg_ripple.schema_summary());
+```
+
+---
+
+## enable_schema_summary() → boolean (v0.14.0)
+
+```sql
+pg_ripple.enable_schema_summary() → boolean
+```
+
+Creates `_pg_ripple.inferred_schema` as a pg_trickle stream table (refreshed every 30 s) for SPARQL IDE auto-completion. Requires pg_trickle. Returns `false` with a warning if pg_trickle is not installed.
+
+```sql
+SELECT pg_ripple.enable_schema_summary();
+-- true (or false with warning if pg_trickle missing)
+```
+
+---
+
+
 
 --
 pical usage**: call once after a bulk load that may contain duplicate triples.

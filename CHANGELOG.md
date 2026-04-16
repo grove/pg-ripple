@@ -9,7 +9,46 @@ Versions correspond to the milestones in [ROADMAP.md](ROADMAP.md).
 
 ## [Unreleased]
 
-Points at the next milestone: v0.14.0 — Administrative & Operational Readiness.
+Points at the next milestone: v0.15.0 — SPARQL Protocol (HTTP Endpoint).
+
+---
+
+## [0.14.0] — 2025-07-18 — Administrative & Operational Readiness
+
+This release focuses on production operations: maintenance commands, monitoring, graph-level access control, and comprehensive documentation. Everything a system administrator needs to run pg_ripple confidently in production.
+
+**New in this release:** Maintenance functions (`vacuum`, `reindex`, `vacuum_dictionary`). Dictionary diagnostics (`dictionary_stats`). Graph-level Row-Level Security with `enable_graph_rls`, `grant_graph`, `revoke_graph`, `list_graph_access`. Optional pg_trickle integration via `schema_summary` / `enable_schema_summary`. Complete documentation for backup/restore, contributing, error codes (PT001–PT799), and security hardening. Extension upgrade scripts for the full `0.1.0 → 0.14.0` chain.
+
+### What you can do
+
+- **Maintain the store** — `pg_ripple.vacuum()` runs `MERGE` then `ANALYZE` on all VP tables; `pg_ripple.reindex()` rebuilds all indices; `pg_ripple.vacuum_dictionary()` removes orphaned dictionary entries after bulk deletes (uses advisory lock to be safe)
+- **Diagnose the dictionary** — `pg_ripple.dictionary_stats()` returns a JSON object with `total_entries`, `hot_entries`, `cache_capacity`, `cache_budget_mb`, and `shmem_ready`
+- **Control graph access** — `pg_ripple.enable_graph_rls()` activates RLS policies on VP tables keyed on the `g` (graph ID) column; `grant_graph(role, graph, permission)` / `revoke_graph(role, graph)` manage the `_pg_ripple.graph_access` mapping table; `list_graph_access()` returns the current ACL as JSON
+- **Bypass RLS for admin work** — `SET pg_ripple.rls_bypass = on` in a superuser session skips RLS checks; protected by `GUC_SUSET` (superuser-only)
+- **Inspect schema** — `pg_ripple.schema_summary()` returns the inferred class→property→cardinality summary (populated by the optional pg_trickle integration); `enable_schema_summary()` sets up the `_pg_ripple.inferred_schema` table and stream when pg_trickle is installed
+- **Upgrade safely** — tested upgrade path from every prior version; `ALTER EXTENSION pg_ripple UPDATE` works for all transitions up to 0.14.0
+
+### What happens behind the scenes
+
+`vacuum()` and `reindex()` discover live VP tables by querying `pg_class` for tables matching the `vp_%` pattern in `_pg_ripple`. `vacuum_dictionary()` acquires advisory lock `0x7269706c` (`ripl`) then deletes from `_pg_ripple.dictionary` any row whose encoded ID does not appear in any VP table — safe to run concurrently with queries.
+
+RLS policies are created on `_pg_ripple.vp_rare` (the catch-all VP table) using `current_setting('pg_ripple.rls_bypass', true)` as the bypass expression. The `graph_access` mapping table stores `(role_name, graph_id, permission)` triples; `grant_graph` encodes the graph IRI using `encode_term` before inserting.
+
+<details>
+<summary>Technical details</summary>
+
+- **src/lib.rs** — new `pg_extern` functions: `vacuum()`, `reindex()`, `vacuum_dictionary()`, `dictionary_stats()`, `enable_graph_rls()`, `grant_graph()`, `revoke_graph()`, `list_graph_access()`, `schema_summary()`, `enable_schema_summary()`; new GUC `pg_ripple.rls_bypass` (bool, `GUC_SUSET`)
+- **sql/pg_ripple--0.13.0--0.14.0.sql** — creates `_pg_ripple.graph_access` and `_pg_ripple.inferred_schema` tables with appropriate indices
+- **tests/pg_regress/sql/admin_functions.sql** — tests vacuum, reindex, vacuum_dictionary, dictionary_stats, predicate_stats view
+- **tests/pg_regress/sql/graph_rls.sql** — tests grant_graph, list_graph_access, revoke_graph, enable_graph_rls, rls_bypass GUC
+- **tests/pg_regress/sql/upgrade_path.sql** — verifies full administrative API is available after a clean install
+- **docs/src/user-guide/backup-restore.md** — pg_dump/pg_restore, VP table considerations, PITR, logical replication
+- **docs/src/user-guide/contributing.md** — dev setup, test commands, PR workflow, code conventions
+- **docs/src/reference/error-reference.md** — PT001–PT799 error code table
+- **docs/src/reference/security.md** — supported versions matrix, RLS section, hardening GUCs
+- **docs/src/user-guide/sql-reference/admin.md** — expanded with all new v0.14.0 admin functions
+
+</details>
 
 ---
 

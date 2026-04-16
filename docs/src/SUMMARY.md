@@ -25,6 +25,8 @@
 - [Configuration](user-guide/configuration.md)
 - [Scaling & HTAP](user-guide/scaling.md)
 - [Pre-Deployment](user-guide/pre-deployment.md)
+- [Backup & Restore](user-guide/backup-restore.md)
+- [Contributing](user-guide/contributing.md)
 - [Best Practices](user-guide/best-practices/index.md)
   - [Data Modeling](user-guide/best-practices/data-modeling.md)
   - [Bulk Loading](user-guide/best-practices/bulk-loading.md)
@@ -42,6 +44,7 @@
 - [Roadmap](reference/roadmap.md)
 - [Release Process](reference/release-process.md)
 - [Security](reference/security.md)
+- [Error Reference](reference/error-reference.md)
 
 ---
 

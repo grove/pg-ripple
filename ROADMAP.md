@@ -928,14 +928,14 @@ BSBM results documented. >100K triples/sec sustained bulk load. <10ms for simple
 
 ### Deliverables
 
-- [ ] **Extension upgrade scripts**
+- [x] **Extension upgrade scripts**
   - Tested upgrade path `0.1.0 → ... → 0.16.0`
   - `ALTER EXTENSION pg_ripple UPDATE` works for all version transitions
-- [ ] **pg_trickle integration: live schema extraction** *(optional, when pg_trickle is installed)*
+- [x] **pg_trickle integration: live schema extraction** *(optional, when pg_trickle is installed)*
   - `_pg_ripple.inferred_schema` stream table maintains a live class→property→cardinality summary
   - Exposed as `pg_ripple.schema_summary()` for tooling and SPARQL IDE auto-completion (v0.15.0 HTTP endpoint)
   - Serves as a starting point for automatic SHACL shape inference ([§2.15](plans/ecosystem/pg_trickle.md))
-- [ ] **Administrative functions**
+- [x] **Administrative functions**
   - `pg_ripple.vacuum()` — force merge + VACUUM on VP tables
   - `pg_ripple.reindex()` — rebuild all VP table indices
   - `pg_ripple.compact(keep_old BOOL DEFAULT false)` — trigger an immediate full merge across all VP tables; `keep_old := false` drops the previous generation's `_main` table immediately after the atomic rename
@@ -945,10 +945,10 @@ BSBM results documented. >100K triples/sec sustained bulk load. <10ms for simple
 - [ ] **Logging & diagnostics**
   - Structured logging for merge operations, validation results
   - Custom `EXPLAIN` option showing SPARQL→SQL mapping (PG18 extension EXPLAIN)
-- [ ] **Documentation** *(see [plans/documentation.md](plans/documentation.md) for the full page-by-page specification)*
+- [x] **Documentation** *(see [plans/documentation.md](plans/documentation.md) for the full page-by-page specification)*
   - `user-guide/backup-restore.md`, `user-guide/contributing.md` (complete), `reference/error-reference.md` (PT001–PT799), `reference/security.md` (complete)
   - **Performance tuning guide** — dictionary cache sizing, `cache_budget` budgeting, `merge_threshold` and `vp_promotion_threshold` tuning; SHACL constraint mapping reference; Datalog rule authoring guide
-- [ ] **Graph-level Row-Level Security (RLS)**
+- [x] **Graph-level Row-Level Security (RLS)**
   - `pg_ripple.enable_graph_rls()` — activate RLS policies on VP tables using the `g` column
   - Policy driven by a mapping table: `_pg_ripple.graph_access (role_name TEXT, graph_id BIGINT, permission TEXT)` — `'read'` / `'write'` / `'admin'`
   - `pg_ripple.grant_graph(role TEXT, graph TEXT, permission TEXT)` / `pg_ripple.revoke_graph()`
@@ -959,17 +959,17 @@ BSBM results documented. >100K triples/sec sustained bulk load. <10ms for simple
   - `cargo pgrx package` produces installable `.deb` and `.rpm`
   - Docker image with extension pre-installed
   - PGXN metadata
-- [ ] pg_regress: `admin_functions.sql` (vacuum, reindex, dictionary_stats, predicate_stats), `graph_rls.sql` (RLS policy enforcement, cross-role isolation, superuser bypass), `upgrade_path.sql` (install v0.1.0 → load data → sequential upgrade to current version → verify data integrity and query correctness at each step)
+- [x] pg_regress: `admin_functions.sql` (vacuum, reindex, dictionary_stats, predicate_stats), `graph_rls.sql` (RLS policy enforcement, cross-role isolation, superuser bypass), `upgrade_path.sql` (install v0.1.0 → load data → sequential upgrade to current version → verify data integrity and query correctness at each step)
 
 ### Documentation
 
 > See [plans/documentation.md](plans/documentation.md) for details.
 
-- [ ] `user-guide/backup-restore.md` — `pg_dump`/`pg_restore` procedure, VP table considerations, PITR with WAL
-- [ ] `reference/security.md` complete — supported versions matrix, responsible disclosure, hardening GUCs
-- [ ] `reference/error-reference.md` — PT001–PT799 error code table with resolution notes
-- [ ] `user-guide/contributing.md` complete — dev setup, test commands, PR workflow, AGENTS.md conventions, governance
-- [ ] `user-guide/sql-reference/admin.md` expanded: vacuum, reindex, `dictionary_stats`, `predicate_stats`
+- [x] `user-guide/backup-restore.md` — `pg_dump`/`pg_restore` procedure, VP table considerations, PITR with WAL
+- [x] `reference/security.md` complete — supported versions matrix, responsible disclosure, hardening GUCs
+- [x] `reference/error-reference.md` — PT001–PT799 error code table with resolution notes
+- [x] `user-guide/contributing.md` complete — dev setup, test commands, PR workflow, AGENTS.md conventions, governance
+- [x] `user-guide/sql-reference/admin.md` expanded: vacuum, reindex, `dictionary_stats`, `predicate_stats`
 
 ### Exit Criteria
 
