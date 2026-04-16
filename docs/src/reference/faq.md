@@ -14,7 +14,7 @@ pg_ripple uses the `CYCLE` clause in `WITH RECURSIVE` CTEs for hash-based cycle 
 
 ### Is pg_ripple compatible with LPG tools?
 
-Not yet. A Cypher/GQL compatibility layer is on the v0.13.0 roadmap. The VP storage structure is architecturally aligned with LPG — each VP table is a property edge type — so the mapping will be natural.
+Not yet. A Cypher/GQL compatibility layer is on the post-1.0 roadmap. The VP storage structure is architecturally aligned with LPG — each VP table is a property edge type — so the mapping will be natural.
 
 ### What RDF formats does pg_ripple support?
 
@@ -57,21 +57,21 @@ The output is JSON-LD in expanded form — each subject is one array entry with 
 
 ### What SPARQL 1.1 features are supported?
 
-As of v0.5.0:
+As of v0.19.0, the full SPARQL 1.1 specification is implemented:
 
-- SELECT, ASK
-- BGP (basic graph patterns)
-- OPTIONAL (LeftJoin)
-- UNION / MINUS
-- FILTER (comparison, string, boolean operators)
-- Property paths: `+`, `*`, `?`, `/`, `|`, `^`
-- GROUP BY / HAVING / aggregates (COUNT, SUM, AVG, MIN, MAX, GROUP_CONCAT)
-- Subqueries
-- BIND / VALUES
-- Named graphs via `GRAPH`
-- ORDER BY, LIMIT, OFFSET, DISTINCT
+**Query forms:** SELECT, ASK, CONSTRUCT, DESCRIBE
 
-Not yet: CONSTRUCT, DESCRIBE, SPARQL Update, SERVICE (federation).
+**Graph patterns:** BGP, OPTIONAL (LeftJoin), UNION, MINUS, FILTER, BIND, VALUES, Named graphs via `GRAPH`
+
+**Property paths:** `+`, `*`, `?`, `/` (sequence), `|` (alternative), `^` (inverse)
+
+**Aggregates:** GROUP BY, HAVING, COUNT, SUM, AVG, MIN, MAX, GROUP_CONCAT
+
+**Modifiers:** DISTINCT, ORDER BY, LIMIT, OFFSET, subqueries
+
+**Update:** INSERT DATA, DELETE DATA, DELETE/INSERT WHERE, LOAD, CLEAR, DROP, CREATE, COPY, MOVE, ADD
+
+**Federation:** `SERVICE <url> { … }` with SSRF allowlist, `SERVICE SILENT`, connection pooling, result caching, adaptive timeouts, batch SERVICE detection
 
 ### Does pg_ripple support SPARQL 1.1 property paths?
 

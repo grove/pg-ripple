@@ -34,7 +34,7 @@ When `true`, adds a `(g, s, o)` composite index to each VP table. This speeds up
 | Property | Value |
 |---|---|
 | Type | `integer` |
-| Default | `128` |
+| Default | `256` |
 | Min / Max | `1 / 4096` |
 | Restart required | No |
 
@@ -73,6 +73,19 @@ The plan cache key includes this value, so changing `max_path_depth` automatical
 | Restart required | **Yes** (shared memory) |
 
 Size of the in-process LRU cache for recently used dictionary entries. Larger values reduce dictionary table lookups for workloads with high term reuse. Requires a PostgreSQL restart because shared memory is allocated at startup.
+
+---
+
+## cache_budget_mb
+
+| Property | Value |
+|---|---|
+| Type | `integer` |
+| Default | `64` |
+| Min / Max | `0 / 2147483647` |
+| Restart required | **Yes** (startup-only) |
+
+Maximum memory budget in megabytes for the shared encode cache. Bulk load operations monitor cache utilisation against this budget and reduce their batch size when utilisation exceeds 90%, preventing out-of-memory conditions during large imports. Set to `0` to disable this back-pressure mechanism.
 
 ---
 
@@ -344,6 +357,146 @@ SET pg_ripple.rls_bypass = on;
 
 ---
 
+## Federation Parameters (v0.16.0+)
+
+### federation_timeout
+
+| Property | Value |
+|---|---|
+| Type | `integer` |
+| Default | `30` |
+| Min / Max | `1 / 3600` |
+| Restart required | No |
+
+Wall-clock timeout in seconds for each outbound SERVICE call. If the remote endpoint does not respond within this window the call fails. The failure behaviour is controlled by `federation_on_error`.
+
+```sql
+SET pg_ripple.federation_timeout = 10;
+```
+
+---
+
+### federation_max_results
+
+| Property | Value |
+|---|---|
+| Type | `integer` |
+| Default | `10000` |
+| Min / Max | `1 / 2147483647` |
+| Restart required | No |
+
+Maximum number of rows accepted from a single SERVICE call. Rows beyond this limit are silently dropped. Increase for queries that legitimately return large result sets from remote endpoints.
+
+```sql
+SET pg_ripple.federation_max_results = 50000;
+```
+
+---
+
+### federation_on_error
+
+| Property | Value |
+|---|---|
+| Type | `enum` |
+| Default | `'warning'` |
+| Values | `'warning'`, `'empty'`, `'error'` |
+| Restart required | No |
+
+Controls the response when a SERVICE call fails (timeout, network error, HTTP error):
+
+- **`'warning'`** (default) — emit a WARNING and return empty results for that SERVICE clause
+- **`'empty'`** — silently return empty results (no WARNING)
+- **`'error'`** — raise an ERROR and abort the whole query
+
+`SERVICE SILENT` always suppresses errors regardless of this setting.
+
+```sql
+SET pg_ripple.federation_on_error = 'empty';
+```
+
+---
+
+### federation_pool_size
+
+| Property | Value |
+|---|---|
+| Type | `integer` |
+| Default | `4` |
+| Min / Max | `1 / 32` |
+| Restart required | No |
+| Since | v0.19.0 |
+
+Number of idle TCP connections to keep open per remote endpoint in the per-backend HTTP connection pool. Connections are reused across SERVICE calls in the same PostgreSQL backend session, eliminating repeated TCP and TLS handshake overhead.
+
+Increase for backend sessions that fan out to many remote endpoints simultaneously. The practical upper bound is the number of distinct endpoints queried per session.
+
+```sql
+SET pg_ripple.federation_pool_size = 16;
+```
+
+---
+
+### federation_cache_ttl
+
+| Property | Value |
+|---|---|
+| Type | `integer` |
+| Default | `0` (disabled) |
+| Min / Max | `0 / 86400` |
+| Restart required | No |
+| Since | v0.19.0 |
+
+Time-to-live in seconds for cached SERVICE results. When `> 0`, the first successful response to a SERVICE call is stored in `_pg_ripple.federation_cache`; identical queries within this window skip the HTTP call entirely.
+
+`0` disables caching. The merge background worker evicts expired entries on each polling cycle.
+
+```sql
+-- Cache Wikidata lookups for 1 hour
+SET pg_ripple.federation_cache_ttl = 3600;
+```
+
+---
+
+### federation_on_partial
+
+| Property | Value |
+|---|---|
+| Type | `enum` |
+| Default | `'empty'` |
+| Values | `'empty'`, `'use'` |
+| Restart required | No |
+| Since | v0.19.0 |
+
+Controls the response when a SERVICE call starts delivering rows but then fails mid-stream (connection drop, timeout after first bytes):
+
+- **`'empty'`** (default) — discard all partial results and return empty
+- **`'use'`** — keep however many rows were received before the failure
+
+```sql
+SET pg_ripple.federation_on_partial = 'use';
+```
+
+---
+
+### federation_adaptive_timeout
+
+| Property | Value |
+|---|---|
+| Type | `boolean` |
+| Default | `false` |
+| Restart required | No |
+| Since | v0.19.0 |
+
+When `on`, derives the effective per-endpoint timeout from the P95 observed latency recorded in `_pg_ripple.federation_health`, rather than using the fixed `federation_timeout` value. Endpoints with consistently fast responses get tighter timeouts; consistently slow endpoints are given more time.
+
+Falls back to `federation_timeout` when no health data is available for an endpoint.
+
+```sql
+SET pg_ripple.federation_adaptive_timeout = on;
+```
+
+---
+
 ## Quick tuning reference
 
 | Workload | Key parameters |
@@ -354,3 +507,5 @@ SET pg_ripple.rls_bypass = on;
 | **Write-heavy OLTP** | `merge_interval_secs = 10`, `latch_trigger_threshold = 5000`, `shacl_mode = 'async'` |
 | **Analytics / OLAP** | `plan_cache_size = 512`, `bgp_reorder = on`, `parallel_query_min_joins = 2` |
 | **Reasoning workload** | `inference_mode = 'on_demand'`, `dictionary_cache_size = 262144` |
+| **Federation (semi-static endpoints)** | `federation_cache_ttl = 3600`, `federation_pool_size = 8`, `federation_adaptive_timeout = on` |
+| **Federation (strict latency)** | `federation_timeout = 5`, `federation_on_error = 'empty'`, `federation_on_partial = 'use'` |

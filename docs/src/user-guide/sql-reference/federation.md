@@ -38,7 +38,7 @@ SERVICE ?var { ... }  -- variable endpoint (requires VALUES binding)
 
 Only allowlisted endpoints can be contacted. Calling an unregistered URL raises an error — this prevents Server-Side Request Forgery (SSRF) attacks.
 
-### `pg_ripple.register_endpoint(url, local_view_name)`
+### `pg_ripple.register_endpoint(url, local_view_name, complexity)`
 
 Register a remote SPARQL endpoint.
 
@@ -46,6 +46,7 @@ Register a remote SPARQL endpoint.
 |---|---|---|---|
 | `url` | `TEXT` | — | Full URL of the endpoint (e.g. `https://dbpedia.org/sparql`) |
 | `local_view_name` | `TEXT` | `NULL` | Optional name of a local SPARQL view stream table that pre-materialises the data from this endpoint. When set, `SERVICE` calls targeting this URL are rewritten to scan the local table instead of making HTTP calls. |
+| `complexity` | `TEXT` | `'normal'` | Endpoint speed hint: `'fast'`, `'normal'`, or `'slow'`. Influences query planning order when multiple `SERVICE` clauses target different endpoints. |
 
 ```sql
 -- Register a plain remote endpoint
@@ -55,6 +56,13 @@ SELECT pg_ripple.register_endpoint('https://dbpedia.org/sparql');
 SELECT pg_ripple.register_endpoint(
     'https://internal-kb.example.com/sparql',
     'my_local_view_stream'
+);
+
+-- Register a known-fast endpoint
+SELECT pg_ripple.register_endpoint(
+    'https://fast-endpoint.example.com/sparql',
+    NULL,
+    'fast'
 );
 ```
 
@@ -84,7 +92,7 @@ List all registered endpoints.
 SELECT * FROM pg_ripple.list_endpoints();
 ```
 
-Returns: `(url TEXT, enabled BOOLEAN, local_view_name TEXT)`.
+Returns: `(url TEXT, enabled BOOLEAN, local_view_name TEXT, complexity TEXT)`.
 
 ## Configuration GUCs
 

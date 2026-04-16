@@ -13,9 +13,9 @@ pg_ripple is a PostgreSQL 18 extension building toward a fully-featured knowledg
 
 ---
 
-## What works today (v0.17.0)
+## What works today (v0.19.0)
 
-v0.17.0 is the JSON-LD Framing release. Seventeen versions in, pg_ripple covers the full SPARQL 1.1 stack, SHACL validation, Datalog reasoning, incremental live views, a standard HTTP endpoint, federated queries across remote SPARQL services, and now frame-driven JSON-LD export — all inside PostgreSQL with no separate process required.
+Nineteen versions in, pg_ripple covers the full SPARQL 1.1 stack, SHACL validation, Datalog reasoning, incremental live views, a standard HTTP endpoint, high-performance federated queries across remote SPARQL services, and frame-driven JSON-LD export — all inside PostgreSQL with no separate process required.
 
 | Area | What's included |
 |---|---|
@@ -27,7 +27,7 @@ v0.17.0 is the JSON-LD Framing release. Seventeen versions in, pg_ripple covers 
 | **Export** | `export_turtle()`, `export_jsonld()`, `export_ntriples()`, streaming variants |
 | **JSON-LD Framing** | `export_jsonld_framed(frame)` — frame-driven CONSTRUCT → nested JSON-LD; `jsonld_frame_to_sparql(frame)` — inspect the generated SPARQL; `export_jsonld_framed_stream(frame)` — NDJSON one object per root; `jsonld_frame(input, frame)` — general-purpose framing; `create_framing_view` / `drop_framing_view` / `list_framing_views` |
 | **HTTP API** | `pg_ripple_http` companion service: W3C SPARQL 1.1 Protocol over HTTP/HTTPS; content negotiation (JSON, XML, CSV, TSV, Turtle, N-Triples, JSON-LD); bearer/basic auth; CORS; Prometheus metrics; Docker Compose included |
-| **Federation** | `SERVICE <url> { … }` in any SPARQL query; SSRF-safe endpoint allowlist; `SERVICE SILENT`; configurable timeout, result cap, and error mode; health monitoring; local view rewrite |
+| **Federation** | `SERVICE <url> { … }` in any SPARQL query; SSRF-safe endpoint allowlist; `SERVICE SILENT`; configurable timeout, result cap, and error mode; health monitoring; local view rewrite; connection pooling; result caching with TTL; explicit variable projection; batch `SERVICE` (two clauses to the same endpoint → one HTTP request); adaptive timeouts; endpoint complexity hints; partial-result tolerance |
 | **SPARQL views** | `create_sparql_view(name, sparql, schedule, decode)` — always-fresh stream table from any SPARQL SELECT; `drop_sparql_view`, `list_sparql_views` |
 | **Datalog views** | `create_datalog_view(name, rules, goal, …)` — self-refreshing table from inline rules + goal; `create_datalog_view_from_rule_set`; `drop_datalog_view`, `list_datalog_views` |
 | **Framing views** | `create_framing_view(name, frame)` — incrementally-maintained JSON-LD stream table (requires pg_trickle) |
@@ -90,15 +90,7 @@ SELECT pg_ripple.infer('org_rules');
 
 ## Where we're headed
 
-Three releases remain on the path to v1.0.0. Each adds a self-contained layer on top of what already works.
-
-### v0.18.0 — SPARQL CONSTRUCT, DESCRIBE & ASK Views
-
-pg_ripple already lets you register a SPARQL SELECT query as a live stream table. This release extends that to the other three query forms. A **CONSTRUCT view** materialises the derived triples produced by a CONSTRUCT query — ideal for caching inferred facts or pre-building API responses. A **DESCRIBE view** stores all triples about the described resources. An **ASK view** keeps a single `BOOLEAN` row up to date as the underlying pattern changes — useful as a live constraint monitor or dashboard indicator. All three are backed by pg_trickle and update incrementally on every triple change.
-
-### v0.19.0 — Federation Performance
-
-The `SERVICE` clause works today but creates a new HTTP connection on every call. This release adds connection pooling (reuse TCP/TLS across calls), a configurable result cache with TTL, query rewriting to project only the variables the outer query needs, batching of multiple `SERVICE` clauses to the same endpoint into one HTTP request, and adaptive timeouts based on observed P95 latency. The result is significantly lower latency and better behaviour under load for federation-heavy workloads.
+One release remains on the path to v1.0.0.
 
 ### v1.0.0 — Production Release
 
@@ -119,7 +111,7 @@ This means you get:
 
 ### How it compares
 
-> **Note**: pg_ripple features marked "Yes" are *planned* across v0.1.0–v1.0.0; see the [Roadmap](ROADMAP.md) for delivery versions. Competitor capabilities reflect publicly documented feature sets.
+> **Note**: pg_ripple features marked "Yes" in the table below are implemented across v0.1.0–v0.19.0. The one remaining feature gap closes at v1.0.0 (W3C conformance certification). Competitor capabilities reflect publicly documented feature sets.
 
 | Capability | pg_ripple | Blazegraph | Virtuoso | Apache Fuseki |
 |---|---|---|---|---|
@@ -142,7 +134,7 @@ This means you get:
 
 pg_ripple is built from the ground up for performance.
 
-> The diagram below shows the target v0.6.0+ architecture after the HTAP split and shared-memory cache land.
+> The diagram below shows the v0.6.0+ architecture with the HTAP split and shared-memory cache.
 
 ```
  SPARQL Query / Update                   HTTP API
@@ -213,12 +205,12 @@ pg_ripple is built from the ground up for performance.
 | PostgreSQL version | 18.x |
 | SPARQL parser | [spargebra](https://crates.io/crates/spargebra) — W3C-compliant SPARQL 1.1 algebra |
 | SPARQL optimizer | [sparopt](https://crates.io/crates/sparopt) — first-pass algebra optimizer (filter pushdown, constant folding) |
-| RDF parsers | [rio_turtle](https://crates.io/crates/rio_turtle), [rio_xml](https://crates.io/crates/rio_xml) — Turtle, N-Triples, RDF/XML; custom N-Triples-star parser (v0.4.0); [oxttl](https://crates.io/crates/oxttl) / [oxrdf](https://crates.io/crates/oxrdf) planned at v0.5.x for Turtle-star |
+| RDF parsers | [rio_turtle](https://crates.io/crates/rio_turtle), [rio_xml](https://crates.io/crates/rio_xml) — Turtle, N-Triples, RDF/XML; [oxttl](https://crates.io/crates/oxttl) / [oxrdf](https://crates.io/crates/oxrdf) — RDF-star / Turtle-star |
 | Hashing | [xxhash-rust](https://crates.io/crates/xxhash-rust) (XXH3-128) — fast non-cryptographic hash for dictionary dedup |
 | Serialization | [serde](https://crates.io/crates/serde) + [serde_json](https://crates.io/crates/serde_json) — SHACL reports, SPARQL results, config |
 | HTTP server | [axum](https://crates.io/crates/axum) (built on [tokio](https://tokio.rs/)) — SPARQL Protocol HTTP endpoint (`pg_ripple_http` binary) |
 | PG client (HTTP service) | [tokio-postgres](https://crates.io/crates/tokio-postgres) + [deadpool-postgres](https://crates.io/crates/deadpool-postgres) — async connection pool from HTTP service to PostgreSQL |
-| HTTP client (federation) | [reqwest](https://crates.io/crates/reqwest) — outbound calls to remote SPARQL endpoints (SERVICE keyword) |
+| HTTP client (federation) | [ureq](https://crates.io/crates/ureq) 2.12 — outbound calls to remote SPARQL endpoints (`SERVICE` keyword); connection-pooled `Agent` per backend session |
 | IVM / stream tables | [pg_trickle](https://github.com/grove/pg-trickle) *(optional companion extension)* — incremental SPARQL views, ExtVP, live statistics |
 | Dictionary cache | [lru](https://crates.io/crates/lru) — backend-local LRU cache (v0.1.0–v0.5.1); replaced by sharded shared-memory map in v0.6.0 |
 | Error handling | [thiserror](https://crates.io/crates/thiserror) — typed error enums with PT error code constants (PT001–PT799) |
@@ -262,28 +254,31 @@ CREATE EXTENSION pg_ripple;
 
 ## Roadmap
 
-18 releases from v0.1.0 to v1.0.0, estimated at 98–131 person-weeks total.
+19 releases from v0.1.0 to v1.0.0, with one remaining.
 
-| Version | Name | What it delivers | Effort | Status |
-|---|---|---|---|---|
-| **0.1.0** | **Foundation** | Dictionary encoding, VP storage, basic triple CRUD | 6–8 pw | ✅ Done |
-| **0.2.0** | **Bulk Loading & Named Graphs** | Turtle/N-Triples/N-Quads/TriG import, named graphs, rare-predicate table | 6–8 pw | ✅ Done |
-| **0.3.0** | **SPARQL Basic** | SELECT, ASK, BGPs, FILTER, OPTIONAL, GRAPH patterns, plan cache | 6–8 pw | ✅ Done |
-| **0.4.0** | **RDF-star** | Quoted triples, statement metadata, LPG-ready storage | 8–10 pw | ✅ Done |
-| **0.5.0** | **SPARQL Advanced (Query)** | Property paths, aggregates, UNION/MINUS, subqueries, BIND/VALUES | 6–8 pw | ✅ Done |
-| **0.5.1** | **SPARQL Advanced (Write)** | Inline encoding, CONSTRUCT/DESCRIBE, INSERT/DELETE DATA, full-text search | 6–8 pw | ✅ Done |
-| **0.6.0** | **HTAP Architecture** | Concurrent reads/writes, shared-memory dictionary cache | 8–10 pw | ✅ Done |
-| **0.7.0** | **SHACL Core** | Constraint shapes, synchronous validation on insert | 4–6 pw | ✅ Done |
-| **0.8.0** | **SHACL Advanced** | Complex shapes, async background validation pipeline | 4–6 pw | ✅ Done |
-| **0.9.0** | **Serialization** | Turtle/N-Triples/JSON-LD/RDF-XML export, RDF-star formats | 3–4 pw | ✅ Done |
-| **0.10.0** | **Datalog Reasoning** | RDFS (13 rules), OWL 2 RL (~20 core rules), custom rules, integrity constraints | 10–12 pw | ✅ Done |
-| **0.11.0** | **SPARQL & Datalog Views** | Incremental live views via pg_trickle, ExtVP | 5–7 pw | ✅ Done |
-| 0.12.0 | SPARQL Update (Advanced) | DELETE/INSERT WHERE, LOAD, CLEAR, DROP, CREATE | 3–4 pw | Planned |
-| 0.13.0 | Performance | BSBM benchmarks, prepared statements, planner statistics | 6–8 pw | Planned |
-| 0.14.0 | Admin & Security | Graph-level RLS, vacuum/reindex, packaging, full docs | 4–6 pw | Planned |
-| 0.15.0 | SPARQL Protocol | Standard W3C HTTP endpoint (`pg_ripple_http` binary) | 3–4 pw | Planned |
-| 0.16.0 | SPARQL Federation | `SERVICE` keyword, parallel remote endpoint queries | 4–6 pw | Planned |
-| 1.0.0 | Production Release | W3C conformance, stress testing, security audit | 6–8 pw | Planned |
+| Version | Name | What it delivers | Status |
+|---|---|---|---|
+| **0.1.0** | **Foundation** | Dictionary encoding, VP storage, basic triple CRUD | ✅ Done |
+| **0.2.0** | **Bulk Loading & Named Graphs** | Turtle/N-Triples/N-Quads/TriG import, named graphs, rare-predicate table | ✅ Done |
+| **0.3.0** | **SPARQL Basic** | SELECT, ASK, BGPs, FILTER, OPTIONAL, GRAPH patterns, plan cache | ✅ Done |
+| **0.4.0** | **RDF-star** | Quoted triples, statement metadata, LPG-ready storage | ✅ Done |
+| **0.5.0** | **SPARQL Advanced (Query)** | Property paths, aggregates, UNION/MINUS, subqueries, BIND/VALUES | ✅ Done |
+| **0.5.1** | **SPARQL Advanced (Write)** | Inline encoding, CONSTRUCT/DESCRIBE, INSERT/DELETE DATA, full-text search | ✅ Done |
+| **0.6.0** | **HTAP Architecture** | Concurrent reads/writes, shared-memory dictionary cache | ✅ Done |
+| **0.7.0** | **SHACL Core** | Constraint shapes, synchronous validation on insert | ✅ Done |
+| **0.8.0** | **SHACL Advanced** | Complex shapes, async background validation pipeline | ✅ Done |
+| **0.9.0** | **Serialization** | Turtle/N-Triples/JSON-LD/RDF-XML export, RDF-star formats | ✅ Done |
+| **0.10.0** | **Datalog Reasoning** | RDFS (13 rules), OWL 2 RL (~20 core rules), custom rules, integrity constraints | ✅ Done |
+| **0.11.0** | **SPARQL & Datalog Views** | Incremental live views via pg_trickle, ExtVP | ✅ Done |
+| **0.12.0** | **SPARQL Update (Advanced)** | DELETE/INSERT WHERE, LOAD, CLEAR, DROP, CREATE | ✅ Done |
+| **0.13.0** | **Performance** | BSBM benchmarks, prepared statements, planner statistics | ✅ Done |
+| **0.14.0** | **Admin & Security** | Graph-level RLS, vacuum/reindex, packaging, full docs | ✅ Done |
+| **0.15.0** | **SPARQL Protocol** | Standard W3C HTTP endpoint (`pg_ripple_http` binary) | ✅ Done |
+| **0.16.0** | **SPARQL Federation** | `SERVICE` keyword, SSRF allowlist, error handling, health monitoring | ✅ Done |
+| **0.17.0** | **JSON-LD Framing** | Frame-driven CONSTRUCT export, framing views, general-purpose `jsonld_frame()` | ✅ Done |
+| **0.18.0** | **CONSTRUCT/DESCRIBE/ASK Views** | Incremental live views for all four SPARQL query forms | ✅ Done |
+| **0.19.0** | **Federation Performance** | Connection pooling, result caching, variable projection, batch SERVICE, adaptive timeouts | ✅ Done |
+| **1.0.0** | **Production Release** | W3C conformance, stress testing, security audit | 🔜 Next |
 
 See [ROADMAP.md](ROADMAP.md) for deliverables and exit criteria for every release.
 
@@ -298,7 +293,7 @@ Planned future directions: distributed storage (Citus), vector + graph hybrid se
 pg_ripple aims for production-grade quality:
 
 - **Unit tests** — pgrx `#[pg_test]` for every SQL-exposed function, property-based testing with `proptest`
-- **Integration tests** — 30+ pg_regress test files covering every feature
+- **Integration tests** — 64 pg_regress test files covering every feature
 - **Security testing** — SQL injection prevention, malformed input resilience, resource exhaustion defence
 - **Fuzz testing** — continuous fuzzing of the SPARQL→SQL pipeline with `cargo-fuzz`
 - **Concurrency testing** — dictionary cache correctness, merge worker data integrity under concurrent writes

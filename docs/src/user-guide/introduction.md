@@ -22,8 +22,9 @@ pg_ripple's VP storage model is structurally compatible with Labeled Property Gr
 | SPARQL inside a PostgreSQL application | ✅ | requires HTTP client |
 | Transactional RDF writes with rollback | ✅ | usually not supported |
 | Mixing SPARQL results with relational data | ✅ | complex federation |
-| Hundreds of billions of triples | future v0.9.0 | some mature stores |
-| SPARQL federation across endpoints | future v0.10.0 | mature support |
+| SHACL validation and Datalog reasoning | ✅ | rarely built-in |
+| SPARQL federation across remote endpoints | ✅ | mature support |
+| Hundreds of billions of triples | future (post-1.0) | some mature stores |
 
 ## System requirements
 
