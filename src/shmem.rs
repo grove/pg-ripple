@@ -85,11 +85,21 @@ pub static MERGE_WORKER_PID: PgAtomic<AtomicI32> = unsafe { PgAtomic::new(c"pg_r
 pub static TOTAL_DELTA_ROWS: PgAtomic<AtomicI64> =
     unsafe { PgAtomic::new(c"pg_ripple_delta_rows") };
 
-// ─── Bloom filter (per-predicate delta presence) ─────────────────────────────
+// ─── Bloom filter (per-bit reference counting, v0.22.0+) ──────────────────────
 
-/// 1024-bit Bloom filter: which predicates have rows in their delta tables.
+/// 1024-bit Bloom filter: which predicates may have rows in their delta tables.
 /// Indexed by two multiplicative hashes of the predicate ID.
+/// 
+/// v0.22.0+: Replaced with per-bit reference counting to prevent hash collisions
+/// from causing false-negative delta skips.  Each bit position gets an 8-bit
+/// saturating counter; a bit is only cleared when its counter reaches 0.
 pub static DELTA_BLOOM: PgLwLock<[u64; 16]> = unsafe { PgLwLock::new(c"pg_ripple_delta_bloom") };
+
+/// Per-bit reference counters for the delta bloom filter (v0.22.0+).
+/// 1024 u8 values, one for each bit position in DELTA_BLOOM.
+/// Counter saturates at 255; a bit is only cleared when the counter reaches 0.
+pub static DELTA_BLOOM_COUNTERS: PgLwLock<[u8; 1024]> =
+    unsafe { PgLwLock::new(c"pg_ripple_delta_bloom_counters") };
 
 // ─── Shared-memory encode cache (1 shard × 1024 sets × 4 ways = 4096 capacity) ─
 
@@ -130,6 +140,9 @@ pub fn init() {
 
     // v0.6.0: Bloom filter.
     pg_shmem_init!(DELTA_BLOOM);
+    
+    // v0.22.0: Per-bit reference counting for bloom filter.
+    pg_shmem_init!(DELTA_BLOOM_COUNTERS = [0u8; 1024]);
 
     // v0.22.0: 4-way set-associative encode cache.
     // Initialize: all ways in all sets are empty (hash=0, id=0).
@@ -226,25 +239,32 @@ fn bloom_bits(pred_id: i64) -> (usize, usize) {
 
 /// Mark that predicate `pred_id` has rows in its delta table.
 ///
+/// Increments the reference counter for both bloom bit positions.
+/// The bits themselves are set immediately (no ref-counting needed for set).
 /// No-op when shmem is not initialised.
 pub fn set_predicate_delta_bit(pred_id: i64) {
     if !SHMEM_READY.load(Ordering::Acquire) {
         return;
     }
     let (p1, p2) = bloom_bits(pred_id);
-    let mut guard = DELTA_BLOOM.exclusive();
-    let words: &mut [u64; 16] = &mut guard;
-    words[p1 >> 6] |= 1u64 << (p1 & 63);
-    words[p2 >> 6] |= 1u64 << (p2 & 63);
+    
+    let mut guard_bits = DELTA_BLOOM.exclusive();
+    let bits: &mut [u64; 16] = &mut guard_bits;
+    bits[p1 >> 6] |= 1u64 << (p1 & 63);
+    bits[p2 >> 6] |= 1u64 << (p2 & 63);
+    
+    let mut guard_counters = DELTA_BLOOM_COUNTERS.exclusive();
+    let counters: &mut [u8; 1024] = &mut guard_counters;
+    // Increment both counters, saturating at 255
+    counters[p1] = counters[p1].saturating_add(1);
+    counters[p2] = counters[p2].saturating_add(1);
 }
+
 /// Clear the bloom-filter bits for `pred_id` after a successful merge.
 ///
-/// Clearing is conservative: we only clear bits that are exclusively owned
-/// by this predicate (i.e., neither bit is shared with a different predicate
-/// that still has delta rows).  Since we always clear both bits atomically
-/// under the exclusive lock, at worst we introduce a false negative for a
-/// different predicate mapped to the same bit — the query path handles that
-/// safely by scanning delta (it never skips when uncertain).
+/// v0.22.0+: Decrements the reference counters for both bloom bit positions.
+/// Only clears the bit when the counter reaches 0, preventing false negatives
+/// from hash collisions where different predicates share a bit position.
 ///
 /// No-op when shmem is not initialised.
 pub fn clear_predicate_delta_bit(pred_id: i64) {
@@ -252,10 +272,28 @@ pub fn clear_predicate_delta_bit(pred_id: i64) {
         return;
     }
     let (p1, p2) = bloom_bits(pred_id);
-    let mut guard = DELTA_BLOOM.exclusive();
-    let words: &mut [u64; 16] = &mut guard;
-    words[p1 >> 6] &= !(1u64 << (p1 & 63));
-    words[p2 >> 6] &= !(1u64 << (p2 & 63));
+    
+    let mut guard_counters = DELTA_BLOOM_COUNTERS.exclusive();
+    let counters: &mut [u8; 1024] = &mut guard_counters;
+    
+    // Decrement counters
+    if counters[p1] > 0 {
+        counters[p1] -= 1;
+    }
+    if counters[p2] > 0 {
+        counters[p2] -= 1;
+    }
+    
+    let mut guard_bits = DELTA_BLOOM.exclusive();
+    let bits: &mut [u64; 16] = &mut guard_bits;
+    
+    // Only clear the bits when their counters reach 0
+    if counters[p1] == 0 {
+        bits[p1 >> 6] &= !(1u64 << (p1 & 63));
+    }
+    if counters[p2] == 0 {
+        bits[p2 >> 6] &= !(1u64 << (p2 & 63));
+    }
 }
 
 /// Returns `false` if the predicate definitely has no delta rows (both bloom

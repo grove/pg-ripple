@@ -1590,13 +1590,13 @@ Every SPARQL 1.1 built-in function from the W3C SPARQL 1.1 Appendix A either wor
   - H-7 (`vp_rare` double-count in star patterns): fix `rebuild_subject_patterns()` in `src/storage/merge.rs` to enumerate only predicates that have a dedicated VP table (listed in `_pg_ripple.predicates` with a non-null `table_oid`); skip `vp_rare` as a direct scan target — `vp_rare` rows are already reachable via their per-predicate plans and must not be scanned a second time as the raw table
   - New pg_regress test `merge_dedup.sql`: insert the same triple before and after `pg_ripple.force_merge()`; verify the query returns exactly one result row; verify `triple_count` in the predicate catalog equals 1
 
-- [ ] **Shared-memory encode cache — 4-way set-associative redesign** (high fix H-1)
+- [x] **Shared-memory encode cache — 4-way set-associative redesign** (high fix H-1)
   - Replace the direct-mapped 4096-slot cache with a 4-way set-associative layout: 1024 sets × 4 ways — same memory footprint as before, birthday-collision rate drops from ~15% to <1% at 5k hot terms
   - LRU eviction within each 4-way set using a 2-bit age field packed into the existing `(hash_parts, id)` slot struct
   - New `pg_ripple.cache_stats()` SQL function returning `(hits BIGINT, misses BIGINT, evictions BIGINT, utilisation FLOAT)` — exposes hit rate for monitoring
   - Benchmark gate: `just bench-cache` asserts hit rate ≥ 95% on a 10k-predicate workload; CI fails on regression below 90%
 
-- [ ] **Bloom filter per-bit reference counting** (high fix H-2)
+- [x] **Bloom filter per-bit reference counting** (high fix H-2)
   - Replace the boolean `u64` bloom words with 8-bit saturating counters in the delta bloom shared-memory segment
   - `set_predicate_delta_bit(pred_id)`: increment both bloom counter positions (saturates at 255)
   - `clear_predicate_delta_bit(pred_id)`: decrement both counters; only clears the boolean bit when the counter reaches 0 — prevents false-negative delta skips for predicates that hash-collide with a predicate being concurrently merged
