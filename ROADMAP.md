@@ -1543,6 +1543,12 @@ W3C SPARQL 1.1 Query test suite: ≥95% pass rate. W3C SPARQL 1.1 Update test su
   - `OPTIONAL` over aggregates: wrap `GROUP BY` / `HAVING` sub-patterns as `LATERAL` subselects keyed on shared variables, preventing a Cartesian-product blow-up when a `LeftJoin` pattern has an aggregate sub-query on the right side
   - Self-join dedup key: replace the `format!("{tp}")` Debug-string key in BGP pattern deduplication with a structural `(s_term_id, p_term_id, o_term_id)` tuple so that only genuinely identical patterns are collapsed
 
+- [ ] **SPARQL property path & federation completeness**
+  - Negated property sets `!(p1|p2|…)`: compile to an anti-join in `src/sparql/property_path.rs` — emit SQL of the form `… WHERE vp_predicate.p NOT IN ($p1_id, $p2_id, …)` using encoded predicate IDs collected at compile time; wire into `translate_path()` as a new `NegatedPropertySet` variant
+  - `SERVICE SILENT`: when the `silent` flag is set on a `SERVICE` block, wrap the federation call in `translate_service()` in `src/sparql/federation.rs` so that any federation error (network failure, timeout, parse error) is caught and returns an empty result set rather than propagating the error to the caller — matches SPARQL 1.1 §10.4.4 semantics
+  - New pg_regress test `property_path_negated.sql` — verify `!(p)` and `!(p1|p2)` return the correct triples on a known dataset; verify no false exclusions for unrelated predicates
+  - New pg_regress test `service_silent.sql` — verify `SERVICE SILENT { <http://unreachable.invalid/sparql> { ?s ?p ?o } }` returns zero rows rather than an error
+
 - [ ] **Honest W3C conformance test assertions**
   - Rewrite all `count(*) >= 0 AS label_no_error` and row-count assertions in `w3c_sparql_query_conformance.sql` that previously masked silent filter-drops with real value-checking assertions
   - New pg_regress test file `sparql_builtins.sql` — one assertion per built-in function, verifying correct output value not just row count
@@ -1560,7 +1566,7 @@ W3C SPARQL 1.1 Query test suite: ≥95% pass rate. W3C SPARQL 1.1 Update test su
 
 ### Exit Criteria
 
-Every SPARQL 1.1 built-in function from the W3C SPARQL 1.1 Appendix A either works correctly or raises a named `ERRCODE_FEATURE_NOT_SUPPORTED` error — never silently drops. `w3c_sparql_query_conformance.sql` passes with real value-checking assertions (no `>= 0` shims). `sparql_builtins.sql` passes for all implemented functions. `ORDER BY` NULL placement, property-path cycle detection on a DAG, ZeroOrMore scope restriction, and `GROUP_CONCAT DISTINCT` each have a dedicated passing regression test.
+Every SPARQL 1.1 built-in function from the W3C SPARQL 1.1 Appendix A either works correctly or raises a named `ERRCODE_FEATURE_NOT_SUPPORTED` error — never silently drops. `w3c_sparql_query_conformance.sql` passes with real value-checking assertions (no `>= 0` shims). `sparql_builtins.sql` passes for all implemented functions. `ORDER BY` NULL placement, property-path cycle detection on a DAG, ZeroOrMore scope restriction, and `GROUP_CONCAT DISTINCT` each have a dedicated passing regression test. `property_path_negated.sql` passes for single and multi-predicate negated sets. `service_silent.sql` returns zero rows rather than an error on an unreachable `SERVICE SILENT` endpoint.
 
 ---
 
@@ -1583,6 +1589,11 @@ Every SPARQL 1.1 built-in function from the W3C SPARQL 1.1 Appendix A either wor
   - C-3 (view-rename atomicity): remove the `CREATE OR REPLACE VIEW vp_N` step from the merge cycle — the view's `FROM` clause always names `vp_N_main` directly, which PG re-resolves after the rename; the `CREATE OR REPLACE VIEW` call is eliminated, closing the window between rename and view-rebuild
   - C-4 (tombstone resurrection): record `max_sid_at_snapshot` at merge-start (`currval('_pg_ripple.statement_id_seq')` before processing); at merge-end TRUNCATE, only delete tombstones with `i ≤ max_sid_at_snapshot` — tombstones for deletes that committed after the snapshot survive to the next merge cycle
   - New pg_regress test `merge_race.sql`: issue a `pg_ripple.delete_triple()` concurrently with `pg_ripple.force_merge()`; verify deleted triple does not reappear; verify no `relation does not exist` error under a concurrent `pg_ripple.sparql()` call
+
+- [ ] **Merge deduplication and `rebuild_subject_patterns` correctness** (high fixes H-6, H-7)
+  - H-6 (cross-merge duplicate visibility): add a `UNIQUE (s, o, g)` constraint to `vp_{id}_delta` and change `insert_triple` to use `ON CONFLICT DO NOTHING`; update the VP view definition to carry `DISTINCT ON (s, o, g)` as a safety net for rows that crossed a merge boundary before the constraint was present — prevents a triple from appearing twice in query results when it exists in both `main` and `delta`
+  - H-7 (`vp_rare` double-count in star patterns): fix `rebuild_subject_patterns()` in `src/storage/merge.rs` to enumerate only predicates that have a dedicated VP table (listed in `_pg_ripple.predicates` with a non-null `table_oid`); skip `vp_rare` as a direct scan target — `vp_rare` rows are already reachable via their per-predicate plans and must not be scanned a second time as the raw table
+  - New pg_regress test `merge_dedup.sql`: insert the same triple before and after `pg_ripple.force_merge()`; verify the query returns exactly one result row; verify `triple_count` in the predicate catalog equals 1
 
 - [ ] **Shared-memory encode cache — 4-way set-associative redesign** (high fix H-1)
   - Replace the direct-mapped 4096-slot cache with a 4-way set-associative layout: 1024 sets × 4 ways — same memory footprint as before, birthday-collision rate drops from ~15% to <1% at 5k hot terms
@@ -1625,7 +1636,7 @@ Every SPARQL 1.1 built-in function from the W3C SPARQL 1.1 Appendix A either wor
 
 ### Exit Criteria
 
-Rolled-back `insert_triple` cannot plant a phantom ID (`dictionary_rollback.sql` pg_regress passes). `merge_race.sql` passes with zero tombstone resurrections and zero `relation does not exist` errors under a concurrent query. Shmem cache benchmark reports ≥ 95% hit rate at 10k hot terms. `pg_ripple_http` returns `429` when rate limit is exceeded (verified by integration test). Unprivileged role is denied `SELECT` on `_pg_ripple.*` (`privilege_isolation.sql` passes). All migration scripts from 0.1.0 through 0.22.0 run cleanly via `just test-migration`.
+Rolled-back `insert_triple` cannot plant a phantom ID (`dictionary_rollback.sql` pg_regress passes). `merge_race.sql` passes with zero tombstone resurrections and zero `relation does not exist` errors under a concurrent query. `merge_dedup.sql` passes — inserting the same triple across a merge boundary returns exactly one result row. Shmem cache benchmark reports ≥ 95% hit rate at 10k hot terms. `pg_ripple_http` returns `429` when rate limit is exceeded (verified by integration test). Unprivileged role is denied `SELECT` on `_pg_ripple.*` (`privilege_isolation.sql` passes). All migration scripts from 0.1.0 through 0.22.0 run cleanly via `just test-migration`.
 
 ---
 
@@ -1648,6 +1659,7 @@ Rolled-back `insert_triple` cannot plant a phantom ID (`dictionary_rollback.sql`
   - `sh:lessThan` / `sh:greaterThan`: emit a comparison join between the focus node's two property values, decoding literals to numeric/date types for ordering
   - `sh:qualifiedValueShape`: `sh:qualifiedMinCount` / `sh:qualifiedMaxCount` on a nested shape — count focus-node values matching the inner shape and compare against the declared bounds
   - `sh:path` with property path expressions: extend the shape compiler to accept inverse paths (`sh:inversePath`), alternative paths (`sh:alternativePath`), sequence paths, and zero-or-more/one-or-more/zero-or-one paths — each maps to the corresponding property-path CTE already used in the SPARQL engine
+  - Turtle block comment handling (M-11): add a `/* … */` block-comment stripping pass in the SHACL shape pre-processor at `src/shacl/mod.rs` before the document is handed to the Turtle parser — regex: strip `(?s)/\*.*?\*/`; allows SPARQL-style block-commented shapes to load correctly
   - New pg_regress test `shacl_core_completion.sql` — one test per new constraint with passing, failing, and edge-case triples; verified against the W3C SHACL Core test suite manifest
 
 - [ ] **SPARQL query introspection** (feature F-3 from the gap analysis)
@@ -1657,6 +1669,11 @@ Rolled-back `insert_triple` cannot plant a phantom ID (`dictionary_rollback.sql`
   - When `format = 'sparql_algebra'`: returns the `spargebra` algebra tree serialised as indented text via `Debug` formatting — exposes the optimizer's view of the query
   - Security: `SECURITY DEFINER` is not used; the caller needs `SELECT` privilege on the relevant VP tables (same as `pg_ripple.sparql()`)
   - New pg_regress test `explain_sparql.sql` — verifies that the function returns non-empty output for a known-good SELECT query and does not error on edge cases (empty graph, VALUES-only query, property path query)
+
+- [ ] **SHACL query-optimization hint verification** (performance fix P-5)
+  - Verify that `sh:maxCount 1` on a predicate elides `DISTINCT` in the SQL generated for SPARQL patterns using that predicate — inspect `translate_select()` in `src/sparql/sqlgen.rs` and wire the lookup against the SHACL constraint catalog if the hint is not already applied; a triple pattern on a `maxCount 1` predicate should not produce a `HashAggregate` (DISTINCT) node in the plan
+  - Verify that `sh:minCount 1` on a predicate downgrades `LEFT JOIN` to `INNER JOIN` in the SQL generator for `OPTIONAL` patterns — saves a null-check pass and allows the PG planner to use more efficient join strategies
+  - New pg_regress test `shacl_query_hints.sql` — load a shape with `sh:maxCount 1` and `sh:minCount 1`; run `pg_ripple.explain_sparql()` on a query using the constrained predicate; assert the plan string does not contain `HashAggregate` for the maxCount case and does not contain `Hash Left Join` for the minCount case
 
 - [ ] **Datalog engine correctness fixes** (medium fixes M-1, M-2, M-3)
   - Division by zero (M-1): wrap every arithmetic divisor in the Datalog SQL compiler with `NULLIF(expr, 0)`; emit a `NOTICE`-level message naming the failing rule head when a null propagation from division occurs
@@ -1679,7 +1696,7 @@ Rolled-back `insert_triple` cannot plant a phantom ID (`dictionary_rollback.sql`
 
 ### Exit Criteria
 
-W3C SHACL Core test suite pass rate increases to ≥ 98%. `shacl_core_completion.sql` pg_regress passes for all eight new constraint types. `explain_sparql.sql` passes. A Datalog rule with division, an unbound variable, and a negation cycle each raise the expected named error rather than silent failure or a crash. `src/framing/embedder.rs` no longer contains `unwrap()` on the CONSTRUCT result. All migration scripts from 0.1.0 through 0.23.0 run cleanly via `just test-migration`.
+W3C SHACL Core test suite pass rate increases to ≥ 98%. `shacl_core_completion.sql` pg_regress passes for all new constraint types including the `/* … */` block-comment case. `explain_sparql.sql` passes. `shacl_query_hints.sql` passes — `explain_sparql()` confirms no spurious DISTINCT or LEFT JOIN for constrained predicates. A Datalog rule with division, an unbound variable, and a negation cycle each raise the expected named error rather than silent failure or a crash. `src/framing/embedder.rs` no longer contains `unwrap()` on the CONSTRUCT result. All migration scripts from 0.1.0 through 0.23.0 run cleanly via `just test-migration`.
 
 ---
 
@@ -1730,6 +1747,26 @@ W3C SHACL Core test suite pass rate increases to ≥ 98%. `shacl_core_completion
   - Rework `src/export.rs` Turtle/N-Triples/JSON-LD export helpers to iterate over VP tables in SID-order cursor batches (batch size: `pg_ripple.export_batch_size` GUC, default: `10000`) rather than materialising the full graph into memory
   - `DECLARE … CURSOR FOR SELECT … ORDER BY i` + `FETCH $batch_size FROM cursor` loop — each batch is serialised and flushed to `COPY` output immediately; peak memory is bounded by `batch_size × average_triple_size`
 
+- [ ] **View anti-join rewrite for HTAP query path** (performance fix P-6)
+  - Replace the `EXCEPT` (sort-based set difference) in the `(main EXCEPT tombstones) UNION ALL delta` VP view with a `LEFT JOIN … WHERE t.s IS NULL` anti-join: `SELECT m.* FROM _pg_ripple.vp_{id}_main m LEFT JOIN _pg_ripple.vp_{id}_tombstones t ON m.s = t.s AND m.o = t.o AND m.g = t.g WHERE t.s IS NULL`
+  - The anti-join allows the PG planner to choose hash anti-join, avoiding a materialising sort over `main`; at 10M-row `main` tables this reduces per-query overhead from O(N log N) to O(N) for tombstone filtering
+  - Update all VP view definitions and the merge worker's view-rebuild template to use the anti-join form; no user-visible behaviour change
+  - Benchmark gate: `just bench-htap-read` asserts a SELECT over a 1M-row `main` with 100 tombstones completes in ≤ 2× the time of the same query with zero tombstones
+
+- [ ] **BGP selectivity model improvements** (architectural improvement A-6)
+  - Extend BGP reordering in `src/sparql/optimizer.rs` to factor in variable binding as a selectivity multiplier: bound subject → `0.01 × triple_count`, bound object → `0.05 × triple_count`, unbound → `triple_count` — reduces the likelihood that a poorly-ordered BGP generates a pathological SQL join order before PG's planner has a chance to reorder it
+  - Document the heuristic in `reference/internals/optimizer.md` (new page) alongside the `explain_sparql()` function from v0.23.0
+
+- [ ] **Schema-aware statistics worker**
+  - Extend the background merge worker to run `ANALYZE _pg_ripple.vp_{id}_main` after each successful merge — ensures the PG planner has fresh statistics on the main partition for join planning
+  - For VP tables whose objects are consistently typed (all `xsd:integer`, `xsd:decimal`, or `xsd:dateTime` as detected by the dictionary `kind` column), create an extended statistics object (`CREATE STATISTICS … (dependencies, ndistinct)`) so the planner can exploit correlation for range predicates
+  - New GUC `pg_ripple.auto_analyze` (BOOL, default `on`) — allows operators to disable the post-merge ANALYZE if they manage statistics manually
+
+- [ ] **SPARQL-star Update: quoted triples in CONSTRUCT and UPDATE templates**
+  - Extend the CONSTRUCT template compiler in `src/sparql/sqlgen.rs` to handle `<< ?s ?p ?o >>` quoted-triple patterns in CONSTRUCT WHERE and CONSTRUCT template clauses — stored using the existing `KIND_QUOTED_TRIPLE` dictionary kind from v0.4.0
+  - Extend the INSERT DATA / DELETE DATA / INSERT WHERE / DELETE WHERE parsers to accept quoted triple syntax in graph patterns and template positions
+  - New pg_regress test `sparql_star_update.sql`: `INSERT DATA { << <Alice> <knows> <Bob> >> <assertedBy> <Carol> }; SELECT … WHERE { << ?s ?p ?o >> <assertedBy> ?a }` — verify the quoted triple round-trips correctly through insert and query
+
 ### Documentation
 
 > See [plans/documentation.md](plans/documentation.md) for details.
@@ -1741,7 +1778,7 @@ W3C SHACL Core test suite pass rate increases to ≥ 98%. `shacl_core_completion
 
 ### Exit Criteria
 
-`datalog_seminaive.sql` passes with correct closure count and iteration count ≤ longest derivation chain. Semi-naive benchmark is ≥ 5× faster than naive on the RDFS subgraph. All four new OWL RL rules derive correct inferences in the corresponding pg_regress tests. SPARQL result-set decoding issues ≤ 2 SPI round-trips for 1000-term results (verified by the bench gate). Property path with default depth limit correctly traverses a 100-hop chain; depth-10 truncation emits the expected WARNING. Migration scripts from 0.1.0 through 0.24.0 run cleanly via `just test-migration`.
+`datalog_seminaive.sql` passes with correct closure count and iteration count ≤ longest derivation chain. Semi-naive benchmark is ≥ 5× faster than naive on the RDFS subgraph. All four new OWL RL rules derive correct inferences in the corresponding pg_regress tests. SPARQL result-set decoding issues ≤ 2 SPI round-trips for 1000-term results (verified by the bench gate). Property path with default depth limit correctly traverses a 100-hop chain; depth-10 truncation emits the expected WARNING. `sparql_star_update.sql` passes. The HTAP anti-join benchmark completes within 2× the no-tombstone baseline. Migration scripts from 0.1.0 through 0.24.0 run cleanly via `just test-migration`.
 
 ---
 
@@ -1769,6 +1806,11 @@ W3C SHACL Core test suite pass rate increases to ≥ 98%. `shacl_core_completion
     - `geof:boundary(a)` → `ST_Boundary(ST_GeomFromText(a))` serialised back to WKT literal
   - SPARQL FILTER integration: wire all geo functions into `translate_expr()` in `src/sparql/expr.rs`; topological predicates emit a SQL boolean; distance/area/boundary emit decoded numeric/WKT values
   - New pg_regress test `geosparql.sql` — skipped automatically when PostGIS is absent (`DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_proc WHERE proname = 'st_geomfromtext') THEN RAISE EXCEPTION …; END IF; END $$`); when PostGIS is present, verifies intersection, distance, and contains queries against a small geography dataset
+
+- [ ] **Federation cache and partial-result correctness** (high fixes H-12, H-13)
+  - H-12 (cache key upgrade): replace the XXH3-64 result cache key in `src/sparql/federation.rs` with the full XXH3-128 hash — the 64-bit birthday bound (~2.1 billion distinct cached queries before 50% collision probability) is thin for a long-running server; the full 128-bit hash makes collision negligible even at very high query volumes
+  - H-13 (partial-result parser): add a size gate to the federation partial-result recovery path — if the truncated response exceeds `pg_ripple.federation_partial_recovery_max_bytes` (INT GUC, default: `65536`), skip partial recovery and return zero rows with a `WARNING: federation partial response too large for recovery (N bytes)`; this prevents the `rfind("},")` heuristic from truncating a valid row whose literal value contains `"}"` followed by a comma in large responses
+  - New pg_regress test `federation_cache.sql` — verify that two federation calls with identical query text to different endpoints are cached independently; verify that a simulated oversized partial response exceeding the byte gate produces zero rows with the expected WARNING
 
 - [ ] **Catalog OID stability** (architectural fix A-5)
   - Add `schema_name NAME, table_name NAME` columns to `_pg_ripple.predicates` in the migration script
@@ -1802,6 +1844,12 @@ W3C SHACL Core test suite pass rate increases to ≥ 98%. `shacl_core_completion
   - Export literal round-trip (M-10): add a pg_regress test `export_roundtrip.sql` that inserts triples with `\uXXXX` Unicode escapes, non-ASCII literals, and control characters, then round-trips through Turtle export and import; verifies the decoded values match the originals
   - W3C conformance test classification (M-19): replace remaining `label_no_error` style assertions in the conformance test file with a formal skip-list `expected_skip` CTE; document each skip with a reason code (`UNIMPLEMENTED`, `KNOWN_LIMITATION`, or `SPEC_AMBIGUITY`); ensure the skip list shrinks to zero by v1.0.0
 
+- [ ] **Supplementary feature additions**
+  - `pg_ripple.canary()` health function: runs a battery of internal self-checks and returns a JSON object `{"merge_worker": "ok"|"stalled", "cache_hit_rate": 0.0–1.0, "catalog_consistent": true|false, "orphaned_rare_rows": N}` — suitable for ops dashboards, alerting pipelines, and CI smoke tests; `catalog_consistent` checks that VP table count in `pg_tables` matches the predicate catalog and that no `vp_rare` rows exist for promoted predicates
+  - OWL ontology import: `pg_ripple.load_owl_ontology(data TEXT, format TEXT DEFAULT 'turtle')` — parses a Turtle or OWL/XML ontology, loads it into the triple store, and calls `pg_ripple.run_rules()` to materialise RDFS/OWL RL inference; removes the need for users to write Datalog manually for standard DL-Lite ontologies
+  - RDF Patch / LD Patch import: `pg_ripple.apply_patch(data TEXT, format TEXT DEFAULT 'rdf-patch')` — processes an RDF Patch (W3C Community Group) or LD Patch document, routing `Add`, `Delete`, and `UpdateList` operations to `insert_triple` / `delete_triple`; useful for incremental sync from external triple stores
+  - Custom aggregate extension point: `pg_ripple.register_aggregate(name TEXT, init_sql TEXT, step_sql TEXT, final_sql TEXT)` registers a PostgreSQL aggregate accessible in SPARQL GROUP BY via the `<iri>()` extension aggregate syntax; documents how to pass encoded dictionary IDs through the accumulator state
+
 ### Documentation
 
 > See [plans/documentation.md](plans/documentation.md) for details.
@@ -1815,7 +1863,7 @@ W3C SHACL Core test suite pass rate increases to ≥ 98%. `shacl_core_completion
 
 ### Exit Criteria
 
-`geosparql.sql` pg_regress passes when PostGIS is present and skips cleanly when PostGIS is absent. `bulk_load_strict.sql` passes for both strict and lenient modes. Blank-node prefix uses `nextval(…)` — no wall-clock-based prefix in `src/bulk_load.rs`. `SELECT pg_ripple.register_endpoint('file:///etc/passwd')` raises `ERRCODE_INVALID_PARAMETER_VALUE`. `_pg_ripple.predicates` has `schema_name` and `table_name` columns populated. Migration scripts from 0.1.0 through 0.25.0 run cleanly via `just test-migration`.
+`geosparql.sql` pg_regress passes when PostGIS is present and skips cleanly when PostGIS is absent. `bulk_load_strict.sql` passes for both strict and lenient modes. Blank-node prefix uses `nextval(…)` — no wall-clock-based prefix in `src/bulk_load.rs`. `SELECT pg_ripple.register_endpoint('file:///etc/passwd')` raises `ERRCODE_INVALID_PARAMETER_VALUE`. `_pg_ripple.predicates` has `schema_name` and `table_name` columns populated. `federation_cache.sql` passes — distinct endpoints are cached independently and oversized partial responses produce zero rows with a WARNING. `pg_ripple.canary()` returns `{"catalog_consistent": true, "orphaned_rare_rows": 0}` on a healthy database. Migration scripts from 0.1.0 through 0.25.0 run cleanly via `just test-migration`.
 
 ---
 
