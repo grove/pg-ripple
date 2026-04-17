@@ -19,9 +19,6 @@
 --   - Property functions (custom aggregate functions) are not supported.
 --   - Language tag comparisons with langMatches() are best-effort.
 --   - Variable-inside-quoted-triple patterns return 0 rows with a WARNING.
---   - CONTAINS / STRSTARTS / STRENDS / REGEX in FILTER: not yet translated.
---   - FILTER NOT EXISTS: not yet translated (use MINUS instead, which works).
---   - Subquery + LIMIT inside outer join: not yet fully supported.
 --
 -- Namespace: https://w3c.sparql.query.test/ (unique, no interference).
 
@@ -244,9 +241,8 @@ FROM pg_ripple.sparql($$
     }
 $$);
 
--- 4.2 Subquery with LIMIT: known limitation — inner LIMIT not yet fully supported.
--- Asserts no error instead of specific row count.
-SELECT count(*) >= 0 AS subquery_inner_limit_no_error
+-- 4.2 Subquery with LIMIT: inner query narrows to top-1
+SELECT count(*) = 1 AS subquery_inner_limit
 FROM pg_ripple.sparql($$
     SELECT ?s ?name WHERE {
         ?s <https://w3c.sparql.query.test/name> ?name .
@@ -312,9 +308,8 @@ FROM pg_ripple.sparql($$
     }
 $$);
 
--- 6.4 CONTAINS / STRSTARTS / STRENDS — known limitation: not yet translated.
--- Asserts no error instead of specific row count.
-SELECT count(*) >= 0 AS fn_string_predicates_no_error
+-- 6.4 CONTAINS / STRSTARTS / STRENDS
+SELECT count(*) = 1 AS fn_string_predicates
 FROM pg_ripple.sparql($$
     SELECT ?name WHERE {
         ?s <https://w3c.sparql.query.test/name> ?name .
@@ -322,9 +317,8 @@ FROM pg_ripple.sparql($$
     }
 $$);
 
--- 6.5 REGEX — known limitation: REGEX in FILTER not yet translated.
--- Asserts no error instead of specific row count.
-SELECT count(*) >= 0 AS fn_regex_no_error
+-- 6.5 REGEX
+SELECT count(*) = 2 AS fn_regex
 FROM pg_ripple.sparql($$
     SELECT ?name WHERE {
         ?s <https://w3c.sparql.query.test/name> ?name .
@@ -377,9 +371,8 @@ $$);
 -- 7. Negation: NOT EXISTS and MINUS
 -- ══════════════════════════════════════════════════════════════════════════════
 
--- 7.1 NOT EXISTS — known limitation: FILTER NOT EXISTS not yet translated.
--- Use MINUS instead (see 7.2 which passes). Asserts no error.
-SELECT count(*) >= 0 AS neg_not_exists_no_error
+-- 7.1 NOT EXISTS: persons with NO email
+SELECT count(*) = 2 AS neg_not_exists
 FROM pg_ripple.sparql($$
     SELECT ?s WHERE {
         ?s <https://w3c.sparql.query.test/type> <https://w3c.sparql.query.test/Person> .

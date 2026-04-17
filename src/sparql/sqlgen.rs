@@ -29,7 +29,7 @@ use std::collections::HashMap;
 use pgrx::datum::DatumWithOid;
 use pgrx::prelude::*;
 use spargebra::algebra::{
-    AggregateExpression, AggregateFunction, Expression, GraphPattern, OrderExpression,
+    AggregateExpression, AggregateFunction, Expression, Function, GraphPattern, OrderExpression,
 };
 use spargebra::term::{GroundTerm, Literal, NamedNodePattern, TermPattern};
 
@@ -669,9 +669,71 @@ fn translate_pattern(pattern: &GraphPattern, ctx: &mut Ctx) -> Fragment {
         GraphPattern::Distinct { inner } | GraphPattern::Reduced { inner } => {
             translate_pattern(inner, ctx)
         }
-        GraphPattern::Slice { inner, .. } | GraphPattern::OrderBy { inner, .. } => {
-            translate_pattern(inner, ctx)
+        GraphPattern::Slice { .. } => {
+            // Nested subquery with LIMIT/OFFSET: extract modifiers from this
+            // node and wrap the inner translation in a SQL subquery so the
+            // LIMIT is applied before the outer query joins with the result.
+            let mods = extract_modifiers(pattern);
+            let inner_frag = translate_pattern(mods.pattern, ctx);
+
+            // Which variables to project: either the declared set or all bound.
+            let keep_vars: Vec<String> = if let Some(ref pv) = mods.project_vars {
+                pv.clone()
+            } else {
+                inner_frag.bindings.keys().cloned().collect()
+            };
+
+            let cols: Vec<String> = keep_vars
+                .iter()
+                .filter_map(|v| {
+                    inner_frag
+                        .bindings
+                        .get(v)
+                        .map(|col| format!("{col} AS _sl_{v}"))
+                })
+                .collect();
+
+            let select_clause = if cols.is_empty() {
+                "1 AS _sl_dummy".to_owned()
+            } else {
+                cols.join(", ")
+            };
+
+            let order_clause = if !mods.order_exprs.is_empty() {
+                let os = translate_order_by(&mods.order_exprs, &inner_frag.bindings);
+                if os.is_empty() {
+                    String::new()
+                } else {
+                    format!("ORDER BY {os}")
+                }
+            } else {
+                String::new()
+            };
+
+            let limit_str = mods.limit.map_or(String::new(), |n| format!("LIMIT {n}"));
+            let offset_str = if mods.offset > 0 {
+                format!("OFFSET {}", mods.offset)
+            } else {
+                String::new()
+            };
+
+            let subq = format!(
+                "(SELECT {select_clause} FROM {} {} {order_clause} {limit_str} {offset_str})",
+                inner_frag.build_from(),
+                inner_frag.build_where()
+            );
+
+            let alias = ctx.next_alias();
+            let mut frag = Fragment::empty();
+            frag.from_items.push((alias.clone(), subq));
+            for v in &keep_vars {
+                if inner_frag.bindings.contains_key(v) {
+                    frag.bindings.insert(v.clone(), format!("{alias}._sl_{v}"));
+                }
+            }
+            frag
         }
+        GraphPattern::OrderBy { inner, .. } => translate_pattern(inner, ctx),
 
         // ── Property path (p+, p*, p?, p/q, p|q, ^p, !(p)) ────────────────────
         GraphPattern::Path {
@@ -1600,8 +1662,92 @@ fn translate_expr(
             }
         }
 
+        // ── String filter functions ───────────────────────────────────────────
+        // Variables hold dictionary IDs; decode to text via a correlated subquery.
+        // Literals use their raw lexical value as a SQL string.
+        Expression::FunctionCall(Function::Contains, args) if args.len() >= 2 => {
+            let hay = expr_as_text_sql(&args[0], bindings)?;
+            let needle = expr_as_text_sql(&args[1], bindings)?;
+            Some(format!("(strpos({hay}, {needle}) > 0)"))
+        }
+
+        Expression::FunctionCall(Function::StrStarts, args) if args.len() >= 2 => {
+            let str_expr = expr_as_text_sql(&args[0], bindings)?;
+            let prefix = expr_as_text_sql(&args[1], bindings)?;
+            Some(format!("(starts_with({str_expr}, {prefix}))"))
+        }
+
+        Expression::FunctionCall(Function::StrEnds, args) if args.len() >= 2 => {
+            let str_expr = expr_as_text_sql(&args[0], bindings)?;
+            let suffix = expr_as_text_sql(&args[1], bindings)?;
+            Some(format!("(right({str_expr}, length({suffix})) = {suffix})"))
+        }
+
+        Expression::FunctionCall(Function::Regex, args) if args.len() >= 2 => {
+            let str_expr = expr_as_text_sql(&args[0], bindings)?;
+            let pattern = expr_as_text_sql(&args[1], bindings)?;
+            // Optional third argument: flags. "i" means case-insensitive.
+            let case_insensitive = args
+                .get(2)
+                .is_some_and(|f| matches!(f, Expression::Literal(fl) if fl.value().contains('i')));
+            if case_insensitive {
+                Some(format!("({str_expr} ~* {pattern})"))
+            } else {
+                Some(format!("({str_expr} ~ {pattern})"))
+            }
+        }
+
+        // ── EXISTS / NOT EXISTS ───────────────────────────────────────────────
+        // NOT EXISTS is Expression::Not(Expression::Exists(...)), handled via
+        // the existing Not arm which recursively calls translate_expr.
+        Expression::Exists(pattern) => {
+            let inner_frag = translate_pattern(pattern, ctx);
+
+            // Correlate inner variables against outer bindings.
+            let mut all_conditions = inner_frag.conditions.clone();
+            for (var, inner_col) in &inner_frag.bindings {
+                if let Some(outer_col) = bindings.get(var.as_str()) {
+                    all_conditions.push(format!("{inner_col} = {outer_col}"));
+                }
+            }
+
+            let where_clause = if all_conditions.is_empty() {
+                String::new()
+            } else {
+                format!("WHERE {}", all_conditions.join(" AND "))
+            };
+
+            let from_clause = inner_frag.build_from();
+            Some(format!(
+                "(EXISTS (SELECT 1 FROM {from_clause} {where_clause}))"
+            ))
+        }
+
         // Unsupported expressions: skip (safe — omitting a FILTER is conservative,
         // potentially returns more rows than strictly correct but never corrupts data).
+        _ => None,
+    }
+}
+
+/// Returns a SQL text expression for `expr`.
+///
+/// Variables hold dictionary IDs — decoded via a correlated subquery against
+/// `_pg_ripple.dictionary`.  Literals use their raw lexical value as a SQL
+/// string constant.  Returns `None` for expressions that cannot be decoded to
+/// text (e.g. complex sub-expressions).
+fn expr_as_text_sql(expr: &Expression, bindings: &HashMap<String, String>) -> Option<String> {
+    match expr {
+        Expression::Variable(v) => {
+            let col = bindings.get(v.as_str())?;
+            Some(format!(
+                "(SELECT _dict.value FROM _pg_ripple.dictionary _dict WHERE _dict.id = {col})"
+            ))
+        }
+        Expression::Literal(lit) => {
+            let val = lit.value();
+            let escaped = val.replace('\'', "''");
+            Some(format!("'{escaped}'"))
+        }
         _ => None,
     }
 }

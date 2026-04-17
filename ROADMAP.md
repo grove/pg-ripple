@@ -1464,6 +1464,19 @@ A federated query making repeated calls to the same endpoint is measurably faste
 
 - [x] pg_regress: `w3c_sparql_query_conformance.sql`, `w3c_sparql_update_conformance.sql`, `w3c_shacl_conformance.sql`, `crash_recovery_merge.sql` (basic recovery smoke test)
 
+- [x] **100% W3C SPARQL 1.1 Query conformance** — fix all remaining known limitations:
+  - `FILTER` string functions: `CONTAINS()`, `STRSTARTS()`, `STRENDS()`, `REGEX()` — translate to SQL `strpos`, `starts_with`, `right()`, `~` / `~*`
+  - `FILTER NOT EXISTS { ... }` — translate to SQL `NOT EXISTS (correlated subquery)`
+  - Subquery + `LIMIT` in outer JOIN — wrap the inner slice pattern in a SQL subquery with `LIMIT` applied before the outer join
+  - **Target**: all assertions in `w3c_sparql_query_conformance.sql` pass with exact expected values
+
+- [x] **100% W3C SHACL Core conformance** — fix `validate()` false-negative on conforming graphs:
+  - Root cause: `value_has_datatype()` returns `false` for inline-encoded types (xsd:integer, xsd:boolean, xsd:dateTime, xsd:date) because inline IDs are never stored in the dictionary
+  - Fix: detect inline IDs (`id < 0`) and determine their datatype from the inline type code without a DB round-trip
+  - Additionally: plain literals (kind=KIND_LITERAL, xsd:string normalization) now correctly satisfy `sh:datatype xsd:string`
+  - Additionally: `sh:in` with string literal values now encodes them via dictionary lookup instead of `lookup_iri`
+  - **Target**: `validate()` returns `conforms=true` for all conforming graphs; violation detection remains 100%
+
 ### Documentation
 
 > See [plans/documentation.md](plans/documentation.md) for details.

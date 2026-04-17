@@ -159,7 +159,7 @@ SELECT pg_ripple.insert_triple(
 SELECT (pg_ripple.validate() ->> 'conforms')::boolean = true AS violation_resolved;
  violation_resolved 
 --------------------
- f
+ t
 (1 row)
 
 -- ─── 9. shape_iri_to_table_suffix correctness (via catalog insert test) ──────

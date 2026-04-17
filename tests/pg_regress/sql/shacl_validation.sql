@@ -70,11 +70,11 @@ SELECT pg_ripple.insert_triple(
     '<http://shacl.test/Person>'
 ) > 0 AS bob_type_ok;
 
--- Bob has name with plain literal (no datatype) — should violate sh:datatype xsd:string.
+-- Bob has name with wrong datatype (integer instead of xsd:string) — must violate.
 SELECT pg_ripple.insert_triple(
     '<http://shacl.test/bob>',
     '<http://shacl.test/name>',
-    '"Bob"'
+    '"99"^^<http://www.w3.org/2001/XMLSchema#integer>'
 ) > 0 AS bob_name_ok;
 
 -- validate() should find at least one violation for Bob's name.

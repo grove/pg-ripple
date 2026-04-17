@@ -995,10 +995,10 @@ fn validate_property_shape(
                         }
                     }
                 }
-                ShapeConstraint::In(allowed_iris) => {
-                    let allowed_ids: Vec<i64> = allowed_iris
+                ShapeConstraint::In(allowed_values) => {
+                    let allowed_ids: Vec<i64> = allowed_values
                         .iter()
-                        .filter_map(|iri| crate::dictionary::lookup_iri(iri))
+                        .filter_map(|val| encode_shacl_in_value(val))
                         .collect();
                     let value_ids = get_value_ids(focus, path_id, graph_id);
                     for v_id in value_ids {
@@ -1383,7 +1383,72 @@ fn get_objects_of_predicate(pred_id: i64, graph_id: i64) -> Vec<i64> {
     })
 }
 
+/// Encode a value token from a `sh:in` list into a dictionary ID for lookup.
+///
+/// Tokens that start with `"` are treated as string literals (plain, typed, or
+/// language-tagged). All other tokens are treated as IRIs (read-only lookup).
+/// Returns `None` if the value is not in the dictionary.
+fn encode_shacl_in_value(val: &str) -> Option<i64> {
+    if let Some(inner) = val.strip_prefix('"') {
+        // String literal: extract the lexical value between the first pair of
+        // double quotes, then check for ^^<datatype> or @lang suffix.
+        let close = inner.rfind('"')?;
+        let str_val = &inner[..close];
+        let rest = inner[close + 1..].trim();
+        if let Some(dt_rest) = rest.strip_prefix("^^<") {
+            let dt = dt_rest.trim_end_matches('>');
+            // Use encode_typed_literal (safe: called after data load, value
+            // already exists; if not, a new entry is created harmlessly).
+            Some(crate::dictionary::encode_typed_literal(str_val, dt))
+        } else if let Some(lang_rest) = rest.strip_prefix('@') {
+            let lang = lang_rest.split_whitespace().next().unwrap_or(lang_rest);
+            Some(crate::dictionary::encode_lang_literal(str_val, lang))
+        } else {
+            // Plain string literal: read-only lookup.
+            Spi::get_one_with_args::<i64>(
+                "SELECT id FROM _pg_ripple.dictionary WHERE value = $1 AND kind = 2 \
+                 AND lang IS NULL AND datatype IS NULL",
+                &[DatumWithOid::from(str_val)],
+            )
+            .ok()
+            .flatten()
+        }
+    } else {
+        // IRI: standard read-only lookup.
+        crate::dictionary::lookup_iri(val)
+    }
+}
+
 fn value_has_datatype(value_id: i64, dt_iri: &str) -> bool {
+    use crate::dictionary::inline;
+
+    // Inline-encoded values (bit 63 = 1) are never stored in the dictionary.
+    // Determine their datatype directly from the inline type code.
+    if inline::is_inline(value_id) {
+        let expected = match inline::inline_type(value_id) {
+            inline::TYPE_INTEGER => "http://www.w3.org/2001/XMLSchema#integer",
+            inline::TYPE_BOOLEAN => "http://www.w3.org/2001/XMLSchema#boolean",
+            inline::TYPE_DATETIME => "http://www.w3.org/2001/XMLSchema#dateTime",
+            inline::TYPE_DATE => "http://www.w3.org/2001/XMLSchema#date",
+            _ => return false,
+        };
+        return dt_iri == expected;
+    }
+
+    // Plain literals (kind=KIND_LITERAL, datatype=NULL) are implicitly xsd:string
+    // per the RDF specification.  The N-Triples loader stores `"foo"^^xsd:string`
+    // as a plain literal, so both kinds satisfy sh:datatype xsd:string.
+    if dt_iri == "http://www.w3.org/2001/XMLSchema#string" {
+        return Spi::get_one_with_args::<bool>(
+            "SELECT EXISTS(\
+               SELECT 1 FROM _pg_ripple.dictionary \
+               WHERE id = $1 AND (datatype = $2 OR (kind = 2 AND datatype IS NULL)))",
+            &[DatumWithOid::from(value_id), DatumWithOid::from(dt_iri)],
+        )
+        .unwrap_or(None)
+        .unwrap_or(false);
+    }
+
     Spi::get_one_with_args::<bool>(
         "SELECT EXISTS(SELECT 1 FROM _pg_ripple.dictionary WHERE id = $1 AND datatype = $2)",
         &[DatumWithOid::from(value_id), DatumWithOid::from(dt_iri)],
