@@ -84,7 +84,7 @@ cargo pgrx install --pg-config $(which pg_config)
 
 ## Git & GitHub Workflow
 
-After editing files, output the git commands to stage and commit the changes. Summarize the changes in the commit message. Group discrete changes into separate commits when appropriate. **Do not run `git commit` unless the user explicitly says it is fine.**
+After editing files, stage and commit the changes. Summarize the changes in the commit message. Group discrete changes into separate commits when appropriate.
 
 Never create a new branch unless the current branch is `main`.
 
