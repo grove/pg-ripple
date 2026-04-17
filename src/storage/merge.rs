@@ -223,6 +223,16 @@ pub fn merge_predicate(pred_id: i64) -> i64 {
     let delta = format!("_pg_ripple.vp_{pred_id}_delta");
     let tombs = format!("_pg_ripple.vp_{pred_id}_tombstones");
 
+    // Capture the max statement ID at merge-start (v0.22.0 C-4).
+    // This prevents "tombstone resurrection": deletes that commit during the merge
+    // will have statement IDs > max_sid_at_snapshot, so their tombstones will not
+    // be truncated in this cycle, surviving to the next merge cycle where they can
+    // correctly filter out the resurrected deletes.
+    let max_sid_at_snapshot: i64 =
+        Spi::get_one_with_args::<i64>("SELECT currval('_pg_ripple.statement_id_seq')", &[])
+            .unwrap_or_else(|e| pgrx::error!("merge: capture max_sid error: {e}"))
+            .unwrap_or(0);
+
     // Drop any leftover _main_new from a previous failed merge.
     Spi::run_with_args(&format!("DROP TABLE IF EXISTS {main_new}"), &[])
         .unwrap_or_else(|e| pgrx::error!("merge: drop leftover main_new error: {e}"));
@@ -301,28 +311,30 @@ pub fn merge_predicate(pred_id: i64) -> i64 {
     )
     .unwrap_or_else(|e| pgrx::error!("merge: rename main_new error: {e}"));
 
-    // Step 4: truncate delta and tombstones.
-    Spi::run_with_args(&format!("TRUNCATE {delta}, {tombs}"), &[])
-        .unwrap_or_else(|e| pgrx::error!("merge: truncate delta/tombstones error: {e}"));
+    // Step 4: truncate delta; delete only older tombstones (v0.22.0 C-4).
+    // Truncate the entire delta table (all rows have been merged into main_new).
+    Spi::run_with_args(&format!("TRUNCATE {delta}"), &[])
+        .unwrap_or_else(|e| pgrx::error!("merge: truncate delta error: {e}"));
 
-    // Step 5: recreate the view (may reference stale OIDs after rename).
-    let view = format!("_pg_ripple.vp_{pred_id}");
+    // Delete only tombstones with i <= max_sid_at_snapshot. Newer tombstones
+    // (from deletes that committed during this merge cycle) survive to the next
+    // merge cycle, preventing the "tombstone resurrection" race condition where
+    // a delete could be missed if it happened after main_new was created but
+    // before this merge cycle started.
     Spi::run_with_args(
-        &format!(
-            "CREATE OR REPLACE VIEW {view} AS \
-             SELECT m.s, m.o, m.g, m.i, m.source \
-             FROM {main} m \
-             LEFT JOIN {tombs} t ON m.s = t.s AND m.o = t.o AND m.g = t.g \
-             WHERE t.s IS NULL \
-             UNION ALL \
-             SELECT d.s, d.o, d.g, d.i, d.source \
-             FROM {delta} d"
-        ),
-        &[],
+        &format!("DELETE FROM {tombs} WHERE i <= $1"),
+        &[DatumWithOid::from(max_sid_at_snapshot)],
     )
-    .unwrap_or_else(|e| pgrx::error!("merge: recreate view error: {e}"));
+    .unwrap_or_else(|e| pgrx::error!("merge: delete old tombstones error: {e}"));
 
-    // Step 6: ANALYZE so planner has fresh stats.
+    // Step 5: ANALYZE so planner has fresh stats.
+    // NOTE: Do NOT recreate the view after rename (v0.22.0 C-3).
+    // The view vp_{pred_id} is created once when the predicate is promoted
+    // to have its own VP table. After renaming vp_{pred_id}_main_new to
+    // vp_{pred_id}_main, PostgreSQL's name resolution automatically routes
+    // queries through the renamed table, closing the atomicity window.
+    // Recreating the view would introduce a gap where concurrent queries
+    // could fail with "table not found" errors.
     Spi::run_with_args(&format!("ANALYZE {main}"), &[])
         .unwrap_or_else(|e| pgrx::error!("merge: ANALYZE error: {e}"));
 
