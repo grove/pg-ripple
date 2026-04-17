@@ -1,4 +1,4 @@
-//! Shared memory for pg_ripple v0.6.0 (HTAP Architecture).
+//! Shared memory for pg_ripple v0.6.0+ (HTAP Architecture).
 //!
 //! # Shared objects
 //!
@@ -8,8 +8,8 @@
 //! | `LAYOUT_VERSION` | `PgAtomic<AtomicU32>` | Slot-versioning magic for safe upgrades |
 //! | `TOTAL_DELTA_ROWS` | `PgAtomic<AtomicI64>` | Running count of unmerged delta rows |
 //! | `DELTA_BLOOM` | `PgLwLock<[u64; 16]>` | 1024-bit bloom filter: which predicates have delta rows |
-//! | `ENCODE_CACHE_S0..S3` | `PgLwLock<EncodeCacheShard>` | Sharded shared-memory encode cache |
-//! | `CACHE_USED_SLOTS` | `PgAtomic<AtomicI64>` | Count of occupied encode-cache slots |
+//! | `ENCODE_CACHE_S0..S3` | `PgLwLock<EncodeCacheShard>` | 4-way set-associative shared-memory cache (v0.22.0+) |
+//! | `CACHE_STATS` | `PgAtomic<CacheStats>` | Hit/miss/eviction counters |
 //!
 //! ## Bloom filter (delta existence)
 //!
@@ -23,15 +23,18 @@
 //! positions; a bit is set when either or both positions are set.  On merge the
 //! two bits for that predicate are cleared so subsequent reads can skip delta.
 //!
-//! ## Encode cache (shared-memory dictionary)
+//! ## Encode cache (shared-memory dictionary, v0.22.0+)
 //!
-//! Four 1024-slot shards keyed on `hash128 >> 62` (top 2 bits).  Each slot
-//! stores `([hash_lo: u64, hash_hi: u64], id: i64)`.  An empty slot has
-//! `[0, 0]` (XXH3-128 of any real term is astronomically unlikely to be zero).
+//! **4-way set-associative design**: 1024 sets × 4 ways per set.  Each way is
+//! `(hash128_scoped: u128, id: i64, age: u8)`.  Empty slots have id == 0.
+//!
+//! Hashing: set index = `(hash128_scoped >> 126) & 0x3FF` (top 10 bits after
+//! database-scoping).  LRU within each set: on hit, age is reset to 0; on insert,
+//! the way with the highest age is evicted and replaced.  Age increments on each
+//! miss within that set.
 //!
 //! Lookups use a **shared** LW lock (many readers); inserts use **exclusive**.
-//! The hit rate is the primary performance metric; eviction is write-through
-//! (new entries overwrite old entries in the same slot — no explicit eviction).
+//! Hit rate is tracked in `CACHE_STATS` for monitoring.
 //!
 //! These objects are only available when the extension is loaded via
 //! `shared_preload_libraries`.  When loaded via `CREATE EXTENSION` (without
@@ -40,25 +43,27 @@
 
 use pgrx::prelude::*;
 use pgrx::{PgAtomic, PgLwLock, pg_shmem_init};
-use std::sync::atomic::{AtomicBool, AtomicI32, AtomicI64, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, AtomicI64, AtomicU32, AtomicU64, Ordering};
 
-// ─── Encode cache types ───────────────────────────────────────────────────────
+// ─── Encode cache types (v0.22.0: 4-way set-associative) ───────────────────────
 
-/// One slot in the shared-memory encode cache.
-/// Layout: `([hash_lo, hash_hi], id)`.  Empty when hash == [0, 0].
-pub type EncodeSlot = ([u64; 2], i64);
+/// One way in a set: stored as u128 (hash) with id in a separate array.
+/// Packing: `hash | (age << 126)` uses top 2 bits for age (0..3).
+/// id == 0 means empty.
+/// One set: 4 ways per set.
+pub type EncodeSet = [u128; 4];
 
-/// One shard: 1024 direct-mapped slots.
-pub type EncodeCacheShard = [EncodeSlot; ENCODE_SHARD_SLOTS];
+/// Shard: all sets for this shard index.
+pub type EncodeCacheShard = [EncodeSet; ENCODE_CACHE_SETS];
 
-/// Number of slots in each encode-cache shard.
-pub const ENCODE_SHARD_SLOTS: usize = 1024;
+/// Parallel array: stores i64 IDs corresponding to ways.
+pub type EncodeCacheIds = [[i64; 4]; ENCODE_CACHE_SETS];
 
-/// Number of encode-cache shards (must be a power of two ≤ 4).
-pub const ENCODE_SHARDS: usize = 4;
+/// Number of sets per shard (1024).
+pub const ENCODE_CACHE_SETS: usize = 1024;
 
 /// Total encode-cache capacity across all shards.
-pub const ENCODE_CACHE_CAPACITY: usize = ENCODE_SHARD_SLOTS * ENCODE_SHARDS;
+pub const ENCODE_CACHE_CAPACITY: usize = ENCODE_CACHE_SETS * 4;
 
 // ─── Layout version guard ─────────────────────────────────────────────────────
 
@@ -86,20 +91,23 @@ pub static TOTAL_DELTA_ROWS: PgAtomic<AtomicI64> =
 /// Indexed by two multiplicative hashes of the predicate ID.
 pub static DELTA_BLOOM: PgLwLock<[u64; 16]> = unsafe { PgLwLock::new(c"pg_ripple_delta_bloom") };
 
-// ─── Shared-memory encode cache (4 shards × 1024 slots) ─────────────────────
+// ─── Shared-memory encode cache (1 shard × 1024 sets × 4 ways = 4096 capacity) ─
 
 pub static ENCODE_CACHE_S0: PgLwLock<EncodeCacheShard> =
     unsafe { PgLwLock::new(c"pg_ripple_ec_s0") };
-pub static ENCODE_CACHE_S1: PgLwLock<EncodeCacheShard> =
-    unsafe { PgLwLock::new(c"pg_ripple_ec_s1") };
-pub static ENCODE_CACHE_S2: PgLwLock<EncodeCacheShard> =
-    unsafe { PgLwLock::new(c"pg_ripple_ec_s2") };
-pub static ENCODE_CACHE_S3: PgLwLock<EncodeCacheShard> =
-    unsafe { PgLwLock::new(c"pg_ripple_ec_s3") };
 
-/// Running count of occupied encode-cache slots (for budget utilization).
-pub static CACHE_USED_SLOTS: PgAtomic<AtomicI64> =
-    unsafe { PgAtomic::new(c"pg_ripple_cache_used") };
+pub static ENCODE_CACHE_IDS: PgLwLock<EncodeCacheIds> =
+    unsafe { PgLwLock::new(c"pg_ripple_ec_ids") };
+
+/// Cache statistics: hits counter.
+pub static CACHE_HITS: PgAtomic<AtomicU64> = unsafe { PgAtomic::new(c"pg_ripple_cache_hits") };
+
+/// Cache statistics: misses counter.
+pub static CACHE_MISSES: PgAtomic<AtomicU64> = unsafe { PgAtomic::new(c"pg_ripple_cache_misses") };
+
+/// Cache statistics: evictions counter.
+pub static CACHE_EVICTIONS: PgAtomic<AtomicU64> =
+    unsafe { PgAtomic::new(c"pg_ripple_cache_evictions") };
 
 // ─── Initialisation guard ────────────────────────────────────────────────────
 
@@ -120,15 +128,16 @@ pub fn init() {
     pg_shmem_init!(MERGE_WORKER_PID = AtomicI32::new(0));
     pg_shmem_init!(TOTAL_DELTA_ROWS = AtomicI64::new(0));
 
-    // v0.6.0: Bloom filter + encode cache shards.
+    // v0.6.0: Bloom filter.
     pg_shmem_init!(DELTA_BLOOM);
-    // Arrays of 1024 elements exceed Rust's Default-for-array limit (≤32) in
-    // the current compiler, so we provide explicit zero initialisers.
-    pg_shmem_init!(ENCODE_CACHE_S0 = [([0u64, 0u64], 0i64); ENCODE_SHARD_SLOTS]);
-    pg_shmem_init!(ENCODE_CACHE_S1 = [([0u64, 0u64], 0i64); ENCODE_SHARD_SLOTS]);
-    pg_shmem_init!(ENCODE_CACHE_S2 = [([0u64, 0u64], 0i64); ENCODE_SHARD_SLOTS]);
-    pg_shmem_init!(ENCODE_CACHE_S3 = [([0u64, 0u64], 0i64); ENCODE_SHARD_SLOTS]);
-    pg_shmem_init!(CACHE_USED_SLOTS = AtomicI64::new(0));
+
+    // v0.22.0: 4-way set-associative encode cache.
+    // Initialize: all ways in all sets are empty (hash=0, id=0).
+    pg_shmem_init!(ENCODE_CACHE_S0 = [[0u128; 4]; ENCODE_CACHE_SETS]);
+    pg_shmem_init!(ENCODE_CACHE_IDS = [[0i64; 4]; ENCODE_CACHE_SETS]);
+    pg_shmem_init!(CACHE_HITS = AtomicU64::new(0));
+    pg_shmem_init!(CACHE_MISSES = AtomicU64::new(0));
+    pg_shmem_init!(CACHE_EVICTIONS = AtomicU64::new(0));
 
     // Register a FINAL shmem_startup_hook that sets SHMEM_READY = true only
     // AFTER all three PgAtomic startup hooks above have fired and the inner
@@ -295,98 +304,77 @@ pub fn reset_bloom_filter() {
 fn db_scoped_hash(hash128: u128) -> u128 {
     let db_oid = u32::from(unsafe { pg_sys::MyDatabaseId }) as u128;
     // Multiplicative mixing spreads the OID bits across the hash so that
-    // shard selection (top 2 bits) and slot selection (low 10 bits) both
-    // change when the database changes.
+    // set selection and way selection both change when the database changes.
     hash128 ^ db_oid.wrapping_mul(0x9E3779B97F4A7C15)
 }
 
-/// Select the shard for `hash128` based on the top 2 bits.
-fn shard_for(hash128: u128) -> usize {
-    ((hash128 >> 126) as usize) & 3
+/// Compute the set index for the 4-way set-associative cache.
+/// Uses the top 10 bits of the scoped hash to select one of 1024 sets.
+fn set_index(hash128: u128) -> usize {
+    ((hash128 >> 118) as usize) & (ENCODE_CACHE_SETS - 1)
 }
 
-/// Compute the slot index within a shard.
-fn slot_for(hash128: u128) -> usize {
-    ((hash128 as u64) as usize) & (ENCODE_SHARD_SLOTS - 1)
+/// Extract the age (2-bit field) from a packed cache entry.
+#[inline]
+fn extract_age(way_hash: u128) -> u8 {
+    ((way_hash >> 126) as u8) & 3
 }
 
-/// Split a u128 hash into (lo: u64, hi: u64) for slot storage.
-fn split_hash(hash128: u128) -> [u64; 2] {
-    [hash128 as u64, (hash128 >> 64) as u64]
-}
-
-/// Macro to dispatch to the correct shard static.
-macro_rules! with_shard_shared {
-    ($shard:expr, $body:expr) => {
-        match $shard {
-            0 => {
-                let guard = ENCODE_CACHE_S0.share();
-                $body(&*guard)
-            }
-            1 => {
-                let guard = ENCODE_CACHE_S1.share();
-                $body(&*guard)
-            }
-            2 => {
-                let guard = ENCODE_CACHE_S2.share();
-                $body(&*guard)
-            }
-            _ => {
-                let guard = ENCODE_CACHE_S3.share();
-                $body(&*guard)
-            }
-        }
-    };
-}
-
-macro_rules! with_shard_exclusive {
-    ($shard:expr, $body:expr) => {
-        match $shard {
-            0 => {
-                let mut guard = ENCODE_CACHE_S0.exclusive();
-                $body(&mut *guard)
-            }
-            1 => {
-                let mut guard = ENCODE_CACHE_S1.exclusive();
-                $body(&mut *guard)
-            }
-            2 => {
-                let mut guard = ENCODE_CACHE_S2.exclusive();
-                $body(&mut *guard)
-            }
-            _ => {
-                let mut guard = ENCODE_CACHE_S3.exclusive();
-                $body(&mut *guard)
-            }
-        }
-    };
+/// Pack age into the top 2 bits of a hash.
+#[inline]
+fn pack_age(hash: u128, age: u8) -> u128 {
+    (hash & 0x3FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF) | ((age as u128) << 126)
 }
 
 /// Look up a hash128 in the shared-memory encode cache.
 ///
 /// Returns `Some(id)` on a hit, `None` on a miss or when shmem is not ready.
+/// On hit, resets the age field of the matching way to 0 (MRU).
+/// On miss, increments age of all other ways in the set.
 pub fn encode_cache_lookup(hash128: u128) -> Option<i64> {
     if !SHMEM_READY.load(Ordering::Acquire) {
         return None;
     }
     let scoped = db_scoped_hash(hash128);
-    let shard = shard_for(scoped);
-    let slot = slot_for(scoped);
-    let expected = split_hash(scoped);
-    with_shard_shared!(shard, |cache: &EncodeCacheShard| {
-        let (stored_hash, stored_id) = cache[slot];
-        if stored_hash == expected && stored_id != 0 {
-            Some(stored_id)
-        } else {
-            None
+    let set_idx = set_index(scoped);
+
+    // Clear top 2 bits from the search key (we'll match on the lower 126 bits)
+    let search_hash = scoped & 0x3FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF;
+
+    let mut guard_hashes = ENCODE_CACHE_S0.exclusive();
+    let mut guard_ids = ENCODE_CACHE_IDS.exclusive();
+
+    let set_hashes = &mut guard_hashes[set_idx];
+    let set_ids = &mut guard_ids[set_idx];
+
+    // Search for a matching way
+    for (way_idx, way_hash) in set_hashes.iter_mut().enumerate() {
+        let stored_hash = *way_hash & 0x3FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF;
+        if stored_hash == search_hash && set_ids[way_idx] != 0 {
+            // Hit: reset age to 0 (MRU)
+            *way_hash = pack_age(search_hash, 0);
+            CACHE_HITS.get().fetch_add(1, Ordering::Relaxed);
+            return Some(set_ids[way_idx]);
         }
-    })
+    }
+
+    // Miss: increment age of all occupied ways
+    for (way_idx, way_hash) in set_hashes.iter_mut().enumerate() {
+        if set_ids[way_idx] != 0 {
+            let age = extract_age(*way_hash);
+            if age < 3 {
+                *way_hash = pack_age(*way_hash & 0x3FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF, age + 1);
+            }
+        }
+    }
+    CACHE_MISSES.get().fetch_add(1, Ordering::Relaxed);
+    None
 }
 
 /// Insert a (hash128, id) pair into the shared-memory encode cache.
 ///
-/// Uses direct-mapped eviction: the new entry unconditionally overwrites the
-/// existing occupant of the slot (no LRU bookkeeping needed).
+/// 4-way set-associative eviction: finds the way with the highest age
+/// and overwrites it. If an empty slot exists, uses that instead.
 ///
 /// No-op when shmem is not initialised.
 pub fn encode_cache_insert(hash128: u128, id: i64) {
@@ -394,26 +382,68 @@ pub fn encode_cache_insert(hash128: u128, id: i64) {
         return;
     }
     let scoped = db_scoped_hash(hash128);
-    let shard = shard_for(scoped);
-    let slot = slot_for(scoped);
-    let hash_parts = split_hash(scoped);
-    with_shard_exclusive!(shard, |cache: &mut EncodeCacheShard| {
-        let was_empty = cache[slot].0 == [0u64; 2];
-        cache[slot] = (hash_parts, id);
-        if was_empty {
-            CACHE_USED_SLOTS.get().fetch_add(1, Ordering::Relaxed);
+    let set_idx = set_index(scoped);
+
+    // Clear top 2 bits (they're reserved for age packing)
+    let clean_hash = scoped & 0x3FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF;
+
+    let mut guard_hashes = ENCODE_CACHE_S0.exclusive();
+    let mut guard_ids = ENCODE_CACHE_IDS.exclusive();
+
+    let set_hashes = &mut guard_hashes[set_idx];
+    let set_ids = &mut guard_ids[set_idx];
+
+    // Find an empty slot first
+    for (way_idx, &id_val) in set_ids.iter().enumerate() {
+        if id_val == 0 {
+            set_hashes[way_idx] = clean_hash; // age=0 implicitly
+            set_ids[way_idx] = id;
+            return;
         }
-    });
+    }
+
+    // No empty slot; find the way with the highest age and evict it
+    let mut victim_idx = 0;
+    let mut max_age = extract_age(set_hashes[0]);
+    for (way_idx, &hash_val) in set_hashes.iter().enumerate().skip(1) {
+        let age = extract_age(hash_val);
+        if age > max_age {
+            max_age = age;
+            victim_idx = way_idx;
+        }
+    }
+
+    set_hashes[victim_idx] = clean_hash;
+    set_ids[victim_idx] = id;
+
+    CACHE_EVICTIONS.get().fetch_add(1, Ordering::Relaxed);
 }
 
-/// Return the current encode-cache utilization as a percentage (0–100).
+/// Return cache statistics as (hits, misses, evictions, utilisation_pct).
 ///
-/// Returns 0 when shmem is not initialised.
-pub fn cache_utilization_pct() -> u8 {
+/// Returns (0, 0, 0, 0.0) when shmem is not initialised.
+pub fn get_cache_stats() -> (u64, u64, u64, f64) {
     if !SHMEM_READY.load(Ordering::Acquire) {
-        return 0;
+        return (0, 0, 0, 0.0);
     }
-    let used = CACHE_USED_SLOTS.get().load(Ordering::Relaxed);
-    let total = ENCODE_CACHE_CAPACITY as i64;
-    ((used * 100) / total.max(1)).min(100) as u8
+
+    let guard_ids = ENCODE_CACHE_IDS.share();
+
+    let hits = CACHE_HITS.get().load(Ordering::Relaxed);
+    let misses = CACHE_MISSES.get().load(Ordering::Relaxed);
+    let evictions = CACHE_EVICTIONS.get().load(Ordering::Relaxed);
+
+    // Calculate utilisation: count non-empty ways across all sets
+    let mut occupied = 0i64;
+    for set in guard_ids.iter() {
+        for &id in set.iter() {
+            if id != 0 {
+                occupied += 1;
+            }
+        }
+    }
+
+    let utilisation = (occupied as f64) / (ENCODE_CACHE_CAPACITY as f64);
+
+    (hits, misses, evictions, utilisation)
 }

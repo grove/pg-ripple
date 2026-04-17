@@ -97,7 +97,8 @@ fn flush_batch(by_predicate: &mut PredicateBatch) {
     // Back-pressure: if cache_budget > 0 and utilization > 90%, log a notice.
     let budget_mb = crate::CACHE_BUDGET_MB.get();
     if budget_mb > 0 {
-        let util_pct = crate::shmem::cache_utilization_pct();
+        let (_, _, _, utilisation) = crate::shmem::get_cache_stats();
+        let util_pct = (utilisation * 100.0) as u8;
         if util_pct > 90 {
             pgrx::warning!(
                 "pg_ripple: shared-memory encode cache is {}% full (budget: {} MB); consider running pg_ripple.compact() to reduce delta growth",

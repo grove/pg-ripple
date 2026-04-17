@@ -1292,6 +1292,26 @@ mod pg_ripple {
         crate::storage::total_triple_count()
     }
 
+    /// Return shared-memory encode cache statistics (v0.22.0+).
+    ///
+    /// Returns (hits, misses, evictions, utilisation) where:
+    /// - `hits`: count of cache hits since startup
+    /// - `misses`: count of cache misses since startup
+    /// - `evictions`: count of cache evictions since startup
+    /// - `utilisation`: fraction of cache capacity in use (0.0–1.0)
+    ///
+    /// Returns (0, 0, 0, 0.0) when shmem is not initialized.
+    #[pg_extern]
+    fn cache_stats() -> pgrx::JsonB {
+        let (hits, misses, evictions, utilisation) = crate::shmem::get_cache_stats();
+        let mut obj = serde_json::Map::new();
+        obj.insert("hits".to_string(), serde_json::json!(hits));
+        obj.insert("misses".to_string(), serde_json::json!(misses));
+        obj.insert("evictions".to_string(), serde_json::json!(evictions));
+        obj.insert("utilisation".to_string(), serde_json::json!(utilisation));
+        pgrx::JsonB(serde_json::Value::Object(obj))
+    }
+
     /// Pattern-match triples; any argument may be NULL to act as a wildcard.
     /// Queries both dedicated VP tables and vp_rare.
     /// Returns N-Triples–formatted `(s, p, o, g)` tuples.
@@ -2554,9 +2574,10 @@ mod pg_ripple {
             serde_json::json!(use_live_stats),
         );
 
-        // v0.6.0: encode cache statistics.
-        let cache_utilization_pct = crate::shmem::cache_utilization_pct() as i64;
+        // v0.22.0: encode cache statistics (4-way set-associative).
+        let (hits, misses, evictions, utilisation) = crate::shmem::get_cache_stats();
         let cache_capacity = crate::shmem::ENCODE_CACHE_CAPACITY as i64;
+        let cache_utilization_pct = (utilisation * 100.0) as i64;
         obj.insert(
             "encode_cache_capacity".to_string(),
             serde_json::json!(cache_capacity),
@@ -2564,6 +2585,12 @@ mod pg_ripple {
         obj.insert(
             "encode_cache_utilization_pct".to_string(),
             serde_json::json!(cache_utilization_pct),
+        );
+        obj.insert("encode_cache_hits".to_string(), serde_json::json!(hits));
+        obj.insert("encode_cache_misses".to_string(), serde_json::json!(misses));
+        obj.insert(
+            "encode_cache_evictions".to_string(),
+            serde_json::json!(evictions),
         );
 
         pgrx::JsonB(serde_json::Value::Object(obj))
