@@ -89,7 +89,7 @@ pub static TOTAL_DELTA_ROWS: PgAtomic<AtomicI64> =
 
 /// 1024-bit Bloom filter: which predicates may have rows in their delta tables.
 /// Indexed by two multiplicative hashes of the predicate ID.
-/// 
+///
 /// v0.22.0+: Replaced with per-bit reference counting to prevent hash collisions
 /// from causing false-negative delta skips.  Each bit position gets an 8-bit
 /// saturating counter; a bit is only cleared when its counter reaches 0.
@@ -140,7 +140,7 @@ pub fn init() {
 
     // v0.6.0: Bloom filter.
     pg_shmem_init!(DELTA_BLOOM);
-    
+
     // v0.22.0: Per-bit reference counting for bloom filter.
     pg_shmem_init!(DELTA_BLOOM_COUNTERS = [0u8; 1024]);
 
@@ -247,12 +247,12 @@ pub fn set_predicate_delta_bit(pred_id: i64) {
         return;
     }
     let (p1, p2) = bloom_bits(pred_id);
-    
+
     let mut guard_bits = DELTA_BLOOM.exclusive();
     let bits: &mut [u64; 16] = &mut guard_bits;
     bits[p1 >> 6] |= 1u64 << (p1 & 63);
     bits[p2 >> 6] |= 1u64 << (p2 & 63);
-    
+
     let mut guard_counters = DELTA_BLOOM_COUNTERS.exclusive();
     let counters: &mut [u8; 1024] = &mut guard_counters;
     // Increment both counters, saturating at 255
@@ -272,10 +272,10 @@ pub fn clear_predicate_delta_bit(pred_id: i64) {
         return;
     }
     let (p1, p2) = bloom_bits(pred_id);
-    
+
     let mut guard_counters = DELTA_BLOOM_COUNTERS.exclusive();
     let counters: &mut [u8; 1024] = &mut guard_counters;
-    
+
     // Decrement counters
     if counters[p1] > 0 {
         counters[p1] -= 1;
@@ -283,10 +283,10 @@ pub fn clear_predicate_delta_bit(pred_id: i64) {
     if counters[p2] > 0 {
         counters[p2] -= 1;
     }
-    
+
     let mut guard_bits = DELTA_BLOOM.exclusive();
     let bits: &mut [u64; 16] = &mut guard_bits;
-    
+
     // Only clear the bits when their counters reach 0
     if counters[p1] == 0 {
         bits[p1 >> 6] &= !(1u64 << (p1 & 63));
