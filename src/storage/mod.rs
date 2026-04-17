@@ -438,8 +438,16 @@ pub fn insert_triple(s: &str, p: &str, o: &str, g: i64) -> i64 {
     // Fast path: dedicated VP table (HTAP split) already exists — insert to delta.
     if let Some(_view) = get_dedicated_vp_table(p_id) {
         let delta = format!("_pg_ripple.vp_{p_id}_delta");
+        // Use ON CONFLICT DO UPDATE to get the existing row's ID if it already exists.
+        // This handles UNIQUE (s, o, g) constraint (v0.22.0 H-6).
+        // If the triple already exists in delta, we return its existing statement ID.
+        // This prevents duplicate triples across main+delta merge boundaries.
         let sid = Spi::get_one_with_args::<i64>(
-            &format!("INSERT INTO {delta} (s, o, g) VALUES ($1, $2, $3) RETURNING i"),
+            &format!(
+                "INSERT INTO {delta} (s, o, g) VALUES ($1, $2, $3) \
+                 ON CONFLICT (s, o, g) DO UPDATE SET i = EXCLUDED.i \
+                 RETURNING i"
+            ),
             &[
                 DatumWithOid::from(s_id),
                 DatumWithOid::from(o_id),
@@ -490,8 +498,13 @@ pub fn insert_encoded_triple(s_id: i64, p_id: i64, o_id: i64, g: i64) -> i64 {
     if let Some(_view) = get_dedicated_vp_table(p_id) {
         // Route insert to delta table (HTAP write inbox).
         let delta = format!("_pg_ripple.vp_{p_id}_delta");
+        // Use ON CONFLICT DO UPDATE for UNIQUE (s, o, g) constraint (v0.22.0 H-6).
         let sid = Spi::get_one_with_args::<i64>(
-            &format!("INSERT INTO {delta} (s, o, g) VALUES ($1, $2, $3) RETURNING i"),
+            &format!(
+                "INSERT INTO {delta} (s, o, g) VALUES ($1, $2, $3) \
+                 ON CONFLICT (s, o, g) DO UPDATE SET i = EXCLUDED.i \
+                 RETURNING i"
+            ),
             &[
                 DatumWithOid::from(s_id),
                 DatumWithOid::from(o_id),

@@ -87,7 +87,8 @@ pub fn ensure_htap_tables(pred_id: i64) -> String {
                  o      BIGINT   NOT NULL, \
                  g      BIGINT   NOT NULL DEFAULT 0, \
                  i      BIGINT   NOT NULL DEFAULT nextval('_pg_ripple.statement_id_seq'), \
-                 source SMALLINT NOT NULL DEFAULT 0 \
+                 source SMALLINT NOT NULL DEFAULT 0, \
+                 UNIQUE (s, o, g) \
              )"
         ),
         &[],
@@ -149,17 +150,28 @@ pub fn ensure_htap_tables(pred_id: i64) -> String {
     )
     .unwrap_or_else(|e| pgrx::error!("tombstones index error: {e}"));
 
-    // View — UNION ALL of (main − tombstones) + delta.
+    // View — UNION ALL of (main − tombstones) + delta, with dedup safety net (v0.22.0 H-6).
+    // The DISTINCT ON (s, o, g) prevents a triple from appearing twice when it exists
+    // in both main and delta (e.g., if an insert was already in main before the
+    // delta UNIQUE constraint was added, or if a triple crossed a merge boundary
+    // before the constraint existed). The UNIQUE (s, o, g) constraint on delta
+    // ensures no duplicates within delta itself, and future merges will prevent
+    // main+delta duplicates via the merging process. This view definition covers
+    // historical data that may not have had the constraint when inserted.
     Spi::run_with_args(
         &format!(
             "CREATE OR REPLACE VIEW {view} AS \
-             SELECT m.s, m.o, m.g, m.i, m.source \
-             FROM {main} m \
-             LEFT JOIN {tombs} t ON m.s = t.s AND m.o = t.o AND m.g = t.g \
-             WHERE t.s IS NULL \
-             UNION ALL \
-             SELECT d.s, d.o, d.g, d.i, d.source \
-             FROM {delta} d"
+             SELECT DISTINCT ON (s, o, g) s, o, g, i, source \
+             FROM ( \
+                 SELECT m.s, m.o, m.g, m.i, m.source \
+                 FROM {main} m \
+                 LEFT JOIN {tombs} t ON m.s = t.s AND m.o = t.o AND m.g = t.g \
+                 WHERE t.s IS NULL \
+                 UNION ALL \
+                 SELECT d.s, d.o, d.g, d.i, d.source \
+                 FROM {delta} d \
+             ) merged \
+             ORDER BY s, o, g, i ASC"
         ),
         &[],
     )
