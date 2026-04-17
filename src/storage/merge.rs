@@ -400,7 +400,12 @@ pub fn merge_all() -> i64 {
 /// For each subject, records the sorted array of all predicates it appears in.
 /// Called by the merge worker after each generation merge.
 pub fn rebuild_subject_patterns() {
-    // Collect all HTAP predicate IDs.
+    // Collect all HTAP predicate IDs (predicates with dedicated VP tables).
+    // Predicate with table_oid IS NOT NULL are those promoted from vp_rare to have
+    // their own dedicated vp_{id} table. We enumerate ONLY these, excluding vp_rare.
+    // This prevents the "vp_rare double-count" bug (v0.22.0 H-7) where entries in
+    // vp_rare would be counted twice: once via vp_rare itself and once via their
+    // respective dedicated vp_{id} tables (if promoted).
     let pred_ids: Vec<i64> = Spi::connect(|c| {
         c.select(
             "SELECT id FROM _pg_ripple.predicates WHERE table_oid IS NOT NULL",
@@ -416,7 +421,9 @@ pub fn rebuild_subject_patterns() {
         return;
     }
 
-    // Build a union query across all VP tables (view name = _pg_ripple.vp_{id}).
+    // Build a union query across all dedicated VP tables (view name = _pg_ripple.vp_{id}).
+    // Each dedicated VP table's view already incorporates merged main/delta/tombstones.
+    // vp_rare is never scanned directly as a table in this aggregation.
     let union_parts: Vec<String> = pred_ids
         .iter()
         .map(|&p| format!("SELECT {p}::bigint AS p, s FROM _pg_ripple.vp_{p}"))
@@ -440,8 +447,12 @@ pub fn rebuild_subject_patterns() {
 }
 
 /// Rebuild `_pg_ripple.object_patterns` from all VP tables.
+/// Rebuild `_pg_ripple.object_patterns` from all dedicated VP tables (v0.22.0 H-7).
 ///
 /// For each object, records the sorted array of all predicates it appears in.
+/// Only enumerates dedicated VP tables (table_oid IS NOT NULL), never scans vp_rare
+/// directly to prevent double-counting. Entries in vp_rare are already reachable via
+/// their associated dedicated vp_{id} tables after promotion.
 pub fn rebuild_object_patterns() {
     let pred_ids: Vec<i64> = Spi::connect(|c| {
         c.select(
