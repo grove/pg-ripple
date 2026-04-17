@@ -113,6 +113,42 @@ bench-bsbm-pgbench duration="60" clients="10" jobs="4":
 [group: "bench"]
 bench-bsbm-all scale="1" duration="60" clients="10" jobs="4": (bench-bsbm-load scale) bench-bsbm-queries bench-bsbm-htap (bench-bsbm-pgbench duration clients jobs)
 
+# Run BSBM at 100M-triple scale (scale=30 ≈ 100M triples; runs for hours — use nightly CI)
+# Results are written to /tmp/pg_ripple_bsbm_100m_results.txt
+[group: "bench"]
+bench-bsbm-100m db="pg_ripple_bsbm100m": (bench-bsbm-load "30")
+    psql -h /tmp -p 5432 -d {{db}} -c "SELECT pg_ripple.triple_count() AS total_triples;" | tee /tmp/pg_ripple_bsbm_100m_results.txt
+    psql -h /tmp -p 5432 -d {{db}} -f benchmarks/bsbm/bsbm_queries.sql 2>&1 | tee -a /tmp/pg_ripple_bsbm_100m_results.txt
+    @echo "BSBM 100M results written to /tmp/pg_ripple_bsbm_100m_results.txt"
+
+# ── Crash Recovery ────────────────────────────────────────────────────────
+
+# Run the crash-recovery test suite (nightly; requires cargo pgrx start pg18)
+[group: "test"]
+test-crash-recovery:
+    bash tests/crash_recovery/merge_during_kill.sh
+    bash tests/crash_recovery/dict_during_kill.sh
+    bash tests/crash_recovery/shacl_during_violation.sh
+
+# ── Memory Leak Detection ─────────────────────────────────────────────────
+
+# Run a curated subset of unit tests under Valgrind to detect heap leaks.
+# Requires: valgrind installed; a locally-installed pg18 (not pgrx-managed).
+# Timeout: up to 2 hours for the full suite.
+[group: "test"]
+test-valgrind:
+    @echo "Running Valgrind leak check on curated unit test subset..."
+    @echo "This may take up to 2 hours. Log: /tmp/pg_ripple_valgrind.log"
+    valgrind \
+        --leak-check=full \
+        --show-leak-kinds=definite \
+        --error-exitcode=1 \
+        --log-file=/tmp/pg_ripple_valgrind.log \
+        cargo pgrx test pg{{pg}} -- --test-filter "dict::tests" 2>&1 | tail -20
+    @grep -E "definitely lost: 0|no leaks" /tmp/pg_ripple_valgrind.log && \
+        echo "Valgrind: no definite leaks found" || \
+        (echo "Valgrind: definite leaks detected — see /tmp/pg_ripple_valgrind.log"; exit 1)
+
 # ── Docker ────────────────────────────────────────────────────────────────
 
 # Build the Docker image locally

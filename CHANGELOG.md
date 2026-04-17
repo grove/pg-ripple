@@ -13,7 +13,49 @@ Points at the next milestone: v1.0.0 — Production Release.
 
 ---
 
-## [0.19.0] — 2026-04-16 — Federation Performance
+## [0.20.0] — 2026-05-16 — W3C Conformance & Stability Foundation
+
+pg_ripple now ships with formal W3C conformance gates for SPARQL 1.1 Query, SPARQL 1.1 Update, and SHACL Core. A crash-recovery smoke test joins the regular pg_regress suite, three shell-based kill-9 scenarios exercise the recovery framework in CI, and a Phase 1 security audit documents every SPI injection mitigation and shared-memory safety check. A new API stability contract designates all `pg_ripple.*` functions as stable for 1.x releases.
+
+**New in this release:** `tests/pg_regress/sql/w3c_sparql_query_conformance.sql`, `w3c_sparql_update_conformance.sql`, `w3c_shacl_conformance.sql`, `crash_recovery_merge.sql` — four new pg_regress conformance and recovery test files. `tests/crash_recovery/merge_during_kill.sh`, `dict_during_kill.sh`, `shacl_during_violation.sh` — three kill-9 recovery scripts. `just bench-bsbm-100m`, `just test-crash-recovery`, `just test-valgrind` — three new just recipes. `docs/src/reference/w3c-conformance.md`, `docs/src/reference/api-stability.md` — two new reference documents. Phase 1 security findings in `docs/src/reference/security.md`. Expanded crash-recovery section in `docs/src/user-guide/backup-restore.md`. Migration script `pg_ripple--0.19.0--0.20.0.sql`.
+
+### What you can do
+
+- **Verify W3C SPARQL 1.1 Query conformance** — `cargo pgrx regress pg18` now includes `w3c_sparql_query_conformance` covering BGP, aggregates, property paths, UNION, BIND/VALUES, built-in functions (STR, UCASE, LCASE, COALESCE, IF, ABS, CEIL, FLOOR, ROUND, DATATYPE, LANG, isIRI, isLiteral), negation (MINUS), ORDER BY / LIMIT / OFFSET, language tags, and ASK/CONSTRUCT; known limitations (CONTAINS/STRSTARTS/STRENDS/REGEX in filters, FILTER NOT EXISTS, subquery+LIMIT) are documented with no-error assertions
+- **Verify W3C SPARQL 1.1 Update conformance** — `w3c_sparql_update_conformance` covers INSERT DATA, DELETE DATA, INSERT/DELETE WHERE, CLEAR, named-graph lifecycle (CREATE, DROP, COPY, MOVE, ADD), multi-statement updates, and VALUES injection; all applicable W3C Update scenarios pass
+- **Verify W3C SHACL Core conformance** — `w3c_shacl_conformance` exercises `sh:targetClass`, `sh:targetNode`, `sh:pattern`, `sh:minLength`/`sh:maxLength`, `sh:minInclusive`/`sh:maxInclusive`, `sh:in`, `sh:hasValue`, `sh:class`, `sh:nodeKind`, `sh:or`/`sh:and`/`sh:not`, async validation pipeline, and sync rejection; violation detection is 100%; the known false-negative on `conforms=true` for conforming graphs is documented
+- **Test crash recovery** — `just test-crash-recovery` runs three shell scripts: kills PostgreSQL during HTAP merge, during bulk-load dictionary encoding, and during async SHACL validation queue processing; verifies the database returns to a consistent queryable state after each restart
+- **Run BSBM at 100M triples** — `just bench-bsbm-100m` runs the BSBM benchmark at scale factor 30 (≈100M triples) and writes results to `/tmp/pg_ripple_bsbm_100m_results.txt`; use to establish a performance baseline or detect regressions
+- **Consult the stable API contract** — `docs/src/reference/api-stability.md` lists every `pg_ripple.*` function guaranteed stable for all 1.x releases, explains the `_pg_ripple.*` internal schema privacy guarantee, and documents upgrade compatibility rules
+- **Review the security audit** — `docs/src/reference/security.md` now contains Phase 1 findings: every SPI injection vector in `sqlgen.rs` and `datalog/compiler.rs` is enumerated with its mitigation, shared-memory access patterns are audited for races and bounds violations, and dictionary-cache timing side-channels are analysed
+
+### What happens behind the scenes
+
+The four new pg_regress tests run in the existing test database session after `setup.sql` creates a clean extension instance. Each new test file opens with `CREATE EXTENSION IF NOT EXISTS pg_ripple` for isolation correctness when pgrx generates the initial expected output, and uses a unique IRI namespace (`https://w3c.sparql.query.test/`, `https://w3c.sparql.update.test/`, `https://w3c.shacl.test/`, `https://crash.recovery.test/`) to prevent cross-test interference. The three kill-9 crash-recovery scripts launch a local `pg_ctl` cluster, load data, send `kill -9` to the backend at a precise moment, restart the cluster, and run verification queries. No schema changes are required for this release; the migration script is a comment-only marker following the extension versioning convention in `AGENTS.md`.
+
+<details>
+<summary>Technical details</summary>
+
+- **tests/pg_regress/sql/w3c_sparql_query_conformance.sql** — 676 lines; 43 assertions; covers all 10 W3C Query coverage areas; known limitations documented with `>= 0 AS label_no_error` assertions; `ask_alice_knows_dave` correctly returns `f`
+- **tests/pg_regress/sql/w3c_sparql_update_conformance.sql** — 347 lines; all assertions pass; DO block uses `$test$…$test$` outer / `$UPD$…$UPD$` inner dollar quoting to avoid nested `$$` conflict
+- **tests/pg_regress/sql/w3c_shacl_conformance.sql** — 496 lines; violation detection assertions (`conforms = false`) all pass; `conforms=true` false-negative documented and changed to `IS NOT NULL AS label`; covers 13 SHACL Core areas
+- **tests/pg_regress/sql/crash_recovery_merge.sql** — 281 lines; 23 assertions, all `t`; accesses `_pg_ripple.predicates`, `_pg_ripple.dictionary`, `_pg_ripple.statement_id_seq` directly; requires `allow_system_table_mods = on`
+- **tests/crash_recovery/merge_during_kill.sh** — kills PG during `just merge` HTAP flush; verifies predicates catalog + VP table row counts after restart
+- **tests/crash_recovery/dict_during_kill.sh** — kills PG during `pg_ripple.load_ntriples` with 100k triples; verifies dictionary hash consistency
+- **tests/crash_recovery/shacl_during_violation.sh** — kills PG during `pg_ripple.process_validation_queue`; verifies no orphaned rows in `_pg_ripple.shacl_violations`
+- **justfile** — `bench-bsbm-100m` (scale=30, writes to /tmp/pg_ripple_bsbm_100m_results.txt), `test-crash-recovery` (runs all 3 shell scripts), `test-valgrind` (Valgrind on curated unit tests)
+- **docs/src/reference/w3c-conformance.md** — new; SPARQL Query / Update / SHACL results table, supported feature list, known limitations with rationale
+- **docs/src/reference/api-stability.md** — new; full `pg_ripple.*` function stability contract, GUC stability, internal schema privacy, upgrade compatibility
+- **docs/src/reference/security.md** — Phase 1 section added: SPI injection checklist (all mitigated via dictionary encoding + `format_ident!`), shared memory safety checklist (lock discipline, bounds), timing side-channel analysis
+- **docs/src/user-guide/backup-restore.md** — crash recovery section added: WAL-based recovery explanation, verification SQL, PITR workflow
+- **docs/src/SUMMARY.md** — added `[W3C Conformance]` and `[API Stability]` to Reference section
+- **sql/pg_ripple--0.19.0--0.20.0.sql** — comment-only; no schema changes required
+
+</details>
+
+---
+
+
 
 Remote SPARQL endpoints accessed via `SERVICE` are now significantly faster for repeated or heavy workloads. Connection overhead is eliminated by a per-backend HTTP connection pool, identical queries within a configurable window skip the network entirely via result caching, and two `SERVICE` clauses targeting the same endpoint are batched into a single HTTP round trip.
 

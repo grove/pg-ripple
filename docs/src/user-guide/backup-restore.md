@@ -121,3 +121,62 @@ SELECT pg_ripple.load_nquads(pg_read_file('/backup/export.nq'));
 -- or
 SELECT pg_ripple.load_turtle(pg_read_file('/backup/export.ttl'));
 ```
+
+---
+
+## Crash recovery (v0.20.0)
+
+pg_ripple relies entirely on PostgreSQL's WAL-based crash recovery. No additional steps are required after an unexpected shutdown (power failure, `kill -9`, OOM kill).
+
+### What happens on restart after a crash
+
+1. **PostgreSQL replays WAL** — all committed transactions are recovered; uncommitted transactions are rolled back.
+2. **The HTAP merge worker restarts** — the background worker re-attaches to shared memory and resumes from a clean state. Any partial merge is discarded; the delta tables retain all committed but un-merged triples.
+3. **The dictionary is consistent** — dictionary inserts use `ON CONFLICT DO NOTHING … RETURNING`, which is atomic. No orphaned or duplicate entries survive a crash.
+4. **The predicates catalog is consistent** — `_pg_ripple.predicates` is updated within the same transaction as the VP table write, so the counts are always coherent.
+
+### Verifying recovery
+
+Run the following after a suspected crash:
+
+```sql
+-- 1. Check for negative triple counts (should always be 0)
+SELECT count(*) FROM _pg_ripple.predicates WHERE triple_count < 0;
+
+-- 2. Check for duplicate dictionary entries (should always be 0)
+SELECT count(*) FROM (
+    SELECT value, kind, count(*) AS n
+    FROM _pg_ripple.dictionary
+    GROUP BY value, kind
+    HAVING count(*) > 1
+) dups;
+
+-- 3. Reconcile the predicates catalog
+SELECT pg_ripple.promote_rare_predicates();
+
+-- 4. Refresh planner statistics
+SELECT pg_ripple.vacuum();
+```
+
+### Running the crash recovery test suite
+
+The automated crash recovery tests (introduced in v0.20.0) simulate `kill -9` during merge, bulk load, and validation, then verify all assertions above:
+
+```bash
+# Requires: cargo pgrx start pg18
+just test-crash-recovery
+```
+
+Individual scripts:
+
+```bash
+bash tests/crash_recovery/merge_during_kill.sh
+bash tests/crash_recovery/dict_during_kill.sh
+bash tests/crash_recovery/shacl_during_violation.sh
+```
+
+### WAL replay and PITR
+
+pg_ripple is fully compatible with PostgreSQL Point-in-Time Recovery (PITR). Enable WAL archiving and use `pg_basebackup` as you would for any PostgreSQL database. The `_pg_ripple` schema is recovered along with all other schema objects.
+
+See the [PITR with WAL](#pitr-with-wal) section above for configuration details.

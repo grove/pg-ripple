@@ -1388,7 +1388,7 @@ A federated query making repeated calls to the same endpoint is measurably faste
 
 ### Deliverables
 
-- [ ] **W3C SPARQL 1.1 Query test suite conformance**
+- [x] **W3C SPARQL 1.1 Query test suite conformance**
   - Download and run the official [W3C SPARQL 1.1 Query test suite](https://www.w3.org/2009/sparql/test-suite-20130327/)
   - Implement missing query features or fix conformance bugs
   - Document unsupported features (property functions, custom aggregate functions) with rationale
@@ -1397,14 +1397,14 @@ A federated query making repeated calls to the same endpoint is measurably faste
   - Federation (`SERVICE`) conformance covered by v0.16.0; no additional work needed
   - **Target**: ≥95% of applicable W3C Query test suite passes (excluding property functions, language tags in comparisons, and other known limitations)
 
-- [ ] **W3C SPARQL 1.1 Update test suite conformance**
+- [x] **W3C SPARQL 1.1 Update test suite conformance**
   - Download and run the official [W3C SPARQL 1.1 Update test suite](https://www.w3.org/2013/sparql-update-tests/)
   - Implement missing update features or fix conformance bugs
   - Document unsupported features with rationale
   - Create `tests/pg_regress/w3c_sparql_update_conformance.sql` with representative W3C test cases
   - **Target**: ≥95% of applicable W3C Update test suite passes
 
-- [ ] **W3C SHACL Core test suite conformance**
+- [x] **W3C SHACL Core test suite conformance**
   - Download and run the official [W3C SHACL Core test suite](https://w3c.github.io/shacl/tests/)
   - Implement missing validators or fix conformance bugs
   - **Critical constraint**: Any optimization strategy used in shape compilation must preserve identical externally-visible results as the reference semantics; if optimization changes the set of violations reported, it is a regression
@@ -1412,7 +1412,7 @@ A federated query making repeated calls to the same endpoint is measurably faste
   - Document any limitations (e.g. SHACL Advanced features not yet implemented, deferred to v0.8.0 or later)
   - **Target**: ≥95% of SHACL Core test suite passes
 
-- [ ] **Crash recovery testing framework**
+- [x] **Crash recovery testing framework**
   - `tests/crash_recovery/merge_during_kill.sh` — start a bulk load, kill -9 the PostgreSQL backend during HTAP generation merge, restart PostgreSQL, verify:
     - No corruption in `_pg_ripple.predicates` catalog
     - VP table data is recoverable (rows visible, no stray VACUUM marks)
@@ -1423,14 +1423,14 @@ A federated query making repeated calls to the same endpoint is measurably faste
   - Run these as part of regular CI (nightly schedule, ~30 min total)
   - Document recovery procedure for production operators (backup/restore, WAL replays)
 
-- [ ] **Memory leak detection**
+- [x] **Memory leak detection**
   - Set up `cargo pgrx test --valgrind` invocation for a curated subset of unit tests (heap allocations are the main concern; stack overflows out of scope)
   - Identify and fix any definite leaks (not just reachable at program exit)
   - Focus areas: shared-memory allocations, per-query temporary buffers, dictionary cache evictions, failed error paths
   - Document baseline leak-free status in release notes
   - CI nightly run (timeout 2 hours)
 
-- [ ] **Security review (Phase 1)**
+- [x] **Security review (Phase 1)**
   - **SPI query generation review**: Audit all `src/sparql/sqlgen.rs` and `src/datalog/compiler.rs` for potential SQL injection vectors
     - All IRI/literal constants must be dictionary-encoded before SQL generation
     - No string interpolation into generated SQL (`format!` only for identifiers via `format_ident!`)
@@ -1443,7 +1443,7 @@ A federated query making repeated calls to the same endpoint is measurably faste
   - **Dictionary cache timing side-channels review**: Verify that encode/decode latency does not leak dictionary size, IRI patterns, or other sensitive metadata
   - Document findings in `reference/security.md`; create follow-up issues for Phase 2 (v0.21.0 or later) if needed
 
-- [ ] **Benchmarking at scale (100M triples)**
+- [x] **Benchmarking at scale (100M triples)**
   - Extend BSBM benchmark infrastructure to run with 100M triples (BSBM scale factor ≥30)
   - Measure query latency, throughput, memory usage, merge worker performance
   - Publish baseline results in release notes: e.g. "Query latency: <50ms p95 on 100M triples with 4 GiB shared memory"
@@ -1451,28 +1451,28 @@ A federated query making repeated calls to the same endpoint is measurably faste
   - Compare with v0.19.0 results to detect performance regressions
   - **Known constraint**: BSBM at 100M triples on a single 4-core developer machine will take ~4–6 hours; run nightly or on a larger CI machine
 
-- [ ] **API stability audit** (documentation only; no code changes)
+- [x] **API stability audit** (documentation only; no code changes)
   - Audit all `pg_ripple.*` SQL functions for API stability
   - Designate these as stable / guaranteed API for 1.x releases
   - Document that `_pg_ripple.*` schema is private and subject to change
   - Create `reference/api-stability.md` documenting the stability contract
 
-- [ ] **Migration script** (`sql/pg_ripple--0.19.0--0.20.0.sql`)
+- [x] **Migration script** (`sql/pg_ripple--0.19.0--0.20.0.sql`)
   - If there are schema changes from conformance fixes, add them here
   - If no schema changes are required, leave the migration script as an empty comment block with a note explaining what new functions/GUCs (if any) are provided
   - Per extension versioning conventions (AGENTS.md), the migration script must exist even if empty
 
-- [ ] pg_regress: `w3c_sparql_query_conformance.sql`, `w3c_sparql_update_conformance.sql`, `w3c_shacl_conformance.sql`, `crash_recovery_merge.sql` (basic recovery smoke test)
+- [x] pg_regress: `w3c_sparql_query_conformance.sql`, `w3c_sparql_update_conformance.sql`, `w3c_shacl_conformance.sql`, `crash_recovery_merge.sql` (basic recovery smoke test)
 
 ### Documentation
 
 > See [plans/documentation.md](plans/documentation.md) for details.
 
-- [ ] `reference/w3c-conformance.md` (new page) — W3C test suite results summary, supported subset list, unsupported features with rationale, known limitations
-- [ ] `reference/security.md` (Phase 1 findings) — SPI injection mitigations, shared memory safety, side-channel analysis
-- [ ] `reference/api-stability.md` (new page) — stable API contract, `pg_ripple.*` functions, `_pg_ripple.*` schema privacy
-- [ ] `user-guide/backup-restore.md` expanded: crash recovery procedure, WAL replay, PITR workflow
-- [ ] Release notes for v0.20.0 — include BSBM 100M triple baseline results, W3C test suite summary, security audit findings
+- [x] `reference/w3c-conformance.md` (new page) — W3C test suite results summary, supported subset list, unsupported features with rationale, known limitations
+- [x] `reference/security.md` (Phase 1 findings) — SPI injection mitigations, shared memory safety, side-channel analysis
+- [x] `reference/api-stability.md` (new page) — stable API contract, `pg_ripple.*` functions, `_pg_ripple.*` schema privacy
+- [x] `user-guide/backup-restore.md` expanded: crash recovery procedure, WAL replay, PITR workflow
+- [x] Release notes for v0.20.0 — include BSBM 100M triple baseline results, W3C test suite summary, security audit findings
 
 ### Exit Criteria
 

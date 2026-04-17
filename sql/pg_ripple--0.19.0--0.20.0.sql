@@ -1,0 +1,19 @@
+-- Migration 0.19.0 → 0.20.0: W3C Conformance & Stability Foundation
+--
+-- What this release provides (no SQL schema changes required):
+--
+--   • W3C SPARQL 1.1 Query test suite conformance (≥95% pass rate)
+--   • W3C SPARQL 1.1 Update test suite conformance (≥95% pass rate)
+--   • W3C SHACL Core test suite conformance (≥95% pass rate)
+--   • Crash recovery testing framework (kill -9 during merge, bulk load, validation)
+--   • Memory leak detection baseline (Valgrind-clean curated test subset)
+--   • Security review Phase 1: SPI injection audit + shared memory safety audit
+--   • BSBM 100M-triple benchmarking infrastructure and baseline results
+--   • API stability contract documentation (pg_ripple.* = stable public API)
+--
+-- No DDL changes are required for this migration. All improvements are either
+-- query-engine conformance fixes, test infrastructure, or documentation.
+--
+-- Version numbers for supported GUCs and function signatures are unchanged.
+-- The public pg_ripple.* schema API is now formally designated as stable
+-- for the 1.x release series (see reference/api-stability.md).

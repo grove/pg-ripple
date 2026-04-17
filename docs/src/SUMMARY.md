@@ -50,6 +50,8 @@
 - [Roadmap](reference/roadmap.md)
 - [Release Process](reference/release-process.md)
 - [Security](reference/security.md)
+- [W3C Conformance](reference/w3c-conformance.md)
+- [API Stability](reference/api-stability.md)
 - [Error Reference](reference/error-reference.md)
 
 ---

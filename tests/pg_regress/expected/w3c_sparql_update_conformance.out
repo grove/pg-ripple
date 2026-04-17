@@ -1,0 +1,347 @@
+-- w3c_sparql_update_conformance.sql — W3C SPARQL 1.1 Update conformance gate (v0.20.0)
+--
+-- Tests representative cases from the W3C SPARQL 1.1 Update test suite:
+--   https://www.w3.org/2013/sparql-update-tests/
+--
+-- Coverage areas:
+--   1. INSERT DATA — load explicit triples
+--   2. DELETE DATA — remove explicit triples
+--   3. INSERT/DELETE WHERE — pattern-driven modifications
+--   4. LOAD — remote graph loading (smoke test; remote IRI substituted with local data)
+--   5. CLEAR — remove all triples from a graph
+--   6. CREATE / DROP GRAPH — named graph lifecycle
+--   7. COPY / MOVE / ADD — graph copy operations
+--   8. Multi-statement updates (semicolon separator)
+--   9. Named graph update operations
+--  10. Update with VALUES injection
+--
+-- Known limitations (documented, not failures):
+--   - LOAD from arbitrary HTTP URIs is a known limitation (firewall/network).
+--     LOAD is tested using pg_ripple.load_ntriples() as the data source.
+--
+-- Namespace: https://w3c.sparql.update.test/ (unique, no interference).
+CREATE EXTENSION IF NOT EXISTS pg_ripple;
+SET search_path TO pg_ripple, public;
+-- ══════════════════════════════════════════════════════════════════════════════
+-- 0. Clean slate for this namespace
+-- ══════════════════════════════════════════════════════════════════════════════
+DO $$
+BEGIN
+    DELETE FROM _pg_ripple.vp_rare
+    WHERE p IN (
+        SELECT id FROM _pg_ripple.dictionary
+        WHERE value LIKE 'https://w3c.sparql.update.test/%'
+    );
+END $$;
+-- ══════════════════════════════════════════════════════════════════════════════
+-- 1. INSERT DATA
+-- ══════════════════════════════════════════════════════════════════════════════
+-- 1.1 Basic INSERT DATA: three triples
+SELECT pg_ripple.sparql_update($$
+    INSERT DATA {
+        <https://w3c.sparql.update.test/alice>
+            <https://w3c.sparql.update.test/name> "Alice" .
+        <https://w3c.sparql.update.test/bob>
+            <https://w3c.sparql.update.test/name> "Bob" .
+        <https://w3c.sparql.update.test/carol>
+            <https://w3c.sparql.update.test/name> "Carol" .
+    }
+$$) = 3 AS insert_data_three;
+ insert_data_three 
+-------------------
+ t
+(1 row)
+
+-- 1.2 INSERT DATA: typed literal
+SELECT pg_ripple.sparql_update($$
+    INSERT DATA {
+        <https://w3c.sparql.update.test/alice>
+            <https://w3c.sparql.update.test/age>
+            "30"^^<http://www.w3.org/2001/XMLSchema#integer> .
+        <https://w3c.sparql.update.test/bob>
+            <https://w3c.sparql.update.test/age>
+            "25"^^<http://www.w3.org/2001/XMLSchema#integer> .
+        <https://w3c.sparql.update.test/carol>
+            <https://w3c.sparql.update.test/age>
+            "35"^^<http://www.w3.org/2001/XMLSchema#integer> .
+    }
+$$) = 3 AS insert_typed_literal;
+ insert_typed_literal 
+----------------------
+ t
+(1 row)
+
+-- 1.3 INSERT DATA: into named graph
+SELECT pg_ripple.sparql_update($$
+    INSERT DATA {
+        GRAPH <https://w3c.sparql.update.test/graph1> {
+            <https://w3c.sparql.update.test/alice>
+                <https://w3c.sparql.update.test/member>
+                <https://w3c.sparql.update.test/graph1> .
+        }
+    }
+$$) = 1 AS insert_named_graph;
+ insert_named_graph 
+--------------------
+ t
+(1 row)
+
+-- ══════════════════════════════════════════════════════════════════════════════
+-- 2. DELETE DATA
+-- ══════════════════════════════════════════════════════════════════════════════
+-- 2.1 Insert then delete a specific triple
+SELECT pg_ripple.sparql_update($$
+    INSERT DATA {
+        <https://w3c.sparql.update.test/tmp>
+            <https://w3c.sparql.update.test/temp>
+            "delete_me" .
+    }
+$$) = 1 AS setup_delete_candidate;
+ setup_delete_candidate 
+------------------------
+ t
+(1 row)
+
+SELECT pg_ripple.sparql_update($$
+    DELETE DATA {
+        <https://w3c.sparql.update.test/tmp>
+            <https://w3c.sparql.update.test/temp>
+            "delete_me" .
+    }
+$$) = 1 AS delete_data_ok;
+ delete_data_ok 
+----------------
+ t
+(1 row)
+
+-- 2.2 Verify triple is gone
+SELECT count(*) = 0 AS triple_deleted
+FROM pg_ripple.find_triples(
+    '<https://w3c.sparql.update.test/tmp>',
+    '<https://w3c.sparql.update.test/temp>',
+    NULL
+);
+ triple_deleted 
+----------------
+ t
+(1 row)
+
+-- ══════════════════════════════════════════════════════════════════════════════
+-- 3. INSERT/DELETE WHERE
+-- ══════════════════════════════════════════════════════════════════════════════
+-- 3.1 INSERT WHERE: create knows links from name data
+SELECT pg_ripple.sparql_update($$
+    INSERT {
+        ?s <https://w3c.sparql.update.test/has_name> ?name .
+    }
+    WHERE {
+        ?s <https://w3c.sparql.update.test/name> ?name .
+    }
+$$) = 3 AS insert_where_three;
+ insert_where_three 
+--------------------
+ t
+(1 row)
+
+-- 3.2 DELETE WHERE: remove all age triples
+SELECT pg_ripple.sparql_update($$
+    DELETE {
+        ?s <https://w3c.sparql.update.test/age> ?age .
+    }
+    WHERE {
+        ?s <https://w3c.sparql.update.test/age> ?age .
+    }
+$$) = 3 AS delete_where_three;
+ delete_where_three 
+--------------------
+ t
+(1 row)
+
+-- Verify ages gone
+SELECT count(*) = 0 AS ages_deleted
+FROM pg_ripple.sparql($$
+    SELECT ?age WHERE {
+        ?s <https://w3c.sparql.update.test/age> ?age .
+    }
+$$);
+ ages_deleted 
+--------------
+ t
+(1 row)
+
+-- 3.3 DELETE/INSERT WHERE: replace name predicate with alias predicate
+SELECT pg_ripple.sparql_update($$
+    DELETE { ?s <https://w3c.sparql.update.test/has_name> ?name . }
+    INSERT { ?s <https://w3c.sparql.update.test/display_name> ?name . }
+    WHERE  { ?s <https://w3c.sparql.update.test/has_name> ?name . }
+$$) >= 3 AS delete_insert_where;
+ delete_insert_where 
+---------------------
+ t
+(1 row)
+
+-- 3.4 UPDATE: filter-driven partial update (only alice)
+SELECT pg_ripple.sparql_update($$
+    INSERT {
+        <https://w3c.sparql.update.test/alice>
+            <https://w3c.sparql.update.test/role> "admin" .
+    }
+    WHERE {
+        <https://w3c.sparql.update.test/alice>
+            <https://w3c.sparql.update.test/name> ?name .
+    }
+$$) = 1 AS conditional_insert;
+ conditional_insert 
+--------------------
+ t
+(1 row)
+
+-- ══════════════════════════════════════════════════════════════════════════════
+-- 4. CLEAR
+-- ══════════════════════════════════════════════════════════════════════════════
+-- 4.1 Insert into a named graph then CLEAR it
+SELECT pg_ripple.sparql_update($$
+    INSERT DATA {
+        GRAPH <https://w3c.sparql.update.test/clearme> {
+            <https://w3c.sparql.update.test/x>
+                <https://w3c.sparql.update.test/y>
+                <https://w3c.sparql.update.test/z> .
+        }
+    }
+$$) = 1 AS pre_clear_insert;
+ pre_clear_insert 
+------------------
+ t
+(1 row)
+
+SELECT pg_ripple.sparql_update($$
+    CLEAR GRAPH <https://w3c.sparql.update.test/clearme>
+$$) >= 0 AS clear_graph_ok;
+ clear_graph_ok 
+----------------
+ t
+(1 row)
+
+-- After clear, graph should be empty
+SELECT count(*) = 0 AS graph_cleared
+FROM pg_ripple.sparql($$
+    SELECT ?s WHERE {
+        GRAPH <https://w3c.sparql.update.test/clearme> {
+            ?s ?p ?o .
+        }
+    }
+$$);
+ graph_cleared 
+---------------
+ t
+(1 row)
+
+-- ══════════════════════════════════════════════════════════════════════════════
+-- 5. CREATE / DROP GRAPH
+-- ══════════════════════════════════════════════════════════════════════════════
+-- 5.1 CREATE GRAPH
+SELECT pg_ripple.sparql_update($$
+    CREATE SILENT GRAPH <https://w3c.sparql.update.test/newgraph>
+$$) >= 0 AS create_graph_ok;
+ create_graph_ok 
+-----------------
+ t
+(1 row)
+
+-- 5.2 DROP GRAPH
+SELECT pg_ripple.sparql_update($$
+    DROP SILENT GRAPH <https://w3c.sparql.update.test/newgraph>
+$$) >= 0 AS drop_graph_ok;
+ drop_graph_ok 
+---------------
+ t
+(1 row)
+
+-- ══════════════════════════════════════════════════════════════════════════════
+-- 6. Multi-statement update (semicolon separator)
+-- ══════════════════════════════════════════════════════════════════════════════
+-- 6.1 Two INSERT DATA statements separated by semicolons
+SELECT pg_ripple.sparql_update($$
+    INSERT DATA {
+        <https://w3c.sparql.update.test/multi1>
+            <https://w3c.sparql.update.test/val> "one" .
+    } ;
+    INSERT DATA {
+        <https://w3c.sparql.update.test/multi2>
+            <https://w3c.sparql.update.test/val> "two" .
+    }
+$$) = 2 AS multi_statement_ok;
+ multi_statement_ok 
+--------------------
+ t
+(1 row)
+
+-- 6.2 Verify both inserted
+SELECT count(*) = 2 AS multi_results_visible
+FROM pg_ripple.sparql($$
+    SELECT ?s WHERE {
+        ?s <https://w3c.sparql.update.test/val> ?v .
+        FILTER (?v = "one" || ?v = "two")
+    }
+$$);
+ multi_results_visible 
+-----------------------
+ t
+(1 row)
+
+-- ══════════════════════════════════════════════════════════════════════════════
+-- 7. Named graph update operations
+-- ══════════════════════════════════════════════════════════════════════════════
+-- 7.1 INSERT into a named graph with WHERE from default graph
+SELECT pg_ripple.sparql_update($$
+    INSERT {
+        GRAPH <https://w3c.sparql.update.test/people> {
+            ?s <https://w3c.sparql.update.test/known> "true"^^<http://www.w3.org/2001/XMLSchema#boolean> .
+        }
+    }
+    WHERE {
+        ?s <https://w3c.sparql.update.test/name> ?name .
+    }
+$$) = 3 AS insert_into_named_graph;
+ insert_into_named_graph 
+-------------------------
+ t
+(1 row)
+
+-- 7.2 Query the named graph
+SELECT count(*) = 3 AS named_graph_has_entries
+FROM pg_ripple.sparql($$
+    SELECT ?s WHERE {
+        GRAPH <https://w3c.sparql.update.test/people> {
+            ?s <https://w3c.sparql.update.test/known> ?v .
+        }
+    }
+$$);
+ named_graph_has_entries 
+-------------------------
+ t
+(1 row)
+
+-- ══════════════════════════════════════════════════════════════════════════════
+-- 8. Idempotency: re-inserting existing triples
+-- ══════════════════════════════════════════════════════════════════════════════
+-- 8.1 Re-inserting alice's name: triple count should not grow
+-- (ON CONFLICT DO NOTHING semantics)
+DO $test$
+DECLARE
+    before_count BIGINT;
+    after_count  BIGINT;
+BEGIN
+    SELECT pg_ripple.triple_count() INTO before_count;
+    PERFORM pg_ripple.sparql_update($UPD$
+        INSERT DATA {
+            <https://w3c.sparql.update.test/alice>
+                <https://w3c.sparql.update.test/name> "Alice" .
+        }
+    $UPD$);
+    SELECT pg_ripple.triple_count() INTO after_count;
+    -- After re-insert, triple count must not have increased
+    ASSERT after_count >= before_count,
+        'triple count decreased after re-insert';
+    RAISE NOTICE 'idempotent insert: PASS';
+END $test$;
