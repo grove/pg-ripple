@@ -41,8 +41,9 @@ Each release below has two layers:
 | [0.17.0](#v0170--json-ld-framing) | JSON-LD Framing | Frame-driven CONSTRUCT queries producing nested JSON-LD | 3–4 pw |
 | [0.18.0](#v0180--sparql-construct-describe--ask-views) | SPARQL CONSTRUCT & ASK Views | Materialize CONSTRUCT and ASK queries as live, incrementally-updated stream tables | 2–3 pw |
 | [0.19.0](#v0190--federation-performance) | Federation Performance | Connection pooling, result caching, query rewriting, and batching for remote SPARQL endpoints | 3–5 pw |
+| [0.20.0](#v0200--w3c-conformance--stability-foundation) | W3C Conformance & Stability | W3C SPARQL 1.1 and SHACL Core test suite compliance, crash recovery and memory safety hardening, security audit initiation | 5–7 pw |
 | [1.0.0](#v100--production-release) | Production Release | Standards conformance, stress testing, security audit | 6–8 pw |
-| | | **Total estimated effort** | **106–143 pw** |
+| | | **Total estimated effort** | **111–150 pw** |
 
 ---
 
@@ -1377,6 +1378,108 @@ A federated query making repeated calls to the same endpoint is measurably faste
 
 ---
 
+## v0.20.0 — W3C Conformance & Stability Foundation
+
+**Theme**: Standards compliance, crash safety, and production readiness preparation.
+
+> **In plain language:** As we approach the 1.0 release, this milestone focuses on *confidence*. Instead of building new features, we verify that everything already built works *correctly* according to the official W3C standards. We run pg_ripple's SPARQL engine and SHACL validator against the W3C test suites and fix any edge cases. We test what happens when the database crashes and verify recovery is clean. We scan the code for security vulnerabilities. And we benchmark at scale (100M triples) to establish baselines. The result is a release that's ready for production users to rely on.
+>
+> **Effort estimate: 5–7 person-weeks**
+
+### Deliverables
+
+- [ ] **W3C SPARQL 1.1 Query test suite conformance**
+  - Download and run the official [W3C SPARQL 1.1 Query test suite](https://www.w3.org/2009/sparql/test-suite-20130327/)
+  - Implement missing query features or fix conformance bugs
+  - Document unsupported features (property functions, custom aggregate functions) with rationale
+  - Verify conformance via both SQL (`pg_ripple.sparql()`) and HTTP (`/sparql` endpoint) interfaces
+  - Create `tests/pg_regress/w3c_sparql_query_conformance.sql` with representative W3C test cases; mark expected failures clearly
+  - Federation (`SERVICE`) conformance covered by v0.16.0; no additional work needed
+  - **Target**: ≥95% of applicable W3C Query test suite passes (excluding property functions, language tags in comparisons, and other known limitations)
+
+- [ ] **W3C SPARQL 1.1 Update test suite conformance**
+  - Download and run the official [W3C SPARQL 1.1 Update test suite](https://www.w3.org/2013/sparql-update-tests/)
+  - Implement missing update features or fix conformance bugs
+  - Document unsupported features with rationale
+  - Create `tests/pg_regress/w3c_sparql_update_conformance.sql` with representative W3C test cases
+  - **Target**: ≥95% of applicable W3C Update test suite passes
+
+- [ ] **W3C SHACL Core test suite conformance**
+  - Download and run the official [W3C SHACL Core test suite](https://w3c.github.io/shacl/tests/)
+  - Implement missing validators or fix conformance bugs
+  - **Critical constraint**: Any optimization strategy used in shape compilation must preserve identical externally-visible results as the reference semantics; if optimization changes the set of violations reported, it is a regression
+  - Create `tests/pg_regress/w3c_shacl_conformance.sql` with representative W3C test cases
+  - Document any limitations (e.g. SHACL Advanced features not yet implemented, deferred to v0.8.0 or later)
+  - **Target**: ≥95% of SHACL Core test suite passes
+
+- [ ] **Crash recovery testing framework**
+  - `tests/crash_recovery/merge_during_kill.sh` — start a bulk load, kill -9 the PostgreSQL backend during HTAP generation merge, restart PostgreSQL, verify:
+    - No corruption in `_pg_ripple.predicates` catalog
+    - VP table data is recoverable (rows visible, no stray VACUUM marks)
+    - Dictionary is consistent (no orphaned or duplicate entries)
+    - Subsequent queries return correct results
+  - `tests/crash_recovery/dict_during_kill.sh` — kill -9 during a high-volume dictionary encoding operation (e.g. bulk load), verify dictionary consistency
+  - `tests/crash_recovery/shacl_during_violation.sh` — kill -9 during async validation queue processing, verify no violation reports are lost and no rows are orphaned
+  - Run these as part of regular CI (nightly schedule, ~30 min total)
+  - Document recovery procedure for production operators (backup/restore, WAL replays)
+
+- [ ] **Memory leak detection**
+  - Set up `cargo pgrx test --valgrind` invocation for a curated subset of unit tests (heap allocations are the main concern; stack overflows out of scope)
+  - Identify and fix any definite leaks (not just reachable at program exit)
+  - Focus areas: shared-memory allocations, per-query temporary buffers, dictionary cache evictions, failed error paths
+  - Document baseline leak-free status in release notes
+  - CI nightly run (timeout 2 hours)
+
+- [ ] **Security review (Phase 1)**
+  - **SPI query generation review**: Audit all `src/sparql/sqlgen.rs` and `src/datalog/compiler.rs` for potential SQL injection vectors
+    - All IRI/literal constants must be dictionary-encoded before SQL generation
+    - No string interpolation into generated SQL (`format!` only for identifiers via `format_ident!`)
+    - Create a checklist document listing all unsafe patterns and their mitigations
+  - **Shared memory safety review**: Audit `src/shmem.rs` and all `pgrx::PgSharedMem` usage for:
+    - Data races (concurrent access without synchronization)
+    - Bounds violations (buffer overflows, stack smashing)
+    - Use-after-free (stale pointers after shmem recreation)
+    - Create a checklist document with findings and resolutions
+  - **Dictionary cache timing side-channels review**: Verify that encode/decode latency does not leak dictionary size, IRI patterns, or other sensitive metadata
+  - Document findings in `reference/security.md`; create follow-up issues for Phase 2 (v0.21.0 or later) if needed
+
+- [ ] **Benchmarking at scale (100M triples)**
+  - Extend BSBM benchmark infrastructure to run with 100M triples (BSBM scale factor ≥30)
+  - Measure query latency, throughput, memory usage, merge worker performance
+  - Publish baseline results in release notes: e.g. "Query latency: <50ms p95 on 100M triples with 4 GiB shared memory"
+  - Store results artifact in CI (for regression detection in future releases)
+  - Compare with v0.19.0 results to detect performance regressions
+  - **Known constraint**: BSBM at 100M triples on a single 4-core developer machine will take ~4–6 hours; run nightly or on a larger CI machine
+
+- [ ] **API stability audit** (documentation only; no code changes)
+  - Audit all `pg_ripple.*` SQL functions for API stability
+  - Designate these as stable / guaranteed API for 1.x releases
+  - Document that `_pg_ripple.*` schema is private and subject to change
+  - Create `reference/api-stability.md` documenting the stability contract
+
+- [ ] **Migration script** (`sql/pg_ripple--0.19.0--0.20.0.sql`)
+  - If there are schema changes from conformance fixes, add them here
+  - If no schema changes are required, leave the migration script as an empty comment block with a note explaining what new functions/GUCs (if any) are provided
+  - Per extension versioning conventions (AGENTS.md), the migration script must exist even if empty
+
+- [ ] pg_regress: `w3c_sparql_query_conformance.sql`, `w3c_sparql_update_conformance.sql`, `w3c_shacl_conformance.sql`, `crash_recovery_merge.sql` (basic recovery smoke test)
+
+### Documentation
+
+> See [plans/documentation.md](plans/documentation.md) for details.
+
+- [ ] `reference/w3c-conformance.md` (new page) — W3C test suite results summary, supported subset list, unsupported features with rationale, known limitations
+- [ ] `reference/security.md` (Phase 1 findings) — SPI injection mitigations, shared memory safety, side-channel analysis
+- [ ] `reference/api-stability.md` (new page) — stable API contract, `pg_ripple.*` functions, `_pg_ripple.*` schema privacy
+- [ ] `user-guide/backup-restore.md` expanded: crash recovery procedure, WAL replay, PITR workflow
+- [ ] Release notes for v0.20.0 — include BSBM 100M triple baseline results, W3C test suite summary, security audit findings
+
+### Exit Criteria
+
+W3C SPARQL 1.1 Query test suite: ≥95% pass rate. W3C SPARQL 1.1 Update test suite: ≥95% pass rate. W3C SHACL Core test suite: ≥95% pass rate. Crash recovery framework operational: database recovers cleanly from kill -9 during merge, bulk load, and validation. Valgrind finds no definite memory leaks. Security review Phase 1 complete: all SPI injection vectors documented and mitigated, shared memory audit complete. BSBM 100M triple baseline published. API stability contract documented.
+
+---
+
 ## v1.0.0 — Production Release
 
 **Theme**: Stability, conformance, and production certification.
@@ -1478,7 +1581,9 @@ Stable, tested, documented, and published. Ready for production workloads up to 
 | 0.14.0 | +3 weeks | 4–6 pw | 85–113 pw |
 | 0.15.0 | +2 weeks | 3–4 pw | 88–117 pw |
 | 0.16.0 | +3 weeks | 4–6 pw | 92–123 pw |
-| 1.0.0 | +4 weeks | 6–8 pw | **98–131 pw** |
+| 0.19.0 | +3 weeks | 3–5 pw | 95–128 pw |
+| 0.20.0 | +3 weeks | 5–7 pw | 100–135 pw |
+| 1.0.0 | +4 weeks | 6–8 pw | **106–143 pw** |
 | 1.1–1.9 | Post-1.0 | Community-driven | — |
 
 *Estimates assume a pair of focused developers with Rust and PostgreSQL experience. "pw" = person-weeks. Calendar durations assume pair programming; a solo developer should expect roughly double the calendar time. Actual pace depends on contributor availability and scope adjustments discovered during implementation.*
