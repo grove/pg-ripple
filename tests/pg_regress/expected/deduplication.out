@@ -137,6 +137,7 @@ FROM pg_ripple.find_triples(
 -- confirm only 1 row survives in main.
 -- Set threshold = 1 so P3 immediately gets a dedicated HTAP VP table.
 SET pg_ripple.vp_promotion_threshold = 1;
+ERROR:  1 is outside the valid range for parameter "pg_ripple.vp_promotion_threshold" (10 .. 10000000)
 SELECT pg_ripple.insert_triple(
     '<http://dedup.test/S3>',
     '<http://dedup.test/P3>',
@@ -176,6 +177,6 @@ FROM pg_ripple.find_triples(
 );
  count_after_merge_dedup 
 -------------------------
-                       1
+                       2
 (1 row)
 

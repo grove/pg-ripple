@@ -96,7 +96,7 @@ COMMIT;
 -- Verify all three terms were reinserted
 SELECT COUNT(*) = 3 as all_kinds_reinserted FROM test_dict_rollback;
  all_kinds_reinserted 
----------------------
+----------------------
  t
 (1 row)
 
