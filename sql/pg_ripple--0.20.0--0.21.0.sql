@@ -1,0 +1,41 @@
+-- Migration 0.20.0 → 0.21.0: SPARQL Built-in Functions & Query Correctness
+--
+-- Schema changes in this release:
+--
+--   • No new tables, columns, or indices are required.
+--
+-- New GUC registered by the Rust extension on load:
+--
+--   pg_ripple.sparql_strict (BOOL, default on)
+--     When on (default), a SPARQL FILTER expression that uses an unsupported
+--     built-in function raises ERRCODE_FEATURE_NOT_SUPPORTED with a message
+--     naming the unimplemented function, instead of silently dropping the
+--     predicate from the generated SQL WHERE clause.
+--     Set to off to restore the pre-0.21.0 warn-and-drop behaviour for
+--     compatibility with existing queries that rely on the silent-drop.
+--
+-- What this release provides (Rust-compiled changes):
+--
+--   • Full SPARQL 1.1 built-in function surface:
+--     STR, STRLEN, SUBSTR, UCASE, LCASE, CONCAT, REPLACE, ENCODE_FOR_URI,
+--     STRLANG, STRDT, isIRI, isLiteral, isBlank, isNumeric, sameTerm,
+--     IRI/URI, BNODE, LANG, DATATYPE, LANGMATCHES,
+--     ABS, CEIL, FLOOR, ROUND, RAND,
+--     NOW, YEAR, MONTH, DAY, HOURS, MINUTES, SECONDS, TIMEZONE, TZ,
+--     MD5, SHA1, SHA256, SHA384, SHA512, UUID, STRUUID,
+--     IF, COALESCE
+--   • FILTER silent-drop replaced by structured ERRCODE_FEATURE_NOT_SUPPORTED
+--     (controlled by pg_ripple.sparql_strict GUC)
+--   • ORDER BY: correct SPARQL 1.1 §15.1 NULL placement
+--     (ASC … NULLS LAST, DESC … NULLS FIRST)
+--   • GROUP_CONCAT(DISTINCT …): DISTINCT flag now honoured
+--   • p* (ZeroOrMore) path: zero-hop identity rows restricted to subjects
+--     that actually participate in the predicate's VP tables
+--   • Property-path CYCLE clause: CYCLE (s, o) instead of CYCLE o —
+--     prevents false cycle detection in DAGs with shared intermediate nodes
+--   • OPTIONAL over aggregates: LATERAL subselect wrapping, no Cartesian
+--     product when right side is a GROUP BY sub-pattern
+--   • BGP self-join dedup key: structural (s, p, o) tuple replaces fragile
+--     Debug-string key
+--   • W3C conformance test suite: label_no_error shims replaced with real
+--     value-checking assertions

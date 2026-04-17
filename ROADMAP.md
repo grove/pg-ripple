@@ -11,7 +11,7 @@ Each release below has two layers:
 - **The plain-language summary** (in the coloured box) explains *what* the release delivers and *why it matters* — no programming knowledge required.
 - **The technical deliverables** list the specific items developers will build. Feel free to skip these if you're reading for the big picture.
 
-**Effort estimates** are given as *person-weeks* — e.g. "6–8 pw" means the release would take roughly 6–8 weeks for a single full-time developer, or 3–4 weeks for a pair working together. The total estimated effort from v0.1.0 to v1.0.0 is **98–131 person-weeks** (~23–30 months for one developer; ~11–15 months for a pair).
+**Effort estimates** are given as *person-weeks* — e.g. "6–8 pw" means the release would take roughly 6–8 weeks for a single full-time developer, or 3–4 weeks for a pair working together. The total estimated effort from v0.1.0 to v1.0.0 is **123–166 person-weeks** (~29–39 months for one developer; ~15–20 months for a pair).
 
 **"optional at runtime" items**: some deliverables are annotated *(optional at runtime — X must be installed)*. This means the feature depends on an external extension (e.g. pg_trickle) that may not be installed in every deployment. The feature is **required by this roadmap** and must be implemented; the Rust code gates on a runtime availability check and degrades gracefully (returns 0 / false / empty, emits a WARNING, never raises an ERROR) when the dependency is absent. These items are not optional from a delivery standpoint.
 
@@ -42,8 +42,10 @@ Each release below has two layers:
 | [0.18.0](#v0180--sparql-construct-describe--ask-views) | SPARQL CONSTRUCT & ASK Views | Materialize CONSTRUCT and ASK queries as live, incrementally-updated stream tables | 2–3 pw |
 | [0.19.0](#v0190--federation-performance) | Federation Performance | Connection pooling, result caching, query rewriting, and batching for remote SPARQL endpoints | 3–5 pw |
 | [0.20.0](#v0200--w3c-conformance--stability-foundation) | W3C Conformance & Stability | W3C SPARQL 1.1 and SHACL Core test suite compliance, crash recovery and memory safety hardening, security audit initiation | 5–7 pw |
+| [0.21.0](#v0210--sparql-built-in-functions--query-correctness) | SPARQL Built-in Functions & Query Correctness | Implement all ~40 missing SPARQL 1.1 built-in functions, fix the FILTER silent-drop hazard, and close critical query-semantics bugs | 6–8 pw |
+| [0.22.0](#v0220--storage-correctness--security-hardening) | Storage Correctness & Security Hardening | Fix HTAP merge race conditions, dictionary cache rollback, shmem cache thrashing, rare-predicate promotion race, and HTTP service security gaps | 6–8 pw |
 | [1.0.0](#v100--production-release) | Production Release | Standards conformance, stress testing, security audit | 6–8 pw |
-| | | **Total estimated effort** | **111–150 pw** |
+| | | **Total estimated effort** | **123–166 pw** |
 
 ---
 
@@ -1501,6 +1503,126 @@ A federated query making repeated calls to the same endpoint is measurably faste
 ### Exit Criteria
 
 W3C SPARQL 1.1 Query test suite: ≥95% pass rate. W3C SPARQL 1.1 Update test suite: ≥95% pass rate. W3C SHACL Core test suite: ≥95% pass rate. Crash recovery framework operational: database recovers cleanly from kill -9 during merge, bulk load, and validation. Valgrind finds no definite memory leaks. Security review Phase 1 complete: all SPI injection vectors documented and mitigated, shared memory audit complete. BSBM 100M triple baseline published. API stability contract documented.
+
+---
+
+## v0.21.0 — SPARQL Built-in Functions & Query Correctness
+
+**Theme**: Implement all ~40 missing SPARQL 1.1 built-in functions, fix the FILTER silent-drop correctness hazard, and close several high-priority query-semantics bugs identified in the v0.20.0 gap analysis.
+
+> **In plain language:** Until now, pg_ripple's SPARQL engine understood the *grammar* of standard functions like `UCASE`, `IF`, `DATATYPE`, and `isIRI` — but silently ignored them at runtime, returning too many rows instead of the correctly filtered set. This release makes those functions actually work. It also fixes several query-correctness issues that were masked by the existing conformance test suite: wrong sort-order for NULL values, `p*` paths generating phantom reflexive rows on nodes that don't participate in the property at all, and `GROUP_CONCAT` ignoring the `DISTINCT` keyword. After this release, any unsupported expression raises a clear named error rather than silently dropping the filter.
+>
+> **Effort estimate: 6–8 person-weeks**
+
+### Deliverables
+
+- [ ] **SPARQL 1.1 built-in function surface — full implementation**
+  - String functions: `STR`, `STRLEN`, `SUBSTR`, `UCASE`, `LCASE`, `CONCAT`, `REPLACE`, `ENCODE_FOR_URI`, `STRLANG`, `STRDT` (in addition to `STRSTARTS`, `STRENDS`, `CONTAINS`, `REGEX` already present)
+  - Type-testing predicates: `isIRI`, `isLiteral`, `isBlank`, `isNumeric`, `sameTerm`
+  - Term construction and access: `IRI` (alias `URI`), `BNODE`, `LANG`, `DATATYPE`, `LANGMATCHES`
+  - Numeric functions: `ABS`, `CEIL`, `FLOOR`, `ROUND`, `RAND`
+  - Datetime functions: `NOW`, `YEAR`, `MONTH`, `DAY`, `HOURS`, `MINUTES`, `SECONDS`, `TIMEZONE`, `TZ`
+  - Hash / UUID functions: `MD5`, `SHA1`, `SHA256`, `SHA384`, `SHA512`, `UUID`, `STRUUID`
+  - Control functions: `IF`, `COALESCE`
+  - Implementation strategy: decode the dictionary ID to the term value at expression-evaluation time; compile to PostgreSQL equivalents where available (`LOWER`, `UPPER`, `SUBSTR`, `MD5`, `NOW()`, `ABS`, `CEIL`, `FLOOR`, `ROUND`, `gen_random_uuid()`, etc.); datetime functions extract fields from `xsd:dateTime` literals via `to_timestamp` + `EXTRACT`; hash functions operate over the term's string representation
+  - Introduce a typed `SqlExpr` intermediate representation in `src/sparql/expr.rs` replacing the current raw-`String` output from `translate_expr()` — makes the function dispatch table explicit and independently testable
+
+- [ ] **FILTER silent-drop fix**
+  - Change `translate_expr()` so that an unsupported expression variant raises a structured `ERRCODE_FEATURE_NOT_SUPPORTED` error naming the unimplemented function, rather than returning `None` and silently dropping the predicate from the SQL `WHERE` clause
+  - Add `pg_ripple.sparql_strict` GUC (default: `on`): when `off`, the legacy warn-and-drop behaviour is preserved for compatibility; when `on` (default from this release onwards), unsupported expressions hard-error
+  - Migration script `sql/pg_ripple--0.20.0--0.21.0.sql`: register the `sparql_strict` GUC with its default
+
+- [ ] **Query correctness fixes**
+  - `ORDER BY` NULL placement: append `NULLS LAST` to every `ASC` clause and `NULLS FIRST` to every `DESC` clause in the SQL generator, matching SPARQL 1.1 §15.1 semantics (unbound variables sort last in ascending order, first in descending order)
+  - `GROUP_CONCAT(DISTINCT …)`: honour the `distinct` flag in `AggregateExpression::GroupConcat` — emit `STRING_AGG(DISTINCT …, sep)` rather than silently dropping the deduplication
+  - `p*` (ZeroOrMore) reflexive rows: restrict the zero-hop identity row to subjects that actually appear in the predicate's VP tables, preventing spurious reflexive paths for all nodes in the graph
+  - Property-path cycle detection: change `CYCLE o SET _is_cycle USING _cycle_path` to `CYCLE (s, o) SET _is_cycle USING _cycle_path` in all `WITH RECURSIVE` path CTEs — prevents false cycle detection in DAGs that have shared intermediate nodes
+  - `OPTIONAL` over aggregates: wrap `GROUP BY` / `HAVING` sub-patterns as `LATERAL` subselects keyed on shared variables, preventing a Cartesian-product blow-up when a `LeftJoin` pattern has an aggregate sub-query on the right side
+  - Self-join dedup key: replace the `format!("{tp}")` Debug-string key in BGP pattern deduplication with a structural `(s_term_id, p_term_id, o_term_id)` tuple so that only genuinely identical patterns are collapsed
+
+- [ ] **Honest W3C conformance test assertions**
+  - Rewrite all `count(*) >= 0 AS label_no_error` and row-count assertions in `w3c_sparql_query_conformance.sql` that previously masked silent filter-drops with real value-checking assertions
+  - New pg_regress test file `sparql_builtins.sql` — one assertion per built-in function, verifying correct output value not just row count
+  - New pg_regress test file `sparql_filter_errors.sql` — verifies that queries using unsupported expressions under `sparql_strict = on` raise `ERRCODE_FEATURE_NOT_SUPPORTED`
+  - New pg_regress test file `property_path_correctness.sql` — cycle detection on cyclic graphs, ZeroOrMore on disconnected nodes, DAG with shared ancestors, `NULLS LAST` sort order
+
+### Documentation
+
+> See [plans/documentation.md](plans/documentation.md) for details.
+
+- [ ] `reference/sparql-functions.md` (new page) — every SPARQL 1.1 built-in function, implementation status, PostgreSQL equivalent used, and known limitations (e.g. timezone precision, regex dialect)
+- [ ] `user-guide/sparql-reference.md` updated with complete function table and `sparql_strict` GUC guidance
+- [ ] `reference/w3c-conformance.md` updated — replace `label_no_error` placeholder entries with accurate pass / skip / fail classification
+- [ ] Release notes for v0.21.0 — list every newly implemented function; highlight the FILTER silent-drop fix and the migration from `label_no_error` assertions
+
+### Exit Criteria
+
+Every SPARQL 1.1 built-in function from the W3C SPARQL 1.1 Appendix A either works correctly or raises a named `ERRCODE_FEATURE_NOT_SUPPORTED` error — never silently drops. `w3c_sparql_query_conformance.sql` passes with real value-checking assertions (no `>= 0` shims). `sparql_builtins.sql` passes for all implemented functions. `ORDER BY` NULL placement, property-path cycle detection on a DAG, ZeroOrMore scope restriction, and `GROUP_CONCAT DISTINCT` each have a dedicated passing regression test.
+
+---
+
+## v0.22.0 — Storage Correctness & Security Hardening
+
+**Theme**: Fix the critical data-integrity issues in the storage layer (dictionary cache rollback, HTAP merge races, shmem cache thrashing, rare-predicate promotion race) and close the security gaps in the HTTP companion service and privilege model identified in the v0.20.0 gap analysis.
+
+> **In plain language:** This release addresses issues that could silently corrupt data or create security vulnerabilities in production deployments. The most important fix: if a database transaction is rolled back, pg_ripple's internal term-ID cache now correctly discards the rolled-back entries — previously, stale IDs could be planted into the triple store, creating phantom references that make facts disappear or return the wrong data. Two race conditions in the background merge process that could cause deleted facts to reappear, or queries to error mid-merge, are also closed. The internal shared-memory cache is redesigned to handle large vocabularies without thrashing. On the security side, the HTTP companion service's rate-limiting finally works, error messages no longer leak internal database details to API clients, and the `_pg_ripple` internal schema is explicitly locked away from unprivileged roles.
+>
+> **Effort estimate: 6–8 person-weeks**
+
+### Deliverables
+
+- [ ] **Dictionary cache rollback correctness** (critical fix C-2)
+  - Register `RegisterXactCallback` and `RegisterSubXactCallback` during `_PG_init` — on `XACT_EVENT_ABORT` and `XACT_EVENT_PARALLEL_ABORT`, drain both `ENCODE_CACHE` and `DECODE_CACHE` thread-local LRU caches so rolled-back term IDs cannot be served to future encode calls in the same backend session
+  - Stamp a per-backend epoch counter; bump on rollback; the shared-memory encode cache stores the write epoch at insertion time and rejects cache hits from a prior epoch, ensuring the shmem path is also safe
+  - New pg_regress test `dictionary_rollback.sql`: `BEGIN; pg_ripple.insert_triple(…new term…); ROLLBACK; pg_ripple.insert_triple(same term again); verify pg_ripple.decode_id(id) = original term string, not NULL`
+
+- [ ] **HTAP merge race fixes** (critical fixes C-3 and C-4)
+  - C-3 (view-rename atomicity): remove the `CREATE OR REPLACE VIEW vp_N` step from the merge cycle — the view's `FROM` clause always names `vp_N_main` directly, which PG re-resolves after the rename; the `CREATE OR REPLACE VIEW` call is eliminated, closing the window between rename and view-rebuild
+  - C-4 (tombstone resurrection): record `max_sid_at_snapshot` at merge-start (`currval('_pg_ripple.statement_id_seq')` before processing); at merge-end TRUNCATE, only delete tombstones with `i ≤ max_sid_at_snapshot` — tombstones for deletes that committed after the snapshot survive to the next merge cycle
+  - New pg_regress test `merge_race.sql`: issue a `pg_ripple.delete_triple()` concurrently with `pg_ripple.force_merge()`; verify deleted triple does not reappear; verify no `relation does not exist` error under a concurrent `pg_ripple.sparql()` call
+
+- [ ] **Shared-memory encode cache — 4-way set-associative redesign** (high fix H-1)
+  - Replace the direct-mapped 4096-slot cache with a 4-way set-associative layout: 1024 sets × 4 ways — same memory footprint as before, birthday-collision rate drops from ~15% to <1% at 5k hot terms
+  - LRU eviction within each 4-way set using a 2-bit age field packed into the existing `(hash_parts, id)` slot struct
+  - New `pg_ripple.cache_stats()` SQL function returning `(hits BIGINT, misses BIGINT, evictions BIGINT, utilisation FLOAT)` — exposes hit rate for monitoring
+  - Benchmark gate: `just bench-cache` asserts hit rate ≥ 95% on a 10k-predicate workload; CI fails on regression below 90%
+
+- [ ] **Bloom filter per-bit reference counting** (high fix H-2)
+  - Replace the boolean `u64` bloom words with 8-bit saturating counters in the delta bloom shared-memory segment
+  - `set_predicate_delta_bit(pred_id)`: increment both bloom counter positions (saturates at 255)
+  - `clear_predicate_delta_bit(pred_id)`: decrement both counters; only clears the boolean bit when the counter reaches 0 — prevents false-negative delta skips for predicates that hash-collide with a predicate being concurrently merged
+
+- [ ] **Rare-predicate promotion atomicity** (high fixes H-3 and H-4)
+  - Rewrite `promote_predicate()` to use a single atomic CTE: `WITH moved AS (DELETE FROM _pg_ripple.vp_rare WHERE p = $1 RETURNING s, o, g, i, source) INSERT INTO _pg_ripple.vp_{id}_delta (s, o, g, i, source) SELECT * FROM moved` — eliminates the two-statement window where concurrent inserts can orphan rows in `vp_rare` under a predicate that now has its own VP table
+  - After the CTE, `UPDATE _pg_ripple.predicates SET triple_count = (SELECT count(*) FROM _pg_ripple.vp_{id}_delta) WHERE id = $1` to restore accurate planner statistics rather than leaving `triple_count = 0` after promotion
+  - pg_regress test: load > `vp_promotion_threshold` triples for a single predicate while a concurrent transaction also inserts into `vp_rare` for that predicate; verify zero orphan rows after promotion completes
+
+- [ ] **pg_ripple_http security hardening** (high fixes H-14, H-15; medium fixes M-13, S-4)
+  - Rate limiting: integrate `tower_governor` crate; `PG_RIPPLE_HTTP_RATE_LIMIT` env var is now enforced as requests-per-second per source IP (default 100 req/s); excess requests receive `429 Too Many Requests` with `Retry-After` header
+  - Error redaction: replace verbatim PostgreSQL error text in HTTP 4xx/5xx responses with `{"error": "<category>", "trace_id": "<uuid>"}` JSON; log the full PG error + trace ID at server `ERROR` level — internal schema names, GUC values, and file paths are never exposed to API clients
+  - Constant-time auth: replace `token != expected.as_str()` with `!constant_time_eq(token.as_bytes(), expected.as_bytes())` using the `constant_time_eq` crate
+  - Federation URL scheme validation: `pg_ripple.register_endpoint()` rejects any URL whose scheme is not `http` or `https` with `ERRCODE_INVALID_PARAMETER_VALUE` — prevents `file://`, `gopher://`, or other scheme registration even though `ureq` would refuse them at connection time
+
+- [ ] **Privilege model hardening** (medium fix M-14)
+  - Migration script `sql/pg_ripple--0.21.0--0.22.0.sql`: `REVOKE ALL ON SCHEMA _pg_ripple FROM PUBLIC; REVOKE ALL ON ALL TABLES IN SCHEMA _pg_ripple FROM PUBLIC; REVOKE ALL ON ALL SEQUENCES IN SCHEMA _pg_ripple FROM PUBLIC;`
+  - New pg_regress test `privilege_isolation.sql`: create a non-superuser role; verify `SELECT * FROM _pg_ripple.dictionary` raises permission denied; verify `SELECT * FROM pg_ripple.find_triples(NULL, NULL, NULL)` still works (public API unaffected)
+
+- [ ] **GUC bounds and merge worker signal handling** (medium fixes M-12, M-15)
+  - `pg_ripple.vp_promotion_threshold`: add `min = 10` and `max = 10_000_000` constraints to the pgrx GUC definition — prevents catalog explosion at `threshold = 1` and permanent `vp_rare` lock-in at `threshold = INT_MAX`
+  - Merge worker: call `BackgroundWorker::reset_latch()` immediately before `std::thread::sleep` in the error back-off path — prevents a busy-wait loop where a `SIGHUP` received during the sleep keeps `wait_latch` returning immediately on the next cycle
+
+### Documentation
+
+> See [plans/documentation.md](plans/documentation.md) for details.
+
+- [ ] `reference/security.md` Phase 2 section: rate limiting configuration, error-redaction policy, privilege model, constant-time auth rationale, URL scheme enforcement
+- [ ] `user-guide/operations.md` updated: rollback safety guarantee for dictionary cache, merge correctness guarantees (tombstone epoch fence), `pg_ripple.cache_stats()` monitoring
+- [ ] `user-guide/upgrading.md` updated: v0.21.0→v0.22.0 privilege change (REVOKE) is safe for all existing deployments; no data migration required
+- [ ] Release notes for v0.22.0 — highlight dictionary-rollback fix, merge race fixes, HTTP security changes
+
+### Exit Criteria
+
+Rolled-back `insert_triple` cannot plant a phantom ID (`dictionary_rollback.sql` pg_regress passes). `merge_race.sql` passes with zero tombstone resurrections and zero `relation does not exist` errors under a concurrent query. Shmem cache benchmark reports ≥ 95% hit rate at 10k hot terms. `pg_ripple_http` returns `429` when rate limit is exceeded (verified by integration test). Unprivileged role is denied `SELECT` on `_pg_ripple.*` (`privilege_isolation.sql` passes). All migration scripts from 0.1.0 through 0.22.0 run cleanly via `just test-migration`.
 
 ---
 
