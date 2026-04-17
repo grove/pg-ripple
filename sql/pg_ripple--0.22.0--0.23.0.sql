@@ -1,0 +1,14 @@
+-- Migration 0.22.0 → 0.23.0: SHACL Core Completion & SPARQL Diagnostics
+--
+-- New features (compiled from Rust — no SQL schema changes required):
+--   • SHACL: sh:hasValue, sh:closed, sh:ignoredProperties, sh:nodeKind,
+--             sh:languageIn, sh:uniqueLang, sh:lessThan, sh:greaterThan,
+--             sh:qualifiedValueShape, property paths in sh:path
+--   • New SQL function: pg_ripple.explain_sparql(query TEXT, format TEXT DEFAULT 'text')
+--   • Datalog: division-by-zero NULLIF wrap; unbound-variable compile error;
+--               full SCC-based negation-through-cycle detection
+--   • JSON-LD framing: embedder no longer panics on empty CONSTRUCT result;
+--                       per-node visited set prevents thrash on near-cyclic graphs
+
+-- Register the explain_sparql function (implemented as a pg_extern in Rust).
+-- No DDL-level schema changes are required for this migration.

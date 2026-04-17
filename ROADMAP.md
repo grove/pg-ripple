@@ -44,8 +44,11 @@ Each release below has two layers:
 | [0.20.0](#v0200--w3c-conformance--stability-foundation) | W3C Conformance & Stability | W3C SPARQL 1.1 and SHACL Core test suite compliance, crash recovery and memory safety hardening, security audit initiation | 5–7 pw |
 | [0.21.0](#v0210--sparql-built-in-functions--query-correctness) | SPARQL Built-in Functions & Query Correctness | Implement all ~40 missing SPARQL 1.1 built-in functions, fix the FILTER silent-drop hazard, and close critical query-semantics bugs | 6–8 pw |
 | [0.22.0](#v0220--storage-correctness--security-hardening) | Storage Correctness & Security Hardening | Fix HTAP merge race conditions, dictionary cache rollback, shmem cache thrashing, rare-predicate promotion race, and HTTP service security gaps | 6–8 pw |
+| [0.23.0](#v0230--shacl-core-completion--sparql-diagnostics) | SHACL Core Completion & SPARQL Diagnostics | Complete the SHACL constraint set, add SPARQL query introspection, and fix Datalog/JSON-LD correctness issues | 6–8 pw |
+| [0.24.0](#v0240--semi-naive-datalog--performance-hardening) | Semi-naive Datalog & Performance Hardening | Implement semi-naive evaluation for Datalog rules, complete the OWL RL rule set, batch-decode large result sets, and bound property-path depth | 6–8 pw |
+| [0.25.0](#v0250--geosparql--architectural-polish) | GeoSPARQL & Architectural Polish | Add GeoSPARQL 1.1 geometry primitives, stabilise the internal catalog against OID drift, and close remaining medium- and low-priority issues | 6–8 pw |
 | [1.0.0](#v100--production-release) | Production Release | Standards conformance, stress testing, security audit | 6–8 pw |
-| | | **Total estimated effort** | **123–166 pw** |
+| | | **Total estimated effort** | **141–190 pw** |
 
 ---
 
@@ -1623,6 +1626,196 @@ Every SPARQL 1.1 built-in function from the W3C SPARQL 1.1 Appendix A either wor
 ### Exit Criteria
 
 Rolled-back `insert_triple` cannot plant a phantom ID (`dictionary_rollback.sql` pg_regress passes). `merge_race.sql` passes with zero tombstone resurrections and zero `relation does not exist` errors under a concurrent query. Shmem cache benchmark reports ≥ 95% hit rate at 10k hot terms. `pg_ripple_http` returns `429` when rate limit is exceeded (verified by integration test). Unprivileged role is denied `SELECT` on `_pg_ripple.*` (`privilege_isolation.sql` passes). All migration scripts from 0.1.0 through 0.22.0 run cleanly via `just test-migration`.
+
+---
+
+## v0.23.0 — SHACL Core Completion & SPARQL Diagnostics
+
+**Theme**: Complete the SHACL 1.0 Core constraint set, introduce first-class SPARQL query introspection, and fix correctness issues in the Datalog engine and JSON-LD framing identified in the v0.20.0 gap analysis.
+
+> **In plain language:** This release makes pg_ripple's data-quality rules (SHACL) useful for real-world schemas. Until now, common constraints like "this property must have a specific value" (`sh:hasValue`), "this node must have exactly this type" (`sh:nodeKind`), and "no properties outside this allowed list" (`sh:closed`) were silently ignored. They now work. Separately, a new function `pg_ripple.explain_sparql()` lets you see exactly what SQL pg_ripple generates for a SPARQL query — invaluable for diagnosing slow queries. The Datalog engine also receives three correctness fixes: arithmetic division errors now name the rule that caused them, rules with undefined variables now error at compile time rather than silently matching nothing, and cyclic negation is correctly detected.
+>
+> **Effort estimate: 6–8 person-weeks**
+
+### Deliverables
+
+- [ ] **SHACL Core constraint completion** (medium fix M-18)
+  - `sh:hasValue`: verify that at least one value matches the given RDF term; compile to `EXISTS (SELECT 1 FROM vp_{id} WHERE s = $node AND o = $encoded_value)`
+  - `sh:closed` + `sh:ignoredProperties`: reject triples whose predicate is not in the shape's declared property set; compile to a NOT EXISTS anti-join over all VP tables scoped to the focus node, excluding the declared properties and the ignore list
+  - `sh:nodeKind`: validate that each value is an IRI, blank node, or literal as declared; discriminate using the dictionary `kind` column
+  - `sh:languageIn`: compile to `lang(value) = ANY($language_tags_array)` after decoding the language tag from the literal's dictionary entry
+  - `sh:uniqueLang`: use `COUNT(*) OVER (PARTITION BY lang(value))` and reject partitions with count > 1
+  - `sh:lessThan` / `sh:greaterThan`: emit a comparison join between the focus node's two property values, decoding literals to numeric/date types for ordering
+  - `sh:qualifiedValueShape`: `sh:qualifiedMinCount` / `sh:qualifiedMaxCount` on a nested shape — count focus-node values matching the inner shape and compare against the declared bounds
+  - `sh:path` with property path expressions: extend the shape compiler to accept inverse paths (`sh:inversePath`), alternative paths (`sh:alternativePath`), sequence paths, and zero-or-more/one-or-more/zero-or-one paths — each maps to the corresponding property-path CTE already used in the SPARQL engine
+  - New pg_regress test `shacl_core_completion.sql` — one test per new constraint with passing, failing, and edge-case triples; verified against the W3C SHACL Core test suite manifest
+
+- [ ] **SPARQL query introspection** (feature F-3 from the gap analysis)
+  - New SQL function `pg_ripple.explain_sparql(query TEXT, format TEXT DEFAULT 'text') RETURNS TEXT`
+  - When `format = 'sql'`: returns the generated SQL string produced by `translate_select()` without executing it — useful for manual inspection
+  - When `format = 'text'` (default) or `'json'`: runs `EXPLAIN (ANALYZE, FORMAT text/json)` on the generated SQL via SPI and returns the plan output
+  - When `format = 'sparql_algebra'`: returns the `spargebra` algebra tree serialised as indented text via `Debug` formatting — exposes the optimizer's view of the query
+  - Security: `SECURITY DEFINER` is not used; the caller needs `SELECT` privilege on the relevant VP tables (same as `pg_ripple.sparql()`)
+  - New pg_regress test `explain_sparql.sql` — verifies that the function returns non-empty output for a known-good SELECT query and does not error on edge cases (empty graph, VALUES-only query, property path query)
+
+- [ ] **Datalog engine correctness fixes** (medium fixes M-1, M-2, M-3)
+  - Division by zero (M-1): wrap every arithmetic divisor in the Datalog SQL compiler with `NULLIF(expr, 0)`; emit a `NOTICE`-level message naming the failing rule head when a null propagation from division occurs
+  - Unbound variables (M-2): add a compile-time check in `compile_rule()` that every variable appearing in a rule body literal is either bound by a positive body literal or explicitly declared; raise `ERRCODE_SYNTAX_ERROR` naming the variable and the rule head rather than emitting a `WHERE x = NULL` clause that silently matches nothing
+  - Negation-through-cycle (M-3): replace the single-edge negation check in `stratify.rs` with full SCC (strongly-connected component) computation using Tarjan's algorithm; reject any SCC that contains a negation-back-edge with a structured error naming the cycle: `"datalog: unstratifiable negation cycle: rule A → ¬B → ¬C → A"`
+
+- [ ] **JSON-LD framing correctness fixes** (medium fixes M-4, M-5)
+  - Embedder panic on empty result (M-4): replace `roots.into_iter().next().unwrap()` in `src/framing/embedder.rs` with `.ok_or_else(|| PgError::new("json-ld framing: CONSTRUCT produced no results", …))` — returns an empty JSON-LD document `{"@context": …, "@graph": []}` rather than panicking
+  - Per-node visited set (M-5): add a `HashSet<NodeId>` as the third parameter of the recursive `embed_node()` function; insert the current node ID before recursing and check membership before following an edge — prevents infinite thrash on near-cyclic embedded graphs; consistent with W3C JSON-LD Framing §4.1.3
+
+### Documentation
+
+> See [plans/documentation.md](plans/documentation.md) for details.
+
+- [ ] `reference/shacl-reference.md` updated — every newly supported constraint documented with syntax, semantics, and a worked example; mark previously-deferred constraints as now implemented
+- [ ] `user-guide/shacl-guide.md` updated — add a section on property path shapes (`sh:path`) showing inverse and alternative path examples
+- [ ] `reference/sparql-functions.md` updated — add `pg_ripple.explain_sparql()` reference with all four `format` options, example output, and note on required privileges
+- [ ] `user-guide/datalog-guide.md` updated — document the new division-by-zero `NOTICE`, the unbound-variable compile error, and the unstratifiable-cycle error with remediation guidance
+- [ ] Release notes for v0.23.0 — highlight SHACL gap closures, new `explain_sparql` function, and the three Datalog correctness fixes
+
+### Exit Criteria
+
+W3C SHACL Core test suite pass rate increases to ≥ 98%. `shacl_core_completion.sql` pg_regress passes for all eight new constraint types. `explain_sparql.sql` passes. A Datalog rule with division, an unbound variable, and a negation cycle each raise the expected named error rather than silent failure or a crash. `src/framing/embedder.rs` no longer contains `unwrap()` on the CONSTRUCT result. All migration scripts from 0.1.0 through 0.23.0 run cleanly via `just test-migration`.
+
+---
+
+## v0.24.0 — Semi-naive Datalog & Performance Hardening
+
+**Theme**: Replace the naive Datalog evaluation strategy with semi-naive evaluation for large-scale inference, complete the OWL RL rule set, batch-decode SPARQL result sets, and add safety bounds to property-path recursion.
+
+> **In plain language:** pg_ripple can derive new facts automatically from rules (Datalog). Until now, on every iteration of the rule engine, all previously derived facts were re-checked — wasteful for large datasets where most facts don't change between iterations. This release switches to "semi-naive" evaluation: each iteration only looks at *newly* derived facts from the previous pass, which can be 10–100 × faster on large ontologies. For the same reason, four missing OWL reasoning rules that affect subclass and property chains are added. Two performance improvements round out the release: returning large SPARQL result sets is sped up by decoding all term IDs in a single batch rather than one-by-one, and property-path queries (`p*`, `p+`) gain a configurable depth limit to prevent runaway recursion on highly-connected graphs.
+>
+> **Effort estimate: 6–8 person-weeks**
+
+### Deliverables
+
+- [ ] **Semi-naive Datalog evaluation** (performance fix P-3, depends on M-3 from v0.23.0)
+  - Rework `src/datalog/compiler.rs` to emit ΔR maintenance queries:
+    - For each derived relation `R`, maintain a delta table `Δ_R` holding only rows derived in the most recent iteration
+    - The fixpoint loop re-evaluates each rule against `Δ_R` (the delta of its input relations) rather than the full `R`; newly derived rows are inserted into `Δ_R_new`; after each iteration `Δ_R ← Δ_R_new` and the loop continues while `Δ_R` is non-empty
+    - Compile to a series of CTEs: `WITH delta_R AS (…), delta_R_new AS (…) INSERT INTO R SELECT * FROM delta_R_new ON CONFLICT DO NOTHING`
+  - Preserve stratified evaluation order: each stratum is fully converged before the next stratum begins; semi-naive is applied within each stratum
+  - Correct prerequisite: requires M-3 (stable stratification) from v0.23.0 — test pipeline enforces this ordering
+  - New pg_regress test `datalog_seminaive.sql` — run RDFS closure over a 10k-triple subgraph; verify correct closure count; measure and assert iteration count is bounded by the longest derivation chain length (not the full relation size)
+  - `just bench-datalog` benchmark gate: semi-naive must be ≥ 5× faster than naive on the RDFS subgraph benchmark; CI fails on regression below 3×
+
+- [ ] **OWL RL rule set completion** (medium fix M-17)
+  - `cax-sco` full transitive closure: the existing partial rule handles one level of `rdfs:subClassOf`; add the transitive step so that `A subClassOf B, B subClassOf C → A subClassOf C` is derived for arbitrary chain length via the semi-naive mechanism above
+  - `cls-avf`: `owl:allValuesFrom` chaining — `x ∈ C, C ≡ (∀p . D), y = p(x) → y ∈ D`; compile to a join across the `owl:allValuesFrom` VP table and the subject's type VP table
+  - `prp-ifp`: inverse-functional property inference — `p is InverseFunctionalProperty, p(x, z) and p(y, z) → x = y`; compile to a self-join on `vp_{p_id}` grouping by `o`, emitting `sameAs` triples for any `s` values that collide
+  - `prp-spo1`: sub-property chaining — `q subPropertyOf p, q(x, y) → p(x, y)` for derived property chains; relies on the semi-naive delta loop to propagate transitively
+  - Update `src/datalog/builtins.rs` with the four new rule templates; document which OWL RL rules are now implemented vs. out of scope; update `reference/datalog-reference.md`
+
+- [ ] **Batch decode for SPARQL result sets** (architectural fix A-2, performance fix P-2)
+  - Wire `batch_decode_ids()` through the SPARQL execution path in `src/sparql/sqlgen.rs`: after SPI returns a result set, collect all distinct `i64` IDs across all columns in a single pass, call `batch_decode_ids(&ids)` to resolve them in one SPI round-trip, then substitute into the result rows
+  - The existing `batch_decode` infrastructure is already implemented for the bulk-load path; the change is routing the SPARQL result-building loop through the same function
+  - Benchmark gate: `just bench-sparql-decode` asserts ≤ 2 SPI round-trips for a SELECT returning 1000 distinct terms; previously O(N) calls
+
+- [ ] **Property-path depth GUC** (performance fix P-4)
+  - New GUC `pg_ripple.property_path_max_depth` (type: `INT`, default: `64`, min: `1`, max: `100000`)
+  - Append `WHERE _depth < $pg_ripple.property_path_max_depth` to every `WITH RECURSIVE … CYCLE` property-path CTE generated by `src/sparql/property_path.rs`
+  - When the depth limit is hit, emit a `WARNING`-level message: `"property path depth limit reached (max: N); some paths may be truncated"` — not an error, because SPARQL spec does not define a depth limit
+  - New pg_regress test `property_path_depth.sql` — verify that a 100-hop chain is fully traversed with default limit, and that reducing the GUC to 10 truncates at 10 hops with the expected WARNING
+
+- [ ] **BRIN index migration to SID column** (medium fix M-16)
+  - Migration script `sql/pg_ripple--0.23.0--0.24.0.sql`: for each existing VP main table, `DROP INDEX vp_{id}_main_s_brin; CREATE INDEX vp_{id}_main_i_brin ON _pg_ripple.vp_{id}_main USING brin (i)` — the `i` (SID) column is monotonically increasing with insertion order, giving BRIN strong correlation; the `s` (subject) column has near-random distribution and BRIN provides negligible benefit
+  - Merge worker: generate the new BRIN on `i` at merge time for freshly built `main` partitions; remove the BRIN-on-`s` creation step from `create_vp_table()`
+  - B-tree indices on `(s, o)` and `(o, s)` are unchanged
+
+- [ ] **Export streaming** (low fix L-6)
+  - Rework `src/export.rs` Turtle/N-Triples/JSON-LD export helpers to iterate over VP tables in SID-order cursor batches (batch size: `pg_ripple.export_batch_size` GUC, default: `10000`) rather than materialising the full graph into memory
+  - `DECLARE … CURSOR FOR SELECT … ORDER BY i` + `FETCH $batch_size FROM cursor` loop — each batch is serialised and flushed to `COPY` output immediately; peak memory is bounded by `batch_size × average_triple_size`
+
+### Documentation
+
+> See [plans/documentation.md](plans/documentation.md) for details.
+
+- [ ] `reference/datalog-reference.md` updated — add semi-naive evaluation section explaining the ΔR mechanics, iteration bounds, and performance expectations; update OWL RL coverage table to mark `cax-sco` full, `cls-avf`, `prp-ifp`, `prp-spo1` as implemented
+- [ ] `reference/configuration.md` updated — document `pg_ripple.property_path_max_depth` and `pg_ripple.export_batch_size` GUCs with allowed ranges and tuning guidance
+- [ ] `user-guide/performance.md` updated — add "large result set decoding" section explaining the batch-decode change and expected latency improvement
+- [ ] Release notes for v0.24.0 — highlight semi-naive evaluation with performance numbers from the benchmark; list completed OWL RL rules; note BRIN migration and streaming export
+
+### Exit Criteria
+
+`datalog_seminaive.sql` passes with correct closure count and iteration count ≤ longest derivation chain. Semi-naive benchmark is ≥ 5× faster than naive on the RDFS subgraph. All four new OWL RL rules derive correct inferences in the corresponding pg_regress tests. SPARQL result-set decoding issues ≤ 2 SPI round-trips for 1000-term results (verified by the bench gate). Property path with default depth limit correctly traverses a 100-hop chain; depth-10 truncation emits the expected WARNING. Migration scripts from 0.1.0 through 0.24.0 run cleanly via `just test-migration`.
+
+---
+
+## v0.25.0 — GeoSPARQL & Architectural Polish
+
+**Theme**: Add a GeoSPARQL 1.1 geometry subset using PostGIS, stabilise the internal catalog against OID drift, and close the remaining medium- and low-priority issues from the v0.20.0 gap analysis.
+
+> **In plain language:** PostgreSQL already understands geography — distances, containment, intersection — through the PostGIS extension. This release connects pg_ripple's RDF triple store to PostGIS so that SPARQL queries can filter and compute over geographic data: "which cities are within 50 km of Berlin?", "which roads cross this polygon?". This covers the most common GeoSPARQL functions used in open data publishing (Wikidata, LinkedGeoData, government datasets). The release also includes a set of smaller housekeeping improvements: the internal predicate catalog now stores table names instead of fragile OIDs, the HTTP companion service correctly validates federation endpoint URLs against SSRF schemes, bulk loads can now be run in strict mode that rolls back on any malformed triple, and the remaining low-priority issues from the v0.20.0 assessment are closed.
+>
+> **Effort estimate: 6–8 person-weeks**
+
+### Deliverables
+
+- [ ] **GeoSPARQL 1.1 geometry subset** (feature F-5 from the gap analysis)
+  - Prerequisite: PostGIS installed (gated with a runtime `SELECT proname FROM pg_proc WHERE proname = 'st_geomfromtext'` availability check; all geo functions return `NULL` with a `WARNING` if PostGIS is absent — no `ERROR`)
+  - WKT literal support: recognize `geo:wktLiteral` datatype IRIs in the dictionary encoder; store as a regular literal; decode to a `TEXT` representation compatible with `ST_GeomFromText()`
+  - Topological relation functions (compile to PostGIS equivalents):
+    - `geo:sfIntersects(a, b)` → `ST_Intersects(ST_GeomFromText(a), ST_GeomFromText(b))`
+    - `geo:sfContains(a, b)` → `ST_Contains(ST_GeomFromText(a), ST_GeomFromText(b))`
+    - `geo:sfWithin(a, b)` → `ST_Within(ST_GeomFromText(a), ST_GeomFromText(b))`
+    - `geo:sfTouches(a, b)`, `geo:sfCrosses(a, b)`, `geo:sfOverlaps(a, b)` — same pattern
+  - Distance and measurement functions:
+    - `geof:distance(a, b, unit)` → `ST_Distance(ST_GeomFromText(a)::geography, ST_GeomFromText(b)::geography)` with unit conversion (supports `uom:metre`, `uom:kilometre`, `uom:mile`); result encoded as `xsd:double`
+    - `geof:area(a, unit)` → `ST_Area(…::geography)` with the same unit conversion
+    - `geof:boundary(a)` → `ST_Boundary(ST_GeomFromText(a))` serialised back to WKT literal
+  - SPARQL FILTER integration: wire all geo functions into `translate_expr()` in `src/sparql/expr.rs`; topological predicates emit a SQL boolean; distance/area/boundary emit decoded numeric/WKT values
+  - New pg_regress test `geosparql.sql` — skipped automatically when PostGIS is absent (`DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_proc WHERE proname = 'st_geomfromtext') THEN RAISE EXCEPTION …; END IF; END $$`); when PostGIS is present, verifies intersection, distance, and contains queries against a small geography dataset
+
+- [ ] **Catalog OID stability** (architectural fix A-5)
+  - Add `schema_name NAME, table_name NAME` columns to `_pg_ripple.predicates` in the migration script
+  - Populate on insert: `schema_name = '_pg_ripple'`, `table_name = 'vp_{id}_delta'` (the mutable partition; view name is derivable)
+  - All dynamic SQL in the merge worker, query path, and admin functions now references `quote_ident(schema_name) || '.' || quote_ident(table_name)` rather than looking up OIDs — OID drift after a `pg_dump` / `pg_restore` cycle no longer silently redirects queries to the wrong relation
+  - Migration script `sql/pg_ripple--0.24.0--0.25.0.sql`: `ALTER TABLE _pg_ripple.predicates ADD COLUMN schema_name NAME DEFAULT '_pg_ripple', ADD COLUMN table_name NAME; UPDATE _pg_ripple.predicates SET table_name = 'vp_' || id || '_delta';`
+
+- [ ] **Federation SSRF scheme validation** (security fix S-4)
+  - `pg_ripple.register_endpoint(url TEXT)`: reject any URL whose scheme is not `http` or `https` at registration time with `ERRCODE_INVALID_PARAMETER_VALUE: "federation endpoint must use http or https scheme; got: <scheme>"` — belt-and-braces defence even though `ureq` would refuse non-HTTP at connection time
+
+- [ ] **Bulk load strict mode** (medium fix M-8)
+  - Add `strict BOOLEAN DEFAULT false` parameter to `pg_ripple.load_turtle(data TEXT, strict BOOLEAN DEFAULT false)` and all other bulk-load entry points
+  - When `strict = true`: any parse error or malformed triple aborts the entire `COPY`-equivalent batch with a structured error naming the line number and the offending triple; the transaction is rolled back to the savepoint established at the start of the load
+  - When `strict = false` (current behaviour): malformed triples emit a `WARNING` and are skipped; partial loads are committed as before
+  - New pg_regress test `bulk_load_strict.sql` — verify that a load with one malformed triple in strict mode rolls back all preceding triples; verify that the same load in lenient mode commits the well-formed triples
+
+- [ ] **Blank-node document scoping fix** (medium fix M-9)
+  - Replace the `SystemTime::now().duration_since(UNIX_EPOCH).unwrap().subsec_nanos()` blank-node prefix in `src/bulk_load.rs` with `nextval('_pg_ripple.statement_id_seq')` — globally unique per load call, collision-free under any level of concurrency
+
+- [ ] **Merge worker cache isolation** (architectural fix A-3)
+  - Register a transaction-boundary callback in the background merge worker (analogous to the xact-end callback added in v0.22.0 for the encode cache) that clears the worker-local encode/decode LRU cache at the end of every merge transaction — prevents the worker from using stale IDs if a future migration rewrites dictionary rows
+
+- [ ] **pg_trickle version-lock probe** (architectural fix A-4)
+  - In `_PG_init`, if `pg_trickle` is available, execute `SELECT extversion FROM pg_extension WHERE extname = 'pg_trickle'` and compare against the compile-time `PG_TRICKLE_TESTED_VERSION` constant; emit a `WARNING` if the installed version is newer than tested: `"pg_ripple: pg_trickle version N.N.N is newer than tested version N.N.N; incremental views may behave unexpectedly"`
+
+- [ ] **Remaining low-priority fixes**
+  - CDC payload documentation (L-2): add a `decode BOOLEAN DEFAULT false` parameter to `pg_ripple.cdc_changes()` that, when true, decodes dictionary IDs to N-Triples strings in the payload; document in `user-guide/cdc.md`
+  - Dependency alignment (L-3/L-4): upgrade `ureq` from v2 to v3 in `pg_ripple_http/Cargo.toml`; update `AGENTS.md` to list `oxttl`/`oxrdf` as the canonical RDF-star parser (replacing `rio_turtle` for star triples); update `Cargo.toml` if not already present
+  - GUC description strings (L-5): update every `GucBuilder::new()` `.set_description()` call in `src/lib.rs` to include the default value and valid range, e.g. `"Maximum property path recursion depth. Default: 64. Range: 1–100000."` — improves `SHOW ALL` and pg_admin discoverability
+  - Inline decoder defensive assert (L-7): add `debug_assert!(is_inline(id), "decode_inline called with non-inline id {id}")` at the top of `decode_inline()` in `src/dictionary/inline.rs`
+  - Export literal round-trip (M-10): add a pg_regress test `export_roundtrip.sql` that inserts triples with `\uXXXX` Unicode escapes, non-ASCII literals, and control characters, then round-trips through Turtle export and import; verifies the decoded values match the originals
+  - W3C conformance test classification (M-19): replace remaining `label_no_error` style assertions in the conformance test file with a formal skip-list `expected_skip` CTE; document each skip with a reason code (`UNIMPLEMENTED`, `KNOWN_LIMITATION`, or `SPEC_AMBIGUITY`); ensure the skip list shrinks to zero by v1.0.0
+
+### Documentation
+
+> See [plans/documentation.md](plans/documentation.md) for details.
+
+- [ ] `reference/geosparql.md` (new page) — GeoSPARQL 1.1 support matrix, all implemented functions with signatures and PostGIS equivalents, PostGIS version requirements, worked examples with WKT literals
+- [ ] `user-guide/geospatial.md` (new page) — how to store and query geographic data in pg_ripple, linking GeoSPARQL to PostGIS, example queries for distance filtering and containment
+- [ ] `reference/security.md` updated — document federation scheme validation and the remediation rationale
+- [ ] `user-guide/bulk-load.md` updated — document the `strict` parameter with when to use it and how to diagnose partial-load failures
+- [ ] `reference/configuration.md` updated — document `pg_trickle` version-lock warning and the new CDC `decode` parameter
+- [ ] Release notes for v0.25.0 — highlight GeoSPARQL capability, catalog OID stability improvement, strict bulk load, and summary of all closed low-priority issues
+
+### Exit Criteria
+
+`geosparql.sql` pg_regress passes when PostGIS is present and skips cleanly when PostGIS is absent. `bulk_load_strict.sql` passes for both strict and lenient modes. Blank-node prefix uses `nextval(…)` — no wall-clock-based prefix in `src/bulk_load.rs`. `SELECT pg_ripple.register_endpoint('file:///etc/passwd')` raises `ERRCODE_INVALID_PARAMETER_VALUE`. `_pg_ripple.predicates` has `schema_name` and `table_name` columns populated. Migration scripts from 0.1.0 through 0.25.0 run cleanly via `just test-migration`.
 
 ---
 
