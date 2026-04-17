@@ -1,0 +1,12 @@
+diff -U3 /Users/geir.gronmo/projects/pg-ripple2/tests/pg_regress/expected/dictionary_rollback.out /Users/geir.gronmo/projects/pg-ripple2/tests/pg_regress/results/dictionary_rollback.out
+--- /Users/geir.gronmo/projects/pg-ripple2/tests/pg_regress/expected/dictionary_rollback.out	2026-04-17 20:19:48
++++ /Users/geir.gronmo/projects/pg-ripple2/tests/pg_regress/results/dictionary_rollback.out	2026-04-17 20:22:24
+@@ -96,7 +96,7 @@
+ -- Verify all three terms were reinserted
+ SELECT COUNT(*) = 3 as all_kinds_reinserted FROM test_dict_rollback;
+  all_kinds_reinserted 
+----------------------
++----------------------
+  t
+ (1 row)
+ 

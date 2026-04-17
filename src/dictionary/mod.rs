@@ -603,3 +603,20 @@ pub fn decode(id: i64) -> Option<String> {
 
     value
 }
+
+/// Clear both the encode and decode thread-local caches.
+///
+/// Called on transaction abort (XACT_EVENT_ABORT, XACT_EVENT_PARALLEL_ABORT)
+/// to ensure rolled-back dictionary entries do not leak into future transactions.
+/// This is critical for correctness: if a transaction is rolled back, any
+/// dictionary IDs inserted during that transaction should not be served by
+/// the cache in subsequent encode calls, as the dictionary rows themselves
+/// have been rolled back (v0.22.0 critical fix C-2).
+pub(crate) fn clear_caches() {
+    ENCODE_CACHE.with(|c| {
+        c.borrow_mut().clear();
+    });
+    DECODE_CACHE.with(|c| {
+        c.borrow_mut().clear();
+    });
+}

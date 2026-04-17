@@ -1093,9 +1093,51 @@ pub extern "C-unwind" fn _PG_init() {
         // accumulated unmerged delta row count crosses the trigger threshold.
         register_executor_end_hook();
     }
+
+    // ── Transaction callbacks (v0.22.0) ───────────────────────────────────────
+    // Register transaction callback to clear the dictionary cache on abort.
+    // This ensures rolled-back dictionary entries (from INSERT INTO dictionary
+    // during a failed transaction) do not persist in the backend-local cache,
+    // preventing phantom references (v0.22.0 critical fix C-2).
+    register_xact_callback();
+
     // Schema and base tables are created by the `schema_setup` extension_sql!
     // block, which runs inside the CREATE EXTENSION transaction where SPI and
     // DDL are available.  Nothing to do here.
+}
+
+// ─── Transaction callbacks (v0.22.0) ──────────────────────────────────────────
+
+/// Register a transaction callback to clear the dictionary cache on abort.
+///
+/// This prevents rolled-back dictionary entries from persisting in the
+/// backend-local cache, which would create phantom references in subsequent
+/// transactions (critical fix C-2).
+fn register_xact_callback() {
+    unsafe {
+        // SAFETY: RegisterXactCallback is a standard PostgreSQL callback mechanism
+        // for transaction events. We register a C-compatible callback that will be
+        // called at various transaction events. The callback uses only Rust code
+        // (clear_caches) which has no dependencies on PG's signal handling, so it
+        // is safe to call from a callback context.
+        pg_sys::RegisterXactCallback(Some(xact_callback_c), std::ptr::null_mut());
+    }
+}
+
+/// C-compatible transaction callback wrapper.
+///
+/// PostgreSQL calls this callback with XactEvent and an opaque arg pointer.
+/// We forward to the Rust clear_caches function only on XACT_EVENT_ABORT and
+/// XACT_EVENT_PARALLEL_ABORT events.
+#[allow(non_snake_case)]
+unsafe extern "C-unwind" fn xact_callback_c(event: u32, _arg: *mut std::ffi::c_void) {
+    // XactEvent is an enum in PostgreSQL, and the event is passed as a u32.
+    // We check against the enum discriminants for ABORT events:
+    // XACT_EVENT_ABORT = 0, XACT_EVENT_PARALLEL_ABORT = 4
+    // See src/include/access/xact.h in PostgreSQL source.
+    if event == 0 || event == 4 {
+        crate::dictionary::clear_caches();
+    }
 }
 
 // ─── Public SQL-callable functions ────────────────────────────────────────────
