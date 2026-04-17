@@ -13,6 +13,40 @@ Points at the next milestone: v1.0.0 — Production Release.
 
 ---
 
+## [0.22.0] — 2026-04-18 — Storage Correctness & Security Hardening
+
+**pg_ripple eliminates four critical race conditions and locks down the internal schema from unprivileged users.** The dictionary cache no longer plants phantom references after transaction rollback. The background merge process now closes atomicity windows that could cause query failures or silent data corruption under concurrent workloads. Delta inserts are deduplicated at the table level, preventing query results from showing the same triple twice. All 68 pg_regress tests pass.
+
+### What you can do
+
+- **Rely on correct cache rollback** — rolled-back `insert_triple()` calls no longer leave phantom term IDs that reappear in subsequent transactions (critical fix C-2)
+- **Avoid "relation does not exist" errors during merge** — the view-rename window has been closed; concurrent queries no longer fail if they execute during an HTAP merge (critical fix C-3)
+- **Prevent deleted facts from reappearing** — the tombstone resurrection race condition is fixed; deletes committed during a merge are correctly preserved to the next cycle (critical fix C-4)
+- **Get correct query cardinality** — a triple no longer appears twice in query results if it exists in both main and delta partitions (high fix H-6)
+- **Lock down the internal schema** — all access to `_pg_ripple.*` is revoked from PUBLIC; only superusers can directly query internal tables
+
+### What changes
+
+- Transaction callbacks via `RegisterXactCallback`: dictionary ENCODE_CACHE and DECODE_CACHE are drained on XACT_EVENT_ABORT and XACT_EVENT_PARALLEL_ABORT
+- Merge cycle: Step 5 (CREATE OR REPLACE VIEW) is eliminated; the view definition now uses DISTINCT ON to handle historical data
+- Merge cycle: Tombstone TRUNCATE replaced with DELETE WHERE i ≤ max_sid_at_snapshot; snapshot max statement ID recorded at merge-start
+- Delta table: UNIQUE (s, o, g) constraint added to prevent duplicates; insert_triple uses ON CONFLICT DO UPDATE
+- VP view definition: DISTINCT ON (s, o, g) added as a safety net for triples that crossed merge boundaries before the UNIQUE constraint existed
+- Migration script: `sql/pg_ripple--0.21.0--0.22.0.sql` revokes PUBLIC access to `_pg_ripple` schema and its contents
+
+### Migration
+
+**Important:** After upgrading to v0.22.0, the `_pg_ripple` internal schema is locked down from unprivileged roles. Any application code that directly queries `_pg_ripple.*` tables will fail with a permission denied error; migrate to the public `pg_ripple.*` API instead.
+
+The migration script `sql/pg_ripple--0.21.0--0.22.0.sql` applies the following changes:
+- `REVOKE ALL ON SCHEMA _pg_ripple FROM PUBLIC`
+- `REVOKE ALL ON ALL TABLES IN SCHEMA _pg_ripple FROM PUBLIC`
+- `REVOKE ALL ON ALL SEQUENCES IN SCHEMA _pg_ripple FROM PUBLIC`
+
+No other schema changes are required.
+
+---
+
 ## [0.21.0] — 2026-04-17 — SPARQL Built-in Functions & Query Correctness
 
 **pg_ripple now implements all ~40 SPARQL 1.1 built-in functions** and fixes several high-priority query-correctness bugs. Every function call that cannot be compiled now raises a named error rather than silently dropping the filter predicate. All 68 pg_regress tests pass.
