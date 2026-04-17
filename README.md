@@ -13,7 +13,7 @@ pg_ripple is a PostgreSQL 18 extension building toward a fully-featured knowledg
 
 ---
 
-## What works today (v0.20.0)
+## What works today (v0.22.0)
 
 **pg_ripple is now 100% conformant with the W3C SPARQL 1.1 Query, SPARQL 1.1 Update, and SHACL Core test suites.** Twenty versions in, pg_ripple covers the full SPARQL 1.1 stack, SHACL validation, Datalog reasoning, incremental live views, a standard HTTP endpoint, high-performance federated queries across remote SPARQL services, and frame-driven JSON-LD export — all inside PostgreSQL with no separate process required.
 
@@ -279,6 +279,8 @@ CREATE EXTENSION pg_ripple;
 | **0.18.0** | **CONSTRUCT/DESCRIBE/ASK Views** | Incremental live views for all four SPARQL query forms | ✅ Done |
 | **0.19.0** | **Federation Performance** | Connection pooling, result caching, variable projection, batch SERVICE, adaptive timeouts | ✅ Done |
 | **0.20.0** | **W3C Conformance & Stability** | 100% W3C SPARQL 1.1 Query/Update/SHACL Core conformance, crash recovery, security audit Phase 1, API stability contract | ✅ Done |
+| **0.21.0** | **SPARQL Built-in Functions** | All ~40 SPARQL 1.1 built-in functions, query correctness fixes, `sparql_strict` GUC | ✅ Done |
+| **0.22.0** | **Storage Correctness & Security Hardening** | Dictionary rollback safety, merge race fixes, atomic predicate promotion, HTTP rate limiting, error redaction, constant-time auth | ✅ Done |
 | **1.0.0** | **Production Release** | Stress testing (72h), final security sign-off, production certification | 🔜 Next |
 
 See [ROADMAP.md](ROADMAP.md) for deliverables and exit criteria for every release.
@@ -294,7 +296,7 @@ Planned future directions: distributed storage (Citus), vector + graph hybrid se
 pg_ripple aims for production-grade quality:
 
 - **Unit tests** — pgrx `#[pg_test]` for every SQL-exposed function, property-based testing with `proptest`
-- **Integration tests** — 68 pg_regress test files covering every feature
+- **Integration tests** — 70 pg_regress test files covering every feature
 - **Security testing** — SQL injection prevention, malformed input resilience, resource exhaustion defence
 - **Fuzz testing** — continuous fuzzing of the SPARQL→SQL pipeline with `cargo-fuzz`
 - **Concurrency testing** — dictionary cache correctness, merge worker data integrity under concurrent writes

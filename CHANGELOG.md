@@ -13,50 +13,42 @@ Points at the next milestone: v1.0.0 — Production Release.
 
 ---
 
-## [0.22.0] — 2026-04-18 — Storage Correctness & Security Hardening
+## [0.22.0] — 2026-04-17 — Storage Correctness & Security Hardening
 
-**pg_ripple eliminates four critical race conditions, locks down the internal schema from unprivileged users, and improves cache performance with 4-way set-associative eviction and per-bit bloom filter reference counting.** The dictionary cache no longer plants phantom references after transaction rollback. The background merge process now closes atomicity windows that could cause query failures or silent data corruption under concurrent workloads. Delta inserts are deduplicated at the table level, preventing query results from showing the same triple twice. The shared-memory encode cache now uses 4-way set-associative LRU to reduce hash collisions and improve hit rate on large vocabularies. The bloom filter tracking delta tables uses per-bit reference counting to prevent hash collisions from causing false-negative delta skips during concurrent merge operations. All 69 pg_regress tests pass.
+**pg_ripple eliminates four critical race conditions, locks down the internal schema from unprivileged users, and hardens the HTTP companion service against information-disclosure and timing attacks.** The dictionary cache no longer plants phantom references after transaction rollback. The background merge process closes all known atomicity windows. Rare-predicate promotion is now atomic. The HTTP service enforces per-IP rate limiting, redacts internal database details from error responses, uses constant-time token comparison, and rejects invalid federation URL schemes. All 70 pg_regress tests pass.
 
 ### What you can do
 
-- **Rely on correct cache rollback** — rolled-back `insert_triple()` calls no longer leave phantom term IDs that reappear in subsequent transactions (critical fix C-2)
-- **Avoid "relation does not exist" errors during merge** — the view-rename window has been closed; concurrent queries no longer fail if they execute during an HTAP merge (critical fix C-3)
-- **Prevent deleted facts from reappearing** — the tombstone resurrection race condition is fixed; deletes committed during a merge are correctly preserved to the next cycle (critical fix C-4)
-- **Get correct query cardinality** — a triple no longer appears twice in query results if it exists in both main and delta partitions (high fix H-6)
-- **Monitor cache performance** — new `pg_ripple.cache_stats()` SQL function returns hit/miss/eviction counts and current utilisation (high fix H-1)
-- **Handle hash collisions safely** — the bloom filter now uses per-bit reference counting so that predicates with hash-colliding bit positions don't cause false-negative delta skips (high fix H-2)
+- **Rely on correct cache rollback** — rolled-back `insert_triple()` calls no longer leave phantom term IDs that reappear in subsequent transactions
+- **Avoid "relation does not exist" errors during merge** — the view-rename window has been closed; concurrent queries no longer fail if they execute during an HTAP merge
+- **Prevent deleted facts from reappearing** — the tombstone resurrection race condition is fixed; deletes committed during a merge are correctly preserved to the next cycle
+- **Get correct query cardinality** — a triple no longer appears twice in query results if it exists in both main and delta partitions
+- **Rely on atomic predicate promotion** — a predicate promoted from `vp_rare` to its own VP table in a single CTE; no rows can be orphaned during concurrent inserts
+- **Monitor cache performance** — new `pg_ripple.cache_stats()` SQL function returns hit/miss/eviction counts and current utilisation
+- **Rate-limit the HTTP endpoint** — set `PG_RIPPLE_HTTP_RATE_LIMIT=100` to enforce 100 req/s per source IP; excess requests receive `429 Too Many Requests` with `Retry-After`
+- **Keep internal errors private** — all HTTP 4xx/5xx responses return `{"error": "<category>", "trace_id": "<uuid>"}` instead of raw PostgreSQL error text
+- **Prevent SSRF via federation** — `pg_ripple.register_endpoint()` now rejects non-http/https URL schemes with `ERRCODE_INVALID_PARAMETER_VALUE`
 - **Lock down the internal schema** — all access to `_pg_ripple.*` is revoked from PUBLIC; only superusers can directly query internal tables
 
 ### What changes
 
-- **Shared-memory encode cache (v0.22.0, H-1)**: Replaced direct-mapped 4096-slot design with 4-way set-associative 1024 sets. LRU eviction within each set uses 2-bit age field. Birthday-collision rate drops from ~15% to <1% at 5k hot terms.
-- **Bloom filter (v0.22.0, H-2)**: Added separate DELTA_BLOOM_COUNTERS array with per-bit 8-bit saturating counters. `set_predicate_delta_bit()` increments counters; `clear_predicate_delta_bit()` decrements and only clears bit when counter reaches 0.
-- Transaction callbacks via `RegisterXactCallback`: dictionary ENCODE_CACHE and DECODE_CACHE are drained on XACT_EVENT_ABORT and XACT_EVENT_PARALLEL_ABORT
-- Merge cycle: Step 5 (CREATE OR REPLACE VIEW) is eliminated; the view definition now uses DISTINCT ON to handle historical data
-- Merge cycle: Tombstone TRUNCATE replaced with DELETE WHERE i ≤ max_sid_at_snapshot; snapshot max statement ID recorded at merge-start
-- Delta table: UNIQUE (s, o, g) constraint added to prevent duplicates; insert_triple uses ON CONFLICT DO UPDATE
-- VP view definition: DISTINCT ON (s, o, g) added as a safety net for triples that crossed merge boundaries before the UNIQUE constraint existed
-- Migration script: `sql/pg_ripple--0.21.0--0.22.0.sql` revokes PUBLIC access to `_pg_ripple` schema and its contents
+- **Shared-memory encode cache**: Replaced direct-mapped 4096-slot design with 4-way set-associative 1024 sets × 4 ways. LRU eviction within each set uses a 2-bit age field. Birthday-collision rate drops from ~15% to <1% at 5k hot terms.
+- **Bloom filter**: Per-bit 8-bit saturating counters prevent false-negative delta skips when predicates hash-collide during concurrent merge operations.
+- **Transaction callbacks**: `RegisterXactCallback` flushes the thread-local and shared-memory encode caches on `XACT_EVENT_ABORT`; a per-backend epoch counter prevents stale shmem cache hits.
+- **Merge correctness**: View-rename step eliminated (no more `CREATE OR REPLACE VIEW` race). Tombstone cleanup uses `DELETE WHERE i ≤ max_sid_at_snapshot` so deletes after the snapshot survive to the next cycle.
+- **Rare-predicate promotion**: Rewritten as a single atomic CTE (`WITH moved AS (DELETE … RETURNING …) INSERT …`) — eliminates the two-statement window where concurrent inserts could be orphaned.
+- **Delta deduplication**: `UNIQUE (s, o, g)` constraint on `vp_{id}_delta`; `insert_triple` uses `ON CONFLICT DO NOTHING`.
+- **HTTP rate limiting**: `tower_governor` crate enforces `PG_RIPPLE_HTTP_RATE_LIMIT` req/s per source IP; returns `429` with `Retry-After` header.
+- **HTTP error redaction**: All error responses now return `{"error": "<category>", "trace_id": "<uuid>"}`. Full error + trace ID logged at `ERROR` level server-side.
+- **Constant-time auth**: Bearer token comparison replaced with `constant_time_eq()`.
+- **Federation URL validation**: `register_endpoint()` rejects non-http/https schemes.
+- **Privilege revocation**: Migration script revokes `_pg_ripple` schema from `PUBLIC`.
 
 ### Migration
 
-**Important:** After upgrading to v0.22.0, the `_pg_ripple` internal schema is locked down from unprivileged roles. Any application code that directly queries `_pg_ripple.*` tables will fail with a permission denied error; migrate to the public `pg_ripple.*` API instead.
+**Important:** After upgrading to v0.22.0, the `_pg_ripple` internal schema is locked from unprivileged roles. Application code that directly queries `_pg_ripple.*` tables must migrate to the public `pg_ripple.*` API.
 
-The migration script `sql/pg_ripple--0.21.0--0.22.0.sql` applies the following changes:
-- `REVOKE ALL ON SCHEMA _pg_ripple FROM PUBLIC`
-- `REVOKE ALL ON ALL TABLES IN SCHEMA _pg_ripple FROM PUBLIC`
-- `REVOKE ALL ON ALL SEQUENCES IN SCHEMA _pg_ripple FROM PUBLIC`
-
-No other schema changes are required.
-
-### Partial Implementation Note
-
-The following v0.22.0 deliverables remain incomplete and are deferred to v0.23.0 or later:
-- H-3/H-4: Rare-predicate promotion atomicity (CTE-based atomic promotion)
-- H-14/H-15/M-13/S-4: pg_ripple_http security hardening (rate limiting, error redaction, constant-time auth, URL scheme validation)
-- Documentation: security.md Phase 2, operations.md, upgrading.md, and release notes sections
-
-These features are architectural enhancements and API additions that do not affect the core data-integrity fixes (C-2, C-3, C-4) and cache improvements (H-1, H-2) which are the focus of this release.
+No other schema changes require manual action. The migration script `sql/pg_ripple--0.21.0--0.22.0.sql` applies automatically via `ALTER EXTENSION pg_ripple UPDATE`.
 
 ---
 
