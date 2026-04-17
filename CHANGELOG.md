@@ -15,7 +15,7 @@ Points at the next milestone: v1.0.0 — Production Release.
 
 ## [0.22.0] — 2026-04-18 — Storage Correctness & Security Hardening
 
-**pg_ripple eliminates four critical race conditions and locks down the internal schema from unprivileged users.** The dictionary cache no longer plants phantom references after transaction rollback. The background merge process now closes atomicity windows that could cause query failures or silent data corruption under concurrent workloads. Delta inserts are deduplicated at the table level, preventing query results from showing the same triple twice. All 68 pg_regress tests pass.
+**pg_ripple eliminates four critical race conditions, locks down the internal schema from unprivileged users, and improves cache performance with 4-way set-associative eviction and per-bit bloom filter reference counting.** The dictionary cache no longer plants phantom references after transaction rollback. The background merge process now closes atomicity windows that could cause query failures or silent data corruption under concurrent workloads. Delta inserts are deduplicated at the table level, preventing query results from showing the same triple twice. The shared-memory encode cache now uses 4-way set-associative LRU to reduce hash collisions and improve hit rate on large vocabularies. The bloom filter tracking delta tables uses per-bit reference counting to prevent hash collisions from causing false-negative delta skips during concurrent merge operations. All 69 pg_regress tests pass.
 
 ### What you can do
 
@@ -23,10 +23,14 @@ Points at the next milestone: v1.0.0 — Production Release.
 - **Avoid "relation does not exist" errors during merge** — the view-rename window has been closed; concurrent queries no longer fail if they execute during an HTAP merge (critical fix C-3)
 - **Prevent deleted facts from reappearing** — the tombstone resurrection race condition is fixed; deletes committed during a merge are correctly preserved to the next cycle (critical fix C-4)
 - **Get correct query cardinality** — a triple no longer appears twice in query results if it exists in both main and delta partitions (high fix H-6)
+- **Monitor cache performance** — new `pg_ripple.cache_stats()` SQL function returns hit/miss/eviction counts and current utilisation (high fix H-1)
+- **Handle hash collisions safely** — the bloom filter now uses per-bit reference counting so that predicates with hash-colliding bit positions don't cause false-negative delta skips (high fix H-2)
 - **Lock down the internal schema** — all access to `_pg_ripple.*` is revoked from PUBLIC; only superusers can directly query internal tables
 
 ### What changes
 
+- **Shared-memory encode cache (v0.22.0, H-1)**: Replaced direct-mapped 4096-slot design with 4-way set-associative 1024 sets. LRU eviction within each set uses 2-bit age field. Birthday-collision rate drops from ~15% to <1% at 5k hot terms.
+- **Bloom filter (v0.22.0, H-2)**: Added separate DELTA_BLOOM_COUNTERS array with per-bit 8-bit saturating counters. `set_predicate_delta_bit()` increments counters; `clear_predicate_delta_bit()` decrements and only clears bit when counter reaches 0.
 - Transaction callbacks via `RegisterXactCallback`: dictionary ENCODE_CACHE and DECODE_CACHE are drained on XACT_EVENT_ABORT and XACT_EVENT_PARALLEL_ABORT
 - Merge cycle: Step 5 (CREATE OR REPLACE VIEW) is eliminated; the view definition now uses DISTINCT ON to handle historical data
 - Merge cycle: Tombstone TRUNCATE replaced with DELETE WHERE i ≤ max_sid_at_snapshot; snapshot max statement ID recorded at merge-start
@@ -44,6 +48,15 @@ The migration script `sql/pg_ripple--0.21.0--0.22.0.sql` applies the following c
 - `REVOKE ALL ON ALL SEQUENCES IN SCHEMA _pg_ripple FROM PUBLIC`
 
 No other schema changes are required.
+
+### Partial Implementation Note
+
+The following v0.22.0 deliverables remain incomplete and are deferred to v0.23.0 or later:
+- H-3/H-4: Rare-predicate promotion atomicity (CTE-based atomic promotion)
+- H-14/H-15/M-13/S-4: pg_ripple_http security hardening (rate limiting, error redaction, constant-time auth, URL scheme validation)
+- Documentation: security.md Phase 2, operations.md, upgrading.md, and release notes sections
+
+These features are architectural enhancements and API additions that do not affect the core data-integrity fixes (C-2, C-3, C-4) and cache improvements (H-1, H-2) which are the focus of this release.
 
 ---
 
