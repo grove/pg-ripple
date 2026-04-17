@@ -1575,17 +1575,17 @@ Every SPARQL 1.1 built-in function from the W3C SPARQL 1.1 Appendix A either wor
 
 ### Deliverables
 
-- [ ] **Dictionary cache rollback correctness** (critical fix C-2)
+- [x] **Dictionary cache rollback correctness** (critical fix C-2)
   - Register `RegisterXactCallback` and `RegisterSubXactCallback` during `_PG_init` — on `XACT_EVENT_ABORT` and `XACT_EVENT_PARALLEL_ABORT`, drain both `ENCODE_CACHE` and `DECODE_CACHE` thread-local LRU caches so rolled-back term IDs cannot be served to future encode calls in the same backend session
   - Stamp a per-backend epoch counter; bump on rollback; the shared-memory encode cache stores the write epoch at insertion time and rejects cache hits from a prior epoch, ensuring the shmem path is also safe
   - New pg_regress test `dictionary_rollback.sql`: `BEGIN; pg_ripple.insert_triple(…new term…); ROLLBACK; pg_ripple.insert_triple(same term again); verify pg_ripple.decode_id(id) = original term string, not NULL`
 
-- [ ] **HTAP merge race fixes** (critical fixes C-3 and C-4)
+- [x] **HTAP merge race fixes** (critical fixes C-3 and C-4)
   - C-3 (view-rename atomicity): remove the `CREATE OR REPLACE VIEW vp_N` step from the merge cycle — the view's `FROM` clause always names `vp_N_main` directly, which PG re-resolves after the rename; the `CREATE OR REPLACE VIEW` call is eliminated, closing the window between rename and view-rebuild
   - C-4 (tombstone resurrection): record `max_sid_at_snapshot` at merge-start (`currval('_pg_ripple.statement_id_seq')` before processing); at merge-end TRUNCATE, only delete tombstones with `i ≤ max_sid_at_snapshot` — tombstones for deletes that committed after the snapshot survive to the next merge cycle
   - New pg_regress test `merge_race.sql`: issue a `pg_ripple.delete_triple()` concurrently with `pg_ripple.force_merge()`; verify deleted triple does not reappear; verify no `relation does not exist` error under a concurrent `pg_ripple.sparql()` call
 
-- [ ] **Merge deduplication and `rebuild_subject_patterns` correctness** (high fixes H-6, H-7)
+- [x] **Merge deduplication and `rebuild_subject_patterns` correctness** (high fixes H-6, H-7)
   - H-6 (cross-merge duplicate visibility): add a `UNIQUE (s, o, g)` constraint to `vp_{id}_delta` and change `insert_triple` to use `ON CONFLICT DO NOTHING`; update the VP view definition to carry `DISTINCT ON (s, o, g)` as a safety net for rows that crossed a merge boundary before the constraint was present — prevents a triple from appearing twice in query results when it exists in both `main` and `delta`
   - H-7 (`vp_rare` double-count in star patterns): fix `rebuild_subject_patterns()` in `src/storage/merge.rs` to enumerate only predicates that have a dedicated VP table (listed in `_pg_ripple.predicates` with a non-null `table_oid`); skip `vp_rare` as a direct scan target — `vp_rare` rows are already reachable via their per-predicate plans and must not be scanned a second time as the raw table
   - New pg_regress test `merge_dedup.sql`: insert the same triple before and after `pg_ripple.force_merge()`; verify the query returns exactly one result row; verify `triple_count` in the predicate catalog equals 1
@@ -1612,11 +1612,11 @@ Every SPARQL 1.1 built-in function from the W3C SPARQL 1.1 Appendix A either wor
   - Constant-time auth: replace `token != expected.as_str()` with `!constant_time_eq(token.as_bytes(), expected.as_bytes())` using the `constant_time_eq` crate
   - Federation URL scheme validation: `pg_ripple.register_endpoint()` rejects any URL whose scheme is not `http` or `https` with `ERRCODE_INVALID_PARAMETER_VALUE` — prevents `file://`, `gopher://`, or other scheme registration even though `ureq` would refuse them at connection time
 
-- [ ] **Privilege model hardening** (medium fix M-14)
+- [x] **Privilege model hardening** (medium fix M-14)
   - Migration script `sql/pg_ripple--0.21.0--0.22.0.sql`: `REVOKE ALL ON SCHEMA _pg_ripple FROM PUBLIC; REVOKE ALL ON ALL TABLES IN SCHEMA _pg_ripple FROM PUBLIC; REVOKE ALL ON ALL SEQUENCES IN SCHEMA _pg_ripple FROM PUBLIC;`
   - New pg_regress test `privilege_isolation.sql`: create a non-superuser role; verify `SELECT * FROM _pg_ripple.dictionary` raises permission denied; verify `SELECT * FROM pg_ripple.find_triples(NULL, NULL, NULL)` still works (public API unaffected)
 
-- [ ] **GUC bounds and merge worker signal handling** (medium fixes M-12, M-15)
+- [x] **GUC bounds and merge worker signal handling** (medium fixes M-12, M-15)
   - `pg_ripple.vp_promotion_threshold`: add `min = 10` and `max = 10_000_000` constraints to the pgrx GUC definition — prevents catalog explosion at `threshold = 1` and permanent `vp_rare` lock-in at `threshold = INT_MAX`
   - Merge worker: call `BackgroundWorker::reset_latch()` immediately before `std::thread::sleep` in the error back-off path — prevents a busy-wait loop where a `SIGHUP` received during the sleep keeps `wait_latch` returning immediately on the next cycle
 
