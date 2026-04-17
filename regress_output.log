@@ -1,0 +1,117 @@
+[32m[1m       Using[0m[39m [37m[1mCliArgument("pg18")[0m[39m and `pg_config` from [36m/opt/homebrew/Cellar/postgresql@18/18.3/bin/pg_config[39m
+[32m[1m    Stopping[0m[39m Postgres v18
+[32m[1m    Building[0m[39m extension with features [36mpg18[39m
+[32m[1m     Running[0m[39m command [36m"/opt/homebrew/bin/cargo" "build" "--lib" "--features" "pg18" "--no-default-features" "--message-format=json-render-diagnostics"[39m
+   Compiling pg_ripple v0.22.0 (/Users/geir.gronmo/projects/pg-ripple2)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.66s
+[32m[1m  Installing[0m[39m extension
+[32m[1m     Copying[0m[39m control file to [36m/opt/homebrew/share/postgresql@18/extension/pg_ripple.control[39m
+[32m[1m     Copying[0m[39m shared library to [36m/opt/homebrew/lib/postgresql@18/pg_ripple.dylib[39m
+[32m[1m  Discovered[0m[39m [36m[1m143[0m[39m SQL entities: [36m[1m1[0m[39m schemas ([36m[1m1[0m[39m unique), [36m[1m132[0m[39m functions, [36m[1m0[0m[39m types, [36m[1m0[0m[39m enums, [36m[1m10[0m[39m sqls, [36m[1m0[0m[39m ords, [36m[1m0[0m[39m hashes, [36m[1m0[0m[39m aggregates, [36m[1m0[0m[39m triggers
+[32m[1m  Rebuilding[0m[39m [36mpgrx_embed[39m, in debug mode, for SQL generation with features [36mpg18[39m
+   Compiling pg_ripple v0.22.0 (/Users/geir.gronmo/projects/pg-ripple2)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.76s
+[32m[1m     Writing[0m[39m SQL entities to /opt/homebrew/share/postgresql@18/extension/pg_ripple--0.22.0.sql
+[32m[1m     Copying[0m[39m extension schema upgrade file to [36m/opt/homebrew/share/postgresql@18/extension/pg_ripple--0.19.0--0.20.0.sql[39m
+[32m[1m     Copying[0m[39m extension schema upgrade file to [36m/opt/homebrew/share/postgresql@18/extension/pg_ripple--0.23.0--0.24.0.sql[39m
+[32m[1m     Copying[0m[39m extension schema upgrade file to [36m/opt/homebrew/share/postgresql@18/extension/pg_ripple--0.11.0--0.12.0.sql[39m
+[32m[1m     Copying[0m[39m extension schema upgrade file to [36m/opt/homebrew/share/postgresql@18/extension/pg_ripple--0.7.0--0.8.0.sql[39m
+[32m[1m     Copying[0m[39m extension schema upgrade file to [36m/opt/homebrew/share/postgresql@18/extension/pg_ripple--0.17.0--0.18.0.sql[39m
+[32m[1m     Copying[0m[39m extension schema upgrade file to [36m/opt/homebrew/share/postgresql@18/extension/pg_ripple--0.15.0--0.16.0.sql[39m
+[32m[1m     Copying[0m[39m extension schema upgrade file to [36m/opt/homebrew/share/postgresql@18/extension/pg_ripple--0.3.0--0.4.0.sql[39m
+[32m[1m     Copying[0m[39m extension schema upgrade file to [36m/opt/homebrew/share/postgresql@18/extension/pg_ripple--0.16.0--0.17.0.sql[39m
+[32m[1m     Copying[0m[39m extension schema upgrade file to [36m/opt/homebrew/share/postgresql@18/extension/pg_ripple--0.5.0--0.5.1.sql[39m
+[32m[1m     Copying[0m[39m extension schema upgrade file to [36m/opt/homebrew/share/postgresql@18/extension/pg_ripple--0.20.0--0.21.0.sql[39m
+[32m[1m     Copying[0m[39m extension schema upgrade file to [36m/opt/homebrew/share/postgresql@18/extension/pg_ripple--0.24.0--0.25.0.sql[39m
+[32m[1m     Copying[0m[39m extension schema upgrade file to [36m/opt/homebrew/share/postgresql@18/extension/pg_ripple--0.4.0--0.5.0.sql[39m
+[32m[1m     Copying[0m[39m extension schema upgrade file to [36m/opt/homebrew/share/postgresql@18/extension/pg_ripple--0.9.0--0.10.0.sql[39m
+[32m[1m     Copying[0m[39m extension schema upgrade file to [36m/opt/homebrew/share/postgresql@18/extension/pg_ripple--0.12.0--0.13.0.sql[39m
+[32m[1m     Copying[0m[39m extension schema upgrade file to [36m/opt/homebrew/share/postgresql@18/extension/pg_ripple--0.2.0--0.3.0.sql[39m
+[32m[1m     Copying[0m[39m extension schema upgrade file to [36m/opt/homebrew/share/postgresql@18/extension/pg_ripple--0.14.0--0.15.0.sql[39m
+[32m[1m     Copying[0m[39m extension schema upgrade file to [36m/opt/homebrew/share/postgresql@18/extension/pg_ripple--0.6.0--0.7.0.sql[39m
+[32m[1m     Copying[0m[39m extension schema upgrade file to [36m/opt/homebrew/share/postgresql@18/extension/pg_ripple--0.22.0--0.23.0.sql[39m
+[32m[1m     Copying[0m[39m extension schema upgrade file to [36m/opt/homebrew/share/postgresql@18/extension/pg_ripple--0.5.1--0.6.0.sql[39m
+[32m[1m     Copying[0m[39m extension schema upgrade file to [36m/opt/homebrew/share/postgresql@18/extension/pg_ripple--0.10.0--0.11.0.sql[39m
+[32m[1m     Copying[0m[39m extension schema upgrade file to [36m/opt/homebrew/share/postgresql@18/extension/pg_ripple--0.18.0--0.19.0.sql[39m
+[32m[1m     Copying[0m[39m extension schema upgrade file to [36m/opt/homebrew/share/postgresql@18/extension/pg_ripple--0.8.0--0.9.0.sql[39m
+[32m[1m     Copying[0m[39m extension schema upgrade file to [36m/opt/homebrew/share/postgresql@18/extension/pg_ripple--0.1.0--0.2.0.sql[39m
+[32m[1m     Copying[0m[39m extension schema upgrade file to [36m/opt/homebrew/share/postgresql@18/extension/pg_ripple--0.13.0--0.14.0.sql[39m
+[32m[1m     Copying[0m[39m extension schema upgrade file to [36m/opt/homebrew/share/postgresql@18/extension/pg_ripple--0.21.0--0.22.0.sql[39m
+[32m[1m    Finished[0m[39m installing pg_ripple
+[32m[1m    Starting[0m[39m Postgres v18 on port [36m[1m28818[0m[39m
+[33m[1m     Forcing[0m[39m database [36mpg_ripple_regress[39m to be (re)created as `setup.sql` is newer than its expected output
+[32m[1m    Dropping[0m[39m database [36m[1mpg_ripple_regress[0m[39m
+[32m[1m    Creating[0m[39m database [36m[1mpg_ripple_regress[0m[39m
+
+--- beginning regression test run ---
+[92m[1mPASS[0m[39m setup 574ms
+[92m[1mPASS[0m[39m admin_functions 72ms
+[92m[1mPASS[0m[39m aggregates 75ms
+[92m[1mPASS[0m[39m ask_views 70ms
+[92m[1mPASS[0m[39m basic_crud 66ms
+[92m[1mPASS[0m[39m bsbm 76ms
+[92m[1mPASS[0m[39m change_notification 57ms
+[92m[1mPASS[0m[39m concurrent_write_merge 67ms
+[92m[1mPASS[0m[39m construct_views 61ms
+[92m[1mPASS[0m[39m crash_recovery_merge 68ms
+[92m[1mPASS[0m[39m datalog_arithmetic 62ms
+[92m[1mPASS[0m[39m datalog_constraints 61ms
+[92m[1mPASS[0m[39m datalog_custom 63ms
+[92m[1mPASS[0m[39m datalog_malformed 57ms
+[92m[1mPASS[0m[39m datalog_negation 53ms
+[92m[1mPASS[0m[39m datalog_owl_rl 67ms
+[92m[1mPASS[0m[39m datalog_rdfs 56ms
+[92m[1mPASS[0m[39m datalog_views 62ms
+[92m[1mPASS[0m[39m deduplication 68ms
+[92m[1mPASS[0m[39m describe_views 56ms
+[92m[1mPASS[0m[39m dictionary 56ms
+[92m[1mPASS[0m[39m dictionary_rollback 70ms
+[92m[1mPASS[0m[39m export_ntriples 75ms
+[92m[1mPASS[0m[39m extvp 78ms
+[92m[1mPASS[0m[39m fts_search 64ms
+[92m[1mPASS[0m[39m fuzz_integration 55ms
+[92m[1mPASS[0m[39m graph_delete 64ms
+[92m[1mPASS[0m[39m graph_rls 61ms
+[92m[1mPASS[0m[39m htap_benchmarks 126ms
+[92m[1mPASS[0m[39m htap_merge 72ms
+[92m[1mPASS[0m[39m inline_encoding 64ms
+[92m[1mPASS[0m[39m jsonld_framing 122ms
+[92m[1mPASS[0m[39m jsonld_framing_views 66ms
+[92m[1mPASS[0m[39m load_into_graph 73ms
+[92m[1mPASS[0m[39m merge_edge_cases 71ms
+[92m[1mPASS[0m[39m named_graphs 66ms
+[92m[1mPASS[0m[39m nquads_trig 66ms
+[92m[1mPASS[0m[39m property_paths 62ms
+[92m[1mPASS[0m[39m rare_predicate_promotion 67ms
+[92m[1mPASS[0m[39m rdf_star_construct 73ms
+[92m[1mPASS[0m[39m rdf_star_datalog 55ms
+[92m[1mPASS[0m[39m rdf_star_load 66ms
+[92m[1mPASS[0m[39m resource_limits 60ms
+[92m[1mPASS[0m[39m schema_state 60ms
+[92m[1mPASS[0m[39m serialization 81ms
+[92m[1mPASS[0m[39m shacl_advanced 71ms
+[92m[1mPASS[0m[39m shacl_af_rule 53ms
+[92m[1mPASS[0m[39m shacl_dag_monitors 57ms
+[92m[1mPASS[0m[39m shacl_malformed 52ms
+[92m[1mPASS[0m[39m shacl_query_opt 64ms
+[92m[1mPASS[0m[39m shacl_validation 58ms
+[92m[1mPASS[0m[39m sparql_construct 64ms
+[92m[1mPASS[0m[39m sparql_delete_data 64ms
+[92m[1mPASS[0m[39m sparql_federation 59ms
+[92m[1mPASS[0m[39m sparql_federation_perf 73ms
+[92m[1mPASS[0m[39m sparql_federation_timeout 57ms
+[92m[1mPASS[0m[39m sparql_graph_management 65ms
+[92m[1mPASS[0m[39m sparql_injection 61ms
+[92m[1mPASS[0m[39m sparql_insert_data 59ms
+[92m[1mPASS[0m[39m sparql_protocol 67ms
+[92m[1mPASS[0m[39m sparql_queries 58ms
+[92m[1mPASS[0m[39m sparql_star_conformance 77ms
+[92m[1mPASS[0m[39m sparql_update_where 62ms
+[92m[1mPASS[0m[39m sparql_views 63ms
+[92m[1mPASS[0m[39m sql_api_completeness 63ms
+[92m[1mPASS[0m[39m triple_crud 64ms
+[92m[1mPASS[0m[39m upgrade_path 92ms
+[92m[1mPASS[0m[39m w3c_shacl_conformance 92ms
+[92m[1mPASS[0m[39m w3c_sparql_query_conformance 80ms
+[92m[1mPASS[0m[39m w3c_sparql_update_conformance 98ms
+passed=70 failed=0

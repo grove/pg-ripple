@@ -120,7 +120,88 @@ SELECT pg_ripple.grant_graph('app_user', '<https://example.org/confidential>', '
 
 ## No known vulnerabilities
 
-There are no known vulnerabilities in pg_ripple 0.20.0 at the time of release.
+There are no known vulnerabilities in pg_ripple at the time of this release.
 
-Phase 2 of the security review (external penetration testing, fuzzing the SPARQL parser, and network-layer analysis of the HTTP endpoint) is planned for v0.21.0.
+---
+
+## Security Review Phase 2 (v0.22.0)
+
+v0.22.0 completed a Phase 2 security review covering the HTTP companion service, the privilege model, and authentication hardening.
+
+### Rate limiting (pg_ripple_http)
+
+The HTTP companion service now enforces per-source-IP rate limiting using the `tower_governor` crate.
+
+**Configuration:**
+
+Set the `PG_RIPPLE_HTTP_RATE_LIMIT` environment variable to the maximum requests per second allowed from a single IP address (default `0` = unlimited):
+
+```bash
+PG_RIPPLE_HTTP_RATE_LIMIT=100 pg_ripple_http
+```
+
+When the limit is exceeded, the service returns:
+
+```
+HTTP/1.1 429 Too Many Requests
+Retry-After: 1
+```
+
+A value of `0` disables rate limiting entirely (suitable for trusted internal deployments behind a gateway that handles rate limiting upstream).
+
+### Error redaction policy
+
+All 4xx and 5xx error responses from `pg_ripple_http` are now redacted. Internal database details — schema names, GUC values, file paths, and PostgreSQL error messages — are never returned to API clients.
+
+Instead, clients receive a structured JSON error with a category and a trace ID:
+
+```json
+{"error": "sparql_query_error", "trace_id": "550e8400-e29b-41d4-a716-446655440000"}
+```
+
+The full error and trace ID are logged at `ERROR` level on the server side. Use the `trace_id` to correlate client-reported errors with server logs.
+
+**Error categories:**
+
+| Category | HTTP Status | Meaning |
+|---|---|---|
+| `sparql_query_error` | 400 | SELECT/ASK/CONSTRUCT/DESCRIBE query failed |
+| `sparql_update_error` | 400 | SPARQL UPDATE failed |
+| `service_unavailable` | 503 | Database connection pool unavailable |
+| `database_unavailable` | 503 | Health check query failed |
+
+### Constant-time authentication
+
+The `PG_RIPPLE_HTTP_AUTH_TOKEN` bearer token is now compared using `constant_time_eq` from the `constant_time_eq` crate, preventing timing-based side-channel attacks that could leak token length or content via response time differences.
+
+### Federation URL scheme enforcement
+
+`pg_ripple.register_endpoint()` now rejects any URL whose scheme is not `http` or `https` with `ERRCODE_INVALID_PARAMETER_VALUE`:
+
+```sql
+SELECT pg_ripple.register_endpoint('file:///etc/passwd');
+-- ERROR: register_endpoint: URL scheme must be http or https
+```
+
+This prevents registration of `file://`, `gopher://`, or other schemes that could be used for server-side request forgery even though `ureq` would reject them at connection time.
+
+### Privilege model hardening
+
+The `_pg_ripple` internal schema is now explicitly locked away from unprivileged roles. The migration script `pg_ripple--0.21.0--0.22.0.sql` revokes all access:
+
+```sql
+REVOKE ALL ON SCHEMA _pg_ripple FROM PUBLIC;
+REVOKE ALL ON ALL TABLES IN SCHEMA _pg_ripple FROM PUBLIC;
+REVOKE ALL ON ALL SEQUENCES IN SCHEMA _pg_ripple FROM PUBLIC;
+```
+
+Unprivileged roles cannot read `_pg_ripple.dictionary`, `_pg_ripple.vp_*`, or any internal table directly. The public `pg_ripple.*` API functions (which are `SECURITY DEFINER`) continue to work as before.
+
+**Checklist (all items: mitigated)**
+
+- [x] Rate limiting enforced per source IP — excess returns `429` with `Retry-After`
+- [x] Error responses never expose internal database details
+- [x] Auth token compared with `constant_time_eq` (timing-safe)
+- [x] `register_endpoint()` rejects non-http/https URL schemes
+- [x] `_pg_ripple` schema inaccessible to `PUBLIC`
 

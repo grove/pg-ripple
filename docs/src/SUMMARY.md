@@ -28,6 +28,8 @@
   - [SPARQL Protocol (HTTP)](user-guide/sql-reference/http-endpoint.md)
   - [SPARQL Federation](user-guide/sql-reference/federation.md)
 - [Configuration](user-guide/configuration.md)
+- [Operations](user-guide/operations.md)
+- [Upgrading](user-guide/upgrading.md)
 - [Scaling & HTAP](user-guide/scaling.md)
 - [Pre-Deployment](user-guide/pre-deployment.md)
 - [Backup & Restore](user-guide/backup-restore.md)

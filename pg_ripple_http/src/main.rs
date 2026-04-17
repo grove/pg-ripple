@@ -13,10 +13,14 @@ use axum::extract::{Query, State};
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
+use constant_time_eq::constant_time_eq;
 use deadpool_postgres::{Config, Pool, Runtime};
 use serde::Deserialize;
 use tokio_postgres::NoTls;
+use tower_governor::GovernorLayer;
+use tower_governor::governor::GovernorConfigBuilder;
 use tower_http::cors::{AllowOrigin, CorsLayer};
+use uuid::Uuid;
 
 mod metrics;
 
@@ -25,8 +29,6 @@ mod metrics;
 struct AppState {
     pool: Pool,
     auth_token: Option<String>,
-    #[allow(dead_code)]
-    rate_limit: u32,
     metrics: metrics::Metrics,
 }
 
@@ -106,10 +108,10 @@ async fn main() {
         );
     }
 
+    // rate_limit is consumed by the governor layer below; not stored in AppState.
     let state = Arc::new(AppState {
         pool,
         auth_token,
-        rate_limit,
         metrics: metrics::Metrics::new(),
     });
 
@@ -124,12 +126,23 @@ async fn main() {
         CorsLayer::new().allow_origin(AllowOrigin::list(origins))
     };
 
-    let app = Router::new()
+    // Build the rate-limiting layer (governor) if a rate limit is configured.
+    // governor operates per source IP; 0 means unlimited.
+    let mut app = Router::new()
         .route("/sparql", get(sparql_get).post(sparql_post))
         .route("/health", get(health))
         .route("/metrics", get(metrics_endpoint))
         .layer(cors)
         .with_state(state);
+
+    if rate_limit > 0 {
+        let governor_conf = GovernorConfigBuilder::default()
+            .per_second(rate_limit as u64)
+            .burst_size(rate_limit)
+            .finish()
+            .expect("invalid governor configuration");
+        app = app.layer(GovernorLayer::new(Arc::new(governor_conf)));
+    }
 
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
     tracing::info!("pg_ripple_http listening on http://{addr}");
@@ -137,7 +150,31 @@ async fn main() {
     let listener = tokio::net::TcpListener::bind(addr)
         .await
         .expect("failed to bind TCP listener");
-    axum::serve(listener, app).await.expect("server error");
+    // Pass ConnectInfo for per-IP rate limiting.
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .await
+    .expect("server error");
+}
+
+// ─── Error redaction ─────────────────────────────────────────────────────────
+
+/// v0.22.0 H-14: Build a redacted error response that hides internal database
+/// details from API clients. Logs the full error + trace ID at ERROR level.
+fn redacted_error(category: &str, detail: &str, status: StatusCode) -> Response {
+    let trace_id = Uuid::new_v4().to_string();
+    tracing::error!(trace_id = %trace_id, detail = %detail, "query error");
+    let body = serde_json::json!({
+        "error": category,
+        "trace_id": trace_id
+    });
+    Response::builder()
+        .status(status)
+        .header("content-type", "application/json")
+        .body(Body::from(body.to_string()))
+        .unwrap()
 }
 
 // ─── Authentication ──────────────────────────────────────────────────────────
@@ -154,7 +191,8 @@ fn check_auth(state: &AppState, headers: &HeaderMap) -> Result<(), Response> {
             .strip_prefix("Bearer ")
             .or_else(|| provided.strip_prefix("Basic "))
             .unwrap_or(provided);
-        if token != expected.as_str() {
+        // v0.22.0 S-4: Use constant-time comparison to prevent timing side-channels.
+        if !constant_time_eq(token.as_bytes(), expected.as_bytes()) {
             return Err((StatusCode::UNAUTHORIZED, "unauthorized").into_response());
         }
     }
@@ -287,11 +325,11 @@ async fn execute_sparql(
         Ok(c) => c,
         Err(e) => {
             state.metrics.record_error();
-            return (
+            return redacted_error(
+                "service_unavailable",
+                &format!("pool error: {e}"),
                 StatusCode::SERVICE_UNAVAILABLE,
-                format!("database connection error: {e}"),
-            )
-                .into_response();
+            );
         }
     };
 
@@ -307,7 +345,11 @@ async fn execute_sparql(
             }
             Err(e) => {
                 state.metrics.record_error();
-                (StatusCode::BAD_REQUEST, format!("SPARQL update error: {e}")).into_response()
+                redacted_error(
+                    "sparql_update_error",
+                    &format!("SPARQL update error: {e}"),
+                    StatusCode::BAD_REQUEST,
+                )
             }
         }
     } else {
@@ -343,7 +385,11 @@ async fn execute_select(
         Ok(r) => r,
         Err(e) => {
             state.metrics.record_error();
-            return (StatusCode::BAD_REQUEST, format!("SPARQL query error: {e}")).into_response();
+            return redacted_error(
+                "sparql_query_error",
+                &format!("SPARQL query error: {e}"),
+                StatusCode::BAD_REQUEST,
+            );
         }
     };
 
@@ -375,7 +421,11 @@ async fn execute_ask(
         Ok(r) => r,
         Err(e) => {
             state.metrics.record_error();
-            return (StatusCode::BAD_REQUEST, format!("SPARQL ASK error: {e}")).into_response();
+            return redacted_error(
+                "sparql_ask_error",
+                &format!("SPARQL ASK error: {e}"),
+                StatusCode::BAD_REQUEST,
+            );
         }
     };
 
@@ -403,11 +453,11 @@ async fn execute_construct(
         Ok(r) => r,
         Err(e) => {
             state.metrics.record_error();
-            return (
+            return redacted_error(
+                "sparql_construct_error",
+                &format!("SPARQL CONSTRUCT error: {e}"),
                 StatusCode::BAD_REQUEST,
-                format!("SPARQL CONSTRUCT error: {e}"),
-            )
-                .into_response();
+            );
         }
     };
 
@@ -444,11 +494,11 @@ async fn execute_describe(
         Ok(r) => r,
         Err(e) => {
             state.metrics.record_error();
-            return (
+            return redacted_error(
+                "sparql_describe_error",
+                &format!("SPARQL DESCRIBE error: {e}"),
                 StatusCode::BAD_REQUEST,
-                format!("SPARQL DESCRIBE error: {e}"),
-            )
-                .into_response();
+            );
         }
     };
 
@@ -748,13 +798,17 @@ async fn health(State(state): State<Arc<AppState>>) -> Response {
     match state.pool.get().await {
         Ok(client) => match client.query_one("SELECT 1", &[]).await {
             Ok(_) => (StatusCode::OK, "ok").into_response(),
-            Err(e) => (
+            Err(e) => redacted_error(
+                "database_unavailable",
+                &format!("database check failed: {e}"),
                 StatusCode::SERVICE_UNAVAILABLE,
-                format!("database check failed: {e}"),
-            )
-                .into_response(),
+            ),
         },
-        Err(e) => (StatusCode::SERVICE_UNAVAILABLE, format!("pool error: {e}")).into_response(),
+        Err(e) => redacted_error(
+            "pool_unavailable",
+            &format!("pool error: {e}"),
+            StatusCode::SERVICE_UNAVAILABLE,
+        ),
     }
 }
 

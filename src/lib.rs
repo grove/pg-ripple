@@ -3424,6 +3424,14 @@ mod pg_ripple {
         local_view_name: default!(Option<&str>, "NULL"),
         complexity: default!(Option<&str>, "NULL"),
     ) {
+        // v0.22.0 M-13: Reject non-http/https URL schemes to prevent file://, gopher://, etc.
+        let scheme_ok = url.starts_with("http://") || url.starts_with("https://");
+        if !scheme_ok {
+            pgrx::error!(
+                "register_endpoint: URL scheme must be http or https; got: {}",
+                url
+            );
+        }
         let local_view = local_view_name.unwrap_or("");
         let cx = complexity.unwrap_or("normal");
         if local_view.is_empty() {

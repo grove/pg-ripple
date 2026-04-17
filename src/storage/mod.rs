@@ -347,26 +347,49 @@ fn insert_into_vp_rare(p_id: i64, s_id: i64, o_id: i64, g: i64) -> i64 {
 }
 
 /// Promote a single predicate from vp_rare to its own VP table (HTAP split).
+///
+/// v0.22.0 H-3/H-4: Uses a single atomic CTE to eliminate the two-statement window
+/// where concurrent inserts could orphan rows in vp_rare under a predicate that now
+/// has its own VP table. After the atomic move, updates triple_count to match the
+/// actual row count rather than leaving it at 0 after promotion.
 fn promote_predicate(p_id: i64) {
     // ensure_vp_table creates the HTAP split (delta + main + tombstones + view).
     ensure_vp_table(p_id);
     let delta = format!("_pg_ripple.vp_{p_id}_delta");
 
-    // Move rows from vp_rare to the dedicated delta table.
+    // Atomically move all rows for this predicate from vp_rare to the dedicated
+    // delta table in a single CTE — eliminates the window between SELECT and DELETE
+    // where concurrent inserts could be orphaned.
     Spi::run_with_args(
         &format!(
-            "INSERT INTO {delta} (s, o, g, i, source) \
-             SELECT s, o, g, i, source FROM _pg_ripple.vp_rare WHERE p = $1"
+            "WITH moved AS ( \
+               DELETE FROM _pg_ripple.vp_rare WHERE p = $1 \
+               RETURNING s, o, g, i, source \
+             ) \
+             INSERT INTO {delta} (s, o, g, i, source) \
+             SELECT s, o, g, i, source FROM moved \
+             ON CONFLICT (s, o, g) DO NOTHING"
         ),
         &[DatumWithOid::from(p_id)],
     )
-    .unwrap_or_else(|e| pgrx::error!("predicate promotion insert SPI error: {e}"));
+    .unwrap_or_else(|e| pgrx::error!("predicate promotion atomic CTE SPI error: {e}"));
 
+    // Restore accurate triple_count in the predicate catalog after promotion.
+    // Before this update, triple_count reflects vp_rare inserts; after the atomic
+    // move the VP table is the authoritative source.
     Spi::run_with_args(
-        "DELETE FROM _pg_ripple.vp_rare WHERE p = $1",
+        &format!(
+            "UPDATE _pg_ripple.predicates \
+             SET triple_count = (SELECT count(*) FROM {delta}), \
+                 table_oid   = (SELECT oid FROM pg_class \
+                                WHERE relname = 'vp_{p_id}_delta' \
+                                  AND relnamespace = (SELECT oid FROM pg_namespace \
+                                                      WHERE nspname = '_pg_ripple')) \
+             WHERE id = $1"
+        ),
         &[DatumWithOid::from(p_id)],
     )
-    .unwrap_or_else(|e| pgrx::error!("predicate promotion delete SPI error: {e}"));
+    .unwrap_or_else(|e| pgrx::error!("predicate promotion count update SPI error: {e}"));
 }
 
 /// Promote all rare predicates that have reached the promotion threshold.

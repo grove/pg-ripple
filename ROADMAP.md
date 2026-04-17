@@ -1601,12 +1601,12 @@ Every SPARQL 1.1 built-in function from the W3C SPARQL 1.1 Appendix A either wor
   - `set_predicate_delta_bit(pred_id)`: increment both bloom counter positions (saturates at 255)
   - `clear_predicate_delta_bit(pred_id)`: decrement both counters; only clears the boolean bit when the counter reaches 0 — prevents false-negative delta skips for predicates that hash-collide with a predicate being concurrently merged
 
-- [ ] **Rare-predicate promotion atomicity** (high fixes H-3 and H-4)
+- [x] **Rare-predicate promotion atomicity** (high fixes H-3 and H-4)
   - Rewrite `promote_predicate()` to use a single atomic CTE: `WITH moved AS (DELETE FROM _pg_ripple.vp_rare WHERE p = $1 RETURNING s, o, g, i, source) INSERT INTO _pg_ripple.vp_{id}_delta (s, o, g, i, source) SELECT * FROM moved` — eliminates the two-statement window where concurrent inserts can orphan rows in `vp_rare` under a predicate that now has its own VP table
   - After the CTE, `UPDATE _pg_ripple.predicates SET triple_count = (SELECT count(*) FROM _pg_ripple.vp_{id}_delta) WHERE id = $1` to restore accurate planner statistics rather than leaving `triple_count = 0` after promotion
   - pg_regress test: load > `vp_promotion_threshold` triples for a single predicate while a concurrent transaction also inserts into `vp_rare` for that predicate; verify zero orphan rows after promotion completes
 
-- [ ] **pg_ripple_http security hardening** (high fixes H-14, H-15; medium fixes M-13, S-4)
+- [x] **pg_ripple_http security hardening** (high fixes H-14, H-15; medium fixes M-13, S-4)
   - Rate limiting: integrate `tower_governor` crate; `PG_RIPPLE_HTTP_RATE_LIMIT` env var is now enforced as requests-per-second per source IP (default 100 req/s); excess requests receive `429 Too Many Requests` with `Retry-After` header
   - Error redaction: replace verbatim PostgreSQL error text in HTTP 4xx/5xx responses with `{"error": "<category>", "trace_id": "<uuid>"}` JSON; log the full PG error + trace ID at server `ERROR` level — internal schema names, GUC values, and file paths are never exposed to API clients
   - Constant-time auth: replace `token != expected.as_str()` with `!constant_time_eq(token.as_bytes(), expected.as_bytes())` using the `constant_time_eq` crate
@@ -1624,10 +1624,10 @@ Every SPARQL 1.1 built-in function from the W3C SPARQL 1.1 Appendix A either wor
 
 > See [plans/documentation.md](plans/documentation.md) for details.
 
-- [ ] `reference/security.md` Phase 2 section: rate limiting configuration, error-redaction policy, privilege model, constant-time auth rationale, URL scheme enforcement
-- [ ] `user-guide/operations.md` updated: rollback safety guarantee for dictionary cache, merge correctness guarantees (tombstone epoch fence), `pg_ripple.cache_stats()` monitoring
-- [ ] `user-guide/upgrading.md` updated: v0.21.0→v0.22.0 privilege change (REVOKE) is safe for all existing deployments; no data migration required
-- [ ] Release notes for v0.22.0 — highlight dictionary-rollback fix, merge race fixes, HTTP security changes
+- [x] `reference/security.md` Phase 2 section: rate limiting configuration, error-redaction policy, privilege model, constant-time auth rationale, URL scheme enforcement
+- [x] `user-guide/operations.md` updated: rollback safety guarantee for dictionary cache, merge correctness guarantees (tombstone epoch fence), `pg_ripple.cache_stats()` monitoring
+- [x] `user-guide/upgrading.md` updated: v0.21.0→v0.22.0 privilege change (REVOKE) is safe for all existing deployments; no data migration required
+- [x] Release notes for v0.22.0 — highlight dictionary-rollback fix, merge race fixes, HTTP security changes
 
 ### Exit Criteria
 

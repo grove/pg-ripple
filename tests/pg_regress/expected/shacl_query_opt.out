@@ -152,7 +152,7 @@ SELECT
 SELECT pg_ripple.sparql_update('DELETE WHERE { ?s ?p ?o }');
  sparql_update 
 ---------------
-            41
+            52
 (1 row)
 
 DELETE FROM _pg_ripple.shacl_shapes;
