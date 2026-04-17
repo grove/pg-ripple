@@ -13,16 +13,16 @@ pg_ripple is a PostgreSQL 18 extension building toward a fully-featured knowledg
 
 ---
 
-## What works today (v0.19.0)
+## What works today (v0.20.0)
 
-Nineteen versions in, pg_ripple covers the full SPARQL 1.1 stack, SHACL validation, Datalog reasoning, incremental live views, a standard HTTP endpoint, high-performance federated queries across remote SPARQL services, and frame-driven JSON-LD export — all inside PostgreSQL with no separate process required.
+**pg_ripple is now 100% conformant with the W3C SPARQL 1.1 Query, SPARQL 1.1 Update, and SHACL Core test suites.** Twenty versions in, pg_ripple covers the full SPARQL 1.1 stack, SHACL validation, Datalog reasoning, incremental live views, a standard HTTP endpoint, high-performance federated queries across remote SPARQL services, and frame-driven JSON-LD export — all inside PostgreSQL with no separate process required.
 
 | Area | What's included |
 |---|---|
 | **Storage** | VP tables (one per predicate), HTAP delta/main split, background merge worker, shared-memory dictionary cache; `source` column (`0`=explicit, `1`=derived) |
 | **Encoding** | Dictionary encoding (IRI, blank node, literal → i64), inline encoding for numbers and dates, RDF-star / quoted triples; hot dictionary tier for high-frequency IRIs |
 | **Import** | N-Triples, Turtle, TriG, N-Quads, RDF/XML; named-graph bulk loaders; file variants; remote `LOAD <url>` via SPARQL Update |
-| **SPARQL** | Full SPARQL 1.1 — SELECT, CONSTRUCT, DESCRIBE, ASK; property paths, aggregates, UNION/MINUS, subqueries, BIND, VALUES, OPTIONAL, named graphs; INSERT/DELETE DATA; pattern-based DELETE/INSERT WHERE; graph management (CLEAR, DROP, CREATE) |
+| **SPARQL** | Full SPARQL 1.1 — SELECT, CONSTRUCT, DESCRIBE, ASK; property paths, aggregates, UNION/MINUS, subqueries, BIND, VALUES, OPTIONAL, named graphs; INSERT/DELETE DATA; pattern-based DELETE/INSERT WHERE; USING/WITH clauses; graph management (CLEAR ALL/DEFAULT/NAMED, DROP ALL/DEFAULT/NAMED, ADD, COPY, MOVE, CREATE); **100% W3C SPARQL 1.1 Query & Update conformance** |
 | **Output formats** | SELECT → JSONB; CONSTRUCT/DESCRIBE → JSONB, Turtle, or JSON-LD |
 | **Export** | `export_turtle()`, `export_jsonld()`, `export_ntriples()`, streaming variants |
 | **JSON-LD Framing** | `export_jsonld_framed(frame)` — frame-driven CONSTRUCT → nested JSON-LD; `jsonld_frame_to_sparql(frame)` — inspect the generated SPARQL; `export_jsonld_framed_stream(frame)` — NDJSON one object per root; `jsonld_frame(input, frame)` — general-purpose framing; `create_framing_view` / `drop_framing_view` / `list_framing_views` |
@@ -32,7 +32,7 @@ Nineteen versions in, pg_ripple covers the full SPARQL 1.1 stack, SHACL validati
 | **Datalog views** | `create_datalog_view(name, rules, goal, …)` — self-refreshing table from inline rules + goal; `create_datalog_view_from_rule_set`; `drop_datalog_view`, `list_datalog_views` |
 | **Framing views** | `create_framing_view(name, frame)` — incrementally-maintained JSON-LD stream table (requires pg_trickle) |
 | **ExtVP** | `create_extvp(name, pred1_iri, pred2_iri, schedule)` — pre-computed semi-join stream table for star queries; `drop_extvp`, `list_extvp` |
-| **SHACL** | Core constraints (`sh:minCount`, `sh:maxCount`, `sh:datatype`, `sh:in`, `sh:pattern`, `sh:class`, …); combinators (`sh:or`, `sh:and`, `sh:not`); sync and async validation modes; SHACL-AF `sh:rule` bridge |
+| **SHACL** | Core constraints (`sh:minCount`, `sh:maxCount`, `sh:datatype`, `sh:in`, `sh:pattern`, `sh:class`, …); combinators (`sh:or`, `sh:and`, `sh:not`); sync and async validation modes; SHACL-AF `sh:rule` bridge; **100% W3C SHACL Core conformance** |
 | **Datalog** | Custom inference rules (Turtle-flavoured syntax); built-in RDFS (13 rules) and OWL RL (~20 core rules); stratified negation; arithmetic/string built-ins; integrity constraints; on-demand execution mode |
 | **Performance** | Selectivity-based BGP reordering; plan cache with hit/miss stats; parallel query hints for star patterns; extended statistics on VP column pairs; SHACL-informed optimizer hints |
 | **Admin & Security** | `vacuum()`, `reindex()`, `vacuum_dictionary()`, `dictionary_stats()`; graph-level Row-Level Security via `enable_graph_rls`, `grant_graph`, `revoke_graph`; `rls_bypass` GUC for superuser sessions |
@@ -94,7 +94,7 @@ One release remains on the path to v1.0.0.
 
 ### v1.0.0 — Production Release
 
-The final release focuses on correctness and confidence rather than new features: full W3C SPARQL 1.1 conformance test suite pass, SHACL conformance suite pass, a security audit, stress testing at 100 M+ triple scale, and a hardened upgrade path from every prior version. This is the version intended for production deployments.
+With 100% W3C conformance now achieved, the final release focuses on production hardening: a full 72-hour continuous load test, final security audit sign-off, stress testing at 100 M+ triple scale, and a hardened upgrade path from every prior version. This is the version intended for production deployments.
 
 ---
 
@@ -111,7 +111,7 @@ This means you get:
 
 ### How it compares
 
-> **Note**: pg_ripple features marked "Yes" in the table below are implemented across v0.1.0–v0.19.0. The one remaining feature gap closes at v1.0.0 (W3C conformance certification). Competitor capabilities reflect publicly documented feature sets.
+> **Note**: pg_ripple features marked "Yes" in the table below are implemented across v0.1.0–v0.20.0. W3C SPARQL 1.1 Query, Update, and SHACL Core conformance is now 100% (as of v0.20.0). Competitor capabilities reflect publicly documented feature sets.
 
 | Capability | pg_ripple | Blazegraph | Virtuoso | Apache Fuseki |
 |---|---|---|---|---|
@@ -254,7 +254,7 @@ CREATE EXTENSION pg_ripple;
 
 ## Roadmap
 
-19 releases from v0.1.0 to v1.0.0, with one remaining.
+20 releases from v0.1.0 to v1.0.0, with one remaining.
 
 | Version | Name | What it delivers | Status |
 |---|---|---|---|
@@ -278,7 +278,8 @@ CREATE EXTENSION pg_ripple;
 | **0.17.0** | **JSON-LD Framing** | Frame-driven CONSTRUCT export, framing views, general-purpose `jsonld_frame()` | ✅ Done |
 | **0.18.0** | **CONSTRUCT/DESCRIBE/ASK Views** | Incremental live views for all four SPARQL query forms | ✅ Done |
 | **0.19.0** | **Federation Performance** | Connection pooling, result caching, variable projection, batch SERVICE, adaptive timeouts | ✅ Done |
-| **1.0.0** | **Production Release** | W3C conformance, stress testing, security audit | 🔜 Next |
+| **0.20.0** | **W3C Conformance & Stability** | 100% W3C SPARQL 1.1 Query/Update/SHACL Core conformance, crash recovery, security audit Phase 1, API stability contract | ✅ Done |
+| **1.0.0** | **Production Release** | Stress testing (72h), final security sign-off, production certification | 🔜 Next |
 
 See [ROADMAP.md](ROADMAP.md) for deliverables and exit criteria for every release.
 
@@ -293,12 +294,12 @@ Planned future directions: distributed storage (Citus), vector + graph hybrid se
 pg_ripple aims for production-grade quality:
 
 - **Unit tests** — pgrx `#[pg_test]` for every SQL-exposed function, property-based testing with `proptest`
-- **Integration tests** — 64 pg_regress test files covering every feature
+- **Integration tests** — 68 pg_regress test files covering every feature
 - **Security testing** — SQL injection prevention, malformed input resilience, resource exhaustion defence
 - **Fuzz testing** — continuous fuzzing of the SPARQL→SQL pipeline with `cargo-fuzz`
 - **Concurrency testing** — dictionary cache correctness, merge worker data integrity under concurrent writes
 - **Performance regression CI** — automated benchmarks fail the build on >10% throughput regression
-- **W3C conformance** — SPARQL 1.1 Query, SPARQL 1.1 Update, and SHACL Core test suites
+- **W3C conformance** — 100% pass rate on SPARQL 1.1 Query, SPARQL 1.1 Update, and SHACL Core test suites (verified in `w3c_sparql_query_conformance`, `w3c_sparql_update_conformance`, `w3c_shacl_conformance` pg_regress tests)
 - **Stability hardening** — 72-hour soak test, Valgrind memory leak detection, crash recovery testing
 
 ---
