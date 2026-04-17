@@ -1477,6 +1477,17 @@ A federated query making repeated calls to the same endpoint is measurably faste
   - Additionally: `sh:in` with string literal values now encodes them via dictionary lookup instead of `lookup_iri`
   - **Target**: `validate()` returns `conforms=true` for all conforming graphs; violation detection remains 100%
 
+- [x] **100% W3C SPARQL 1.1 Update test suite conformance** — implement full update operator coverage:
+  - `USING <g>` / `WITH <g>` clauses: restrict WHERE evaluation to the specified dataset graph(s)
+  - `CLEAR ALL`, `CLEAR DEFAULT`, `CLEAR NAMED` — all graph-target variants
+  - `DROP ALL`, `DROP DEFAULT`, `DROP NAMED` — all graph-target variants
+  - `ADD <src> TO <dst>` — copy triples from source graph to destination (source preserved)
+  - `COPY <src> TO <dst>` — clear destination then copy source (source preserved)
+  - `MOVE <src> TO <dst>` — copy source to destination then drop source
+  - `DELETE WHERE { ... }` shorthand — pattern used as both delete template and WHERE clause
+  - Multi-graph USING: `USING <g1> USING <g2>` expands to UNION of GRAPH patterns in WHERE
+  - **Target**: all assertions in `w3c_sparql_update_conformance.sql` (sections 1–16) pass with exact expected values
+
 ### Documentation
 
 > See [plans/documentation.md](plans/documentation.md) for details.

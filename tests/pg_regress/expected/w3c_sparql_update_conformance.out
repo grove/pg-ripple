@@ -345,3 +345,621 @@ BEGIN
         'triple count decreased after re-insert';
     RAISE NOTICE 'idempotent insert: PASS';
 END $test$;
+-- ══════════════════════════════════════════════════════════════════════════════
+-- 9. CLEAR ALL / CLEAR DEFAULT / CLEAR NAMED
+-- ══════════════════════════════════════════════════════════════════════════════
+-- 9.1 Setup: load triples into two named graphs + default graph
+SELECT pg_ripple.sparql_update($$
+    INSERT DATA {
+        <https://w3c.sparql.update.test/cleartest/s1>
+            <https://w3c.sparql.update.test/cleartest/p> "default1" .
+        GRAPH <https://w3c.sparql.update.test/cleartest/g1> {
+            <https://w3c.sparql.update.test/cleartest/s2>
+                <https://w3c.sparql.update.test/cleartest/p> "named1" .
+        }
+        GRAPH <https://w3c.sparql.update.test/cleartest/g2> {
+            <https://w3c.sparql.update.test/cleartest/s3>
+                <https://w3c.sparql.update.test/cleartest/p> "named2" .
+        }
+    }
+$$) = 3 AS clear_test_setup;
+ clear_test_setup 
+------------------
+ t
+(1 row)
+
+-- 9.2 CLEAR NAMED: removes all named-graph triples; default unchanged
+SELECT pg_ripple.sparql_update($$
+    CLEAR NAMED
+$$) >= 0 AS clear_named_ok;
+ clear_named_ok 
+----------------
+ t
+(1 row)
+
+SELECT count(*) = 0 AS named_graphs_empty
+FROM pg_ripple.sparql($$
+    SELECT ?s WHERE {
+        GRAPH <https://w3c.sparql.update.test/cleartest/g1> { ?s ?p ?o . }
+    }
+$$);
+ named_graphs_empty 
+--------------------
+ t
+(1 row)
+
+-- Default graph triple still exists
+SELECT count(*) = 1 AS default_graph_untouched
+FROM pg_ripple.sparql($$
+    SELECT ?s WHERE {
+        ?s <https://w3c.sparql.update.test/cleartest/p> "default1" .
+    }
+$$);
+ default_graph_untouched 
+-------------------------
+ t
+(1 row)
+
+-- 9.3 CLEAR DEFAULT: clear default graph only
+SELECT pg_ripple.sparql_update($$
+    CLEAR DEFAULT
+$$) >= 0 AS clear_default_ok;
+ clear_default_ok 
+------------------
+ t
+(1 row)
+
+SELECT count(*) = 0 AS default_cleared
+FROM pg_ripple.sparql($$
+    SELECT ?s WHERE {
+        ?s <https://w3c.sparql.update.test/cleartest/p> "default1" .
+    }
+$$);
+ default_cleared 
+-----------------
+ t
+(1 row)
+
+-- 9.4 CLEAR ALL: ensure everything clean (re-insert then clear)
+SELECT pg_ripple.sparql_update($$
+    INSERT DATA {
+        <https://w3c.sparql.update.test/cleartest/s4>
+            <https://w3c.sparql.update.test/cleartest/p> "all1" .
+        GRAPH <https://w3c.sparql.update.test/cleartest/g3> {
+            <https://w3c.sparql.update.test/cleartest/s5>
+                <https://w3c.sparql.update.test/cleartest/p> "all2" .
+        }
+    }
+$$) = 2 AS pre_clear_all;
+ pre_clear_all 
+---------------
+ t
+(1 row)
+
+SELECT pg_ripple.sparql_update($$
+    CLEAR ALL
+$$) >= 0 AS clear_all_ok;
+ clear_all_ok 
+--------------
+ t
+(1 row)
+
+SELECT count(*) = 0 AS all_cleared
+FROM pg_ripple.sparql($$
+    SELECT ?s WHERE {
+        ?s <https://w3c.sparql.update.test/cleartest/p> ?v .
+    }
+$$);
+ all_cleared 
+-------------
+ t
+(1 row)
+
+-- ══════════════════════════════════════════════════════════════════════════════
+-- 10. DROP DEFAULT / DROP NAMED / DROP ALL
+-- ══════════════════════════════════════════════════════════════════════════════
+-- 10.1 Setup
+SELECT pg_ripple.sparql_update($$
+    INSERT DATA {
+        <https://w3c.sparql.update.test/droptest/s1>
+            <https://w3c.sparql.update.test/droptest/p> "default1" .
+        GRAPH <https://w3c.sparql.update.test/droptest/g1> {
+            <https://w3c.sparql.update.test/droptest/s2>
+                <https://w3c.sparql.update.test/droptest/p> "named1" .
+        }
+    }
+$$) = 2 AS drop_test_setup;
+ drop_test_setup 
+-----------------
+ t
+(1 row)
+
+-- 10.2 DROP DEFAULT: clears the default graph
+SELECT pg_ripple.sparql_update($$
+    DROP DEFAULT
+$$) >= 0 AS drop_default_ok;
+ drop_default_ok 
+-----------------
+ t
+(1 row)
+
+SELECT count(*) = 0 AS default_dropped
+FROM pg_ripple.sparql($$
+    SELECT ?s WHERE {
+        ?s <https://w3c.sparql.update.test/droptest/p> "default1" .
+    }
+$$);
+ default_dropped 
+-----------------
+ t
+(1 row)
+
+-- 10.3 DROP NAMED: clears all named-graph triples
+SELECT pg_ripple.sparql_update($$
+    DROP NAMED
+$$) >= 0 AS drop_named_ok;
+ drop_named_ok 
+---------------
+ t
+(1 row)
+
+SELECT count(*) = 0 AS named_dropped
+FROM pg_ripple.sparql($$
+    SELECT ?s WHERE {
+        GRAPH <https://w3c.sparql.update.test/droptest/g1> { ?s ?p ?o . }
+    }
+$$);
+ named_dropped 
+---------------
+ t
+(1 row)
+
+-- 10.4 DROP ALL (with fresh data, then drop)
+SELECT pg_ripple.sparql_update($$
+    INSERT DATA {
+        <https://w3c.sparql.update.test/droptest/s3>
+            <https://w3c.sparql.update.test/droptest/p> "all1" .
+    }
+$$) = 1 AS pre_drop_all;
+ pre_drop_all 
+--------------
+ t
+(1 row)
+
+SELECT pg_ripple.sparql_update($$
+    DROP ALL
+$$) >= 0 AS drop_all_ok;
+ drop_all_ok 
+-------------
+ t
+(1 row)
+
+-- ══════════════════════════════════════════════════════════════════════════════
+-- 11. ADD graph operation (W3C: add/manifest#add01..add08)
+-- ADD source TO dest: copies triples from source into dest; source unchanged
+-- ══════════════════════════════════════════════════════════════════════════════
+-- 11.1 Setup: data in named graph :gA
+SELECT pg_ripple.sparql_update($$
+    INSERT DATA {
+        GRAPH <https://w3c.sparql.update.test/add/gA> {
+            <https://w3c.sparql.update.test/add/x>
+                <https://w3c.sparql.update.test/add/val> "fromA" .
+        }
+    }
+$$) = 1 AS add_setup;
+ add_setup 
+-----------
+ t
+(1 row)
+
+-- 11.2 ADD :gA TO :gB
+SELECT pg_ripple.sparql_update($$
+    ADD <https://w3c.sparql.update.test/add/gA>
+    TO  <https://w3c.sparql.update.test/add/gB>
+$$) >= 0 AS add_ga_to_gb_ok;
+ add_ga_to_gb_ok 
+-----------------
+ t
+(1 row)
+
+-- :gB now has the triple from :gA
+SELECT count(*) = 1 AS add_dest_has_triple
+FROM pg_ripple.sparql($$
+    SELECT ?v WHERE {
+        GRAPH <https://w3c.sparql.update.test/add/gB> {
+            <https://w3c.sparql.update.test/add/x>
+                <https://w3c.sparql.update.test/add/val> ?v .
+        }
+    }
+$$);
+ add_dest_has_triple 
+---------------------
+ t
+(1 row)
+
+-- Source :gA still has its triple
+SELECT count(*) = 1 AS add_source_unchanged
+FROM pg_ripple.sparql($$
+    SELECT ?v WHERE {
+        GRAPH <https://w3c.sparql.update.test/add/gA> {
+            <https://w3c.sparql.update.test/add/x>
+                <https://w3c.sparql.update.test/add/val> ?v .
+        }
+    }
+$$);
+ add_source_unchanged 
+----------------------
+ t
+(1 row)
+
+-- 11.3 ADD SILENT on a non-existent source graph (should not error)
+SELECT pg_ripple.sparql_update($$
+    ADD SILENT <https://w3c.sparql.update.test/add/nonexistent>
+    TO         <https://w3c.sparql.update.test/add/gB>
+$$) >= 0 AS add_silent_nonexistent_ok;
+ add_silent_nonexistent_ok 
+---------------------------
+ t
+(1 row)
+
+-- ══════════════════════════════════════════════════════════════════════════════
+-- 12. COPY graph operation (W3C: copy/manifest#copy01..copy07)
+-- COPY source TO dest: clears dest then copies source into dest
+-- ══════════════════════════════════════════════════════════════════════════════
+-- 12.1 Setup: :gSrc has one triple; :gDst already has a different triple
+SELECT pg_ripple.sparql_update($$
+    INSERT DATA {
+        GRAPH <https://w3c.sparql.update.test/copy/gSrc> {
+            <https://w3c.sparql.update.test/copy/s>
+                <https://w3c.sparql.update.test/copy/p> "src" .
+        }
+        GRAPH <https://w3c.sparql.update.test/copy/gDst> {
+            <https://w3c.sparql.update.test/copy/s>
+                <https://w3c.sparql.update.test/copy/p> "old_dst" .
+        }
+    }
+$$) = 2 AS copy_setup;
+ copy_setup 
+------------
+ t
+(1 row)
+
+-- 12.2 COPY :gSrc TO :gDst (overwrites :gDst)
+SELECT pg_ripple.sparql_update($$
+    COPY <https://w3c.sparql.update.test/copy/gSrc>
+    TO   <https://w3c.sparql.update.test/copy/gDst>
+$$) >= 0 AS copy_ok;
+ copy_ok 
+---------
+ t
+(1 row)
+
+-- :gDst now has exactly the triple from :gSrc
+SELECT count(*) = 1 AS copy_dest_correct
+FROM pg_ripple.sparql($$
+    SELECT ?v WHERE {
+        GRAPH <https://w3c.sparql.update.test/copy/gDst> {
+            <https://w3c.sparql.update.test/copy/s>
+                <https://w3c.sparql.update.test/copy/p> ?v .
+        }
+    }
+$$);
+ copy_dest_correct 
+-------------------
+ t
+(1 row)
+
+SELECT count(*) = 1 AS copy_dest_has_src_value
+FROM pg_ripple.sparql($$
+    SELECT ?v WHERE {
+        GRAPH <https://w3c.sparql.update.test/copy/gDst> {
+            <https://w3c.sparql.update.test/copy/s>
+                <https://w3c.sparql.update.test/copy/p> "src" .
+        }
+    }
+$$);
+ copy_dest_has_src_value 
+-------------------------
+ t
+(1 row)
+
+-- Source graph :gSrc is unchanged
+SELECT count(*) = 1 AS copy_source_unchanged
+FROM pg_ripple.sparql($$
+    SELECT ?v WHERE {
+        GRAPH <https://w3c.sparql.update.test/copy/gSrc> {
+            <https://w3c.sparql.update.test/copy/s>
+                <https://w3c.sparql.update.test/copy/p> ?v .
+        }
+    }
+$$);
+ copy_source_unchanged 
+-----------------------
+ t
+(1 row)
+
+-- 12.3 COPY SILENT on non-existent source (should not error)
+SELECT pg_ripple.sparql_update($$
+    COPY SILENT <https://w3c.sparql.update.test/copy/nonexistent>
+    TO          <https://w3c.sparql.update.test/copy/gDst>
+$$) >= 0 AS copy_silent_ok;
+ copy_silent_ok 
+----------------
+ t
+(1 row)
+
+-- ══════════════════════════════════════════════════════════════════════════════
+-- 13. MOVE graph operation (W3C: move/manifest#move01..move07)
+-- MOVE source TO dest: clears dest, copies source to dest, drops source
+-- ══════════════════════════════════════════════════════════════════════════════
+-- 13.1 Setup
+SELECT pg_ripple.sparql_update($$
+    INSERT DATA {
+        GRAPH <https://w3c.sparql.update.test/move/gSrc> {
+            <https://w3c.sparql.update.test/move/s>
+                <https://w3c.sparql.update.test/move/p> "move_me" .
+        }
+        GRAPH <https://w3c.sparql.update.test/move/gDst> {
+            <https://w3c.sparql.update.test/move/s>
+                <https://w3c.sparql.update.test/move/p> "old_dst" .
+        }
+    }
+$$) = 2 AS move_setup;
+ move_setup 
+------------
+ t
+(1 row)
+
+-- 13.2 MOVE :gSrc TO :gDst
+SELECT pg_ripple.sparql_update($$
+    MOVE <https://w3c.sparql.update.test/move/gSrc>
+    TO   <https://w3c.sparql.update.test/move/gDst>
+$$) >= 0 AS move_ok;
+ move_ok 
+---------
+ t
+(1 row)
+
+-- :gDst has the source triple
+SELECT count(*) = 1 AS move_dest_has_triple
+FROM pg_ripple.sparql($$
+    SELECT ?v WHERE {
+        GRAPH <https://w3c.sparql.update.test/move/gDst> {
+            <https://w3c.sparql.update.test/move/s>
+                <https://w3c.sparql.update.test/move/p> "move_me" .
+        }
+    }
+$$);
+ move_dest_has_triple 
+----------------------
+ t
+(1 row)
+
+-- Source :gSrc is empty after MOVE
+SELECT count(*) = 0 AS move_source_empty
+FROM pg_ripple.sparql($$
+    SELECT ?v WHERE {
+        GRAPH <https://w3c.sparql.update.test/move/gSrc> {
+            ?s ?p ?v .
+        }
+    }
+$$);
+ move_source_empty 
+-------------------
+ t
+(1 row)
+
+-- 13.3 MOVE SILENT on non-existent source (should not error)
+SELECT pg_ripple.sparql_update($$
+    MOVE SILENT <https://w3c.sparql.update.test/move/nonexistent>
+    TO          <https://w3c.sparql.update.test/move/gDst>
+$$) >= 0 AS move_silent_ok;
+ move_silent_ok 
+----------------
+ t
+(1 row)
+
+-- ══════════════════════════════════════════════════════════════════════════════
+-- 14. USING clause (W3C: delete/manifest#dawg-delete-using-01 etc.)
+-- USING <g> restricts the WHERE dataset to graph <g>
+-- ══════════════════════════════════════════════════════════════════════════════
+-- 14.1 Load data into a named graph only
+SELECT pg_ripple.sparql_update($$
+    INSERT DATA {
+        GRAPH <https://w3c.sparql.update.test/using/g1> {
+            <https://w3c.sparql.update.test/using/a>
+                <https://w3c.sparql.update.test/using/knows>
+                <https://w3c.sparql.update.test/using/b> .
+            <https://w3c.sparql.update.test/using/b>
+                <https://w3c.sparql.update.test/using/name> "Bob" .
+        }
+    }
+$$) = 2 AS using_setup;
+ using_setup 
+-------------
+ t
+(1 row)
+
+-- 14.2 INSERT USING: match inside g1 and insert result into default graph
+SELECT pg_ripple.sparql_update($$
+    INSERT {
+        ?s <https://w3c.sparql.update.test/using/display_name> ?name .
+    }
+    USING <https://w3c.sparql.update.test/using/g1>
+    WHERE {
+        ?s <https://w3c.sparql.update.test/using/name> ?name .
+    }
+$$) = 1 AS insert_using_ok;
+ insert_using_ok 
+-----------------
+ t
+(1 row)
+
+-- Result: default graph should have the display_name triple
+SELECT count(*) = 1 AS using_insert_visible
+FROM pg_ripple.sparql($$
+    SELECT ?name WHERE {
+        ?s <https://w3c.sparql.update.test/using/display_name> ?name .
+    }
+$$);
+ using_insert_visible 
+----------------------
+ t
+(1 row)
+
+-- 14.3 DELETE USING: delete from default graph via match in named graph
+SELECT pg_ripple.sparql_update($$
+    DELETE {
+        ?s <https://w3c.sparql.update.test/using/display_name> ?name .
+    }
+    USING <https://w3c.sparql.update.test/using/g1>
+    WHERE {
+        ?s <https://w3c.sparql.update.test/using/name> ?name .
+    }
+$$) = 1 AS delete_using_ok;
+ delete_using_ok 
+-----------------
+ t
+(1 row)
+
+-- display_name triple is now gone
+SELECT count(*) = 0 AS using_delete_applied
+FROM pg_ripple.sparql($$
+    SELECT ?name WHERE {
+        ?s <https://w3c.sparql.update.test/using/display_name> ?name .
+    }
+$$);
+ using_delete_applied 
+----------------------
+ t
+(1 row)
+
+-- ══════════════════════════════════════════════════════════════════════════════
+-- 15. WITH clause (W3C: delete/manifest#dawg-delete-with-01 etc.)
+-- WITH <g> makes <g> the working graph for DELETE/INSERT templates
+-- and adds it as the USING dataset for the WHERE clause
+-- ══════════════════════════════════════════════════════════════════════════════
+-- 15.1 Setup: data in named graph :wg
+SELECT pg_ripple.sparql_update($$
+    INSERT DATA {
+        GRAPH <https://w3c.sparql.update.test/with/wg> {
+            <https://w3c.sparql.update.test/with/a>
+                <https://w3c.sparql.update.test/with/knows>
+                <https://w3c.sparql.update.test/with/b> .
+            <https://w3c.sparql.update.test/with/b>
+                <https://w3c.sparql.update.test/with/label> "B" .
+        }
+    }
+$$) = 2 AS with_setup;
+ with_setup 
+------------
+ t
+(1 row)
+
+-- 15.2 WITH :wg DELETE { ?s :knows ?o } WHERE { ?s :knows ?o }
+-- spargebra rewrites delete template to GRAPH :wg { ?s :knows ?o }
+-- and adds USING :wg to restrict WHERE to :wg
+SELECT pg_ripple.sparql_update($$
+    WITH <https://w3c.sparql.update.test/with/wg>
+    DELETE { ?s <https://w3c.sparql.update.test/with/knows> ?o . }
+    WHERE  { ?s <https://w3c.sparql.update.test/with/knows> ?o . }
+$$) = 1 AS with_delete_ok;
+ with_delete_ok 
+----------------
+ t
+(1 row)
+
+-- The :knows triple is gone from :wg
+SELECT count(*) = 0 AS with_delete_applied
+FROM pg_ripple.sparql($$
+    SELECT ?o WHERE {
+        GRAPH <https://w3c.sparql.update.test/with/wg> {
+            <https://w3c.sparql.update.test/with/a>
+                <https://w3c.sparql.update.test/with/knows> ?o .
+        }
+    }
+$$);
+ with_delete_applied 
+---------------------
+ t
+(1 row)
+
+-- The :label triple in :wg is unaffected
+SELECT count(*) = 1 AS with_other_triple_intact
+FROM pg_ripple.sparql($$
+    SELECT ?v WHERE {
+        GRAPH <https://w3c.sparql.update.test/with/wg> {
+            <https://w3c.sparql.update.test/with/b>
+                <https://w3c.sparql.update.test/with/label> ?v .
+        }
+    }
+$$);
+ with_other_triple_intact 
+--------------------------
+ t
+(1 row)
+
+-- 15.3 WITH :wg INSERT
+SELECT pg_ripple.sparql_update($$
+    WITH <https://w3c.sparql.update.test/with/wg>
+    INSERT { ?s <https://w3c.sparql.update.test/with/alias> ?v . }
+    WHERE  { ?s <https://w3c.sparql.update.test/with/label> ?v . }
+$$) = 1 AS with_insert_ok;
+ with_insert_ok 
+----------------
+ t
+(1 row)
+
+SELECT count(*) = 1 AS with_insert_visible
+FROM pg_ripple.sparql($$
+    SELECT ?v WHERE {
+        GRAPH <https://w3c.sparql.update.test/with/wg> {
+            ?s <https://w3c.sparql.update.test/with/alias> ?v .
+        }
+    }
+$$);
+ with_insert_visible 
+---------------------
+ t
+(1 row)
+
+-- ══════════════════════════════════════════════════════════════════════════════
+-- 16. DELETE WHERE shorthand (W3C: delete-where/manifest#*)
+-- DELETE WHERE { pattern } is shorthand for DELETE { pattern } WHERE { pattern }
+-- ══════════════════════════════════════════════════════════════════════════════
+-- 16.1 Setup
+SELECT pg_ripple.sparql_update($$
+    INSERT DATA {
+        <https://w3c.sparql.update.test/dw/a>
+            <https://w3c.sparql.update.test/dw/knows>
+            <https://w3c.sparql.update.test/dw/b> .
+    }
+$$) = 1 AS dw_setup;
+ dw_setup 
+----------
+ t
+(1 row)
+
+-- 16.2 DELETE WHERE shorthand
+SELECT pg_ripple.sparql_update($$
+    DELETE WHERE {
+        <https://w3c.sparql.update.test/dw/a>
+            <https://w3c.sparql.update.test/dw/knows> ?b .
+    }
+$$) = 1 AS delete_where_shorthand_ok;
+ delete_where_shorthand_ok 
+---------------------------
+ t
+(1 row)
+
+SELECT count(*) = 0 AS delete_where_applied
+FROM pg_ripple.find_triples(
+    '<https://w3c.sparql.update.test/dw/a>',
+    '<https://w3c.sparql.update.test/dw/knows>',
+    NULL
+);
+ delete_where_applied 
+----------------------
+ t
+(1 row)
+

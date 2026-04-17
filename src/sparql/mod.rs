@@ -665,10 +665,10 @@ pub fn sparql_update(query_text: &str) -> i64 {
             GraphUpdateOperation::DeleteInsert {
                 delete,
                 insert,
+                using,
                 pattern,
-                ..
             } => {
-                affected += execute_delete_insert(delete, insert, pattern);
+                affected += execute_delete_insert(delete, insert, using.as_ref(), pattern);
             }
             GraphUpdateOperation::Load {
                 source,
@@ -729,14 +729,59 @@ pub fn sparql_update(query_text: &str) -> i64 {
 
 // ─── DELETE/INSERT WHERE ──────────────────────────────────────────────────────
 
+/// Wrap a WHERE clause pattern in the graph context defined by a USING/WITH dataset.
+///
+/// `USING <g>` / `WITH <g>` means the bare triple patterns in the WHERE clause
+/// should be evaluated against graph `<g>` rather than all graphs.
+/// Multiple `USING <g>` clauses produce a UNION of GRAPH patterns.
+fn wrap_pattern_for_dataset(
+    dataset: &spargebra::algebra::QueryDataset,
+    pattern: &spargebra::algebra::GraphPattern,
+) -> spargebra::algebra::GraphPattern {
+    use spargebra::algebra::GraphPattern;
+    use spargebra::term::NamedNodePattern;
+
+    // Named-graph entries are accessible via explicit GRAPH clauses in the pattern;
+    // they do not affect the evaluation of bare triple patterns.
+    // Only the `default` list changes which graph bare patterns are resolved against.
+    if dataset.default.is_empty() {
+        // No default-graph restriction: return pattern unchanged.
+        return pattern.clone();
+    }
+
+    // Build one GRAPH wrapper per USING-default graph, then UNION them.
+    dataset
+        .default
+        .iter()
+        .map(|g| GraphPattern::Graph {
+            name: NamedNodePattern::NamedNode(g.clone()),
+            inner: Box::new(pattern.clone()),
+        })
+        .reduce(|l, r| GraphPattern::Union {
+            left: Box::new(l),
+            right: Box::new(r),
+        })
+        .unwrap_or_else(|| pattern.clone())
+}
+
 /// Execute a `DELETE/INSERT WHERE` pattern-based update.
 /// Returns the total number of triples deleted + inserted.
 fn execute_delete_insert(
     delete_templates: &[spargebra::term::GroundQuadPattern],
     insert_templates: &[spargebra::term::QuadPattern],
+    using: Option<&spargebra::algebra::QueryDataset>,
     pattern: &spargebra::algebra::GraphPattern,
 ) -> i64 {
-    // 1. Translate WHERE clause to SQL via the existing SELECT engine.
+    // 1. Restrict the WHERE pattern to the USING/WITH dataset if specified.
+    let wrapped: spargebra::algebra::GraphPattern;
+    let pattern: &spargebra::algebra::GraphPattern = if let Some(dataset) = using {
+        wrapped = wrap_pattern_for_dataset(dataset, pattern);
+        &wrapped
+    } else {
+        pattern
+    };
+
+    // 2. Translate WHERE clause to SQL via the existing SELECT engine.
     let trans = sqlgen::translate_select(pattern);
     let (sql, variables) = (trans.sql, trans.variables);
 
