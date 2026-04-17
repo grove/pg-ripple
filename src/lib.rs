@@ -768,11 +768,11 @@ pub extern "C-unwind" fn _PG_init() {
 
     pgrx::GucRegistry::define_int_guc(
         c"pg_ripple.vp_promotion_threshold",
-        c"Minimum triple count before a predicate gets its own VP table (default: 1000)",
+        c"Minimum triple count before a predicate gets its own VP table (default: 1000, range: 10–10,000,000)",
         c"",
         &VPP_THRESHOLD,
-        1,
-        i32::MAX,
+        10,
+        10_000_000,
         GucContext::Userset,
         GucFlags::default(),
     );
