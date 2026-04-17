@@ -13,6 +13,33 @@ Points at the next milestone: v1.0.0 — Production Release.
 
 ---
 
+## [0.21.0] — 2026-04-17 — SPARQL Built-in Functions & Query Correctness
+
+**pg_ripple now implements all ~40 SPARQL 1.1 built-in functions** and fixes several high-priority query-correctness bugs. Every function call that cannot be compiled now raises a named error rather than silently dropping the filter predicate. All 68 pg_regress tests pass.
+
+### What you can do
+
+- **Use SPARQL 1.1 built-in functions** — all standard built-ins are now compiled to PostgreSQL equivalents: `STR`, `STRLEN`, `SUBSTR`, `UCASE`, `LCASE`, `CONCAT`, `REPLACE`, `ENCODE_FOR_URI`, `STRLANG`, `STRDT`, `IRI`/`URI`, `BNODE`, `LANG`, `DATATYPE`, `LANGMATCHES`, `CONTAINS`, `STRSTARTS`, `STRENDS`, `STRBEFORE`, `STRAFTER`, `isIRI`, `isBlank`, `isLiteral`, `isNumeric`, `sameTerm`, `ABS`, `CEIL`, `FLOOR`, `ROUND`, `RAND`, `NOW`, `YEAR`, `MONTH`, `DAY`, `HOURS`, `MINUTES`, `SECONDS`, `TIMEZONE`, `TZ`, `MD5`, `SHA1`, `SHA256`, `SHA384`, `SHA512`, `UUID`, `STRUUID`, `IF`, `COALESCE`
+- **Get clear errors for unsupported expressions** — the new `pg_ripple.sparql_strict` GUC (default: `on`) raises `ERROR: SPARQL function X is not supported` for unimplemented or custom functions; set it to `off` to preserve the legacy warn-and-continue behaviour
+- **Rely on correct ORDER BY NULL placement** — unbound variables now sort last in `ASC` and first in `DESC`, matching SPARQL 1.1 §15.1
+- **Use GROUP_CONCAT DISTINCT** — `GROUP_CONCAT(DISTINCT ?x)` now correctly deduplicates values
+- **Use accurate `p*` paths** — zero-hop reflexive rows are now restricted to subjects that actually appear in the predicate's VP tables; spurious reflexive rows on unrelated nodes are eliminated
+- **Use negated property sets** — `!(p1|p2)` patterns now scan all VP tables and correctly exclude the listed predicates
+- **SERVICE SILENT** — a `SERVICE SILENT` clause returns zero rows when the remote endpoint is unreachable, rather than propagating an error
+
+### What changes
+
+- New `src/sparql/expr.rs` module containing the full SPARQL 1.1 built-in function dispatch table
+- `pg_ripple.sparql_strict` GUC (boolean, default `on`) — controls error vs. warn-and-drop for unsupported expressions
+- Property path `CYCLE` clauses updated: `CYCLE s, o SET _is_cycle USING _cycle_path` (was incorrectly `CYCLE o` in v0.20.0)
+- `translate_expr` `_` arm now raises (or warns) instead of silently returning NULL
+- `GROUP_CONCAT` emits `STRING_AGG(DISTINCT …)` when the SPARQL `DISTINCT` flag is set
+- BGP self-join dedup key changed from Debug string to structural `(s, p, o)` key
+
+### Migration
+
+No schema changes. The migration script `sql/pg_ripple--0.20.0--0.21.0.sql` is comment-only. The new `sparql_strict` GUC is registered at extension load time.
+
 ## [0.20.0] — 2026-05-16 — W3C Conformance & Stability Foundation
 
 **pg_ripple achieves 100% conformance with the W3C SPARQL 1.1 Query, SPARQL 1.1 Update, and SHACL Core test suites.** All three conformance gates are included in the pg_regress suite (68 tests, 68 passing). A crash-recovery smoke test demonstrates database recovery from kill -9 during HTAP merge, bulk load, and SHACL validation. Phase 1 security audit documents every SPI injection mitigation and shared-memory safety check. A new API stability contract designates all `pg_ripple.*` functions as stable for 1.x releases.

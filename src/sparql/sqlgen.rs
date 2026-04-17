@@ -33,6 +33,7 @@ use spargebra::algebra::{
 };
 use spargebra::term::{GroundTerm, Literal, NamedNodePattern, TermPattern};
 
+use super::expr;
 use super::federation;
 use super::property_path::{PathCtx, compile_path};
 use crate::dictionary;
@@ -112,7 +113,7 @@ fn build_all_predicates_union() -> String {
 // ─── Translation context ─────────────────────────────────────────────────────
 
 /// Mutable state carried through recursive translation.
-struct Ctx {
+pub(super) struct Ctx {
     alias_counter: u32,
     #[allow(dead_code)]
     opt_counter: u32,
@@ -151,7 +152,7 @@ impl Ctx {
 
     /// Encode an IRI to a dictionary id (read-only lookup; no insert).
     /// Returns `None` if the IRI has never been stored.
-    fn encode_iri(&mut self, iri: &str) -> Option<i64> {
+    pub(super) fn encode_iri(&mut self, iri: &str) -> Option<i64> {
         if let Some(cached) = self.per_query.get(iri) {
             return *cached;
         }
@@ -161,7 +162,7 @@ impl Ctx {
     }
 
     /// Encode a `spargebra::Literal` to a dictionary id (may insert).
-    fn encode_literal(&mut self, lit: &Literal) -> i64 {
+    pub(super) fn encode_literal(&mut self, lit: &Literal) -> i64 {
         let lang = lit.language();
         let value = lit.value();
         let dt = lit.datatype().as_str();
@@ -175,6 +176,28 @@ impl Ctx {
         } else {
             dictionary::encode_typed_literal(value, dt)
         }
+    }
+
+    /// Translate an expression to a SQL value (dictionary ID or raw numeric).
+    /// Used by expr.rs when resolving function arguments.
+    #[allow(dead_code)]
+    pub(super) fn translate_value(
+        &mut self,
+        expr: &Expression,
+        bindings: &HashMap<String, String>,
+    ) -> Option<String> {
+        translate_expr_value(expr, bindings, self)
+    }
+
+    /// Translate an expression to a SQL boolean.
+    /// Used by expr.rs when resolving IF conditions.
+    #[allow(dead_code)]
+    pub(super) fn translate_filter(
+        &mut self,
+        expr: &Expression,
+        bindings: &HashMap<String, String>,
+    ) -> Option<String> {
+        translate_expr(expr, bindings, self)
     }
 }
 
@@ -360,10 +383,14 @@ fn translate_bgp(patterns: &[spargebra::term::TriplePattern], ctx: &mut Ctx) -> 
     let mut frag = Fragment::empty();
 
     // Self-join elimination: detect duplicate triple patterns, only scan once.
+    // v0.21.0: use a structural (s_term, p_term, o_term) key instead of the
+    // Debug-string representation, so only truly identical patterns are collapsed.
     let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
 
     for tp in patterns {
-        let key = format!("{tp}");
+        // Build a canonical key from the Display representation of each term part.
+        // spargebra's term types implement Display with consistent output.
+        let key = format!("{}\x00{}\x00{}", tp.subject, tp.predicate, tp.object);
         if !seen.insert(key) {
             continue;
         }
@@ -832,17 +859,25 @@ fn translate_pattern(pattern: &GraphPattern, ctx: &mut Ctx) -> Fragment {
             // their raw SQL column (not the boolean `IS NOT NULL` wrapper that
             // translate_expr produces). This is critical for COUNT/SUM aggregate
             // results re-bound via Extend (e.g. `SELECT (COUNT(?p) AS ?cnt)`).
-            let sql_expr = translate_expr_value(expression, &frag.bindings, ctx)
-                .or_else(|| translate_expr(expression, &frag.bindings, ctx));
-            if let Some(expr) = sql_expr {
-                frag.bindings.insert(variable.as_str().to_owned(), expr);
+            let sql_expr = translate_expr_value(expression, &frag.bindings, ctx);
+            if let Some(expr_sql) = sql_expr {
+                frag.bindings.insert(variable.as_str().to_owned(), expr_sql);
             }
-            // If the expression is a simple variable reference to a raw_numeric
-            // variable (e.g. the internal aggregate hash mapped to user-facing
-            // ?cnt via Extend), propagate the raw_numeric status to the new name.
-            if let Expression::Variable(src_var) = expression
-                && ctx.raw_numeric_vars.contains(src_var.as_str())
-            {
+            // Propagate raw_numeric status from:
+            // 1. Simple variable references to already-raw_numeric variables.
+            // 2. SPARQL numeric functions (STRLEN, ABS, CEIL, FLOOR, ROUND, RAND,
+            //    YEAR, MONTH, DAY, HOURS, MINUTES, SECONDS).
+            let is_from_numeric_var = if let Expression::Variable(src_var) = expression {
+                ctx.raw_numeric_vars.contains(src_var.as_str())
+            } else {
+                false
+            };
+            let is_from_numeric_fn = if let Expression::FunctionCall(func, _) = expression {
+                expr::is_numeric_function(func)
+            } else {
+                false
+            };
+            if is_from_numeric_var || is_from_numeric_fn {
                 ctx.raw_numeric_vars.insert(variable.as_str().to_owned());
             }
             frag
@@ -1168,10 +1203,18 @@ fn translate_aggregate(agg: &AggregateExpression, bindings: &HashMap<String, Str
                 AggregateFunction::Max => format!("MAX({arg})"),
                 AggregateFunction::GroupConcat { separator } => {
                     let sep = separator.as_deref().unwrap_or(" ");
-                    format!(
-                        "STRING_AGG({arg}::text, {sep_lit} ORDER BY {arg})",
-                        sep_lit = quote_sql_string(sep)
-                    )
+                    // v0.21.0: honour the DISTINCT flag per SPARQL 1.1 §18.5.
+                    if *distinct {
+                        format!(
+                            "STRING_AGG(DISTINCT {arg}::text, {sep_lit} ORDER BY {arg})",
+                            sep_lit = quote_sql_string(sep)
+                        )
+                    } else {
+                        format!(
+                            "STRING_AGG({arg}::text, {sep_lit} ORDER BY {arg})",
+                            sep_lit = quote_sql_string(sep)
+                        )
+                    }
                 }
                 AggregateFunction::Sample => format!("MIN({arg})"),
                 AggregateFunction::Custom(_) => format!("MIN({arg})"),
@@ -1592,6 +1635,49 @@ fn encode_ground_term(gt: &GroundTerm, ctx: &mut Ctx) -> i64 {
 
 // ─── Expression translator ───────────────────────────────────────────────────
 
+/// Dispatch a SPARQL function call in boolean (FILTER) context.
+///
+/// Tries `expr::translate_function_filter` first.  If it returns `None`
+/// (the function is not boolean-typed), attempts to use the function in value
+/// context: if it produces a non-NULL value, return TRUE (acts as `BOUND`).
+/// If neither context produces a result, applies the `sparql_strict` policy:
+/// raise ERRCODE_FEATURE_NOT_SUPPORTED when strict, or warn-and-return-None
+/// when lenient.
+fn translate_function_call_filter(
+    func: &Function,
+    args: &[Expression],
+    bindings: &HashMap<String, String>,
+    ctx: &mut Ctx,
+) -> Option<String> {
+    // Try boolean context first.
+    if let Some(sql) = expr::translate_function_filter(func, args, bindings, ctx) {
+        return Some(sql);
+    }
+    // Try value context: function produces a value → use IS NOT NULL as boolean.
+    let mut is_numeric = false;
+    if let Some(val_sql) =
+        expr::translate_function_value(func, args, bindings, ctx, &mut is_numeric)
+    {
+        return Some(format!("({val_sql} IS NOT NULL)"));
+    }
+    // Neither worked: apply strict / lenient policy.
+    let strict = crate::SPARQL_STRICT.get();
+    if strict {
+        pgrx::error!(
+            "SPARQL function {} is not supported; \
+             set pg_ripple.sparql_strict = off to warn-and-skip instead",
+            expr::function_name(func)
+        );
+    } else {
+        pgrx::warning!(
+            "SPARQL function {} is not yet supported — FILTER predicate dropped \
+             (set pg_ripple.sparql_strict = on to raise an error instead)",
+            expr::function_name(func)
+        );
+        None
+    }
+}
+
 fn translate_expr(
     expr: &Expression,
     bindings: &HashMap<String, String>,
@@ -1649,6 +1735,56 @@ fn translate_expr(
             Some(format!("({col} IS NOT NULL)"))
         }
 
+        // ── IF / COALESCE (v0.21.0) ──────────────────────────────────────────
+        Expression::If(cond, then_expr, else_expr) => {
+            let cond_sql = translate_expr(cond, bindings, ctx)?;
+            let then_sql = translate_expr_value(then_expr, bindings, ctx)?;
+            let else_sql = translate_expr_value(else_expr, bindings, ctx)
+                .unwrap_or_else(|| "NULL::bigint".to_owned());
+            Some(format!(
+                "CASE WHEN {cond_sql} THEN {then_sql} ELSE {else_sql} END"
+            ))
+        }
+        Expression::Coalesce(exprs) => {
+            let parts: Vec<String> = exprs
+                .iter()
+                .filter_map(|e| translate_expr_value(e, bindings, ctx))
+                .collect();
+            if parts.is_empty() {
+                Some("NULL::bigint".to_owned())
+            } else {
+                // In boolean context, coalesce is truthy when non-null.
+                Some(format!("(COALESCE({}) IS NOT NULL)", parts.join(", ")))
+            }
+        }
+
+        // ── Arithmetic expressions ────────────────────────────────────────────
+        Expression::Add(a, b) => {
+            let la = translate_expr_value(a, bindings, ctx)?;
+            let ra = translate_expr_value(b, bindings, ctx)?;
+            Some(format!("(({la}) + ({ra}))"))
+        }
+        Expression::Subtract(a, b) => {
+            let la = translate_expr_value(a, bindings, ctx)?;
+            let ra = translate_expr_value(b, bindings, ctx)?;
+            Some(format!("(({la}) - ({ra}))"))
+        }
+        Expression::Multiply(a, b) => {
+            let la = translate_expr_value(a, bindings, ctx)?;
+            let ra = translate_expr_value(b, bindings, ctx)?;
+            Some(format!("(({la}) * ({ra}))"))
+        }
+        Expression::Divide(a, b) => {
+            let la = translate_expr_value(a, bindings, ctx)?;
+            let ra = translate_expr_value(b, bindings, ctx)?;
+            Some(format!("(({la}) / ({ra}))"))
+        }
+        Expression::UnaryPlus(inner) => translate_expr_value(inner, bindings, ctx),
+        Expression::UnaryMinus(inner) => {
+            let sql = translate_expr_value(inner, bindings, ctx)?;
+            Some(format!("(-({sql}))"))
+        }
+
         Expression::In(var, values) => {
             let col = translate_expr_value(var, bindings, ctx)?;
             let ids: Vec<_> = values
@@ -1666,35 +1802,27 @@ fn translate_expr(
         // Variables hold dictionary IDs; decode to text via a correlated subquery.
         // Literals use their raw lexical value as a SQL string.
         Expression::FunctionCall(Function::Contains, args) if args.len() >= 2 => {
-            let hay = expr_as_text_sql(&args[0], bindings)?;
-            let needle = expr_as_text_sql(&args[1], bindings)?;
-            Some(format!("(strpos({hay}, {needle}) > 0)"))
+            translate_function_call_filter(&Function::Contains, args, bindings, ctx)
         }
 
         Expression::FunctionCall(Function::StrStarts, args) if args.len() >= 2 => {
-            let str_expr = expr_as_text_sql(&args[0], bindings)?;
-            let prefix = expr_as_text_sql(&args[1], bindings)?;
-            Some(format!("(starts_with({str_expr}, {prefix}))"))
+            translate_function_call_filter(&Function::StrStarts, args, bindings, ctx)
         }
 
         Expression::FunctionCall(Function::StrEnds, args) if args.len() >= 2 => {
-            let str_expr = expr_as_text_sql(&args[0], bindings)?;
-            let suffix = expr_as_text_sql(&args[1], bindings)?;
-            Some(format!("(right({str_expr}, length({suffix})) = {suffix})"))
+            translate_function_call_filter(&Function::StrEnds, args, bindings, ctx)
         }
 
         Expression::FunctionCall(Function::Regex, args) if args.len() >= 2 => {
-            let str_expr = expr_as_text_sql(&args[0], bindings)?;
-            let pattern = expr_as_text_sql(&args[1], bindings)?;
-            // Optional third argument: flags. "i" means case-insensitive.
-            let case_insensitive = args
-                .get(2)
-                .is_some_and(|f| matches!(f, Expression::Literal(fl) if fl.value().contains('i')));
-            if case_insensitive {
-                Some(format!("({str_expr} ~* {pattern})"))
-            } else {
-                Some(format!("({str_expr} ~ {pattern})"))
-            }
+            translate_function_call_filter(&Function::Regex, args, bindings, ctx)
+        }
+
+        // ── SPARQL 1.1 built-in functions (v0.21.0) ─────────────────────────
+        // All function calls first try the FILTER boolean context dispatcher.
+        // If it returns None (function not applicable in boolean context), it
+        // falls through to the EXISTS / NOT EXISTS handler below.
+        Expression::FunctionCall(func, args) => {
+            translate_function_call_filter(func, args, bindings, ctx)
         }
 
         // ── EXISTS / NOT EXISTS ───────────────────────────────────────────────
@@ -1723,9 +1851,25 @@ fn translate_expr(
             ))
         }
 
-        // Unsupported expressions: skip (safe — omitting a FILTER is conservative,
-        // potentially returns more rows than strictly correct but never corrupts data).
-        _ => None,
+        // Unsupported expressions: raise a structured error when sparql_strict
+        // is on (default), or silently drop (warn only) when off.
+        // Never silently drop: either raise or warn, but never corrupt data by
+        // omitting a filter predicate without any indication.
+        _ => {
+            let strict = crate::SPARQL_STRICT.get();
+            if strict {
+                pgrx::error!(
+                    "unsupported SPARQL expression type in FILTER; \
+                     set pg_ripple.sparql_strict = off to warn-and-skip instead"
+                );
+            } else {
+                pgrx::warning!(
+                    "unsupported SPARQL expression in FILTER — predicate dropped \
+                     (set pg_ripple.sparql_strict = on to raise an error instead)"
+                );
+                None
+            }
+        }
     }
 }
 
@@ -1735,6 +1879,7 @@ fn translate_expr(
 /// `_pg_ripple.dictionary`.  Literals use their raw lexical value as a SQL
 /// string constant.  Returns `None` for expressions that cannot be decoded to
 /// text (e.g. complex sub-expressions).
+#[allow(dead_code)]
 fn expr_as_text_sql(expr: &Expression, bindings: &HashMap<String, String>) -> Option<String> {
     match expr {
         Expression::Variable(v) => {
@@ -1768,13 +1913,52 @@ fn translate_expr_value(
     match expr {
         Expression::Variable(v) => Some(bindings.get(v.as_str())?.clone()),
         Expression::NamedNode(nn) => {
-            let id = ctx.encode_iri(nn.as_str())?;
-            Some(id.to_string())
+            // Try inline (dictionary lookup at translation time).
+            if let Some(id) = ctx.encode_iri(nn.as_str()) {
+                return Some(id.to_string());
+            }
+            // IRI not yet in dictionary; embed a runtime lookup so BIND/IF/COALESCE
+            // can reference IRIs that are inserted in the same transaction.
+            let iri = nn.as_str().replace('\'', "''");
+            Some(format!(
+                "(SELECT d.id FROM _pg_ripple.dictionary d WHERE d.value = '{iri}' AND d.kind = 0 LIMIT 1)"
+            ))
         }
         Expression::Literal(lit) => {
             // use inline encoding (or dict if out of range / unsupported type)
             let id = ctx.encode_literal(lit);
             Some(id.to_string())
+        }
+        // ── IF / COALESCE (v0.21.0) ──────────────────────────────────────────
+        Expression::If(cond, then_expr, else_expr) => {
+            let cond_sql = translate_expr(cond, bindings, ctx)?;
+            let then_sql = translate_expr_value(then_expr, bindings, ctx)?;
+            let else_sql = translate_expr_value(else_expr, bindings, ctx)
+                .unwrap_or_else(|| "NULL::bigint".to_owned());
+            Some(format!(
+                "CASE WHEN {cond_sql} THEN {then_sql} ELSE {else_sql} END"
+            ))
+        }
+        Expression::Coalesce(exprs) => {
+            let parts: Vec<String> = exprs
+                .iter()
+                .filter_map(|e| translate_expr_value(e, bindings, ctx))
+                .collect();
+            if parts.is_empty() {
+                Some("NULL::bigint".to_owned())
+            } else {
+                Some(format!("COALESCE({})", parts.join(", ")))
+            }
+        }
+        // ── SPARQL 1.1 built-in functions (v0.21.0) ──────────────────────────
+        Expression::FunctionCall(func, args) => {
+            let mut is_numeric = false;
+            let result =
+                expr::translate_function_value(func, args, bindings, ctx, &mut is_numeric)?;
+            // NOTE: is_numeric flag is only used in the Extend pattern handler.
+            // Here we just return the SQL expression; the Extend handler will
+            // also call is_numeric_function() directly.
+            Some(result)
         }
         _ => None,
     }
@@ -1852,14 +2036,20 @@ fn translate_order_by(exprs: &[OrderExpression], bindings: &HashMap<String, Stri
         .filter_map(|oe| match oe {
             OrderExpression::Asc(expr) => {
                 if let Expression::Variable(v) = expr {
-                    bindings.get(v.as_str()).map(|col| format!("{col} ASC"))
+                    // SPARQL 1.1 §15.1: unbound variables sort last in ASC order.
+                    bindings
+                        .get(v.as_str())
+                        .map(|col| format!("{col} ASC NULLS LAST"))
                 } else {
                     None
                 }
             }
             OrderExpression::Desc(expr) => {
                 if let Expression::Variable(v) = expr {
-                    bindings.get(v.as_str()).map(|col| format!("{col} DESC"))
+                    // SPARQL 1.1 §15.1: unbound variables sort first in DESC order.
+                    bindings
+                        .get(v.as_str())
+                        .map(|col| format!("{col} DESC NULLS FIRST"))
                 } else {
                     None
                 }

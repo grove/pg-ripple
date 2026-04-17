@@ -675,6 +675,14 @@ pub static FEDERATION_ON_PARTIAL: pgrx::GucSetting<Option<std::ffi::CString>> =
 pub static FEDERATION_ADAPTIVE_TIMEOUT: pgrx::GucSetting<bool> =
     pgrx::GucSetting::<bool>::new(false);
 
+// ─── v0.21.0 GUCs ────────────────────────────────────────────────────────────
+
+/// GUC: when `on` (default), a FILTER expression that uses an unsupported
+/// SPARQL built-in function raises `ERRCODE_FEATURE_NOT_SUPPORTED` with a
+/// message naming the function.  When `off`, the legacy warn-and-drop behaviour
+/// is preserved for backward compatibility.
+pub static SPARQL_STRICT: pgrx::GucSetting<bool> = pgrx::GucSetting::<bool>::new(true);
+
 // ─── pg_trickle runtime detection (v0.6.0) ───────────────────────────────────
 
 /// Returns `true` when the pg_trickle extension is installed in the current database.
@@ -1028,6 +1036,18 @@ pub extern "C-unwind" fn _PG_init() {
         c"When on, derive per-endpoint timeout from P95 latency in federation_health (default: off)",
         c"",
         &FEDERATION_ADAPTIVE_TIMEOUT,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+
+    // ── v0.21.0 GUCs ─────────────────────────────────────────────────────────
+
+    pgrx::GucRegistry::define_bool_guc(
+        c"pg_ripple.sparql_strict",
+        c"When on (default), unsupported SPARQL FILTER functions raise ERRCODE_FEATURE_NOT_SUPPORTED; \
+          when off, they are silently dropped for backward compatibility",
+        c"",
+        &SPARQL_STRICT,
         GucContext::Userset,
         GucFlags::default(),
     );

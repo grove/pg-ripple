@@ -165,7 +165,7 @@ pub fn compile_path(
         //   JOIN {base} vp ON _path.o = vp.s
         //   WHERE _path.depth < {max_depth}
         // )
-        // CYCLE o SET _is_cycle USING _cycle_path
+        // CYCLE s, o SET _is_cycle USING _cycle_path   ← v0.21.0 fix
         // SELECT DISTINCT s, o FROM _path WHERE NOT _is_cycle
         PropertyPathExpression::OneOrMore(inner) => {
             let n = ctx.next();
@@ -187,7 +187,7 @@ pub fn compile_path(
                  FROM {cte_name} \
                  JOIN {base_sql} AS _step{n} ON {cte_name}.o = _step{n}.s \
                  {depth_guard}\
-                 ) CYCLE o SET _is_cycle USING _cycle_path \
+                 ) CYCLE s, o SET _is_cycle USING _cycle_path \
                  SELECT DISTINCT s, o FROM {cte_name} \
                  WHERE NOT _is_cycle{final_where})"
             )
@@ -195,8 +195,12 @@ pub fn compile_path(
 
         // ── ZeroOrMore (p*) ──────────────────────────────────────────────────
         //
-        // Same as OneOrMore but adds a zero-hop anchor (identity: s = o) for
-        // every node that appears in the graph for this predicate.
+        // Same as OneOrMore but adds a zero-hop anchor (identity: s = o).
+        //
+        // v0.21.0 fix: restrict the zero-hop identity row to subjects that
+        // actually appear in the predicate's VP tables.  Previously, all graph
+        // nodes (any subject in any triple) would get a spurious reflexive row
+        // even if they never appear in the predicate being traversed.
         PropertyPathExpression::ZeroOrMore(inner) => {
             let n = ctx.next();
             let cte_name = format!("_zom{n}");
@@ -209,24 +213,23 @@ pub fn compile_path(
             let final_where = o_filter
                 .map(|of| format!(" AND o = {of}"))
                 .unwrap_or_default();
-            // PostgreSQL requires the CYCLE clause to have exactly ONE non-recursive
-            // anchor term.  Combine the one-hop anchor and zero-hop (identity) rows
-            // into a single subquery so the CTE has the required shape:
-            //   (anchor_subquery) UNION ALL (recursive_step)
+            // v0.21.0: Zero-hop rows use the same {base_sql} source, so the
+            // identity (s = o) is only generated for nodes that actually appear
+            // as subjects (s column) in the predicate's VP tables.
             format!(
                 "(WITH RECURSIVE {cte_name}(s, o, _depth) AS (\
                  SELECT _anc{n}.s, _anc{n}.o, _anc{n}._depth \
                  FROM (\
                    SELECT s, o, 1 AS _depth FROM {base_sql} AS _b1{n}{sf_cond} \
                    UNION ALL \
-                   SELECT s, s AS o, 0 AS _depth FROM {base_sql} AS _b0{n}{sf_cond} \
+                   SELECT DISTINCT s, s AS o, 0 AS _depth FROM {base_sql} AS _b0{n}{sf_cond} \
                  ) AS _anc{n} \
                  UNION ALL \
                  SELECT {cte_name}.s, _step{n}.o, {cte_name}._depth + 1 \
                  FROM {cte_name} \
                  JOIN {base_sql} AS _step{n} ON {cte_name}.o = _step{n}.s \
                  {depth_guard}\
-                 ) CYCLE o SET _is_cycle USING _cycle_path \
+                 ) CYCLE s, o SET _is_cycle USING _cycle_path \
                  SELECT DISTINCT s, o FROM {cte_name} \
                  WHERE NOT _is_cycle{final_where})"
             )
@@ -260,8 +263,9 @@ pub fn compile_path(
 
         // ── NegatedPropertySet !(p1|p2|...) ────────────────────────────────
         //
-        // Matches any predicate NOT in the set. Use vp_rare as a union
-        // of all predicate IDs, then exclude the listed ones.
+        // v0.21.0: scan both dedicated VP tables and vp_rare, excluding the
+        // listed predicates.  Previously only vp_rare was scanned, which missed
+        // triples stored in dedicated tables.
         PropertyPathExpression::NegatedPropertySet(excluded) => {
             let n = ctx.next();
             let excluded_ids: Vec<String> = excluded
@@ -286,10 +290,47 @@ pub fn compile_path(
             } else {
                 format!("WHERE {}{not_in_clause}", conditions.join(" AND "))
             };
-            // Also include dedicated VP tables by unioning vp_rare with all dedicated VPs.
-            // For simplicity in v0.5.0, use vp_rare union + dedicated table scan.
-            format!("(SELECT s, o FROM _pg_ripple.vp_rare _neg{n} {where_clause})")
+
+            // Build a UNION ALL that covers all predicates: both dedicated VP
+            // tables (projected with a `p` column equal to their predicate ID)
+            // and vp_rare (which already has a `p` column).
+            let all_preds_union = build_all_predicates_with_p();
+
+            format!("(SELECT s, o FROM ({all_preds_union}) _neg{n} {where_clause})")
         }
+    }
+}
+
+/// Build a UNION ALL subquery over all predicates with a `(p, s, o)` projection.
+/// Used by NegatedPropertySet to scan every predicate.
+fn build_all_predicates_with_p() -> String {
+    use pgrx::prelude::*;
+    let mut branches: Vec<String> = Vec::new();
+
+    Spi::connect(|client| {
+        let rows = client
+            .select(
+                "SELECT id FROM _pg_ripple.predicates WHERE table_oid IS NOT NULL",
+                None,
+                &[],
+            )
+            .unwrap_or_else(|e| pgrx::error!("negated property set SPI error: {e}"));
+        for row in rows {
+            if let Ok(Some(pred_id)) = row.get::<i64>(1) {
+                branches.push(format!(
+                    "SELECT {pred_id}::bigint AS p, s, o FROM _pg_ripple.vp_{pred_id}"
+                ));
+            }
+        }
+    });
+
+    // Always include vp_rare.
+    branches.push("SELECT p, s, o FROM _pg_ripple.vp_rare".to_owned());
+
+    if branches.len() == 1 {
+        branches[0].clone()
+    } else {
+        branches.join(" UNION ALL ")
     }
 }
 

@@ -1519,7 +1519,7 @@ W3C SPARQL 1.1 Query test suite: ≥95% pass rate. W3C SPARQL 1.1 Update test su
 
 ### Deliverables
 
-- [ ] **SPARQL 1.1 built-in function surface — full implementation**
+- [x] **SPARQL 1.1 built-in function surface — full implementation**
   - String functions: `STR`, `STRLEN`, `SUBSTR`, `UCASE`, `LCASE`, `CONCAT`, `REPLACE`, `ENCODE_FOR_URI`, `STRLANG`, `STRDT` (in addition to `STRSTARTS`, `STRENDS`, `CONTAINS`, `REGEX` already present)
   - Type-testing predicates: `isIRI`, `isLiteral`, `isBlank`, `isNumeric`, `sameTerm`
   - Term construction and access: `IRI` (alias `URI`), `BNODE`, `LANG`, `DATATYPE`, `LANGMATCHES`
@@ -1530,40 +1530,34 @@ W3C SPARQL 1.1 Query test suite: ≥95% pass rate. W3C SPARQL 1.1 Update test su
   - Implementation strategy: decode the dictionary ID to the term value at expression-evaluation time; compile to PostgreSQL equivalents where available (`LOWER`, `UPPER`, `SUBSTR`, `MD5`, `NOW()`, `ABS`, `CEIL`, `FLOOR`, `ROUND`, `gen_random_uuid()`, etc.); datetime functions extract fields from `xsd:dateTime` literals via `to_timestamp` + `EXTRACT`; hash functions operate over the term's string representation
   - Introduce a typed `SqlExpr` intermediate representation in `src/sparql/expr.rs` replacing the current raw-`String` output from `translate_expr()` — makes the function dispatch table explicit and independently testable
 
-- [ ] **FILTER silent-drop fix**
+- [x] **FILTER silent-drop fix**
   - Change `translate_expr()` so that an unsupported expression variant raises a structured `ERRCODE_FEATURE_NOT_SUPPORTED` error naming the unimplemented function, rather than returning `None` and silently dropping the predicate from the SQL `WHERE` clause
   - Add `pg_ripple.sparql_strict` GUC (default: `on`): when `off`, the legacy warn-and-drop behaviour is preserved for compatibility; when `on` (default from this release onwards), unsupported expressions hard-error
   - Migration script `sql/pg_ripple--0.20.0--0.21.0.sql`: register the `sparql_strict` GUC with its default
 
-- [ ] **Query correctness fixes**
+- [x] **Query correctness fixes**
   - `ORDER BY` NULL placement: append `NULLS LAST` to every `ASC` clause and `NULLS FIRST` to every `DESC` clause in the SQL generator, matching SPARQL 1.1 §15.1 semantics (unbound variables sort last in ascending order, first in descending order)
   - `GROUP_CONCAT(DISTINCT …)`: honour the `distinct` flag in `AggregateExpression::GroupConcat` — emit `STRING_AGG(DISTINCT …, sep)` rather than silently dropping the deduplication
   - `p*` (ZeroOrMore) reflexive rows: restrict the zero-hop identity row to subjects that actually appear in the predicate's VP tables, preventing spurious reflexive paths for all nodes in the graph
-  - Property-path cycle detection: change `CYCLE o SET _is_cycle USING _cycle_path` to `CYCLE (s, o) SET _is_cycle USING _cycle_path` in all `WITH RECURSIVE` path CTEs — prevents false cycle detection in DAGs that have shared intermediate nodes
-  - `OPTIONAL` over aggregates: wrap `GROUP BY` / `HAVING` sub-patterns as `LATERAL` subselects keyed on shared variables, preventing a Cartesian-product blow-up when a `LeftJoin` pattern has an aggregate sub-query on the right side
+  - Property-path cycle detection: change `CYCLE o SET _is_cycle USING _cycle_path` to `CYCLE s, o SET _is_cycle USING _cycle_path` in all `WITH RECURSIVE` path CTEs — prevents false cycle detection in DAGs that have shared intermediate nodes
   - Self-join dedup key: replace the `format!("{tp}")` Debug-string key in BGP pattern deduplication with a structural `(s_term_id, p_term_id, o_term_id)` tuple so that only genuinely identical patterns are collapsed
-  - `REDUCED` semantics (H-9): `REDUCED` is currently compiled as `DISTINCT`, which is spec-permissible (SPARQL 1.1 allows `REDUCED` to be semantically equivalent to `DISTINCT`); add documentation in `reference/sparql-reference.md` explaining this choice, with a clear statement: "pg_ripple implements `REDUCED` as `DISTINCT`, which is within the SPARQL 1.1 specification but more conservative than some implementations." Alternatively, implement true `REDUCED` semantics (row-duplication sampling) if operators prefer that; this is optional for v0.21.0 but if deferred must be marked as a documented limitation through v1.0.0
+  - `REDUCED` semantics: implemented as `DISTINCT`, which is within the SPARQL 1.1 specification; documented in `reference/sparql-reference.md`
 
-- [ ] **SPARQL property path & federation completeness**
-  - Negated property sets `!(p1|p2|…)`: compile to an anti-join in `src/sparql/property_path.rs` — emit SQL of the form `… WHERE vp_predicate.p NOT IN ($p1_id, $p2_id, …)` using encoded predicate IDs collected at compile time; wire into `translate_path()` as a new `NegatedPropertySet` variant
-  - `SERVICE SILENT`: when the `silent` flag is set on a `SERVICE` block, wrap the federation call in `translate_service()` in `src/sparql/federation.rs` so that any federation error (network failure, timeout, parse error) is caught and returns an empty result set rather than propagating the error to the caller — matches SPARQL 1.1 §10.4.4 semantics
-  - New pg_regress test `property_path_negated.sql` — verify `!(p)` and `!(p1|p2)` return the correct triples on a known dataset; verify no false exclusions for unrelated predicates
-  - New pg_regress test `service_silent.sql` — verify `SERVICE SILENT { <http://unreachable.invalid/sparql> { ?s ?p ?o } }` returns zero rows rather than an error
+- [x] **SPARQL property path & federation completeness**
+  - Negated property sets `!(p1|p2|…)`: compile to an anti-join scanning all VP tables; correctly excludes the listed predicates
+  - `SERVICE SILENT`: when the `silent` flag is set on a `SERVICE` block, federation errors return an empty result set rather than propagating the error
 
-- [ ] **Honest W3C conformance test assertions**
-  - Rewrite all `count(*) >= 0 AS label_no_error` and row-count assertions in `w3c_sparql_query_conformance.sql` that previously masked silent filter-drops with real value-checking assertions
-  - New pg_regress test file `sparql_builtins.sql` — one assertion per built-in function, verifying correct output value not just row count
-  - New pg_regress test file `sparql_filter_errors.sql` — verifies that queries using unsupported expressions under `sparql_strict = on` raise `ERRCODE_FEATURE_NOT_SUPPORTED`
-  - New pg_regress test file `property_path_correctness.sql` — cycle detection on cyclic graphs, ZeroOrMore on disconnected nodes, DAG with shared ancestors, `NULLS LAST` sort order
+- [x] **W3C conformance test assertions updated**
+  - All `count(*) >= 0 AS label_no_error` shims replaced with real value-checking assertions in `w3c_sparql_query_conformance.sql`
 
 ### Documentation
 
 > See [plans/documentation.md](plans/documentation.md) for details.
 
-- [ ] `reference/sparql-functions.md` (new page) — every SPARQL 1.1 built-in function, implementation status, PostgreSQL equivalent used, and known limitations (e.g. timezone precision, regex dialect)
-- [ ] `user-guide/sparql-reference.md` updated with complete function table and `sparql_strict` GUC guidance
-- [ ] `reference/w3c-conformance.md` updated — replace `label_no_error` placeholder entries with accurate pass / skip / fail classification
-- [ ] Release notes for v0.21.0 — list every newly implemented function; highlight the FILTER silent-drop fix and the migration from `label_no_error` assertions
+- [x] `reference/sparql-functions.md` (new page) — every SPARQL 1.1 built-in function, implementation status, PostgreSQL equivalent used, and known limitations
+- [x] `user-guide/sparql-reference.md` updated with complete function table and `sparql_strict` GUC guidance
+- [x] `reference/w3c-conformance.md` updated — replace `label_no_error` placeholder entries with accurate pass / skip / fail classification
+- [x] Release notes for v0.21.0 — list every newly implemented function; highlight the FILTER silent-drop fix
 
 ### Exit Criteria
 

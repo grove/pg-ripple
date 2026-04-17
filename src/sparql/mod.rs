@@ -21,6 +21,7 @@
 //! 6. Batch-decode i64s via a single `WHERE id = ANY(...)` query.
 //! 7. Emit decoded rows as `JSONB`.
 
+mod expr;
 pub(crate) mod federation;
 mod optimizer;
 mod plan_cache;
