@@ -51,8 +51,11 @@ Each release below has two layers:
 | [0.27.0](#v0270--vector--sparql-hybrid-foundation) | Vector + SPARQL Hybrid: Foundation | Core pgvector integration — embedding table, HNSW index, `pg:similar()` SPARQL function, bulk embedding, and hybrid retrieval modes | 5–7 pw |
 | [0.28.0](#v0280--advanced-hybrid-search--rag-pipeline) | Advanced Hybrid Search & RAG Pipeline | Production-grade RRF fusion, incremental embedding worker, graph-contextualized embeddings, and end-to-end RAG retrieval | 5–8 pw |
 | [0.29.0](#v0290--datalog-optimization-magic-sets--cost-based-compilation) | Datalog Optimization: Magic Sets & Cost-Based Compilation | Goal-directed inference via magic sets, cost-based body atom reordering, subsumption checking, anti-join negation, filter pushdown, delta table indexing | 5–7 pw |
+| [0.30.0](#v0300--datalog-aggregation--compiled-rule-plans) | Datalog Aggregation & Compiled Rule Plans | Aggregation in rule bodies (Datalog^agg), SQL plan caching across inference runs, SPARQL on-demand query speedup | 5–7 pw |
+| [0.31.0](#v0310--entity-resolution--demand-transformation) | Entity Resolution & Demand Transformation | `owl:sameAs` entity canonicalization, demand transformation for goal-directed rule rewriting, SPARQL query planner integration | 5–7 pw |
+| [0.32.0](#v0320--well-founded-semantics--tabling) | Well-Founded Semantics & Tabling | Three-valued semantics for cyclic ontologies, subsumptive result caching for Datalog and SPARQL repeated sub-queries | 5–7 pw |
 | [1.0.0](#v100--production-release) | Production Release | Standards conformance, stress testing, security audit | 6–8 pw |
-| | | **Total estimated effort** | **160–218 pw** |
+| | | **Total estimated effort** | **175–239 pw** |
 
 ---
 
@@ -2268,6 +2271,165 @@ See [plans/ecosystem/datalog.md §14.2](plans/ecosystem/datalog.md) for detailed
 ### Exit Criteria
 
 `datalog_magic_sets.sql`, `datalog_cost_reorder.sql`, `datalog_antijoin.sql`, `datalog_subsumption.sql`, `datalog_filter_pushdown.sql`, and `datalog_delta_index.sql` all pass in `cargo pgrx regress pg18`. `pg_ripple.infer_goal('rdfs', '?x rdf:type foaf:Person')` returns the same triples as `pg_ripple.infer('rdfs')` filtered to `rdf:type foaf:Person`, but completes in <10% of the time on a 1M-triple dataset. Migration scripts from 0.1.0 through 0.29.0 run cleanly via `just test-migration`.
+
+---
+
+## v0.30.0 — Datalog Aggregation & Compiled Rule Plans
+
+**Theme**: Analytics-grade inference and rule plan caching.
+
+> **In plain language:** This release adds two major capabilities to the Datalog engine. First, rules can now aggregate facts — for example, "count the number of friends each person has" or "find the maximum salary in each department" — unlocking graph analytics and metrics directly from inference rules. Second, the engine caches the SQL it generates for each rule set, so repeated calls to `infer()` (e.g., after each data load) no longer repeat expensive dictionary lookups and query construction. As a bonus, SPARQL queries that use on-demand Datalog rules also benefit from the plan cache: a query that triggers inference gets a faster response on every repeat execution.
+>
+> **Effort estimate: 5–7 person-weeks**
+
+### Background
+
+See [plans/ecosystem/datalog.md §14.2](plans/ecosystem/datalog.md) for design notes. Aggregation in rule bodies (Datalog^agg) follows the aggregation-stratification spec: aggregate operations are allowed only in rule bodies over predicates that are fully computed in a lower stratum, ensuring a unique minimal model. Compiled rule plans cache generated SQL in a `HashMap<rule_set, Vec<CachedPlan>>` keyed on the dictionary-encoded rule set name; cache invalidation triggers on `load_rules()`, `drop_rules()`, or GUC change.
+
+### Deliverables
+
+- [ ] **Aggregation in rule bodies (Datalog^agg)** (`src/datalog/compiler.rs`, `src/datalog/stratify.rs`)
+  - Extend rule IR to support aggregate terms in body atoms: `COUNT(?x)`, `SUM(?x)`, `MIN(?x)`, `MAX(?x)`, `AVG(?x)`
+  - Aggregation-stratification check: aggregated predicates must be fully computed in a lower stratum; reject with `PT510` if violated
+  - SQL compilation: aggregate body atoms compile to subquery CTEs with `GROUP BY` and aggregate window functions
+  - `pg_ripple.infer_agg(rule_set TEXT) RETURNS JSONB` — variant of `infer()` that enables aggregation rules
+  - Example rule: `?x ex:friendCount ?n :- COUNT(?y WHERE ?x foaf:knows ?y) = ?n .`
+  - Benchmark: `benchmarks/datalog_agg.sql` — PageRank-style degree centrality on a social graph
+
+- [ ] **Compiled rule plans** (`src/datalog/cache.rs` new module)
+  - Cache the generated SQL string (and dictionary-encoded constant vector) for each rule on first `infer()` call
+  - Cache key: rule set name + schema version (invalidate on any `ALTER EXTENSION pg_ripple UPDATE`)
+  - Cache storage: `pgrx::PgSharedMem`-backed LRU, size controlled by GUC `pg_ripple.rule_plan_cache_size` (default: 64 entries)
+  - SPARQL on-demand mode benefit: when a SPARQL query inlines a derived predicate CTE, the CTE SQL is served from the plan cache rather than rebuilt from scratch
+  - GUC: `pg_ripple.rule_plan_cache` (bool, default `true`)
+  - Expose cache statistics via `pg_ripple.rule_plan_cache_stats() RETURNS TABLE(rule_set TEXT, hits BIGINT, misses BIGINT, entries INT)`
+
+- [ ] **Error codes** (`src/error.rs`)
+  - `PT510` — aggregation-stratification violation (aggregate over non-ground predicate)
+  - `PT511` — unsupported aggregate function in rule body
+
+- [ ] **pg_regress tests**
+  - `datalog_agg.sql` — verify COUNT, SUM, MIN, MAX rules derive correct results; verify stratification rejects cycles through aggregates
+  - `datalog_plan_cache.sql` — verify cache hit/miss counts via `rule_plan_cache_stats()`; verify cache invalidation on `drop_rules()`
+  - `datalog_sparql_cache.sql` — verify SPARQL on-demand query using a derived predicate is faster on second execution (plan served from cache)
+
+### Migration Script
+
+`sql/pg_ripple--0.29.0--0.30.0.sql` — registers new GUCs (`pg_ripple.rule_plan_cache`, `pg_ripple.rule_plan_cache_size`). No VP table schema changes.
+
+### Documentation
+
+- [ ] `user-guide/sql-reference/datalog.md` updated — document `infer_agg()`, aggregation rule syntax, plan cache GUCs, `rule_plan_cache_stats()`
+- [ ] `user-guide/best-practices/datalog-optimization.md` updated — add section on aggregation-stratification rules, plan cache tuning
+- [ ] Release notes for v0.30.0
+
+### Exit Criteria
+
+`datalog_agg.sql`, `datalog_plan_cache.sql`, and `datalog_sparql_cache.sql` all pass in `cargo pgrx regress pg18`. A PageRank-style degree centrality rule on a 1M-triple social graph produces correct results. Second call to `infer()` on the same rule set reports cache hits > 0 in `rule_plan_cache_stats()`. Migration scripts from 0.1.0 through 0.30.0 run cleanly via `just test-migration`.
+
+---
+
+## v0.31.0 — Entity Resolution & Demand Transformation
+
+**Theme**: Identity semantics and goal-directed rule rewriting for SPARQL and Datalog.
+
+> **In plain language:** This release tackles two distinct but complementary problems. First, it adds proper handling for `owl:sameAs` — the RDF way of saying "these two names refer to the same thing". When the engine knows that `ex:Alice` and `ex:A.Smith` are the same person, all facts about one automatically apply to the other. Second, it introduces demand transformation — a generalisation of the magic sets technique (added in v0.29.0) that can rewrite complex rule programs to derive only the facts that a query actually needs, even for rules with many cross-referencing bodies. This also makes SPARQL on-demand mode smarter: SPARQL queries can now trigger only the Datalog inference relevant to their specific patterns.
+>
+> **Effort estimate: 5–7 person-weeks**
+
+### Background
+
+See [plans/ecosystem/datalog.md §14.2](plans/ecosystem/datalog.md) for design notes. `owl:sameAs` merging uses a pre-pass canonicalization strategy: before each fixpoint iteration, the compiler rewrites triple patterns to use the canonical (lowest-id) representative of each `sameAs` equivalence class. Demand transformation is more flexible than magic sets for programs with multiple recursive predicates that reference each other — it propagates binding demands through the full program dependency graph rather than one predicate at a time.
+
+### Deliverables
+
+- [ ] **`owl:sameAs` entity canonicalization** (`src/datalog/rewrite.rs` new module)
+  - Pre-pass: at the start of each inference run, compute equivalence classes of `owl:sameAs` (VP table for `sameAs` predicate) using union-find over dictionary IDs
+  - Canonicalization map: each non-canonical ID maps to the lowest ID in its class
+  - Rule compiler rewrite: substitute all occurrences of non-canonical IDs in rule bodies before SQL generation
+  - SPARQL integration: SPARQL queries that reference a non-canonical entity are transparently rewritten to query the canonical form
+  - GUC: `pg_ripple.sameas_reasoning` (bool, default `true`)
+  - Benchmark: `benchmarks/sameas.sql` — query entity with 100 `sameAs` aliases; verify all facts visible via any alias
+
+- [ ] **Demand transformation** (`src/datalog/demand.rs` new module)
+  - Generalised magic sets: compute demand sets for all predicates simultaneously via a fixed-point on the program dependency graph
+  - API: `pg_ripple.infer_demand(rule_set TEXT, demands JSONB) RETURNS JSONB` — `demands` is an array of goal patterns `[{"p": "rdf:type", "o": "foaf:Person"}, ...]`
+  - Automatically applied in `create_datalog_view()` when multiple goal patterns are specified
+  - SPARQL on-demand integration: when a SPARQL query references multiple derived predicates, compute a joint demand set and apply it to all relevant rules before generating inline CTEs; reduces CTE size and join cost
+  - GUC: `pg_ripple.demand_transform` (bool, default `true`)
+
+- [ ] **pg_regress tests**
+  - `datalog_sameas.sql` — load `sameAs` assertions; verify inference results are visible via all aliases; verify canonicalization in SPARQL query results
+  - `datalog_demand.sql` — verify `infer_demand()` derives same results as `infer()` filtered to the demand set; verify EXPLAIN shows smaller CTE for SPARQL on-demand queries with demand transform enabled
+
+### Migration Script
+
+`sql/pg_ripple--0.30.0--0.31.0.sql` — registers `pg_ripple.sameas_reasoning` and `pg_ripple.demand_transform` GUCs. No VP table schema changes.
+
+### Documentation
+
+- [ ] `user-guide/sql-reference/datalog.md` updated — document `infer_demand()`, `owl:sameAs` behaviour, `sameas_reasoning` GUC
+- [ ] `user-guide/best-practices/datalog-optimization.md` updated — add section on demand transformation vs. magic sets, when to use `infer_demand()` vs. `infer_goal()`
+- [ ] Release notes for v0.31.0
+
+### Exit Criteria
+
+`datalog_sameas.sql` and `datalog_demand.sql` pass in `cargo pgrx regress pg18`. A SPARQL on-demand query referencing two derived predicates on a 1M-triple dataset completes in <50% of the time compared to v0.30.0 (demand transform reduces combined CTE size). Migration scripts from 0.1.0 through 0.31.0 run cleanly via `just test-migration`.
+
+---
+
+## v0.32.0 — Well-Founded Semantics & Tabling
+
+**Theme**: Advanced reasoning for cyclic ontologies and subsumptive result caching for Datalog and SPARQL.
+
+> **In plain language:** Two powerful features for production knowledge graph workloads. Well-founded semantics handles the edge cases that stratified Datalog cannot: programs where rules are mutually recursive through negation (e.g., "X is trusted unless untrusted, and untrusted unless trusted"). Instead of rejecting these programs, the engine assigns a third truth value — *unknown* — and returns whatever can be definitively concluded. Tabling caches the results of recurring sub-queries: if the same Datalog sub-goal (or SPARQL sub-pattern) appears in multiple queries or multiple times within one query, the answer is computed once and reused. For analytical workloads with repeated sub-query patterns, this is a 2–5× speedup.
+>
+> **Effort estimate: 5–7 person-weeks**
+
+### Background
+
+See [plans/ecosystem/datalog.md §14.2](plans/ecosystem/datalog.md) for design notes. Well-founded semantics (Van Gelder et al., 1991) extends stratified Datalog with a three-valued model: facts are true, false, or *unknown* (neither provably true nor provably false). The SQL encoding uses an iterative alternating fixpoint: two parallel CTE chains compute the *well-founded model* over at most `pg_ripple.wfs_max_iterations` rounds. Tabling (subsumptive tabling, inspired by XSB Prolog) stores derived sub-goals in a session-scoped cache table `_pg_ripple.tabling_cache (goal_hash BIGINT, result JSONB, computed_at TIMESTAMPTZ)` and reuses results within a configurable TTL.
+
+### Deliverables
+
+- [ ] **Well-founded semantics** (`src/datalog/wfs.rs` new module)
+  - Alternating fixpoint algorithm: compute `T_P↑` (positive) and `T_P↓` (negative) iteratively until fixpoint
+  - Three-valued result: derived facts carry a `certainty` column (`true` / `unknown`) in the query output
+  - `pg_ripple.infer_wfs(rule_set TEXT) RETURNS JSONB` — run well-founded fixpoint instead of stratified evaluation
+  - Graceful degradation: for stratifiable programs, `infer_wfs()` produces the same results as `infer()` with no overhead
+  - GUC: `pg_ripple.wfs_max_iterations` (integer, default `100`) — safety cap on alternating fixpoint rounds
+  - Error code `PT520` — well-founded fixpoint did not converge within `wfs_max_iterations`
+  - Benchmark: `benchmarks/wfs.sql` — cyclic ontology with mutual negation; verify unknown facts are correctly identified
+
+- [ ] **Tabling / memoization** (`src/datalog/tabling.rs` new module)
+  - Session-scoped cache: `_pg_ripple.tabling_cache (goal_hash BIGINT PRIMARY KEY, result BYTEA, computed_at TIMESTAMPTZ)`
+  - Cache key: XXH3-128 of the normalised goal pattern (predicate ID + bound-variable encoding)
+  - SPARQL integration: SPARQL sub-query patterns (e.g., property path closures, OPTIONAL blocks) that match a cached goal are served from the tabling cache without re-executing the CTE — implemented at the SPARQL→SQL translation layer
+  - Datalog integration: `infer()` and `infer_goal()` check the tabling cache before running the fixpoint; on cache miss, the result is stored for future calls
+  - TTL: `pg_ripple.tabling_ttl` (integer seconds, default `300`); set to `0` to disable expiry
+  - GUC: `pg_ripple.tabling` (bool, default `true`)
+  - Invalidation: cache is automatically cleared on any triple insert/delete/update (via CDC hook), and on `drop_rules()`
+  - Expose stats: `pg_ripple.tabling_stats() RETURNS TABLE(goal_hash BIGINT, hits BIGINT, computed_ms FLOAT, cached_at TIMESTAMPTZ)`
+
+- [ ] **pg_regress tests**
+  - `datalog_wfs.sql` — verify well-founded semantics on a cyclic negation program; verify `certainty = 'unknown'` for unresolvable facts; verify stratifiable programs return same results as `infer()`
+  - `datalog_tabling.sql` — verify cache hit/miss counts via `tabling_stats()`; verify TTL expiry; verify cache invalidation on triple insert
+  - `sparql_tabling.sql` — SPARQL query with repeated sub-pattern; verify tabling stats show hit > 0 on second identical sub-pattern within one query
+
+### Migration Script
+
+`sql/pg_ripple--0.31.0--0.32.0.sql` — creates `_pg_ripple.tabling_cache` table; registers `pg_ripple.tabling`, `pg_ripple.tabling_ttl`, `pg_ripple.wfs_max_iterations` GUCs.
+
+### Documentation
+
+- [ ] `user-guide/sql-reference/datalog.md` updated — document `infer_wfs()`, tabling GUCs, `tabling_stats()`
+- [ ] `user-guide/best-practices/datalog-optimization.md` updated — add section on when to use `infer_wfs()`, tabling tuning, SPARQL sub-query caching behaviour
+- [ ] `user-guide/best-practices/sparql-performance.md` (new page) — how tabling accelerates SPARQL property paths and repeated sub-queries; how demand transformation reduces CTE size; how rule plan caching (v0.30.0) interacts with SPARQL on-demand mode
+- [ ] Release notes for v0.32.0
+
+### Exit Criteria
+
+`datalog_wfs.sql`, `datalog_tabling.sql`, and `sparql_tabling.sql` all pass in `cargo pgrx regress pg18`. A SPARQL query with a repeated transitive-closure sub-pattern on a 1M-triple dataset completes in <50% of the time on the second execution (tabling cache hit). `infer_wfs()` on a stratifiable rule set produces identical results to `infer()`. Migration scripts from 0.1.0 through 0.32.0 run cleanly via `just test-migration`.
 
 ---
 
