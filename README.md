@@ -13,9 +13,9 @@ pg_ripple is a PostgreSQL 18 extension building toward a fully-featured knowledg
 
 ---
 
-## What works today (v0.22.0)
+## What works today (v0.24.0)
 
-**pg_ripple is now 100% conformant with the W3C SPARQL 1.1 Query, SPARQL 1.1 Update, and SHACL Core test suites.** Twenty versions in, pg_ripple covers the full SPARQL 1.1 stack, SHACL validation, Datalog reasoning, incremental live views, a standard HTTP endpoint, high-performance federated queries across remote SPARQL services, and frame-driven JSON-LD export — all inside PostgreSQL with no separate process required.
+**pg_ripple is now 100% conformant with the W3C SPARQL 1.1 Query, SPARQL 1.1 Update, and SHACL Core test suites.** Twenty-four versions in, pg_ripple covers the full SPARQL 1.1 stack, SHACL validation, semi-naive Datalog reasoning, streaming RDF export, incremental live views, a standard HTTP endpoint, high-performance federated queries across remote SPARQL services, and frame-driven JSON-LD export — all inside PostgreSQL with no separate process required.
 
 | Area | What's included |
 |---|---|
@@ -32,9 +32,9 @@ pg_ripple is a PostgreSQL 18 extension building toward a fully-featured knowledg
 | **Datalog views** | `create_datalog_view(name, rules, goal, …)` — self-refreshing table from inline rules + goal; `create_datalog_view_from_rule_set`; `drop_datalog_view`, `list_datalog_views` |
 | **Framing views** | `create_framing_view(name, frame)` — incrementally-maintained JSON-LD stream table (requires pg_trickle) |
 | **ExtVP** | `create_extvp(name, pred1_iri, pred2_iri, schedule)` — pre-computed semi-join stream table for star queries; `drop_extvp`, `list_extvp` |
-| **SHACL** | Core constraints (`sh:minCount`, `sh:maxCount`, `sh:datatype`, `sh:in`, `sh:pattern`, `sh:class`, …); combinators (`sh:or`, `sh:and`, `sh:not`); sync and async validation modes; SHACL-AF `sh:rule` bridge; **100% W3C SHACL Core conformance** |
-| **Datalog** | Custom inference rules (Turtle-flavoured syntax); built-in RDFS (13 rules) and OWL RL (~20 core rules); stratified negation; arithmetic/string built-ins; integrity constraints; on-demand execution mode |
-| **Performance** | Selectivity-based BGP reordering; plan cache with hit/miss stats; parallel query hints for star patterns; extended statistics on VP column pairs; SHACL-informed optimizer hints |
+| **SHACL** | Core constraints (`sh:minCount`, `sh:maxCount`, `sh:datatype`, `sh:in`, `sh:pattern`, `sh:class`, `sh:hasValue`, `sh:nodeKind`, `sh:languageIn`, `sh:uniqueLang`, `sh:lessThan`, `sh:greaterThan`, `sh:closed`, …); combinators (`sh:or`, `sh:and`, `sh:not`); sync and async validation modes; SHACL-AF `sh:rule` bridge; **100% W3C SHACL Core conformance** |
+| **Datalog** | Custom inference rules (Turtle-flavoured syntax); built-in RDFS (13 rules) and OWL RL (~20 core rules); stratified negation; arithmetic/string built-ins; integrity constraints; on-demand execution mode; **semi-naive evaluation** via `infer_with_stats(rule_set)` returning `{"derived": N, "iterations": K}` |
+| **Performance** | Selectivity-based BGP reordering (subject-bound 1%, object-bound 5% of row estimates); plan cache with hit/miss stats; parallel query hints for star patterns; extended statistics on VP column pairs; SHACL-informed optimizer hints; streaming cursor-based export (`pg_ripple.export_batch_size` GUC); `pg_ripple.property_path_max_depth` GUC (default 64) to cap recursive property-path depth; post-merge `ANALYZE` via `pg_ripple.auto_analyze` GUC; BRIN index on SID column for range-scan acceleration; `pg_ripple.explain_sparql(query, format)` for SQL/algebra/plan introspection |
 | **Admin & Security** | `vacuum()`, `reindex()`, `vacuum_dictionary()`, `dictionary_stats()`; graph-level Row-Level Security via `enable_graph_rls`, `grant_graph`, `revoke_graph`; `rls_bypass` GUC for superuser sessions |
 | **Full-text search** | `fts_search()` over literal values via PostgreSQL GIN indexes |
 
@@ -90,11 +90,15 @@ SELECT pg_ripple.infer('org_rules');
 
 ## Where we're headed
 
-One release remains on the path to v1.0.0.
+Two releases remain on the path to v1.0.0.
+
+### v0.25.0 — GeoSPARQL & Architectural Polish
+
+The next release adds GeoSPARQL 1.1 geometry primitives (distance, containment, intersection via PostGIS), stabilises the internal predicate catalog against OID drift by storing schema/table names, adds strict bulk-load mode, and closes the remaining medium- and low-priority issues from the v0.20.0 gap analysis.
 
 ### v1.0.0 — Production Release
 
-With 100% W3C conformance now achieved, the final release focuses on production hardening: a full 72-hour continuous load test, final security audit sign-off, stress testing at 100 M+ triple scale, and a hardened upgrade path from every prior version. This is the version intended for production deployments.
+With 100% W3C conformance achieved and GeoSPARQL added, the final release focuses on production hardening: a full 72-hour continuous load test, final security audit sign-off, stress testing at 100 M+ triple scale, and a hardened upgrade path from every prior version. This is the version intended for production deployments.
 
 ---
 
@@ -111,7 +115,7 @@ This means you get:
 
 ### How it compares
 
-> **Note**: pg_ripple features marked "Yes" in the table below are implemented across v0.1.0–v0.20.0. W3C SPARQL 1.1 Query, Update, and SHACL Core conformance is now 100% (as of v0.20.0). Competitor capabilities reflect publicly documented feature sets.
+> **Note**: pg_ripple features marked "Yes" in the table below are implemented across v0.1.0–v0.24.0. W3C SPARQL 1.1 Query, Update, and SHACL Core conformance is 100% (achieved in v0.20.0). Competitor capabilities reflect publicly documented feature sets.
 
 | Capability | pg_ripple | Blazegraph | Virtuoso | Apache Fuseki |
 |---|---|---|---|---|
@@ -254,7 +258,7 @@ CREATE EXTENSION pg_ripple;
 
 ## Roadmap
 
-20 releases from v0.1.0 to v1.0.0, with one remaining.
+26 releases from v0.1.0 to v1.0.0, with two remaining.
 
 | Version | Name | What it delivers | Status |
 |---|---|---|---|
@@ -281,7 +285,10 @@ CREATE EXTENSION pg_ripple;
 | **0.20.0** | **W3C Conformance & Stability** | 100% W3C SPARQL 1.1 Query/Update/SHACL Core conformance, crash recovery, security audit Phase 1, API stability contract | ✅ Done |
 | **0.21.0** | **SPARQL Built-in Functions** | All ~40 SPARQL 1.1 built-in functions, query correctness fixes, `sparql_strict` GUC | ✅ Done |
 | **0.22.0** | **Storage Correctness & Security Hardening** | Dictionary rollback safety, merge race fixes, atomic predicate promotion, HTTP rate limiting, error redaction, constant-time auth | ✅ Done |
-| **1.0.0** | **Production Release** | Stress testing (72h), final security sign-off, production certification | 🔜 Next |
+| **0.23.0** | **SHACL Core Completion & SPARQL Diagnostics** | `sh:hasValue`, `sh:nodeKind`, `sh:languageIn`, `sh:uniqueLang`, `sh:lessThan`, `sh:greaterThan`, `sh:closed`; `explain_sparql()`; Datalog division/unbound-var/negation-cycle fixes | ✅ Done |
+| **0.24.0** | **Semi-naive Datalog & Performance Hardening** | Semi-naive evaluation with `infer_with_stats()`; streaming export; `property_path_max_depth` GUC; BGP selectivity model; BRIN-on-SID migration; SPARQL-star Update fixes | ✅ Done |
+| **0.25.0** | **GeoSPARQL & Architectural Polish** | GeoSPARQL 1.1 geometry primitives (PostGIS), catalog OID stability, strict bulk-load mode, federation cache correctness, remaining gap-analysis fixes | 🔜 Next |
+| **1.0.0** | **Production Release** | Stress testing (72h), final security sign-off, production certification | ⏳ Planned |
 
 See [ROADMAP.md](ROADMAP.md) for deliverables and exit criteria for every release.
 
@@ -296,7 +303,7 @@ Planned future directions: distributed storage (Citus), vector + graph hybrid se
 pg_ripple aims for production-grade quality:
 
 - **Unit tests** — pgrx `#[pg_test]` for every SQL-exposed function, property-based testing with `proptest`
-- **Integration tests** — 70 pg_regress test files covering every feature
+- **Integration tests** — 76 pg_regress test files covering every feature
 - **Security testing** — SQL injection prevention, malformed input resilience, resource exhaustion defence
 - **Fuzz testing** — continuous fuzzing of the SPARQL→SQL pipeline with `cargo-fuzz`
 - **Concurrency testing** — dictionary cache correctness, merge worker data integrity under concurrent writes
