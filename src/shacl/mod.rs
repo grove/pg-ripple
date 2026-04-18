@@ -502,16 +502,14 @@ fn parse_shape_statement(
                 let tags = parse_list_values(obj_rest.trim(), prefixes)?;
                 constraints.push(ShapeConstraint::LanguageIn(tags));
             }
-            "http://www.w3.org/ns/shacl#uniqueLang" => {
-                if obj_rest.trim() == "true" {
-                    constraints.push(ShapeConstraint::UniqueLang);
-                }
+            "http://www.w3.org/ns/shacl#uniqueLang" if obj_rest.trim() == "true" => {
+                constraints.push(ShapeConstraint::UniqueLang);
             }
-            "http://www.w3.org/ns/shacl#closed" => {
-                if obj_rest.trim() == "true" {
-                    closed = true;
-                }
+            "http://www.w3.org/ns/shacl#uniqueLang" => {}
+            "http://www.w3.org/ns/shacl#closed" if obj_rest.trim() == "true" => {
+                closed = true;
             }
+            "http://www.w3.org/ns/shacl#closed" => {}
             "http://www.w3.org/ns/shacl#ignoredProperties" => {
                 ignored_properties = parse_list_values(obj_rest.trim(), prefixes)?;
             }
@@ -667,11 +665,10 @@ fn parse_property_shape(
                 let tags = parse_list_values(obj_rest.trim(), prefixes)?;
                 constraints.push(ShapeConstraint::LanguageIn(tags));
             }
-            "http://www.w3.org/ns/shacl#uniqueLang" => {
-                if obj_rest.trim() == "true" {
-                    constraints.push(ShapeConstraint::UniqueLang);
-                }
+            "http://www.w3.org/ns/shacl#uniqueLang" if obj_rest.trim() == "true" => {
+                constraints.push(ShapeConstraint::UniqueLang);
             }
+            "http://www.w3.org/ns/shacl#uniqueLang" => {}
             "http://www.w3.org/ns/shacl#lessThan" => {
                 let other_path = expand_iri(obj_rest.trim(), prefixes)?;
                 constraints.push(ShapeConstraint::LessThan(other_path));
