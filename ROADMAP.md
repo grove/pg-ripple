@@ -1994,6 +1994,7 @@ See [plans/vector_sparql_hybrid.md](plans/vector_sparql_hybrid.md) for the full 
   - **HNSW index** (default) on `(embedding vector_cosine_ops)` with configurable `m` (default 16) and `ef_construction` (default 64) parameters — best recall/speed trade-off for most workloads
   - **IVFFlat index** alternative (opt-in via GUC `pg_ripple.embedding_index_type = 'ivfflat'`) — faster build times, preferable for high-write workloads where the HNSW build cost is prohibitive; lists auto-set to `sqrt(row_count)`
   - **`halfvec` support**: the `embedding` column accepts both `vector(N)` and `halfvec(N)` via GUC `pg_ripple.embedding_precision = 'half'`; `halfvec` halves storage (2 bytes per dimension instead of 4) at marginal recall cost — recommended for > 5M entity graphs or `embedding_dimensions >= 3072`
+  - **Binary quantization support**: opt-in via GUC `pg_ripple.embedding_precision = 'binary'`; stores embeddings as pgvector `bit(N)` using Hamming distance, reducing storage by ~96% (1 bit/dimension) at the cost of recall — suitable for extremely large-scale graphs (> 50M entities) where approximate results are acceptable; requires pgvector ≥ 0.7.0
   - Fallback: if pgvector is absent, the table is created with `BYTEA` as a stub column and all similarity functions return empty results with a WARNING
   - Migration script creates the table only if pgvector is detected via `SELECT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'vector')`
 
@@ -2004,7 +2005,7 @@ See [plans/vector_sparql_hybrid.md](plans/vector_sparql_hybrid.md) for the full 
   - `pg_ripple.embedding_api_key` (string, default `''`, superuser-only) — API key; value is masked in `pg_settings` via a superuser-only GUC flag
   - `pg_ripple.pgvector_enabled` (bool, default `true`) — runtime switch; set to `false` to disable all pgvector-dependent code paths without uninstalling the extension
   - `pg_ripple.embedding_index_type` (string, default `'hnsw'`, options `'hnsw'`|`'ivfflat'`) — controls which index type is created on `_pg_ripple.embeddings`; changing this requires `REINDEX`
-  - `pg_ripple.embedding_precision` (string, default `'single'`, options `'single'`|`'half'`) — `'half'` stores embeddings as `halfvec(N)` reducing storage by 50%; requires pgvector ≥ 0.7.0
+  - `pg_ripple.embedding_precision` (string, default `'single'`, options `'single'`|`'half'`|`'binary'`) — `'half'` stores embeddings as `halfvec(N)` (50% storage reduction); `'binary'` stores as `bit(N)` using Hamming distance (~96% storage reduction, best for > 50M entities); requires pgvector ≥ 0.7.0
 
 - [ ] **`pg_ripple.embed_entities()` — batch embedding** (`src/sparql/embedding.rs`)
   - `pg_ripple.embed_entities(graph_iri TEXT DEFAULT NULL, model TEXT DEFAULT NULL, batch_size INT DEFAULT 100) RETURNS BIGINT`
@@ -2057,6 +2058,7 @@ See [plans/vector_sparql_hybrid.md](plans/vector_sparql_hybrid.md) for the full 
   - `vector_filter.sql` — SPARQL query with `FILTER(?score < 0.5)` on a `pg:similar()` result; verify only entities below the threshold are returned
   - `vector_graceful.sql` — test behaviour when `pg_ripple.pgvector_enabled = false`; verify WARNING is emitted and no ERROR is raised
   - `vector_halfvec.sql` — store embeddings with `pg_ripple.embedding_precision = 'half'`; verify halfvec column type and that `pg_ripple.similar_entities()` returns correct results
+  - `vector_binary.sql` — store embeddings with `pg_ripple.embedding_precision = 'binary'`; verify bit column type and that Hamming-distance similarity returns non-zero results
   - `vector_refresh.sql` — insert entity, embed, update its `rdfs:label`, call `pg_ripple.refresh_embeddings()`, verify `updated_at` advances and re-embedding count is 1
 
 ### Migration Script
@@ -2067,11 +2069,11 @@ See [plans/vector_sparql_hybrid.md](plans/vector_sparql_hybrid.md) for the full 
 
 - [ ] `user-guide/hybrid-search.md` (new page) — quick-start: install pgvector, set GUC parameters, call `pg_ripple.embed_entities()`, run a SPARQL hybrid query; includes architecture diagram showing VP table + embeddings table join
 - [ ] `reference/embedding-functions.md` (new page) — API reference for `embed_entities`, `similar_entities`, `store_embedding`, `pg:similar()`
-- [ ] `reference/guc-reference.md` updated — document the four new embedding GUC parameters with recommended values for OpenAI, Ollama, and local Sentence-BERT
+- [ ] `reference/guc-reference.md` updated — document all seven new embedding GUC parameters (`embedding_model`, `embedding_dimensions`, `embedding_api_url`, `embedding_api_key`, `pgvector_enabled`, `embedding_index_type`, `embedding_precision`) with recommended values for OpenAI, Ollama, and local Sentence-BERT; include storage trade-off table for `embedding_precision` modes
 
 ### Exit Criteria
 
-`vector_crud.sql`, `vector_sparql.sql`, `vector_filter.sql`, `vector_halfvec.sql`, and `vector_refresh.sql` all pass in `cargo pgrx regress pg18` when pgvector is installed. `vector_setup.sql` skips cleanly when pgvector is absent. `pg_ripple.store_embedding('http://example.org/aspirin', ARRAY[...])` round-trips correctly through `pg_ripple.similar_entities('anti-inflammatory')`. A SPARQL query with `BIND(pg:similar(?drug, "aspirin", 10) AS ?score) FILTER(?score < 0.5)` returns only entities with cosine distance below 0.5. `SELECT pg_ripple.similar_entities('test')` when `pg_ripple.pgvector_enabled = false` emits a WARNING and returns zero rows (no ERROR). `pg_ripple.refresh_embeddings()` after a label update returns a count of 1 and advances `updated_at`. `SELECT count(*) FROM _pg_ripple.embeddings` with `embedding_precision = 'half'` confirms the column is of type `halfvec`. Migration scripts from 0.1.0 through 0.27.0 run cleanly via `just test-migration`.
+`vector_crud.sql`, `vector_sparql.sql`, `vector_filter.sql`, `vector_halfvec.sql`, `vector_binary.sql`, and `vector_refresh.sql` all pass in `cargo pgrx regress pg18` when pgvector is installed. `vector_setup.sql` skips cleanly when pgvector is absent. `pg_ripple.store_embedding('http://example.org/aspirin', ARRAY[...])` round-trips correctly through `pg_ripple.similar_entities('anti-inflammatory')`. A SPARQL query with `BIND(pg:similar(?drug, "aspirin", 10) AS ?score) FILTER(?score < 0.5)` returns only entities with cosine distance below 0.5. `SELECT pg_ripple.similar_entities('test')` when `pg_ripple.pgvector_enabled = false` emits a WARNING and returns zero rows (no ERROR). `pg_ripple.refresh_embeddings()` after a label update returns a count of 1 and advances `updated_at`. `SELECT count(*) FROM _pg_ripple.embeddings` with `embedding_precision = 'half'` confirms the column is of type `halfvec`. Migration scripts from 0.1.0 through 0.27.0 run cleanly via `just test-migration`.
 
 ---
 

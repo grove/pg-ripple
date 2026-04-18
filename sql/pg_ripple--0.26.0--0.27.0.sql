@@ -18,7 +18,7 @@
 --   pg_ripple.embedding_api_key
 --   pg_ripple.pgvector_enabled
 --   pg_ripple.embedding_index_type   ('hnsw' | 'ivfflat', default 'hnsw')
---   pg_ripple.embedding_precision    ('single' | 'half', default 'single')
+--   pg_ripple.embedding_precision    ('single' | 'half' | 'binary', default 'single')
 --
 -- SPARQL extension function:
 --   pg:similar(?entity, "query_text", k) — registered in the function registry

@@ -454,7 +454,7 @@ Key differentiators:
 | Embedding API latency | Bulk embedding is slow for large graphs | Support local embedding models (Ollama, vLLM); batch API calls; async background worker |
 | Dimension mismatch | Different models produce different-dimension vectors | Multi-model schema with `model` column; validate dimensions on insert |
 | Stale embeddings | Entity labels change but embeddings aren't updated | Trigger-based invalidation; `pg_ripple.refresh_embeddings()` function |
-| Memory pressure | Large HNSW indexes compete with VP table caches for shared_buffers | Tuning guide; halfvec support for 50% memory reduction; binary quantization for large-scale |
+| Memory pressure | Large HNSW indexes compete with VP table caches for shared_buffers | Tuning guide; `halfvec` support for 50% memory reduction (`embedding_precision = 'half'`); binary quantization via pgvector `bit` type for ~96% reduction (`embedding_precision = 'binary'`) for > 50M entity graphs |
 
 ---
 
