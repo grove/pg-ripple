@@ -11,7 +11,7 @@ Each release below has two layers:
 - **The plain-language summary** (in the coloured box) explains *what* the release delivers and *why it matters* — no programming knowledge required.
 - **The technical deliverables** list the specific items developers will build. Feel free to skip these if you're reading for the big picture.
 
-**Effort estimates** are given as *person-weeks* — e.g. "6–8 pw" means the release would take roughly 6–8 weeks for a single full-time developer, or 3–4 weeks for a pair working together. The total estimated effort from v0.1.0 to v1.0.0 is **123–166 person-weeks** (~29–39 months for one developer; ~15–20 months for a pair).
+**Effort estimates** are given as *person-weeks* — e.g. "6–8 pw" means the release would take roughly 6–8 weeks for a single full-time developer, or 3–4 weeks for a pair working together. The total estimated effort from v0.1.0 to v1.0.0 is **155–211 person-weeks** (~36–49 months for one developer; ~18–25 months for a pair).
 
 **"optional at runtime" items**: some deliverables are annotated *(optional at runtime — X must be installed)*. This means the feature depends on an external extension (e.g. pg_trickle) that may not be installed in every deployment. The feature is **required by this roadmap** and must be implemented; the Rust code gates on a runtime availability check and degrades gracefully (returns 0 / false / empty, emits a WARNING, never raises an ERROR) when the dependency is absent. These items are not optional from a delivery standpoint.
 
@@ -48,8 +48,10 @@ Each release below has two layers:
 | [0.24.0](#v0240--semi-naive-datalog--performance-hardening) | Semi-naive Datalog & Performance Hardening | Implement semi-naive evaluation for Datalog rules, complete the OWL RL rule set, batch-decode large result sets, and bound property-path depth | 6–8 pw |
 | [0.25.0](#v0250--geosparql--architectural-polish) | GeoSPARQL & Architectural Polish | Add GeoSPARQL 1.1 geometry primitives, stabilise the internal catalog against OID drift, and close remaining medium- and low-priority issues | 6–8 pw |
 | [0.26.0](#v0260--graphrag-integration) | GraphRAG Integration | First-class integration with Microsoft GraphRAG: BYOG Parquet export, Datalog-enriched entity graphs, SHACL quality enforcement, and a Python CLI bridge | 4–6 pw |
+| [0.27.0](#v0270--vector--sparql-hybrid-foundation) | Vector + SPARQL Hybrid: Foundation | Core pgvector integration — embedding table, HNSW index, `pg:similar()` SPARQL function, bulk embedding, and hybrid retrieval modes | 5–7 pw |
+| [0.28.0](#v0280--advanced-hybrid-search--rag-pipeline) | Advanced Hybrid Search & RAG Pipeline | Production-grade RRF fusion, incremental embedding worker, graph-contextualized embeddings, and end-to-end RAG retrieval | 5–8 pw |
 | [1.0.0](#v100--production-release) | Production Release | Standards conformance, stress testing, security audit | 6–8 pw |
-| | | **Total estimated effort** | **145–196 pw** |
+| | | **Total estimated effort** | **155–211 pw** |
 
 ---
 
@@ -1968,6 +1970,185 @@ See [plans/graphrag.md](plans/graphrag.md) for the full synergy analysis, archit
 
 ---
 
+## v0.27.0 — Vector + SPARQL Hybrid: Foundation
+
+**Theme**: Core pgvector integration — embedding storage, similarity functions, and SPARQL extension.
+
+> **In plain language:** This release adds AI-powered semantic search to pg_ripple. Every entity in your knowledge graph can now have a *vector embedding* — a compact numerical fingerprint that captures its meaning. You can then search for entities that are semantically similar to a phrase ("find drugs similar to anti-inflammatory agents"), and combine that similarity search with precise SPARQL queries ("but only drugs approved by the FDA that don't interact with methotrexate"). This is called *hybrid search*, and it's the dominant retrieval pattern for modern AI applications. pg_ripple's unique advantage is that both the graph query and the similarity search run inside the same PostgreSQL process — with zero overhead, ACID transactions, and the query planner optimising both together. No other triplestore offers this.
+>
+> **Effort estimate: 5–7 person-weeks**
+
+### Background
+
+See [plans/vector_sparql_hybrid.md](plans/vector_sparql_hybrid.md) for the full analysis, pgvector deep-dive, competitive landscape, and integration architecture. Key findings:
+
+- pgvector (14k+ GitHub stars, MIT license, ships with every major managed PostgreSQL provider) is the standard PostgreSQL vector extension. Because pg_ripple and pgvector share the same PostgreSQL backend, JOINs between VP tables and vector tables execute in-process with zero serialisation overhead.
+- No existing triplestore or vector database combines full SPARQL 1.1, SHACL validation, Datalog reasoning, and in-process vector similarity in a single system.
+- The `_pg_ripple.embeddings` table uses dictionary-encoded `entity_id` foreign keys, enabling zero-copy joins with all VP tables.
+- This is an *optional at runtime* integration: pg_ripple degrades gracefully (returns empty results with a WARNING) if pgvector is not installed.
+
+### Deliverables
+
+- [ ] **`_pg_ripple.embeddings` table** (`sql/pg_ripple--0.26.0--0.27.0.sql`)
+  - Schema: `entity_id BIGINT NOT NULL REFERENCES _pg_ripple.dictionary(id), model TEXT NOT NULL DEFAULT 'default', embedding vector(1536), updated_at TIMESTAMPTZ NOT NULL DEFAULT now(), PRIMARY KEY (entity_id, model)` *(optional at runtime — pgvector must be installed)*
+  - HNSW index on `(embedding vector_cosine_ops)` with configurable `m` and `ef_construction` parameters
+  - Fallback: if pgvector is absent, the table is created with `BYTEA` as a stub column and all similarity functions return empty results with a WARNING
+  - Migration script creates the table only if pgvector is detected via `SELECT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'vector')`
+
+- [ ] **GUC parameters** (registered in `_PG_init` in `src/lib.rs`)
+  - `pg_ripple.embedding_model` (string, default `''`) — embedding model name tag stored in the `model` column
+  - `pg_ripple.embedding_dimensions` (integer, default `1536`, range `1–16000`) — vector dimensions; must match the actual model output
+  - `pg_ripple.embedding_api_url` (string, default `''`) — base URL for an OpenAI-compatible embedding API (e.g. `https://api.openai.com/v1`, local Ollama, vLLM)
+  - `pg_ripple.embedding_api_key` (string, default `''`, superuser-only) — API key; value is masked in `pg_settings` via a superuser-only GUC flag
+  - `pg_ripple.pgvector_enabled` (bool, default `true`) — runtime switch; set to `false` to disable all pgvector-dependent code paths without uninstalling the extension
+
+- [ ] **`pg_ripple.embed_entities()` — batch embedding** (`src/sparql/embedding.rs`)
+  - `pg_ripple.embed_entities(graph_iri TEXT DEFAULT NULL, model TEXT DEFAULT NULL, batch_size INT DEFAULT 100) RETURNS BIGINT`
+  - Executes a SPARQL SELECT to collect entity IRIs + their `rdfs:label` (falling back to the IRI local name) from the specified graph (or all graphs if NULL)
+  - Batches entity labels, calls the OpenAI-compatible API at `pg_ripple.embedding_api_url`; supports gzip-compressed responses
+  - Stores results in `_pg_ripple.embeddings` via `INSERT … ON CONFLICT (entity_id, model) DO UPDATE SET embedding = EXCLUDED.embedding, updated_at = now()`
+  - Returns total number of embeddings stored
+  - Raises `PT601 — embedding API URL not configured` if `pg_ripple.embedding_api_url` is empty
+
+- [ ] **`pg_ripple.similar_entities()` — k-NN query** (`src/sparql/embedding.rs`)
+  - `pg_ripple.similar_entities(query_text TEXT, k INT DEFAULT 10, model TEXT DEFAULT NULL) RETURNS TABLE (entity_id BIGINT, entity_iri TEXT, distance FLOAT8)` *(optional at runtime — pgvector must be installed)*
+  - Encodes `query_text` to a vector via the configured embedding API
+  - Executes `SELECT entity_id, embedding <=> $query_vec FROM _pg_ripple.embeddings ORDER BY 1 LIMIT k` using the pgvector `<=>` cosine distance operator
+  - Decodes `entity_id` back to IRI text via the dictionary
+  - Returns results sorted by ascending cosine distance (0 = identical, 2 = maximally dissimilar)
+
+- [ ] **`pg_ripple.store_embedding()` — user-supplied embeddings**
+  - `pg_ripple.store_embedding(entity_iri TEXT, embedding FLOAT8[], model TEXT DEFAULT NULL) RETURNS VOID`
+  - Encodes `entity_iri` via the dictionary encoder, casts `FLOAT8[]` to `vector`, and upserts into `_pg_ripple.embeddings`
+  - Useful for pre-computed KGE embeddings (TransE, RotatE, ComplEx) from external pipelines; no API call needed
+  - Validates that `array_length(embedding, 1)` matches `pg_ripple.embedding_dimensions`; raises `PT602 — embedding dimension mismatch` otherwise
+
+- [ ] **SPARQL `pg:similar()` extension function** (`src/sparql/functions.rs`)
+  - Register `<http://pg-ripple.org/functions/similar>` as a SPARQL extension function in the function registry
+  - Signature: `pg:similar(?entity, "query_text"^^xsd:string, k)` — returns cosine distance as `xsd:double`
+  - Translate to SQL: the SPARQL→SQL compiler detects `pg:similar` calls in BIND expressions and emits a JOIN against `_pg_ripple.embeddings` with the `<=>` operator
+  - Filter pushdown: if the SPARQL query has `FILTER(?score < threshold)`, push the threshold into the SQL `WHERE` clause to allow HNSW iterative scan pruning
+  - Graceful degradation: if pgvector is absent, raises `PT603 — pgvector extension not installed` with an install hint
+
+- [ ] **Error codes for the embedding subsystem** (`src/error.rs`)
+  - `PT601` — embedding API URL not configured
+  - `PT602` — embedding dimension mismatch
+  - `PT603` — pgvector extension not installed
+  - `PT604` — embedding API request failed (includes HTTP status code in detail)
+  - `PT605` — entity has no embedding (raised when `pg:similar` is called for an entity absent from `_pg_ripple.embeddings`)
+
+- [ ] **pg_regress tests**
+  - `vector_setup.sql` — verify pgvector is installed; skip remaining vector tests if absent
+  - `vector_crud.sql` — store embeddings via `pg_ripple.store_embedding()`, retrieve via `pg_ripple.similar_entities()`, verify ranking order
+  - `vector_sparql.sql` — SPARQL query using `pg:similar()` in a BIND expression; verify the result set is non-empty and ordered by distance
+  - `vector_filter.sql` — SPARQL query with `FILTER(?score < 0.5)` on a `pg:similar()` result; verify only entities below the threshold are returned
+  - `vector_graceful.sql` — test behaviour when `pg_ripple.pgvector_enabled = false`; verify WARNING is emitted and no ERROR is raised
+
+### Migration Script
+
+`sql/pg_ripple--0.26.0--0.27.0.sql` — creates `_pg_ripple.embeddings` table and HNSW index if pgvector is present; registers GUC parameters. No changes to VP table schema.
+
+### Documentation
+
+- [ ] `user-guide/hybrid-search.md` (new page) — quick-start: install pgvector, set GUC parameters, call `pg_ripple.embed_entities()`, run a SPARQL hybrid query; includes architecture diagram showing VP table + embeddings table join
+- [ ] `reference/embedding-functions.md` (new page) — API reference for `embed_entities`, `similar_entities`, `store_embedding`, `pg:similar()`
+- [ ] `reference/guc-reference.md` updated — document the four new embedding GUC parameters with recommended values for OpenAI, Ollama, and local Sentence-BERT
+
+### Exit Criteria
+
+`vector_crud.sql`, `vector_sparql.sql`, and `vector_filter.sql` all pass in `cargo pgrx regress pg18` when pgvector is installed. `vector_setup.sql` skips cleanly when pgvector is absent. `pg_ripple.store_embedding('http://example.org/aspirin', ARRAY[...])` round-trips correctly through `pg_ripple.similar_entities('anti-inflammatory')`. A SPARQL query with `BIND(pg:similar(?drug, "aspirin", 10) AS ?score) FILTER(?score < 0.5)` returns only entities with cosine distance below 0.5. `SELECT pg_ripple.similar_entities('test')` when `pg_ripple.pgvector_enabled = false` emits a WARNING and returns zero rows (no ERROR). Migration scripts from 0.1.0 through 0.27.0 run cleanly via `just test-migration`.
+
+---
+
+## v0.28.0 — Advanced Hybrid Search & RAG Pipeline
+
+**Theme**: Production-grade hybrid search with RRF fusion, incremental embedding, graph-contextualized embeddings, and end-to-end RAG retrieval.
+
+> **In plain language:** This release builds on the pgvector foundation to deliver two advanced capabilities. First, *hybrid ranking*: instead of choosing between SPARQL results or vector results, pg_ripple now fuses both using Reciprocal Rank Fusion — a proven algorithm that combines ranked lists from different retrieval systems. Second, *RAG support*: a single SQL function (`pg_ripple.rag_retrieve()`) takes a natural language question, runs hybrid search, and returns structured context ready for an LLM system prompt. A background worker keeps embeddings up-to-date as new entities are added. The result is a complete knowledge-graph-grounded RAG backend running entirely inside PostgreSQL — no separate vector database, no ETL, no eventual consistency.
+>
+> **Effort estimate: 5–8 person-weeks**
+
+### Background
+
+See [plans/vector_sparql_hybrid.md](plans/vector_sparql_hybrid.md) §5 (Advanced Integration Patterns) and §7 (Phases 2 & 3) for full design rationale. Key highlights:
+
+- Reciprocal Rank Fusion (RRF) is the standard algorithm for combining ranked lists from heterogeneous retrieval systems. With RRF, pg_ripple fuses SPARQL result rankings with vector distance rankings into a single scored list using the formula $\text{RRF}(d) = \sum_{r \in R} \frac{1}{k_{rrf} + r(d)}$ where $k_{rrf} = 60$.
+- Incremental embedding via a background worker ensures entities added after initial bulk embedding are automatically embedded without user intervention.
+- Graph-contextualized embeddings generate text representations that include entity neighborhood information (label, types, neighboring entity labels) before embedding — producing vectors that encode relational context, making similarity search more meaningful than label-only embeddings.
+- `pg_ripple.rag_retrieve()` is the missing link between pg_ripple's knowledge graph and LLM-based applications; it bridges directly to the pg_ripple_http HTTP service for REST-based LLM integrations.
+
+### Deliverables
+
+- [ ] **`pg_ripple.hybrid_search()` — RRF fusion** (`src/sparql/embedding.rs`)
+  - `pg_ripple.hybrid_search(sparql_query TEXT, query_text TEXT, k INT DEFAULT 10, alpha FLOAT8 DEFAULT 0.5, model TEXT DEFAULT NULL) RETURNS TABLE (entity_id BIGINT, entity_iri TEXT, rrf_score FLOAT8, sparql_rank INT, vector_rank INT)` *(optional at runtime — pgvector must be installed)*
+  - Executes `sparql_query` (a SPARQL SELECT returning `?entity`) to get the SPARQL-ranked candidate set
+  - Executes `pg_ripple.similar_entities(query_text, k * 10)` to get the vector-ranked candidate set
+  - Applies Reciprocal Rank Fusion with $k_{rrf} = 60$; `alpha` controls SPARQL vs. vector weight (0.0 = vector only, 1.0 = SPARQL only, 0.5 = equal)
+  - Returns top-`k` entities sorted by descending `rrf_score`
+
+- [ ] **Incremental embedding background worker** (`src/worker.rs` extension)
+  - New table `_pg_ripple.embedding_queue (entity_id BIGINT PRIMARY KEY, enqueued_at TIMESTAMPTZ NOT NULL DEFAULT now())`
+  - Trigger on `_pg_ripple.dictionary`: inserts new entity IDs into `embedding_queue` when `pg_ripple.auto_embed = true`
+  - Background worker dequeues entities in batches of `pg_ripple.embedding_batch_size`, calls the embedding API, upserts into `_pg_ripple.embeddings`
+  - GUC: `pg_ripple.auto_embed` (bool, default `false`) — master switch for trigger-based embedding; off by default to avoid surprise API charges
+  - GUC: `pg_ripple.embedding_batch_size` (integer, default `100`, range `1–10000`)
+
+- [ ] **`pg_ripple.contextualize_entity()` — graph-serialized text** (`src/sparql/embedding.rs`)
+  - `pg_ripple.contextualize_entity(entity_iri TEXT, depth INT DEFAULT 1, max_neighbors INT DEFAULT 20) RETURNS TEXT`
+  - Runs an internal SPARQL CONSTRUCT to gather the entity's label, type(s), and up-to-`max_neighbors` neighboring entity labels within `depth` hops
+  - Serialises the neighborhood as structured text: `"[entity_label]. Type: [types]. Related: [neighbor_labels]."` — suitable for embedding
+  - Used internally by `pg_ripple.embed_entities()` when `pg_ripple.use_graph_context = true` (new GUC, bool, default `false`)
+
+- [ ] **`pg_ripple.rag_retrieve()` — end-to-end RAG** (`src/sparql/embedding.rs`)
+  - `pg_ripple.rag_retrieve(question TEXT, sparql_filter TEXT DEFAULT NULL, k INT DEFAULT 5, model TEXT DEFAULT NULL) RETURNS TABLE (entity_iri TEXT, label TEXT, context_json JSONB, distance FLOAT8)` *(optional at runtime — pgvector must be installed)*
+  - Step 1: encode `question` to a vector; find `k` nearest entities via HNSW
+  - Step 2: if `sparql_filter` is non-NULL, apply it as a SPARQL WHERE clause filter on the candidate set
+  - Step 3: for each surviving entity, call `pg_ripple.contextualize_entity()` to build a rich context
+  - Step 4: return `context_json` as JSONB with keys `label`, `types`, `properties`, `neighbors` — formatted for direct use as an LLM system prompt fragment; structure mirrors the JSON-LD framing output from v0.17.0
+
+- [ ] **`pg_ripple_http` RAG endpoint** (`pg_ripple_http/src/main.rs`)
+  - `POST /rag` — accepts `{"question": "...", "sparql_filter": "...", "k": 5}` JSON body
+  - Calls `pg_ripple.rag_retrieve()` via the existing SPI connection
+  - Returns `{"results": [...], "context": "..."}` where `context` is the concatenated `context_json` entries formatted as a plain-text LLM prompt
+  - Authentication: same bearer-token auth as existing `pg_ripple_http` endpoints
+  - Rate limiting: inherits the `pg_ripple_http.max_requests_per_second` GUC
+
+- [ ] **SHACL embedding completeness shape**
+  - `examples/shacl_embedding_completeness.ttl` — reusable SHACL shape that validates all entities of a given class have embeddings (uses `sh:path :hasEmbedding ; sh:minCount 1`)
+  - `pg_ripple.add_embedding_triples() RETURNS BIGINT` — materialises `:hasEmbedding` triples for entities present in `_pg_ripple.embeddings`, making the SHACL shape checkable
+
+- [ ] **Multi-model support**
+  - `pg_ripple.list_embedding_models() RETURNS TABLE (model TEXT, entity_count BIGINT, dimensions INT)` — enumerate all models in `_pg_ripple.embeddings`
+  - `pg_ripple.similar_entities()`, `pg:similar()`, and `pg_ripple.rag_retrieve()` all accept an optional `model` argument; default is the `pg_ripple.embedding_model` GUC value
+
+- [ ] **Benchmarks**
+  - `benchmarks/hybrid_search.sql` — pgbench-based benchmark measuring hybrid search latency and throughput; tests vector-only, SPARQL-only, and RRF-fused patterns
+  - Target: hybrid search over 1M entities, 1,536-dimensional embeddings, HNSW index, < 50 ms P99 latency for top-10 results
+
+- [ ] **pg_regress tests**
+  - `vector_hybrid.sql` — `pg_ripple.hybrid_search()` with a SPARQL SELECT + vector query; verify RRF scores are non-zero and results are sorted
+  - `vector_rag.sql` — `pg_ripple.rag_retrieve()` end-to-end; verify `context_json` contains expected keys
+  - `vector_contextualize.sql` — `pg_ripple.contextualize_entity()` on a test entity with known neighbors; verify output text contains expected labels
+  - `vector_worker.sql` — insert a new entity with `pg_ripple.auto_embed = true`; verify `_pg_ripple.embedding_queue` is populated; simulate worker drain and verify embedding is present
+
+### Migration Script
+
+`sql/pg_ripple--0.27.0--0.28.0.sql` — creates `_pg_ripple.embedding_queue` table and trigger; registers new GUC parameters. No changes to VP table schema.
+
+### Documentation
+
+- [ ] `user-guide/hybrid-search.md` updated — add RRF fusion and RAG sections; include end-to-end worked example from question to LLM context
+- [ ] `user-guide/rag.md` (new page) — step-by-step guide to using `pg_ripple.rag_retrieve()` as a backend for LangChain, LlamaIndex, and raw OpenAI API calls; includes `pg_ripple_http` REST example
+- [ ] `reference/embedding-functions.md` updated — document `hybrid_search`, `rag_retrieve`, `contextualize_entity`, `list_embedding_models`
+- [ ] `reference/http-api.md` updated — document `POST /rag` endpoint with request/response examples
+- [ ] Release notes for v0.28.0 — highlight `rag_retrieve` and `hybrid_search` as headline features; link to the hybrid-search and RAG user guides
+
+### Exit Criteria
+
+`vector_hybrid.sql`, `vector_rag.sql`, `vector_contextualize.sql`, and `vector_worker.sql` all pass in `cargo pgrx regress pg18` when pgvector is installed. `pg_ripple.hybrid_search('SELECT ?drug WHERE { ?drug a :Drug }', 'anti-inflammatory', 10)` returns ≤ 10 rows with non-zero `rrf_score`. `pg_ripple.rag_retrieve('what treats headaches?', k := 5)` returns JSONB rows with `label`, `types`, `properties`, and `neighbors` keys. `POST /rag` on `pg_ripple_http` returns a `context` field suitable for use as an LLM system prompt. Inserting a new entity with `pg_ripple.auto_embed = true` and running the background worker loop populates `_pg_ripple.embeddings` for that entity. Migration scripts from 0.1.0 through 0.28.0 run cleanly via `just test-migration`.
+
+---
+
 ## v1.0.0 — Production Release
 
 **Theme**: Stability, conformance, and production certification.
@@ -2035,8 +2216,7 @@ Stable, tested, documented, and published. Ready for production workloads up to 
 | Version | Theme | What it delivers | Key Technical Features |
 |---|---|---|---|
 | 1.1 | Distributed | Spread data across multiple servers for horizontal scale | Citus integration, subject-based sharding |
-| 1.2 | Vector + Graph | Combine knowledge graphs with AI-style similarity search | pgvector integration, hybrid semantic search |
-| 1.3 | Temporal | Track how data changes over time; query historical states | Bitstring versioning, TimescaleDB integration |
+| 1.2 | Temporal | Track how data changes over time; query historical states | Bitstring versioning, TimescaleDB integration |
 | 1.4 | Extended VP | Automatically pre-compute shortcuts for frequent query patterns | Automated workload-driven ExtVP stream tables (pg_trickle), ontology change propagation DAG |
 | 1.5 | Interop | Bridge to GraphQL APIs and expose LPG views for visualization tools | GraphQL-to-SPARQL auto-generation from SHACL shapes, stable LPG view layer for visualization tooling |
 | 1.6 | Cypher / GQL | Query and write data using the industry-standard graph query languages | `cypher-algebra` standalone crate (openCypher + GQL grammar, same IR); `pg_ripple.cypher()` SQL function; `CREATE`, `MERGE`, `SET`, `DELETE` via VP write path; openCypher TCK ≥80%; edge properties available since v0.4.0 (RDF-star) |
