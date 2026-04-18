@@ -806,6 +806,7 @@ pub fn find_triples(
 }
 
 /// Collect all (s_id, p_id, o_id, g_id) from all VP tables (for export).
+#[allow(dead_code)]
 pub fn all_encoded_triples(graph: Option<i64>) -> Vec<(i64, i64, i64, i64)> {
     let mut results = Vec::new();
 
@@ -871,6 +872,115 @@ pub fn all_encoded_triples(graph: Option<i64>) -> Vec<(i64, i64, i64, i64)> {
     results.extend(rare_rows);
 
     results
+}
+
+/// Iterate over all encoded triples in batches using cursor-based streaming.
+///
+/// Calls `callback` for each batch of `(s_id, p_id, o_id, g_id)` tuples.
+/// The batch size is controlled by `pg_ripple.export_batch_size` (default 10 000).
+///
+/// This avoids loading the entire graph into a single Rust `Vec`, which can
+/// consume many GiB of memory for large stores.
+///
+/// # Parameters
+/// - `graph`: optional graph filter (None = all graphs)
+/// - `callback`: called once per batch with a slice of `(s, p, o, g)` tuples
+#[allow(clippy::type_complexity)]
+pub fn for_each_encoded_triple_batch(
+    graph: Option<i64>,
+    callback: &mut dyn FnMut(&[(i64, i64, i64, i64)]), // (s, p, o, g)
+) {
+    let batch_size = crate::EXPORT_BATCH_SIZE.get() as usize;
+
+    // ── Dedicated VP tables ───────────────────────────────────────────────────
+    let pred_ids: Vec<i64> = Spi::connect(|c| {
+        c.select(
+            "SELECT id FROM _pg_ripple.predicates WHERE table_oid IS NOT NULL",
+            None,
+            &[],
+        )
+        .unwrap_or_else(|e| pgrx::error!("predicates scan SPI error: {e}"))
+        .filter_map(|row| row.get::<i64>(1).ok().flatten())
+        .collect()
+    });
+
+    for p_id in pred_ids {
+        let table = format!("_pg_ripple.vp_{p_id}");
+        let g_filter = match graph {
+            Some(gid) => format!(" WHERE g = {gid}"),
+            None => String::new(),
+        };
+        // Use OFFSET-based pagination inside a single SPI::connect to avoid
+        // repeated connection overhead.  Each page fetches `batch_size` rows
+        // ordered by the monotonically-increasing SID column `i`.
+        let mut offset = 0usize;
+        loop {
+            let sql = format!(
+                "SELECT s, o, g FROM {table}{g_filter} ORDER BY i LIMIT {batch_size} OFFSET {offset}"
+            );
+            let page: Vec<(i64, i64, i64, i64)> = Spi::connect(|c| {
+                c.select(&sql, None, &[])
+                    .unwrap_or_else(|e| {
+                        pgrx::error!("for_each_encoded_triple_batch VP scan SPI error: {e}")
+                    })
+                    .filter_map(|row| {
+                        let s: Option<i64> = row.get(1).ok().flatten();
+                        let o: Option<i64> = row.get(2).ok().flatten();
+                        let g: Option<i64> = row.get(3).ok().flatten();
+                        match (s, o, g) {
+                            (Some(s), Some(o), Some(g)) => Some((s, p_id, o, g)),
+                            _ => None,
+                        }
+                    })
+                    .collect()
+            });
+            let page_len = page.len();
+            if !page.is_empty() {
+                callback(&page);
+            }
+            if page_len < batch_size {
+                break;
+            }
+            offset += batch_size;
+        }
+    }
+
+    // ── vp_rare ───────────────────────────────────────────────────────────────
+    let g_filter = match graph {
+        Some(gid) => format!(" WHERE g = {gid}"),
+        None => String::new(),
+    };
+    let mut offset = 0usize;
+    loop {
+        let sql = format!(
+            "SELECT p, s, o, g FROM _pg_ripple.vp_rare{g_filter} ORDER BY i LIMIT {batch_size} OFFSET {offset}"
+        );
+        let page: Vec<(i64, i64, i64, i64)> = Spi::connect(|c| {
+            c.select(&sql, None, &[])
+                .unwrap_or_else(|e| {
+                    pgrx::error!("for_each_encoded_triple_batch vp_rare scan SPI error: {e}")
+                })
+                .filter_map(|row| {
+                    let p: Option<i64> = row.get(1).ok().flatten();
+                    let s: Option<i64> = row.get(2).ok().flatten();
+                    let o: Option<i64> = row.get(3).ok().flatten();
+                    let g: Option<i64> = row.get(4).ok().flatten();
+                    match (p, s, o, g) {
+                        (Some(p), Some(s), Some(o), Some(g)) => Some((s, p, o, g)),
+                        _ => None,
+                    }
+                })
+                .collect()
+        });
+        let page_len = page.len();
+        if !page.is_empty() {
+            callback(&page);
+        }
+        if page_len < batch_size {
+            break;
+        }
+        offset += batch_size;
+    }
 }
 
 /// Scan a single VP table and decode results to text tuples.
@@ -1655,25 +1765,21 @@ pub fn deduplicate_predicate(p_iri: &str) -> i64 {
         let main = format!("_pg_ripple.vp_{p_id}_main");
         let tombs = format!("_pg_ripple.vp_{p_id}_tombstones");
 
-        // Deduplicate delta: delete all rows whose ctid is not the minimum per (s,o,g).
-        // We use a self-join to find the surviving minimum-ctid row per group.
+        // Deduplicate delta: delete all rows keeping the minimum-i (SID) row per (s,o,g).
+        // In practice the UNIQUE (s,o,g) constraint prevents duplicates in the delta table,
+        // but this covers legacy data created before the constraint existed.
         let delta_removed = Spi::get_one_with_args::<i64>(
             &format!(
-                "WITH min_ctids AS ( \
-                     SELECT MIN(ctid::text::point[0]::int8) AS min_ctid_raw, \
-                            s, o, g \
+                "WITH keep AS ( \
+                     SELECT s, o, g, MIN(i) AS min_i \
                      FROM {delta} \
                      GROUP BY s, o, g \
                      HAVING COUNT(*) > 1 \
                  ), \
                  del AS ( \
                      DELETE FROM {delta} d \
-                     USING min_ctids m \
-                     WHERE d.s = m.s AND d.o = m.o AND d.g = m.g \
-                       AND d.i NOT IN ( \
-                           SELECT MIN(i) FROM {delta} d2 \
-                           WHERE d2.s = m.s AND d2.o = m.o AND d2.g = m.g \
-                       ) \
+                     USING keep k \
+                     WHERE d.s = k.s AND d.o = k.o AND d.g = k.g AND d.i <> k.min_i \
                      RETURNING 1 \
                  ) \
                  SELECT COUNT(*)::BIGINT FROM del"

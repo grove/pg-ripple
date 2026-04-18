@@ -10,7 +10,7 @@
 //!
 //! The merge cycle ("fresh-table generation merge"):
 //! 1. Create `vp_{id}_main_new` from `(main − tombstones) UNION ALL delta ORDER BY s`
-//! 2. Add BRIN index on `vp_{id}_main_new`
+//! 2. Add BRIN index on `vp_{id}_main_new` (on i column — monotonic SID)
 //! 3. Atomically rename `_main_new` to `_main` (drop previous main)  
 //! 4. TRUNCATE delta and tombstones
 //! 5. ANALYZE the new main table
@@ -68,7 +68,7 @@ pub fn initialize_pattern_tables() {
 
 /// Create the HTAP triple partition for `pred_id`:
 /// - `_pg_ripple.vp_{id}_delta`      (B-tree on s,o and o,s)
-/// - `_pg_ripple.vp_{id}_main`       (BRIN on s)
+/// - `_pg_ripple.vp_{id}_main`       (BRIN on i — monotonic SID column)
 /// - `_pg_ripple.vp_{id}_tombstones` (index on s,o,g)
 /// - VIEW `_pg_ripple.vp_{id}`       = (main − tombstones) UNION ALL delta
 ///
@@ -123,7 +123,9 @@ pub fn ensure_htap_tables(pred_id: i64) -> String {
     .unwrap_or_else(|e| pgrx::error!("main table creation error: {e}"));
 
     Spi::run_with_args(
-        &format!("CREATE INDEX IF NOT EXISTS idx_vp_{pred_id}_main_brin ON {main} USING BRIN (s)"),
+        &format!(
+            "CREATE INDEX IF NOT EXISTS idx_vp_{pred_id}_main_i_brin ON {main} USING BRIN (i)"
+        ),
         &[],
     )
     .unwrap_or_else(|e| pgrx::error!("main BRIN index error: {e}"));
@@ -288,17 +290,16 @@ pub fn merge_predicate(pred_id: i64) -> i64 {
     Spi::run_with_args(&create_sql, &[])
         .unwrap_or_else(|e| pgrx::error!("merge: create main_new error: {e}"));
 
-    // Step 2: BRIN index on new main (effective because rows arrive ordered by s).
-    // Drop any stale index from a previous merge cycle (the index name survives
-    // across table renames: when main_new is renamed to main, its index keeps
-    // the original name).
+    // Step 2: BRIN index on new main (effective because rows arrive in SID (i) order —
+    // monotonically increasing, giving BRIN strong correlation on the i column).
+    // Drop any stale index from a previous merge cycle.
     Spi::run_with_args(
-        &format!("DROP INDEX IF EXISTS _pg_ripple.idx_vp_{pred_id}_main_new_brin"),
+        &format!("DROP INDEX IF EXISTS _pg_ripple.idx_vp_{pred_id}_main_new_i_brin"),
         &[],
     )
     .unwrap_or_else(|e| pgrx::error!("merge: drop stale BRIN index error: {e}"));
     Spi::run_with_args(
-        &format!("CREATE INDEX idx_vp_{pred_id}_main_new_brin ON {main_new} USING BRIN (s)"),
+        &format!("CREATE INDEX idx_vp_{pred_id}_main_new_i_brin ON {main_new} USING BRIN (i)"),
         &[],
     )
     .unwrap_or_else(|e| pgrx::error!("merge: BRIN index on main_new error: {e}"));
@@ -347,8 +348,12 @@ pub fn merge_predicate(pred_id: i64) -> i64 {
     // queries through the renamed table, closing the atomicity window.
     // Recreating the view would introduce a gap where concurrent queries
     // could fail with "table not found" errors.
-    Spi::run_with_args(&format!("ANALYZE {main}"), &[])
-        .unwrap_or_else(|e| pgrx::error!("merge: ANALYZE error: {e}"));
+    //
+    // AUTO_ANALYZE GUC (v0.24.0): skip ANALYZE if the user has disabled it.
+    if crate::AUTO_ANALYZE.get() {
+        Spi::run_with_args(&format!("ANALYZE {main}"), &[])
+            .unwrap_or_else(|e| pgrx::error!("merge: ANALYZE error: {e}"));
+    }
 
     // Clear the bloom filter bit — delta is now empty.
     crate::shmem::clear_predicate_delta_bit(pred_id);

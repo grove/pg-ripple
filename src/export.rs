@@ -32,20 +32,20 @@ pub fn export_ntriples(graph: Option<&str>) -> String {
         None => Some(0), // default graph
     };
 
-    let rows = storage::all_encoded_triples(g_id);
-
-    let mut out = String::with_capacity(rows.len() * 80);
-    for (s_id, p_id, o_id, _g) in &rows {
-        let s = dictionary::format_ntriples(*s_id);
-        let p = dictionary::format_ntriples(*p_id);
-        let o = dictionary::format_ntriples(*o_id);
-        out.push_str(&s);
-        out.push(' ');
-        out.push_str(&p);
-        out.push(' ');
-        out.push_str(&o);
-        out.push_str(" .\n");
-    }
+    let mut out = String::new();
+    storage::for_each_encoded_triple_batch(g_id, &mut |batch| {
+        for (s_id, p_id, o_id, _g) in batch {
+            let s = dictionary::format_ntriples(*s_id);
+            let p = dictionary::format_ntriples(*p_id);
+            let o = dictionary::format_ntriples(*o_id);
+            out.push_str(&s);
+            out.push(' ');
+            out.push_str(&p);
+            out.push(' ');
+            out.push_str(&o);
+            out.push_str(" .\n");
+        }
+    });
     out
 }
 
@@ -72,24 +72,24 @@ pub fn export_nquads(graph: Option<&str>) -> String {
         None => None, // all graphs
     };
 
-    let rows = storage::all_encoded_triples(g_filter);
-
-    let mut out = String::with_capacity(rows.len() * 100);
-    for (s_id, p_id, o_id, g_id) in &rows {
-        let s = dictionary::format_ntriples(*s_id);
-        let p = dictionary::format_ntriples(*p_id);
-        let o = dictionary::format_ntriples(*o_id);
-        out.push_str(&s);
-        out.push(' ');
-        out.push_str(&p);
-        out.push(' ');
-        out.push_str(&o);
-        if *g_id > 0 {
+    let mut out = String::new();
+    storage::for_each_encoded_triple_batch(g_filter, &mut |batch| {
+        for (s_id, p_id, o_id, g_id) in batch {
+            let s = dictionary::format_ntriples(*s_id);
+            let p = dictionary::format_ntriples(*p_id);
+            let o = dictionary::format_ntriples(*o_id);
+            out.push_str(&s);
             out.push(' ');
-            out.push_str(&dictionary::format_ntriples(*g_id));
+            out.push_str(&p);
+            out.push(' ');
+            out.push_str(&o);
+            if *g_id > 0 {
+                out.push(' ');
+                out.push_str(&dictionary::format_ntriples(*g_id));
+            }
+            out.push_str(" .\n");
         }
-        out.push_str(" .\n");
-    }
+    });
     out
 }
 
@@ -165,7 +165,11 @@ pub fn export_turtle(graph: Option<&str>) -> String {
         None => Some(0),
     };
 
-    let rows = storage::all_encoded_triples(g_id);
+    // Load all triples first (Turtle requires grouping by subject).
+    let mut rows: Vec<(i64, i64, i64, i64)> = Vec::new();
+    storage::for_each_encoded_triple_batch(g_id, &mut |batch| {
+        rows.extend_from_slice(batch);
+    });
 
     // Group: subject → predicate → [object]
     let mut subjects: BTreeMap<i64, BTreeMap<i64, Vec<i64>>> = BTreeMap::new();
@@ -240,13 +244,14 @@ pub fn export_turtle_stream(graph: Option<&str>) -> Vec<String> {
         }
     }
 
-    let rows = storage::all_encoded_triples(g_id);
-    for (s_id, p_id, o_id, _g) in &rows {
-        let s = nt_term_to_turtle(&dictionary::format_ntriples(*s_id));
-        let p = nt_term_to_turtle(&dictionary::format_ntriples(*p_id));
-        let o = nt_term_to_turtle(&dictionary::format_ntriples(*o_id));
-        lines.push(format!("{} {} {} .", s, p, o));
-    }
+    storage::for_each_encoded_triple_batch(g_id, &mut |batch| {
+        for (s_id, p_id, o_id, _g) in batch {
+            let s = nt_term_to_turtle(&dictionary::format_ntriples(*s_id));
+            let p = nt_term_to_turtle(&dictionary::format_ntriples(*p_id));
+            let o = nt_term_to_turtle(&dictionary::format_ntriples(*o_id));
+            lines.push(format!("{} {} {} .", s, p, o));
+        }
+    });
 
     lines
 }
@@ -326,7 +331,11 @@ pub fn export_jsonld(graph: Option<&str>) -> serde_json::Value {
         None => Some(0),
     };
 
-    let rows = storage::all_encoded_triples(g_id);
+    // JSON-LD requires grouping by subject, so collect all triples first.
+    let mut rows: Vec<(i64, i64, i64, i64)> = Vec::new();
+    storage::for_each_encoded_triple_batch(g_id, &mut |batch| {
+        rows.extend_from_slice(batch);
+    });
 
     // Group: subject_nt → predicate_nt → [object_value]
     let mut subjects: BTreeMap<String, BTreeMap<String, Vec<serde_json::Value>>> = BTreeMap::new();

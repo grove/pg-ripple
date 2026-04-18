@@ -367,3 +367,44 @@ $SHACL$) IS NOT NULL AS block_comment_parse_ok;
  t
 (1 row)
 
+-- ─────────────────────────────────────────────────────────────────────────────
+-- Cleanup: drop all shapes and data loaded by this test.
+-- Without this, lingering shapes (especially LangShape which has Article2
+-- violating sh:languageIn) cause cascading failures in subsequent SHACL tests.
+-- ─────────────────────────────────────────────────────────────────────────────
+DO $$
+DECLARE
+    s RECORD;
+BEGIN
+    FOR s IN SELECT shape_iri FROM _pg_ripple.shacl_shapes
+             WHERE shape_iri LIKE '%shacl.core23.test%'
+    LOOP
+        PERFORM pg_ripple.drop_shape(s.shape_iri);
+    END LOOP;
+END $$;
+-- Remove all triples in the shacl.core23.test namespace.
+DO $$
+DECLARE
+    core23_ids BIGINT[];
+    pred_id     BIGINT;
+BEGIN
+    SELECT array_agg(id) INTO core23_ids
+    FROM _pg_ripple.dictionary
+    WHERE value LIKE 'http://shacl.core23.test/%';
+    IF core23_ids IS NULL THEN RETURN; END IF;
+    DELETE FROM _pg_ripple.vp_rare
+    WHERE s = ANY(core23_ids) OR o = ANY(core23_ids) OR p = ANY(core23_ids);
+    FOR pred_id IN
+        SELECT id FROM _pg_ripple.predicates WHERE table_oid IS NOT NULL
+    LOOP
+        BEGIN
+            EXECUTE format(
+                'DELETE FROM _pg_ripple.vp_%s_delta WHERE s=ANY($1) OR o=ANY($1)',
+                pred_id) USING core23_ids;
+            EXECUTE format(
+                'DELETE FROM _pg_ripple.vp_%s_main  WHERE s=ANY($1) OR o=ANY($1)',
+                pred_id) USING core23_ids;
+        EXCEPTION WHEN undefined_table THEN NULL;
+        END;
+    END LOOP;
+END $$;

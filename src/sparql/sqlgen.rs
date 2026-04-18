@@ -768,7 +768,10 @@ fn translate_pattern(pattern: &GraphPattern, ctx: &mut Ctx) -> Fragment {
             path,
             object,
         } => {
-            let max_depth = crate::MAX_PATH_DEPTH.get();
+            // v0.24.0: use the more restrictive of max_path_depth and property_path_max_depth.
+            let max_depth = crate::MAX_PATH_DEPTH
+                .get()
+                .min(crate::PROPERTY_PATH_MAX_DEPTH.get());
             let mut path_ctx = PathCtx::new(ctx.path_counter);
 
             // Determine bound constants for subject / object to push into the CTE.

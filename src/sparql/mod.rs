@@ -441,6 +441,42 @@ pub(crate) fn sparql_construct_rows(query_text: &str) -> Vec<(i64, i64, i64)> {
                 spargebra::term::TermPattern::Variable(v) if var_set.contains(v.as_str()) => {
                     resolve_idx(v.as_str()).and_then(|i| row_vals.get(i).copied().flatten())
                 }
+                spargebra::term::TermPattern::Triple(inner) => {
+                    // v0.24.0: ground quoted-triple in CONSTRUCT template.
+                    // Encode all three components; if any is unresolvable, skip (None).
+                    let ts_str = match &inner.subject {
+                        spargebra::term::TermPattern::NamedNode(nn) => Some(nn.as_str()),
+                        _ => None,
+                    };
+                    let tp_id = match &inner.predicate {
+                        spargebra::term::NamedNodePattern::NamedNode(nn) => Some(
+                            crate::dictionary::encode(nn.as_str(), crate::dictionary::KIND_IRI),
+                        ),
+                        _ => None,
+                    };
+                    let to_id_opt = match &inner.object {
+                        spargebra::term::TermPattern::NamedNode(nn) => Some(
+                            crate::dictionary::encode(nn.as_str(), crate::dictionary::KIND_IRI),
+                        ),
+                        spargebra::term::TermPattern::Variable(v)
+                            if var_set.contains(v.as_str()) =>
+                        {
+                            resolve_idx(v.as_str())
+                                .and_then(|i| row_vals.get(i).copied().flatten())
+                        }
+                        _ => None,
+                    };
+                    match (ts_str, tp_id, to_id_opt) {
+                        (Some(ts_str), Some(tp_id), Some(to_id)) => {
+                            let ts_id = crate::dictionary::encode(
+                                ts_str,
+                                crate::dictionary::KIND_IRI,
+                            );
+                            Some(crate::dictionary::encode_quoted_triple(ts_id, tp_id, to_id))
+                        }
+                        _ => None,
+                    }
+                }
                 _ => None,
             };
             if let (Some(s), Some(p), Some(o)) = (s_id, p_id, o_id) {
@@ -551,7 +587,15 @@ pub fn sparql_construct(query_text: &str) -> Vec<pgrx::JsonB> {
                     ))
                 }
                 spargebra::term::TermPattern::BlankNode(_) => None,
-                spargebra::term::TermPattern::Triple(_) => None,
+                spargebra::term::TermPattern::Triple(_inner) => {
+                    // v0.24.0: quoted-triple objects are stored as dictionary IDs;
+                    // decode via the batch_decode map (the ID was collected above).
+                    // The quoted-triple ID is bound to the variable referencing it;
+                    // look up the variable column in the result row.
+                    // For now, resolve via the variable binding if any object variable
+                    // maps to a quoted-triple ID in the decode map.
+                    None // ground quoted triples in CONSTRUCT templates not yet decoded to N-Triple-star notation
+                }
                 spargebra::term::TermPattern::Variable(v) => {
                     if var_set.contains(v.as_str()) {
                         resolve(row_vals, v.as_str())
@@ -914,7 +958,23 @@ fn resolve_ground_term(
             let idx = var_index.get(v.as_str())?;
             *row.get(*idx)?
         }
-        spargebra::term::GroundTermPattern::Triple(_) => None,
+        spargebra::term::GroundTermPattern::Triple(inner) => {
+            // v0.24.0: support quoted-triple patterns in DELETE templates.
+            // inner.subject and inner.object are GroundTermPattern (may be variables),
+            // inner.predicate is NamedNodePattern.
+            let s_id = resolve_ground_term(&inner.subject, row, var_index)?;
+            let p_id = match &inner.predicate {
+                spargebra::term::NamedNodePattern::NamedNode(nn) => {
+                    dictionary::encode(nn.as_str(), dictionary::KIND_IRI)
+                }
+                spargebra::term::NamedNodePattern::Variable(v) => {
+                    let idx = var_index.get(v.as_str())?;
+                    (*row.get(*idx)?)?
+                }
+            };
+            let o_id = resolve_ground_term(&inner.object, row, var_index)?;
+            dictionary::lookup_quoted_triple(s_id, p_id, o_id)
+        }
     }
 }
 
@@ -937,7 +997,21 @@ fn resolve_term_pattern(
             let idx = var_index.get(v.as_str())?;
             *row.get(*idx)?
         }
-        spargebra::term::TermPattern::Triple(_) => None,
+        spargebra::term::TermPattern::Triple(inner) => {
+            // v0.24.0: support quoted-triple patterns in INSERT/CONSTRUCT templates.
+            let s_id = resolve_term_pattern(&inner.subject, row, var_index)?;
+            let p_id = match &inner.predicate {
+                spargebra::term::NamedNodePattern::NamedNode(nn) => {
+                    dictionary::encode(nn.as_str(), dictionary::KIND_IRI)
+                }
+                spargebra::term::NamedNodePattern::Variable(v) => {
+                    let idx = var_index.get(v.as_str())?;
+                    (*row.get(*idx)?)?
+                }
+            };
+            let o_id = resolve_term_pattern(&inner.object, row, var_index)?;
+            Some(dictionary::encode_quoted_triple(s_id, p_id, o_id))
+        }
     }
 }
 

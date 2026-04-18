@@ -1363,13 +1363,21 @@ fn validate_property_shape(
                 }
                 ShapeConstraint::LanguageIn(allowed_tags) => {
                     // Value nodes must have a language tag in the allowed list.
+                    // Tags in `allowed_tags` come from the Turtle parser and may still
+                    // be wrapped in Turtle string-literal quotes (e.g. `"en"` stored
+                    // as 4 chars including the `"` characters).  Strip those so that
+                    // the comparison with the dictionary `lang` column (bare tag, e.g. `en`)
+                    // works correctly.
                     let value_ids = get_value_ids(focus, path_id, graph_id);
                     for v_id in value_ids {
                         let lang_opt = get_language_tag(v_id);
                         let ok = match &lang_opt {
                             Some(lang) => {
                                 let lang_lower = lang.to_lowercase();
-                                allowed_tags.iter().any(|t| t.to_lowercase() == lang_lower)
+                                allowed_tags.iter().any(|t| {
+                                    let bare = t.trim_matches('"');
+                                    bare.to_lowercase() == lang_lower
+                                })
                             }
                             None => false, // not a language-tagged literal
                         };
@@ -2307,7 +2315,10 @@ pub fn validate_sync(s_id: i64, p_id: i64, o_id: i64, g_id: i64) -> Result<(), S
                         let ok = match &lang_opt {
                             Some(lang) => {
                                 let lang_lower = lang.to_lowercase();
-                                allowed_tags.iter().any(|t| t.to_lowercase() == lang_lower)
+                                allowed_tags.iter().any(|t| {
+                                    let bare = t.trim_matches('"');
+                                    bare.to_lowercase() == lang_lower
+                                })
                             }
                             None => false,
                         };

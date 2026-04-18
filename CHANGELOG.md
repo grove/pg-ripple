@@ -13,6 +13,45 @@ Points at the next milestone: v1.0.0 — Production Release.
 
 ---
 
+## [0.24.0] — 2026-04-18 — Semi-naive Datalog, Streaming Export & Performance Hardening
+
+**pg_ripple adds semi-naive Datalog evaluation with statistics, streaming triple export, SPARQL property-path depth control, BGP selectivity improvements, and fixes a correctness bug in `sh:languageIn` evaluation.** All 76 pg_regress tests pass (3 new tests for v0.24.0 features).
+
+### What you can do
+
+- **Run inference with stats** — `pg_ripple.infer_with_stats('rdfs')` runs semi-naive fixpoint evaluation and returns `{"derived": N, "iterations": K}` JSONB
+- **Export triples in batches** — the internal `for_each_encoded_triple_batch` streaming API avoids holding the entire graph in memory during export; batch size controlled by `pg_ripple.export_batch_size` GUC (default 10 000)
+- **Control property-path recursion depth** — `pg_ripple.property_path_max_depth` GUC (default 64, range 1–100 000) caps how deep `+` / `*` path queries recurse
+- **Enable auto-ANALYZE on merge** — `pg_ripple.auto_analyze` GUC (bool, default off) triggers a targeted `ANALYZE` after each merge cycle so the planner has fresh statistics
+- **Validate `sh:languageIn` correctly** — Turtle string-literal tags like `"en"` in `sh:languageIn ( "en" "de" )` now strip the surrounding quotes before comparing against the dictionary `lang` column
+
+### What changes
+
+- **Semi-naive Datalog evaluation** (`src/datalog/mod.rs`, `src/datalog/compiler.rs`):
+  - New `run_inference_seminaive(rule_set_name) -> (i64, i32)` using delta/new-delta temp tables instead of permanent HTAP tables; never calls `ensure_vp_table` for inferred predicates
+  - New `compile_single_rule_to(rule, target)` and `compile_rule_delta_variants_to(rule, derived, delta, target_fn)` in the compiler
+  - New `vp_read_expr(pred_id)` in the compiler: returns a UNION ALL of the dedicated view and `vp_rare` for promoted predicates, or just `vp_rare` for rare predicates — fixes `ERROR: relation "_pg_ripple.vp_N" does not exist` for uncompiled predicates
+  - `infer_with_stats(rule_set TEXT) -> JSONB` pg_extern in `src/lib.rs`
+  - WARNINGs emitted for rules with variable predicates (not supported in semi-naive; rule is skipped)
+  - Materialized triples written to `vp_rare` with `ON CONFLICT DO NOTHING`
+- **Streaming export** (`src/export.rs`, `src/storage/mod.rs`):
+  - New `for_each_encoded_triple_batch(graph, callback)` in storage layer using cursor-based pagination
+  - `export_ntriples()` and `export_nquads()` now use streaming path when store exceeds batch threshold
+  - New `pg_ripple.export_batch_size` GUC (i32, default 10 000, range 100–10 000 000)
+- **Performance hardening**:
+  - BGP selectivity fallback multipliers: subject-bound → 1% of reltuples, object-bound → 5% (`src/sparql/optimizer.rs`) — avoids divide-by-zero when `pg_stats.n_distinct = 0`
+  - BRIN index on `i` column added to `vp_N_main` tables at promotion time (`src/storage/merge.rs`) — accelerates range scans by sequential ID
+  - `pg_ripple.auto_analyze` GUC: when on, runs `ANALYZE vp_N_delta, vp_N_main` after each successful merge cycle
+- **GUC additions** (`src/lib.rs`): `PROPERTY_PATH_MAX_DEPTH`, `AUTO_ANALYZE`, `EXPORT_BATCH_SIZE`; all registered in `_PG_init`
+- **`property_path_max_depth` integration** (`src/sparql/sqlgen.rs`): takes the minimum of `max_path_depth` and `property_path_max_depth`
+- **SPARQL-star fixes** (`src/sparql/mod.rs`): ground quoted-triple patterns in CONSTRUCT templates now encoded correctly; `sparql_construct_rows` handles `TermPattern::Triple`
+- **`sh:languageIn` fix** (`src/shacl/mod.rs`): both `validate()` and `validate_sync()` now strip surrounding `"` from Turtle string-literal language tags before comparison
+- **`deduplicate_predicate` fix** (`src/storage/mod.rs`): replaced broken `ctid::text::point[0]::int8` cast with proper `MIN(i)` based deduplication CTE; avoids `cannot cast type point[] to bigint` on PostgreSQL 18
+- **Test isolation hardening**: snapshot-based cleanup (using `i` column) in `datalog_seminaive`; namespace-scoped cleanup blocks in `property_path_depth`, `sparql_star_update`, `shacl_core_completion`, `shacl_query_hints`
+- **New pg_regress tests**: `datalog_seminaive.sql`, `property_path_depth.sql`, `sparql_star_update.sql`
+
+---
+
 ## [0.23.0] — 2026-04-20 — SHACL Core Completion & SPARQL Diagnostics
 
 **pg_ripple completes the SHACL 1.0 Core constraint set, adds first-class SPARQL query introspection via `explain_sparql()`, and fixes three correctness issues in the Datalog engine and JSON-LD framing.** All 67 pg_regress tests pass (3 new tests for v0.23.0 features).

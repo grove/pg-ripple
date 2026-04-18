@@ -12,7 +12,7 @@ SELECT pg_ripple.insert_triple(
     '<https://rls.test/p>',
     '<https://rls.test/o2>',
     '<https://rls.test/secret_graph>'
-);
+) > 0 AS insert_ok;
 
 -- grant_graph: add access for a role (even if it does not exist yet — just tests the function)
 SELECT pg_ripple.grant_graph('postgres', '<https://rls.test/secret_graph>', 'read');

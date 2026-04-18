@@ -683,6 +683,24 @@ pub static FEDERATION_ADAPTIVE_TIMEOUT: pgrx::GucSetting<bool> =
 /// is preserved for backward compatibility.
 pub static SPARQL_STRICT: pgrx::GucSetting<bool> = pgrx::GucSetting::<bool>::new(true);
 
+// ─── v0.24.0 GUCs ────────────────────────────────────────────────────────────
+
+/// GUC: maximum recursion depth for SPARQL property path queries (`+`, `*`).
+/// Aligns with the v0.24.0 naming convention; equivalent to `max_path_depth`.
+/// Default: 64 (conservative default to prevent runaway recursion).
+pub static PROPERTY_PATH_MAX_DEPTH: pgrx::GucSetting<i32> = pgrx::GucSetting::<i32>::new(64);
+
+/// GUC: when `on` (default), the background merge worker runs `ANALYZE` on
+/// each VP main table immediately after a successful merge cycle, keeping
+/// planner statistics current without requiring manual `VACUUM ANALYZE`.
+/// Set `off` if you manage statistics manually.
+pub static AUTO_ANALYZE: pgrx::GucSetting<bool> = pgrx::GucSetting::<bool>::new(true);
+
+/// GUC: number of triples fetched per cursor batch when streaming export
+/// (Turtle / N-Triples / JSON-LD).  Peak memory is bounded by
+/// `export_batch_size × average_triple_size` per export call.
+pub static EXPORT_BATCH_SIZE: pgrx::GucSetting<i32> = pgrx::GucSetting::<i32>::new(10_000);
+
 // ─── pg_trickle runtime detection (v0.6.0) ───────────────────────────────────
 
 /// Returns `true` when the pg_trickle extension is installed in the current database.
@@ -1048,6 +1066,39 @@ pub extern "C-unwind" fn _PG_init() {
           when off, they are silently dropped for backward compatibility",
         c"",
         &SPARQL_STRICT,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+
+    // ── v0.24.0 GUCs ─────────────────────────────────────────────────────────
+
+    pgrx::GucRegistry::define_int_guc(
+        c"pg_ripple.property_path_max_depth",
+        c"Maximum recursion depth for SPARQL property path queries (p+ and p*); default: 64, min: 1, max: 100000",
+        c"",
+        &PROPERTY_PATH_MAX_DEPTH,
+        1,
+        100_000,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+
+    pgrx::GucRegistry::define_bool_guc(
+        c"pg_ripple.auto_analyze",
+        c"When on (default), run ANALYZE on VP main tables after each merge cycle to keep planner statistics current",
+        c"",
+        &AUTO_ANALYZE,
+        GucContext::Sighup,
+        GucFlags::default(),
+    );
+
+    pgrx::GucRegistry::define_int_guc(
+        c"pg_ripple.export_batch_size",
+        c"Number of triples fetched per cursor batch during streaming export (default: 10000, min: 100, max: 1000000)",
+        c"",
+        &EXPORT_BATCH_SIZE,
+        100,
+        1_000_000,
         GucContext::Userset,
         GucFlags::default(),
     );
@@ -2984,6 +3035,30 @@ mod pg_ripple {
     #[pg_extern]
     fn infer(rule_set: default!(&str, "'custom'")) -> i64 {
         crate::datalog::run_inference(rule_set)
+    }
+
+    /// Run semi-naive inference for the named rule set and materialise derived triples.
+    ///
+    /// Returns a JSONB object with:
+    /// - `"derived"`: total number of triples derived (i64)
+    /// - `"iterations"`: number of fixpoint iterations performed (i32)
+    ///
+    /// Semi-naive evaluation avoids re-examining unchanged rows on each iteration,
+    /// achieving iteration counts bounded by the longest derivation chain rather
+    /// than the full relation size.
+    #[pg_extern]
+    fn infer_with_stats(rule_set: default!(&str, "'custom'")) -> pgrx::JsonB {
+        let (derived, iterations) = crate::datalog::run_inference_seminaive(rule_set);
+        let mut obj = serde_json::Map::new();
+        obj.insert(
+            "derived".to_owned(),
+            serde_json::Value::Number(serde_json::Number::from(derived)),
+        );
+        obj.insert(
+            "iterations".to_owned(),
+            serde_json::Value::Number(serde_json::Number::from(iterations)),
+        );
+        pgrx::JsonB(serde_json::Value::Object(obj))
     }
 
     /// Check all active constraint rules and return violations as JSONB.

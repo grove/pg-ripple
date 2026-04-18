@@ -15,6 +15,7 @@
 //! at parse time.  The SQL generator never emits string comparisons.
 
 use crate::datalog::{ArithOp, Atom, BodyLiteral, CompareOp, Rule, StringBuiltin, Term};
+use pgrx::datum::DatumWithOid;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -40,10 +41,43 @@ fn is_var(term: &Term) -> bool {
 }
 
 /// Derive the VP table name for a predicate constant.
-/// Derived predicates use the same look-up path as base VP tables.
+/// Used for INSERT targets (assumes dedicated HTAP tables exist).
 fn vp_table(pred_id: i64) -> String {
     // Use _pg_ripple.vp_{id} (the view that unions main and delta).
     format!("_pg_ripple.vp_{pred_id}")
+}
+
+/// Return a SQL table expression for READING triples of `pred_id`.
+///
+/// For predicates with dedicated HTAP tables (`predicates.table_oid IS NOT NULL`),
+/// returns a UNION ALL of the dedicated view and any remaining `vp_rare` entries
+/// (rare triples are not moved to the dedicated tables until a full merge/promotion).
+/// For rare predicates (no dedicated table), returns a filtered `vp_rare` subquery.
+///
+/// This function uses SPI and must be called from within a PostgreSQL backend context.
+fn vp_read_expr(pred_id: i64) -> String {
+    let has_dedicated = pgrx::Spi::get_one_with_args::<i64>(
+        "SELECT table_oid::bigint FROM _pg_ripple.predicates \
+         WHERE id = $1 AND table_oid IS NOT NULL",
+        &[DatumWithOid::from(pred_id)],
+    )
+    .ok()
+    .flatten()
+    .is_some();
+
+    if has_dedicated {
+        // Union dedicated view with any un-promoted vp_rare rows so that both
+        // existing data (still in vp_rare) and newly derived data (in the delta
+        // table) are visible to the rule body.
+        format!(
+            "(SELECT s, o, g FROM _pg_ripple.vp_{pred_id} \
+              UNION ALL \
+              SELECT s, o, g FROM _pg_ripple.vp_rare WHERE p = {pred_id})"
+        )
+    } else {
+        // Pure rare predicate: all data lives in vp_rare.
+        format!("(SELECT s, o, g FROM _pg_ripple.vp_rare WHERE p = {pred_id})")
+    }
 }
 
 /// Variable→(alias, column) mapping built while iterating body atoms.
@@ -94,6 +128,35 @@ pub fn compile_rule_set(rules: &[Rule]) -> Result<Vec<String>, String> {
         sqls.push(sql);
     }
     Ok(sqls)
+}
+
+/// Compile a single rule inserting into `target` (with columns `(s, o, g)`).
+/// Used by semi-naive inference to target temp tables instead of HTAP delta tables.
+pub fn compile_single_rule_to(rule: &Rule, target: &str) -> Result<String, String> {
+    let head = rule
+        .head
+        .as_ref()
+        .ok_or_else(|| "cannot compile constraint rule as INSERT".to_owned())?;
+
+    let head_pred = match &head.p {
+        Term::Const(id) => *id,
+        Term::Var(_) => return Err("variable predicate in rule head is not supported".to_owned()),
+        _ => return Err("invalid predicate term in rule head".to_owned()),
+    };
+
+    let head_g_expr = match &head.g {
+        Term::Const(id) => const_sql(*id),
+        Term::Var(v) => format!("g_var_{v}"),
+        Term::DefaultGraph => "0".to_owned(),
+        Term::Wildcard => "0".to_owned(),
+    };
+
+    let is_recursive = is_recursive_rule(rule, head_pred);
+    if is_recursive {
+        compile_recursive_rule(rule, head_pred, &head_g_expr, target)
+    } else {
+        compile_nonrecursive_rule(rule, head_pred, &head_g_expr, target)
+    }
 }
 
 /// Compile a single derivation rule to a SQL INSERT statement.
@@ -198,16 +261,16 @@ fn compile_nonrecursive_rule(
                 }
 
                 if atom_idx == 0 {
-                    from_clauses.push(format!("{} {alias}", vp_table(pred_id)));
+                    from_clauses.push(format!("{} {alias}", vp_read_expr(pred_id)));
                 } else {
                     // Emit as JOIN with equality conditions for shared variables.
                     let join_cond = build_join_cond(&alias, atom, &var_map);
                     if join_cond.is_empty() {
-                        from_clauses.push(format!("{} {alias}", vp_table(pred_id)));
+                        from_clauses.push(format!("{} {alias}", vp_read_expr(pred_id)));
                     } else {
                         from_clauses.push(format!(
                             "JOIN {} {alias} ON {}",
-                            vp_table(pred_id),
+                            vp_read_expr(pred_id),
                             join_cond
                         ));
                     }
@@ -228,7 +291,7 @@ fn compile_nonrecursive_rule(
                 };
                 where_clauses.push(format!(
                     "NOT EXISTS (SELECT 1 FROM {} WHERE {cond_str})",
-                    vp_table(pred_id)
+                    vp_read_expr(pred_id)
                 ));
             }
             BodyLiteral::Compare(lhs, op, rhs) => {
@@ -387,12 +450,12 @@ fn compile_recursive_rule(
             } else {
                 ""
             };
-            base_selects.push(format!("SELECT s, o, g FROM {} {g_filter}", vp_table(*p)));
+            base_selects.push(format!("SELECT s, o, g FROM {} {g_filter}", vp_read_expr(*p)));
         }
     }
 
     let base_sql = if base_selects.is_empty() {
-        format!("SELECT s, o, g FROM {}", vp_table(head_pred))
+        format!("SELECT s, o, g FROM {}", vp_read_expr(head_pred))
     } else {
         base_selects.join("\nUNION\n")
     };
@@ -420,7 +483,7 @@ fn compile_recursive_rule(
             "SELECT base.s, r.o, base.g\n\
              FROM {} base\n\
              JOIN {cte_name} r ON r.s = base.o {join_g}",
-            vp_table(base_pred)
+            vp_read_expr(base_pred)
         )
     } else {
         // Fallback: direct recursion on CTE.
@@ -428,7 +491,7 @@ fn compile_recursive_rule(
             "SELECT base.s, r.o, base.g\n\
              FROM {} base\n\
              JOIN {cte_name} r ON r.s = base.o",
-            vp_table(head_pred)
+            vp_read_expr(head_pred)
         )
     };
 
@@ -495,15 +558,15 @@ pub fn compile_constraint_check(rule: &Rule) -> Result<String, String> {
                 }
 
                 if atom_idx == 0 {
-                    from_clauses.push(format!("{} {alias}", vp_table(pred_id)));
+                    from_clauses.push(format!("{} {alias}", vp_read_expr(pred_id)));
                 } else {
                     let join_cond = build_join_cond(&alias, atom, &var_map);
                     if join_cond.is_empty() {
-                        from_clauses.push(format!("{} {alias}", vp_table(pred_id)));
+                        from_clauses.push(format!("{} {alias}", vp_read_expr(pred_id)));
                     } else {
                         from_clauses.push(format!(
                             "JOIN {} {alias} ON {}",
-                            vp_table(pred_id),
+                            vp_read_expr(pred_id),
                             join_cond
                         ));
                     }
@@ -592,12 +655,12 @@ fn compile_recursive_cte_fragment(
             && let Term::Const(p) = &atom.p
             && *p != head_pred
         {
-            base_selects.push(format!("SELECT s, o, g FROM {}", vp_table(*p)));
+            base_selects.push(format!("SELECT s, o, g FROM {}", vp_read_expr(*p)));
         }
     }
 
     let base_sql = if base_selects.is_empty() {
-        format!("SELECT s, o, g FROM {}", vp_table(head_pred))
+        format!("SELECT s, o, g FROM {}", vp_read_expr(head_pred))
     } else {
         base_selects.join("\nUNION\n")
     };
@@ -634,7 +697,7 @@ fn compile_recursive_cte_fragment(
              JOIN {cte_name} r ON r.s = base.o {join_g}\n\
          )\n\
          CYCLE {cycle_cols} SET is_cycle USING cycle_path",
-        vp_table(base_pred)
+        vp_read_expr(base_pred)
     ))
 }
 
@@ -663,15 +726,15 @@ fn compile_select_arm(rule: &Rule, head: &Atom) -> Result<String, String> {
             }
 
             if atom_idx == 0 {
-                from_clauses.push(format!("{} {alias}", vp_table(pred_id)));
+                from_clauses.push(format!("{} {alias}", vp_read_expr(pred_id)));
             } else {
                 let join_cond = build_join_cond(&alias, atom, &var_map);
                 if join_cond.is_empty() {
-                    from_clauses.push(format!("{} {alias}", vp_table(pred_id)));
+                    from_clauses.push(format!("{} {alias}", vp_read_expr(pred_id)));
                 } else {
                     from_clauses.push(format!(
                         "JOIN {} {alias} ON {}",
-                        vp_table(pred_id),
+                        vp_read_expr(pred_id),
                         join_cond
                     ));
                 }
@@ -802,4 +865,259 @@ fn arith_op_sql(op: &ArithOp) -> &'static str {
         // The caller is responsible for wrapping the RHS with NULLIF.
         ArithOp::Div => "/",
     }
+}
+
+// ─── Semi-naive delta variant compilation ────────────────────────────────────
+
+/// Compile all semi-naive delta variants of a non-recursive rule.
+///
+/// For each body atom at position `i` that uses a derived predicate, generates
+/// one INSERT variant where:
+///   - atom `i` reads from the **delta** table (`delta_name(pred_id)`)
+///   - all preceding atoms read from the **full** VP table
+///   - all following atoms read from the **full** VP table
+///
+/// This implements the standard semi-naive evaluation principle:
+/// only consider tuples that include at least one row from the delta
+/// of the previous iteration, avoiding redundant recomputation.
+///
+/// Returns one SQL string per generated variant (may be empty if no body atoms
+/// reference derived predicates).
+pub fn compile_rule_delta_variants(
+    rule: &Rule,
+    derived_pred_ids: &std::collections::HashSet<i64>,
+    delta_table_name: &dyn Fn(i64) -> String,
+) -> Result<Vec<String>, String> {
+    compile_rule_delta_variants_to(rule, derived_pred_ids, delta_table_name, None)
+}
+
+/// Like `compile_rule_delta_variants` but inserts into tables named by `target_fn`
+/// instead of the default `_pg_ripple.vp_{pred_id}_delta`. Used by semi-naive
+/// inference when targeting temp tables.
+pub fn compile_rule_delta_variants_to(
+    rule: &Rule,
+    derived_pred_ids: &std::collections::HashSet<i64>,
+    delta_table_name: &dyn Fn(i64) -> String,
+    target_fn: Option<&dyn Fn(i64) -> String>,
+) -> Result<Vec<String>, String> {
+    let head = match &rule.head {
+        Some(h) => h,
+        None => return Ok(vec![]), // constraint rules have no head
+    };
+
+    let head_pred = match &head.p {
+        Term::Const(id) => *id,
+        _ => return Err("variable predicate in rule head is not supported".to_owned()),
+    };
+
+    let head_g_expr = match &head.g {
+        Term::Const(id) => const_sql(*id),
+        Term::Var(v) => format!("g_var_{v}"),
+        Term::DefaultGraph => "0".to_owned(),
+        Term::Wildcard => "0".to_owned(),
+    };
+
+    let target = if let Some(tf) = target_fn {
+        tf(head_pred)
+    } else {
+        format!("{}_delta", vp_table(head_pred))
+    };
+
+    // Collect body atoms that reference derived predicates with their positions.
+    let positive_body: Vec<&Atom> = rule
+        .body
+        .iter()
+        .filter_map(|lit| {
+            if let BodyLiteral::Positive(atom) = lit {
+                Some(atom)
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    let mut variants: Vec<String> = Vec::new();
+
+    // For each positive body atom position that uses a derived predicate,
+    // generate one semi-naive variant.
+    for (delta_pos, atom) in positive_body.iter().enumerate() {
+        let pred_id = match &atom.p {
+            Term::Const(id) => *id,
+            _ => continue,
+        };
+        if !derived_pred_ids.contains(&pred_id) {
+            continue; // not a derived predicate → skip
+        }
+
+        // Generate the variant: compile with atom at delta_pos using delta table.
+        let sql = compile_rule_with_one_delta_atom(
+            rule,
+            head_pred,
+            &head_g_expr,
+            &target,
+            delta_pos,
+            delta_table_name,
+        )?;
+        variants.push(sql);
+    }
+
+    Ok(variants)
+}
+
+/// Compile a single rule variant where the body atom at `delta_atom_pos` (counting
+/// only positive atoms) uses `delta_table_name(pred_id)` instead of the full VP table.
+fn compile_rule_with_one_delta_atom(
+    rule: &Rule,
+    _head_pred: i64,
+    head_g_expr: &str,
+    target: &str,
+    delta_atom_pos: usize,
+    delta_table_name: &dyn Fn(i64) -> String,
+) -> Result<String, String> {
+    let head = rule.head.as_ref().unwrap();
+
+    let mut from_clauses: Vec<String> = Vec::new();
+    let mut where_clauses: Vec<String> = Vec::new();
+    let mut var_map = VarMap::default();
+    let mut pos_atom_idx = 0usize; // index among positive atoms
+    let mut alias_idx = 0usize;
+
+    for lit in &rule.body {
+        match lit {
+            BodyLiteral::Positive(atom) => {
+                let alias = format!("t{alias_idx}");
+                alias_idx += 1;
+
+                let pred_id = match &atom.p {
+                    Term::Const(id) => *id,
+                    _ => {
+                        return Err("variable predicate in body not supported".to_owned());
+                    }
+                };
+
+                // Use delta table for this atom if it is the chosen delta position.
+                let tbl = if pos_atom_idx == delta_atom_pos {
+                    delta_table_name(pred_id)
+                } else {
+                    vp_read_expr(pred_id)
+                };
+                pos_atom_idx += 1;
+
+                // Bind variables.
+                if let Term::Var(v) = &atom.s {
+                    var_map.bind(v, &alias, "s");
+                } else if let Term::Const(c) = &atom.s {
+                    where_clauses.push(format!("{alias}.s = {}", const_sql(*c)));
+                }
+                if let Term::Var(v) = &atom.o {
+                    var_map.bind(v, &alias, "o");
+                } else if let Term::Const(c) = &atom.o {
+                    where_clauses.push(format!("{alias}.o = {}", const_sql(*c)));
+                }
+                if let Term::Var(v) = &atom.g {
+                    var_map.bind(v, &alias, "g");
+                } else if let Term::Const(c) = &atom.g {
+                    where_clauses.push(format!("{alias}.g = {}", const_sql(*c)));
+                } else {
+                    let scope = crate::RULE_GRAPH_SCOPE
+                        .get()
+                        .as_ref()
+                        .and_then(|c| c.to_str().ok())
+                        .unwrap_or("default")
+                        .to_owned();
+                    if scope == "default" {
+                        where_clauses.push(format!("{alias}.g = 0"));
+                    }
+                }
+
+                if alias_idx == 1 {
+                    from_clauses.push(format!("{tbl} {alias}"));
+                } else {
+                    let join_cond = build_join_cond(&alias, atom, &var_map);
+                    if join_cond.is_empty() {
+                        from_clauses.push(format!("{tbl} {alias}"));
+                    } else {
+                        from_clauses.push(format!("JOIN {tbl} {alias} ON {join_cond}"));
+                    }
+                }
+            }
+            BodyLiteral::Negated(atom) => {
+                let pred_id = match &atom.p {
+                    Term::Const(id) => *id,
+                    _ => return Err("variable predicate in NOT atom not supported".to_owned()),
+                };
+                let inner_conds = build_not_exists_conds(atom, &var_map);
+                let cond_str = if inner_conds.is_empty() {
+                    "TRUE".to_owned()
+                } else {
+                    inner_conds.join(" AND ")
+                };
+                where_clauses.push(format!(
+                    "NOT EXISTS (SELECT 1 FROM {} WHERE {cond_str})",
+                    vp_read_expr(pred_id)
+                ));
+            }
+            BodyLiteral::Compare(lhs, op, rhs) => {
+                let l = render_comparison_term(lhs, &var_map);
+                let r = render_comparison_term(rhs, &var_map);
+                let op_str = compare_op_sql(op);
+                where_clauses.push(format!("{l} {op_str} {r}"));
+            }
+            BodyLiteral::Assign(var, lhs, op, rhs) => {
+                let l = render_comparison_term(lhs, &var_map);
+                let r_raw = render_comparison_term(rhs, &var_map);
+                let r = if matches!(op, crate::datalog::ArithOp::Div) {
+                    format!("NULLIF({r_raw}, 0)")
+                } else {
+                    r_raw
+                };
+                let op_str = arith_op_sql(op);
+                let col_expr = format!("({l} {op_str} {r})");
+                var_map.bind(var, &col_expr, "");
+            }
+            BodyLiteral::StringBuiltin(builtin) => match builtin {
+                StringBuiltin::Strlen(term, op, rhs_term) => {
+                    let col = render_comparison_term(term, &var_map);
+                    let r = render_comparison_term(rhs_term, &var_map);
+                    let op_str = compare_op_sql(op);
+                    where_clauses.push(format!("LENGTH({col}::text) {op_str} {r}"));
+                }
+                StringBuiltin::Regex(term, pattern) => {
+                    let col = render_comparison_term(term, &var_map);
+                    let escaped = pattern.replace('\'', "''");
+                    where_clauses.push(format!("{col}::text ~ '{escaped}'"));
+                }
+            },
+        }
+    }
+
+    let select_s = match &head.s {
+        Term::Var(v) => var_map
+            .col_ref(v)
+            .ok_or_else(|| format!("unbound variable ?{v} in head"))?,
+        Term::Const(id) => const_sql(*id),
+        _ => return Err("wildcard/invalid in head not allowed".to_owned()),
+    };
+    let select_o = match &head.o {
+        Term::Var(v) => var_map
+            .col_ref(v)
+            .ok_or_else(|| format!("unbound variable ?{v} in head"))?,
+        Term::Const(id) => const_sql(*id),
+        _ => return Err("wildcard/invalid in head not allowed".to_owned()),
+    };
+
+    let from_str = from_clauses.join("\n");
+    let where_str = if where_clauses.is_empty() {
+        String::new()
+    } else {
+        format!("WHERE {}", where_clauses.join("\n  AND "))
+    };
+
+    Ok(format!(
+        "INSERT INTO {target} (s, o, g)\n\
+         SELECT {select_s}, {select_o}, {head_g_expr}\n\
+         FROM {from_str}\n\
+         {where_str}\n\
+         ON CONFLICT DO NOTHING"
+    ))
 }

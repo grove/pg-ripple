@@ -39,7 +39,9 @@ pub mod compiler;
 pub mod parser;
 pub mod stratify;
 
+pub use compiler::compile_rule_delta_variants_to;
 pub use compiler::compile_rule_set;
+pub use compiler::compile_single_rule_to;
 pub use parser::parse_rules;
 pub use stratify::stratify;
 
@@ -265,6 +267,265 @@ pub fn store_rules(rule_set: &str, rules: &[Rule]) -> i64 {
 }
 
 // ─── Inference execution ──────────────────────────────────────────────────────
+
+/// Execute on-demand materialization for a rule set using **semi-naive evaluation**.
+///
+/// Returns `(total_triples_derived, iteration_count)`.
+///
+/// ## Semi-naive algorithm
+///
+/// For each stratum S of the rule set:
+/// 1. **Seed**: run all rules once against the full VP tables to get the first
+///    round of derived triples.  Store these new triples in both the VP delta
+///    tables and temporary `_dl_delta_{pred_id}` tables.
+/// 2. **Fixpoint loop**: on each subsequent iteration, generate one SQL variant
+///    per body atom that references a derived predicate.  Each variant uses the
+///    `_dl_delta_{pred_id}` table (triples derived in the *previous* iteration)
+///    instead of the full VP table for that atom, and the full VP tables for all
+///    other atoms.  This ensures only genuinely *new* derivations are attempted.
+/// 3. Terminate when no iteration produces any new triples.
+///
+/// The number of iterations is bounded by the longest derivation chain in the
+/// data, not by the total relation size — the key semi-naive property.
+pub fn run_inference_seminaive(rule_set_name: &str) -> (i64, i32) {
+    ensure_catalog();
+
+    // ── 1. Load rules from catalog ────────────────────────────────────────────
+    let rule_rows: Vec<(String, i32, bool)> = {
+        let sql = "SELECT rule_text, stratum, is_recursive \
+                   FROM _pg_ripple.rules \
+                   WHERE rule_set = $1 AND active = true \
+                   ORDER BY stratum, id";
+        Spi::connect(|client| {
+            client
+                .select(sql, None, &[pgrx::datum::DatumWithOid::from(rule_set_name)])
+                .unwrap_or_else(|e| pgrx::error!("rule select SPI error: {e}"))
+                .map(|row| {
+                    let text: String = row.get::<String>(1).ok().flatten().unwrap_or_default();
+                    let stratum: i32 = row.get::<i32>(2).ok().flatten().unwrap_or(0);
+                    let recursive: bool = row.get::<bool>(3).ok().flatten().unwrap_or(false);
+                    (text, stratum, recursive)
+                })
+                .collect::<Vec<_>>()
+        })
+    };
+
+    if rule_rows.is_empty() {
+        return (0, 0);
+    }
+
+    // ── 2. Parse all rules ────────────────────────────────────────────────────
+    let mut all_rules: Vec<Rule> = Vec::new();
+    for (rule_text, _stratum, _recursive) in &rule_rows {
+        match parse_rules(rule_text, rule_set_name) {
+            Ok(rs) => all_rules.extend(rs.rules),
+            Err(e) => pgrx::warning!("rule parse error during semi-naive inference: {e}"),
+        }
+    }
+
+    if all_rules.is_empty() {
+        return (0, 0);
+    }
+
+    // ── 3. Collect derived predicate IDs (rule heads) ─────────────────────────
+    let derived_pred_ids: std::collections::HashSet<i64> = all_rules
+        .iter()
+        .filter_map(|r| {
+            r.head.as_ref().and_then(|h| {
+                if let Term::Const(id) = &h.p {
+                    Some(*id)
+                } else {
+                    None
+                }
+            })
+        })
+        .collect();
+
+    // ── 4. Create delta temp tables for each derived predicate ─────────────────
+    // We use temp tables exclusively to avoid creating permanent HTAP tables for
+    // predicates that may be below the promotion threshold.  Derived triples are
+    // materialised into vp_rare at the end of inference.
+    for &pred_id in &derived_pred_ids {
+        let _ = Spi::run_with_args(&format!("DROP TABLE IF EXISTS _dl_delta_{pred_id}"), &[]);
+        Spi::run_with_args(
+            &format!(
+                "CREATE TEMP TABLE _dl_delta_{pred_id} \
+                 (s BIGINT NOT NULL, o BIGINT NOT NULL, g BIGINT NOT NULL DEFAULT 0, \
+                  UNIQUE (s, o, g))"
+            ),
+            &[],
+        )
+        .unwrap_or_else(|e| pgrx::error!("semi-naive: create delta temp table error: {e}"));
+    }
+
+    // ── 5. Seeding pass: run all rules once, inserting into temp delta tables ──
+    let seed_target_fn = |pred_id: i64| -> String { format!("_dl_delta_{pred_id}") };
+    for rule in &all_rules {
+        if rule.head.is_none() {
+            continue;
+        }
+        let head_pred = match &rule.head.as_ref().unwrap().p {
+            Term::Const(id) => *id,
+            _ => continue,
+        };
+        if !derived_pred_ids.contains(&head_pred) {
+            continue;
+        }
+        let target = seed_target_fn(head_pred);
+        match compile_single_rule_to(rule, &target) {
+            Ok(sql) => {
+                if let Err(e) = Spi::run_with_args(&sql, &[]) {
+                    pgrx::warning!("semi-naive seed SQL error: {e}: SQL={sql}");
+                }
+            }
+            Err(e) => pgrx::warning!("semi-naive rule compile error: {e}"),
+        }
+    }
+
+    // ── 6. Fixpoint loop ───────────────────────────────────────────────────────
+    let mut iteration_count = 1i32;
+    let max_iterations = 10_000i32;
+
+    loop {
+        if iteration_count >= max_iterations {
+            pgrx::warning!(
+                "semi-naive inference: reached max iteration limit ({max_iterations}); \
+                 possible infinite derivation chain in rule set '{rule_set_name}'"
+            );
+            break;
+        }
+        iteration_count += 1;
+
+        // Create "new delta" temp tables.
+        for &pred_id in &derived_pred_ids {
+            let _ = Spi::run_with_args(
+                &format!("DROP TABLE IF EXISTS _dl_delta_new_{pred_id}"),
+                &[],
+            );
+            Spi::run_with_args(
+                &format!(
+                    "CREATE TEMP TABLE _dl_delta_new_{pred_id} \
+                     (s BIGINT NOT NULL, o BIGINT NOT NULL, g BIGINT NOT NULL DEFAULT 0, \
+                      UNIQUE (s, o, g))"
+                ),
+                &[],
+            )
+            .unwrap_or_else(|e| pgrx::error!("semi-naive: create delta_new error: {e}"));
+        }
+
+        let mut new_this_iter = 0i64;
+        let delta_fn = |pred_id: i64| -> String { format!("_dl_delta_{pred_id}") };
+        let new_delta_fn = |pred_id: i64| -> String { format!("_dl_delta_new_{pred_id}") };
+
+        for rule in &all_rules {
+            if rule.head.is_none() {
+                continue;
+            }
+            let head_pred = match &rule.head.as_ref().unwrap().p {
+                Term::Const(id) => *id,
+                _ => continue,
+            };
+            if !derived_pred_ids.contains(&head_pred) {
+                continue;
+            }
+
+            match compile_rule_delta_variants_to(
+                rule,
+                &derived_pred_ids,
+                &delta_fn,
+                Some(&new_delta_fn),
+            ) {
+                Ok(variant_sqls) => {
+                    for sql in &variant_sqls {
+                        if let Err(e) = Spi::run_with_args(sql, &[]) {
+                            pgrx::warning!("semi-naive variant SQL error: {e}: SQL={sql}");
+                        }
+                    }
+                }
+                Err(e) => pgrx::warning!("semi-naive compile error: {e}"),
+            }
+        }
+
+        // Count new rows across all "new delta" tables.
+        for &pred_id in &derived_pred_ids {
+            // Only count rows NOT already in the current delta.
+            let cnt = Spi::get_one::<i64>(&format!(
+                "SELECT count(*) FROM _dl_delta_new_{pred_id} n \
+                 WHERE NOT EXISTS ( \
+                     SELECT 1 FROM _dl_delta_{pred_id} d \
+                     WHERE d.s = n.s AND d.o = n.o AND d.g = n.g \
+                 )"
+            ))
+            .unwrap_or(None)
+            .unwrap_or(0);
+            new_this_iter += cnt;
+        }
+
+        // Merge new delta into delta (union).
+        for &pred_id in &derived_pred_ids {
+            let _ = Spi::run_with_args(
+                &format!(
+                    "INSERT INTO _dl_delta_{pred_id} (s, o, g) \
+                     SELECT s, o, g FROM _dl_delta_new_{pred_id} \
+                     ON CONFLICT DO NOTHING"
+                ),
+                &[],
+            );
+            let _ = Spi::run_with_args(
+                &format!("DROP TABLE IF EXISTS _dl_delta_new_{pred_id}"),
+                &[],
+            );
+        }
+
+        if new_this_iter == 0 {
+            break;
+        }
+    }
+
+    // ── 7. Materialise derived triples into vp_rare ───────────────────────────
+    // Insert derived triples permanently so they are visible to subsequent queries.
+    // vp_rare accepts all predicates via its (p, s, o, g) schema.
+    let mut total_derived: i64 = 0;
+    for &pred_id in &derived_pred_ids {
+        let cnt = Spi::get_one::<i64>(&format!(
+            "WITH ins AS ( \
+               INSERT INTO _pg_ripple.vp_rare (p, s, o, g) \
+               SELECT {pred_id}::bigint, s, o, g FROM _dl_delta_{pred_id} \
+               ON CONFLICT DO NOTHING \
+               RETURNING 1 \
+             ) SELECT COUNT(*)::bigint FROM ins"
+        ))
+        .unwrap_or(None)
+        .unwrap_or(0);
+        total_derived += cnt;
+
+        // Update predicate count in catalog.
+        if cnt > 0 {
+            let _ = Spi::run_with_args(
+                "INSERT INTO _pg_ripple.predicates (id, table_oid, triple_count) \
+                 VALUES ($1, NULL, $2) \
+                 ON CONFLICT (id) DO UPDATE \
+                     SET triple_count = _pg_ripple.predicates.triple_count + EXCLUDED.triple_count",
+                &[
+                    pgrx::datum::DatumWithOid::from(pred_id),
+                    pgrx::datum::DatumWithOid::from(cnt),
+                ],
+            );
+        }
+    }
+
+    // ── 8. Cleanup temp tables ─────────────────────────────────────────────────
+    for &pred_id in &derived_pred_ids {
+        let _ = Spi::run_with_args(&format!("DROP TABLE IF EXISTS _dl_delta_{pred_id}"), &[]);
+        let _ = Spi::run_with_args(
+            &format!("DROP TABLE IF EXISTS _dl_delta_new_{pred_id}"),
+            &[],
+        );
+    }
+
+    (total_derived, iteration_count)
+}
+
 
 /// Execute on-demand materialization for a rule set: run all rules in stratum
 /// order and insert derived triples.  Returns the number of triples derived.

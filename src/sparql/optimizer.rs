@@ -238,11 +238,15 @@ pub(super) fn estimate_pattern_cost(
         }
         (true, false) => {
             // Subject is bound: estimate rows = reltuples / n_distinct(s).
-            rows / stats.effective_ndistinct_s()
+            // Fallback multiplier when no pg_stats data is available: 1% of triples.
+            let nd = stats.effective_ndistinct_s();
+            if nd > 1.0 { rows / nd } else { 0.01 * rows }
         }
         (false, true) => {
             // Object is bound: estimate rows = reltuples / n_distinct(o).
-            rows / stats.effective_ndistinct_o()
+            // Fallback multiplier when no pg_stats data is available: 5% of triples.
+            let nd = stats.effective_ndistinct_o();
+            if nd > 1.0 { rows / nd } else { 0.05 * rows }
         }
         (false, false) => {
             // Full scan.
