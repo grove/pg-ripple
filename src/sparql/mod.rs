@@ -461,17 +461,14 @@ pub(crate) fn sparql_construct_rows(query_text: &str) -> Vec<(i64, i64, i64)> {
                         spargebra::term::TermPattern::Variable(v)
                             if var_set.contains(v.as_str()) =>
                         {
-                            resolve_idx(v.as_str())
-                                .and_then(|i| row_vals.get(i).copied().flatten())
+                            resolve_idx(v.as_str()).and_then(|i| row_vals.get(i).copied().flatten())
                         }
                         _ => None,
                     };
                     match (ts_str, tp_id, to_id_opt) {
                         (Some(ts_str), Some(tp_id), Some(to_id)) => {
-                            let ts_id = crate::dictionary::encode(
-                                ts_str,
-                                crate::dictionary::KIND_IRI,
-                            );
+                            let ts_id =
+                                crate::dictionary::encode(ts_str, crate::dictionary::KIND_IRI);
                             Some(crate::dictionary::encode_quoted_triple(ts_id, tp_id, to_id))
                         }
                         _ => None,

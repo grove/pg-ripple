@@ -450,7 +450,10 @@ fn compile_recursive_rule(
             } else {
                 ""
             };
-            base_selects.push(format!("SELECT s, o, g FROM {} {g_filter}", vp_read_expr(*p)));
+            base_selects.push(format!(
+                "SELECT s, o, g FROM {} {g_filter}",
+                vp_read_expr(*p)
+            ));
         }
     }
 

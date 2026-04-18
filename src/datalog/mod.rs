@@ -526,7 +526,6 @@ pub fn run_inference_seminaive(rule_set_name: &str) -> (i64, i32) {
     (total_derived, iteration_count)
 }
 
-
 /// Execute on-demand materialization for a rule set: run all rules in stratum
 /// order and insert derived triples.  Returns the number of triples derived.
 pub fn run_inference(rule_set_name: &str) -> i64 {
