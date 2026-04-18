@@ -9,7 +9,39 @@ Versions correspond to the milestones in [ROADMAP.md](ROADMAP.md).
 
 ## [Unreleased]
 
-Points at the next milestone: v1.0.0 — Production Release.
+Points at the next milestone: v0.28.0 — Advanced Hybrid Search & RAG Pipeline.
+
+---
+
+## [0.27.0] — 2026-04-18 — Vector + SPARQL Hybrid: Foundation
+
+**pg_ripple gains pgvector integration: store high-dimensional embeddings for any RDF entity, search by semantic similarity, and mix vector nearest-neighbour search with SPARQL graph patterns in a single in-process query.** All 95 pg_regress tests pass (8 new tests for v0.27.0 features).
+
+### What you can do
+
+- **Store embeddings for RDF entities** — `pg_ripple.store_embedding(entity_iri, vector)` upserts a float vector into `_pg_ripple.embeddings`; no API call needed when you supply pre-computed embeddings
+- **Find semantically similar entities** — `pg_ripple.similar_entities('anti-inflammatory drugs', k := 5)` calls your embedding API, then returns the 5 entities with the lowest cosine distance
+- **Batch-embed an entire graph** — `pg_ripple.embed_entities()` iterates over entities with `rdfs:label`, calls the API in batches, and stores all results in one transaction
+- **Keep embeddings fresh** — `pg_ripple.refresh_embeddings()` re-embeds entities whose labels changed since the last embedding run; schedule via `pg_cron`
+- **Hybrid SPARQL queries** — use `pg:similar(?entity, "search text", 10)` inside SPARQL `BIND` expressions; combine with FILTER, OPTIONAL, UNION, and any other SPARQL feature
+- **Run in CI without pgvector** — every embedding function degrades gracefully with a WARNING (no ERROR) when pgvector is absent; all 8 new tests pass in environments without pgvector
+
+### Added
+
+- `_pg_ripple.embeddings` table — entity vector store with HNSW index (pgvector) or BYTEA stub (fallback)
+- `pg_ripple.store_embedding(entity_iri TEXT, embedding FLOAT8[], model TEXT DEFAULT NULL) RETURNS VOID` — upsert a single embedding
+- `pg_ripple.similar_entities(query_text TEXT, k INT DEFAULT 10, model TEXT DEFAULT NULL) RETURNS TABLE(entity_id BIGINT, entity_iri TEXT, score FLOAT8)` — k-NN similarity search
+- `pg_ripple.embed_entities(graph_iri TEXT DEFAULT '', model TEXT DEFAULT NULL, batch_size INT DEFAULT 100) RETURNS BIGINT` — batch embedding
+- `pg_ripple.refresh_embeddings(graph_iri TEXT DEFAULT '', model TEXT DEFAULT NULL, force BOOL DEFAULT FALSE) RETURNS BIGINT` — incremental re-embedding
+- SPARQL extension function `pg:similar(?entity, "text", k)` via IRI `http://pg-ripple.org/functions/similar`
+- 7 new GUC parameters: `pg_ripple.pgvector_enabled`, `pg_ripple.embedding_api_url`, `pg_ripple.embedding_api_key`, `pg_ripple.embedding_model`, `pg_ripple.embedding_dimensions`, `pg_ripple.embedding_index_type`, `pg_ripple.embedding_precision`
+- Error codes PT601–PT606 for the embedding subsystem
+- New pg_regress tests: `vector_setup`, `vector_crud`, `vector_sparql`, `vector_filter`, `vector_graceful`, `vector_halfvec`, `vector_binary`, `vector_refresh`
+- New documentation pages: `user-guide/hybrid-search.md`, `reference/embedding-functions.md`, `reference/guc-reference.md`
+
+### Migration
+
+Run `sql/pg_ripple--0.26.0--0.27.0.sql` on existing installations. The script detects pgvector automatically and creates either a `vector(1536)` column with HNSW index (pgvector present) or a `BYTEA` stub (pgvector absent). No VP table schema changes.
 
 ---
 

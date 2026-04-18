@@ -3,6 +3,7 @@
 //! Error code ranges:
 //! - PT001–PT099: dictionary errors
 //! - PT100–PT199: storage errors
+//! - PT601–PT606: embedding / vector errors (v0.27.0)
 
 use thiserror::Error;
 
@@ -38,4 +39,39 @@ pub enum StorageError {
     /// SPI execution failed during triple insert, delete, or query.
     #[error("storage SPI error: {msg}")]
     Spi { msg: String },
+}
+
+/// Embedding / vector subsystem errors (PT601–PT606) — v0.27.0.
+#[allow(dead_code)]
+#[derive(Debug, Error)]
+pub enum EmbeddingError {
+    /// PT601 — embedding API URL not configured.
+    #[error("embedding API URL not configured; set pg_ripple.embedding_api_url")]
+    ApiUrlNotConfigured,
+
+    /// PT602 — embedding dimension mismatch.
+    #[error(
+        "embedding dimension mismatch: expected {expected} dimensions \
+         (pg_ripple.embedding_dimensions), got {got}"
+    )]
+    DimensionMismatch { expected: i32, got: usize },
+
+    /// PT603 — pgvector extension not installed.
+    #[error(
+        "pgvector extension not installed; install pgvector and recreate \
+         _pg_ripple.embeddings to enable hybrid search"
+    )]
+    PgvectorNotInstalled,
+
+    /// PT604 — embedding API request failed.
+    #[error("embedding API request failed (HTTP {status}): {detail}")]
+    ApiRequestFailed { status: u16, detail: String },
+
+    /// PT605 — entity has no embedding.
+    #[error("entity has no embedding: {entity_iri}")]
+    EntityHasNoEmbedding { entity_iri: String },
+
+    /// PT606 — no stale embeddings found (NOTICE level).
+    #[error("no stale embeddings found")]
+    NoStaleEmbeddings,
 }

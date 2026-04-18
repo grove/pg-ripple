@@ -1,0 +1,50 @@
+-- pg_regress test: SPARQL pg:similar() with FILTER threshold (v0.27.0)
+-- Tests that FILTER(?score < threshold) on a pg:similar() result completes
+-- without ERROR.  When pgvector is absent, BIND emits NULL and FILTER excludes
+-- all rows (no crash, no ERROR).
+
+SET client_min_messages = warning;
+CREATE EXTENSION IF NOT EXISTS pg_ripple;
+SET client_min_messages = DEFAULT;
+SET search_path TO pg_ripple, public;
+
+-- ── pgvector status ────────────────────────────────────────────────────────────
+SELECT CASE
+    WHEN EXISTS(SELECT 1 FROM pg_extension WHERE extname = 'vector')
+    THEN 'pgvector available'
+    ELSE 'pgvector absent - FILTER on NULL score returns 0 rows (expected in CI)'
+END AS pgvector_status;
+
+-- ── Load drug data ────────────────────────────────────────────────────────────
+
+SELECT pg_ripple.load_ntriples(
+    '<https://pharma.example/aspirin> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://pharma.example/Drug> .' || chr(10) ||
+    '<https://pharma.example/ibuprofen> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://pharma.example/Drug> .' || chr(10) ||
+    '<https://pharma.example/naproxen> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://pharma.example/Drug> .' || chr(10)
+) >= 3 AS drug_triples_loaded;
+
+-- ── FILTER on pg:similar() score must complete without ERROR ──────────────────
+-- When pgvector is absent: ?score is NULL, FILTER(NULL < 0.5) = FALSE, no rows.
+-- count() must be >= 0 regardless.
+SELECT count(*) >= 0 AS filter_query_completed
+FROM pg_ripple.sparql(
+    'PREFIX pg: <http://pg-ripple.org/functions/>
+     PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+     SELECT ?drug ?score WHERE {
+       ?drug rdf:type <https://pharma.example/Drug> .
+       BIND(pg:similar(?drug, "aspirin", 10) AS ?score)
+       FILTER(?score < 0.5)
+     }'
+);
+
+-- ── Threshold of 2.0 (maximum cosine distance) still completes ───────────────
+SELECT count(*) >= 0 AS max_threshold_query_completed
+FROM pg_ripple.sparql(
+    'PREFIX pg: <http://pg-ripple.org/functions/>
+     PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+     SELECT ?drug ?score WHERE {
+       ?drug rdf:type <https://pharma.example/Drug> .
+       BIND(pg:similar(?drug, "anti-inflammatory", 10) AS ?score)
+       FILTER(?score < 2.0)
+     }'
+);

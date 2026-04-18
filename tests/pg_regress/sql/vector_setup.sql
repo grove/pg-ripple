@@ -1,0 +1,44 @@
+-- pg_regress test: vector setup (v0.27.0)
+-- Checks pgvector availability and skips remaining vector tests gracefully.
+-- This test must pass in all CI environments, including those without pgvector.
+
+SET client_min_messages = warning;
+CREATE EXTENSION IF NOT EXISTS pg_ripple;
+SET client_min_messages = DEFAULT;
+SET search_path TO pg_ripple, public;
+
+-- Force the pg_ripple shared library to load in this session so that GUC
+-- registrations become visible in pg_settings.  When the extension is already
+-- installed, CREATE EXTENSION is a no-op and the library is *not* loaded
+-- automatically until a pg_ripple function is first called.
+SELECT pg_ripple.load_ntriples('') = 0 AS library_loaded;
+
+-- ── pgvector availability gate ────────────────────────────────────────────────
+-- Probe whether pgvector is installed.  This drives all subsequent vector tests.
+
+SELECT CASE
+    WHEN EXISTS(SELECT 1 FROM pg_extension WHERE extname = 'vector')
+    THEN 'pgvector available'
+    ELSE 'pgvector absent - vector tests will verify graceful degradation (expected in CI)'
+END AS pgvector_status;
+
+-- ── embeddings table existence ────────────────────────────────────────────────
+-- The migration script creates _pg_ripple.embeddings regardless of pgvector.
+-- When pgvector is absent it uses BYTEA; when present it uses vector(N).
+
+SELECT EXISTS(
+    SELECT 1 FROM information_schema.tables
+    WHERE table_schema = '_pg_ripple'
+      AND table_name   = 'embeddings'
+) AS embeddings_table_exists;
+
+-- ── GUC parameters are registered ────────────────────────────────────────────
+
+SELECT COUNT(*) >= 7 AS embedding_gucs_registered
+FROM pg_settings
+WHERE name LIKE 'pg_ripple.embedding%'
+   OR name = 'pg_ripple.pgvector_enabled';
+
+-- ── pgvector_enabled GUC default value ────────────────────────────────────────
+
+SELECT current_setting('pg_ripple.pgvector_enabled') AS pgvector_enabled_default;

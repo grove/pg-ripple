@@ -313,6 +313,11 @@ pub(super) fn translate_function_filter(
     }
 }
 
+// ─── pg:similar() — pgvector cosine similarity (v0.27.0) ─────────────────────
+
+/// `pg:similar` IRI constant.
+pub(super) const PG_SIMILAR_IRI: &str = "http://pg-ripple.org/functions/similar";
+
 /// Translate an argument expression to a SQL text expression.
 ///
 /// For variable arguments: decode the dictionary ID to lexical text.
@@ -872,6 +877,40 @@ pub(super) fn translate_function_value(
                         "ST_AsText(ST_Boundary(ST_GeomFromText({a_wkt})))"
                     )))
                 }
+
+                // ── pg:similar(?entity, "text", k) — pgvector cosine distance ──
+                // Returns cosine distance as xsd:double (0 = identical, 2 = opposite).
+                // When pgvector is absent or disabled, emits NULL::float8.
+                PG_SIMILAR_IRI => {
+                    *is_numeric = true;
+                    let entity_col = translate_arg_value(args.first()?, bindings, ctx)?;
+                    let query_text = args
+                        .get(1)
+                        .and_then(|e| {
+                            if let Expression::Literal(lit) = e {
+                                Some(lit.value().to_owned())
+                            } else {
+                                None
+                            }
+                        })
+                        .unwrap_or_default();
+                    let k = args
+                        .get(2)
+                        .and_then(|e| {
+                            if let Expression::Literal(lit) = e {
+                                lit.value().parse::<i64>().ok()
+                            } else {
+                                None
+                            }
+                        })
+                        .unwrap_or(10);
+                    Some(crate::sparql::embedding::sql_for_pg_similar(
+                        &entity_col,
+                        &query_text,
+                        k,
+                    ))
+                }
+
                 _ => None,
             }
         }

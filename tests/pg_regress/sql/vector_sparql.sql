@@ -1,0 +1,45 @@
+-- pg_regress test: SPARQL pg:similar() extension function (v0.27.0)
+-- Tests the pg:similar() SPARQL extension function with graceful degradation.
+-- When pgvector is absent, the function returns NULL/empty results without ERROR.
+
+SET client_min_messages = warning;
+CREATE EXTENSION IF NOT EXISTS pg_ripple;
+SET client_min_messages = DEFAULT;
+SET search_path TO pg_ripple, public;
+
+-- ── pgvector status ────────────────────────────────────────────────────────────
+SELECT CASE
+    WHEN EXISTS(SELECT 1 FROM pg_extension WHERE extname = 'vector')
+    THEN 'pgvector available'
+    ELSE 'pgvector absent - pg:similar() returns NULL (expected in CI)'
+END AS pgvector_status;
+
+-- ── Load a small drug dataset ─────────────────────────────────────────────────
+
+SELECT pg_ripple.load_ntriples(
+    '<https://pharma.example/aspirin> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://pharma.example/Drug> .' || chr(10) ||
+    '<https://pharma.example/ibuprofen> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://pharma.example/Drug> .' || chr(10)
+) >= 2 AS drug_triples_loaded;
+
+-- ── pg:similar() in BIND must parse and execute without ERROR ─────────────────
+-- When pgvector is absent: the BIND emits NULL for ?score; FILTER excludes all rows.
+-- Result set is non-negative (0 when absent, possibly > 0 when pgvector is present).
+SELECT count(*) >= 0 AS similar_query_completed
+FROM pg_ripple.sparql(
+    'PREFIX pg: <http://pg-ripple.org/functions/>
+     PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+     SELECT ?drug ?score WHERE {
+       ?drug rdf:type <https://pharma.example/Drug> .
+       BIND(pg:similar(?drug, "aspirin", 10) AS ?score)
+     }'
+);
+
+-- ── SPARQL with pg:similar() must not raise an ERROR ─────────────────────────
+SELECT count(*) >= 0 AS no_error_raised
+FROM pg_ripple.sparql(
+    'PREFIX pg: <http://pg-ripple.org/functions/>
+     SELECT ?e WHERE {
+       ?e <http://www.w3.org/2000/01/rdf-schema#label> ?label .
+       BIND(pg:similar(?e, "drug", 5) AS ?score)
+     }'
+);

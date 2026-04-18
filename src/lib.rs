@@ -358,6 +358,42 @@ CREATE TABLE IF NOT EXISTS _pg_ripple.custom_aggregates (
     requires = ["v019_federation_cache_setup"]
 );
 
+// v0.27.0: Embeddings table for vector / pgvector hybrid search.
+pgrx::extension_sql!(
+    r#"
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'vector') THEN
+        EXECUTE $sql$
+            CREATE TABLE IF NOT EXISTS _pg_ripple.embeddings (
+                entity_id   BIGINT      NOT NULL,
+                model       TEXT        NOT NULL DEFAULT 'default',
+                embedding   vector(1536),
+                updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+                PRIMARY KEY (entity_id, model)
+            );
+            CREATE INDEX IF NOT EXISTS embeddings_hnsw_idx
+                ON _pg_ripple.embeddings
+                USING hnsw (embedding vector_cosine_ops);
+        $sql$;
+    ELSE
+        EXECUTE $sql$
+            CREATE TABLE IF NOT EXISTS _pg_ripple.embeddings (
+                entity_id   BIGINT      NOT NULL,
+                model       TEXT        NOT NULL DEFAULT 'default',
+                embedding   BYTEA,
+                updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+                PRIMARY KEY (entity_id, model)
+            );
+        $sql$;
+    END IF;
+END;
+$$;
+"#,
+    name = "v027_embeddings_table",
+    requires = ["v025_custom_aggregates"]
+);
+
 // v0.11.0: SPARQL views, Datalog views, and ExtVP catalog tables.
 pgrx::extension_sql!(
     r#"
@@ -721,6 +757,40 @@ pub static AUTO_ANALYZE: pgrx::GucSetting<bool> = pgrx::GucSetting::<bool>::new(
 /// (Turtle / N-Triples / JSON-LD).  Peak memory is bounded by
 /// `export_batch_size × average_triple_size` per export call.
 pub static EXPORT_BATCH_SIZE: pgrx::GucSetting<i32> = pgrx::GucSetting::<i32>::new(10_000);
+
+// ─── v0.27.0 GUCs ────────────────────────────────────────────────────────────
+
+/// GUC: embedding model name tag stored in the `model` column of `_pg_ripple.embeddings`.
+pub static EMBEDDING_MODEL: pgrx::GucSetting<Option<std::ffi::CString>> =
+    pgrx::GucSetting::<Option<std::ffi::CString>>::new(None);
+
+/// GUC: vector dimension count; must match the actual model output (default: 1536).
+pub static EMBEDDING_DIMENSIONS: pgrx::GucSetting<i32> = pgrx::GucSetting::<i32>::new(1536);
+
+/// GUC: base URL for an OpenAI-compatible embedding API
+/// (e.g. `https://api.openai.com/v1`, local Ollama, vLLM).
+pub static EMBEDDING_API_URL: pgrx::GucSetting<Option<std::ffi::CString>> =
+    pgrx::GucSetting::<Option<std::ffi::CString>>::new(None);
+
+/// GUC: API key for the embedding endpoint.  Superuser-only; value is masked
+/// in `pg_settings` via the `NOT_IN_SAMPLE` GUC flag.
+pub static EMBEDDING_API_KEY: pgrx::GucSetting<Option<std::ffi::CString>> =
+    pgrx::GucSetting::<Option<std::ffi::CString>>::new(None);
+
+/// GUC: runtime switch; set to `false` to disable all pgvector-dependent code
+/// paths without uninstalling the extension (default: `true`).
+pub static PGVECTOR_ENABLED: pgrx::GucSetting<bool> = pgrx::GucSetting::<bool>::new(true);
+
+/// GUC: index type created on `_pg_ripple.embeddings` — `'hnsw'` (default)
+/// or `'ivfflat'`.  Changing this requires `REINDEX`.
+pub static EMBEDDING_INDEX_TYPE: pgrx::GucSetting<Option<std::ffi::CString>> =
+    pgrx::GucSetting::<Option<std::ffi::CString>>::new(None);
+
+/// GUC: embedding storage precision — `'single'` (default, `vector(N)`),
+/// `'half'` (`halfvec(N)`, 50% storage reduction), or `'binary'` (`bit(N)`,
+/// ~96% storage reduction, Hamming distance).  Requires pgvector ≥ 0.7.0.
+pub static EMBEDDING_PRECISION: pgrx::GucSetting<Option<std::ffi::CString>> =
+    pgrx::GucSetting::<Option<std::ffi::CString>>::new(None);
 
 // ─── pg_trickle runtime detection (v0.6.0) ───────────────────────────────────
 
@@ -1251,6 +1321,73 @@ pub extern "C-unwind" fn _PG_init() {
         &EXPORT_BATCH_SIZE,
         100,
         1_000_000,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+
+    // ── v0.27.0 GUCs ─────────────────────────────────────────────────────────
+
+    pgrx::GucRegistry::define_string_guc(
+        c"pg_ripple.embedding_model",
+        c"Embedding model name tag (e.g. 'text-embedding-3-small'); stored in the model column of _pg_ripple.embeddings",
+        c"",
+        &EMBEDDING_MODEL,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+
+    pgrx::GucRegistry::define_int_guc(
+        c"pg_ripple.embedding_dimensions",
+        c"Vector dimension count; must match the actual model output (default: 1536, range: 1-16000)",
+        c"",
+        &EMBEDDING_DIMENSIONS,
+        1,
+        16_000,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+
+    pgrx::GucRegistry::define_string_guc(
+        c"pg_ripple.embedding_api_url",
+        c"Base URL for an OpenAI-compatible embedding API (e.g. https://api.openai.com/v1)",
+        c"",
+        &EMBEDDING_API_URL,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+
+    pgrx::GucRegistry::define_string_guc(
+        c"pg_ripple.embedding_api_key",
+        c"API key for the embedding endpoint (superuser-only; masked in pg_settings)",
+        c"",
+        &EMBEDDING_API_KEY,
+        GucContext::Suset,
+        GucFlags::default(),
+    );
+
+    pgrx::GucRegistry::define_bool_guc(
+        c"pg_ripple.pgvector_enabled",
+        c"When off, disable all pgvector-dependent code paths without uninstalling the extension (default: on)",
+        c"",
+        &PGVECTOR_ENABLED,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+
+    pgrx::GucRegistry::define_string_guc(
+        c"pg_ripple.embedding_index_type",
+        c"Index type on _pg_ripple.embeddings: 'hnsw' (default) or 'ivfflat'; changing requires REINDEX",
+        c"",
+        &EMBEDDING_INDEX_TYPE,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+
+    pgrx::GucRegistry::define_string_guc(
+        c"pg_ripple.embedding_precision",
+        c"Embedding storage precision: 'single' (default, vector(N)), 'half' (halfvec(N), -50% storage), 'binary' (bit(N), -96% storage); requires pgvector >= 0.7.0",
+        c"",
+        &EMBEDDING_PRECISION,
         GucContext::Userset,
         GucFlags::default(),
     );
@@ -3996,6 +4133,86 @@ mod pg_ripple {
             }
         });
         TableIterator::new(rows)
+    }
+
+    // ── Vector embedding (v0.27.0) ────────────────────────────────────────────
+
+    /// Store a user-supplied embedding vector for an entity IRI.
+    ///
+    /// `embedding` is a `FLOAT8[]` array upserted into `_pg_ripple.embeddings`.
+    /// Its length must match `pg_ripple.embedding_dimensions` (default: 1536).
+    ///
+    /// Raises a WARNING (not an ERROR) when pgvector is absent or the array
+    /// length does not match the configured dimension count (PT602 / PT603).
+    #[pg_extern]
+    fn store_embedding(
+        entity_iri: &str,
+        embedding: Vec<f64>,
+        model: default!(Option<&str>, "NULL"),
+    ) {
+        crate::sparql::embedding::store_embedding(entity_iri, embedding, model)
+    }
+
+    /// Return the k nearest entities to `query_text` by cosine distance.
+    ///
+    /// Encodes `query_text` via the configured embedding API and queries
+    /// `_pg_ripple.embeddings` using the pgvector `<=>` cosine distance
+    /// operator.  Returns results sorted by ascending distance.
+    ///
+    /// Returns zero rows when pgvector is absent, `pgvector_enabled = false`,
+    /// or `embedding_api_url` is not configured.
+    #[pg_extern]
+    fn similar_entities(
+        query_text: &str,
+        k: default!(i32, 10),
+        model: default!(Option<&str>, "NULL"),
+    ) -> TableIterator<
+        'static,
+        (
+            name!(entity_id, i64),
+            name!(entity_iri, String),
+            name!(distance, f64),
+        ),
+    > {
+        let rows = crate::sparql::embedding::similar_entities(query_text, k, model);
+        TableIterator::new(rows)
+    }
+
+    /// Batch-embed entities from a graph using the configured embedding API.
+    ///
+    /// Collects entity IRIs + their `rdfs:label` (or IRI local name) and calls
+    /// the OpenAI-compatible API at `pg_ripple.embedding_api_url`.  Results are
+    /// upserted into `_pg_ripple.embeddings`.
+    ///
+    /// `graph_iri` — restrict to a named graph; NULL embeds entities from all graphs.
+    /// `model` — override `pg_ripple.embedding_model`.
+    /// `batch_size` — API call batch size (default: 100).
+    ///
+    /// Returns total embeddings stored.
+    #[pg_extern]
+    fn embed_entities(
+        graph_iri: default!(Option<&str>, "NULL"),
+        model: default!(Option<&str>, "NULL"),
+        batch_size: default!(i32, 100),
+    ) -> i64 {
+        crate::sparql::embedding::embed_entities(graph_iri, model, batch_size)
+    }
+
+    /// Refresh stale embeddings after label updates.
+    ///
+    /// Identifies entities whose `rdfs:label` triple was inserted after
+    /// `_pg_ripple.embeddings.updated_at` and re-embeds them.  When `force =
+    /// true`, re-embeds all entities regardless of staleness.
+    ///
+    /// Returns the count of re-embedded entities.  Emits a NOTICE when no
+    /// stale embeddings are found (PT606).
+    #[pg_extern]
+    fn refresh_embeddings(
+        graph_iri: default!(Option<&str>, "NULL"),
+        model: default!(Option<&str>, "NULL"),
+        force: default!(bool, false),
+    ) -> i64 {
+        crate::sparql::embedding::refresh_embeddings(graph_iri, model, force)
     }
 }
 

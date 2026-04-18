@@ -1996,7 +1996,7 @@ See [plans/vector_sparql_hybrid.md](plans/vector_sparql_hybrid.md) for the full 
 
 ### Deliverables
 
-- [ ] **`_pg_ripple.embeddings` table** (`sql/pg_ripple--0.26.0--0.27.0.sql`)
+- [x] **`_pg_ripple.embeddings` table** (`sql/pg_ripple--0.26.0--0.27.0.sql`)
   - Schema: `entity_id BIGINT NOT NULL REFERENCES _pg_ripple.dictionary(id), model TEXT NOT NULL DEFAULT 'default', embedding vector(1536), updated_at TIMESTAMPTZ NOT NULL DEFAULT now(), PRIMARY KEY (entity_id, model)` *(optional at runtime — pgvector must be installed)*
   - **HNSW index** (default) on `(embedding vector_cosine_ops)` with configurable `m` (default 16) and `ef_construction` (default 64) parameters — best recall/speed trade-off for most workloads
   - **IVFFlat index** alternative (opt-in via GUC `pg_ripple.embedding_index_type = 'ivfflat'`) — faster build times, preferable for high-write workloads where the HNSW build cost is prohibitive; lists auto-set to `sqrt(row_count)`
@@ -2005,7 +2005,7 @@ See [plans/vector_sparql_hybrid.md](plans/vector_sparql_hybrid.md) for the full 
   - Fallback: if pgvector is absent, the table is created with `BYTEA` as a stub column and all similarity functions return empty results with a WARNING
   - Migration script creates the table only if pgvector is detected via `SELECT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'vector')`
 
-- [ ] **GUC parameters** (registered in `_PG_init` in `src/lib.rs`)
+- [x] **GUC parameters** (registered in `_PG_init` in `src/lib.rs`)
   - `pg_ripple.embedding_model` (string, default `''`) — embedding model name tag stored in the `model` column
   - `pg_ripple.embedding_dimensions` (integer, default `1536`, range `1–16000`) — vector dimensions; must match the actual model output
   - `pg_ripple.embedding_api_url` (string, default `''`) — base URL for an OpenAI-compatible embedding API (e.g. `https://api.openai.com/v1`, local Ollama, vLLM)
@@ -2014,7 +2014,7 @@ See [plans/vector_sparql_hybrid.md](plans/vector_sparql_hybrid.md) for the full 
   - `pg_ripple.embedding_index_type` (string, default `'hnsw'`, options `'hnsw'`|`'ivfflat'`) — controls which index type is created on `_pg_ripple.embeddings`; changing this requires `REINDEX`
   - `pg_ripple.embedding_precision` (string, default `'single'`, options `'single'`|`'half'`|`'binary'`) — `'half'` stores embeddings as `halfvec(N)` (50% storage reduction); `'binary'` stores as `bit(N)` using Hamming distance (~96% storage reduction, best for > 50M entities); requires pgvector ≥ 0.7.0
 
-- [ ] **`pg_ripple.embed_entities()` — batch embedding** (`src/sparql/embedding.rs`)
+- [x] **`pg_ripple.embed_entities()` — batch embedding** (`src/sparql/embedding.rs`)
   - `pg_ripple.embed_entities(graph_iri TEXT DEFAULT NULL, model TEXT DEFAULT NULL, batch_size INT DEFAULT 100) RETURNS BIGINT`
   - Executes a SPARQL SELECT to collect entity IRIs + their `rdfs:label` (falling back to the IRI local name) from the specified graph (or all graphs if NULL)
   - Batches entity labels, calls the OpenAI-compatible API at `pg_ripple.embedding_api_url`; supports gzip-compressed responses
@@ -2022,27 +2022,27 @@ See [plans/vector_sparql_hybrid.md](plans/vector_sparql_hybrid.md) for the full 
   - Returns total number of embeddings stored
   - Raises `PT601 — embedding API URL not configured` if `pg_ripple.embedding_api_url` is empty
 
-- [ ] **`pg_ripple.similar_entities()` — k-NN query** (`src/sparql/embedding.rs`)
+- [x] **`pg_ripple.similar_entities()` — k-NN query** (`src/sparql/embedding.rs`)
   - `pg_ripple.similar_entities(query_text TEXT, k INT DEFAULT 10, model TEXT DEFAULT NULL) RETURNS TABLE (entity_id BIGINT, entity_iri TEXT, distance FLOAT8)` *(optional at runtime — pgvector must be installed)*
   - Encodes `query_text` to a vector via the configured embedding API
   - Executes `SELECT entity_id, embedding <=> $query_vec FROM _pg_ripple.embeddings ORDER BY 1 LIMIT k` using the pgvector `<=>` cosine distance operator
   - Decodes `entity_id` back to IRI text via the dictionary
   - Returns results sorted by ascending cosine distance (0 = identical, 2 = maximally dissimilar)
 
-- [ ] **`pg_ripple.store_embedding()` — user-supplied embeddings**
+- [x] **`pg_ripple.store_embedding()` — user-supplied embeddings**
   - `pg_ripple.store_embedding(entity_iri TEXT, embedding FLOAT8[], model TEXT DEFAULT NULL) RETURNS VOID`
   - Encodes `entity_iri` via the dictionary encoder, casts `FLOAT8[]` to `vector`, and upserts into `_pg_ripple.embeddings`
   - Useful for pre-computed KGE embeddings (TransE, RotatE, ComplEx) from external pipelines; no API call needed
   - Validates that `array_length(embedding, 1)` matches `pg_ripple.embedding_dimensions`; raises `PT602 — embedding dimension mismatch` otherwise
 
-- [ ] **SPARQL `pg:similar()` extension function** (`src/sparql/functions.rs`)
+- [x] **SPARQL `pg:similar()` extension function** (`src/sparql/functions.rs`)
   - Register `<http://pg-ripple.org/functions/similar>` as a SPARQL extension function in the function registry
   - Signature: `pg:similar(?entity, "query_text"^^xsd:string, k)` — returns cosine distance as `xsd:double`
   - Translate to SQL: the SPARQL→SQL compiler detects `pg:similar` calls in BIND expressions and emits a JOIN against `_pg_ripple.embeddings` with the `<=>` operator
   - Filter pushdown: if the SPARQL query has `FILTER(?score < threshold)`, push the threshold into the SQL `WHERE` clause to allow HNSW iterative scan pruning
   - Graceful degradation: if pgvector is absent, raises `PT603 — pgvector extension not installed` with an install hint
 
-- [ ] **`pg_ripple.refresh_embeddings()` — stale embedding invalidation** (`src/sparql/embedding.rs`)
+- [x] **`pg_ripple.refresh_embeddings()` — stale embedding invalidation** (`src/sparql/embedding.rs`)
   - `pg_ripple.refresh_embeddings(graph_iri TEXT DEFAULT NULL, model TEXT DEFAULT NULL, force BOOL DEFAULT false) RETURNS BIGINT`
   - Identifies entities whose `rdfs:label` was updated after `_pg_ripple.embeddings.updated_at` by joining `_pg_ripple.embeddings` against the label VP table's `i` (SID) sequence — higher SID implies a later write
   - Re-embeds stale entities in batches; skips entities where `updated_at` is already current unless `force = true`
@@ -2050,7 +2050,7 @@ See [plans/vector_sparql_hybrid.md](plans/vector_sparql_hybrid.md) for the full 
   - Intended for scheduled maintenance (e.g. via `pg_cron`) and called automatically at the end of each background worker cycle when `pg_ripple.auto_embed = true`
   - Raises `PT606 — no stale embeddings found` as a NOTICE (not an ERROR) when nothing needs refreshing
 
-- [ ] **Error codes for the embedding subsystem** (`src/error.rs`)
+- [x] **Error codes for the embedding subsystem** (`src/error.rs`)
   - `PT601` — embedding API URL not configured
   - `PT602` — embedding dimension mismatch
   - `PT603` — pgvector extension not installed
@@ -2058,7 +2058,7 @@ See [plans/vector_sparql_hybrid.md](plans/vector_sparql_hybrid.md) for the full 
   - `PT605` — entity has no embedding (raised when `pg:similar` is called for an entity absent from `_pg_ripple.embeddings`)
   - `PT606` — no stale embeddings found (NOTICE level)
 
-- [ ] **pg_regress tests**
+- [x] **pg_regress tests**
   - `vector_setup.sql` — verify pgvector is installed; skip remaining vector tests if absent
   - `vector_crud.sql` — store embeddings via `pg_ripple.store_embedding()`, retrieve via `pg_ripple.similar_entities()`, verify ranking order
   - `vector_sparql.sql` — SPARQL query using `pg:similar()` in a BIND expression; verify the result set is non-empty and ordered by distance
@@ -2074,9 +2074,9 @@ See [plans/vector_sparql_hybrid.md](plans/vector_sparql_hybrid.md) for the full 
 
 ### Documentation
 
-- [ ] `user-guide/hybrid-search.md` (new page) — quick-start: install pgvector, set GUC parameters, call `pg_ripple.embed_entities()`, run a SPARQL hybrid query; includes architecture diagram showing VP table + embeddings table join
-- [ ] `reference/embedding-functions.md` (new page) — API reference for `embed_entities`, `similar_entities`, `store_embedding`, `pg:similar()`
-- [ ] `reference/guc-reference.md` updated — document all seven new embedding GUC parameters (`embedding_model`, `embedding_dimensions`, `embedding_api_url`, `embedding_api_key`, `pgvector_enabled`, `embedding_index_type`, `embedding_precision`) with recommended values for OpenAI, Ollama, and local Sentence-BERT; include storage trade-off table for `embedding_precision` modes
+- [x] `user-guide/hybrid-search.md` (new page) — quick-start: install pgvector, set GUC parameters, call `pg_ripple.embed_entities()`, run a SPARQL hybrid query; includes architecture diagram showing VP table + embeddings table join
+- [x] `reference/embedding-functions.md` (new page) — API reference for `embed_entities`, `similar_entities`, `store_embedding`, `pg:similar()`
+- [x] `reference/guc-reference.md` updated — document all seven new embedding GUC parameters (`embedding_model`, `embedding_dimensions`, `embedding_api_url`, `embedding_api_key`, `pgvector_enabled`, `embedding_index_type`, `embedding_precision`) with recommended values for OpenAI, Ollama, and local Sentence-BERT; include storage trade-off table for `embedding_precision` modes
 
 ### Exit Criteria
 

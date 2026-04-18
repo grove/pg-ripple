@@ -1,0 +1,45 @@
+-- pg_regress test: vector CRUD (v0.27.0)
+-- Tests store_embedding() and similar_entities() with graceful degradation
+-- when pgvector is absent.
+
+SET client_min_messages = warning;
+CREATE EXTENSION IF NOT EXISTS pg_ripple;
+SET client_min_messages = DEFAULT;
+SET search_path TO pg_ripple, public;
+
+-- ── pgvector status ────────────────────────────────────────────────────────────
+SELECT CASE
+    WHEN EXISTS(SELECT 1 FROM pg_extension WHERE extname = 'vector')
+    THEN 'pgvector available'
+    ELSE 'pgvector absent - graceful degradation tested below'
+END AS pgvector_status;
+
+-- ── Load some entities ────────────────────────────────────────────────────────
+
+SELECT pg_ripple.load_ntriples(
+    '<https://pharma.example/aspirin> <http://www.w3.org/2000/01/rdf-schema#label> "aspirin" .' || chr(10) ||
+    '<https://pharma.example/ibuprofen> <http://www.w3.org/2000/01/rdf-schema#label> "ibuprofen" .' || chr(10) ||
+    '<https://pharma.example/naproxen> <http://www.w3.org/2000/01/rdf-schema#label> "naproxen" .' || chr(10)
+) >= 3 AS pharma_triples_loaded;
+
+-- ── store_embedding() graceful degradation ────────────────────────────────────
+-- When pgvector is absent, store_embedding emits a WARNING and returns nothing.
+-- The call must complete without ERROR.
+
+SET client_min_messages = warning;
+SELECT pg_ripple.store_embedding(
+    'https://pharma.example/aspirin',
+    ARRAY[0.1, 0.2, 0.3]::float8[]
+) IS NULL AS store_embedding_returned_void;
+
+-- ── similar_entities() graceful degradation ───────────────────────────────────
+-- When pgvector is absent, similar_entities returns zero rows (no ERROR).
+SET client_min_messages = DEFAULT;
+
+SELECT count(*) = 0 AS similar_entities_empty_without_pgvector
+FROM pg_ripple.similar_entities('anti-inflammatory');
+
+-- ── embeddings table is accessible ────────────────────────────────────────────
+-- The table exists; row count is 0 when pgvector is absent.
+SELECT count(*) >= 0 AS embeddings_table_accessible
+FROM _pg_ripple.embeddings;
