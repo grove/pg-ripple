@@ -13,7 +13,30 @@ Points at the next milestone: v1.0.0 — Production Release.
 
 ---
 
-## [0.24.0] — 2026-04-18 — Semi-naive Datalog, Streaming Export & Performance Hardening
+## [0.25.0] — 2026-04-18 — Architectural Polish & Health Checks
+
+**pg_ripple adds a `canary()` health-check function, strict bulk-load mode, merge-worker LRU cache isolation, a pg_trickle version probe, and a federation partial-result byte gate.** All 78 pg_regress tests pass (2 new tests for v0.25.0 features).
+
+### What you can do
+
+- **Check system health** — `pg_ripple.canary()` returns `{"merge_worker": "ok"|"stalled", "cache_hit_rate": 0.0–1.0, "catalog_consistent": true|false, "orphaned_rare_rows": N}` for quick liveness checks from monitoring scripts
+- **Strict bulk loading** — pass `strict := true` to any loader (e.g. `load_ntriples(data, strict := true)`) to abort and roll back the entire transaction on any parse error instead of emitting a WARNING and continuing
+- **pg_trickle version probe** — a WARNING is emitted at `CREATE EXTENSION` time if the installed pg_trickle version is newer than the tested version (v0.3.0), helping catch unexpected API drift
+- **Bounded partial federation recovery** — oversized partial responses from remote SPARQL endpoints (larger than `pg_ripple.federation_partial_recovery_max_bytes`, default 64 KB) return an empty result with a WARNING instead of attempting a heuristic parse
+
+### What changes
+
+- **`canary()` health check** (`src/lib.rs`): new `#[pg_extern] fn canary() -> JsonB` — inspects the merge-worker PID from shared memory, reads cache hit statistics, validates predicate catalog consistency, and counts orphaned rows in `vp_rare`
+- **Bulk load strict mode** (`src/bulk_load.rs`, `src/lib.rs`): `strict: bool` parameter (default `false`) added to all `load_*` pg_extern wrappers; when `true`, parse errors call `pgrx::error!()` to abort the transaction rather than `pgrx::warning!()` to skip the bad triple
+- **Merge worker LRU cache isolation** (`src/worker.rs`): `crate::dictionary::clear_caches()` is called at the end of each merge cycle, evicting all per-backend dictionary caches so the merge worker never serves stale data to subsequent transactions
+- **pg_trickle version probe** (`src/lib.rs`): `has_pg_trickle()` now performs an SPI query for `extversion` in `pg_extension` and emits a WARNING if the installed version exceeds `PG_TRICKLE_TESTED_VERSION = "0.3.0"`
+- **Federation byte gate** (`src/sparql/federation.rs`): new `pg_ripple.federation_partial_recovery_max_bytes` GUC (i32, default 65 536, range 1 024–104 857 600); in `execute_remote_partial`, the `Err(_)` recovery branch checks `body.len()` against the limit and returns empty with a WARNING if exceeded
+- **Inline decoder defensive assert** (`src/dictionary/inline.rs`): `debug_assert!(is_inline(id))` added at the top of `format_inline()` to catch incorrect call sites in debug builds
+- **New pg_regress tests**: `bulk_load_strict.sql`, `canary.sql`
+
+---
+
+ — Semi-naive Datalog, Streaming Export & Performance Hardening
 
 **pg_ripple adds semi-naive Datalog evaluation with statistics, streaming triple export, SPARQL property-path depth control, BGP selectivity improvements, and fixes a correctness bug in `sh:languageIn` evaluation.** All 76 pg_regress tests pass (3 new tests for v0.24.0 features).
 

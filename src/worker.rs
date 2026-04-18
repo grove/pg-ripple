@@ -196,6 +196,10 @@ fn run_merge_cycle() {
 
     // Evict expired federation cache entries on each polling cycle (v0.19.0).
     crate::sparql::federation::evict_expired_cache();
+
+    // A-3: clear backend-local LRU cache at end of merge transaction to prevent
+    // stale IDs from being used if dictionary rows are rewritten by a future migration.
+    crate::dictionary::clear_caches();
 }
 
 // ─── GUC helpers ─────────────────────────────────────────────────────────────

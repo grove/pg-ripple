@@ -497,6 +497,77 @@ SET pg_ripple.federation_adaptive_timeout = on;
 
 ---
 
+## Performance Parameters (v0.24.0)
+
+### property_path_max_depth
+
+| Property | Value |
+|---|---|
+| Type | `integer` |
+| Default | `64` |
+| Min / Max | `1 / 100000` |
+| Restart required | No |
+| Since | v0.24.0 |
+
+Maximum recursion depth for property path queries using the `+` or `*` operators. The generated `WITH RECURSIVE … CYCLE` CTE appends a `WHERE _depth < property_path_max_depth` guard so queries on cyclic or very deep graphs terminate predictably.
+
+When the limit is hit, pg_ripple emits a `WARNING` and returns the results found up to the depth limit — it is not an error.
+
+```sql
+-- Tighten the limit for a specific session
+SET pg_ripple.property_path_max_depth = 10;
+
+-- Raise it for a known deep hierarchy
+SET pg_ripple.property_path_max_depth = 1000;
+```
+
+> The plan cache key includes this value, so changing `property_path_max_depth` automatically invalidates cached path query plans for the current session.
+
+---
+
+### export_batch_size
+
+| Property | Value |
+|---|---|
+| Type | `integer` |
+| Default | `10000` |
+| Min / Max | `100 / 10000000` |
+| Restart required | No |
+| Since | v0.24.0 |
+
+Number of triples fetched per cursor batch during `export_turtle()`, `export_ntriples()`, and `export_jsonld()`. Export iterates VP tables in SID (statement-ID) order using `DECLARE … CURSOR FOR … FETCH $batch_size` to bound peak memory use.
+
+Larger values reduce round-trips and improve throughput; smaller values reduce memory pressure for very large exports running alongside other workloads.
+
+```sql
+-- Smaller batches on a memory-constrained server
+SET pg_ripple.export_batch_size = 1000;
+
+-- Larger batches for a dedicated export run
+SET pg_ripple.export_batch_size = 100000;
+```
+
+---
+
+### auto_analyze
+
+| Property | Value |
+|---|---|
+| Type | `boolean` |
+| Default | `off` |
+| Restart required | No |
+| Since | v0.24.0 |
+
+When `on`, the background merge worker runs `ANALYZE _pg_ripple.vp_{id}_delta` and `ANALYZE _pg_ripple.vp_{id}_main` after each successful merge cycle. This keeps the PostgreSQL planner's statistics current so join plans over recently-merged data stay accurate.
+
+Disable when you manage statistics manually (e.g. with a scheduled `VACUUM ANALYZE`) or when background I/O must be minimised.
+
+```sql
+SET pg_ripple.auto_analyze = on;
+```
+
+---
+
 ## Quick tuning reference
 
 | Workload | Key parameters |

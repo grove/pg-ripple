@@ -4,8 +4,15 @@
 -- binary and HTTP requests (curl).  This file tests the SQL-level functions that
 -- back the HTTP endpoint, verifying they produce correct output formats.
 
+-- Seed a known triple so the next query is deterministic.
+SELECT pg_ripple.load_ntriples(
+    '<https://example.org/proto_seed> <https://example.org/proto_prop> "seed" .'
+);
+
 -- Verify sparql() returns JSONB results suitable for JSON serialization
-SELECT result FROM pg_ripple.sparql('SELECT ?s WHERE { ?s ?p ?o } LIMIT 1');
+SELECT result FROM pg_ripple.sparql(
+    'SELECT ?s WHERE { <https://example.org/proto_seed> ?p ?o . BIND(<https://example.org/proto_seed> AS ?s) } LIMIT 1'
+);
 
 -- Verify sparql_ask returns boolean
 SELECT pg_ripple.load_ntriples(

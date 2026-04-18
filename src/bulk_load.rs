@@ -161,7 +161,7 @@ fn post_load_cleanup(touched_predicates: Vec<i64>) {
 /// - Nested quoted triples (recursive)
 ///
 /// Returns the number of triples loaded.
-pub fn load_ntriples(data: &str) -> i64 {
+pub fn load_ntriples(data: &str, strict: bool) -> i64 {
     let generation = storage::next_load_generation();
     let mut by_predicate: PredicateBatch = HashMap::new();
     let mut touched: std::collections::HashSet<i64> = std::collections::HashSet::new();
@@ -179,6 +179,8 @@ pub fn load_ntriples(data: &str) -> i64 {
             if total % BATCH_SIZE as i64 == 0 {
                 flush_batch(&mut by_predicate);
             }
+        } else if strict {
+            pgrx::error!("N-Triples parse error (strict mode): {}", trimmed);
         } else {
             pgrx::warning!("N-Triples parse error on: {}", trimmed);
         }
@@ -191,7 +193,7 @@ pub fn load_ntriples(data: &str) -> i64 {
 
 /// Load N-Quads data from a text string (supports named graphs).
 /// Uses rio_turtle for N-Quads. RDF-star in quoted-triple positions emits a warning.
-pub fn load_nquads(data: &str) -> i64 {
+pub fn load_nquads(data: &str, _strict: bool) -> i64 {
     let generation = storage::next_load_generation();
     let mut by_predicate: HashMap<i64, Vec<(i64, i64, i64)>> = HashMap::new();
     let mut touched: std::collections::HashSet<i64> = std::collections::HashSet::new();
@@ -224,7 +226,7 @@ pub fn load_nquads(data: &str) -> i64 {
 
 /// Load Turtle data from a text string.
 /// Uses rio_turtle's `TurtleParser`. For Turtle-star content, use load_ntriples().
-pub fn load_turtle(data: &str) -> i64 {
+pub fn load_turtle(data: &str, _strict: bool) -> i64 {
     let generation = storage::next_load_generation();
     let mut by_predicate: PredicateBatch = HashMap::new();
     let mut touched: std::collections::HashSet<i64> = std::collections::HashSet::new();
@@ -253,7 +255,7 @@ pub fn load_turtle(data: &str) -> i64 {
 
 /// Load TriG data from a text string (Turtle with named graph blocks).
 /// Uses rio_turtle for full TriG/named-graph support.
-pub fn load_trig(data: &str) -> i64 {
+pub fn load_trig(data: &str, _strict: bool) -> i64 {
     let generation = storage::next_load_generation();
     let mut by_predicate: HashMap<i64, Vec<(i64, i64, i64)>> = HashMap::new();
     let mut touched: std::collections::HashSet<i64> = std::collections::HashSet::new();
@@ -297,33 +299,33 @@ fn read_file_content(path: &str) -> String {
 }
 
 /// Load N-Triples from a server-side file path.
-pub fn load_ntriples_file(path: &str) -> i64 {
+pub fn load_ntriples_file(path: &str, strict: bool) -> i64 {
     let content = read_file_content(path);
-    load_ntriples(&content)
+    load_ntriples(&content, strict)
 }
 
 /// Load N-Quads from a server-side file path.
-pub fn load_nquads_file(path: &str) -> i64 {
+pub fn load_nquads_file(path: &str, strict: bool) -> i64 {
     let content = read_file_content(path);
-    load_nquads(&content)
+    load_nquads(&content, strict)
 }
 
 /// Load Turtle from a server-side file path.
-pub fn load_turtle_file(path: &str) -> i64 {
+pub fn load_turtle_file(path: &str, strict: bool) -> i64 {
     let content = read_file_content(path);
-    load_turtle(&content)
+    load_turtle(&content, strict)
 }
 
 /// Load TriG from a server-side file path.
-pub fn load_trig_file(path: &str) -> i64 {
+pub fn load_trig_file(path: &str, strict: bool) -> i64 {
     let content = read_file_content(path);
-    load_trig(&content)
+    load_trig(&content, strict)
 }
 
 /// Load RDF/XML from a server-side file path (superuser required).
-pub fn load_rdfxml_file(path: &str) -> i64 {
+pub fn load_rdfxml_file(path: &str, strict: bool) -> i64 {
     let content = read_file_content(path);
-    load_rdfxml(&content)
+    load_rdfxml(&content, strict)
 }
 
 /// Load N-Triples from a server-side file into a specific graph.
@@ -349,7 +351,7 @@ pub fn load_rdfxml_file_into_graph(path: &str, g_id: i64) -> i64 {
 /// Uses `rio_xml::RdfXmlParser` for conformant RDF/XML parsing.  Named graphs
 /// are not supported in the RDF/XML format; all triples are loaded into the
 /// default graph.
-pub fn load_rdfxml(data: &str) -> i64 {
+pub fn load_rdfxml(data: &str, _strict: bool) -> i64 {
     let generation = storage::next_load_generation();
     let mut by_predicate: PredicateBatch = HashMap::new();
     let mut touched: std::collections::HashSet<i64> = std::collections::HashSet::new();

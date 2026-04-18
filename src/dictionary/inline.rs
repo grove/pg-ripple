@@ -175,6 +175,10 @@ pub fn decode_date_days(id: i64) -> i64 {
 ///
 /// Returns a string like `"42"^^<http://www.w3.org/2001/XMLSchema#integer>`.
 pub fn format_inline(id: i64) -> String {
+    debug_assert!(
+        is_inline(id),
+        "format_inline called with non-inline id {id}"
+    );
     match inline_type(id) {
         TYPE_INTEGER => {
             let v = decode_integer(id);

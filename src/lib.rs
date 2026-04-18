@@ -675,6 +675,10 @@ pub static FEDERATION_ON_PARTIAL: pgrx::GucSetting<Option<std::ffi::CString>> =
 pub static FEDERATION_ADAPTIVE_TIMEOUT: pgrx::GucSetting<bool> =
     pgrx::GucSetting::<bool>::new(false);
 
+/// Maximum body size in bytes for partial federation result recovery (H-13, v0.25.0).
+pub static FEDERATION_PARTIAL_RECOVERY_MAX_BYTES: pgrx::GucSetting<i32> =
+    pgrx::GucSetting::<i32>::new(65_536);
+
 // ─── v0.21.0 GUCs ────────────────────────────────────────────────────────────
 
 /// GUC: when `on` (default), a FILTER expression that uses an unsupported
@@ -703,16 +707,43 @@ pub static EXPORT_BATCH_SIZE: pgrx::GucSetting<i32> = pgrx::GucSetting::<i32>::n
 
 // ─── pg_trickle runtime detection (v0.6.0) ───────────────────────────────────
 
+/// The pg_trickle version that pg_ripple was tested against (A-4, v0.25.0).
+const PG_TRICKLE_TESTED_VERSION: &str = "0.3.0";
+
 /// Returns `true` when the pg_trickle extension is installed in the current database.
 ///
 /// All pg_trickle-dependent features gate on this check — core pg_ripple
 /// functionality works without pg_trickle.
+///
+/// Also emits a one-time WARNING if the installed pg_trickle version is newer
+/// than `PG_TRICKLE_TESTED_VERSION` (A-4, v0.25.0).
 pub(crate) fn has_pg_trickle() -> bool {
-    pgrx::Spi::get_one::<bool>(
+    // Check existence first.
+    let exists = pgrx::Spi::get_one::<bool>(
         "SELECT EXISTS(SELECT 1 FROM pg_extension WHERE extname = 'pg_trickle')",
     )
     .unwrap_or(None)
-    .unwrap_or(false)
+    .unwrap_or(false);
+
+    if exists {
+        // Version-lock probe (A-4): warn if installed version is newer than tested.
+        if let Some(installed) = pgrx::Spi::get_one::<String>(
+            "SELECT extversion FROM pg_extension WHERE extname = 'pg_trickle'",
+        )
+        .unwrap_or(None)
+        {
+            if installed.as_str() > PG_TRICKLE_TESTED_VERSION {
+                pgrx::warning!(
+                    "pg_ripple: pg_trickle version {} is newer than tested version {}; \
+                     incremental views may behave unexpectedly",
+                    installed,
+                    PG_TRICKLE_TESTED_VERSION
+                );
+            }
+        }
+    }
+
+    exists
 }
 
 /// Returns `true` when the pg_trickle live-statistics stream tables have been
@@ -1058,6 +1089,17 @@ pub extern "C-unwind" fn _PG_init() {
         GucFlags::default(),
     );
 
+    pgrx::GucRegistry::define_int_guc(
+        c"pg_ripple.federation_partial_recovery_max_bytes",
+        c"Maximum response body size in bytes for partial federation result recovery; responses larger than this return empty with a WARNING (default: 65536, min: 1024, max: 104857600)",
+        c"",
+        &FEDERATION_PARTIAL_RECOVERY_MAX_BYTES,
+        1024,
+        104_857_600,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+
     // ── v0.21.0 GUCs ─────────────────────────────────────────────────────────
 
     pgrx::GucRegistry::define_bool_guc(
@@ -1397,61 +1439,66 @@ mod pg_ripple {
 
     /// Load N-Triples data from a text string.  Returns the number of triples loaded.
     /// Also accepts N-Triples-star (quoted triples as objects or subjects).
+    /// When `strict = true`, any parse error aborts and rolls back the entire load.
     #[pg_extern]
-    fn load_ntriples(data: &str) -> i64 {
-        crate::bulk_load::load_ntriples(data)
+    fn load_ntriples(data: &str, strict: pgrx::default!(bool, false)) -> i64 {
+        crate::bulk_load::load_ntriples(data, strict)
     }
 
     /// Load N-Quads data from a text string (supports named graphs).
+    /// When `strict = true`, any parse error aborts and rolls back the entire load.
     #[pg_extern]
-    fn load_nquads(data: &str) -> i64 {
-        crate::bulk_load::load_nquads(data)
+    fn load_nquads(data: &str, strict: pgrx::default!(bool, false)) -> i64 {
+        crate::bulk_load::load_nquads(data, strict)
     }
 
     /// Load Turtle data from a text string.
     /// Also accepts Turtle-star (quoted triples) using oxttl with rdf-12 support.
+    /// When `strict = true`, any parse error aborts and rolls back the entire load.
     #[pg_extern]
-    fn load_turtle(data: &str) -> i64 {
-        crate::bulk_load::load_turtle(data)
+    fn load_turtle(data: &str, strict: pgrx::default!(bool, false)) -> i64 {
+        crate::bulk_load::load_turtle(data, strict)
     }
 
     /// Load TriG data (Turtle with named graph blocks) from a text string.
+    /// When `strict = true`, any parse error aborts and rolls back the entire load.
     #[pg_extern]
-    fn load_trig(data: &str) -> i64 {
-        crate::bulk_load::load_trig(data)
+    fn load_trig(data: &str, strict: pgrx::default!(bool, false)) -> i64 {
+        crate::bulk_load::load_trig(data, strict)
     }
 
     /// Load N-Triples from a server-side file path (superuser required).
     #[pg_extern]
-    fn load_ntriples_file(path: &str) -> i64 {
-        crate::bulk_load::load_ntriples_file(path)
+    fn load_ntriples_file(path: &str, strict: pgrx::default!(bool, false)) -> i64 {
+        crate::bulk_load::load_ntriples_file(path, strict)
     }
 
     /// Load N-Quads from a server-side file path (superuser required).
     #[pg_extern]
-    fn load_nquads_file(path: &str) -> i64 {
-        crate::bulk_load::load_nquads_file(path)
+    fn load_nquads_file(path: &str, strict: pgrx::default!(bool, false)) -> i64 {
+        crate::bulk_load::load_nquads_file(path, strict)
     }
 
     /// Load Turtle from a server-side file path (superuser required).
     #[pg_extern]
-    fn load_turtle_file(path: &str) -> i64 {
-        crate::bulk_load::load_turtle_file(path)
+    fn load_turtle_file(path: &str, strict: pgrx::default!(bool, false)) -> i64 {
+        crate::bulk_load::load_turtle_file(path, strict)
     }
 
     /// Load TriG from a server-side file path (superuser required).
     #[pg_extern]
-    fn load_trig_file(path: &str) -> i64 {
-        crate::bulk_load::load_trig_file(path)
+    fn load_trig_file(path: &str, strict: pgrx::default!(bool, false)) -> i64 {
+        crate::bulk_load::load_trig_file(path, strict)
     }
 
     /// Load RDF/XML data from a text string.  Returns the number of triples loaded.
     ///
     /// Parses conformant RDF/XML using `rio_xml`.  All triples are loaded into the
     /// default graph (RDF/XML does not support named graphs).
+    /// When `strict = true`, any parse error aborts and rolls back the entire load.
     #[pg_extern]
-    fn load_rdfxml(data: &str) -> i64 {
-        crate::bulk_load::load_rdfxml(data)
+    fn load_rdfxml(data: &str, strict: pgrx::default!(bool, false)) -> i64 {
+        crate::bulk_load::load_rdfxml(data, strict)
     }
 
     // ── Named graph management ────────────────────────────────────────────────
@@ -2659,6 +2706,94 @@ mod pg_ripple {
         pgrx::JsonB(serde_json::Value::Object(obj))
     }
 
+    /// Health check function (v0.25.0).
+    ///
+    /// Returns a JSONB object with key health indicators for operations dashboards:
+    /// - `merge_worker`: `"ok"` if the merge worker PID is recorded in shared memory,
+    ///   `"stalled"` otherwise.
+    /// - `cache_hit_rate`: fraction of dictionary encode lookups that hit the
+    ///   backend-local LRU cache (0.0–1.0).
+    /// - `catalog_consistent`: `true` if the number of VP tables in `pg_class` matches
+    ///   the number of promoted predicates in `_pg_ripple.predicates`.
+    /// - `orphaned_rare_rows`: number of `vp_rare` rows whose predicate has a dedicated
+    ///   VP table (should be 0 after a healthy promotion cycle).
+    #[pg_extern]
+    fn canary() -> pgrx::JsonB {
+        use serde_json::{Map, Number, Value as Json};
+
+        // merge_worker: check PID in shared memory.
+        let merge_worker_pid =
+            if crate::shmem::SHMEM_READY.load(std::sync::atomic::Ordering::Acquire) {
+                crate::shmem::MERGE_WORKER_PID
+                    .get()
+                    .load(std::sync::atomic::Ordering::Relaxed)
+            } else {
+                0
+            };
+        let merge_worker_status = if merge_worker_pid > 0 {
+            "ok"
+        } else {
+            "stalled"
+        };
+
+        // cache_hit_rate: from shmem stats.
+        let (hits, misses, _, _) = crate::shmem::get_cache_stats();
+        let total = hits + misses;
+        let hit_rate = if total > 0 {
+            (hits as f64) / (total as f64)
+        } else {
+            1.0_f64
+        };
+
+        // catalog_consistent: VP table count == promoted predicate count.
+        let pg_table_count: i64 = pgrx::Spi::get_one::<i64>(
+            "SELECT count(*)::bigint FROM pg_class c \
+             JOIN pg_namespace n ON n.oid = c.relnamespace \
+             WHERE n.nspname = '_pg_ripple' AND c.relname LIKE 'vp_%_delta'",
+        )
+        .unwrap_or(None)
+        .unwrap_or(0);
+
+        let predicate_count: i64 = pgrx::Spi::get_one::<i64>(
+            "SELECT count(*)::bigint FROM _pg_ripple.predicates WHERE htap = true",
+        )
+        .unwrap_or(None)
+        .unwrap_or(0);
+
+        let catalog_consistent = pg_table_count == predicate_count;
+
+        // orphaned_rare_rows: vp_rare rows for promoted predicates.
+        let orphaned: i64 = pgrx::Spi::get_one::<i64>(
+            "SELECT count(*)::bigint \
+             FROM _pg_ripple.vp_rare r \
+             WHERE EXISTS ( \
+               SELECT 1 FROM _pg_ripple.predicates p WHERE p.id = r.p AND p.htap = true \
+             )",
+        )
+        .unwrap_or(None)
+        .unwrap_or(0);
+
+        let mut obj = Map::new();
+        obj.insert(
+            "merge_worker".to_owned(),
+            Json::String(merge_worker_status.to_owned()),
+        );
+        obj.insert(
+            "cache_hit_rate".to_owned(),
+            Json::Number(Number::from_f64(hit_rate).unwrap_or(Number::from(0))),
+        );
+        obj.insert(
+            "catalog_consistent".to_owned(),
+            Json::Bool(catalog_consistent),
+        );
+        obj.insert(
+            "orphaned_rare_rows".to_owned(),
+            Json::Number(Number::from(orphaned)),
+        );
+
+        pgrx::JsonB(Json::Object(obj))
+    }
+
     // ── Change Data Capture (v0.6.0) ──────────────────────────────────────────
 
     /// Subscribe to triple change notifications on a NOTIFY channel.
@@ -3398,8 +3533,8 @@ mod pg_ripple {
 
     /// Load RDF/XML from a server-side file path (superuser required).
     #[pg_extern]
-    fn load_rdfxml_file(path: &str) -> i64 {
-        crate::bulk_load::load_rdfxml_file(path)
+    fn load_rdfxml_file(path: &str, strict: pgrx::default!(bool, false)) -> i64 {
+        crate::bulk_load::load_rdfxml_file(path, strict)
     }
 
     // ── v0.15.0: Graph-aware triple deletion ──────────────────────────────────
@@ -3685,7 +3820,7 @@ mod tests {
     fn test_ntriples_bulk_load() {
         let data =
             "<https://example.org/a> <https://example.org/knows> <https://example.org/b> .\n";
-        let count = crate::bulk_load::load_ntriples(data);
+        let count = crate::bulk_load::load_ntriples(data, false);
         assert_eq!(count, 1);
         assert!(crate::storage::total_triple_count() >= 1);
     }
@@ -3693,7 +3828,7 @@ mod tests {
     #[pg_test]
     fn test_turtle_bulk_load() {
         let data = "@prefix ex: <https://example.org/> .\nex:x ex:rel ex:y .\n";
-        let count = crate::bulk_load::load_turtle(data);
+        let count = crate::bulk_load::load_turtle(data, false);
         assert_eq!(count, 1);
     }
 
@@ -3716,7 +3851,7 @@ mod tests {
     fn test_export_ntriples_roundtrip() {
         let nt =
             "<https://example.org/ex> <https://example.org/pred> <https://example.org/obj> .\n";
-        crate::bulk_load::load_ntriples(nt);
+        crate::bulk_load::load_ntriples(nt, false);
         let exported = crate::export::export_ntriples(None);
         assert!(exported.contains("<https://example.org/pred>"));
     }
@@ -3735,6 +3870,7 @@ mod tests {
     fn pg_test_sparql_select_one_triple() {
         crate::bulk_load::load_ntriples(
             "<https://example.org/a> <https://example.org/p> <https://example.org/b> .\n",
+            false,
         );
         let rows = crate::sparql::sparql("SELECT ?s ?p ?o WHERE { ?s ?p ?o }");
         assert_eq!(rows.len(), 1, "expected exactly one row");
@@ -3757,6 +3893,7 @@ mod tests {
     fn pg_test_sparql_ask_match() {
         crate::bulk_load::load_ntriples(
             "<https://example.org/x> <https://example.org/q> <https://example.org/y> .\n",
+            false,
         );
         let result =
             crate::sparql::sparql_ask("ASK { <https://example.org/x> <https://example.org/q> ?o }");
@@ -3783,6 +3920,7 @@ mod tests {
         crate::bulk_load::load_ntriples(
             "<https://example.org/s1> <https://example.org/p> <https://example.org/o1> .\n\
              <https://example.org/s2> <https://example.org/p> <https://example.org/o2> .\n",
+            false,
         );
         let rows =
             crate::sparql::sparql("SELECT ?s ?o WHERE { ?s <https://example.org/p> ?o } LIMIT 1");
@@ -3798,6 +3936,7 @@ mod tests {
             "<https://example.org/eve> <https://example.org/said> \
              << <https://example.org/alice> <https://example.org/knows> \
              <https://example.org/bob> >> .\n",
+            false,
         );
         assert_eq!(n, 1, "object-position quoted triple must load as 1 triple");
     }
@@ -3809,6 +3948,7 @@ mod tests {
             "<< <https://example.org/alice> <https://example.org/knows> \
              <https://example.org/bob> >> <https://example.org/certainty> \
              \"0.9\"^^<http://www.w3.org/2001/XMLSchema#decimal> .\n",
+            false,
         );
         assert_eq!(n, 1, "subject-position quoted triple must load as 1 triple");
     }
@@ -3851,6 +3991,7 @@ mod tests {
         crate::bulk_load::load_ntriples(
             "<https://example.org/s1> <https://example.org/same> <https://example.org/o> .\n\
              <https://example.org/s2> <https://example.org/same> <https://example.org/o> .\n",
+            false,
         );
         // Select just ?o — should be deduplicated to 1 row.
         let rows =
@@ -3864,6 +4005,7 @@ mod tests {
         crate::bulk_load::load_ntriples(
             "<https://example.org/s1> <https://example.org/p> <https://example.org/o1> .\n\
              <https://example.org/s2> <https://example.org/p> <https://example.org/o2> .\n",
+            false,
         );
         // Only one subject matches the binding of ?s to s1.
         let rows = crate::sparql::sparql(

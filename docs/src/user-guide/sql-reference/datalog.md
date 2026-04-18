@@ -139,6 +139,66 @@ Non-recursive strata use `INSERT … SELECT … ON CONFLICT DO NOTHING`. Recursi
 
 ---
 
+## infer_with_stats
+
+```sql
+pg_ripple.infer_with_stats(rule_set TEXT) → JSONB
+```
+
+Runs semi-naive fixpoint evaluation on the named rule set and returns a JSONB object with the number of derived triples and the number of fixpoint iterations taken (v0.24.0+).
+
+```sql
+SELECT pg_ripple.infer_with_stats('rdfs');
+-- Returns: {"derived": 42, "iterations": 3}
+```
+
+**Why use this instead of `infer()`?** For large ontologies, semi-naive evaluation is significantly faster because each fixpoint iteration only re-evaluates rules against *new* triples derived in the previous iteration (the ΔR delta), rather than rescanning the entire derived relation. The `iterations` counter tells you how many iterations the engine needed to reach the fixpoint — bounded by the longest derivation chain, not the size of the dataset.
+
+### Semi-naive evaluation mechanics
+
+The engine maintains, for each derived relation `R`, a *delta table* `ΔR` containing only the rows derived in the most recent iteration. Each iteration:
+
+1. For every rule in the current stratum, re-evaluate the rule body against `ΔR` (the delta of its input relations).
+2. Insert any new rows into `ΔR_new` with `ON CONFLICT DO NOTHING`.
+3. After all rules are processed: `ΔR ← ΔR_new`, then continue if `ΔR` is non-empty.
+
+This means iteration cost scales with the *frontier* of new derivations, not the total size of the relation. On RDFS closure over a dataset where the longest subClassOf chain has depth 5, the engine converges in 5 iterations regardless of how many triples there are.
+
+Stratified evaluation order is preserved: each stratum is fully converged before the next stratum begins. Semi-naive is applied *within* each stratum.
+
+### OWL RL coverage
+
+The built-in `owl-rl` rule set implements the following OWL 2 RL axioms:
+
+| OWL RL Rule | Axiom | Status |
+|---|---|---|
+| rdfs2 | domain inference | ✅ |
+| rdfs3 | range inference | ✅ |
+| rdfs4a/4b | Resource membership | ✅ |
+| rdfs5 | subPropertyOf transitivity | ✅ |
+| rdfs7 / prp-spo1 | subPropertyOf propagation | ✅ |
+| rdfs9 / cax-sco | subClassOf type propagation | ✅ |
+| rdfs11 | subClassOf transitivity | ✅ |
+| cls-avf | allValuesFrom chaining | ✅ |
+| prp-ifp | InverseFunctionalProperty | ✅ |
+| prp-sym | SymmetricProperty | ✅ |
+| prp-trp | TransitiveProperty | ✅ |
+| prp-inv1/2 | inverseOf | ✅ |
+| prp-fp | FunctionalProperty | ✅ |
+| cax-eqc1 | equivalentClass | ✅ |
+| prp-eqp1 | equivalentProperty | ✅ |
+| prp-chm | propertyChainAxiom (2-link) | ✅ |
+| cls-hv1 | hasValue restriction | ✅ |
+| cls-int1 | intersectionOf membership | ✅ |
+| eq-sym | sameAs symmetry | ✅ |
+| eq-trans | sameAs transitivity | ✅ |
+| eq-rep-c | sameAs class propagation | ✅ |
+| owl:onProperty + allValuesFrom | cls-avf full form | ✅ |
+
+Rules that require decidable enumeration (e.g. `owl:oneOf`, `cls-oo`) or second-order patterns are outside the OWL RL profile and are not implemented.
+
+---
+
 ## check_constraints
 
 ```sql

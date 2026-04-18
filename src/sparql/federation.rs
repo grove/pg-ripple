@@ -304,6 +304,17 @@ pub(crate) fn execute_remote_partial(
             Ok(result)
         }
         Err(_) => {
+            // H-13: if the response body is very large, skip partial recovery
+            // to avoid the rfind heuristic incorrectly truncating valid JSON.
+            let max_partial_bytes = crate::FEDERATION_PARTIAL_RECOVERY_MAX_BYTES.get() as usize;
+            if body.len() > max_partial_bytes {
+                pgrx::warning!(
+                    "SERVICE {url}: partial response too large for recovery ({} bytes > {} limit); returning empty",
+                    body.len(),
+                    max_partial_bytes
+                );
+                return Ok((vec![], vec![]));
+            }
             // Body may be truncated JSON.  Try to extract partial rows.
             let partial = parse_sparql_results_json_partial(&body, max_results as usize);
             let row_count = partial.1.len();

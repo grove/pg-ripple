@@ -1716,14 +1716,14 @@ W3C SHACL Core test suite pass rate increases to ≥ 98%. `shacl_core_completion
   - New pg_regress test `datalog_seminaive.sql` — run RDFS closure over a 10k-triple subgraph; verify correct closure count; measure and assert iteration count is bounded by the longest derivation chain length (not the full relation size)
   - `just bench-datalog` benchmark gate: semi-naive must be ≥ 5× faster than naive on the RDFS subgraph benchmark; CI fails on regression below 3×
 
-- [ ] **OWL RL rule set completion** (medium fix M-17)
+- [x] **OWL RL rule set completion** (medium fix M-17)
   - `cax-sco` full transitive closure: the existing partial rule handles one level of `rdfs:subClassOf`; add the transitive step so that `A subClassOf B, B subClassOf C → A subClassOf C` is derived for arbitrary chain length via the semi-naive mechanism above
   - `cls-avf`: `owl:allValuesFrom` chaining — `x ∈ C, C ≡ (∀p . D), y = p(x) → y ∈ D`; compile to a join across the `owl:allValuesFrom` VP table and the subject's type VP table
   - `prp-ifp`: inverse-functional property inference — `p is InverseFunctionalProperty, p(x, z) and p(y, z) → x = y`; compile to a self-join on `vp_{p_id}` grouping by `o`, emitting `sameAs` triples for any `s` values that collide
   - `prp-spo1`: sub-property chaining — `q subPropertyOf p, q(x, y) → p(x, y)` for derived property chains; relies on the semi-naive delta loop to propagate transitively
   - Update `src/datalog/builtins.rs` with the four new rule templates; document which OWL RL rules are now implemented vs. out of scope; update `reference/datalog-reference.md`
 
-- [ ] **Batch decode for SPARQL result sets** (architectural fix A-2, performance fix P-2)
+- [x] **Batch decode for SPARQL result sets** (architectural fix A-2, performance fix P-2)
   - Wire `batch_decode_ids()` through the SPARQL execution path in `src/sparql/sqlgen.rs`: after SPI returns a result set, collect all distinct `i64` IDs across all columns in a single pass, call `batch_decode_ids(&ids)` to resolve them in one SPI round-trip, then substitute into the result rows
   - The existing `batch_decode` infrastructure is already implemented for the bulk-load path; the change is routing the SPARQL result-building loop through the same function
   - Benchmark gate: `just bench-sparql-decode` asserts ≤ 2 SPI round-trips for a SELECT returning 1000 distinct terms; previously O(N) calls
@@ -1767,9 +1767,9 @@ W3C SHACL Core test suite pass rate increases to ≥ 98%. `shacl_core_completion
 
 > See [plans/documentation.md](plans/documentation.md) for details.
 
-- [ ] `reference/datalog-reference.md` updated — add semi-naive evaluation section explaining the ΔR mechanics, iteration bounds, and performance expectations; update OWL RL coverage table to mark `cax-sco` full, `cls-avf`, `prp-ifp`, `prp-spo1` as implemented
-- [ ] `reference/configuration.md` updated — document `pg_ripple.property_path_max_depth` and `pg_ripple.export_batch_size` GUCs with allowed ranges and tuning guidance
-- [ ] `user-guide/performance.md` updated — add "large result set decoding" section explaining the batch-decode change and expected latency improvement
+- [x] `reference/datalog-reference.md` updated — add semi-naive evaluation section explaining the ΔR mechanics, iteration bounds, and performance expectations; update OWL RL coverage table to mark `cax-sco` full, `cls-avf`, `prp-ifp`, `prp-spo1` as implemented
+- [x] `reference/configuration.md` updated — document `pg_ripple.property_path_max_depth` and `pg_ripple.export_batch_size` GUCs with allowed ranges and tuning guidance
+- [x] `user-guide/performance.md` updated — add "large result set decoding" section explaining the batch-decode change and expected latency improvement
 - [x] Release notes for v0.24.0 — highlight semi-naive evaluation with performance numbers from the benchmark; list completed OWL RL rules; note BRIN migration and streaming export
 
 ### Exit Criteria
@@ -1805,7 +1805,7 @@ W3C SHACL Core test suite pass rate increases to ≥ 98%. `shacl_core_completion
 
 - [ ] **Federation cache and partial-result correctness** (high fixes H-12, H-13)
   - H-12 (cache key upgrade): replace the XXH3-64 result cache key in `src/sparql/federation.rs` with the full XXH3-128 hash — the 64-bit birthday bound (~2.1 billion distinct cached queries before 50% collision probability) is thin for a long-running server; the full 128-bit hash makes collision negligible even at very high query volumes
-  - H-13 (partial-result parser): add a size gate to the federation partial-result recovery path — if the truncated response exceeds `pg_ripple.federation_partial_recovery_max_bytes` (INT GUC, default: `65536`), skip partial recovery and return zero rows with a `WARNING: federation partial response too large for recovery (N bytes)`; this prevents the `rfind("},")` heuristic from truncating a valid row whose literal value contains `"}"` followed by a comma in large responses
+  - [x] H-13 (partial-result parser): add a size gate to the federation partial-result recovery path — if the truncated response exceeds `pg_ripple.federation_partial_recovery_max_bytes` (INT GUC, default: `65536`), skip partial recovery and return zero rows with a `WARNING: federation partial response too large for recovery (N bytes)`; this prevents the `rfind("},")` heuristic from truncating a valid row whose literal value contains `"}"` followed by a comma in large responses
   - New pg_regress test `federation_cache.sql` — verify that two federation calls with identical query text to different endpoints are cached independently; verify that a simulated oversized partial response exceeding the byte gate produces zero rows with the expected WARNING
 
 - [ ] **Catalog OID stability** (architectural fix A-5)
@@ -1817,7 +1817,7 @@ W3C SHACL Core test suite pass rate increases to ≥ 98%. `shacl_core_completion
 - [ ] **Federation SSRF scheme validation** (security fix S-4)
   - `pg_ripple.register_endpoint(url TEXT)`: reject any URL whose scheme is not `http` or `https` at registration time with `ERRCODE_INVALID_PARAMETER_VALUE: "federation endpoint must use http or https scheme; got: <scheme>"` — belt-and-braces defence even though `ureq` would refuse non-HTTP at connection time
 
-- [ ] **Bulk load strict mode** (medium fix M-8)
+- [x] **Bulk load strict mode** (medium fix M-8)
   - Add `strict BOOLEAN DEFAULT false` parameter to `pg_ripple.load_turtle(data TEXT, strict BOOLEAN DEFAULT false)` and all other bulk-load entry points
   - When `strict = true`: any parse error or malformed triple aborts the entire `COPY`-equivalent batch with a structured error naming the line number and the offending triple; the transaction is rolled back to the savepoint established at the start of the load
   - When `strict = false` (current behaviour): malformed triples emit a `WARNING` and are skipped; partial loads are committed as before
@@ -1826,23 +1826,23 @@ W3C SHACL Core test suite pass rate increases to ≥ 98%. `shacl_core_completion
 - [ ] **Blank-node document scoping fix** (medium fix M-9)
   - Replace the `SystemTime::now().duration_since(UNIX_EPOCH).unwrap().subsec_nanos()` blank-node prefix in `src/bulk_load.rs` with `nextval('_pg_ripple.statement_id_seq')` — globally unique per load call, collision-free under any level of concurrency
 
-- [ ] **Merge worker cache isolation** (architectural fix A-3)
+- [x] **Merge worker cache isolation** (architectural fix A-3)
   - Register a transaction-boundary callback in the background merge worker (analogous to the xact-end callback added in v0.22.0 for the encode cache) that clears the worker-local encode/decode LRU cache at the end of every merge transaction — prevents the worker from using stale IDs if a future migration rewrites dictionary rows
 
-- [ ] **pg_trickle version-lock probe** (architectural fix A-4)
+- [x] **pg_trickle version-lock probe** (architectural fix A-4)
   - In `_PG_init`, if `pg_trickle` is available, execute `SELECT extversion FROM pg_extension WHERE extname = 'pg_trickle'` and compare against the compile-time `PG_TRICKLE_TESTED_VERSION` constant; emit a `WARNING` if the installed version is newer than tested: `"pg_ripple: pg_trickle version N.N.N is newer than tested version N.N.N; incremental views may behave unexpectedly"`
 
 - [ ] **Remaining low-priority fixes**
   - CDC payload documentation (L-2): add a `decode BOOLEAN DEFAULT false` parameter to `pg_ripple.cdc_changes()` that, when true, decodes dictionary IDs to N-Triples strings in the payload; document in `user-guide/cdc.md`
   - Dependency alignment (L-3/L-4): upgrade `ureq` from v2 to v3 in `pg_ripple_http/Cargo.toml`; update `AGENTS.md` to list `oxttl`/`oxrdf` as the canonical RDF-star parser (replacing `rio_turtle` for star triples); update `Cargo.toml` if not already present
   - GUC description strings (L-5): update every `GucBuilder::new()` `.set_description()` call in `src/lib.rs` to include the default value and valid range, e.g. `"Maximum property path recursion depth. Default: 64. Range: 1–100000."` — improves `SHOW ALL` and pg_admin discoverability
-  - Inline decoder defensive assert (L-7): add `debug_assert!(is_inline(id), "decode_inline called with non-inline id {id}")` at the top of `decode_inline()` in `src/dictionary/inline.rs`
+  - [x] Inline decoder defensive assert (L-7): add `debug_assert!(is_inline(id), "decode_inline called with non-inline id {id}")` at the top of `decode_inline()` in `src/dictionary/inline.rs`
   - Export literal round-trip (M-10): add a pg_regress test `export_roundtrip.sql` that inserts triples with `\uXXXX` Unicode escapes, non-ASCII literals, and control characters, then round-trips through Turtle export and import; verifies the decoded values match the originals
   - W3C conformance test classification (M-19): replace remaining `label_no_error` style assertions in the conformance test file with a formal skip-list `expected_skip` CTE; document each skip with a reason code (`UNIMPLEMENTED`, `KNOWN_LIMITATION`, or `SPEC_AMBIGUITY`); ensure the skip list shrinks to zero by v1.0.0
   - File-path bulk loader validation (S-8): all `load_*_file()` functions (`load_turtle_file`, `load_ntriples_file`, etc.) require superuser status but do not validate symlink following or path traversal beyond that gate; add a `realpath()` call in `src/bulk_load.rs` to resolve symlinks and verify the target is within `pg_read_server_files` accessible directories (matching PostgreSQL's `COPY FROM` file-access model); emit `ERRCODE_INSUFFICIENT_PRIVILEGE` if access is denied, preventing a superuser from accidentally loading files outside the protected path set
 
 - [ ] **Supplementary feature additions**
-  - `pg_ripple.canary()` health function: runs a battery of internal self-checks and returns a JSON object `{"merge_worker": "ok"|"stalled", "cache_hit_rate": 0.0–1.0, "catalog_consistent": true|false, "orphaned_rare_rows": N}` — suitable for ops dashboards, alerting pipelines, and CI smoke tests; `catalog_consistent` checks that VP table count in `pg_tables` matches the predicate catalog and that no `vp_rare` rows exist for promoted predicates
+  - [x] `pg_ripple.canary()` health function: runs a battery of internal self-checks and returns a JSON object `{"merge_worker": "ok"|"stalled", "cache_hit_rate": 0.0–1.0, "catalog_consistent": true|false, "orphaned_rare_rows": N}` — suitable for ops dashboards, alerting pipelines, and CI smoke tests; `catalog_consistent` checks that VP table count in `pg_tables` matches the predicate catalog and that no `vp_rare` rows exist for promoted predicates
   - OWL ontology import: `pg_ripple.load_owl_ontology(data TEXT, format TEXT DEFAULT 'turtle')` — parses a Turtle or OWL/XML ontology, loads it into the triple store, and calls `pg_ripple.run_rules()` to materialise RDFS/OWL RL inference; removes the need for users to write Datalog manually for standard DL-Lite ontologies
   - RDF Patch / LD Patch import: `pg_ripple.apply_patch(data TEXT, format TEXT DEFAULT 'rdf-patch')` — processes an RDF Patch (W3C Community Group) or LD Patch document, routing `Add`, `Delete`, and `UpdateList` operations to `insert_triple` / `delete_triple`; useful for incremental sync from external triple stores
   - Custom aggregate extension point: `pg_ripple.register_aggregate(name TEXT, init_sql TEXT, step_sql TEXT, final_sql TEXT)` registers a PostgreSQL aggregate accessible in SPARQL GROUP BY via the `<iri>()` extension aggregate syntax; documents how to pass encoded dictionary IDs through the accumulator state

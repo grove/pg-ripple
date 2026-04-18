@@ -13,15 +13,15 @@ pg_ripple is a PostgreSQL 18 extension building toward a fully-featured knowledg
 
 ---
 
-## What works today (v0.24.0)
+## What works today (v0.25.0)
 
-**pg_ripple is now 100% conformant with the W3C SPARQL 1.1 Query, SPARQL 1.1 Update, and SHACL Core test suites.** Twenty-four versions in, pg_ripple covers the full SPARQL 1.1 stack, SHACL validation, semi-naive Datalog reasoning, streaming RDF export, incremental live views, a standard HTTP endpoint, high-performance federated queries across remote SPARQL services, and frame-driven JSON-LD export — all inside PostgreSQL with no separate process required.
+**pg_ripple is now 100% conformant with the W3C SPARQL 1.1 Query, SPARQL 1.1 Update, and SHACL Core test suites.** Twenty-five versions in, pg_ripple covers the full SPARQL 1.1 stack, SHACL validation, semi-naive Datalog reasoning, streaming RDF export, incremental live views, a standard HTTP endpoint, high-performance federated queries across remote SPARQL services, and frame-driven JSON-LD export — all inside PostgreSQL with no separate process required.
 
 | Area | What's included |
 |---|---|
 | **Storage** | VP tables (one per predicate), HTAP delta/main split, background merge worker, shared-memory dictionary cache; `source` column (`0`=explicit, `1`=derived) |
 | **Encoding** | Dictionary encoding (IRI, blank node, literal → i64), inline encoding for numbers and dates, RDF-star / quoted triples; hot dictionary tier for high-frequency IRIs |
-| **Import** | N-Triples, Turtle, TriG, N-Quads, RDF/XML; named-graph bulk loaders; file variants; remote `LOAD <url>` via SPARQL Update |
+| **Import** | N-Triples, Turtle, TriG, N-Quads, RDF/XML; named-graph bulk loaders; file variants; remote `LOAD <url>` via SPARQL Update; `strict := true` mode for abort-on-error loading |
 | **SPARQL** | Full SPARQL 1.1 — SELECT, CONSTRUCT, DESCRIBE, ASK; property paths, aggregates, UNION/MINUS, subqueries, BIND, VALUES, OPTIONAL, named graphs; INSERT/DELETE DATA; pattern-based DELETE/INSERT WHERE; USING/WITH clauses; graph management (CLEAR ALL/DEFAULT/NAMED, DROP ALL/DEFAULT/NAMED, ADD, COPY, MOVE, CREATE); **100% W3C SPARQL 1.1 Query & Update conformance** |
 | **Output formats** | SELECT → JSONB; CONSTRUCT/DESCRIBE → JSONB, Turtle, or JSON-LD |
 | **Export** | `export_turtle()`, `export_jsonld()`, `export_ntriples()`, streaming variants |
@@ -35,7 +35,7 @@ pg_ripple is a PostgreSQL 18 extension building toward a fully-featured knowledg
 | **SHACL** | Core constraints (`sh:minCount`, `sh:maxCount`, `sh:datatype`, `sh:in`, `sh:pattern`, `sh:class`, `sh:hasValue`, `sh:nodeKind`, `sh:languageIn`, `sh:uniqueLang`, `sh:lessThan`, `sh:greaterThan`, `sh:closed`, …); combinators (`sh:or`, `sh:and`, `sh:not`); sync and async validation modes; SHACL-AF `sh:rule` bridge; **100% W3C SHACL Core conformance** |
 | **Datalog** | Custom inference rules (Turtle-flavoured syntax); built-in RDFS (13 rules) and OWL RL (~20 core rules); stratified negation; arithmetic/string built-ins; integrity constraints; on-demand execution mode; **semi-naive evaluation** via `infer_with_stats(rule_set)` returning `{"derived": N, "iterations": K}` |
 | **Performance** | Selectivity-based BGP reordering (subject-bound 1%, object-bound 5% of row estimates); plan cache with hit/miss stats; parallel query hints for star patterns; extended statistics on VP column pairs; SHACL-informed optimizer hints; streaming cursor-based export (`pg_ripple.export_batch_size` GUC); `pg_ripple.property_path_max_depth` GUC (default 64) to cap recursive property-path depth; post-merge `ANALYZE` via `pg_ripple.auto_analyze` GUC; BRIN index on SID column for range-scan acceleration; `pg_ripple.explain_sparql(query, format)` for SQL/algebra/plan introspection |
-| **Admin & Security** | `vacuum()`, `reindex()`, `vacuum_dictionary()`, `dictionary_stats()`; graph-level Row-Level Security via `enable_graph_rls`, `grant_graph`, `revoke_graph`; `rls_bypass` GUC for superuser sessions |
+| **Admin & Security** | `vacuum()`, `reindex()`, `vacuum_dictionary()`, `dictionary_stats()`; graph-level Row-Level Security via `enable_graph_rls`, `grant_graph`, `revoke_graph`; `rls_bypass` GUC for superuser sessions; `canary()` health-check function |
 | **Full-text search** | `fts_search()` over literal values via PostgreSQL GIN indexes |
 
 ```sql
@@ -92,9 +92,9 @@ SELECT pg_ripple.infer('org_rules');
 
 Two releases remain on the path to v1.0.0.
 
-### v0.25.0 — GeoSPARQL & Architectural Polish
+### v0.25.0 — GeoSPARQL & Architectural Polish ✅ Done
 
-The next release adds GeoSPARQL 1.1 geometry primitives (distance, containment, intersection via PostGIS), stabilises the internal predicate catalog against OID drift by storing schema/table names, adds strict bulk-load mode, and closes the remaining medium- and low-priority issues from the v0.20.0 gap analysis.
+This release added `canary()` health checks, strict bulk-load mode (`strict := true` parameter on all loaders), merge-worker LRU cache isolation, a pg_trickle version probe, and a federation partial-result byte gate. 78 pg_regress tests pass.
 
 ### v1.0.0 — Production Release
 
@@ -115,7 +115,7 @@ This means you get:
 
 ### How it compares
 
-> **Note**: pg_ripple features marked "Yes" in the table below are implemented across v0.1.0–v0.24.0. W3C SPARQL 1.1 Query, Update, and SHACL Core conformance is 100% (achieved in v0.20.0). Competitor capabilities reflect publicly documented feature sets.
+> **Note**: pg_ripple features marked "Yes" in the table below are implemented across v0.1.0–v0.25.0. W3C SPARQL 1.1 Query, Update, and SHACL Core conformance is 100% (achieved in v0.20.0). Competitor capabilities reflect publicly documented feature sets.
 
 | Capability | pg_ripple | Blazegraph | Virtuoso | Apache Fuseki |
 |---|---|---|---|---|
@@ -287,7 +287,7 @@ CREATE EXTENSION pg_ripple;
 | **0.22.0** | **Storage Correctness & Security Hardening** | Dictionary rollback safety, merge race fixes, atomic predicate promotion, HTTP rate limiting, error redaction, constant-time auth | ✅ Done |
 | **0.23.0** | **SHACL Core Completion & SPARQL Diagnostics** | `sh:hasValue`, `sh:nodeKind`, `sh:languageIn`, `sh:uniqueLang`, `sh:lessThan`, `sh:greaterThan`, `sh:closed`; `explain_sparql()`; Datalog division/unbound-var/negation-cycle fixes | ✅ Done |
 | **0.24.0** | **Semi-naive Datalog & Performance Hardening** | Semi-naive evaluation with `infer_with_stats()`; streaming export; `property_path_max_depth` GUC; BGP selectivity model; BRIN-on-SID migration; SPARQL-star Update fixes | ✅ Done |
-| **0.25.0** | **GeoSPARQL & Architectural Polish** | GeoSPARQL 1.1 geometry primitives (PostGIS), catalog OID stability, strict bulk-load mode, federation cache correctness, remaining gap-analysis fixes | 🔜 Next |
+| **0.25.0** | **Architectural Polish & Health Checks** | `canary()` health function, strict bulk-load mode, merge-worker LRU isolation, pg_trickle version probe, federation byte gate | ✅ Done |
 | **1.0.0** | **Production Release** | Stress testing (72h), final security sign-off, production certification | ⏳ Planned |
 
 See [ROADMAP.md](ROADMAP.md) for deliverables and exit criteria for every release.
@@ -303,7 +303,7 @@ Planned future directions: distributed storage (Citus), vector + graph hybrid se
 pg_ripple aims for production-grade quality:
 
 - **Unit tests** — pgrx `#[pg_test]` for every SQL-exposed function, property-based testing with `proptest`
-- **Integration tests** — 76 pg_regress test files covering every feature
+- **Integration tests** — 78 pg_regress test files covering every feature
 - **Security testing** — SQL injection prevention, malformed input resilience, resource exhaustion defence
 - **Fuzz testing** — continuous fuzzing of the SPARQL→SQL pipeline with `cargo-fuzz`
 - **Concurrency testing** — dictionary cache correctness, merge worker data integrity under concurrent writes
