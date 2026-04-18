@@ -1903,9 +1903,7 @@ fn get_all_predicate_iris_for_node(focus: i64, graph_id: i64) -> Vec<String> {
         .unwrap_or(None)
         .unwrap_or(false);
 
-        if has_subject
-            && let Some(iri) = crate::dictionary::decode(pred_id)
-        {
+        if has_subject && let Some(iri) = crate::dictionary::decode(pred_id) {
             predicates.push(iri);
         }
     }
