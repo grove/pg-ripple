@@ -19,7 +19,7 @@
 //! # Result caching (v0.19.0)
 //!
 //! When `pg_ripple.federation_cache_ttl > 0`, remote results are stored in
-//! `_pg_ripple.federation_cache` keyed on `(url, XXH3-64(sparql_text))`.
+//! `_pg_ripple.federation_cache` keyed on `(url, XXH3-128(sparql_text))`.
 //! Cache hits skip the HTTP call entirely.  Expired rows are cleaned up by
 //! the merge background worker.
 //!
@@ -148,16 +148,17 @@ fn cache_lookup(url: &str, sparql_text: &str) -> Option<String> {
     if ttl == 0 {
         return None;
     }
-    // XXH3-64 of the SPARQL text as a fingerprint key.
+    // XXH3-128 of the SPARQL text as a 32-char hex fingerprint key.
+    // Using 128-bit avoids birthday-bound collisions even at very high query volumes.
     let hash = {
-        use xxhash_rust::xxh3::xxh3_64;
-        xxh3_64(sparql_text.as_bytes()) as i64
+        use xxhash_rust::xxh3::xxh3_128;
+        format!("{:032x}", xxh3_128(sparql_text.as_bytes()))
     };
     Spi::get_one_with_args::<String>(
         "SELECT result_jsonb::text
          FROM _pg_ripple.federation_cache
          WHERE url = $1 AND query_hash = $2 AND expires_at > now()",
-        &[DatumWithOid::from(url), DatumWithOid::from(hash)],
+        &[DatumWithOid::from(url), DatumWithOid::from(hash.as_str())],
     )
     .ok()
     .flatten()
@@ -170,8 +171,8 @@ fn cache_store(url: &str, sparql_text: &str, body: &str) {
         return;
     }
     let hash = {
-        use xxhash_rust::xxh3::xxh3_64;
-        xxh3_64(sparql_text.as_bytes()) as i64
+        use xxhash_rust::xxh3::xxh3_128;
+        format!("{:032x}", xxh3_128(sparql_text.as_bytes()))
     };
     // Validate that the body is valid JSON before storing.
     if serde_json::from_str::<Json>(body).is_err() {
@@ -187,7 +188,7 @@ fn cache_store(url: &str, sparql_text: &str, body: &str) {
                expires_at   = EXCLUDED.expires_at",
         &[
             DatumWithOid::from(url),
-            DatumWithOid::from(hash),
+            DatumWithOid::from(hash.as_str()),
             DatumWithOid::from(body),
             DatumWithOid::from(ttl_str.as_str()),
         ],

@@ -13,26 +13,38 @@ Points at the next milestone: v1.0.0 — Production Release.
 
 ---
 
-## [0.25.0] — 2026-04-18 — Architectural Polish & Health Checks
+## [0.25.0] — 2026-04-18 — GeoSPARQL & Architectural Polish
 
-**pg_ripple adds a `canary()` health-check function, strict bulk-load mode, merge-worker LRU cache isolation, a pg_trickle version probe, and a federation partial-result byte gate.** All 78 pg_regress tests pass (2 new tests for v0.25.0 features).
+**pg_ripple adds GeoSPARQL 1.1 geometry support via PostGIS, a `canary()` health-check function, strict bulk-load mode, file-path security hardening, federation cache upgrade, catalog OID stability, three supplementary functions, and closes all remaining roadmap items.** All 82 pg_regress tests pass (6 new tests for v0.25.0 features).
 
 ### What you can do
 
+- **Query geographic data with GeoSPARQL** — use `geo:sfIntersects`, `geo:sfContains`, `geo:sfWithin` and 9 other topological predicates in SPARQL FILTER clauses; compute `geof:distance`, `geof:area`, `geof:boundary`; requires PostGIS (graceful no-op when absent)
 - **Check system health** — `pg_ripple.canary()` returns `{"merge_worker": "ok"|"stalled", "cache_hit_rate": 0.0–1.0, "catalog_consistent": true|false, "orphaned_rare_rows": N}` for quick liveness checks from monitoring scripts
-- **Strict bulk loading** — pass `strict := true` to any loader (e.g. `load_ntriples(data, strict := true)`) to abort and roll back the entire transaction on any parse error instead of emitting a WARNING and continuing
-- **pg_trickle version probe** — a WARNING is emitted at `CREATE EXTENSION` time if the installed pg_trickle version is newer than the tested version (v0.3.0), helping catch unexpected API drift
-- **Bounded partial federation recovery** — oversized partial responses from remote SPARQL endpoints (larger than `pg_ripple.federation_partial_recovery_max_bytes`, default 64 KB) return an empty result with a WARNING instead of attempting a heuristic parse
+- **Strict bulk loading** — pass `strict := true` to any loader to abort and roll back on any parse error instead of emitting a WARNING and continuing
+- **Apply RDF patches** — `pg_ripple.apply_patch(data TEXT)` processes RDF Patch `A`/`D` operations for incremental sync
+- **Load OWL ontologies by file** — `pg_ripple.load_owl_ontology(path TEXT)` auto-detects format by extension (`.ttl`, `.nt`, `.xml`, `.rdf`, `.owl`)
+- **Register custom SPARQL aggregates** — `pg_ripple.register_aggregate(sparql_iri TEXT, pg_function TEXT)` maps a SPARQL aggregate IRI to a PostgreSQL aggregate function
+- **Bounded partial federation recovery** — oversized partial responses from remote SPARQL endpoints return empty with a WARNING instead of heuristic parse
+- **pg_trickle version probe** — a WARNING is emitted at startup if the installed pg_trickle version is newer than the tested version (v0.3.0)
 
 ### What changes
 
-- **`canary()` health check** (`src/lib.rs`): new `#[pg_extern] fn canary() -> JsonB` — inspects the merge-worker PID from shared memory, reads cache hit statistics, validates predicate catalog consistency, and counts orphaned rows in `vp_rare`
-- **Bulk load strict mode** (`src/bulk_load.rs`, `src/lib.rs`): `strict: bool` parameter (default `false`) added to all `load_*` pg_extern wrappers; when `true`, parse errors call `pgrx::error!()` to abort the transaction rather than `pgrx::warning!()` to skip the bad triple
-- **Merge worker LRU cache isolation** (`src/worker.rs`): `crate::dictionary::clear_caches()` is called at the end of each merge cycle, evicting all per-backend dictionary caches so the merge worker never serves stale data to subsequent transactions
-- **pg_trickle version probe** (`src/lib.rs`): `has_pg_trickle()` now performs an SPI query for `extversion` in `pg_extension` and emits a WARNING if the installed version exceeds `PG_TRICKLE_TESTED_VERSION = "0.3.0"`
-- **Federation byte gate** (`src/sparql/federation.rs`): new `pg_ripple.federation_partial_recovery_max_bytes` GUC (i32, default 65 536, range 1 024–104 857 600); in `execute_remote_partial`, the `Err(_)` recovery branch checks `body.len()` against the limit and returns empty with a WARNING if exceeded
-- **Inline decoder defensive assert** (`src/dictionary/inline.rs`): `debug_assert!(is_inline(id))` added at the top of `format_inline()` to catch incorrect call sites in debug builds
-- **New pg_regress tests**: `bulk_load_strict.sql`, `canary.sql`
+- **GeoSPARQL (F-5)** (`src/sparql/expr.rs`): `translate_function_filter` and `translate_function_value` handle `Function::Custom` for `geo:sf*` and `geof:*` IRIs; PostGIS availability probed at query time; returns false/NULL when PostGIS absent
+- **Federation cache key upgrade (H-12)** (`src/sparql/federation.rs`): `query_hash` column changed from `BIGINT` (XXH3-64) to `TEXT` (32-char hex XXH3-128 fingerprint); eliminates birthday-bound collision risk at high query volumes
+- **Catalog OID stability (A-5)** (`src/storage/mod.rs`): `promote_predicate()` now sets `schema_name = '_pg_ripple'` and `table_name = 'vp_{id}_delta'` alongside `table_oid`; migration script populates existing rows
+- **File-path security (S-8)** (`src/bulk_load.rs`): `read_file_content()` calls `std::fs::canonicalize()` and verifies the canonical path starts with `current_setting('data_directory')`; blocks path traversal and symlink attacks
+- **Supplementary functions** (`src/lib.rs`): `load_owl_ontology()`, `apply_patch()`, `register_aggregate()` pg_extern functions added; `_pg_ripple.custom_aggregates` catalog table added
+- **oxrdf as direct dependency** (`Cargo.toml`): `oxrdf = "0.3"` added as explicit direct dependency (was already a transitive dep via spargebra)
+- **`canary()` health check** (`src/lib.rs`): new `#[pg_extern] fn canary() -> JsonB`
+- **Bulk load strict mode** (`src/bulk_load.rs`, `src/lib.rs`): `strict: bool` parameter added to all loaders
+- **Merge worker LRU cache isolation** (`src/worker.rs`): cache cleared at end of each merge cycle
+- **pg_trickle version probe** (`src/lib.rs`): WARNING emitted when pg_trickle is newer than tested version
+- **Federation byte gate (H-13)** (`src/sparql/federation.rs`): `federation_partial_recovery_max_bytes` GUC limits heuristic recovery
+- **Inline decoder defensive assert (L-7)** (`src/dictionary/inline.rs`): `debug_assert!(is_inline(id))` at top of `format_inline()`
+- **Migration script** (`sql/pg_ripple--0.24.0--0.25.0.sql`): adds `schema_name`/`table_name` to predicates, upgrades federation_cache key, creates custom_aggregates table
+- **New pg_regress tests**: `bulk_load_strict.sql`, `canary.sql`, `geosparql.sql`, `federation_cache.sql`, `export_roundtrip.sql`, `supplementary_features.sql`
+- **Documentation**: new `reference/geosparql.md`, `user-guide/geospatial.md`; updated `reference/security.md`, `user-guide/sql-reference/bulk-load.md`, `user-guide/configuration.md`
 
 ---
 

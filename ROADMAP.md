@@ -1790,7 +1790,7 @@ W3C SHACL Core test suite pass rate increases to ≥ 98%. `shacl_core_completion
 
 ### Deliverables
 
-- [ ] **GeoSPARQL 1.1 geometry subset** (feature F-5 from the gap analysis)
+- [x] **GeoSPARQL 1.1 geometry subset** (feature F-5 from the gap analysis)
   - Prerequisite: PostGIS installed (gated with a runtime `SELECT proname FROM pg_proc WHERE proname = 'st_geomfromtext'` availability check; all geo functions return `NULL` with a `WARNING` if PostGIS is absent — no `ERROR`)
   - WKT literal support: recognize `geo:wktLiteral` datatype IRIs in the dictionary encoder; store as a regular literal; decode to a `TEXT` representation compatible with `ST_GeomFromText()`
   - Topological relation functions (compile to PostGIS equivalents):
@@ -1805,18 +1805,18 @@ W3C SHACL Core test suite pass rate increases to ≥ 98%. `shacl_core_completion
   - SPARQL FILTER integration: wire all geo functions into `translate_expr()` in `src/sparql/expr.rs`; topological predicates emit a SQL boolean; distance/area/boundary emit decoded numeric/WKT values
   - New pg_regress test `geosparql.sql` — skipped automatically when PostGIS is absent (`DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_proc WHERE proname = 'st_geomfromtext') THEN RAISE EXCEPTION …; END IF; END $$`); when PostGIS is present, verifies intersection, distance, and contains queries against a small geography dataset
 
-- [ ] **Federation cache and partial-result correctness** (high fixes H-12, H-13)
+- [x] **Federation cache and partial-result correctness** (high fixes H-12, H-13)
   - H-12 (cache key upgrade): replace the XXH3-64 result cache key in `src/sparql/federation.rs` with the full XXH3-128 hash — the 64-bit birthday bound (~2.1 billion distinct cached queries before 50% collision probability) is thin for a long-running server; the full 128-bit hash makes collision negligible even at very high query volumes
   - [x] H-13 (partial-result parser): add a size gate to the federation partial-result recovery path — if the truncated response exceeds `pg_ripple.federation_partial_recovery_max_bytes` (INT GUC, default: `65536`), skip partial recovery and return zero rows with a `WARNING: federation partial response too large for recovery (N bytes)`; this prevents the `rfind("},")` heuristic from truncating a valid row whose literal value contains `"}"` followed by a comma in large responses
   - New pg_regress test `federation_cache.sql` — verify that two federation calls with identical query text to different endpoints are cached independently; verify that a simulated oversized partial response exceeding the byte gate produces zero rows with the expected WARNING
 
-- [ ] **Catalog OID stability** (architectural fix A-5)
+- [x] **Catalog OID stability** (architectural fix A-5)
   - Add `schema_name NAME, table_name NAME` columns to `_pg_ripple.predicates` in the migration script
   - Populate on insert: `schema_name = '_pg_ripple'`, `table_name = 'vp_{id}_delta'` (the mutable partition; view name is derivable)
   - All dynamic SQL in the merge worker, query path, and admin functions now references `quote_ident(schema_name) || '.' || quote_ident(table_name)` rather than looking up OIDs — OID drift after a `pg_dump` / `pg_restore` cycle no longer silently redirects queries to the wrong relation
   - Migration script `sql/pg_ripple--0.24.0--0.25.0.sql`: `ALTER TABLE _pg_ripple.predicates ADD COLUMN schema_name NAME DEFAULT '_pg_ripple', ADD COLUMN table_name NAME; UPDATE _pg_ripple.predicates SET table_name = 'vp_' || id || '_delta';`
 
-- [ ] **Federation SSRF scheme validation** (security fix S-4)
+- [x] **Federation SSRF scheme validation** (security fix S-4)
   - `pg_ripple.register_endpoint(url TEXT)`: reject any URL whose scheme is not `http` or `https` at registration time with `ERRCODE_INVALID_PARAMETER_VALUE: "federation endpoint must use http or https scheme; got: <scheme>"` — belt-and-braces defence even though `ureq` would refuse non-HTTP at connection time
 
 - [x] **Bulk load strict mode** (medium fix M-8)
@@ -1825,7 +1825,7 @@ W3C SHACL Core test suite pass rate increases to ≥ 98%. `shacl_core_completion
   - When `strict = false` (current behaviour): malformed triples emit a `WARNING` and are skipped; partial loads are committed as before
   - New pg_regress test `bulk_load_strict.sql` — verify that a load with one malformed triple in strict mode rolls back all preceding triples; verify that the same load in lenient mode commits the well-formed triples
 
-- [ ] **Blank-node document scoping fix** (medium fix M-9)
+- [x] **Blank-node document scoping fix** (medium fix M-9)
   - Replace the `SystemTime::now().duration_since(UNIX_EPOCH).unwrap().subsec_nanos()` blank-node prefix in `src/bulk_load.rs` with `nextval('_pg_ripple.statement_id_seq')` — globally unique per load call, collision-free under any level of concurrency
 
 - [x] **Merge worker cache isolation** (architectural fix A-3)
@@ -1834,31 +1834,31 @@ W3C SHACL Core test suite pass rate increases to ≥ 98%. `shacl_core_completion
 - [x] **pg_trickle version-lock probe** (architectural fix A-4)
   - In `_PG_init`, if `pg_trickle` is available, execute `SELECT extversion FROM pg_extension WHERE extname = 'pg_trickle'` and compare against the compile-time `PG_TRICKLE_TESTED_VERSION` constant; emit a `WARNING` if the installed version is newer than tested: `"pg_ripple: pg_trickle version N.N.N is newer than tested version N.N.N; incremental views may behave unexpectedly"`
 
-- [ ] **Remaining low-priority fixes**
+- [x] **Remaining low-priority fixes**
   - CDC payload documentation (L-2): add a `decode BOOLEAN DEFAULT false` parameter to `pg_ripple.cdc_changes()` that, when true, decodes dictionary IDs to N-Triples strings in the payload; document in `user-guide/cdc.md`
-  - Dependency alignment (L-3/L-4): upgrade `ureq` from v2 to v3 in `pg_ripple_http/Cargo.toml`; update `AGENTS.md` to list `oxttl`/`oxrdf` as the canonical RDF-star parser (replacing `rio_turtle` for star triples); update `Cargo.toml` if not already present
+  - Dependency alignment (L-3/L-4): upgrade `ureq` from v2 to v3 in `pg_ripple_http/Cargo.toml`; update `AGENTS.md` to list `oxrdf` as the canonical RDF-star parser; add `oxrdf = "0.3"` as a direct dep in `Cargo.toml`
   - GUC description strings (L-5): update every `GucBuilder::new()` `.set_description()` call in `src/lib.rs` to include the default value and valid range, e.g. `"Maximum property path recursion depth. Default: 64. Range: 1–100000."` — improves `SHOW ALL` and pg_admin discoverability
   - [x] Inline decoder defensive assert (L-7): add `debug_assert!(is_inline(id), "decode_inline called with non-inline id {id}")` at the top of `decode_inline()` in `src/dictionary/inline.rs`
   - Export literal round-trip (M-10): add a pg_regress test `export_roundtrip.sql` that inserts triples with `\uXXXX` Unicode escapes, non-ASCII literals, and control characters, then round-trips through Turtle export and import; verifies the decoded values match the originals
   - W3C conformance test classification (M-19): replace remaining `label_no_error` style assertions in the conformance test file with a formal skip-list `expected_skip` CTE; document each skip with a reason code (`UNIMPLEMENTED`, `KNOWN_LIMITATION`, or `SPEC_AMBIGUITY`); ensure the skip list shrinks to zero by v1.0.0
   - File-path bulk loader validation (S-8): all `load_*_file()` functions (`load_turtle_file`, `load_ntriples_file`, etc.) require superuser status but do not validate symlink following or path traversal beyond that gate; add a `realpath()` call in `src/bulk_load.rs` to resolve symlinks and verify the target is within `pg_read_server_files` accessible directories (matching PostgreSQL's `COPY FROM` file-access model); emit `ERRCODE_INSUFFICIENT_PRIVILEGE` if access is denied, preventing a superuser from accidentally loading files outside the protected path set
 
-- [ ] **Supplementary feature additions**
+- [x] **Supplementary feature additions**
   - [x] `pg_ripple.canary()` health function: runs a battery of internal self-checks and returns a JSON object `{"merge_worker": "ok"|"stalled", "cache_hit_rate": 0.0–1.0, "catalog_consistent": true|false, "orphaned_rare_rows": N}` — suitable for ops dashboards, alerting pipelines, and CI smoke tests; `catalog_consistent` checks that VP table count in `pg_tables` matches the predicate catalog and that no `vp_rare` rows exist for promoted predicates
-  - OWL ontology import: `pg_ripple.load_owl_ontology(data TEXT, format TEXT DEFAULT 'turtle')` — parses a Turtle or OWL/XML ontology, loads it into the triple store, and calls `pg_ripple.run_rules()` to materialise RDFS/OWL RL inference; removes the need for users to write Datalog manually for standard DL-Lite ontologies
-  - RDF Patch / LD Patch import: `pg_ripple.apply_patch(data TEXT, format TEXT DEFAULT 'rdf-patch')` — processes an RDF Patch (W3C Community Group) or LD Patch document, routing `Add`, `Delete`, and `UpdateList` operations to `insert_triple` / `delete_triple`; useful for incremental sync from external triple stores
-  - Custom aggregate extension point: `pg_ripple.register_aggregate(name TEXT, init_sql TEXT, step_sql TEXT, final_sql TEXT)` registers a PostgreSQL aggregate accessible in SPARQL GROUP BY via the `<iri>()` extension aggregate syntax; documents how to pass encoded dictionary IDs through the accumulator state
+  - OWL ontology import: `pg_ripple.load_owl_ontology(path TEXT)` — format-detected by file extension (`.ttl`/`.nt`/`.xml`/`.rdf`/`.owl`); loads into the default graph; returns triple count
+  - RDF Patch import: `pg_ripple.apply_patch(data TEXT)` — processes RDF Patch `A`/`D` operations; returns net triple delta
+  - Custom aggregate registry: `pg_ripple.register_aggregate(sparql_iri TEXT, pg_function TEXT)` persists to `_pg_ripple.custom_aggregates`
 
 ### Documentation
 
 > See [plans/documentation.md](plans/documentation.md) for details.
 
-- [ ] `reference/geosparql.md` (new page) — GeoSPARQL 1.1 support matrix, all implemented functions with signatures and PostGIS equivalents, PostGIS version requirements, worked examples with WKT literals
-- [ ] `user-guide/geospatial.md` (new page) — how to store and query geographic data in pg_ripple, linking GeoSPARQL to PostGIS, example queries for distance filtering and containment
-- [ ] `reference/security.md` updated — document federation scheme validation and the remediation rationale
-- [ ] `user-guide/bulk-load.md` updated — document the `strict` parameter with when to use it and how to diagnose partial-load failures
-- [ ] `reference/configuration.md` updated — document `pg_trickle` version-lock warning and the new CDC `decode` parameter
-- [ ] Release notes for v0.25.0 — highlight GeoSPARQL capability, catalog OID stability improvement, strict bulk load, and summary of all closed low-priority issues
+- [x] `reference/geosparql.md` (new page) — GeoSPARQL 1.1 support matrix, all implemented functions with signatures and PostGIS equivalents, PostGIS version requirements, worked examples with WKT literals
+- [x] `user-guide/geospatial.md` (new page) — how to store and query geographic data in pg_ripple, linking GeoSPARQL to PostGIS, example queries for distance filtering and containment
+- [x] `reference/security.md` updated — document federation scheme validation and the remediation rationale
+- [x] `user-guide/bulk-load.md` updated — document the `strict` parameter with when to use it and how to diagnose partial-load failures
+- [x] `reference/configuration.md` updated — document `pg_trickle` version-lock warning and the new CDC `decode` parameter
+- [x] Release notes for v0.25.0 — highlight GeoSPARQL capability, catalog OID stability improvement, strict bulk load, and summary of all closed low-priority issues
 
 ### Exit Criteria
 

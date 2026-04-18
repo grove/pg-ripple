@@ -13,7 +13,7 @@
 | PostgreSQL target | 18.x only |
 | SPARQL parser | `spargebra` |
 | SPARQL optimizer | `sparopt` (first-pass algebra optimizer) |
-| RDF parsers | `rio_turtle`, `rio_xml`; `oxttl` / `oxrdf` added at v0.4.0 for RDF-star |
+| RDF parsers | `rio_turtle`, `rio_xml`; `oxrdf` (v0.3, direct dep since v0.25.0) for RDF-star graph model |
 | Hashing | `xxhash-rust` (XXH3-128) |
 | Serialization | `serde` + `serde_json` |
 | Tests | `#[pg_test]`, `cargo pgrx regress`, `pgbench` via `pgrx-bench` |

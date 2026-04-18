@@ -75,7 +75,9 @@ CREATE TABLE IF NOT EXISTS _pg_ripple.predicates (
     id           BIGINT  NOT NULL PRIMARY KEY,
     table_oid    OID,
     triple_count BIGINT  NOT NULL DEFAULT 0,
-    htap         BOOLEAN NOT NULL DEFAULT false
+    htap         BOOLEAN NOT NULL DEFAULT false,
+    schema_name  TEXT,
+    table_name   TEXT
 );
 
 -- Rare-predicate consolidation table
@@ -323,12 +325,13 @@ CREATE INDEX IF NOT EXISTS idx_federation_health_url_time
 // v0.19.0: federation result cache table.
 pgrx::extension_sql!(
     r#"
--- Federation result cache (v0.19.0)
+-- Federation result cache (v0.19.0, updated v0.25.0)
 -- Caches SPARQL SELECT results from remote endpoints keyed by (url, query_hash).
+-- query_hash is a 32-char hex XXH3-128 fingerprint of the SPARQL text.
 -- TTL-based expiry; expired rows are cleaned up by the merge background worker.
 CREATE TABLE IF NOT EXISTS _pg_ripple.federation_cache (
     url         TEXT        NOT NULL,
-    query_hash  BIGINT      NOT NULL,
+    query_hash  TEXT        NOT NULL,
     result_jsonb JSONB      NOT NULL,
     cached_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
     expires_at  TIMESTAMPTZ NOT NULL,
@@ -339,6 +342,20 @@ CREATE INDEX IF NOT EXISTS idx_federation_cache_expires
 "#,
     name = "v019_federation_cache_setup",
     requires = ["federation_schema_setup"]
+);
+
+// v0.25.0: Custom aggregate registry.
+pgrx::extension_sql!(
+    r#"
+-- Custom aggregate catalog (v0.25.0)
+-- Maps SPARQL custom aggregate IRIs to PostgreSQL aggregate/function names.
+CREATE TABLE IF NOT EXISTS _pg_ripple.custom_aggregates (
+    sparql_iri  TEXT NOT NULL PRIMARY KEY,
+    pg_function TEXT NOT NULL
+);
+"#,
+    name = "v025_custom_aggregates",
+    requires = ["v019_federation_cache_setup"]
 );
 
 // v0.11.0: SPARQL views, Datalog views, and ExtVP catalog tables.
@@ -709,6 +726,100 @@ pub static EXPORT_BATCH_SIZE: pgrx::GucSetting<i32> = pgrx::GucSetting::<i32>::n
 
 /// The pg_trickle version that pg_ripple was tested against (A-4, v0.25.0).
 const PG_TRICKLE_TESTED_VERSION: &str = "0.3.0";
+
+// ─── RDF Patch N-Triples term parser (v0.25.0) ───────────────────────────────
+
+/// Parse an N-Triples triple statement string into (s, p, o) term strings.
+///
+/// Returns `None` when the input cannot be parsed as a valid N-Triples statement.
+/// Supports IRIs (`<…>`), blank nodes (`_:…`), plain literals (`"…"`), and
+/// datatyped/lang-tagged literals.
+fn parse_nt_triple(line: &str) -> Option<(String, String, String)> {
+    let line = line.trim().trim_end_matches('.').trim();
+    let mut terms: Vec<String> = Vec::with_capacity(3);
+    let mut chars = line.chars().peekable();
+    while let Some(&ch) = chars.peek() {
+        match ch {
+            ' ' | '\t' => {
+                chars.next();
+            }
+            '<' => {
+                chars.next();
+                let mut buf = String::from("<");
+                for c in chars.by_ref() {
+                    buf.push(c);
+                    if c == '>' {
+                        break;
+                    }
+                }
+                terms.push(buf);
+            }
+            '"' => {
+                chars.next();
+                let mut buf = String::from("\"");
+                let mut escaped = false;
+                for c in chars.by_ref() {
+                    buf.push(c);
+                    if escaped {
+                        escaped = false;
+                        continue;
+                    }
+                    if c == '\\' {
+                        escaped = true;
+                        continue;
+                    }
+                    if c == '"' {
+                        break;
+                    }
+                }
+                // Consume optional ^^<datatype> or @lang suffix.
+                while let Some(&p) = chars.peek() {
+                    if p == '^' || p == '@' {
+                        buf.push(p);
+                        chars.next();
+                    } else if p == '<' {
+                        chars.next();
+                        buf.push('<');
+                        for c in chars.by_ref() {
+                            buf.push(c);
+                            if c == '>' {
+                                break;
+                            }
+                        }
+                        break;
+                    } else if p.is_alphanumeric() || p == '-' || p == '_' {
+                        buf.push(p);
+                        chars.next();
+                    } else {
+                        break;
+                    }
+                }
+                terms.push(buf);
+            }
+            '_' => {
+                let mut buf = String::new();
+                for c in chars.by_ref() {
+                    if c == ' ' || c == '\t' {
+                        break;
+                    }
+                    buf.push(c);
+                }
+                terms.push(buf);
+            }
+            _ => {
+                chars.next();
+            }
+        }
+        if terms.len() == 3 {
+            break;
+        }
+    }
+    if terms.len() == 3 {
+        Some((terms.remove(0), terms.remove(0), terms.remove(0)))
+    } else {
+        None
+    }
+}
 
 /// Returns `true` when the pg_trickle extension is installed in the current database.
 ///
@@ -3534,6 +3645,90 @@ mod pg_ripple {
     #[pg_extern]
     fn load_rdfxml_file(path: &str, strict: pgrx::default!(bool, false)) -> i64 {
         crate::bulk_load::load_rdfxml_file(path, strict)
+    }
+
+    // ── v0.25.0 supplementary features ────────────────────────────────────────
+
+    /// Load an OWL ontology file (Turtle / N-Triples / RDF/XML) from the server
+    /// file system and insert all triples into the default graph.
+    ///
+    /// The format is detected from the file extension: `.ttl` → Turtle,
+    /// `.nt` → N-Triples, `.xml` / `.rdf` / `.owl` → RDF/XML.
+    /// Unrecognised extensions default to Turtle.
+    ///
+    /// Returns the number of triples loaded.
+    #[pg_extern]
+    fn load_owl_ontology(path: &str) -> i64 {
+        let ext = std::path::Path::new(path)
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("")
+            .to_lowercase();
+        match ext.as_str() {
+            "nt" => crate::bulk_load::load_ntriples_file(path, false),
+            "xml" | "rdf" | "owl" => crate::bulk_load::load_rdfxml_file(path, false),
+            _ => crate::bulk_load::load_turtle_file(path, false),
+        }
+    }
+
+    /// Apply an RDF Patch (W3C community standard) string to the store.
+    ///
+    /// Supported patch operations (one per line):
+    /// - `A <s> <p> <o> .`  — add triple
+    /// - `D <s> <p> <o> .`  — delete triple
+    ///
+    /// Lines beginning with `#`, `TX`, `TC`, `H` are treated as comments /
+    /// transaction markers and silently ignored.  Returns the net change in
+    /// triple count (additions minus deletions).
+    #[pg_extern]
+    fn apply_patch(patch: &str) -> i64 {
+        let mut added = 0i64;
+        let mut deleted = 0i64;
+        for line in patch.lines() {
+            let line = line.trim();
+            if line.is_empty()
+                || line.starts_with('#')
+                || line.starts_with("TX")
+                || line.starts_with("TC")
+                || line.starts_with('H')
+            {
+                continue;
+            }
+            if let Some(rest) = line.strip_prefix('A').map(|s| s.trim()) {
+                // Parse as a single N-Triples statement
+                let nt = format!("{rest}\n");
+                added += crate::bulk_load::load_ntriples(&nt, false);
+            } else if let Some(rest) = line.strip_prefix('D').map(|s| s.trim()) {
+                // Delete via N-Triples term parser.
+                if let Some((s, p, o)) = crate::parse_nt_triple(rest) {
+                    deleted += crate::storage::delete_triple(&s, &p, &o, 0);
+                }
+            }
+        }
+        added - deleted
+    }
+
+    /// Register a custom SPARQL aggregate function name with the extension.
+    ///
+    /// This records the aggregate IRI in the `_pg_ripple.custom_aggregates`
+    /// catalog table so the SPARQL-to-SQL translator can recognise it and
+    /// delegate to the corresponding PostgreSQL aggregate.
+    ///
+    /// `sparql_iri`  — the full IRI of the custom aggregate function.
+    /// `pg_function` — the PostgreSQL aggregate or function to call (schema-qualified
+    ///                 if outside `pg_catalog`).
+    #[pg_extern]
+    fn register_aggregate(sparql_iri: &str, pg_function: &str) {
+        Spi::run_with_args(
+            "INSERT INTO _pg_ripple.custom_aggregates (sparql_iri, pg_function)
+             VALUES ($1, $2)
+             ON CONFLICT (sparql_iri) DO UPDATE SET pg_function = EXCLUDED.pg_function",
+            &[
+                pgrx::datum::DatumWithOid::from(sparql_iri),
+                pgrx::datum::DatumWithOid::from(pg_function),
+            ],
+        )
+        .unwrap_or_else(|e| pgrx::error!("register_aggregate failed: {e}"));
     }
 
     // ── v0.15.0: Graph-aware triple deletion ──────────────────────────────────

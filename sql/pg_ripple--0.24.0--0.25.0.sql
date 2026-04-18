@@ -9,6 +9,9 @@
 --   • CDC: decode BOOLEAN parameter for pg_ripple.cdc_changes()
 --   • Catalog: schema_name and table_name columns added to _pg_ripple.predicates
 --   • pg_trickle version-lock probe at _PG_init
+--   • Supplementary: load_owl_ontology(), apply_patch(), register_aggregate()
+--   • Federation cache key upgraded from XXH3-64 (BIGINT) to XXH3-128 (TEXT)
+--   • File-path security: load_*_file() restricted to pg data directory
 
 -- Add schema_name and table_name columns to the predicate catalog.
 ALTER TABLE _pg_ripple.predicates
@@ -20,6 +23,19 @@ ALTER TABLE _pg_ripple.predicates
 UPDATE _pg_ripple.predicates
 SET table_name = 'vp_' || id || '_delta'
 WHERE table_name IS NULL;
+
+-- H-12: Upgrade federation_cache query_hash from XXH3-64 (BIGINT) to XXH3-128 (TEXT).
+-- Cache rows are ephemeral and can be safely discarded during the upgrade.
+TRUNCATE _pg_ripple.federation_cache;
+ALTER TABLE _pg_ripple.federation_cache DROP CONSTRAINT IF EXISTS federation_cache_pkey;
+ALTER TABLE _pg_ripple.federation_cache ALTER COLUMN query_hash TYPE TEXT;
+ALTER TABLE _pg_ripple.federation_cache ADD PRIMARY KEY (url, query_hash);
+
+-- Custom aggregates catalog for register_aggregate().
+CREATE TABLE IF NOT EXISTS _pg_ripple.custom_aggregates (
+    sparql_iri  TEXT NOT NULL PRIMARY KEY,
+    pg_function TEXT NOT NULL
+);
 
 -- Revoke PUBLIC access to the internal schema (defence-in-depth; mirrors v0.22.0 REVOKE
 -- in case the 0.21.0→0.22.0 migration was applied before this column was added).

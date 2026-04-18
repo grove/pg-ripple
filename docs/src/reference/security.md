@@ -204,4 +204,31 @@ Unprivileged roles cannot read `_pg_ripple.dictionary`, `_pg_ripple.vp_*`, or an
 - [x] Auth token compared with `constant_time_eq` (timing-safe)
 - [x] `register_endpoint()` rejects non-http/https URL schemes
 - [x] `_pg_ripple` schema inaccessible to `PUBLIC`
+- [x] `load_*_file()` validates canonical path against data directory (v0.25.0)
+
+---
+
+## Security Review Phase 2 (v0.25.0)
+
+v0.25.0 added two further hardening measures.
+
+### File-path bulk loader validation (S-8)
+
+All `load_*_file()` functions (`load_turtle_file`, `load_ntriples_file`, `load_nquads_file`, `load_trig_file`, `load_rdfxml_file`) now validate that the resolved (canonical, symlink-followed) path lies within the PostgreSQL data directory before reading the file.
+
+This prevents a superuser from accidentally loading files outside the cluster directory using symlink tricks:
+
+```sql
+-- Rejected: /etc/passwd is outside the data directory
+SELECT pg_ripple.load_turtle_file('/etc/passwd');
+-- ERROR: permission denied: "/etc/passwd" is outside the database cluster directory
+```
+
+The implementation calls `std::fs::canonicalize()` to resolve symlinks, then checks that the result starts with `current_setting('data_directory')`. This matches the access model used by PostgreSQL's own `COPY FROM FILE`.
+
+### Federation cache key upgrade (H-12)
+
+The `_pg_ripple.federation_cache.query_hash` column was upgraded from `BIGINT` (XXH3-64) to `TEXT` (32-char hex XXH3-128 fingerprint). The 64-bit hash had a birthday bound of approximately 2.1 billion distinct cached queries before a 50% collision probability, which is thin for a long-running server with a large query workload. The 128-bit hash makes collision negligible at any practical query volume.
+
+The migration script truncates the cache table before changing the column type — cache rows are ephemeral and can be safely discarded.
 

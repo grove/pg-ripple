@@ -207,6 +207,15 @@ pub fn initialize_schema() {
     )
     .unwrap_or_else(|e| pgrx::error!("predicates catalog creation error: {e}"));
 
+    // v0.25.0 A-5: Add schema_name and table_name columns (idempotent).
+    Spi::run_with_args(
+        "ALTER TABLE _pg_ripple.predicates \
+             ADD COLUMN IF NOT EXISTS schema_name TEXT, \
+             ADD COLUMN IF NOT EXISTS table_name  TEXT",
+        &[],
+    )
+    .unwrap_or_else(|e| pgrx::error!("predicates schema_name/table_name migration error: {e}"));
+
     // Create the rare predicates consolidation table.
     Spi::run_with_args(
         "CREATE TABLE IF NOT EXISTS _pg_ripple.vp_rare ( \
@@ -384,7 +393,9 @@ fn promote_predicate(p_id: i64) {
                  table_oid   = (SELECT oid FROM pg_class \
                                 WHERE relname = 'vp_{p_id}_delta' \
                                   AND relnamespace = (SELECT oid FROM pg_namespace \
-                                                      WHERE nspname = '_pg_ripple')) \
+                                                      WHERE nspname = '_pg_ripple')), \
+                 schema_name  = '_pg_ripple', \
+                 table_name   = 'vp_{p_id}_delta' \
              WHERE id = $1"
         ),
         &[DatumWithOid::from(p_id)],

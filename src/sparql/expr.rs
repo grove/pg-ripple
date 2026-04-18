@@ -75,6 +75,22 @@ pub(super) fn kind_check_sql(col: &str, kind: i16) -> String {
     }
 }
 
+// ─── PostGIS availability probe ──────────────────────────────────────────────
+
+/// Returns `true` when PostGIS is installed in the current database.
+///
+/// Checked by looking for `st_geomfromtext` in `pg_proc`.  The result is
+/// evaluated **at SPARQL translation time** so that we can emit plain `false`
+/// or `NULL` SQL literals instead of references to PostGIS functions that
+/// PostgreSQL would reject at catalog-resolution time.
+fn postgis_available() -> bool {
+    pgrx::Spi::get_one::<bool>(
+        "SELECT EXISTS(SELECT 1 FROM pg_proc WHERE proname = 'st_geomfromtext')",
+    )
+    .unwrap_or(None)
+    .unwrap_or(false)
+}
+
 // ─── Function name rendering (for error messages) ────────────────────────────
 
 pub(super) fn function_name(func: &Function) -> &'static str {
@@ -241,6 +257,55 @@ pub(super) fn translate_function_filter(
         // ── IF in boolean context ───────────────────────────────────────────
         // Note: IF is Expression::If in spargebra, not Function::If.
         // This arm is unreachable in practice, but kept as a safety fallback.
+
+        // ── GeoSPARQL topological predicates ───────────────────────────────
+        // geo:sf* functions are represented as Function::Custom in spargebra.
+        // They require PostGIS (ST_GeomFromText). PostGIS availability is
+        // probed at translation time so no PostGIS function reference ever
+        // appears in the generated SQL when PostGIS is not installed.
+        Function::Custom(name) => {
+            let iri = name.as_str();
+            // Map GeoSPARQL Simple Features topology predicates to PostGIS.
+            let postgis_fn = match iri {
+                "http://www.opengis.net/def/function/geosparql/sfIntersects" => {
+                    Some("ST_Intersects")
+                }
+                "http://www.opengis.net/def/function/geosparql/sfContains" => Some("ST_Contains"),
+                "http://www.opengis.net/def/function/geosparql/sfWithin" => Some("ST_Within"),
+                "http://www.opengis.net/def/function/geosparql/sfOverlaps" => Some("ST_Overlaps"),
+                "http://www.opengis.net/def/function/geosparql/sfTouches" => Some("ST_Touches"),
+                "http://www.opengis.net/def/function/geosparql/sfCrosses" => Some("ST_Crosses"),
+                "http://www.opengis.net/def/function/geosparql/sfDisjoint" => Some("ST_Disjoint"),
+                "http://www.opengis.net/def/function/geosparql/sfEquals" => Some("ST_Equals"),
+                "http://www.opengis.net/def/function/geosparql/ehIntersects" => {
+                    Some("ST_Intersects")
+                }
+                "http://www.opengis.net/def/function/geosparql/ehContains" => Some("ST_Contains"),
+                "http://www.opengis.net/def/function/geosparql/ehCoveredBy" => Some("ST_CoveredBy"),
+                "http://www.opengis.net/def/function/geosparql/ehCovers" => Some("ST_Covers"),
+                _ => None,
+            };
+            if let Some(pg_fn) = postgis_fn {
+                // When PostGIS is absent, emit literal false — no PostGIS
+                // function references are included so PostgreSQL catalog
+                // resolution succeeds even without the PostGIS extension.
+                if !postgis_available() {
+                    return Some("false".to_string());
+                }
+                let a_col = translate_arg_value(args.first()?, bindings, ctx)?;
+                let b_col = translate_arg_value(args.get(1)?, bindings, ctx)?;
+                let a_wkt = decode_lexical_sql(&a_col);
+                let b_wkt = decode_lexical_sql(&b_col);
+                Some(format!(
+                    "{pg_fn}(\
+                        ST_GeomFromText({a_wkt}), \
+                        ST_GeomFromText({b_wkt})\
+                      )"
+                ))
+            } else {
+                None
+            }
+        }
 
         // In filter context, remaining functions are handled by converting to
         // value and comparing non-null. Return None; caller will use value context.
@@ -762,7 +827,54 @@ pub(super) fn translate_function_value(
 
         // ── RDF-star functions ────────────────────────────────────────────────
         // These are behind the sparql-12 feature flag; return None for now.
-        Function::Custom(_) => None,
+
+        // ── GeoSPARQL non-topological functions ───────────────────────────
+        // geof:distance, geof:area, geof:boundary — return numeric / WKT literals.
+        // PostGIS availability is probed at translation time; when PostGIS is
+        // absent, NULL is emitted without any PostGIS function reference.
+        Function::Custom(name) => {
+            let iri = name.as_str();
+            match iri {
+                "http://www.opengis.net/def/function/geosparql/distance" => {
+                    // geof:distance(?a, ?b, unit) → numeric distance (metres for unit-of-measure)
+                    *is_numeric = true;
+                    if !postgis_available() {
+                        return Some("NULL".to_string());
+                    }
+                    let a_col = translate_arg_value(args.first()?, bindings, ctx)?;
+                    let b_col = translate_arg_value(args.get(1)?, bindings, ctx)?;
+                    let a_wkt = decode_lexical_sql(&a_col);
+                    let b_wkt = decode_lexical_sql(&b_col);
+                    Some(format!(
+                        "ST_Distance(\
+                            ST_GeomFromText({a_wkt})::geography, \
+                            ST_GeomFromText({b_wkt})::geography\
+                          )"
+                    ))
+                }
+                "http://www.opengis.net/def/function/geosparql/area" => {
+                    *is_numeric = true;
+                    if !postgis_available() {
+                        return Some("NULL".to_string());
+                    }
+                    let a_col = translate_arg_value(args.first()?, bindings, ctx)?;
+                    let a_wkt = decode_lexical_sql(&a_col);
+                    Some(format!("ST_Area(ST_GeomFromText({a_wkt})::geography)"))
+                }
+                "http://www.opengis.net/def/function/geosparql/boundary" => {
+                    // Returns a WKT literal of the boundary geometry.
+                    if !postgis_available() {
+                        return Some(encode_literal("NULL".to_string()));
+                    }
+                    let a_col = translate_arg_value(args.first()?, bindings, ctx)?;
+                    let a_wkt = decode_lexical_sql(&a_col);
+                    Some(encode_literal(format!(
+                        "ST_AsText(ST_Boundary(ST_GeomFromText({a_wkt})))"
+                    )))
+                }
+                _ => None,
+            }
+        }
 
         // All remaining functions: return None (not applicable in value context).
         _ => None,

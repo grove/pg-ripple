@@ -290,6 +290,20 @@ pub fn load_trig(data: &str, _strict: bool) -> i64 {
 
 /// Read file content via PostgreSQL's `pg_read_file()` (superuser-only).
 fn read_file_content(path: &str) -> String {
+    // S-8: Resolve symlinks and verify the canonical path resides within the
+    // PostgreSQL data directory, preventing path-traversal and symlink attacks.
+    let data_dir =
+        Spi::get_one_with_args::<String>("SELECT current_setting('data_directory')", &[])
+            .unwrap_or_else(|e| pgrx::error!("could not read data_directory: {e}"))
+            .unwrap_or_else(|| pgrx::error!("data_directory is NULL"));
+
+    let canonical = std::fs::canonicalize(path)
+        .unwrap_or_else(|e| pgrx::error!("could not resolve path \"{path}\": {e}"));
+
+    if !canonical.starts_with(&data_dir) {
+        pgrx::error!("permission denied: \"{path}\" is outside the database cluster directory");
+    }
+
     // pg_read_file() requires superuser or pg_monitor role; SPI propagates
     // the caller's privileges, so a non-superuser call will fail with a
     // permissions error — no additional check needed here.

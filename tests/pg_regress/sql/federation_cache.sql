@@ -1,0 +1,65 @@
+-- pg_regress test: federation cache and partial-result correctness (v0.25.0)
+-- Verifies that:
+--   1. The federation cache table uses TEXT for query_hash (H-12).
+--   2. Endpoint management API works correctly.
+--   3. Oversized partial-response byte gate returns 0 rows (H-13, already tested
+--      in sparql_federation.sql; this test focuses on cache schema correctness).
+
+SET client_min_messages = warning;
+CREATE EXTENSION IF NOT EXISTS pg_ripple;
+SET client_min_messages = DEFAULT;
+SET search_path TO pg_ripple, public;
+
+-- ── Verify federation_cache schema (H-12) ────────────────────────────────────
+-- query_hash must be TEXT (not BIGINT) after the H-12 upgrade.
+SELECT data_type
+FROM information_schema.columns
+WHERE table_schema = '_pg_ripple'
+  AND table_name   = 'federation_cache'
+  AND column_name  = 'query_hash';
+
+-- ── Register two distinct endpoints ──────────────────────────────────────────
+SELECT pg_ripple.register_endpoint('http://cache-test-1.example/sparql');
+SELECT pg_ripple.register_endpoint('http://cache-test-2.example/sparql');
+
+SELECT count(*) >= 2 AS both_endpoints_registered
+FROM pg_ripple.list_endpoints()
+WHERE url IN (
+    'http://cache-test-1.example/sparql',
+    'http://cache-test-2.example/sparql'
+);
+
+-- ── Verify primary key is (url, query_hash) ───────────────────────────────────
+SELECT COUNT(*) = 1 AS has_composite_pk
+FROM pg_indexes
+WHERE schemaname = '_pg_ripple'
+  AND tablename  = 'federation_cache'
+  AND indexname  = 'federation_cache_pkey';
+
+-- ── Verify the expires_at index exists ───────────────────────────────────────
+SELECT COUNT(*) = 1 AS has_expires_index
+FROM pg_indexes
+WHERE schemaname = '_pg_ripple'
+  AND tablename  = 'federation_cache'
+  AND indexname  = 'idx_federation_cache_expires';
+
+-- ── SSRF scheme validation (S-4) ─────────────────────────────────────────────
+-- Attempting to register a file:// URL must raise an error.
+DO $$
+BEGIN
+    BEGIN
+        PERFORM pg_ripple.register_endpoint('file:///etc/passwd');
+        RAISE EXCEPTION 'expected error not raised';
+    EXCEPTION
+        WHEN OTHERS THEN
+            IF SQLERRM LIKE '%must be http or https%' OR SQLERRM LIKE '%scheme%' THEN
+                RAISE NOTICE 'SSRF scheme validation: OK';
+            ELSE
+                RAISE EXCEPTION 'unexpected error: %', SQLERRM;
+            END IF;
+    END;
+END $$;
+
+-- Clean up registered test endpoints.
+SELECT pg_ripple.remove_endpoint('http://cache-test-1.example/sparql');
+SELECT pg_ripple.remove_endpoint('http://cache-test-2.example/sparql');

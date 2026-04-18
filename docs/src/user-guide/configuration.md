@@ -580,3 +580,32 @@ SET pg_ripple.auto_analyze = on;
 | **Reasoning workload** | `inference_mode = 'on_demand'`, `dictionary_cache_size = 262144` |
 | **Federation (semi-static endpoints)** | `federation_cache_ttl = 3600`, `federation_pool_size = 8`, `federation_adaptive_timeout = on` |
 | **Federation (strict latency)** | `federation_timeout = 5`, `federation_on_error = 'empty'`, `federation_on_partial = 'use'` |
+
+---
+
+## pg_trickle integration (v0.25.0)
+
+When pg_trickle is installed, pg_ripple checks the installed version against its tested version at startup. If the installed version is newer than tested, a `WARNING` is emitted:
+
+```
+pg_ripple: pg_trickle version 0.4.0 is newer than tested version 0.3.0; incremental views may behave unexpectedly
+```
+
+This warning can be suppressed by upgrading pg_ripple to a release that was tested against the newer pg_trickle version. It does not prevent normal operation.
+
+---
+
+## CDC decode parameter (v0.25.0)
+
+`pg_ripple.cdc_changes()` accepts a `decode BOOLEAN DEFAULT false` parameter. When `decode = true`, dictionary IDs in the change payload are decoded to N-Triples–formatted strings:
+
+```sql
+-- Encoded (default): IDs are raw BIGINT values
+SELECT * FROM pg_ripple.cdc_changes('my_slot');
+
+-- Decoded: IDs replaced with N-Triples strings
+SELECT * FROM pg_ripple.cdc_changes('my_slot', decode => true);
+```
+
+Decoded mode is slower (requires dictionary lookups) but produces human-readable output suitable for direct consumption by downstream processors.
+
