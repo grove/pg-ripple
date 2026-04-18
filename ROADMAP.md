@@ -1991,7 +1991,9 @@ See [plans/vector_sparql_hybrid.md](plans/vector_sparql_hybrid.md) for the full 
 
 - [ ] **`_pg_ripple.embeddings` table** (`sql/pg_ripple--0.26.0--0.27.0.sql`)
   - Schema: `entity_id BIGINT NOT NULL REFERENCES _pg_ripple.dictionary(id), model TEXT NOT NULL DEFAULT 'default', embedding vector(1536), updated_at TIMESTAMPTZ NOT NULL DEFAULT now(), PRIMARY KEY (entity_id, model)` *(optional at runtime — pgvector must be installed)*
-  - HNSW index on `(embedding vector_cosine_ops)` with configurable `m` and `ef_construction` parameters
+  - **HNSW index** (default) on `(embedding vector_cosine_ops)` with configurable `m` (default 16) and `ef_construction` (default 64) parameters — best recall/speed trade-off for most workloads
+  - **IVFFlat index** alternative (opt-in via GUC `pg_ripple.embedding_index_type = 'ivfflat'`) — faster build times, preferable for high-write workloads where the HNSW build cost is prohibitive; lists auto-set to `sqrt(row_count)`
+  - **`halfvec` support**: the `embedding` column accepts both `vector(N)` and `halfvec(N)` via GUC `pg_ripple.embedding_precision = 'half'`; `halfvec` halves storage (2 bytes per dimension instead of 4) at marginal recall cost — recommended for > 5M entity graphs or `embedding_dimensions >= 3072`
   - Fallback: if pgvector is absent, the table is created with `BYTEA` as a stub column and all similarity functions return empty results with a WARNING
   - Migration script creates the table only if pgvector is detected via `SELECT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'vector')`
 
@@ -2001,6 +2003,8 @@ See [plans/vector_sparql_hybrid.md](plans/vector_sparql_hybrid.md) for the full 
   - `pg_ripple.embedding_api_url` (string, default `''`) — base URL for an OpenAI-compatible embedding API (e.g. `https://api.openai.com/v1`, local Ollama, vLLM)
   - `pg_ripple.embedding_api_key` (string, default `''`, superuser-only) — API key; value is masked in `pg_settings` via a superuser-only GUC flag
   - `pg_ripple.pgvector_enabled` (bool, default `true`) — runtime switch; set to `false` to disable all pgvector-dependent code paths without uninstalling the extension
+  - `pg_ripple.embedding_index_type` (string, default `'hnsw'`, options `'hnsw'`|`'ivfflat'`) — controls which index type is created on `_pg_ripple.embeddings`; changing this requires `REINDEX`
+  - `pg_ripple.embedding_precision` (string, default `'single'`, options `'single'`|`'half'`) — `'half'` stores embeddings as `halfvec(N)` reducing storage by 50%; requires pgvector ≥ 0.7.0
 
 - [ ] **`pg_ripple.embed_entities()` — batch embedding** (`src/sparql/embedding.rs`)
   - `pg_ripple.embed_entities(graph_iri TEXT DEFAULT NULL, model TEXT DEFAULT NULL, batch_size INT DEFAULT 100) RETURNS BIGINT`
@@ -2030,12 +2034,21 @@ See [plans/vector_sparql_hybrid.md](plans/vector_sparql_hybrid.md) for the full 
   - Filter pushdown: if the SPARQL query has `FILTER(?score < threshold)`, push the threshold into the SQL `WHERE` clause to allow HNSW iterative scan pruning
   - Graceful degradation: if pgvector is absent, raises `PT603 — pgvector extension not installed` with an install hint
 
+- [ ] **`pg_ripple.refresh_embeddings()` — stale embedding invalidation** (`src/sparql/embedding.rs`)
+  - `pg_ripple.refresh_embeddings(graph_iri TEXT DEFAULT NULL, model TEXT DEFAULT NULL, force BOOL DEFAULT false) RETURNS BIGINT`
+  - Identifies entities whose `rdfs:label` was updated after `_pg_ripple.embeddings.updated_at` by joining `_pg_ripple.embeddings` against the label VP table's `i` (SID) sequence — higher SID implies a later write
+  - Re-embeds stale entities in batches; skips entities where `updated_at` is already current unless `force = true`
+  - Returns the count of re-embedded entities
+  - Intended for scheduled maintenance (e.g. via `pg_cron`) and called automatically at the end of each background worker cycle when `pg_ripple.auto_embed = true`
+  - Raises `PT606 — no stale embeddings found` as a NOTICE (not an ERROR) when nothing needs refreshing
+
 - [ ] **Error codes for the embedding subsystem** (`src/error.rs`)
   - `PT601` — embedding API URL not configured
   - `PT602` — embedding dimension mismatch
   - `PT603` — pgvector extension not installed
   - `PT604` — embedding API request failed (includes HTTP status code in detail)
   - `PT605` — entity has no embedding (raised when `pg:similar` is called for an entity absent from `_pg_ripple.embeddings`)
+  - `PT606` — no stale embeddings found (NOTICE level)
 
 - [ ] **pg_regress tests**
   - `vector_setup.sql` — verify pgvector is installed; skip remaining vector tests if absent
@@ -2043,6 +2056,8 @@ See [plans/vector_sparql_hybrid.md](plans/vector_sparql_hybrid.md) for the full 
   - `vector_sparql.sql` — SPARQL query using `pg:similar()` in a BIND expression; verify the result set is non-empty and ordered by distance
   - `vector_filter.sql` — SPARQL query with `FILTER(?score < 0.5)` on a `pg:similar()` result; verify only entities below the threshold are returned
   - `vector_graceful.sql` — test behaviour when `pg_ripple.pgvector_enabled = false`; verify WARNING is emitted and no ERROR is raised
+  - `vector_halfvec.sql` — store embeddings with `pg_ripple.embedding_precision = 'half'`; verify halfvec column type and that `pg_ripple.similar_entities()` returns correct results
+  - `vector_refresh.sql` — insert entity, embed, update its `rdfs:label`, call `pg_ripple.refresh_embeddings()`, verify `updated_at` advances and re-embedding count is 1
 
 ### Migration Script
 
@@ -2056,7 +2071,7 @@ See [plans/vector_sparql_hybrid.md](plans/vector_sparql_hybrid.md) for the full 
 
 ### Exit Criteria
 
-`vector_crud.sql`, `vector_sparql.sql`, and `vector_filter.sql` all pass in `cargo pgrx regress pg18` when pgvector is installed. `vector_setup.sql` skips cleanly when pgvector is absent. `pg_ripple.store_embedding('http://example.org/aspirin', ARRAY[...])` round-trips correctly through `pg_ripple.similar_entities('anti-inflammatory')`. A SPARQL query with `BIND(pg:similar(?drug, "aspirin", 10) AS ?score) FILTER(?score < 0.5)` returns only entities with cosine distance below 0.5. `SELECT pg_ripple.similar_entities('test')` when `pg_ripple.pgvector_enabled = false` emits a WARNING and returns zero rows (no ERROR). Migration scripts from 0.1.0 through 0.27.0 run cleanly via `just test-migration`.
+`vector_crud.sql`, `vector_sparql.sql`, `vector_filter.sql`, `vector_halfvec.sql`, and `vector_refresh.sql` all pass in `cargo pgrx regress pg18` when pgvector is installed. `vector_setup.sql` skips cleanly when pgvector is absent. `pg_ripple.store_embedding('http://example.org/aspirin', ARRAY[...])` round-trips correctly through `pg_ripple.similar_entities('anti-inflammatory')`. A SPARQL query with `BIND(pg:similar(?drug, "aspirin", 10) AS ?score) FILTER(?score < 0.5)` returns only entities with cosine distance below 0.5. `SELECT pg_ripple.similar_entities('test')` when `pg_ripple.pgvector_enabled = false` emits a WARNING and returns zero rows (no ERROR). `pg_ripple.refresh_embeddings()` after a label update returns a count of 1 and advances `updated_at`. `SELECT count(*) FROM _pg_ripple.embeddings` with `embedding_precision = 'half'` confirms the column is of type `halfvec`. Migration scripts from 0.1.0 through 0.27.0 run cleanly via `just test-migration`.
 
 ---
 
@@ -2113,6 +2128,21 @@ See [plans/vector_sparql_hybrid.md](plans/vector_sparql_hybrid.md) §5 (Advanced
   - Authentication: same bearer-token auth as existing `pg_ripple_http` endpoints
   - Rate limiting: inherits the `pg_ripple_http.max_requests_per_second` GUC
 
+- [ ] **JSON-LD framing for RAG context output** (`src/framing/` extension)
+  - `pg_ripple.rag_retrieve()` gains an optional `output_format TEXT DEFAULT 'jsonb'` parameter accepting `'jsonb'` or `'jsonld'`
+  - When `output_format = 'jsonld'`, each `context_json` row is formatted as a JSON-LD frame using the framing engine from v0.17.0: entity types map to `@type`, property-value pairs map to their IRI keys, and `@context` is auto-populated from the registered prefix table
+  - Enables direct use of `context_json` as a JSON-LD-framed system prompt for LLMs that prefer structured data (e.g. OpenAI structured outputs)
+  - New pg_regress test `vector_rag_jsonld.sql` — call `pg_ripple.rag_retrieve(... output_format := 'jsonld')` and verify `@type` and `@context` keys are present in the output
+
+- [ ] **SPARQL federation with external vector services** (`src/sparql/federation.rs` extension)
+  - Extends the SERVICE handler (v0.16.0) to recognise vector service endpoints registered via `pg_ripple.register_vector_endpoint(url TEXT, api_type TEXT)` where `api_type` is `'pgvector'`, `'weaviate'`, `'qdrant'`, or `'pinecone'`
+  - Syntax: `SERVICE <http://vector-service/search> { ?entity pg:similarTo "query" ; pg:score ?score }` — translated to the appropriate external API call (HTTP) rather than a local pgvector scan
+  - Returned `?entity` IRIs are resolved against the local dictionary; matched entities can participate in subsequent local triple pattern joins in the same SPARQL query
+  - Use case: local pgvector for < 10M entities; external service for larger embedding indexes, without changing the SPARQL query syntax
+  - GUC: `pg_ripple.vector_federation_timeout_ms` (integer, default `5000`) — HTTP timeout for external vector service calls
+  - Raises `PT607 — vector service endpoint not registered` if an unregistered SERVICE URL is used with a `pg:similarTo` predicate
+  - New pg_regress test `vector_federation.sql` — register a mock vector endpoint, issue a federated SPARQL query, verify graceful fallback when the endpoint is unavailable
+
 - [ ] **SHACL embedding completeness shape**
   - `examples/shacl_embedding_completeness.ttl` — reusable SHACL shape that validates all entities of a given class have embeddings (uses `sh:path :hasEmbedding ; sh:minCount 1`)
   - `pg_ripple.add_embedding_triples() RETURNS BIGINT` — materialises `:hasEmbedding` triples for entities present in `_pg_ripple.embeddings`, making the SHACL shape checkable
@@ -2125,11 +2155,16 @@ See [plans/vector_sparql_hybrid.md](plans/vector_sparql_hybrid.md) §5 (Advanced
   - `benchmarks/hybrid_search.sql` — pgbench-based benchmark measuring hybrid search latency and throughput; tests vector-only, SPARQL-only, and RRF-fused patterns
   - Target: hybrid search over 1M entities, 1,536-dimensional embeddings, HNSW index, < 50 ms P99 latency for top-10 results
 
+- [ ] **Error codes** (additions to `src/error.rs`)
+  - `PT607` — vector service endpoint not registered
+
 - [ ] **pg_regress tests**
   - `vector_hybrid.sql` — `pg_ripple.hybrid_search()` with a SPARQL SELECT + vector query; verify RRF scores are non-zero and results are sorted
   - `vector_rag.sql` — `pg_ripple.rag_retrieve()` end-to-end; verify `context_json` contains expected keys
+  - `vector_rag_jsonld.sql` — `pg_ripple.rag_retrieve(... output_format := 'jsonld')`; verify `@type` and `@context` keys are present
   - `vector_contextualize.sql` — `pg_ripple.contextualize_entity()` on a test entity with known neighbors; verify output text contains expected labels
   - `vector_worker.sql` — insert a new entity with `pg_ripple.auto_embed = true`; verify `_pg_ripple.embedding_queue` is populated; simulate worker drain and verify embedding is present
+  - `vector_federation.sql` — register a mock vector endpoint; verify `SERVICE` query with `pg:similarTo` issues the correct HTTP request; verify graceful timeout fallback
 
 ### Migration Script
 
@@ -2139,13 +2174,14 @@ See [plans/vector_sparql_hybrid.md](plans/vector_sparql_hybrid.md) §5 (Advanced
 
 - [ ] `user-guide/hybrid-search.md` updated — add RRF fusion and RAG sections; include end-to-end worked example from question to LLM context
 - [ ] `user-guide/rag.md` (new page) — step-by-step guide to using `pg_ripple.rag_retrieve()` as a backend for LangChain, LlamaIndex, and raw OpenAI API calls; includes `pg_ripple_http` REST example
-- [ ] `reference/embedding-functions.md` updated — document `hybrid_search`, `rag_retrieve`, `contextualize_entity`, `list_embedding_models`
-- [ ] `reference/http-api.md` updated — document `POST /rag` endpoint with request/response examples
+- [ ] `reference/embedding-functions.md` updated — document `hybrid_search`, `rag_retrieve` (including `output_format` parameter), `contextualize_entity`, `list_embedding_models`, `register_vector_endpoint`
+- [ ] `reference/http-api.md` updated — document `POST /rag` endpoint with request/response examples and JSON-LD output mode
+- [ ] `user-guide/vector-federation.md` (new page) — how to register external vector services, write federated SPARQL queries, and configure timeouts; includes worked examples for Weaviate, Qdrant, and Pinecone endpoints
 - [ ] Release notes for v0.28.0 — highlight `rag_retrieve` and `hybrid_search` as headline features; link to the hybrid-search and RAG user guides
 
 ### Exit Criteria
 
-`vector_hybrid.sql`, `vector_rag.sql`, `vector_contextualize.sql`, and `vector_worker.sql` all pass in `cargo pgrx regress pg18` when pgvector is installed. `pg_ripple.hybrid_search('SELECT ?drug WHERE { ?drug a :Drug }', 'anti-inflammatory', 10)` returns ≤ 10 rows with non-zero `rrf_score`. `pg_ripple.rag_retrieve('what treats headaches?', k := 5)` returns JSONB rows with `label`, `types`, `properties`, and `neighbors` keys. `POST /rag` on `pg_ripple_http` returns a `context` field suitable for use as an LLM system prompt. Inserting a new entity with `pg_ripple.auto_embed = true` and running the background worker loop populates `_pg_ripple.embeddings` for that entity. Migration scripts from 0.1.0 through 0.28.0 run cleanly via `just test-migration`.
+`vector_hybrid.sql`, `vector_rag.sql`, `vector_rag_jsonld.sql`, `vector_contextualize.sql`, `vector_worker.sql`, and `vector_federation.sql` all pass in `cargo pgrx regress pg18` when pgvector is installed. `pg_ripple.hybrid_search('SELECT ?drug WHERE { ?drug a :Drug }', 'anti-inflammatory', 10)` returns ≤ 10 rows with non-zero `rrf_score`. `pg_ripple.rag_retrieve('what treats headaches?', k := 5)` returns JSONB rows with `label`, `types`, `properties`, and `neighbors` keys. `pg_ripple.rag_retrieve('what treats headaches?', k := 5, output_format := 'jsonld')` returns rows whose `context_json` contains `@type` and `@context` keys. `POST /rag` on `pg_ripple_http` returns a `context` field suitable for use as an LLM system prompt. Inserting a new entity with `pg_ripple.auto_embed = true` and running the background worker loop populates `_pg_ripple.embeddings` for that entity. `pg_ripple.register_vector_endpoint('http://unknown/', 'qdrant')` followed by a SERVICE query returns graceful timeout with no ERROR. Migration scripts from 0.1.0 through 0.28.0 run cleanly via `just test-migration`.
 
 ---
 

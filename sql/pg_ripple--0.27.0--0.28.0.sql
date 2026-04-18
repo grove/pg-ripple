@@ -10,18 +10,24 @@
 --   pg_ripple.hybrid_search(sparql_query, query_text, k, alpha, model)
 --     → TABLE(entity_id, entity_iri, rrf_score, sparql_rank, vector_rank)
 --   pg_ripple.contextualize_entity(entity_iri, depth, max_neighbors) → TEXT
---   pg_ripple.rag_retrieve(question, sparql_filter, k, model)
+--   pg_ripple.rag_retrieve(question, sparql_filter, k, model, output_format)
 --     → TABLE(entity_iri, label, context_json, distance)
 --   pg_ripple.list_embedding_models() → TABLE(model, entity_count, dimensions)
 --   pg_ripple.add_embedding_triples() → BIGINT
+--   pg_ripple.register_vector_endpoint(url, api_type) → VOID
 --
 -- New GUC parameters (registered in _PG_init):
---   pg_ripple.auto_embed          (bool, default false)
---   pg_ripple.embedding_batch_size (integer, default 100)
---   pg_ripple.use_graph_context   (bool, default false)
+--   pg_ripple.auto_embed                  (bool, default false)
+--   pg_ripple.embedding_batch_size        (integer, default 100)
+--   pg_ripple.use_graph_context           (bool, default false)
+--   pg_ripple.vector_federation_timeout_ms (integer, default 5000)
+--
+-- New error codes:
+--   PT607 — vector service endpoint not registered
 --
 -- pg_ripple_http new endpoint:
---   POST /rag  — calls pg_ripple.rag_retrieve() and formats context for LLM consumption
+--   POST /rag  — calls pg_ripple.rag_retrieve() and formats context for LLM consumption;
+--                supports output_format 'jsonb' (default) and 'jsonld'
 --
 -- No changes to VP table schema or the dictionary table.
 

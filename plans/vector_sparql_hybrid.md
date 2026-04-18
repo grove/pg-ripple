@@ -405,7 +405,7 @@ Key differentiators:
 
 ## 7. Implementation Plan
 
-### Phase 1: Foundation (v0.28.0) — 4–6 person-weeks
+### Phase 1: Foundation (v0.27.0) — 4–6 person-weeks
 
 **Goal**: Core pgvector integration — embedding table, bulk loading, basic similarity function.
 
@@ -418,7 +418,7 @@ Key differentiators:
 | GUC parameters | `pg_ripple.embedding_model`, `pg_ripple.embedding_dimensions`, `pg_ripple.embedding_api_url` | 0.5 pw |
 | pg_regress tests | Hybrid query tests, embedding CRUD, similarity ranking, SPARQL integration | 1 pw |
 
-### Phase 2: Advanced Hybrid (v0.29.0) — 3–5 person-weeks
+### Phase 2: Advanced Hybrid (v0.28.0) — 3–5 person-weeks
 
 **Goal**: Production-grade hybrid search with multiple fusion strategies and incremental embedding.
 
@@ -430,7 +430,7 @@ Key differentiators:
 | Multi-model support | Support multiple embedding models per entity (different dimensions, different providers) | 0.5 pw |
 | Benchmarks | pgbench-based hybrid search benchmarks; measure latency/throughput for various query patterns | 0.5 pw |
 
-### Phase 3: RAG Pipeline (v0.30.0) — 3–4 person-weeks
+### Phase 3: RAG Pipeline (v0.28.0, continued) — 3–4 person-weeks
 
 **Goal**: End-to-end RAG support — SPARQL-guided retrieval, context assembly, LLM integration.
 

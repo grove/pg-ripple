@@ -9,6 +9,7 @@
 --   pg_ripple.embed_entities(graph_iri, model, batch_size) → BIGINT
 --   pg_ripple.similar_entities(query_text, k, model) → TABLE(entity_id, entity_iri, distance)
 --   pg_ripple.store_embedding(entity_iri, embedding, model) → VOID
+--   pg_ripple.refresh_embeddings(graph_iri, model, force) → BIGINT
 --
 -- New GUC parameters (registered in _PG_init):
 --   pg_ripple.embedding_model
@@ -16,6 +17,8 @@
 --   pg_ripple.embedding_api_url
 --   pg_ripple.embedding_api_key
 --   pg_ripple.pgvector_enabled
+--   pg_ripple.embedding_index_type   ('hnsw' | 'ivfflat', default 'hnsw')
+--   pg_ripple.embedding_precision    ('single' | 'half', default 'single')
 --
 -- SPARQL extension function:
 --   pg:similar(?entity, "query_text", k) — registered in the function registry
