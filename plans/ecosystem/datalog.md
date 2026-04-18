@@ -684,6 +684,210 @@ SELECT * FROM pg_ripple.check_constraints();
 | SWRL integration | Semantic Web Rule Language as an alternative rule syntax. Turtle-based; maps to the same IR. | 3 | Post-1.0 |
 | SHACL-AF `sh:rule` bridge | Detect `sh:rule` entries in SHACL shapes, compile to Datalog IR. Bidirectional: SHACL shapes inform Datalog constraints; derived triples visible to SHACL validation. | 1 | v0.10.0 |
 | Datalog views | Incremental stream tables for Datalog rule sets with a goal pattern. Bundles rules + query as one self-contained artifact. | 1 | v0.11.0 |
+| Magic sets optimization | Goal-directed evaluation: only derive facts relevant to a specific query, reducing materialization cost for large rule sets. Well-studied SQL encoding (Bancilhon et al., 1986; Ullman, 1989). | 1 | v0.29.0 |
+| Cost-based body atom reordering | Use `pg_class` statistics to reorder body atoms (joins) by selectivity within the SQL compiler. Evaluate the most selective joins first to reduce intermediate result size. | 1 | v0.29.0 |
+| Subsumption checking | Detect and eliminate redundant rules at compile time. If rule R1's head and body are a strict generalization of R2, R2 can be pruned. Reduces fixpoint iterations and SQL query count. | 1 | v0.29.0 |
+| Difference-join negation | Replace `NOT EXISTS` subqueries with anti-join (`LEFT JOIN … WHERE … IS NULL`) patterns for negated body atoms. PostgreSQL's planner often generates better plans for anti-joins than correlated `NOT EXISTS`. | 1 | v0.29.0 |
+| Predicate-filter pushdown | Push arithmetic and comparison guards (`?a > 18`, `REGEX(…)`) as early as possible in the join tree rather than applying them at the outermost WHERE clause. Reduces intermediate cardinality. | 1 | v0.29.0 |
+| Delta table indexing | Create targeted B-tree indexes on semi-naive delta tables (`_dl_delta_{pred_id}`) for high-arity rules. Currently deltas are unindexed heap tables; indexing them reduces join cost in subsequent iterations. | 1 | v0.29.0 |
+| Incremental maintenance (DRed) | Delete-Rederive algorithm: when base triples are deleted, identify and retract affected derived triples, then re-derive any that remain supported. Avoids full re-materialization on data changes. | 1 | Post-1.0 |
+| Compiled rule plans | Cache the generated SQL for each rule across inference runs. Currently SQL is regenerated on every `infer()` call. Caching avoids repeated dictionary lookups and SQL string construction. | 2 | Post-1.0 |
+| Parallel stratum evaluation | Evaluate independent rules within the same stratum in parallel using PostgreSQL's background workers. Each rule's INSERT … SELECT runs as a separate SPI transaction; results are merged at the end of the iteration. | 2 | Post-1.0 |
+| Worst-case optimal joins | Replace pairwise hash-joins with worst-case optimal join algorithms (Leapfrog Triejoin / Generic Join) for rules with ≥3 body atoms sharing variables. Avoids intermediate result blowup on cyclic join patterns. | 3 | Post-1.0 |
+| Lattice-based Datalog (Datalog^L) | Extend the rule IR to support user-defined lattice types (e.g., intervals, sets, trust levels) with monotone aggregation. Generalizes Datalog^agg; inspired by Flix and Datafun. | 3 | Post-1.0 |
+| Demand transformation | A generalization of magic sets: rewrite the rule program so that only demanded facts are derived, propagating binding patterns from the query goal through the rule bodies. More flexible than magic sets for complex rule topologies. | 2 | Post-1.0 |
+| Tabling / memoization | Cache intermediate derived facts across queries (subsumptive tabling). When the same subgoal appears in multiple queries, reuse the previously computed result instead of recomputing from scratch. Inspired by XSB Prolog. | 2 | Post-1.0 |
+| Bounded-depth early termination | For rules that are known to produce derivation chains of bounded depth (e.g., `rdfs:subClassOf` in ontologies with known max depth), terminate fixpoint iteration early when the depth bound is reached rather than running the final empty-delta check iteration. | 2 | Post-1.0 |
+
+---
+
+## 14.2 Optimization Techniques — Detailed Design
+
+This section provides detailed design notes for Datalog optimizations planned beyond the current semi-naive evaluation baseline. Optimizations are grouped by category: **evaluation strategy**, **SQL compilation**, and **maintenance**.
+
+### 14.2.1 Magic Sets Transformation (v0.29.0)
+
+The most impactful single optimization for goal-directed Datalog evaluation. Magic sets transforms a Datalog program + query into a *more efficient* program that computes only the facts needed to answer the query, while still using bottom-up semi-naive evaluation.
+
+**Problem**: Currently, `pg_ripple.infer('rdfs')` materializes the *entire* RDFS closure — every possible `rdf:type` and `rdfs:subClassOf` derivation. If a user only needs "all types of entity X", 99% of the computed closure is wasted.
+
+**Algorithm** (Bancilhon, Maier, Sagiv, Ullman — 1986):
+
+1. **Adornment**: given a query like `?x rdf:type foaf:Person`, annotate the goal predicate with a *binding pattern* — here `rdf:type^bf` (bound-free: the object is bound, subject is free).
+2. **Propagation**: push binding patterns through rule bodies. For `?x rdf:type ?c :- ?x rdf:type ?b, ?b rdfs:subClassOf ?c`, the binding on `?c` propagates to `rdfs:subClassOf^fb`.
+3. **Magic rule generation**: for each adorned predicate, generate a "magic" predicate that captures the set of demanded bindings:
+   ```prolog
+   magic_rdf_type_bf(?c) :- .  -- seed: the query constant foaf:Person
+   magic_rdf_type_bf(?c) :- magic_rdf_type_bf(?b), ?b rdfs:subClassOf ?c .
+   ```
+4. **Modified rules**: add a filter to each original rule body that restricts it to demanded tuples:
+   ```prolog
+   ?x rdf:type ?c :- magic_rdf_type_bf(?c), ?x rdf:type ?b, ?b rdfs:subClassOf ?c .
+   ```
+5. **Evaluate the modified program** using standard semi-naive evaluation. The magic predicates are small (only containing demanded constants), so joins are much cheaper.
+
+**SQL encoding** (pg_ripple-specific):
+
+- Magic predicates compile to temporary tables: `CREATE TEMP TABLE _magic_rdf_type_bf (o BIGINT PRIMARY KEY)`
+- Modified rules compile to `INSERT … SELECT … JOIN _magic_rdf_type_bf m ON m.o = t.o`
+- Semi-naive delta variants include magic table joins
+- After inference completes, magic temp tables are dropped
+
+**Integration point**: Datalog views (§15) already provide a goal pattern — this is exactly the input magic sets needs. `create_datalog_view()` will automatically apply magic sets when the goal has bound constants.
+
+**Expected impact**: 10×–1000× reduction in materialization time for selective goals on large datasets. On a 10M-triple dataset with RDFS rules, deriving types for a single entity takes ~5ms with magic sets vs. ~5s for full closure.
+
+**References**:
+- Bancilhon, F., Maier, D., Sagiv, Y., Ullman, J. D. (1986). "Magic sets and other strange ways to implement logic programs." PODS '86.
+- Ullman, J. D. (1989). "Bottom-up beats top-down for Datalog." PODS '89.
+- Beeri, C., Ramakrishnan, R. (1991). "On the power of magic." Journal of Logic Programming.
+
+### 14.2.2 Cost-Based Body Atom Reordering (v0.29.0)
+
+Currently, body atoms in a rule are joined in the order they appear in the rule text. This can be highly suboptimal: if the first atom matches 1M rows and the second matches 100, the join produces a massive intermediate result.
+
+**Algorithm**:
+
+1. At rule compilation time, query `pg_class.reltuples` for each VP table referenced by a body atom.
+2. For atoms with bound constants, estimate selectivity as `1 / n_distinct` (from `pg_statistic`).
+3. Sort body atoms by estimated selectivity (most selective first).
+4. For atoms sharing variables with earlier atoms, prefer those that join on indexed columns (`(s,o)` or `(o,s)`).
+
+**SQL impact**: changes the `FROM` / `JOIN` order in generated SQL. PostgreSQL's query planner performs its own join reordering, but providing a good initial order helps the planner (especially when `join_collapse_limit` is exceeded for rules with many body atoms).
+
+**Expected impact**: 2×–10× speedup on rules with >3 body atoms and skewed predicate cardinalities.
+
+### 14.2.3 Subsumption Checking (v0.29.0)
+
+When multiple rules derive the same predicate, some rules may be *subsumed* — they can never produce a fact that isn't already produced by a more general rule.
+
+**Example**:
+```prolog
+# Rule A (general): ?x rdf:type ?c :- ?x rdf:type ?b, ?b rdfs:subClassOf ?c .
+# Rule B (specific): ?x rdf:type owl:Thing :- ?x rdf:type ?b, ?b rdfs:subClassOf owl:Thing .
+```
+Rule B is subsumed by Rule A — every fact B derives is also derived by A.
+
+**Algorithm**:
+1. For each pair of rules deriving the same predicate, check if one head is a substitution instance of the other.
+2. If the body of the more general rule is a subset of the specific rule's body (modulo variable renaming), the specific rule is redundant.
+3. Remove subsumed rules before SQL generation.
+
+**Expected impact**: reduces the number of `INSERT … SELECT` statements per iteration. Particularly effective for OWL RL, where several rules overlap.
+
+### 14.2.4 Difference-Join Negation (v0.29.0)
+
+Replace correlated `NOT EXISTS` subqueries with anti-join patterns:
+
+```sql
+-- Current (NOT EXISTS):
+WHERE NOT EXISTS (SELECT 1 FROM _pg_ripple.vp_15 m WHERE m.s = t.s)
+
+-- Better (anti-join):
+LEFT JOIN _pg_ripple.vp_15 m ON m.s = t.s
+WHERE m.s IS NULL
+```
+
+PostgreSQL's planner often converts `NOT EXISTS` to an anti-join internally, but pre-empting this transformation ensures consistent behavior across planner versions and cost model edge cases.
+
+**Expected impact**: 10–50% speedup on rules with negated body atoms on large base predicates.
+
+### 14.2.5 Predicate-Filter Pushdown (v0.29.0)
+
+Arithmetic guards (`?a > 18`, `STRLEN(?s) > 0`, `REGEX(…)`) currently appear in the outermost `WHERE` clause. If the filtered variable is bound by an early body atom, the filter can be pushed into that atom's `JOIN … ON` clause or immediately after it.
+
+**Algorithm**:
+1. For each comparison/string guard in the rule body, identify which body atom first binds the guard's variable.
+2. Move the guard to immediately after that atom in the join order.
+3. For range filters (`?a > 18`), combine with the VP table's B-tree index to get an index scan.
+
+**SQL impact**: changes WHERE clause placement; may enable index-only scans on VP tables.
+
+### 14.2.6 Delta Table Indexing (v0.29.0)
+
+Semi-naive evaluation creates temporary delta tables (`_dl_delta_{pred_id}`) that are currently unindexed heap tables. For rules with many body atoms, joins against these tables degrade to sequential scans.
+
+**Solution**: after each iteration populates the delta table, create a B-tree index on the columns used in subsequent joins (typically `s` or `o`). Use `CREATE INDEX CONCURRENTLY` or a simple `CREATE INDEX` (within the same transaction, concurrency is not needed).
+
+**Trade-off**: index creation adds ~1ms per delta table per iteration. For rules that converge in ≤5 iterations, the overhead is negligible; for long-chain derivations (10+ iterations), the cumulative indexing cost is recouped by faster joins.
+
+### 14.2.7 Incremental Maintenance — DRed Algorithm (Post-1.0)
+
+The Delete-Rederive (DRed) algorithm handles incremental maintenance when base triples are deleted:
+
+1. **Over-delete**: when a base triple is deleted, delete all derived triples that *might* depend on it (pessimistic).
+2. **Re-derive**: re-evaluate rules to check if any over-deleted triples can be re-derived via alternative derivation paths.
+3. **Commit**: the triples that survive re-derivation are kept; the rest are permanently deleted.
+
+This avoids full re-materialization and is the standard algorithm used by RDFox and other production Datalog systems.
+
+**SQL encoding**: step 1 uses the existing rule SQL with the deleted triple as a negative filter; step 2 re-runs the same rule SQL but restricted to the over-deleted set.
+
+### 14.2.8 Worst-Case Optimal Joins (Post-1.0)
+
+For rules with cyclic join patterns (e.g., triangle queries: `?x ?p ?y, ?y ?q ?z, ?z ?r ?x`), pairwise hash-joins can produce intermediate results of size $O(n^2)$ even when the final result is $O(n)$. Worst-case optimal (WCO) join algorithms like Leapfrog Triejoin achieve $O(n^{3/2})$ for triangle queries.
+
+**PostgreSQL limitation**: WCO joins cannot be expressed as standard SQL `JOIN` operators. Implementation would require a custom scan node (using PostgreSQL's CustomScan API) or a Rust-side in-memory join that reads from VP table cursors.
+
+**Applicability**: most RDF/OWL rules are acyclic (chain patterns). WCO joins matter primarily for graph analytics rules (triangle counting, community detection). Deferred to post-1.0.
+
+### 14.2.9 Demand Transformation (Post-1.0)
+
+A generalization of magic sets that handles more complex binding-pattern propagation, including cases where bindings flow in both directions through a rule body. The demand transformation:
+
+1. Annotates each predicate occurrence with a *demand pattern* (which arguments will be bound when this predicate is evaluated).
+2. Generates auxiliary "demand" predicates that capture the set of demanded bindings.
+3. Rewrites rules to filter against demand predicates.
+
+Unlike magic sets, demand transformation can handle rules where bindings are generated by intermediate body atoms (not just the goal). This makes it more effective for complex rule topologies like OWL RL with intersecting class hierarchies.
+
+### 14.2.10 Tabling / Memoization (Post-1.0)
+
+Inspired by XSB Prolog's tabling mechanism. When the same derived predicate is queried with the same binding pattern across multiple SPARQL queries or inference runs:
+
+1. Check a **memo table** keyed by `(predicate_id, binding_hash)`.
+2. If a cached result exists and the underlying VP tables haven't changed (checked via table modification counters from `pg_stat_user_tables`), return the cached result.
+3. Otherwise, compute and cache.
+
+**Subsumptive tabling**: if a previous query computed `ancestor(Alice, ?)` (all ancestors of Alice) and a new query asks `ancestor(Alice, Bob)`, the answer can be looked up from the cached result without re-evaluation.
+
+### 14.2.11 Parallel Stratum Evaluation (Post-1.0)
+
+Within a single stratum, multiple rules that derive *different* predicates are independent and can be evaluated in parallel. Use PostgreSQL background workers (one per rule or per group of rules) to execute INSERT … SELECT statements concurrently.
+
+**Correctness constraint**: rules within a stratum that derive the *same* predicate must be serialized (or use `ON CONFLICT DO NOTHING` to handle concurrent inserts to the same delta table).
+
+**Expected impact**: linear speedup proportional to the number of independent derived predicates per stratum. RDFS has ~5 independent rule groups in stratum 0; OWL RL has ~10.
+
+### 14.2.12 Bounded-Depth Early Termination (Post-1.0)
+
+Many real-world ontologies have bounded-depth class/property hierarchies. If the stratifier can determine (via SHACL shape constraints or user-provided annotations) that the maximum derivation chain depth is `d`, the fixpoint loop can terminate after `d` iterations without running the final empty-delta check.
+
+**Integration with SHACL**: SHACL constraints like `sh:maxCount` on `rdfs:subClassOf` paths provide formal bounds on hierarchy depth. The Datalog compiler can read these constraints and set `max_iterations = d + 1`.
+
+### 14.2.13 Compiled Rule Plans (Post-1.0)
+
+Cache the generated SQL strings and their dictionary-encoded constants across `infer()` calls. Currently, every call to `infer()` re-parses rules, re-encodes constants, and re-generates SQL. With a plan cache:
+
+1. On first `infer()`, generate and cache SQL plans keyed by `(rule_set, rule_hash)`.
+2. On subsequent calls, reuse cached plans (invalidate if rules or prefixes change).
+3. Optionally, use PostgreSQL's `PREPARE` to create named prepared statements for the hottest rules.
+
+**Expected impact**: 50–80% reduction in `infer()` overhead for repeated calls on the same rule set.
+
+### 14.2.14 Lattice-Based Datalog — Datalog^L (Post-1.0)
+
+Extend the rule IR to support user-defined lattice types. Instead of deriving plain facts, rules can derive facts with *lattice values* that are combined using a monotone join operation:
+
+```prolog
+# Trust propagation with meet-semilattice:
+?x ex:trustLevel ?t :- ?x ex:directTrust ?t .
+?x ex:trustLevel (MIN ?t1 ?t2) :- ?x ex:knows ?y, ?y ex:trustLevel ?t1, ?x ex:trustLevel ?t2 .
+```
+
+Lattice operations (`MIN`, `MAX`, `UNION`, `INTERSECTION`) are monotone, so fixpoint computation is well-defined. This generalizes aggregation (Datalog^agg) and enables richer analytical rules.
+
+**Inspired by**: Flix (monotone lattice Datalog), Datafun (functional Datalog on semilattices), LogicBlox (lattice predicates).
 
 ---
 
