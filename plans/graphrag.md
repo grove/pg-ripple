@@ -636,21 +636,21 @@ pg_ripple + pgvector combined provides the complete stack: graph traversal, reas
 
 ## 7. Implementation Roadmap
 
-### Phase 1: BYOG Export (Low effort, high value)
+### Phase 1: BYOG Export ✅ Implemented in v0.26.0
 
 - Build a SQL function `pg_ripple.export_graphrag_entities()` → Parquet-compatible output
 - Build `pg_ripple.export_graphrag_relationships()` → Parquet-compatible output
 - Document the BYOG workflow with pg_ripple as source
 - **Value**: Any existing pg_ripple knowledge graph can be used with GraphRAG immediately
 
-### Phase 2: GraphRAG Importer (Medium effort)
+### Phase 2: GraphRAG Importer ✅ Implemented in v0.26.0
 
 - Build a Python package `graphrag-storage-pg-ripple` implementing GraphRAG's `TableProvider`
 - Map GraphRAG knowledge model tables to an RDF ontology (`graphrag:Entity`, `graphrag:Relationship`, etc.)
 - Support both read and write paths
 - **Value**: GraphRAG's indexing pipeline stores directly into pg_ripple
 
-### Phase 3: Query Integration (Medium effort)
+### Phase 3: Query Integration (In Progress)
 
 - Implement a custom GraphRAG `ContextBuilder` that issues SPARQL queries via pg_ripple_http
 - Replace DataFrame-based context assembly with JSON-LD framing

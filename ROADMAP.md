@@ -1893,14 +1893,14 @@ See [plans/graphrag.md](plans/graphrag.md) for the full synergy analysis, archit
 
 ### Deliverables
 
-- [ ] **GraphRAG RDF ontology** (`sql/graphrag_ontology.ttl`)
+- [x] **GraphRAG RDF ontology** (`sql/graphrag_ontology.ttl`)
   - Defines the RDF vocabulary for GraphRAG's knowledge model: `gr:Entity`, `gr:Relationship`, `gr:TextUnit`, `gr:Community`, `gr:CommunityReport`
   - Full property set mirroring GraphRAG's output table schemas: `gr:title`, `gr:type`, `gr:description`, `gr:frequency`, `gr:degree`, `gr:source`, `gr:target`, `gr:weight`, `gr:level`, `gr:rank`, `gr:summary`, `gr:fullContent`, `gr:hasMember`, `gr:parent`
   - Provenance properties for RDF-star metadata: `gr:confidence`, `gr:sourceTextUnit`, `gr:extractedBy`, `gr:extractedAt`
   - Namespace prefix `gr:` pre-registered via `pg_ripple.register_prefix()`
   - Loaded automatically by the example script; also loadable standalone via `pg_ripple.load_turtle_file()`
 
-- [ ] **BYOG Parquet export functions** (`src/export.rs` additions)
+- [x] **BYOG Parquet export functions** (`src/export.rs` additions)
   - `pg_ripple.export_graphrag_entities(graph_iri TEXT, output_path TEXT) RETURNS BIGINT`
     - Executes a SPARQL SELECT to extract all `gr:Entity` triples from the named graph
     - Writes `entities.parquet` with columns: `id`, `title`, `type`, `description`, `text_unit_ids`, `frequency`, `degree` — exactly matching GraphRAG's output schema
@@ -1916,13 +1916,13 @@ See [plans/graphrag.md](plans/graphrag.md) for the full synergy analysis, archit
     - Returns row count
   - Implementation: use Rust's `parquet` + `arrow` crates; require superuser (same as `load_*_file` functions); validate output path via `realpath()` against writable directories
 
-- [ ] **SHACL shapes for GraphRAG quality enforcement** (`sql/graphrag_shapes.ttl`)
+- [x] **SHACL shapes for GraphRAG quality enforcement** (`sql/graphrag_shapes.ttl`)
   - `gr:EntityShape`: `gr:title` required (1..1, string, maxLength 1000); `gr:type` required, constrained to `sh:in ("person" "organization" "geo" "event" "concept")`; `gr:description` required (1..1)
   - `gr:RelationshipShape`: `gr:source` required (1..1, `sh:class gr:Entity`); `gr:target` required (1..1, `sh:class gr:Entity`); `gr:weight` required (1..1, float, `sh:minInclusive 0.0`, `sh:maxInclusive 1.0`)
   - `gr:TextUnitShape`: `gr:text` required (1..1, string); `gr:tokenCount` required (1..1, non-negative integer)
   - Loaded via `pg_ripple.load_turtle_file()` and activated with `pg_ripple.validate()` or `pg_ripple.shacl_mode = 'sync'`
 
-- [ ] **Datalog enrichment rules** (`sql/graphrag_enrichment_rules.pl`)
+- [x] **Datalog enrichment rules** (`sql/graphrag_enrichment_rules.pl`)
   - `gr:coworker(?a, ?b)` — both entities appear as source in relationships targeting the same organization entity
   - `gr:collaborates(?a, ?b)` — both entities appear in the same text unit (share a `gr:TextUnit` via `gr:mentionsEntity`)
   - `gr:indirectReport(?leader, ?sub2)` — transitive: `?leader gr:manages ?mid`, `?mid gr:manages ?sub2`
@@ -1931,7 +1931,7 @@ See [plans/graphrag.md](plans/graphrag.md) for the full synergy analysis, archit
   - OWL-RL built-in rules (`pg_ripple.load_rules_builtin('owl-rl')`) applied first for RDFS subclass/subproperty transitivity
   - Documentation: each rule annotated with its GraphRAG use case (e.g. how `gr:coworker` enriches Local Search neighborhood)
 
-- [ ] **Python CLI bridge** (`scripts/graphrag_export.py`)
+- [x] **Python CLI bridge** (`scripts/graphrag_export.py`)
   - CLI tool wrapping the export functions for users who cannot call `pg_ripple.export_graphrag_*()` directly from SQL (e.g. managed PostgreSQL services where `COPY TO` is restricted)
   - `--pg-url`: PostgreSQL connection string
   - `--graph-iri`: named graph IRI to export
@@ -1943,13 +1943,13 @@ See [plans/graphrag.md](plans/graphrag.md) for the full synergy analysis, archit
   - Prints row counts and output paths on success
   - Unit tests via `pytest` in `scripts/test_graphrag_export.py`
 
-- [ ] **Example walkthrough** (`examples/graphrag_byog.sql`)
+- [x] **Example walkthrough** (`examples/graphrag_byog.sql`)
   - End-to-end example: create named graph → load sample entities/relationships as Turtle → run Datalog enrichment → validate with SHACL → query enriched graph via SPARQL → export to Parquet
   - Demonstrates all four integration points: ontology, validation, reasoning, and export
   - Includes a commented BYOG `settings.yaml` snippet showing the `graphrag index` command that consumes the exported Parquet files
   - Executable as a pg_regress test: `cargo pgrx regress pg18` includes `graphrag_byog.sql`
 
-- [ ] **pg_regress tests**
+- [x] **pg_regress tests**
   - `graphrag_ontology.sql` — load ontology, verify all prefix registrations and class/property triples are present
   - `graphrag_crud.sql` — insert sample entities and relationships as Turtle, query back via SPARQL, verify field values
   - `graphrag_enrichment.sql` — load enrichment rules, run `infer('graphrag_enrichment')`, verify `gr:coworker` and `gr:collaborates` triples are derived
@@ -1964,12 +1964,12 @@ See [plans/graphrag.md](plans/graphrag.md) for the full synergy analysis, archit
 
 > See [plans/documentation.md](plans/documentation.md) for details.
 
-- [ ] `user-guide/graphrag.md` (new page) — step-by-step guide: install pg_ripple, load GraphRAG entities as RDF, run enrichment and validation, export to Parquet, run GraphRAG BYOG workflow; includes architecture diagram showing data flow between GraphRAG and pg_ripple
-- [ ] `reference/graphrag-ontology.md` (new page) — full reference for the `gr:` vocabulary: all classes, properties, and SHACL shapes with descriptions and example triples
-- [ ] `reference/graphrag-functions.md` (new page) — API reference for `export_graphrag_entities`, `export_graphrag_relationships`, `export_graphrag_text_units`
-- [ ] `user-guide/graphrag-enrichment.md` (new page) — explains Datalog enrichment for GraphRAG: which rules are built-in, how to write custom rules, how enriched triples improve community detection quality
-- [ ] `plans/graphrag.md` updated — mark Phase 1 (BYOG export) and Phase 2 (Datalog enrichment) as implemented; update Phase 3 status to in-progress
-- [ ] Release notes for v0.26.0 — highlight GraphRAG integration as the headline feature, link to the BYOG walkthrough, explain the Datalog enrichment value proposition
+- [x] `user-guide/graphrag.md` (new page) — step-by-step guide: install pg_ripple, load GraphRAG entities as RDF, run enrichment and validation, export to Parquet, run GraphRAG BYOG workflow; includes architecture diagram showing data flow between GraphRAG and pg_ripple
+- [x] `reference/graphrag-ontology.md` (new page) — full reference for the `gr:` vocabulary: all classes, properties, and SHACL shapes with descriptions and example triples
+- [x] `reference/graphrag-functions.md` (new page) — API reference for `export_graphrag_entities`, `export_graphrag_relationships`, `export_graphrag_text_units`
+- [x] `user-guide/graphrag-enrichment.md` (new page) — explains Datalog enrichment for GraphRAG: which rules are built-in, how to write custom rules, how enriched triples improve community detection quality
+- [x] `plans/graphrag.md` updated — mark Phase 1 (BYOG export) and Phase 2 (Datalog enrichment) as implemented; update Phase 3 status to in-progress
+- [x] Release notes for v0.26.0 — highlight GraphRAG integration as the headline feature, link to the BYOG walkthrough, explain the Datalog enrichment value proposition
 
 ### Exit Criteria
 

@@ -13,6 +13,34 @@ Points at the next milestone: v1.0.0 — Production Release.
 
 ---
 
+## [0.26.0] — 2026-04-18 — GraphRAG Integration
+
+**pg_ripple becomes a first-class backend for Microsoft GraphRAG: store LLM-extracted entities and relationships as RDF triples, enrich the graph with Datalog rules, enforce quality with SHACL shapes, and export back to Parquet for GraphRAG's BYOG (Bring Your Own Graph) pipeline.** All 87 pg_regress tests pass (5 new tests for v0.26.0 features).
+
+### What you can do
+
+- **Use pg_ripple as your GraphRAG knowledge graph** — store entities, relationships, and text units as native RDF triples; query them with SPARQL; update incrementally via the HTAP delta partition
+- **Export to Parquet for GraphRAG BYOG** — `pg_ripple.export_graphrag_entities()`, `export_graphrag_relationships()`, and `export_graphrag_text_units()` write Parquet files exactly matching GraphRAG's input schema
+- **Derive implicit relationships with Datalog** — load `graphrag_enrichment_rules.pl` and run `pg_ripple.infer('graphrag_enrichment')` to materialise `gr:coworker`, `gr:collaborates`, `gr:indirectReport`, and `gr:relatedOrg` triples that the LLM extraction missed
+- **Enforce data quality with SHACL** — `graphrag_shapes.ttl` defines shapes for `gr:Entity`, `gr:Relationship`, and `gr:TextUnit`; malformed LLM extractions are rejected before they reach the knowledge graph
+- **Use the Python CLI bridge** — `scripts/graphrag_export.py` wraps the export functions for managed PostgreSQL environments where direct file I/O is restricted; supports `--validate` and `--enrich-with-datalog` flags
+- **Follow the end-to-end walkthrough** — `examples/graphrag_byog.sql` demonstrates the full BYOG workflow: ontology loading, entity insertion, Datalog enrichment, SHACL validation, SPARQL query, and Parquet export
+
+### Added
+
+- `pg_ripple.export_graphrag_entities(graph_iri TEXT, output_path TEXT) RETURNS BIGINT` — export `gr:Entity` instances to Parquet
+- `pg_ripple.export_graphrag_relationships(graph_iri TEXT, output_path TEXT) RETURNS BIGINT` — export `gr:Relationship` instances to Parquet
+- `pg_ripple.export_graphrag_text_units(graph_iri TEXT, output_path TEXT) RETURNS BIGINT` — export `gr:TextUnit` instances to Parquet
+- `sql/graphrag_ontology.ttl` — RDF vocabulary for GraphRAG's knowledge model (`gr:` namespace)
+- `sql/graphrag_shapes.ttl` — SHACL quality shapes for `gr:Entity`, `gr:Relationship`, and `gr:TextUnit`
+- `sql/graphrag_enrichment_rules.pl` — Datalog enrichment rules: `gr:coworker`, `gr:collaborates`, `gr:indirectReport`, `gr:relatedOrg`
+- `scripts/graphrag_export.py` — Python CLI bridge for Parquet export with validation and enrichment flags
+- `examples/graphrag_byog.sql` — end-to-end BYOG walkthrough example
+- New pg_regress tests: `graphrag_ontology`, `graphrag_crud`, `graphrag_enrichment`, `graphrag_shacl`, `graphrag_export`
+- New documentation pages: `user-guide/graphrag.md`, `user-guide/graphrag-enrichment.md`, `reference/graphrag-ontology.md`, `reference/graphrag-functions.md`
+
+---
+
 ## [0.25.0] — 2026-04-18 — GeoSPARQL & Architectural Polish
 
 **pg_ripple adds GeoSPARQL 1.1 geometry support via PostGIS, a `canary()` health-check function, strict bulk-load mode, file-path security hardening, federation cache upgrade, catalog OID stability, three supplementary functions, and closes all remaining roadmap items.** All 82 pg_regress tests pass (6 new tests for v0.25.0 features).
