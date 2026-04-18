@@ -11,7 +11,7 @@ Each release below has two layers:
 - **The plain-language summary** (in the coloured box) explains *what* the release delivers and *why it matters* — no programming knowledge required.
 - **The technical deliverables** list the specific items developers will build. Feel free to skip these if you're reading for the big picture.
 
-**Effort estimates** are given as *person-weeks* — e.g. "6–8 pw" means the release would take roughly 6–8 weeks for a single full-time developer, or 3–4 weeks for a pair working together. The total estimated effort from v0.1.0 to v1.0.0 is **155–211 person-weeks** (~36–49 months for one developer; ~18–25 months for a pair).
+**Effort estimates** are given as *person-weeks* — e.g. "6–8 pw" means the release would take roughly 6–8 weeks for a single full-time developer, or 3–4 weeks for a pair working together. The total estimated effort from v0.1.0 to v1.0.0 is **191–262 person-weeks** (~44–60 months for one developer; ~22–30 months for a pair).
 
 **"optional at runtime" items**: some deliverables are annotated *(optional at runtime — X must be installed)*. This means the feature depends on an external extension (e.g. pg_trickle) that may not be installed in every deployment. The feature is **required by this roadmap** and must be implemented; the Rust code gates on a runtime availability check and degrades gracefully (returns 0 / false / empty, emits a WARNING, never raises an ERROR) when the dependency is absent. These items are not optional from a delivery standpoint.
 
@@ -54,8 +54,11 @@ Each release below has two layers:
 | [0.30.0](#v0300--datalog-aggregation--compiled-rule-plans) | Datalog Aggregation & Compiled Rule Plans | Aggregation in rule bodies (Datalog^agg), SQL plan caching across inference runs, SPARQL on-demand query speedup | 5–7 pw |
 | [0.31.0](#v0310--entity-resolution--demand-transformation) | Entity Resolution & Demand Transformation | `owl:sameAs` entity canonicalization, demand transformation for goal-directed rule rewriting, SPARQL query planner integration | 5–7 pw |
 | [0.32.0](#v0320--well-founded-semantics--tabling) | Well-Founded Semantics & Tabling | Three-valued semantics for cyclic ontologies, subsumptive result caching for Datalog and SPARQL repeated sub-queries | 5–7 pw |
+| [0.33.0](#v0330--bounded-depth-termination--incremental-retraction-dred) | Bounded-Depth Termination & Incremental Retraction (DRed) | Early fixpoint termination for bounded hierarchies (20–50% faster SPARQL property paths); Delete-Rederive for write-correct materialized predicates | 5–7 pw |
+| [0.34.0](#v0340--parallel-stratum-evaluation--incremental-rule-updates) | Parallel Stratum Evaluation & Incremental Rule Updates | Background-worker parallelism for independent rules (2–5× faster materialization); add/remove rules without full recompute | 5–7 pw |
+| [0.35.0](#v0350--worst-case-optimal-joins--lattice-based-datalog) | Worst-Case Optimal Joins & Lattice-Based Datalog | Leapfrog Triejoin for cyclic SPARQL patterns (10×–100× speedup); Datalog^L monotone lattice aggregation | 6–9 pw |
 | [1.0.0](#v100--production-release) | Production Release | Standards conformance, stress testing, security audit | 6–8 pw |
-| | | **Total estimated effort** | **175–239 pw** |
+| | | **Total estimated effort** | **191–262 pw** |
 
 ---
 
@@ -2430,6 +2433,158 @@ See [plans/ecosystem/datalog.md §14.2](plans/ecosystem/datalog.md) for design n
 ### Exit Criteria
 
 `datalog_wfs.sql`, `datalog_tabling.sql`, and `sparql_tabling.sql` all pass in `cargo pgrx regress pg18`. A SPARQL query with a repeated transitive-closure sub-pattern on a 1M-triple dataset completes in <50% of the time on the second execution (tabling cache hit). `infer_wfs()` on a stratifiable rule set produces identical results to `infer()`. Migration scripts from 0.1.0 through 0.32.0 run cleanly via `just test-migration`.
+
+---
+
+## v0.33.0 — Bounded-Depth Termination & Incremental Retraction (DRed)
+
+**Theme**: Smarter fixpoint termination and write-correct incremental maintenance.
+
+> **In plain language:** Two complementary improvements for production workloads. First, when an ontology has a known maximum hierarchy depth (e.g., a SHACL shape says class hierarchies are at most 5 levels deep), the inference engine can stop early instead of running one final "did anything change?" check — shaving 20–50% off property path queries and fixpoint loops. Second, the Delete-Rederive (DRed) algorithm means that deleting a base triple no longer requires re-materializing the entire derived closure: the engine surgically removes only the affected derived facts, re-derives any that survive via alternative paths, and leaves everything else untouched. Materialized SPARQL predicates stay correct in milliseconds after deletes instead of seconds.
+>
+> **Effort estimate: 5–7 person-weeks**
+
+### Background
+
+See [plans/ecosystem/datalog.md §14.2.7 and §14.2.12](plans/ecosystem/datalog.md) for design notes. Bounded-depth termination integrates with SHACL shape constraints (`sh:maxDepth` annotations on property paths) and user-provided GUC hints to set the maximum fixpoint iteration count at compile time. DRed (Gupta, Katiyar & Sagiv, 1993) is the standard incremental deletion algorithm used by RDFox and other production Datalog systems; it avoids full re-materialization by over-deleting pessimistically and then re-deriving survivors.
+
+### Deliverables
+
+- [ ] **Bounded-depth early termination** (`src/datalog/compiler.rs`)
+  - Read SHACL `sh:maxDepth` annotations for property paths used in rule bodies; fall back to GUC `pg_ripple.datalog_max_depth` (integer, default `0` = unlimited)
+  - When a depth bound `d` is known, emit `WITH RECURSIVE … (MAXDEPTH d)` hint (PostgreSQL 18 syntax) or use a depth counter column in the recursive CTE: `depth INT`, terminating when `depth > d`
+  - SPARQL property path integration: property path CTEs (`rdfs:subClassOf*`, `ex:knows+`) respect the same bound when the path predicate has a SHACL `sh:maxDepth` constraint
+  - GUC: `pg_ripple.datalog_max_depth` (integer, default `0` — unlimited)
+  - pg_regress test: `datalog_bounded_depth.sql` — verify fixpoint terminates after `d` iterations; verify SPARQL property path honours depth bound; verify unbounded rule still produces full closure
+
+- [ ] **Incremental retraction — DRed algorithm** (`src/datalog/dred.rs` new module)
+  - Hook into the CDC delete path: when a base triple is deleted from a VP table, identify all derived predicates whose SQL rules reference that VP table
+  - **Phase 1 — Over-delete**: for each affected derived predicate, delete all rows that *could* depend on the deleted triple (pessimistic, using rule SQL with the deleted triple as a positive filter)
+  - **Phase 2 — Re-derive**: re-run the rule SQL restricted to the over-deleted set; rows that are re-derived via an alternative derivation path are reinserted
+  - **Phase 3 — Commit**: rows not reinserted after phase 2 are permanently gone
+  - `pg_ripple.dred_enabled` (bool, default `true`) — master switch; set `false` to fall back to full re-materialization on delete
+  - `pg_ripple.dred_batch_size` (integer, default `1000`) — maximum number of deleted base triples to process in a single DRed transaction
+  - Error code `PT530` — DRed cycle detected (derived predicate self-references in a way DRed cannot safely resolve; falls back to full recompute)
+  - pg_regress test: `datalog_dred.sql` — insert triples, materialize RDFS closure, delete one base triple, verify only the correctly-affected derived triples are removed; verify triples supported by alternative paths survive
+
+- [ ] **Incremental rule updates** (`src/datalog/mod.rs`)
+  - `pg_ripple.add_rule(rule_set TEXT, rule_text TEXT)` — add a single rule to an existing rule set without full recompute; only the new rule's derived predicate needs one fresh iteration pass
+  - `pg_ripple.remove_rule(rule_id BIGINT)` — remove a rule and retract any derived facts that were solely supported by it (uses DRed internally)
+  - Dependency-aware invalidation: `add_rule` triggers one additional semi-naive pass on the affected stratum only
+  - pg_regress test: `datalog_incremental_rules.sql` — add a rule to a live rule set; verify new derivations appear without full recompute; remove the rule; verify derived facts retracted
+
+### Migration Script
+
+`sql/pg_ripple--0.32.0--0.33.0.sql` — registers `pg_ripple.datalog_max_depth`, `pg_ripple.dred_enabled`, `pg_ripple.dred_batch_size` GUCs. No VP table schema changes.
+
+### Documentation
+
+- [ ] `user-guide/sql-reference/datalog.md` updated — document `add_rule()`, `remove_rule()`, DRed GUCs, `datalog_max_depth` GUC
+- [ ] `user-guide/best-practices/datalog-optimization.md` updated — add section on DRed vs. full recompute trade-offs; bounded-depth tuning with SHACL
+- [ ] `user-guide/best-practices/sparql-performance.md` updated — add section on bounded-depth SPARQL property paths
+- [ ] Release notes for v0.33.0
+
+### Exit Criteria
+
+`datalog_bounded_depth.sql`, `datalog_dred.sql`, and `datalog_incremental_rules.sql` all pass in `cargo pgrx regress pg18`. Deleting a base triple from a 1M-triple RDFS-materialized dataset with DRed enabled completes in <500ms (vs. full recompute taking >5s). A SPARQL `rdfs:subClassOf*` property path query on a hierarchy with `sh:maxDepth 5` completes in <50% of the time compared to the unbounded version on a 10-level test hierarchy. Migration scripts from 0.1.0 through 0.33.0 run cleanly via `just test-migration`.
+
+---
+
+## v0.34.0 — Parallel Stratum Evaluation & Incremental Rule Updates
+
+**Theme**: Concurrent rule evaluation for faster materialization of large rule sets.
+
+> **In plain language:** The Datalog engine currently evaluates rules one at a time within each stratum. This release allows rules that derive different predicates — and therefore cannot interfere with each other — to run concurrently using PostgreSQL's background worker infrastructure. For OWL RL, which has roughly 10 independent rule groups in its first stratum, this means the full ontology closure can materialize up to 10× faster. SPARQL queries that depend on materialized predicates (the common production mode) benefit directly: derived VP tables become fresh sooner after bulk data loads, reducing the staleness window.
+>
+> **Effort estimate: 5–7 person-weeks**
+
+### Background
+
+See [plans/ecosystem/datalog.md §14.2.11](plans/ecosystem/datalog.md) for design notes. Within a single stratum, rules deriving *different* predicates are fully independent: their INSERT … SELECT statements touch different VP tables and can run concurrently without coordination. Rules deriving the *same* predicate within a stratum must be serialized or use `ON CONFLICT DO NOTHING` to handle concurrent inserts. The implementation uses `pgrx::BackgroundWorker` with a shared-memory semaphore to limit concurrency to `pg_ripple.datalog_parallel_workers` (default: `max_worker_processes / 2`).
+
+### Deliverables
+
+- [ ] **Parallel stratum evaluation** (`src/datalog/parallel.rs` new module)
+  - Analyse rule dependency graph per stratum: partition rules into *independent groups* (rules that derive different predicates and have no shared body predicates that are derived within the same stratum)
+  - Spawn one background worker per independent group; each worker executes its rule's `INSERT … SELECT` for the current semi-naive iteration
+  - Synchronization barrier: the main process waits for all workers to finish before starting the next iteration
+  - `ON CONFLICT DO NOTHING` ensures correctness when two workers insert into the same delta table
+  - GUC: `pg_ripple.datalog_parallel_workers` (integer, default `4`, max `max_worker_processes - 3`)
+  - GUC: `pg_ripple.datalog_parallel_threshold` (integer, default `10000`) — only parallelize strata where the estimated total row count exceeds this threshold (avoid overhead for small rule sets)
+  - Expose parallelism statistics via `infer_with_stats()` JSONB output: `"parallel_groups": 5, "max_concurrent": 4`
+  - pg_regress test: `datalog_parallel.sql` — verify OWL RL closure produces identical results with `datalog_parallel_workers = 1` and `= 4`; verify `infer_with_stats()` reports parallel groups > 1 for OWL RL
+
+- [ ] **SPARQL materialization freshness improvement**
+  - Parallel evaluation reduces time-to-fresh for derived VP tables after `pg_ripple.infer()` calls triggered by bulk loads
+  - Document: SPARQL queries in materialized mode now observe a shorter staleness window after bulk inserts; add note to SPARQL best practices guide
+
+### Migration Script
+
+`sql/pg_ripple--0.33.0--0.34.0.sql` — registers `pg_ripple.datalog_parallel_workers` and `pg_ripple.datalog_parallel_threshold` GUCs. No VP table schema changes.
+
+### Documentation
+
+- [ ] `user-guide/sql-reference/datalog.md` updated — document parallel evaluation GUCs, `infer_with_stats()` parallel fields
+- [ ] `user-guide/best-practices/datalog-optimization.md` updated — add section on tuning `datalog_parallel_workers` for different hardware configurations
+- [ ] `user-guide/best-practices/sparql-performance.md` updated — note materialization freshness improvement with parallel evaluation
+- [ ] Release notes for v0.34.0
+
+### Exit Criteria
+
+`datalog_parallel.sql` passes in `cargo pgrx regress pg18`. OWL RL full closure on a 1M-triple dataset with `datalog_parallel_workers = 4` completes in <40% of the time compared to `datalog_parallel_workers = 1`. Results are identical in both cases. Migration scripts from 0.1.0 through 0.34.0 run cleanly via `just test-migration`.
+
+---
+
+## v0.35.0 — Worst-Case Optimal Joins & Lattice-Based Datalog
+
+**Theme**: Advanced join algorithms for cyclic graph patterns and monotone lattice aggregation.
+
+> **In plain language:** Two ambitious features that push pg_ripple to the frontier of Datalog and graph database research. Worst-case optimal joins tackle the hardest SPARQL performance problem: cyclic query patterns (think "find all triangles" or "find paths that loop back") where standard database joins produce enormous intermediate results. The Leapfrog Triejoin algorithm solves this class of problem with a mathematically optimal algorithm, giving 10×–100× speedups on queries that previously timed out. Lattice-based Datalog extends rules to work with custom algebraic structures — for example, propagating trust scores (where "trust of X through Y" is the minimum of individual trust values), or interval types, or set-valued annotations — enabling a new class of analytical reasoning that standard Datalog cannot express.
+>
+> **Effort estimate: 6–9 person-weeks**
+
+### Background
+
+See [plans/ecosystem/datalog.md §14.2.8 and §14.2.14](plans/ecosystem/datalog.md) for design notes. Worst-case optimal joins (Ngo et al., 2012; "Skew Strikes Back") use a trie-based intersection algorithm that is provably optimal for any join query. PostgreSQL does not expose WCO join algorithms natively; implementation requires a custom scan node via the `CustomScan` API, registering a C-callable scan provider that pg_ripple exposes through its Rust FFI layer. Lattice-based Datalog (Datalog^L, inspired by Flix and Datafun) extends the rule IR with typed lattice values and monotone operations; fixpoint termination is guaranteed by the ascending chain condition on the lattice.
+
+### Deliverables
+
+- [ ] **Worst-case optimal joins — Leapfrog Triejoin** (`src/sparql/wcoj.rs` new module)
+  - Detect cyclic join patterns at SPARQL→SQL translation time: any SELECT with ≥3 triple patterns sharing variables in a cycle (triangle, square, etc.)
+  - For detected cyclic patterns, route execution through a Leapfrog Triejoin scan node instead of standard PostgreSQL hash-joins
+  - CustomScan implementation: register a scan provider in `_PG_init` that intercepts cyclic join nodes in the PostgreSQL planner's plan tree
+  - VP table trie interface: read VP table rows in sort order (existing B-tree `(s, o)` indices serve as the underlying trie structure)
+  - GUC: `pg_ripple.wcoj_enabled` (bool, default `true`) — master switch
+  - GUC: `pg_ripple.wcoj_min_tables` (integer, default `3`) — minimum number of tables in a join before WCOJ is considered
+  - SPARQL benefit: cyclic graph patterns that previously caused query timeouts or multi-second latencies complete in milliseconds
+  - Benchmark: `benchmarks/wcoj.sql` — triangle query on a social-graph VP table; compare WCOJ vs. standard planner at 100K, 1M, 10M triples
+  - pg_regress test: `sparql_wcoj.sql` — verify triangle query produces correct results with WCOJ enabled and disabled; verify `pg_ripple.wcoj_enabled = false` falls back to standard planner
+
+- [ ] **Lattice-Based Datalog — Datalog^L** (`src/datalog/lattice.rs` new module)
+  - Extend rule IR: lattice term `LatticeVal(lattice_type, value)` alongside `Const` and `Var`
+  - Built-in lattice types: `MinLattice` (meet = MIN), `MaxLattice` (join = MAX), `SetLattice` (join = UNION), `IntervalLattice` (join = interval hull)
+  - User-defined lattice types via `pg_ripple.create_lattice(name TEXT, join_fn TEXT, bottom TEXT)` — `join_fn` is a PostgreSQL aggregate function name
+  - SQL compilation: lattice rules compile to `INSERT … SELECT … ON CONFLICT (s, g) DO UPDATE SET o = lattice_join(excluded.o, vp.o)` — the upsert applies the lattice join on conflict
+  - Fixpoint termination: guaranteed by ascending chain condition; bounded by GUC `pg_ripple.lattice_max_iterations` (default `1000`)
+  - Example rule: trust propagation — `?x ex:trust (MIN ?t1 ?t2) :- ?x ex:knows ?y, ?y ex:trust ?t1, ?x ex:directTrust ?t2 .`
+  - GUC: `pg_ripple.lattice_max_iterations` (integer, default `1000`)
+  - Error code `PT540` — lattice fixpoint did not converge (ascending chain condition violated by user-defined lattice)
+  - pg_regress test: `datalog_lattice.sql` — trust propagation rule with MinLattice; verify convergence; verify user-defined lattice via custom aggregate
+
+### Migration Script
+
+`sql/pg_ripple--0.34.0--0.35.0.sql` — registers WCOJ and lattice GUCs; creates `pg_ripple.create_lattice()` SQL function. No VP table schema changes.
+
+### Documentation
+
+- [ ] `user-guide/sql-reference/datalog.md` updated — document `create_lattice()`, lattice rule syntax, lattice GUCs
+- [ ] `user-guide/best-practices/sparql-performance.md` updated — add section on cyclic SPARQL pattern detection and WCOJ; when to set `wcoj_min_tables`
+- [ ] `reference/lattice-datalog.md` (new page) — full tutorial on Datalog^L: lattice types, monotone rules, convergence guarantees, use cases (trust propagation, interval reasoning, set-valued annotations)
+- [ ] Release notes for v0.35.0
+
+### Exit Criteria
+
+`sparql_wcoj.sql` and `datalog_lattice.sql` pass in `cargo pgrx regress pg18`. A triangle-pattern SPARQL query on a 1M-edge social graph VP table completes in <10% of the time compared to the standard planner (WCOJ enabled). A trust-propagation lattice rule on 100K triples converges to the correct fixed point. Migration scripts from 0.1.0 through 0.35.0 run cleanly via `just test-migration`.
 
 ---
 
