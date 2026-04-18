@@ -1,0 +1,114 @@
+# GraphRAG SHACL Shapes for pg_ripple (v0.26.0)
+#
+# Validates the structural integrity of GraphRAG extractions stored as RDF.
+# Rejects malformed entities, relationships, and text units before they
+# corrupt the knowledge graph and degrade community detection quality.
+#
+# Load into pg_ripple:
+#   SELECT pg_ripple.load_shacl(pg_read_file('/path/to/graphrag_shapes.ttl'));
+# Enable sync validation:
+#   SET pg_ripple.shacl_mode = 'sync';
+
+@prefix gr:   <https://graphrag.org/ns/> .
+@prefix sh:   <http://www.w3.org/ns/shacl#> .
+@prefix rdf:  <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix xsd:  <http://www.w3.org/2001/XMLSchema#> .
+
+# ── gr:EntityShape ────────────────────────────────────────────────────────────
+#
+# Validates that every gr:Entity has:
+#   - A gr:title (exactly one, string, max 1000 chars)
+#   - A gr:type (exactly one, constrained to valid categories)
+#   - A gr:description (at least one)
+
+gr:EntityShape
+    a sh:NodeShape ;
+    sh:targetClass gr:Entity ;
+
+    sh:property [
+        sh:path gr:title ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:datatype xsd:string ;
+        sh:maxLength 1000 ;
+        sh:message "gr:Entity must have exactly one gr:title string value of at most 1000 characters." ;
+    ] ;
+
+    sh:property [
+        sh:path gr:type ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:in ( "person" "organization" "geo" "event" "concept" ) ;
+        sh:message "gr:Entity must have exactly one gr:type from: person, organization, geo, event, concept." ;
+    ] ;
+
+    sh:property [
+        sh:path gr:description ;
+        sh:minCount 1 ;
+        sh:message "gr:Entity must have at least one gr:description." ;
+    ] .
+
+# ── gr:RelationshipShape ──────────────────────────────────────────────────────
+#
+# Validates that every gr:Relationship has:
+#   - A gr:source (exactly one, must be a gr:Entity)
+#   - A gr:target (exactly one, must be a gr:Entity)
+#   - A gr:weight (exactly one, float in [0.0, 1.0])
+
+gr:RelationshipShape
+    a sh:NodeShape ;
+    sh:targetClass gr:Relationship ;
+
+    sh:property [
+        sh:path gr:source ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:class gr:Entity ;
+        sh:message "gr:Relationship must have exactly one gr:source that is a gr:Entity." ;
+    ] ;
+
+    sh:property [
+        sh:path gr:target ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:class gr:Entity ;
+        sh:message "gr:Relationship must have exactly one gr:target that is a gr:Entity." ;
+    ] ;
+
+    sh:property [
+        sh:path gr:weight ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:datatype xsd:float ;
+        sh:minInclusive 0.0 ;
+        sh:maxInclusive 1.0 ;
+        sh:message "gr:Relationship must have exactly one gr:weight float in [0.0, 1.0]." ;
+    ] .
+
+# ── gr:TextUnitShape ──────────────────────────────────────────────────────────
+#
+# Validates that every gr:TextUnit has:
+#   - A gr:text (exactly one, string)
+#   - A gr:tokenCount (exactly one, non-negative integer)
+
+gr:TextUnitShape
+    a sh:NodeShape ;
+    sh:targetClass gr:TextUnit ;
+
+    sh:property [
+        sh:path gr:text ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:datatype xsd:string ;
+        sh:message "gr:TextUnit must have exactly one gr:text string value." ;
+    ] ;
+
+    sh:property [
+        sh:path gr:tokenCount ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:datatype xsd:integer ;
+        sh:minInclusive 0 ;
+        sh:message "gr:TextUnit must have exactly one gr:tokenCount non-negative integer." ;
+    ] .

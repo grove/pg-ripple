@@ -1710,6 +1710,47 @@ mod pg_ripple {
         TableIterator::new(lines.into_iter().map(|l| (l,)))
     }
 
+    // ── GraphRAG BYOG Parquet export (v0.26.0) ────────────────────────────────
+
+    /// Export all `gr:Entity` nodes from a named graph to a Parquet file.
+    ///
+    /// Writes a Parquet file at `output_path` with columns:
+    /// `id`, `title`, `type`, `description`, `text_unit_ids`, `frequency`, `degree`.
+    ///
+    /// `graph_iri` is the named graph IRI (without angle brackets), or an empty
+    /// string to query the default graph.
+    ///
+    /// Requires superuser.  Returns the number of entity rows written.
+    ///
+    /// The output file is compatible with `pyarrow.parquet.read_table()` and
+    /// can be fed directly to GraphRAG's BYOG `entity_table_path` option.
+    #[pg_extern]
+    fn export_graphrag_entities(graph_iri: &str, output_path: &str) -> i64 {
+        crate::export::export_graphrag_entities(graph_iri, output_path)
+    }
+
+    /// Export all `gr:Relationship` nodes from a named graph to a Parquet file.
+    ///
+    /// Writes a Parquet file at `output_path` with columns:
+    /// `id`, `source`, `target`, `description`, `weight`, `combined_degree`, `text_unit_ids`.
+    ///
+    /// Requires superuser.  Returns the number of relationship rows written.
+    #[pg_extern]
+    fn export_graphrag_relationships(graph_iri: &str, output_path: &str) -> i64 {
+        crate::export::export_graphrag_relationships(graph_iri, output_path)
+    }
+
+    /// Export all `gr:TextUnit` nodes from a named graph to a Parquet file.
+    ///
+    /// Writes a Parquet file at `output_path` with columns:
+    /// `id`, `text`, `n_tokens`, `document_id`, `entity_ids`, `relationship_ids`.
+    ///
+    /// Requires superuser.  Returns the number of text unit rows written.
+    #[pg_extern]
+    fn export_graphrag_text_units(graph_iri: &str, output_path: &str) -> i64 {
+        crate::export::export_graphrag_text_units(graph_iri, output_path)
+    }
+
     // ── JSON-LD Framing (v0.17.0) ─────────────────────────────────────────────
 
     /// Translate a JSON-LD frame to a SPARQL CONSTRUCT query string.

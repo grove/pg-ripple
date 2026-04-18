@@ -1,0 +1,34 @@
+-- Migration 0.25.0 → 0.26.0: GraphRAG Integration
+--
+-- New SQL functions (compiled from Rust — no SQL schema changes):
+--
+--   pg_ripple.export_graphrag_entities(graph_iri TEXT, output_path TEXT)
+--       RETURNS BIGINT
+--       Export all gr:Entity nodes from the named graph to a Parquet file.
+--       Columns: id, title, type, description, text_unit_ids, frequency, degree.
+--       Requires superuser.
+--
+--   pg_ripple.export_graphrag_relationships(graph_iri TEXT, output_path TEXT)
+--       RETURNS BIGINT
+--       Export all gr:Relationship nodes from the named graph to a Parquet file.
+--       Columns: id, source, target, description, weight, combined_degree, text_unit_ids.
+--       Requires superuser.
+--
+--   pg_ripple.export_graphrag_text_units(graph_iri TEXT, output_path TEXT)
+--       RETURNS BIGINT
+--       Export all gr:TextUnit nodes from the named graph to a Parquet file.
+--       Columns: id, text, n_tokens, document_id, entity_ids, relationship_ids.
+--       Requires superuser.
+--
+-- New static SQL/TTL/PL files (loaded by the user, not auto-loaded):
+--
+--   sql/graphrag_ontology.ttl         — gr: RDF vocabulary for GraphRAG
+--   sql/graphrag_shapes.ttl           — SHACL shapes for GraphRAG quality enforcement
+--   sql/graphrag_enrichment_rules.pl  — Datalog enrichment rules (load via load_rules())
+--   examples/graphrag_byog.sql        — End-to-end BYOG walkthrough example
+--   scripts/graphrag_export.py        — Python CLI bridge for Parquet export
+--
+-- Usage:
+--   SELECT pg_ripple.load_turtle(pg_read_file('<path>/graphrag_ontology.ttl'));
+--   SELECT pg_ripple.load_shacl(pg_read_file('<path>/graphrag_shapes.ttl'));
+--   SELECT pg_ripple.load_rules(pg_read_file('<path>/graphrag_enrichment_rules.pl'), 'graphrag_enrichment');

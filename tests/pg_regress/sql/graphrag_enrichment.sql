@@ -1,0 +1,81 @@
+-- pg_regress test: GraphRAG Datalog enrichment rules (v0.26.0)
+--
+-- Covers:
+--   1. Inserting two entities linked to the same organization
+--   2. Loading the gr:coworker Datalog rule
+--   3. Running infer() to materialize the rule
+--   4. Verifying gr:coworker triple is produced
+--
+-- Namespace: https://graphrag.test/enrich/
+
+CREATE EXTENSION IF NOT EXISTS pg_ripple;
+SET search_path TO pg_ripple, public;
+
+-- ── Setup: insert base triples ────────────────────────────────────────────────
+-- Two people, each linked to the same org via a gr:Relationship.
+-- Relationship r1: alice -> ACME (source=alice, target=acme)
+-- Relationship r2: bob   -> ACME (source=bob, target=acme)
+SELECT pg_ripple.load_turtle($DATA$
+@prefix gr:   <https://graphrag.org/ns/> .
+@prefix rdf:  <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+
+<https://graphrag.test/enrich/entity/alice> rdf:type gr:Entity .
+<https://graphrag.test/enrich/entity/bob>   rdf:type gr:Entity .
+<https://graphrag.test/enrich/entity/acme>  rdf:type gr:Entity .
+
+<https://graphrag.test/enrich/rel/1>
+    rdf:type     gr:Relationship ;
+    gr:source    <https://graphrag.test/enrich/entity/alice> ;
+    gr:target    <https://graphrag.test/enrich/entity/acme> .
+
+<https://graphrag.test/enrich/rel/2>
+    rdf:type     gr:Relationship ;
+    gr:source    <https://graphrag.test/enrich/entity/bob> ;
+    gr:target    <https://graphrag.test/enrich/entity/acme> .
+$DATA$) > 0 AS base_triples_loaded;
+
+-- ── Load gr:coworker Datalog rule ─────────────────────────────────────────────
+-- Rule: two distinct entities are coworkers if they each have a Relationship
+-- pointing to the same target entity.
+SELECT pg_ripple.load_rules(
+    $RULES$
+?a <https://graphrag.org/ns/coworker> ?b :-
+    ?rel1 <https://graphrag.org/ns/source> ?a ,
+    ?rel2 <https://graphrag.org/ns/source> ?b ,
+    ?rel1 <https://graphrag.org/ns/target> ?org ,
+    ?rel2 <https://graphrag.org/ns/target> ?org .
+$RULES$,
+    'graphrag_enrich'
+) > 0 AS rules_loaded;
+
+-- ── Materialize inferred triples ──────────────────────────────────────────────
+SELECT pg_ripple.infer('graphrag_enrich') >= 0 AS infer_ok;
+
+-- ── Verify gr:coworker triple is produced ────────────────────────────────────
+-- alice and bob should both be coworkers (alice,bob and bob,alice and self-coworker)
+SELECT count(*) >= 1 AS coworker_triple_inferred
+FROM pg_ripple.find_triples(
+    '<https://graphrag.test/enrich/entity/alice>',
+    '<https://graphrag.org/ns/coworker>',
+    NULL
+);
+
+SELECT count(*) >= 1 AS bob_coworker_inferred
+FROM pg_ripple.find_triples(
+    '<https://graphrag.test/enrich/entity/bob>',
+    '<https://graphrag.org/ns/coworker>',
+    NULL
+);
+
+-- ── Cleanup ───────────────────────────────────────────────────────────────────
+SELECT pg_ripple.drop_rules('graphrag_enrich') >= 0 AS rules_dropped;
+
+-- ── Cleanup: remove graphrag.test triples ────────────────────────────────────
+DO $$
+BEGIN
+    DELETE FROM _pg_ripple.vp_rare
+    WHERE s IN (SELECT id FROM _pg_ripple.dictionary WHERE value LIKE 'https://graphrag.test/%')
+       OR p IN (SELECT id FROM _pg_ripple.dictionary WHERE value LIKE 'https://graphrag.test/%')
+       OR s IN (SELECT id FROM _pg_ripple.dictionary WHERE value LIKE 'https://graphrag.org/ns/%')
+       OR p IN (SELECT id FROM _pg_ripple.dictionary WHERE value LIKE 'https://graphrag.org/ns/%');
+END $$;

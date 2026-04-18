@@ -1,0 +1,75 @@
+-- pg_regress test: GraphRAG SHACL validation (v0.26.0)
+--
+-- Covers:
+--   1. Loading a SHACL shape requiring gr:title on gr:Entity
+--   2. Inserting a well-formed entity (conforms)
+--   3. Inserting a malformed entity (missing gr:title)
+--   4. Calling validate() and checking conforms / violation count
+--
+-- Namespace: https://graphrag.test/shacl/
+
+CREATE EXTENSION IF NOT EXISTS pg_ripple;
+SET search_path TO pg_ripple, public;
+
+-- ── Load a minimal SHACL shape for gr:Entity ─────────────────────────────────
+SELECT pg_ripple.load_shacl($SHAPES$
+@prefix sh:   <http://www.w3.org/ns/shacl#> .
+@prefix gr:   <https://graphrag.org/ns/> .
+@prefix rdf:  <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix xsd:  <http://www.w3.org/2001/XMLSchema#> .
+
+<https://graphrag.test/shacl/shapes/EntityShape>
+    a              sh:NodeShape ;
+    sh:targetClass gr:Entity ;
+    sh:property [
+        sh:path     gr:title ;
+        sh:minCount 1 ;
+        sh:datatype xsd:string ;
+        sh:message  "gr:Entity must have a gr:title"
+    ] .
+$SHAPES$) >= 0 AS shapes_loaded;
+
+-- ── Insert a well-formed entity (has gr:title) ────────────────────────────────
+SELECT pg_ripple.load_turtle($DATA$
+@prefix gr:   <https://graphrag.org/ns/> .
+@prefix rdf:  <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix xsd:  <http://www.w3.org/2001/XMLSchema#> .
+
+<https://graphrag.test/shacl/entity/good>
+    rdf:type  gr:Entity ;
+    gr:title  "Good Entity" .
+$DATA$) > 0 AS good_entity_loaded;
+
+-- ── Insert a malformed entity (no gr:title) ───────────────────────────────────
+SELECT pg_ripple.insert_triple(
+    '<https://graphrag.test/shacl/entity/bad>',
+    '<http://www.w3.org/1999/02/22-rdf-syntax-ns#type>',
+    '<https://graphrag.org/ns/Entity>'
+) > 0 AS bad_entity_loaded;
+
+-- ── validate() should find violations ────────────────────────────────────────
+-- conforms = false when there is at least one violation.
+SELECT (pg_ripple.validate(NULL)::jsonb ->> 'conforms')::boolean = false
+    AS has_violations;
+
+-- ── result count should be >= 1 (the bad entity) ─────────────────────────────
+SELECT jsonb_array_length(
+    pg_ripple.validate(NULL)::jsonb -> 'results'
+) >= 1 AS violation_count_positive;
+
+-- ── Cleanup shapes ────────────────────────────────────────────────────────────
+DELETE FROM _pg_ripple.shacl_shapes
+WHERE shape_iri = 'https://graphrag.test/shacl/shapes/EntityShape';
+SELECT count(*) = 0 AS shape_deleted
+FROM _pg_ripple.shacl_shapes
+WHERE shape_iri = 'https://graphrag.test/shacl/shapes/EntityShape';
+
+-- ── Cleanup: remove graphrag.test triples ────────────────────────────────────
+DO $$
+BEGIN
+    DELETE FROM _pg_ripple.vp_rare
+    WHERE s IN (SELECT id FROM _pg_ripple.dictionary WHERE value LIKE 'https://graphrag.test/%')
+       OR p IN (SELECT id FROM _pg_ripple.dictionary WHERE value LIKE 'https://graphrag.test/%')
+       OR s IN (SELECT id FROM _pg_ripple.dictionary WHERE value LIKE 'https://graphrag.org/ns/%')
+       OR p IN (SELECT id FROM _pg_ripple.dictionary WHERE value LIKE 'https://graphrag.org/ns/%');
+END $$;

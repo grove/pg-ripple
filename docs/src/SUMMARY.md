@@ -34,6 +34,8 @@
 - [Pre-Deployment](user-guide/pre-deployment.md)
 - [Backup & Restore](user-guide/backup-restore.md)
 - [Contributing](user-guide/contributing.md)
+- [GraphRAG Integration](user-guide/graphrag.md)
+  - [Enrichment Rules](user-guide/graphrag-enrichment.md)
 - [Best Practices](user-guide/best-practices/index.md)
   - [Data Modeling](user-guide/best-practices/data-modeling.md)
   - [Bulk Loading](user-guide/best-practices/bulk-loading.md)
@@ -55,6 +57,8 @@
 - [W3C Conformance](reference/w3c-conformance.md)
 - [API Stability](reference/api-stability.md)
 - [Error Reference](reference/error-reference.md)
+- [GraphRAG Ontology](reference/graphrag-ontology.md)
+- [GraphRAG Functions](reference/graphrag-functions.md)
 
 ---
 
