@@ -75,6 +75,23 @@ pub enum ShapeConstraint {
         min_count: Option<i64>,
         max_count: Option<i64>,
     },
+    // ── v0.23.0 SHACL Core completion ─────────────────────────────────────────
+    /// `sh:hasValue <value>` — at least one value node must equal the given RDF term.
+    HasValue(String),
+    /// `sh:nodeKind <kind-IRI>` — value nodes must be of the specified RDF node kind.
+    /// Valid values: sh:IRI, sh:BlankNode, sh:Literal, sh:BlankNodeOrIRI,
+    /// sh:BlankNodeOrLiteral, sh:IRIOrLiteral.
+    NodeKind(String),
+    /// `sh:languageIn (tag1 tag2 ...)` — value nodes must have a language tag in the list.
+    LanguageIn(Vec<String>),
+    /// `sh:uniqueLang` — no two value nodes may have the same non-empty language tag.
+    UniqueLang,
+    /// `sh:lessThan <path-IRI>` — each value must be less than every value on the other path.
+    LessThan(String),
+    /// `sh:greaterThan <path-IRI>` — each value must be greater than every value on the other path.
+    GreaterThan(String),
+    /// `sh:closed true` — reject triples whose predicate is not in the shape's declared property set.
+    Closed { ignored_properties: Vec<String> },
 }
 
 /// A SHACL PropertyShape (associated with a path via `sh:path`).
@@ -105,6 +122,32 @@ pub struct Shape {
 
 // ─── SHACL Turtle parser ─────────────────────────────────────────────────────
 
+/// Strip `/* ... */` block comments from a Turtle source string (M-11).
+///
+/// Matches multi-line block comments (like SPARQL comments) without using the
+/// regex crate.  Does not strip single-line `#` comments (those are handled by
+/// the line-level filter below).
+fn strip_block_comments(s: &str) -> String {
+    let bytes = s.as_bytes();
+    let mut out = String::with_capacity(s.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if i + 1 < bytes.len() && bytes[i] == b'/' && bytes[i + 1] == b'*' {
+            // Skip until closing `*/`.
+            i += 2;
+            while i + 1 < bytes.len() && !(bytes[i] == b'*' && bytes[i + 1] == b'/') {
+                i += 1;
+            }
+            i += 2; // skip past the closing `*/`
+        } else {
+            // SAFETY: bytes[i] is a valid byte index into the UTF-8 string.
+            out.push(bytes[i] as char);
+            i += 1;
+        }
+    }
+    out
+}
+
 /// Minimal Turtle parser state for SHACL shapes.
 /// We use a hand-rolled subset parser because `spargebra` does not parse
 /// Turtle, and adding a full Turtle parser crate would be too heavyweight for
@@ -125,7 +168,10 @@ pub struct Shape {
 ///     sh:datatype xsd:string ;
 ///   ] .
 /// ```
-fn parse_shacl_turtle(data: &str) -> Result<Vec<Shape>, String> {
+fn parse_shacl_turtle(data_raw: &str) -> Result<Vec<Shape>, String> {
+    // M-11: strip /* ... */ block comments before any other processing.
+    let stripped = strip_block_comments(data_raw);
+    let data = stripped.as_str();
     let mut shapes: Vec<Shape> = Vec::new();
     let mut prefixes: std::collections::HashMap<String, String> = std::collections::HashMap::new();
 
@@ -340,6 +386,9 @@ fn parse_shape_statement(
     let mut constraints: Vec<ShapeConstraint> = Vec::new();
     let mut properties: Vec<PropertyShape> = Vec::new();
     let mut deactivated = false;
+    // v0.23.0 accumulators for sh:closed + sh:ignoredProperties.
+    let mut closed = false;
+    let mut ignored_properties: Vec<String> = Vec::new();
 
     for pair in &po_pairs {
         let pair = pair.trim();
@@ -440,10 +489,43 @@ fn parse_shape_statement(
                 let shape_iri = expand_iri(obj_rest.trim(), prefixes)?;
                 constraints.push(ShapeConstraint::Not(shape_iri));
             }
+            // ── v0.23.0 SHACL Core completion ─────────────────────────────────
+            "http://www.w3.org/ns/shacl#hasValue" => {
+                let val = expand_iri(obj_rest.trim(), prefixes)?;
+                constraints.push(ShapeConstraint::HasValue(val));
+            }
+            "http://www.w3.org/ns/shacl#nodeKind" => {
+                let iri = expand_iri(obj_rest.trim(), prefixes)?;
+                constraints.push(ShapeConstraint::NodeKind(iri));
+            }
+            "http://www.w3.org/ns/shacl#languageIn" => {
+                let tags = parse_list_values(obj_rest.trim(), prefixes)?;
+                constraints.push(ShapeConstraint::LanguageIn(tags));
+            }
+            "http://www.w3.org/ns/shacl#uniqueLang" => {
+                if obj_rest.trim() == "true" {
+                    constraints.push(ShapeConstraint::UniqueLang);
+                }
+            }
+            "http://www.w3.org/ns/shacl#closed" => {
+                if obj_rest.trim() == "true" {
+                    closed = true;
+                }
+            }
+            "http://www.w3.org/ns/shacl#ignoredProperties" => {
+                ignored_properties = parse_list_values(obj_rest.trim(), prefixes)?;
+            }
             _ => {
                 // Unknown predicate — ignore (forward-compatible).
             }
         }
+    }
+
+    // Emit Closed constraint if sh:closed was true.
+    if closed {
+        constraints.push(ShapeConstraint::Closed {
+            ignored_properties: ignored_properties.clone(),
+        });
     }
 
     if !is_shape {
@@ -571,6 +653,32 @@ fn parse_property_shape(
                     format!("sh:qualifiedMaxCount value is not an integer: '{obj_rest}'")
                 })?;
                 qualified_max_count = Some(n);
+            }
+            // ── v0.23.0 SHACL Core completion ─────────────────────────────────
+            "http://www.w3.org/ns/shacl#hasValue" => {
+                let val = expand_iri(obj_rest.trim(), prefixes)?;
+                constraints.push(ShapeConstraint::HasValue(val));
+            }
+            "http://www.w3.org/ns/shacl#nodeKind" => {
+                let iri = expand_iri(obj_rest.trim(), prefixes)?;
+                constraints.push(ShapeConstraint::NodeKind(iri));
+            }
+            "http://www.w3.org/ns/shacl#languageIn" => {
+                let tags = parse_list_values(obj_rest.trim(), prefixes)?;
+                constraints.push(ShapeConstraint::LanguageIn(tags));
+            }
+            "http://www.w3.org/ns/shacl#uniqueLang" => {
+                if obj_rest.trim() == "true" {
+                    constraints.push(ShapeConstraint::UniqueLang);
+                }
+            }
+            "http://www.w3.org/ns/shacl#lessThan" => {
+                let other_path = expand_iri(obj_rest.trim(), prefixes)?;
+                constraints.push(ShapeConstraint::LessThan(other_path));
+            }
+            "http://www.w3.org/ns/shacl#greaterThan" => {
+                let other_path = expand_iri(obj_rest.trim(), prefixes)?;
+                constraints.push(ShapeConstraint::GreaterThan(other_path));
             }
             _ => {}
         }
@@ -1211,6 +1319,174 @@ fn validate_property_shape(
                         });
                     }
                 }
+                // ── v0.23.0 new constraints ────────────────────────────────────
+                ShapeConstraint::HasValue(expected_val) => {
+                    // At least one value node must equal the given RDF term.
+                    let expected_id_opt = crate::dictionary::lookup_iri(expected_val);
+                    let value_ids = get_value_ids(focus, path_id, graph_id);
+                    let has_match = match expected_id_opt {
+                        Some(eid) => value_ids.contains(&eid),
+                        None => false,
+                    };
+                    if !has_match {
+                        let focus_iri = crate::dictionary::decode(focus)
+                            .unwrap_or_else(|| format!("_id_{focus}"));
+                        violations.push(Violation {
+                            focus_node: focus_iri,
+                            shape_iri: shape_iri.to_owned(),
+                            path: Some(ps.path_iri.clone()),
+                            constraint: "sh:hasValue".to_owned(),
+                            message: format!(
+                                "no value node equal to <{expected_val}> found for <{}>",
+                                ps.path_iri
+                            ),
+                            severity: "Violation".to_owned(),
+                        });
+                    }
+                }
+                ShapeConstraint::NodeKind(kind_iri) => {
+                    // Value nodes must be of the specified node kind.
+                    let value_ids = get_value_ids(focus, path_id, graph_id);
+                    for v_id in value_ids {
+                        if !value_has_node_kind(v_id, kind_iri) {
+                            let focus_iri = crate::dictionary::decode(focus)
+                                .unwrap_or_else(|| format!("_id_{focus}"));
+                            violations.push(Violation {
+                                focus_node: focus_iri,
+                                shape_iri: shape_iri.to_owned(),
+                                path: Some(ps.path_iri.clone()),
+                                constraint: "sh:nodeKind".to_owned(),
+                                message: format!(
+                                    "value node id {v_id} does not match sh:nodeKind <{kind_iri}>"
+                                ),
+                                severity: "Violation".to_owned(),
+                            });
+                        }
+                    }
+                }
+                ShapeConstraint::LanguageIn(allowed_tags) => {
+                    // Value nodes must have a language tag in the allowed list.
+                    let value_ids = get_value_ids(focus, path_id, graph_id);
+                    for v_id in value_ids {
+                        let lang_opt = get_language_tag(v_id);
+                        let ok = match &lang_opt {
+                            Some(lang) => {
+                                let lang_lower = lang.to_lowercase();
+                                allowed_tags.iter().any(|t| t.to_lowercase() == lang_lower)
+                            }
+                            None => false, // not a language-tagged literal
+                        };
+                        if !ok {
+                            let focus_iri = crate::dictionary::decode(focus)
+                                .unwrap_or_else(|| format!("_id_{focus}"));
+                            violations.push(Violation {
+                                focus_node: focus_iri,
+                                shape_iri: shape_iri.to_owned(),
+                                path: Some(ps.path_iri.clone()),
+                                constraint: "sh:languageIn".to_owned(),
+                                message: format!(
+                                    "value node id {v_id} has language tag {:?} not in allowed list {:?}",
+                                    lang_opt.as_deref().unwrap_or("none"),
+                                    allowed_tags
+                                ),
+                                severity: "Violation".to_owned(),
+                            });
+                        }
+                    }
+                }
+                ShapeConstraint::UniqueLang => {
+                    // No two value nodes may have the same non-empty language tag.
+                    let value_ids = get_value_ids(focus, path_id, graph_id);
+                    let mut seen_langs: std::collections::HashMap<String, i64> =
+                        std::collections::HashMap::new();
+                    for v_id in value_ids {
+                        if let Some(lang) = get_language_tag(v_id)
+                            && !lang.is_empty()
+                        {
+                            let lang_lower = lang.to_lowercase();
+                            if let Some(prev_id) = seen_langs.get(&lang_lower) {
+                                let focus_iri = crate::dictionary::decode(focus)
+                                    .unwrap_or_else(|| format!("_id_{focus}"));
+                                violations.push(Violation {
+                                    focus_node: focus_iri,
+                                    shape_iri: shape_iri.to_owned(),
+                                    path: Some(ps.path_iri.clone()),
+                                    constraint: "sh:uniqueLang".to_owned(),
+                                    message: format!(
+                                        "duplicate language tag '{lang}' on value nodes {prev_id} and {v_id}"
+                                    ),
+                                    severity: "Violation".to_owned(),
+                                });
+                            } else {
+                                seen_langs.insert(lang_lower, v_id);
+                            }
+                        }
+                    }
+                }
+                ShapeConstraint::LessThan(other_path_iri) => {
+                    // Each value on this path must be < each value on other_path.
+                    let other_path_id = match crate::dictionary::lookup_iri(other_path_iri) {
+                        Some(id) => id,
+                        None => continue,
+                    };
+                    let this_values = get_value_ids(focus, path_id, graph_id);
+                    let other_values = get_value_ids(focus, other_path_id, graph_id);
+                    for v_id in &this_values {
+                        for o_id in &other_values {
+                            let ok = compare_dictionary_values(*v_id, *o_id)
+                                .map(|ord| ord == std::cmp::Ordering::Less)
+                                .unwrap_or(false);
+                            if !ok {
+                                let focus_iri = crate::dictionary::decode(focus)
+                                    .unwrap_or_else(|| format!("_id_{focus}"));
+                                violations.push(Violation {
+                                    focus_node: focus_iri,
+                                    shape_iri: shape_iri.to_owned(),
+                                    path: Some(ps.path_iri.clone()),
+                                    constraint: "sh:lessThan".to_owned(),
+                                    message: format!(
+                                        "value {v_id} on <{}> is not less than value {o_id} on <{other_path_iri}>",
+                                        ps.path_iri
+                                    ),
+                                    severity: "Violation".to_owned(),
+                                });
+                            }
+                        }
+                    }
+                }
+                ShapeConstraint::GreaterThan(other_path_iri) => {
+                    // Each value on this path must be > each value on other_path.
+                    let other_path_id = match crate::dictionary::lookup_iri(other_path_iri) {
+                        Some(id) => id,
+                        None => continue,
+                    };
+                    let this_values = get_value_ids(focus, path_id, graph_id);
+                    let other_values = get_value_ids(focus, other_path_id, graph_id);
+                    for v_id in &this_values {
+                        for o_id in &other_values {
+                            let ok = compare_dictionary_values(*v_id, *o_id)
+                                .map(|ord| ord == std::cmp::Ordering::Greater)
+                                .unwrap_or(false);
+                            if !ok {
+                                let focus_iri = crate::dictionary::decode(focus)
+                                    .unwrap_or_else(|| format!("_id_{focus}"));
+                                violations.push(Violation {
+                                    focus_node: focus_iri,
+                                    shape_iri: shape_iri.to_owned(),
+                                    path: Some(ps.path_iri.clone()),
+                                    constraint: "sh:greaterThan".to_owned(),
+                                    message: format!(
+                                        "value {v_id} on <{}> is not greater than value {o_id} on <{other_path_iri}>",
+                                        ps.path_iri
+                                    ),
+                                    severity: "Violation".to_owned(),
+                                });
+                            }
+                        }
+                    }
+                }
+                // Closed is validated at the shape level, not per-property.
+                ShapeConstraint::Closed { .. } => {}
             }
         }
     }
@@ -1488,7 +1764,154 @@ fn get_vp_table_name(pred_id: i64) -> String {
     }
 }
 
-// ─── Public validation entry point ───────────────────────────────────────────
+// ─── v0.23.0 helper functions ─────────────────────────────────────────────────
+
+/// Check whether a dictionary value node satisfies `sh:nodeKind`.
+///
+/// kind_iri must be one of the W3C SHACL node kind IRIs:
+/// sh:IRI, sh:BlankNode, sh:Literal, sh:BlankNodeOrIRI,
+/// sh:BlankNodeOrLiteral, sh:IRIOrLiteral.
+fn value_has_node_kind(value_id: i64, kind_iri: &str) -> bool {
+    // Determine the actual kind from the dictionary.
+    let kind: i16 = Spi::get_one_with_args::<i16>(
+        "SELECT kind FROM _pg_ripple.dictionary WHERE id = $1",
+        &[DatumWithOid::from(value_id)],
+    )
+    .unwrap_or(None)
+    .unwrap_or(-1);
+
+    let is_iri = kind == crate::dictionary::KIND_IRI;
+    let is_blank = kind == crate::dictionary::KIND_BLANK;
+    let is_literal = matches!(
+        kind,
+        k if k == crate::dictionary::KIND_LITERAL
+            || k == crate::dictionary::KIND_TYPED_LITERAL
+            || k == crate::dictionary::KIND_LANG_LITERAL
+    );
+
+    let sh = "http://www.w3.org/ns/shacl#";
+    match kind_iri.strip_prefix(sh).unwrap_or(kind_iri) {
+        "IRI" => is_iri,
+        "BlankNode" => is_blank,
+        "Literal" => is_literal,
+        "BlankNodeOrIRI" => is_blank || is_iri,
+        "BlankNodeOrLiteral" => is_blank || is_literal,
+        "IRIOrLiteral" => is_iri || is_literal,
+        _ => false,
+    }
+}
+
+/// Retrieve the language tag for a dictionary value node.
+///
+/// Returns `Some(lang)` for language-tagged literals (kind = KIND_LANG_LITERAL),
+/// `None` for all other term kinds.
+fn get_language_tag(value_id: i64) -> Option<String> {
+    Spi::get_one_with_args::<String>(
+        "SELECT lang FROM _pg_ripple.dictionary WHERE id = $1 AND lang IS NOT NULL",
+        &[DatumWithOid::from(value_id)],
+    )
+    .ok()
+    .flatten()
+}
+
+/// Compare two dictionary value nodes for ordering (used by sh:lessThan / sh:greaterThan).
+///
+/// Decodes both values to their lexical forms and attempts a numeric comparison;
+/// falls back to lexicographic comparison.  Returns `None` when comparison is
+/// not meaningful (different types, IRIs, etc.).
+fn compare_dictionary_values(a: i64, b: i64) -> Option<std::cmp::Ordering> {
+    let a_str = crate::dictionary::decode(a)?;
+    let b_str = crate::dictionary::decode(b)?;
+
+    // Try to extract numeric values for typed literals.
+    let extract_number = |s: &str| -> Option<f64> {
+        // N-Triples literal: "value"^^<type> or "value"
+        if let Some(rest) = s.strip_prefix('"') {
+            let inner_end = rest.find('"')?;
+            let lexical = &rest[..inner_end];
+            lexical.parse::<f64>().ok()
+        } else {
+            None
+        }
+    };
+
+    if let (Some(na), Some(nb)) = (extract_number(&a_str), extract_number(&b_str)) {
+        return na.partial_cmp(&nb);
+    }
+
+    // Lexicographic fallback (works for dates in ISO 8601 form).
+    Some(a_str.cmp(&b_str))
+}
+
+/// Return all predicate IRIs used by `focus` node in graph `graph_id`.
+///
+/// Used by `sh:closed` validation.
+fn get_all_predicate_iris_for_node(focus: i64, graph_id: i64) -> Vec<String> {
+    let mut predicates = Vec::new();
+
+    // Check vp_rare (one query, already has a `p` column).
+    let rare_preds: Vec<i64> = {
+        let sql = if graph_id < 0 {
+            "SELECT DISTINCT p FROM _pg_ripple.vp_rare WHERE s = $1".to_owned()
+        } else {
+            "SELECT DISTINCT p FROM _pg_ripple.vp_rare WHERE s = $1 AND g = $2".to_owned()
+        };
+        let args: Vec<DatumWithOid> = if graph_id < 0 {
+            vec![DatumWithOid::from(focus)]
+        } else {
+            vec![DatumWithOid::from(focus), DatumWithOid::from(graph_id)]
+        };
+        Spi::connect(|c| {
+            let rows = c
+                .select(&sql, None, &args)
+                .unwrap_or_else(|e| pgrx::error!("get_all_predicate_iris_for_node: {e}"));
+            rows.filter_map(|row| row.get::<i64>(1).ok().flatten())
+                .collect::<Vec<i64>>()
+        })
+    };
+    for p_id in rare_preds {
+        if let Some(iri) = crate::dictionary::decode(p_id) {
+            predicates.push(iri);
+        }
+    }
+
+    // Check dedicated VP tables.
+    let dedicated_ids: Vec<i64> = Spi::connect(|c| {
+        let rows = c
+            .select(
+                "SELECT id FROM _pg_ripple.predicates WHERE table_oid IS NOT NULL",
+                None,
+                &[],
+            )
+            .unwrap_or_else(|e| pgrx::error!("get_all_predicate_iris_for_node SPI: {e}"));
+        rows.filter_map(|row| row.get::<i64>(1).ok().flatten())
+            .collect()
+    });
+
+    for pred_id in dedicated_ids {
+        let table = format!("_pg_ripple.vp_{pred_id}");
+        let has_subject: bool = if graph_id < 0 {
+            let sql = format!("SELECT EXISTS(SELECT 1 FROM {table} WHERE s = $1)");
+            Spi::get_one_with_args::<bool>(&sql, &[DatumWithOid::from(focus)])
+        } else {
+            let sql = format!("SELECT EXISTS(SELECT 1 FROM {table} WHERE s = $1 AND g = $2)");
+            Spi::get_one_with_args::<bool>(
+                &sql,
+                &[DatumWithOid::from(focus), DatumWithOid::from(graph_id)],
+            )
+        }
+        .unwrap_or(None)
+        .unwrap_or(false);
+
+        if has_subject
+            && let Some(iri) = crate::dictionary::decode(pred_id)
+        {
+            predicates.push(iri);
+        }
+    }
+
+    predicates
+}
 
 /// Run offline validation of all data in the given graph (NULL = default graph 0,
 /// empty string = all graphs) against all active SHACL shapes.
@@ -1595,6 +2018,48 @@ pub fn run_validate(graph: Option<&str>) -> pgrx::JsonB {
                     "message":   v.message,
                     "severity":  v.severity
                 }));
+            }
+        }
+
+        // v0.23.0: sh:closed validation.
+        // If the shape has sh:closed true, ensure no focus node uses a predicate
+        // outside the declared property set (plus rdf:type and ignoredProperties).
+        if let Some(ShapeConstraint::Closed { ignored_properties }) = shape
+            .constraints
+            .iter()
+            .find(|c| matches!(c, ShapeConstraint::Closed { .. }))
+        {
+            let declared_paths: std::collections::HashSet<String> = shape
+                .properties
+                .iter()
+                .map(|ps| ps.path_iri.clone())
+                .collect();
+            let mut allowed: std::collections::HashSet<String> = declared_paths;
+            allowed.insert("http://www.w3.org/1999/02/22-rdf-syntax-ns#type".to_owned());
+            for ign in ignored_properties {
+                allowed.insert(ign.clone());
+            }
+
+            for &focus in &focus_nodes {
+                let used_preds = get_all_predicate_iris_for_node(focus, graph_id);
+                for pred_iri in used_preds {
+                    if !allowed.contains(&pred_iri) {
+                        conforms = false;
+                        let focus_iri = crate::dictionary::decode(focus)
+                            .unwrap_or_else(|| format!("_id_{focus}"));
+                        all_violations.push(serde_json::json!({
+                            "focusNode":  focus_iri,
+                            "shapeIRI":   shape.shape_iri,
+                            "path":       serde_json::Value::Null,
+                            "constraint": "sh:closed",
+                            "message":    format!(
+                                "predicate <{pred_iri}> is not in the declared property set \
+                                 of the closed shape <{}>", shape.shape_iri
+                            ),
+                            "severity":   "Violation"
+                        }));
+                    }
+                }
             }
         }
     }
@@ -1825,6 +2290,50 @@ pub fn validate_sync(s_id: i64, p_id: i64, o_id: i64, g_id: i64) -> Result<(), S
                             }
                         }
                     }
+                    // v0.23.0 new constraints — sync checks where feasible.
+                    ShapeConstraint::HasValue(expected_val) => {
+                        // sh:hasValue: the new value being inserted might satisfy it, so no rejection here.
+                        // Full conformance is only verifiable offline (need to check all values).
+                        let _ = expected_val;
+                    }
+                    ShapeConstraint::NodeKind(kind_iri) => {
+                        if !value_has_node_kind(o_id, kind_iri) {
+                            let focus_iri = crate::dictionary::decode(s_id)
+                                .unwrap_or_else(|| format!("_id_{s_id}"));
+                            return Err(format!(
+                                "SHACL violation: <{}> sh:nodeKind <{kind_iri}> for <{}>: \
+                                 value id {o_id} does not match required node kind",
+                                focus_iri, ps.path_iri
+                            ));
+                        }
+                    }
+                    ShapeConstraint::LanguageIn(allowed_tags) => {
+                        let lang_opt = get_language_tag(o_id);
+                        let ok = match &lang_opt {
+                            Some(lang) => {
+                                let lang_lower = lang.to_lowercase();
+                                allowed_tags.iter().any(|t| t.to_lowercase() == lang_lower)
+                            }
+                            None => false,
+                        };
+                        if !ok {
+                            let focus_iri = crate::dictionary::decode(s_id)
+                                .unwrap_or_else(|| format!("_id_{s_id}"));
+                            return Err(format!(
+                                "SHACL violation: <{}> sh:languageIn for <{}>: \
+                                 value id {o_id} language {:?} not in allowed list {:?}",
+                                focus_iri,
+                                ps.path_iri,
+                                lang_opt.as_deref().unwrap_or("none"),
+                                allowed_tags
+                            ));
+                        }
+                    }
+                    // These constraints need all values present — skip for single insert.
+                    ShapeConstraint::UniqueLang
+                    | ShapeConstraint::LessThan(_)
+                    | ShapeConstraint::GreaterThan(_)
+                    | ShapeConstraint::Closed { .. } => {}
                 }
             }
         }

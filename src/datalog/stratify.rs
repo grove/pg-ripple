@@ -208,24 +208,44 @@ fn topo_sort_sccs(
     // Build SCC dependency graph.
     let n = sccs.len();
     let mut scc_adj: Vec<HashSet<usize>> = vec![HashSet::new(); n];
-    let _scc_neg_edge: Vec<bool> = vec![false; n]; // SCC-internal negative edge?
+    // Track negative edges between SCCs (needed for cross-SCC cycle detection).
+    let mut scc_neg_edge: Vec<HashSet<usize>> = vec![HashSet::new(); n];
 
     for e in edges {
         let src_scc = pred_scc.get(&e.from).copied().unwrap_or(0);
         let dst_scc = pred_scc.get(&e.to).copied().unwrap_or(0);
         if src_scc == dst_scc && e.negative {
-            // Negative self-edge within an SCC → unstratifiable.
-            let pred_names: Vec<String> = sccs[src_scc].iter().map(|p| p.to_string()).collect();
+            // M-3: Negative self-edge within an SCC → unstratifiable negation cycle.
+            // Trace the cycle path through the SCC to produce a named error message.
+            let cycle_path = trace_negation_cycle_in_scc(&sccs[src_scc], edges);
             return Err(format!(
-                "unstratifiable rule set — negation cycle detected in SCC: [{}]",
-                pred_names.join(", ")
+                "datalog: unstratifiable negation cycle: {cycle_path}"
             ));
         }
         if src_scc != dst_scc {
             scc_adj[src_scc].insert(dst_scc);
             if e.negative {
-                // dst_scc must be in a lower stratum than src_scc.
-                // This is enforced by topo sort.
+                scc_neg_edge[src_scc].insert(dst_scc);
+            }
+        }
+    }
+
+    // Additional M-3 check: detect negative cross-SCC edges that create cycles
+    // when combined with positive paths back to the source SCC.
+    for src in 0..n {
+        for &neg_dst in &scc_neg_edge[src] {
+            // Check if neg_dst can reach src through positive edges.
+            if scc_can_reach(neg_dst, src, &scc_adj) {
+                let src_preds: Vec<String> =
+                    sccs[src].iter().map(|p| format!("pred_{p}")).collect();
+                let dst_preds: Vec<String> =
+                    sccs[neg_dst].iter().map(|p| format!("pred_{p}")).collect();
+                return Err(format!(
+                    "datalog: unstratifiable negation cycle: [{}] → ¬[{}] → … → [{}]",
+                    src_preds.join("|"),
+                    dst_preds.join("|"),
+                    src_preds.join("|")
+                ));
             }
         }
     }
@@ -273,6 +293,114 @@ fn topo_sort_sccs(
     }
 
     Ok(pred_stratum)
+}
+
+// ─── M-3 helper functions ─────────────────────────────────────────────────────
+
+/// Trace a negation cycle within an SCC and return a human-readable description.
+///
+/// Tries to reconstruct the cycle path like `"pred_A → ¬pred_B → pred_A"`.
+/// Falls back to listing all predicates if a path cannot be traced.
+fn trace_negation_cycle_in_scc(scc: &[PredicateId], edges: &[Edge]) -> String {
+    // Find the negative edge within the SCC.
+    let scc_set: HashSet<PredicateId> = scc.iter().copied().collect();
+
+    // Find a negative back-edge.
+    let neg_edge = edges
+        .iter()
+        .find(|e| e.negative && scc_set.contains(&e.from) && scc_set.contains(&e.to));
+
+    match neg_edge {
+        Some(ne) => {
+            // Try to find a path from ne.to back to ne.from through positive edges.
+            let path = find_positive_path(ne.to, ne.from, edges, &scc_set);
+            match path {
+                Some(mut chain) => {
+                    // Build: A → ¬B → ... → A
+                    let neg_label = format!("pred_{}", ne.to);
+                    let first = format!("pred_{}", ne.from);
+                    chain.insert(0, neg_label);
+                    chain.insert(0, first.clone());
+                    chain.push(first);
+                    // Mark the negation edge.
+                    if chain.len() >= 2 {
+                        chain[1] = format!("¬{}", chain[1]);
+                    }
+                    chain.join(" → ")
+                }
+                None => {
+                    // Just name the two predicates.
+                    format!("pred_{} → ¬pred_{} → … → pred_{}", ne.from, ne.to, ne.from)
+                }
+            }
+        }
+        None => {
+            // Fallback: list all predicates in the SCC.
+            let names: Vec<String> = scc.iter().map(|p| format!("pred_{p}")).collect();
+            format!("[{}]", names.join(", "))
+        }
+    }
+}
+
+/// Find a path of positive edges from `start` to `end` within the SCC `scc_set`.
+/// Returns the intermediate node names (not including start/end).
+fn find_positive_path(
+    start: PredicateId,
+    end: PredicateId,
+    edges: &[Edge],
+    scc_set: &HashSet<PredicateId>,
+) -> Option<Vec<String>> {
+    if start == end {
+        return Some(vec![]);
+    }
+    // BFS over positive edges.
+    let mut queue: std::collections::VecDeque<(PredicateId, Vec<String>)> =
+        std::collections::VecDeque::new();
+    let mut visited = HashSet::new();
+    queue.push_back((start, vec![]));
+    visited.insert(start);
+
+    while let Some((current, path)) = queue.pop_front() {
+        for e in edges {
+            if e.from == current && !e.negative && scc_set.contains(&e.to) {
+                if e.to == end {
+                    return Some(path);
+                }
+                if !visited.contains(&e.to) {
+                    visited.insert(e.to);
+                    let mut new_path = path.clone();
+                    new_path.push(format!("pred_{}", e.to));
+                    queue.push_back((e.to, new_path));
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Check whether SCC `from` can reach SCC `to` via any edges in `scc_adj`.
+fn scc_can_reach(from: usize, to: usize, scc_adj: &[HashSet<usize>]) -> bool {
+    if from == to {
+        return false; // same-SCC handled separately
+    }
+    let mut visited = HashSet::new();
+    let mut queue = std::collections::VecDeque::new();
+    queue.push_back(from);
+    visited.insert(from);
+    while let Some(cur) = queue.pop_front() {
+        if let Some(adj) = scc_adj.get(cur) {
+            for &next in adj {
+                if next == to {
+                    return true;
+                }
+                if !visited.contains(&next) {
+                    visited.insert(next);
+                    queue.push_back(next);
+                }
+            }
+        }
+    }
+    false
 }
 
 // ─── Public API ──────────────────────────────────────────────────────────────

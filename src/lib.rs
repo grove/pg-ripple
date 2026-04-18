@@ -1587,6 +1587,18 @@ mod pg_ripple {
         crate::sparql::sparql_explain(query, analyze)
     }
 
+    /// Explain a SPARQL query with flexible output format (v0.23.0).
+    ///
+    /// `format` may be one of:
+    /// - `'sql'`             — return the generated SQL without executing it
+    /// - `'text'` (default)  — run EXPLAIN (ANALYZE, FORMAT TEXT)
+    /// - `'json'`            — run EXPLAIN (ANALYZE, FORMAT JSON)
+    /// - `'sparql_algebra'`  — return the spargebra algebra tree
+    #[pg_extern]
+    fn explain_sparql(query: &str, format: default!(&str, "'text'")) -> String {
+        crate::sparql::explain_sparql(query, format)
+    }
+
     /// Execute a SPARQL CONSTRUCT query; returns one JSONB row per constructed triple.
     ///
     /// Each row is `{"s": "...", "p": "...", "o": "..."}` in N-Triples format.

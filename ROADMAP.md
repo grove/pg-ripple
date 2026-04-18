@@ -1645,7 +1645,7 @@ Rolled-back `insert_triple` cannot plant a phantom ID (`dictionary_rollback.sql`
 
 ### Deliverables
 
-- [ ] **SHACL Core constraint completion** (medium fix M-18)
+- [x] **SHACL Core constraint completion** (medium fix M-18)
   - `sh:hasValue`: verify that at least one value matches the given RDF term; compile to `EXISTS (SELECT 1 FROM vp_{id} WHERE s = $node AND o = $encoded_value)`
   - `sh:closed` + `sh:ignoredProperties`: reject triples whose predicate is not in the shape's declared property set; compile to a NOT EXISTS anti-join over all VP tables scoped to the focus node, excluding the declared properties and the ignore list
   - `sh:nodeKind`: validate that each value is an IRI, blank node, or literal as declared; discriminate using the dictionary `kind` column
@@ -1657,7 +1657,7 @@ Rolled-back `insert_triple` cannot plant a phantom ID (`dictionary_rollback.sql`
   - Turtle block comment handling (M-11): add a `/* … */` block-comment stripping pass in the SHACL shape pre-processor at `src/shacl/mod.rs` before the document is handed to the Turtle parser — regex: strip `(?s)/\*.*?\*/`; allows SPARQL-style block-commented shapes to load correctly
   - New pg_regress test `shacl_core_completion.sql` — one test per new constraint with passing, failing, and edge-case triples; verified against the W3C SHACL Core test suite manifest
 
-- [ ] **SPARQL query introspection** (feature F-3 from the gap analysis)
+- [x] **SPARQL query introspection** (feature F-3 from the gap analysis)
   - New SQL function `pg_ripple.explain_sparql(query TEXT, format TEXT DEFAULT 'text') RETURNS TEXT`
   - When `format = 'sql'`: returns the generated SQL string produced by `translate_select()` without executing it — useful for manual inspection
   - When `format = 'text'` (default) or `'json'`: runs `EXPLAIN (ANALYZE, FORMAT text/json)` on the generated SQL via SPI and returns the plan output
@@ -1665,17 +1665,17 @@ Rolled-back `insert_triple` cannot plant a phantom ID (`dictionary_rollback.sql`
   - Security: `SECURITY DEFINER` is not used; the caller needs `SELECT` privilege on the relevant VP tables (same as `pg_ripple.sparql()`)
   - New pg_regress test `explain_sparql.sql` — verifies that the function returns non-empty output for a known-good SELECT query and does not error on edge cases (empty graph, VALUES-only query, property path query)
 
-- [ ] **SHACL query-optimization hint verification** (performance fix P-5)
+- [x] **SHACL query-optimization hint verification** (performance fix P-5)
   - Verify that `sh:maxCount 1` on a predicate elides `DISTINCT` in the SQL generated for SPARQL patterns using that predicate — inspect `translate_select()` in `src/sparql/sqlgen.rs` and wire the lookup against the SHACL constraint catalog if the hint is not already applied; a triple pattern on a `maxCount 1` predicate should not produce a `HashAggregate` (DISTINCT) node in the plan
   - Verify that `sh:minCount 1` on a predicate downgrades `LEFT JOIN` to `INNER JOIN` in the SQL generator for `OPTIONAL` patterns — saves a null-check pass and allows the PG planner to use more efficient join strategies
   - New pg_regress test `shacl_query_hints.sql` — load a shape with `sh:maxCount 1` and `sh:minCount 1`; run `pg_ripple.explain_sparql()` on a query using the constrained predicate; assert the plan string does not contain `HashAggregate` for the maxCount case and does not contain `Hash Left Join` for the minCount case
 
-- [ ] **Datalog engine correctness fixes** (medium fixes M-1, M-2, M-3)
+- [x] **Datalog engine correctness fixes** (medium fixes M-1, M-2, M-3)
   - Division by zero (M-1): wrap every arithmetic divisor in the Datalog SQL compiler with `NULLIF(expr, 0)`; emit a `NOTICE`-level message naming the failing rule head when a null propagation from division occurs
   - Unbound variables (M-2): add a compile-time check in `compile_rule()` that every variable appearing in a rule body literal is either bound by a positive body literal or explicitly declared; raise `ERRCODE_SYNTAX_ERROR` naming the variable and the rule head rather than emitting a `WHERE x = NULL` clause that silently matches nothing
   - Negation-through-cycle (M-3): replace the single-edge negation check in `stratify.rs` with full SCC (strongly-connected component) computation using Tarjan's algorithm; reject any SCC that contains a negation-back-edge with a structured error naming the cycle: `"datalog: unstratifiable negation cycle: rule A → ¬B → ¬C → A"`
 
-- [ ] **JSON-LD framing correctness fixes** (medium fixes M-4, M-5)
+- [x] **JSON-LD framing correctness fixes** (medium fixes M-4, M-5)
   - Embedder panic on empty result (M-4): replace `roots.into_iter().next().unwrap()` in `src/framing/embedder.rs` with `.ok_or_else(|| PgError::new("json-ld framing: CONSTRUCT produced no results", …))` — returns an empty JSON-LD document `{"@context": …, "@graph": []}` rather than panicking
   - Per-node visited set (M-5): add a `HashSet<NodeId>` as the third parameter of the recursive `embed_node()` function; insert the current node ID before recursing and check membership before following an edge — prevents infinite thrash on near-cyclic embedded graphs; consistent with W3C JSON-LD Framing §4.1.3
 
@@ -1683,11 +1683,11 @@ Rolled-back `insert_triple` cannot plant a phantom ID (`dictionary_rollback.sql`
 
 > See [plans/documentation.md](plans/documentation.md) for details.
 
-- [ ] `reference/shacl-reference.md` updated — every newly supported constraint documented with syntax, semantics, and a worked example; mark previously-deferred constraints as now implemented
-- [ ] `user-guide/shacl-guide.md` updated — add a section on property path shapes (`sh:path`) showing inverse and alternative path examples
-- [ ] `reference/sparql-functions.md` updated — add `pg_ripple.explain_sparql()` reference with all four `format` options, example output, and note on required privileges
-- [ ] `user-guide/datalog-guide.md` updated — document the new division-by-zero `NOTICE`, the unbound-variable compile error, and the unstratifiable-cycle error with remediation guidance
-- [ ] Release notes for v0.23.0 — highlight SHACL gap closures, new `explain_sparql` function, and the three Datalog correctness fixes
+- [x] `reference/shacl-reference.md` updated — every newly supported constraint documented with syntax, semantics, and a worked example; mark previously-deferred constraints as now implemented
+- [x] `user-guide/shacl-guide.md` updated — add a section on property path shapes (`sh:path`) showing inverse and alternative path examples
+- [x] `reference/sparql-functions.md` updated — add `pg_ripple.explain_sparql()` reference with all four `format` options, example output, and note on required privileges
+- [x] `user-guide/datalog-guide.md` updated — document the new division-by-zero `NOTICE`, the unbound-variable compile error, and the unstratifiable-cycle error with remediation guidance
+- [x] Release notes for v0.23.0 — highlight SHACL gap closures, new `explain_sparql` function, and the three Datalog correctness fixes
 
 ### Exit Criteria
 

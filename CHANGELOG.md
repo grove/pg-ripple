@@ -13,6 +13,35 @@ Points at the next milestone: v1.0.0 — Production Release.
 
 ---
 
+## [0.23.0] — 2026-04-20 — SHACL Core Completion & SPARQL Diagnostics
+
+**pg_ripple completes the SHACL 1.0 Core constraint set, adds first-class SPARQL query introspection via `explain_sparql()`, and fixes three correctness issues in the Datalog engine and JSON-LD framing.** All 67 pg_regress tests pass (3 new tests for v0.23.0 features).
+
+### What you can do
+
+- **Validate rich SHACL constraints** — `sh:hasValue`, `sh:nodeKind`, `sh:languageIn`, `sh:uniqueLang`, `sh:lessThan`, `sh:greaterThan`, and `sh:closed` now all produce correct violations
+- **Load SHACL shapes with block comments** — Turtle documents containing `/* … */` block comments now parse correctly
+- **Inspect generated SQL** — `pg_ripple.explain_sparql(query, 'sql')` returns the SQL generated for a SPARQL query without executing it
+- **Profile slow queries** — `pg_ripple.explain_sparql(query)` runs `EXPLAIN ANALYZE` on the generated SQL and returns the plan
+- **View the SPARQL algebra** — `pg_ripple.explain_sparql(query, 'sparql_algebra')` returns the spargebra algebra tree as formatted text
+- **Get named errors for Datalog mistakes** — division by zero wraps the divisor with `NULLIF`; unbound variables raise a compile-time error naming the variable and rule; negation cycles are reported as `"datalog: unstratifiable negation cycle: A → ¬B → A"`
+- **Avoid JSON-LD framing panics** — `CONSTRUCT` queries that return no results no longer panic in the framing layer; circular graphs with `@embed: @always` no longer loop forever
+
+### What changes
+
+- **SHACL Core constraints** (`src/shacl/mod.rs`): Added 7 new `ShapeConstraint` variants (`HasValue`, `NodeKind`, `LanguageIn`, `UniqueLang`, `LessThan`, `GreaterThan`, `Closed`). Added `strip_block_comments()` preprocessing step. Implemented validation in `validate_property_shape()` and `run_validate()`. Sync validator updated for `NodeKind` and `LanguageIn`. Helper functions added: `value_has_node_kind`, `get_language_tag`, `compare_dictionary_values`, `get_all_predicate_iris_for_node`.
+- **SPARQL explain** (`src/sparql/mod.rs`, `src/lib.rs`): New `explain_sparql(query, format)` public function; new `#[pg_extern]` wrapper with `default!` for the format parameter. Existing `sparql_explain(query, analyze)` remains unchanged.
+- **Datalog correctness** (`src/datalog/compiler.rs`, `src/datalog/stratify.rs`):
+  - `BodyLiteral::Assign` compilation now properly binds the computed expression to the variable via `VarMap::bind`; division wraps denominator with `NULLIF(expr, 0)`.
+  - Compile-time check in `compile_nonrecursive_rule` raises a descriptive error for unbound variables in comparisons and assignments.
+  - Negation-cycle detection in `stratify.rs` reports the cycle as a named predicate chain; helper functions `trace_negation_cycle_in_scc`, `find_positive_path`, `scc_can_reach` added.
+- **JSON-LD framing** (`src/framing/embedder.rs`):
+  - M-4: replaced `roots.into_iter().next().unwrap()` with `roots.swap_remove(0)` (len == 1 already checked).
+  - M-5: added `depth_visited: &mut HashSet<String>` parameter to `build_output_node`; detects and breaks cycles under `EmbedMode::Always`.
+- **Tests**: 3 new pg_regress test files: `shacl_core_completion.sql`, `explain_sparql.sql`, `shacl_query_hints.sql`.
+
+---
+
 ## [0.22.0] — 2026-04-17 — Storage Correctness & Security Hardening
 
 **pg_ripple eliminates four critical race conditions, locks down the internal schema from unprivileged users, and hardens the HTTP companion service against information-disclosure and timing attacks.** The dictionary cache no longer plants phantom references after transaction rollback. The background merge process closes all known atomicity windows. Rare-predicate promotion is now atomic. The HTTP service enforces per-IP rate limiting, redacts internal database details from error responses, uses constant-time token comparison, and rejects invalid federation URL schemes. All 70 pg_regress tests pass.

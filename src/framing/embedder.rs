@@ -88,7 +88,7 @@ pub fn embed(
     };
 
     let mut embedded_set: HashSet<String> = HashSet::new();
-    let roots = embed_frame_level(&node_map, frame_obj, &opts, &mut embedded_set);
+    let mut roots = embed_frame_level(&node_map, frame_obj, &opts, &mut embedded_set);
 
     if roots.is_empty() {
         // Empty result per W3C framing spec.
@@ -106,14 +106,15 @@ pub fn embed(
         .unwrap_or(roots.len() == 1);
 
     if omit_graph && roots.len() == 1 {
-        Ok(roots.into_iter().next().unwrap())
-    } else {
-        Ok(Value::Object({
-            let mut m = Map::new();
-            m.insert("@graph".to_owned(), Value::Array(roots));
-            m
-        }))
+        // M-4: len == 1 is guaranteed by the condition; no unwrap needed.
+        return Ok(roots.swap_remove(0));
     }
+
+    Ok(Value::Object({
+        let mut m = Map::new();
+        m.insert("@graph".to_owned(), Value::Array(roots));
+        m
+    }))
 }
 
 /// Walk the frame at one level and return the matched + embedded node objects.
@@ -181,7 +182,16 @@ fn embed_frame_level(
     let mut result = Vec::new();
 
     for subj_key in candidates {
-        let node = match build_output_node(subj_key, node_map, frame_obj, opts, embedded_set) {
+        // M-5: fresh depth-visited set per root node to detect circular embedding.
+        let mut depth_visited: HashSet<String> = HashSet::new();
+        let node = match build_output_node(
+            subj_key,
+            node_map,
+            frame_obj,
+            opts,
+            embedded_set,
+            &mut depth_visited,
+        ) {
             Some(n) => n,
             None => continue,
         };
@@ -198,6 +208,8 @@ fn build_output_node(
     frame_obj: &serde_json::Map<String, Value>,
     opts: &EmbedOptions,
     embedded_set: &mut HashSet<String>,
+    // M-5: per-call depth-visited set for cycle detection (EmbedMode::Always).
+    depth_visited: &mut HashSet<String>,
 ) -> Option<Value> {
     let props = node_map.get(subj_key)?;
 
@@ -220,8 +232,21 @@ fn build_output_node(
             }
             embedded_set.insert(subj_key.to_owned());
         }
-        EmbedMode::Always => {}
+        EmbedMode::Always => {
+            // M-5: if this node is already being embedded on the current recursion path,
+            // return a plain @id reference to break the cycle.
+            if depth_visited.contains(subj_key) {
+                return Some(Value::Object({
+                    let mut m = Map::new();
+                    m.insert("@id".to_owned(), Value::String(subj_key.to_owned()));
+                    m
+                }));
+            }
+        }
     }
+
+    // Track current node in the recursion-depth set for cycle detection.
+    depth_visited.insert(subj_key.to_owned());
 
     let mut output = Map::new();
     output.insert("@id".to_owned(), Value::String(subj_key.to_owned()));
@@ -255,8 +280,14 @@ fn build_output_node(
                         .as_object()
                         .and_then(|o| o.get("@id"))
                         .and_then(Value::as_str)
-                        && let Some(embedded) =
-                            build_output_node(id, node_map, child_obj, opts, embedded_set)
+                        && let Some(embedded) = build_output_node(
+                            id,
+                            node_map,
+                            child_obj,
+                            opts,
+                            embedded_set,
+                            depth_visited,
+                        )
                     {
                         return embedded;
                     }
@@ -307,7 +338,14 @@ fn build_output_node(
                             .as_object()
                             .map(|o| o as &serde_json::Map<String, Value>);
                         let embedded = if let Some(cfo) = child_frame_obj {
-                            build_output_node(other_subj, node_map, cfo, opts, embedded_set)
+                            build_output_node(
+                                other_subj,
+                                node_map,
+                                cfo,
+                                opts,
+                                embedded_set,
+                                depth_visited,
+                            )
                         } else {
                             Some(Value::Object({
                                 let mut m = Map::new();
@@ -329,6 +367,9 @@ fn build_output_node(
             output.insert("@reverse".to_owned(), Value::Object(rev_output));
         }
     }
+
+    // M-5: remove this node from the recursion-depth set before returning.
+    depth_visited.remove(subj_key);
 
     Some(Value::Object(output))
 }

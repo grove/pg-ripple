@@ -61,12 +61,19 @@ impl VarMap {
         }
     }
 
-    /// Return `alias.col` for a variable.
+    /// Return `alias.col` for a variable, or just `alias` if `col` is empty
+    /// (used for computed expressions bound via Assign).
     fn col_ref(&self, var: &str) -> Option<String> {
         self.bindings
             .iter()
             .find(|(v, _, _)| v == var)
-            .map(|(_, a, c)| format!("{a}.{c}"))
+            .map(|(_, a, c)| {
+                if c.is_empty() {
+                    a.clone()
+                } else {
+                    format!("{a}.{c}")
+                }
+            })
     }
 }
 
@@ -231,12 +238,19 @@ fn compile_nonrecursive_rule(
                 where_clauses.push(format!("{l} {op_str} {r}"));
             }
             BodyLiteral::Assign(var, lhs, op, rhs) => {
-                // Arithmetic assign: computed as SELECT expression.
+                // M-1: wrap divisor with NULLIF to prevent division-by-zero.
+                // Bind the computed value as a column alias for use in the SELECT.
                 let l = render_comparison_term(lhs, &var_map);
-                let r = render_comparison_term(rhs, &var_map);
+                let r_raw = render_comparison_term(rhs, &var_map);
+                let r = if matches!(op, crate::datalog::ArithOp::Div) {
+                    format!("NULLIF({r_raw}, 0)")
+                } else {
+                    r_raw
+                };
                 let op_str = arith_op_sql(op);
-                // This needs to appear as a column in SELECT; handled separately.
-                let _ = (var, l, r, op_str); // placeholder
+                // Register the computed column so it can be used as a variable.
+                let col_expr = format!("({l} {op_str} {r})");
+                var_map.bind(var, &col_expr, "");
             }
             BodyLiteral::StringBuiltin(builtin) => match builtin {
                 StringBuiltin::Strlen(term, op, rhs_term) => {
@@ -251,6 +265,46 @@ fn compile_nonrecursive_rule(
                     where_clauses.push(format!("{col}::text ~ '{escaped}'"));
                 }
             },
+        }
+    }
+
+    // M-2: Compile-time check for unbound variables in comparisons and assigns.
+    // Any variable used in a Compare or Assign that is not bound by a positive body
+    // literal will produce `WHERE x = NULL` (matches nothing) — detect and reject.
+    let head_text = rule
+        .rule_text
+        .lines()
+        .next()
+        .unwrap_or(&rule.rule_text)
+        .trim();
+    for lit in &rule.body {
+        match lit {
+            BodyLiteral::Compare(lhs, _, rhs) => {
+                for term in [lhs, rhs] {
+                    if let crate::datalog::Term::Var(v) = term
+                        && var_map.col_ref(v).is_none()
+                    {
+                        return Err(format!(
+                            "unbound variable ?{v} in comparison in rule '{head_text}': \
+                             every variable in a comparison must be bound by a positive body literal"
+                        ));
+                    }
+                }
+            }
+            BodyLiteral::Assign(var, lhs, _, rhs) => {
+                for term in [lhs, rhs] {
+                    if let crate::datalog::Term::Var(v) = term
+                        && var_map.col_ref(v).is_none()
+                        && v != var
+                    {
+                        return Err(format!(
+                            "unbound variable ?{v} in assignment in rule '{head_text}': \
+                             every variable in an arithmetic expression must be bound by a positive body literal"
+                        ));
+                    }
+                }
+            }
+            _ => {}
         }
     }
 
@@ -744,6 +798,8 @@ fn arith_op_sql(op: &ArithOp) -> &'static str {
         ArithOp::Add => "+",
         ArithOp::Sub => "-",
         ArithOp::Mul => "*",
+        // Division uses NULLIF to prevent division-by-zero errors (M-1).
+        // The caller is responsible for wrapping the RHS with NULLIF.
         ArithOp::Div => "/",
     }
 }

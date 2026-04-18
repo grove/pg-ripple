@@ -318,6 +318,61 @@ pub fn sparql_explain(query_text: &str, analyze: bool) -> String {
     format!("-- Generated SQL --\n{inner_sql}\n\n-- EXPLAIN ANALYZE --\n{plan}")
 }
 
+/// Explain a SPARQL query with flexible format options.
+///
+/// - `format = 'sql'`: return the generated SQL without executing it.
+/// - `format = 'text'` (default): run `EXPLAIN (ANALYZE, FORMAT TEXT)` on the generated SQL.
+/// - `format = 'json'`: run `EXPLAIN (ANALYZE, FORMAT JSON)` on the generated SQL.
+/// - `format = 'sparql_algebra'`: return the spargebra algebra tree via `Debug` formatting.
+pub fn explain_sparql(query_text: &str, format: &str) -> String {
+    use spargebra::Query;
+
+    let query = SparqlParser::new()
+        .parse_query(query_text)
+        .unwrap_or_else(|e| pgrx::error!("SPARQL parse error: {e}"));
+
+    if format == "sparql_algebra" {
+        return format!("{query:#?}");
+    }
+
+    // Get generated SQL.
+    let inner_sql = match &query {
+        Query::Select { pattern, .. } => {
+            let trans = sqlgen::translate_select(pattern);
+            trans.sql
+        }
+        Query::Ask { pattern, .. } => sqlgen::translate_ask(pattern),
+        Query::Construct { pattern, .. } => {
+            let trans = sqlgen::translate_select(pattern);
+            trans.sql
+        }
+        Query::Describe { .. } => {
+            // DESCRIBE uses a different path; return the algebra instead.
+            return format!("DESCRIBE query algebra:\n{query:#?}");
+        }
+    };
+
+    if format == "sql" {
+        return inner_sql;
+    }
+
+    // Run EXPLAIN on the generated SQL.
+    let explain_format = if format == "json" { "JSON" } else { "TEXT" };
+    let explain_sql = format!("EXPLAIN (ANALYZE, FORMAT {explain_format}) {inner_sql}");
+
+    let plan: String = Spi::connect(|client| {
+        let rows = client
+            .select(&explain_sql, None, &[])
+            .unwrap_or_else(|e| pgrx::error!("explain_sparql EXPLAIN SPI error: {e}"));
+        let lines: Vec<String> = rows
+            .filter_map(|row| row.get::<String>(1).ok().flatten())
+            .collect();
+        lines.join("\n")
+    });
+
+    format!("-- Generated SQL --\n{inner_sql}\n\n-- EXPLAIN ({explain_format}) --\n{plan}")
+}
+
 // ─── SPARQL CONSTRUCT ─────────────────────────────────────────────────────────
 
 /// Execute a SPARQL CONSTRUCT query; returns raw `(s_id, p_id, o_id)` integer rows.
