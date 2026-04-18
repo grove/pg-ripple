@@ -731,15 +731,14 @@ pub(crate) fn has_pg_trickle() -> bool {
             "SELECT extversion FROM pg_extension WHERE extname = 'pg_trickle'",
         )
         .unwrap_or(None)
+            && installed.as_str() > PG_TRICKLE_TESTED_VERSION
         {
-            if installed.as_str() > PG_TRICKLE_TESTED_VERSION {
-                pgrx::warning!(
-                    "pg_ripple: pg_trickle version {} is newer than tested version {}; \
-                     incremental views may behave unexpectedly",
-                    installed,
-                    PG_TRICKLE_TESTED_VERSION
-                );
-            }
+            pgrx::warning!(
+                "pg_ripple: pg_trickle version {} is newer than tested version {}; \
+                 incremental views may behave unexpectedly",
+                installed,
+                PG_TRICKLE_TESTED_VERSION
+            );
         }
     }
 
