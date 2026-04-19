@@ -1376,7 +1376,6 @@ fn compile_rule_with_one_delta_atom(
     ))
 }
 
-
 // ─── v0.30.0: Aggregate rule compilation ─────────────────────────────────────
 
 /// Compile an aggregate rule to a GROUP BY SQL INSERT statement (v0.30.0).
@@ -1451,16 +1450,12 @@ pub fn compile_aggregate_rule(rule: &Rule, target: &str) -> Result<String, Strin
             }
         }
         _ => {
-            return Err(
-                "aggregate atom must have at least one variable".to_owned(),
-            );
+            return Err("aggregate atom must have at least one variable".to_owned());
         }
     };
 
-    let result_in_head_s =
-        matches!(&head.s, Term::Var(v) if *v == agg_lit.result_var);
-    let result_in_head_o =
-        matches!(&head.o, Term::Var(v) if *v == agg_lit.result_var);
+    let result_in_head_s = matches!(&head.s, Term::Var(v) if *v == agg_lit.result_var);
+    let result_in_head_o = matches!(&head.o, Term::Var(v) if *v == agg_lit.result_var);
 
     if !result_in_head_s && !result_in_head_o {
         return Err(format!(
@@ -1469,7 +1464,8 @@ pub fn compile_aggregate_rule(rule: &Rule, target: &str) -> Result<String, Strin
         ));
     }
 
-    let agg_expr = format!("pg_ripple.encode_term({agg_func_sql}(t0.{agg_col})::text, 2::smallint)");
+    let agg_expr =
+        format!("pg_ripple.encode_term({agg_func_sql}(t0.{agg_col})::text, 2::smallint)");
     let group_expr = format!("t0.{group_col}");
 
     let (insert_s, insert_o) = if result_in_head_o {

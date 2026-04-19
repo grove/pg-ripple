@@ -27,7 +27,6 @@ struct PlanEntry {
     misses: i64,
 }
 
-
 struct CacheState {
     /// rule_set_name → plan entry (SQL strings + hit/miss counters).
     entries: HashMap<String, PlanEntry>,
@@ -77,11 +76,7 @@ pub fn lookup(rule_set: &str) -> Option<Vec<String>> {
         }
         _ => {
             // Record a miss.
-            state
-                .entries
-                .entry(rule_set.to_owned())
-                .or_default()
-                .misses += 1;
+            state.entries.entry(rule_set.to_owned()).or_default().misses += 1;
             None
         }
     }
@@ -151,11 +146,7 @@ pub fn lookup_agg(rule_set: &str) -> Option<Vec<String>> {
             Some(entry.sqls.clone())
         }
         _ => {
-            state
-                .entries
-                .entry(rule_set.to_owned())
-                .or_default()
-                .misses += 1;
+            state.entries.entry(rule_set.to_owned()).or_default().misses += 1;
             None
         }
     }

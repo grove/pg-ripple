@@ -627,9 +627,10 @@ pub fn check_aggregation_stratification(rules: &[Rule]) -> Result<(), String> {
         };
         for lit in &rule.body {
             if let BodyLiteral::Aggregate(agg) = lit
-                && let Some(body_pred) = atom_pred(&agg.atom) {
-                    agg_deps.push((head_pred, body_pred));
-                }
+                && let Some(body_pred) = atom_pred(&agg.atom)
+            {
+                agg_deps.push((head_pred, body_pred));
+            }
         }
     }
 
@@ -645,9 +646,10 @@ pub fn check_aggregation_stratification(rules: &[Rule]) -> Result<(), String> {
         };
         for lit in &rule.body {
             if let BodyLiteral::Positive(atom) = lit
-                && let Some(p) = atom_pred(atom) {
-                    pos_deps.entry(h).or_default().push(p);
-                }
+                && let Some(p) = atom_pred(atom)
+            {
+                pos_deps.entry(h).or_default().push(p);
+            }
         }
     }
 
@@ -657,15 +659,13 @@ pub fn check_aggregation_stratification(rules: &[Rule]) -> Result<(), String> {
     for (head_pred, agg_body_pred) in &agg_deps {
         if can_reach_positive(*agg_body_pred, *head_pred, &pos_deps) {
             let _ = (head_pred, agg_body_pred); // used for detection; not in message
-            return Err(
-                "PT510: aggregation-stratification violation: \
+            return Err("PT510: aggregation-stratification violation: \
                  a derived predicate depends on another predicate via aggregation, \
                  but that predicate is also derived through positive rules; \
                  this creates a cycle through aggregation; \
                  ensure the aggregated predicate is fully computed before the \
                  aggregate rule runs"
-                    .to_owned(),
-            );
+                .to_owned());
         }
     }
 

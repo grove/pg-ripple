@@ -19,8 +19,8 @@
 //! ```
 
 use crate::datalog::{
-    AggFunc, AggregateLiteral, ArithOp, Atom, BodyLiteral, CompareOp, Rule, RuleSet,
-    StringBuiltin, Term,
+    AggFunc, AggregateLiteral, ArithOp, Atom, BodyLiteral, CompareOp, Rule, RuleSet, StringBuiltin,
+    Term,
 };
 
 // ─── Public API ──────────────────────────────────────────────────────────────

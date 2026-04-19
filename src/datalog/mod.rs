@@ -866,9 +866,11 @@ pub fn run_inference_agg(rule_set_name: &str) -> (i64, i64, i32) {
     }
 
     // ── 4. Separate aggregate rules from non-aggregate rules ──────────────────
-    let (agg_rules, non_agg_rules): (Vec<Rule>, Vec<Rule>) = all_rules.into_iter().partition(
-        |r| r.body.iter().any(|lit| matches!(lit, BodyLiteral::Aggregate(_))),
-    );
+    let (agg_rules, non_agg_rules): (Vec<Rule>, Vec<Rule>) = all_rules.into_iter().partition(|r| {
+        r.body
+            .iter()
+            .any(|lit| matches!(lit, BodyLiteral::Aggregate(_)))
+    });
 
     // ── 5. Run non-aggregate rules via semi-naive evaluation ──────────────────
     let (normal_derived, iterations) = if !non_agg_rules.is_empty() {
