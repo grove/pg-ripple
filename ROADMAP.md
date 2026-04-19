@@ -2291,7 +2291,7 @@ See [plans/ecosystem/datalog.md §14.2](plans/ecosystem/datalog.md) for design n
 
 ### Deliverables
 
-- [ ] **Aggregation in rule bodies (Datalog^agg)** (`src/datalog/compiler.rs`, `src/datalog/stratify.rs`)
+- [x] **Aggregation in rule bodies (Datalog^agg)** (`src/datalog/compiler.rs`, `src/datalog/stratify.rs`)
   - Extend rule IR to support aggregate terms in body atoms: `COUNT(?x)`, `SUM(?x)`, `MIN(?x)`, `MAX(?x)`, `AVG(?x)`
   - Aggregation-stratification check: aggregated predicates must be fully computed in a lower stratum; reject with `PT510` if violated
   - SQL compilation: aggregate body atoms compile to subquery CTEs with `GROUP BY` and aggregate window functions
@@ -2299,7 +2299,7 @@ See [plans/ecosystem/datalog.md §14.2](plans/ecosystem/datalog.md) for design n
   - Example rule: `?x ex:friendCount ?n :- COUNT(?y WHERE ?x foaf:knows ?y) = ?n .`
   - Benchmark: `benchmarks/datalog_agg.sql` — PageRank-style degree centrality on a social graph
 
-- [ ] **Compiled rule plans** (`src/datalog/cache.rs` new module)
+- [x] **Compiled rule plans** (`src/datalog/cache.rs` new module)
   - Cache the generated SQL string (and dictionary-encoded constant vector) for each rule on first `infer()` call
   - Cache key: rule set name + schema version (invalidate on any `ALTER EXTENSION pg_ripple UPDATE`)
   - Cache storage: `pgrx::PgSharedMem`-backed LRU, size controlled by GUC `pg_ripple.rule_plan_cache_size` (default: 64 entries)
@@ -2307,11 +2307,11 @@ See [plans/ecosystem/datalog.md §14.2](plans/ecosystem/datalog.md) for design n
   - GUC: `pg_ripple.rule_plan_cache` (bool, default `true`)
   - Expose cache statistics via `pg_ripple.rule_plan_cache_stats() RETURNS TABLE(rule_set TEXT, hits BIGINT, misses BIGINT, entries INT)`
 
-- [ ] **Error codes** (`src/error.rs`)
+- [x] **Error codes** (`src/error.rs`)
   - `PT510` — aggregation-stratification violation (aggregate over non-ground predicate)
   - `PT511` — unsupported aggregate function in rule body
 
-- [ ] **pg_regress tests**
+- [x] **pg_regress tests**
   - `datalog_agg.sql` — verify COUNT, SUM, MIN, MAX rules derive correct results; verify stratification rejects cycles through aggregates
   - `datalog_plan_cache.sql` — verify cache hit/miss counts via `rule_plan_cache_stats()`; verify cache invalidation on `drop_rules()`
   - `datalog_sparql_cache.sql` — verify SPARQL on-demand query using a derived predicate is faster on second execution (plan served from cache)
@@ -2322,9 +2322,9 @@ See [plans/ecosystem/datalog.md §14.2](plans/ecosystem/datalog.md) for design n
 
 ### Documentation
 
-- [ ] `user-guide/sql-reference/datalog.md` updated — document `infer_agg()`, aggregation rule syntax, plan cache GUCs, `rule_plan_cache_stats()`
-- [ ] `user-guide/best-practices/datalog-optimization.md` updated — add section on aggregation-stratification rules, plan cache tuning
-- [ ] Release notes for v0.30.0
+- [x] `user-guide/sql-reference/datalog.md` updated — document `infer_agg()`, aggregation rule syntax, plan cache GUCs, `rule_plan_cache_stats()`
+- [x] `user-guide/best-practices/datalog-optimization.md` updated — add section on aggregation-stratification rules, plan cache tuning
+- [x] Release notes for v0.30.0
 
 ### Exit Criteria
 

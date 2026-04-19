@@ -333,6 +333,116 @@ When shapes loaded via `load_shacl()` contain `sh:rule` properties, pg_ripple de
 
 ---
 
+## Aggregate rules (Datalog^agg, v0.30.0)
+
+pg_ripple v0.30.0 adds **aggregate literals** to the Datalog engine, allowing rules to derive facts that depend on computed aggregates (COUNT, SUM, MIN, MAX, AVG) over the triple store. This unlocks graph analytics and metrics directly from inference rules — for example, "count the number of friends each person has" or "find the maximum salary in each department".
+
+### Aggregate rule syntax
+
+An aggregate literal appears in the rule body and uses the following form:
+
+```
+FUNC(?aggVar WHERE subject pred object) = ?resultVar
+```
+
+Where:
+- `FUNC` is one of `COUNT`, `SUM`, `MIN`, `MAX`, `AVG`
+- `?aggVar` is the variable to aggregate over (must appear in the atom's subject or object position)
+- `subject pred object` is the atom pattern (each can be a variable or IRI constant)
+- `?resultVar` must appear in the rule head
+
+**Example — count friends:**
+
+```sql
+SELECT pg_ripple.load_rules(
+  '?x <https://example.org/friendCount> ?n :-
+     COUNT(?y WHERE ?x <https://xmlns.com/foaf/0.1/knows> ?y) = ?n .',
+  'social'
+);
+
+-- Insert data
+SELECT pg_ripple.insert_triple(
+  '<https://example.org/Alice>',
+  '<https://xmlns.com/foaf/0.1/knows>',
+  '<https://example.org/Bob>'
+);
+SELECT pg_ripple.insert_triple(
+  '<https://example.org/Alice>',
+  '<https://xmlns.com/foaf/0.1/knows>',
+  '<https://example.org/Carol>'
+);
+
+-- Run aggregate inference
+SELECT pg_ripple.infer_agg('social');
+-- Returns: {"derived": 0, "aggregate_derived": 1, "iterations": 0}
+
+-- Query result: Alice has 2 friends
+SELECT * FROM pg_ripple.find_triples(
+  '<https://example.org/Alice>',
+  '<https://example.org/friendCount>',
+  NULL
+);
+```
+
+### `pg_ripple.infer_agg(rule_set TEXT DEFAULT 'custom') RETURNS JSONB`
+
+Run Datalog^agg inference for a rule set. Non-aggregate rules are evaluated first via semi-naive fixpoint; aggregate rules are evaluated in a single GROUP BY pass afterwards.
+
+| JSON key | Type | Description |
+|----------|------|-------------|
+| `derived` | bigint | Total triples derived (non-aggregate + aggregate) |
+| `aggregate_derived` | bigint | Triples derived from aggregate rules |
+| `iterations` | int | Semi-naive fixpoint iterations for non-aggregate rules |
+
+```sql
+SELECT pg_ripple.infer_agg('social');
+-- {"derived": 1, "aggregate_derived": 1, "iterations": 0}
+```
+
+### Aggregation stratification (PT510)
+
+Aggregate rules must be **stratified**: no derived predicate may appear in the body of a rule that aggregates over a predicate which also depends on that derived predicate. If a stratification violation is detected, pg_ripple emits `WARNING PT510` and skips the aggregate rules (falling back to running only non-aggregate rules safely).
+
+```sql
+-- This rule pair creates a cycle through aggregation — PT510 will be emitted:
+SELECT pg_ripple.load_rules(
+  '?x <ex:a> ?y :- ?x <ex:b> ?y .', 'bad');
+SELECT pg_ripple.load_rules(
+  '?x <ex:b> ?n :- COUNT(?y WHERE ?x <ex:a> ?y) = ?n .', 'bad');
+
+SELECT pg_ripple.infer_agg('bad');
+-- WARNING:  infer_agg: aggregation stratification violation (PT510): …
+```
+
+---
+
+## Rule plan cache (v0.30.0)
+
+The compiled SQL for each rule set is cached in a process-local LRU so that repeated `infer()` / `infer_agg()` calls on the same rule set skip the parse + compile step.
+
+The cache is automatically invalidated when `load_rules()` or `drop_rules()` is called for that rule set.
+
+### `pg_ripple.rule_plan_cache_stats() RETURNS TABLE(...)`
+
+Returns statistics from the plan cache.
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `rule_set` | text | Name of the rule set |
+| `hits` | bigint | Number of times the cached SQL was used |
+| `misses` | bigint | Number of cache misses (SQL was compiled from scratch) |
+| `entries` | int | Total number of rule sets currently in the cache |
+
+```sql
+-- After two calls to infer_agg():
+SELECT * FROM pg_ripple.rule_plan_cache_stats();
+-- rule_set | hits | misses | entries
+-- ---------+------+--------+---------
+-- social   |    1 |      1 |       1
+```
+
+---
+
 ## Configuration
 
 | GUC | Default | Description |
@@ -344,6 +454,8 @@ When shapes loaded via `load_shacl()` contain `sh:rule` properties, pg_ripple de
 | `pg_ripple.datalog_cost_reorder` | `true` | Sort Datalog body atoms by VP-table cardinality at compile time (v0.29.0+) |
 | `pg_ripple.datalog_antijoin_threshold` | `1000` | Minimum VP-table row count for using `LEFT JOIN … IS NULL` anti-join form for negation (v0.29.0+) |
 | `pg_ripple.delta_index_threshold` | `500` | Minimum delta-table row count before creating a B-tree index on `(s, o)` (v0.29.0+) |
+| `pg_ripple.rule_plan_cache` | `true` | Master switch for the Datalog rule plan cache (v0.30.0+) |
+| `pg_ripple.rule_plan_cache_size` | `64` | Maximum number of rule sets kept in the plan cache; oldest entries evicted on overflow (v0.30.0+) |
 
 ```sql
 -- Enable strict constraint enforcement
@@ -357,6 +469,12 @@ SET pg_ripple.magic_sets = false;
 
 -- Force anti-join form for all negated atoms (even small tables)
 SET pg_ripple.datalog_antijoin_threshold = 1;
+
+-- Disable the rule plan cache (useful for testing)
+SET pg_ripple.rule_plan_cache = false;
+
+-- Set a smaller plan cache (saves memory on servers with many rule sets)
+SET pg_ripple.rule_plan_cache_size = 16;
 ```
 
 ---

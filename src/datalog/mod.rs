@@ -35,17 +35,20 @@
 //! - `pg_ripple.infer(rule_set TEXT)` — materialize derived triples for a rule set
 
 pub mod builtins;
+pub mod cache;
 pub mod compiler;
 pub mod magic;
 pub mod parser;
 pub mod stratify;
 
+pub use compiler::compile_aggregate_rule;
 pub use compiler::compile_rule_delta_variants_to;
 pub use compiler::compile_rule_set;
 pub use compiler::compile_single_rule_to;
 pub use magic::parse_goal;
 pub use magic::run_infer_goal;
 pub use parser::parse_rules;
+pub use stratify::check_aggregation_stratification;
 pub use stratify::check_subsumption;
 pub use stratify::stratify;
 
@@ -87,6 +90,38 @@ pub enum BodyLiteral {
     StringBuiltin(StringBuiltin),
     /// Arithmetic assignment: `?z IS ?x + ?y`.
     Assign(String, Term, ArithOp, Term),
+    /// Aggregate body literal (Datalog^agg, v0.30.0).
+    /// Syntax: `COUNT(?aggVar WHERE subject pred object) = ?resultVar`
+    Aggregate(AggregateLiteral),
+}
+
+/// Aggregate function kinds (v0.30.0).
+#[derive(Debug, Clone, PartialEq)]
+pub enum AggFunc {
+    Count,
+    Sum,
+    Min,
+    Max,
+    Avg,
+}
+
+/// An aggregate literal in a rule body (Datalog^agg, v0.30.0).
+///
+/// Syntax: `COUNT(?aggVar WHERE subject pred object) = ?resultVar`
+///
+/// Compiles to a GROUP BY subquery with an aggregate function.
+/// The predicate in the atom must come from a strictly lower stratum
+/// than the head predicate (aggregation-stratification requirement).
+#[derive(Debug, Clone)]
+pub struct AggregateLiteral {
+    /// The aggregate function (COUNT, SUM, MIN, MAX, AVG).
+    pub func: AggFunc,
+    /// The variable being aggregated (the inner variable inside the WHERE clause).
+    pub agg_var: String,
+    /// The triple pattern inside the WHERE clause.
+    pub atom: Atom,
+    /// The variable to bind the aggregate result to (from `= ?resultVar`).
+    pub result_var: String,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -760,4 +795,310 @@ pub fn get_on_demand_cte(pred_id: i64) -> Option<String> {
 
     let cte = compiler::compile_on_demand_cte(&rules, pred_id).ok()?;
     Some(cte)
+}
+
+// ─── v0.30.0: Aggregation inference ──────────────────────────────────────────
+
+/// Run inference for a rule set that may contain aggregate body literals
+/// (Datalog^agg, v0.30.0).
+///
+/// Returns `(total_derived, aggregate_derived, iteration_count)`.
+///
+/// - Non-aggregate rules are compiled and executed as in `run_inference_seminaive`.
+/// - Aggregate rules (those with `BodyLiteral::Aggregate`) are compiled to GROUP BY
+///   SQL and executed once (not in a fixpoint — aggregates are non-recursive by the
+///   aggregation-stratification constraint).
+/// - PT510 is emitted as a WARNING if a cycle through an aggregate is detected.
+pub fn run_inference_agg(rule_set_name: &str) -> (i64, i64, i32) {
+    ensure_catalog();
+
+    // ── 1. Load rule texts from catalog ──────────────────────────────────────
+    let rule_rows: Vec<String> = {
+        let sql = "SELECT rule_text \
+                   FROM _pg_ripple.rules \
+                   WHERE rule_set = $1 AND active = true \
+                   ORDER BY stratum, id";
+        Spi::connect(|client| {
+            client
+                .select(sql, None, &[pgrx::datum::DatumWithOid::from(rule_set_name)])
+                .unwrap_or_else(|e| pgrx::error!("rule select SPI error: {e}"))
+                .map(|row| row.get::<String>(1).ok().flatten().unwrap_or_default())
+                .collect::<Vec<_>>()
+        })
+    };
+
+    if rule_rows.is_empty() {
+        return (0, 0, 0);
+    }
+
+    // ── 2. Parse all rules ────────────────────────────────────────────────────
+    let mut all_rules: Vec<Rule> = Vec::new();
+    for rule_text in &rule_rows {
+        match parse_rules(rule_text, rule_set_name) {
+            Ok(rs) => all_rules.extend(rs.rules),
+            Err(e) => pgrx::warning!("infer_agg: rule parse error: {e}"),
+        }
+    }
+
+    if all_rules.is_empty() {
+        return (0, 0, 0);
+    }
+
+    // ── 3. Check aggregation stratification (PT510) ───────────────────────────
+    if let Err(e) = check_aggregation_stratification(&all_rules) {
+        pgrx::warning!(
+            "infer_agg: aggregation stratification violation (PT510): {}; \
+             aggregate rules will be skipped",
+            e
+        );
+        // Fall back to running only non-aggregate rules.
+        let non_agg_rules: Vec<Rule> = all_rules
+            .iter()
+            .filter(|r| {
+                !r.body
+                    .iter()
+                    .any(|lit| matches!(lit, BodyLiteral::Aggregate(_)))
+            })
+            .cloned()
+            .collect();
+        let (derived, iters) = run_seminaive_inner(&non_agg_rules, rule_set_name);
+        return (derived, 0, iters);
+    }
+
+    // ── 4. Separate aggregate rules from non-aggregate rules ──────────────────
+    let (agg_rules, non_agg_rules): (Vec<Rule>, Vec<Rule>) = all_rules.into_iter().partition(
+        |r| r.body.iter().any(|lit| matches!(lit, BodyLiteral::Aggregate(_))),
+    );
+
+    // ── 5. Run non-aggregate rules via semi-naive evaluation ──────────────────
+    let (normal_derived, iterations) = if !non_agg_rules.is_empty() {
+        run_seminaive_inner(&non_agg_rules, rule_set_name)
+    } else {
+        (0, 0)
+    };
+
+    // ── 6. Run aggregate rules (single pass, GROUP BY SQL) ────────────────────
+    let mut agg_derived: i64 = 0;
+
+    // Try the plan cache first (v0.30.0).
+    let cached_sqls = cache::lookup_agg(rule_set_name);
+    let agg_sqls: Vec<String> = if let Some(sqls) = cached_sqls {
+        sqls
+    } else {
+        let mut compiled = Vec::new();
+        for rule in &agg_rules {
+            if rule.head.is_none() {
+                continue;
+            }
+            let head_pred = match &rule.head.as_ref().unwrap().p {
+                Term::Const(id) => *id,
+                _ => continue,
+            };
+            // Ensure HTAP tables exist for the head predicate.
+            crate::storage::merge::ensure_htap_tables(head_pred);
+            let target = format!("_pg_ripple.vp_{head_pred}_delta");
+
+            match compile_aggregate_rule(rule, &target) {
+                Ok(sql) => compiled.push(sql),
+                Err(e) => pgrx::warning!("infer_agg: aggregate rule compile error: {e}"),
+            }
+        }
+        cache::store_agg(rule_set_name, &compiled);
+        compiled
+    };
+
+    for sql in &agg_sqls {
+        match Spi::get_one::<i64>(&format!(
+            "WITH ins AS ({sql} RETURNING 1) SELECT COUNT(*)::bigint FROM ins"
+        )) {
+            Ok(Some(n)) => agg_derived += n,
+            Ok(None) => {}
+            Err(e) => pgrx::warning!("infer_agg: aggregate SQL execution error: {e}"),
+        }
+    }
+
+    (normal_derived + agg_derived, agg_derived, iterations)
+}
+
+/// Inner helper: run semi-naive inference over a specific set of (non-aggregate)
+/// rules and materialise results into vp_rare.  Returns (total_derived, iterations).
+fn run_seminaive_inner(rules: &[Rule], rule_set_name: &str) -> (i64, i32) {
+    // Collect derived predicate IDs.
+    let derived_pred_ids: std::collections::HashSet<i64> = rules
+        .iter()
+        .filter_map(|r| {
+            r.head.as_ref().and_then(|h| {
+                if let Term::Const(id) = &h.p {
+                    Some(*id)
+                } else {
+                    None
+                }
+            })
+        })
+        .collect();
+
+    if derived_pred_ids.is_empty() {
+        return (0, 0);
+    }
+
+    // Create delta temp tables.
+    for &pred_id in &derived_pred_ids {
+        let _ = Spi::run_with_args(&format!("DROP TABLE IF EXISTS _dl_delta_{pred_id}"), &[]);
+        Spi::run_with_args(
+            &format!(
+                "CREATE TEMP TABLE _dl_delta_{pred_id} \
+                 (s BIGINT NOT NULL, o BIGINT NOT NULL, g BIGINT NOT NULL DEFAULT 0, \
+                  UNIQUE (s, o, g))"
+            ),
+            &[],
+        )
+        .unwrap_or_else(|e| pgrx::error!("run_seminaive_inner: delta table error: {e}"));
+    }
+
+    // Seeding pass.
+    for rule in rules {
+        if rule.head.is_none() {
+            continue;
+        }
+        let head_pred = match &rule.head.as_ref().unwrap().p {
+            Term::Const(id) => *id,
+            _ => continue,
+        };
+        if !derived_pred_ids.contains(&head_pred) {
+            continue;
+        }
+        let target = format!("_dl_delta_{head_pred}");
+        match compile_single_rule_to(rule, &target) {
+            Ok(sql) => {
+                if let Err(e) = Spi::run_with_args(&sql, &[]) {
+                    pgrx::warning!("run_seminaive_inner: seed SQL error: {e}");
+                }
+            }
+            Err(e) => pgrx::warning!("run_seminaive_inner: seed compile error: {e}"),
+        }
+    }
+
+    // Fixpoint loop.
+    let mut iteration_count = 1i32;
+    loop {
+        if iteration_count >= 10_000 {
+            pgrx::warning!(
+                "run_seminaive_inner: max iterations reached for rule_set '{rule_set_name}'"
+            );
+            break;
+        }
+        iteration_count += 1;
+
+        for &pred_id in &derived_pred_ids {
+            let _ = Spi::run_with_args(
+                &format!("DROP TABLE IF EXISTS _dl_delta_new_{pred_id}"),
+                &[],
+            );
+            Spi::run_with_args(
+                &format!(
+                    "CREATE TEMP TABLE _dl_delta_new_{pred_id} \
+                     (s BIGINT NOT NULL, o BIGINT NOT NULL, g BIGINT NOT NULL DEFAULT 0, \
+                      UNIQUE (s, o, g))"
+                ),
+                &[],
+            )
+            .unwrap_or_else(|e| pgrx::error!("run_seminaive_inner: delta_new error: {e}"));
+        }
+
+        let mut new_this_iter = 0i64;
+        let delta_fn = |pred_id: i64| -> String { format!("_dl_delta_{pred_id}") };
+        let new_delta_fn = |pred_id: i64| -> String { format!("_dl_delta_new_{pred_id}") };
+
+        for rule in rules {
+            if rule.head.is_none() {
+                continue;
+            }
+            let head_pred = match &rule.head.as_ref().unwrap().p {
+                Term::Const(id) => *id,
+                _ => continue,
+            };
+            if !derived_pred_ids.contains(&head_pred) {
+                continue;
+            }
+            match compile_rule_delta_variants_to(
+                rule,
+                &derived_pred_ids,
+                &delta_fn,
+                Some(&new_delta_fn),
+            ) {
+                Ok(sqls) => {
+                    for sql in &sqls {
+                        if let Err(e) = Spi::run_with_args(sql, &[]) {
+                            pgrx::warning!("run_seminaive_inner: variant SQL error: {e}");
+                        }
+                    }
+                }
+                Err(e) => pgrx::warning!("run_seminaive_inner: compile error: {e}"),
+            }
+        }
+
+        for &pred_id in &derived_pred_ids {
+            let cnt = Spi::get_one::<i64>(&format!(
+                "SELECT count(*) FROM _dl_delta_new_{pred_id} n \
+                 WHERE NOT EXISTS (SELECT 1 FROM _dl_delta_{pred_id} d \
+                 WHERE d.s=n.s AND d.o=n.o AND d.g=n.g)"
+            ))
+            .unwrap_or(None)
+            .unwrap_or(0);
+            new_this_iter += cnt;
+        }
+
+        for &pred_id in &derived_pred_ids {
+            let _ = Spi::run_with_args(
+                &format!(
+                    "INSERT INTO _dl_delta_{pred_id} (s,o,g) \
+                     SELECT s,o,g FROM _dl_delta_new_{pred_id} ON CONFLICT DO NOTHING"
+                ),
+                &[],
+            );
+            let _ = Spi::run_with_args(
+                &format!("DROP TABLE IF EXISTS _dl_delta_new_{pred_id}"),
+                &[],
+            );
+        }
+
+        if new_this_iter == 0 {
+            break;
+        }
+    }
+
+    // Materialise into vp_rare.
+    let mut total: i64 = 0;
+    for &pred_id in &derived_pred_ids {
+        let cnt = Spi::get_one::<i64>(&format!(
+            "WITH ins AS (INSERT INTO _pg_ripple.vp_rare (p, s, o, g) \
+             SELECT {pred_id}::bigint, s, o, g FROM _dl_delta_{pred_id} \
+             ON CONFLICT DO NOTHING RETURNING 1) SELECT COUNT(*)::bigint FROM ins"
+        ))
+        .unwrap_or(None)
+        .unwrap_or(0);
+        total += cnt;
+        if cnt > 0 {
+            let _ = Spi::run_with_args(
+                "INSERT INTO _pg_ripple.predicates (id, table_oid, triple_count) \
+                 VALUES ($1, NULL, $2) ON CONFLICT (id) DO UPDATE \
+                 SET triple_count = _pg_ripple.predicates.triple_count + EXCLUDED.triple_count",
+                &[
+                    pgrx::datum::DatumWithOid::from(pred_id),
+                    pgrx::datum::DatumWithOid::from(cnt),
+                ],
+            );
+        }
+    }
+
+    // Cleanup.
+    for &pred_id in &derived_pred_ids {
+        let _ = Spi::run_with_args(&format!("DROP TABLE IF EXISTS _dl_delta_{pred_id}"), &[]);
+        let _ = Spi::run_with_args(
+            &format!("DROP TABLE IF EXISTS _dl_delta_new_{pred_id}"),
+            &[],
+        );
+    }
+
+    (total, iteration_count)
 }

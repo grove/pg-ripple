@@ -150,3 +150,75 @@ cargo pgrx run pg18
 # In psql:
 \i benchmarks/magic_sets.sql
 ```
+
+---
+
+## Aggregate rules — stratification and performance (v0.30.0)
+
+### Aggregation stratification
+
+Aggregate literals (`COUNT`, `SUM`, `MIN`, `MAX`, `AVG`) add a **stratification constraint**: the aggregate rule must be evaluated after all the data it groups over is fully materialized. pg_ripple enforces this automatically via its SCC-based stratifier. If a cycle through aggregation is detected (e.g., a derived predicate P feeds an aggregate that produces another predicate Q which feeds P), the engine emits `WARNING PT510` and skips the aggregate rules.
+
+**Avoid cycles through aggregation:**
+
+```sql
+-- ✗ BAD: foaf:knows is derived by rule 1, but rule 2 aggregates over foaf:knows.
+--   If the aggregate result feeds back into foaf:knows, this is a PT510 violation.
+SELECT pg_ripple.load_rules(
+  '?x <foaf:knows> ?y :- ?x <ex:follows> ?y .
+   ?x <ex:followCount> ?n :- COUNT(?y WHERE ?x <foaf:knows> ?y) = ?n .
+   ?x <ex:follows> ?y :- ?x <ex:followCount> ?n , ?n > 1 .', -- cycle!
+  'bad_set');
+
+-- ✓ GOOD: Aggregate over base data only; result is a new predicate with no back-edge.
+SELECT pg_ripple.load_rules(
+  '?x <ex:followCount> ?n :- COUNT(?y WHERE ?x <ex:follows> ?y) = ?n .',
+  'good_set');
+```
+
+### Performance tips for aggregate rules
+
+1. **Run `infer_agg()` instead of `infer()`** for rule sets that contain aggregate literals. `infer()` silently skips aggregate literals; `infer_agg()` evaluates them.
+
+2. **Plan cache hit ratio**: On a warm cache, the second and subsequent calls to `infer_agg()` skip compilation entirely. Check hit rates:
+
+   ```sql
+   SELECT * FROM pg_ripple.rule_plan_cache_stats();
+   -- rule_set     | hits | misses | entries
+   -- my_analytics |    9 |      1 |       1
+   ```
+
+   A hit rate < 90% may indicate that `load_rules()` is being called unnecessarily (each `load_rules()` invalidates the cache for that rule set).
+
+3. **Use narrow predicates for the aggregate atom**: `COUNT(?y WHERE ?x <ex:knows> ?y)` scans the `ex:knows` VP table. Ensure that predicate has a B-tree index on `(s, o)`.
+
+4. **Batch aggregate rules in a single rule set**: Multiple aggregate rules for the same rule set are compiled in a single `infer_agg()` call; splitting them into separate rule sets multiplies the number of GROUP BY queries.
+
+---
+
+## Rule plan cache tuning (v0.30.0)
+
+The plan cache avoids re-compiling rule SQL on every `infer_agg()` call. Two GUCs control it:
+
+| GUC | Default | Effect |
+|-----|---------|--------|
+| `pg_ripple.rule_plan_cache` | `true` | Master switch — set `false` to debug cache-related issues |
+| `pg_ripple.rule_plan_cache_size` | `64` | Max rule sets cached; oldest entry evicted on overflow |
+
+**Sizing guidelines:**
+
+- If your application has fewer than 64 rule sets (typical), the default is fine.
+- For > 64 rule sets, increase `rule_plan_cache_size` to avoid constant eviction:
+  ```sql
+  ALTER SYSTEM SET pg_ripple.rule_plan_cache_size = 256;
+  SELECT pg_reload_conf();
+  ```
+- Memory cost is low: each cache entry stores a few SQL strings (~1–5 KB typical).
+
+**Cache invalidation:**
+
+The cache is automatically invalidated per rule set when:
+- `pg_ripple.load_rules()` is called for that rule set (new rules may change compiled SQL)
+- `pg_ripple.drop_rules()` is called for that rule set
+
+The cache is **not** shared across backends (it is process-local). Each new backend connection starts with an empty cache, so the first `infer_agg()` call per backend always incurs a compile step.

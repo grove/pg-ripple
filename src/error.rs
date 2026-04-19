@@ -111,3 +111,32 @@ pub enum DatalogOptError {
     )]
     CostReorderSkipped { rule_text: String },
 }
+
+/// Datalog aggregation errors (PT510–PT511) — v0.30.0.
+#[allow(dead_code)]
+#[derive(Debug, Error)]
+pub enum DatalogAggError {
+    /// PT510 — aggregation-stratification violation.
+    ///
+    /// Occurs when an aggregate body literal references a predicate that is
+    /// computed in the same stratum as the head predicate (or depends on the
+    /// head predicate through positive rules), creating an illegal recursive
+    /// aggregate dependency.  The program has no unique minimal model.
+    #[error(
+        "aggregation-stratification violation in rule set '{rule_set}': \
+         predicate '{agg_pred}' is being aggregated but it is not fully computed \
+         before the aggregate rule fires — this creates a cycle through aggregation \
+         which is not allowed (PT510)"
+    )]
+    AggStratificationViolation { rule_set: String, agg_pred: String },
+
+    /// PT511 — unsupported aggregate function in rule body.
+    ///
+    /// Emitted when a rule body uses an aggregate function that the engine
+    /// does not yet support (e.g. a user-defined function name).
+    #[error(
+        "unsupported aggregate function '{func}' in rule body '{rule_text}'; \
+         supported functions are COUNT, SUM, MIN, MAX, AVG (PT511)"
+    )]
+    UnsupportedAggFunc { func: String, rule_text: String },
+}

@@ -892,6 +892,21 @@ pub static DATALOG_ANTIJOIN_THRESHOLD: pgrx::GucSetting<i32> = pgrx::GucSetting:
 /// Set to `0` to disable delta table indexing.  Default: 500.
 pub static DELTA_INDEX_THRESHOLD: pgrx::GucSetting<i32> = pgrx::GucSetting::<i32>::new(500);
 
+// ─── v0.30.0 GUCs ────────────────────────────────────────────────────────────
+
+/// GUC: master switch for the Datalog rule plan cache (v0.30.0).
+///
+/// When `true` (default), `infer()`, `infer_with_stats()`, and `infer_agg()`
+/// cache the compiled SQL for each rule set so that repeated calls on the same
+/// rule set skip the parse + compile step.  Invalidated by `drop_rules()` and
+/// `load_rules()`.
+pub static RULE_PLAN_CACHE: pgrx::GucSetting<bool> = pgrx::GucSetting::<bool>::new(true);
+
+/// GUC: maximum number of rule sets whose compiled SQL is kept in the plan cache
+/// (v0.30.0).  When the cache is full, the entry with the fewest hits is evicted.
+/// Default: 64.
+pub static RULE_PLAN_CACHE_SIZE: pgrx::GucSetting<i32> = pgrx::GucSetting::<i32>::new(64);
+
 // ─── pg_trickle runtime detection (v0.6.0) ───────────────────────────────────
 
 /// The pg_trickle version that pg_ripple was tested against (A-4, v0.25.0).
@@ -1576,6 +1591,31 @@ pub extern "C-unwind" fn _PG_init() {
         &DELTA_INDEX_THRESHOLD,
         0,
         10_000_000,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+
+    // ── v0.30.0 GUCs ─────────────────────────────────────────────────────────
+
+    pgrx::GucRegistry::define_bool_guc(
+        c"pg_ripple.rule_plan_cache",
+        c"When on (default), cache compiled SQL for each rule set to speed up \
+          repeated infer() / infer_agg() calls; invalidated by drop_rules() and \
+          load_rules() (v0.30.0)",
+        c"",
+        &RULE_PLAN_CACHE,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+
+    pgrx::GucRegistry::define_int_guc(
+        c"pg_ripple.rule_plan_cache_size",
+        c"Maximum number of rule sets kept in the plan cache (default: 64, \
+          min: 1, max: 4096); oldest entries are evicted on overflow (v0.30.0)",
+        c"",
+        &RULE_PLAN_CACHE_SIZE,
+        1,
+        4096,
         GucContext::Userset,
         GucFlags::default(),
     );
@@ -3502,6 +3542,8 @@ mod pg_ripple {
     #[pg_extern]
     fn load_rules(rules: &str, rule_set: default!(&str, "'custom'")) -> i64 {
         crate::datalog::builtins::register_standard_prefixes();
+        // Invalidate plan cache for this rule set (v0.30.0).
+        crate::datalog::cache::invalidate(rule_set);
         let rule_set_ir = match crate::datalog::parse_rules(rules, rule_set) {
             Ok(rs) => rs,
             Err(e) => pgrx::error!("rule parse error: {e}"),
@@ -3607,6 +3649,8 @@ mod pg_ripple {
     #[pg_extern]
     fn drop_rules(rule_set: &str) -> i64 {
         crate::datalog::ensure_catalog();
+        // Invalidate plan cache for this rule set (v0.30.0).
+        crate::datalog::cache::invalidate(rule_set);
         pgrx::Spi::get_one_with_args::<i64>(
             "WITH deleted AS ( \
                  DELETE FROM _pg_ripple.rules WHERE rule_set = $1 RETURNING 1 \
@@ -3749,6 +3793,63 @@ mod pg_ripple {
             serde_json::Value::Number(serde_json::Number::from(matching)),
         );
         pgrx::JsonB(serde_json::Value::Object(obj))
+    }
+
+    /// Run inference for a rule set that may contain aggregate body literals
+    /// (Datalog^agg, v0.30.0).
+    ///
+    /// Supports `COUNT(?aggVar WHERE subject pred object) = ?resultVar` syntax
+    /// in rule bodies.  Aggregate rules derive facts by grouping over a base
+    /// predicate and computing COUNT, SUM, MIN, MAX, or AVG per group.
+    ///
+    /// Returns a JSONB object with:
+    /// - `"derived"`: total triples derived (aggregate + non-aggregate)
+    /// - `"aggregate_derived"`: triples derived by aggregate rules only
+    /// - `"iterations"`: fixpoint iteration count for non-aggregate rules
+    ///
+    /// Emits a WARNING with PT510 code if aggregation-stratification is violated.
+    #[pg_extern]
+    fn infer_agg(rule_set: default!(&str, "'custom'")) -> pgrx::JsonB {
+        let (total, agg_derived, iterations) = crate::datalog::run_inference_agg(rule_set);
+        let mut obj = serde_json::Map::new();
+        obj.insert(
+            "derived".to_owned(),
+            serde_json::Value::Number(serde_json::Number::from(total)),
+        );
+        obj.insert(
+            "aggregate_derived".to_owned(),
+            serde_json::Value::Number(serde_json::Number::from(agg_derived)),
+        );
+        obj.insert(
+            "iterations".to_owned(),
+            serde_json::Value::Number(serde_json::Number::from(iterations)),
+        );
+        pgrx::JsonB(serde_json::Value::Object(obj))
+    }
+
+    /// Return statistics for the Datalog rule plan cache (v0.30.0).
+    ///
+    /// Each row has:
+    /// - `rule_set TEXT` — the rule set name
+    /// - `hits BIGINT` — number of times the cached SQL was used
+    /// - `misses BIGINT` — number of times the cache was consulted but missed
+    /// - `entries INT` — total number of entries currently in the cache
+    #[pg_extern]
+    fn rule_plan_cache_stats() -> TableIterator<
+        'static,
+        (
+            name!(rule_set, String),
+            name!(hits, i64),
+            name!(misses, i64),
+            name!(entries, i32),
+        ),
+    > {
+        let stats = crate::datalog::cache::stats();
+        TableIterator::new(
+            stats
+                .into_iter()
+                .map(|s| (s.rule_set, s.hits, s.misses, s.entries)),
+        )
     }
 
     /// Check all active constraint rules and return violations as JSONB.

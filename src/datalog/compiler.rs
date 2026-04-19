@@ -27,7 +27,9 @@
 //!   `JOIN … ON` clause of the atom that first binds all the guard's variables,
 //!   enabling the PostgreSQL planner to apply index scans early.
 
-use crate::datalog::{ArithOp, Atom, BodyLiteral, CompareOp, Rule, StringBuiltin, Term};
+use crate::datalog::{
+    AggFunc, AggregateLiteral, ArithOp, Atom, BodyLiteral, CompareOp, Rule, StringBuiltin, Term,
+};
 use pgrx::datum::DatumWithOid;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -1338,6 +1340,8 @@ fn compile_rule_with_one_delta_atom(
                     where_clauses.push(format!("{col}::text ~ '{escaped}'"));
                 }
             },
+            // Aggregate literals are handled by compile_aggregate_rule, not here.
+            BodyLiteral::Aggregate(_) => {}
         }
     }
 
@@ -1369,5 +1373,142 @@ fn compile_rule_with_one_delta_atom(
          FROM {from_str}\n\
          {where_str}\n\
          ON CONFLICT DO NOTHING"
+    ))
+}
+
+
+// ─── v0.30.0: Aggregate rule compilation ─────────────────────────────────────
+
+/// Compile an aggregate rule to a GROUP BY SQL INSERT statement (v0.30.0).
+///
+/// Aggregate rules have the form:
+/// ```text
+/// ?x pred ?n :- COUNT(?y WHERE ?x bodyPred ?y) = ?n .
+/// ```
+/// See `crate::datalog::AggregateLiteral` for the IR.
+pub fn compile_aggregate_rule(rule: &Rule, target: &str) -> Result<String, String> {
+    let head = rule
+        .head
+        .as_ref()
+        .ok_or_else(|| "aggregate rule must have a head".to_owned())?;
+
+    let agg_lit: &AggregateLiteral = rule
+        .body
+        .iter()
+        .find_map(|lit| {
+            if let BodyLiteral::Aggregate(a) = lit {
+                Some(a)
+            } else {
+                None
+            }
+        })
+        .ok_or_else(|| "no aggregate literal found in rule body".to_owned())?;
+
+    let pred_id = match &agg_lit.atom.p {
+        Term::Const(id) => *id,
+        _ => return Err("aggregate atom predicate must be a constant".to_owned()),
+    };
+
+    let agg_func_sql = match agg_lit.func {
+        AggFunc::Count => "COUNT",
+        AggFunc::Sum => "SUM",
+        AggFunc::Min => "MIN",
+        AggFunc::Max => "MAX",
+        AggFunc::Avg => "AVG",
+    };
+
+    let (agg_col, group_col) = match (&agg_lit.atom.s, &agg_lit.atom.o) {
+        (Term::Var(s_var), Term::Var(o_var)) => {
+            if s_var == &agg_lit.agg_var {
+                ("s", "o")
+            } else if o_var == &agg_lit.agg_var {
+                ("o", "s")
+            } else {
+                return Err(format!(
+                    "agg_var '{}' not found in atom s or o positions",
+                    agg_lit.agg_var
+                ));
+            }
+        }
+        (Term::Const(_), Term::Var(o_var)) => {
+            if o_var == &agg_lit.agg_var {
+                ("o", "s")
+            } else {
+                return Err(format!(
+                    "agg_var '{}' not in atom (s=const, o={o_var})",
+                    agg_lit.agg_var
+                ));
+            }
+        }
+        (Term::Var(s_var), Term::Const(_)) => {
+            if s_var == &agg_lit.agg_var {
+                ("s", "o")
+            } else {
+                return Err(format!(
+                    "agg_var '{}' not in atom (s={s_var}, o=const)",
+                    agg_lit.agg_var
+                ));
+            }
+        }
+        _ => {
+            return Err(
+                "aggregate atom must have at least one variable".to_owned(),
+            );
+        }
+    };
+
+    let result_in_head_s =
+        matches!(&head.s, Term::Var(v) if *v == agg_lit.result_var);
+    let result_in_head_o =
+        matches!(&head.o, Term::Var(v) if *v == agg_lit.result_var);
+
+    if !result_in_head_s && !result_in_head_o {
+        return Err(format!(
+            "result_var '{}' not found in head subject or object",
+            agg_lit.result_var
+        ));
+    }
+
+    let agg_expr = format!("pg_ripple.encode_term({agg_func_sql}(t0.{agg_col})::text, 2::smallint)");
+    let group_expr = format!("t0.{group_col}");
+
+    let (insert_s, insert_o) = if result_in_head_o {
+        (group_expr, agg_expr)
+    } else {
+        (agg_expr, group_expr)
+    };
+
+    let scope = crate::RULE_GRAPH_SCOPE
+        .get()
+        .as_ref()
+        .and_then(|c| c.to_str().ok())
+        .unwrap_or("default")
+        .to_owned();
+
+    let mut where_parts: Vec<String> = Vec::new();
+    if scope == "default" {
+        where_parts.push("t0.g = 0".to_owned());
+    }
+    if let Term::Const(c) = &agg_lit.atom.s {
+        where_parts.push(format!("t0.s = {}", const_sql(*c)));
+    }
+    if let Term::Const(c) = &agg_lit.atom.o {
+        where_parts.push(format!("t0.o = {}", const_sql(*c)));
+    }
+
+    let where_str = if where_parts.is_empty() {
+        String::new()
+    } else {
+        format!("WHERE {}", where_parts.join(" AND "))
+    };
+
+    Ok(format!(
+        "INSERT INTO {target} (s, o, g)\n\
+         SELECT {insert_s}, {insert_o}, 0\n\
+         FROM {source} t0\n\
+         {where_str}\n\
+         GROUP BY t0.{group_col}\n\
+         ON CONFLICT DO NOTHING",
+        source = vp_read_expr(pred_id)
     ))
 }

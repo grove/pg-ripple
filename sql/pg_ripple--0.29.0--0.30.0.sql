@@ -1,0 +1,23 @@
+-- Migration 0.29.0 → 0.30.0: Datalog Aggregation & Compiled Rule Plans
+--
+-- New SQL-visible features (all implemented in Rust/pgrx):
+--
+-- 1. pg_ripple.infer_agg(rule_set TEXT DEFAULT 'custom') RETURNS JSONB
+--    Run Datalog^agg inference with COUNT/SUM/MIN/MAX/AVG aggregate literals.
+--    Returns: { "derived": bigint, "aggregate_derived": bigint, "iterations": int }
+--
+-- 2. pg_ripple.rule_plan_cache_stats()
+--       RETURNS TABLE(rule_set TEXT, hits BIGINT, misses BIGINT, entries INT)
+--    Expose statistics from the process-local rule plan cache.
+--
+-- 3. GUC pg_ripple.rule_plan_cache (bool, default on)
+--    Master switch for the Datalog rule plan cache.
+--
+-- 4. GUC pg_ripple.rule_plan_cache_size (int, default 64, min 1, max 4096)
+--    Maximum number of rule sets held in the plan cache.
+--
+-- No VP table schema changes in this release.
+-- No changes to _pg_ripple.rules, _pg_ripple.dictionary, or any existing tables.
+--
+-- The two new GUCs are registered by pg_ripple._PG_init() at load time;
+-- they do not require explicit CREATE statements here.

@@ -88,6 +88,17 @@ fn build_dependency_graph(rules: &[Rule]) -> Vec<Edge> {
                         });
                     }
                 }
+                // v0.30.0: aggregate dependencies are treated as negative (strict ordering)
+                // to enforce the aggregation-stratification requirement.
+                BodyLiteral::Aggregate(agg) => {
+                    if let Some(p) = atom_pred(&agg.atom) {
+                        edges.push(Edge {
+                            from: h,
+                            to: p,
+                            negative: true,
+                        });
+                    }
+                }
                 _ => {}
             }
         }
@@ -588,6 +599,98 @@ pub fn check_subsumption(rules: &[Rule]) -> Vec<String> {
     }
 
     eliminated
+}
+
+// ─── v0.30.0: Aggregation stratification check ───────────────────────────────
+
+/// Check that aggregate rules satisfy the aggregation-stratification requirement:
+/// for each aggregate body literal, the predicate being aggregated over must NOT
+/// appear in the same stratum as the head predicate (no recursive aggregation).
+///
+/// Returns `Ok(())` if the program is aggregation-stratifiable.
+/// Returns `Err(msg)` with a human-readable description if a violation is found.
+/// The error message is prefixed with `"PT510:"`.
+///
+/// # Algorithm
+///
+/// For each rule with an `Aggregate` body literal, we check whether the aggregated
+/// predicate and the head predicate form a cycle.  Because aggregates are treated
+/// as negative edges by the standard stratifier, any cycle involving an aggregate
+/// edge is already rejected by `stratify()`.  This function provides a more
+/// targeted check with a PT510-specific error message.
+pub fn check_aggregation_stratification(rules: &[Rule]) -> Result<(), String> {
+    // Collect aggregate dependencies: head_pred → agg_body_pred.
+    let mut agg_deps: Vec<(i64, i64)> = Vec::new();
+    for rule in rules {
+        let Some(head_pred) = head_pred(rule) else {
+            continue;
+        };
+        for lit in &rule.body {
+            if let BodyLiteral::Aggregate(agg) = lit
+                && let Some(body_pred) = atom_pred(&agg.atom) {
+                    agg_deps.push((head_pred, body_pred));
+                }
+        }
+    }
+
+    if agg_deps.is_empty() {
+        return Ok(());
+    }
+
+    // Collect all positive dependencies (non-aggregate, non-negative edges).
+    let mut pos_deps: HashMap<i64, Vec<i64>> = HashMap::new();
+    for rule in rules {
+        let Some(h) = head_pred(rule) else {
+            continue;
+        };
+        for lit in &rule.body {
+            if let BodyLiteral::Positive(atom) = lit
+                && let Some(p) = atom_pred(atom) {
+                    pos_deps.entry(h).or_default().push(p);
+                }
+        }
+    }
+
+    // For each aggregate dependency (head_pred → agg_body_pred), check whether
+    // agg_body_pred can reach head_pred via positive edges.
+    // If so, there's a cycle through aggregation → PT510.
+    for (head_pred, agg_body_pred) in &agg_deps {
+        if can_reach_positive(*agg_body_pred, *head_pred, &pos_deps) {
+            let _ = (head_pred, agg_body_pred); // used for detection; not in message
+            return Err(
+                "PT510: aggregation-stratification violation: \
+                 a derived predicate depends on another predicate via aggregation, \
+                 but that predicate is also derived through positive rules; \
+                 this creates a cycle through aggregation; \
+                 ensure the aggregated predicate is fully computed before the \
+                 aggregate rule runs"
+                    .to_owned(),
+            );
+        }
+    }
+
+    Ok(())
+}
+
+/// Check whether predicate `start` can reach `target` via positive rule edges.
+fn can_reach_positive(start: i64, target: i64, deps: &HashMap<i64, Vec<i64>>) -> bool {
+    let mut visited = HashSet::new();
+    let mut queue = VecDeque::new();
+    queue.push_back(start);
+    visited.insert(start);
+    while let Some(cur) = queue.pop_front() {
+        if cur == target {
+            return true;
+        }
+        if let Some(nexts) = deps.get(&cur) {
+            for &next in nexts {
+                if visited.insert(next) {
+                    queue.push_back(next);
+                }
+            }
+        }
+    }
+    false
 }
 
 /// Test whether `a` is a multiset subset of `b`

@@ -18,7 +18,10 @@
 //! Variable      ::= '?' [a-zA-Z_][a-zA-Z0-9_]*
 //! ```
 
-use crate::datalog::{ArithOp, Atom, BodyLiteral, CompareOp, Rule, RuleSet, StringBuiltin, Term};
+use crate::datalog::{
+    AggFunc, AggregateLiteral, ArithOp, Atom, BodyLiteral, CompareOp, Rule, RuleSet,
+    StringBuiltin, Term,
+};
 
 // ─── Public API ──────────────────────────────────────────────────────────────
 
@@ -232,6 +235,11 @@ fn parse_body_literal(text: &str) -> Result<BodyLiteral, String> {
         return Ok(BodyLiteral::Negated(atom));
     }
 
+    // Aggregate literal: COUNT(?y WHERE ...) = ?n, SUM(...), MIN(...), MAX(...), AVG(...)
+    if let Some(agg) = try_parse_aggregate(text) {
+        return Ok(BodyLiteral::Aggregate(agg));
+    }
+
     // Arithmetic assign: ?z IS ?x + ?y
     if let Some(assign) = try_parse_assign(text) {
         return Ok(assign);
@@ -250,6 +258,81 @@ fn parse_body_literal(text: &str) -> Result<BodyLiteral, String> {
     // Positive atom
     let atom = parse_atom(text)?;
     Ok(BodyLiteral::Positive(atom))
+}
+
+/// Try parsing an aggregate body literal.
+///
+/// Syntax: `COUNT(?aggVar WHERE subject pred object) = ?resultVar`
+/// Also supports SUM, MIN, MAX, AVG.
+fn try_parse_aggregate(text: &str) -> Option<AggregateLiteral> {
+    let upper = text.to_uppercase();
+    let func = if upper.starts_with("COUNT(") {
+        AggFunc::Count
+    } else if upper.starts_with("SUM(") {
+        AggFunc::Sum
+    } else if upper.starts_with("MIN(") {
+        AggFunc::Min
+    } else if upper.starts_with("MAX(") {
+        AggFunc::Max
+    } else if upper.starts_with("AVG(") {
+        AggFunc::Avg
+    } else {
+        return None;
+    };
+
+    // Find opening paren position.
+    let paren_start = text.find('(')?;
+
+    // Find " WHERE " keyword (case-insensitive) inside the outer parens.
+    let after_paren = &text[paren_start + 1..];
+    let where_pos_in_after = after_paren.to_uppercase().find(" WHERE ")?;
+
+    // Extract agg_var: between '(' and ' WHERE '.
+    let agg_var_str = after_paren[..where_pos_in_after].trim();
+    let agg_var = agg_var_str.strip_prefix('?')?.to_owned();
+
+    // Find the body atom: between WHERE and ')'.
+    let after_where = &after_paren[where_pos_in_after + 7..]; // skip " WHERE "
+
+    // Find the closing paren for the aggregate function.
+    // We need to find the ')' that closes the aggregate, respecting nesting.
+    let close_paren = {
+        let mut depth = 1usize;
+        let mut pos = None;
+        for (i, c) in after_where.char_indices() {
+            match c {
+                '(' => depth += 1,
+                ')' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        pos = Some(i);
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+        pos?
+    };
+
+    let atom_str = after_where[..close_paren].trim();
+    let atom = parse_atom(atom_str).ok()?;
+
+    // After ')' we expect `= ?resultVar` or `) = ?resultVar`.
+    let after_close = after_where[close_paren + 1..].trim();
+    let result_str = after_close
+        .strip_prefix('=')
+        .map(str::trim)
+        .and_then(|s| s.strip_prefix('?'))?
+        .trim()
+        .to_owned();
+
+    Some(AggregateLiteral {
+        func,
+        agg_var,
+        atom,
+        result_var: result_str,
+    })
 }
 
 /// Try parsing an arithmetic assignment: `?z IS ?x + ?y` or `?z IS ?x * ?y`.

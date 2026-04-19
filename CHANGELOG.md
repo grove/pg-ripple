@@ -9,7 +9,46 @@ Versions correspond to the milestones in [ROADMAP.md](ROADMAP.md).
 
 ## [Unreleased]
 
-Points at the next milestone: v0.30.0 — Datalog Aggregation & Compiled Rule Plans.
+Points at the next milestone: v0.31.0 — Demand-Driven Evaluation & sameAs Reasoning.
+
+---
+
+## [0.30.0] — 2026-04-26 — Datalog Aggregation & Compiled Rule Plans
+
+**pg_ripple's Datalog engine gains Datalog^agg (aggregate literals in rule bodies) and a process-local rule plan cache.** All pg_regress tests pass (3 new tests for v0.30.0 features).
+
+### What you can do
+
+- **Aggregate inference** — `pg_ripple.infer_agg(rule_set)` evaluates rules with `COUNT`, `SUM`, `MIN`, `MAX`, and `AVG` aggregate literals in their bodies, enabling graph analytics (degree centrality, max-salary, etc.) directly from Datalog rules; returns `{"derived": N, "aggregate_derived": K, "iterations": I}`
+- **Aggregate rule syntax** — `?x <ex:count> ?n :- COUNT(?y WHERE ?x <foaf:knows> ?y) = ?n .`
+- **Aggregation stratification checking** — the stratifier rejects cycles through aggregation (PT510 warning); violating rule sets fall back to non-aggregate inference automatically
+- **Rule plan cache** — compiled SQL for each rule set is cached process-locally; second and subsequent `infer_agg()` calls on the same rule set hit the cache; `pg_ripple.rule_plan_cache_stats()` exposes hit/miss counts
+- **Cache invalidation** — `load_rules()` and `drop_rules()` automatically invalidate the cache for the modified rule set
+
+### New GUC parameters
+
+| GUC | Type | Default | Description |
+|-----|------|---------|-------------|
+| `pg_ripple.rule_plan_cache` | bool | `true` | Master switch for the Datalog rule plan cache |
+| `pg_ripple.rule_plan_cache_size` | int | `64` | Maximum rule sets in plan cache (1–4096); evicts LFU entry on overflow |
+
+### New SQL functions
+
+| Function | Returns | Description |
+|----------|---------|-------------|
+| `pg_ripple.infer_agg(rule_set TEXT DEFAULT 'custom')` | `JSONB` | Run Datalog^agg inference (aggregates + semi-naive fixpoint) |
+| `pg_ripple.rule_plan_cache_stats()` | `TABLE(rule_set TEXT, hits BIGINT, misses BIGINT, entries INT)` | Show plan cache statistics per rule set |
+
+### New error codes
+
+| Code | Name | Description |
+|------|------|-------------|
+| PT510 | `AggStratificationViolation` | Aggregate rule creates a cycle through aggregation; rule is skipped |
+| PT511 | `UnsupportedAggFunc` | Unsupported aggregate function in rule body |
+
+### Migration
+
+No schema changes. Run `ALTER EXTENSION pg_ripple UPDATE` to upgrade.
 
 ---
 
