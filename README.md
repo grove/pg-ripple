@@ -7,47 +7,45 @@
 [![PostgreSQL 18](https://img.shields.io/badge/PostgreSQL-18-blue?logo=postgresql&logoColor=white)](https://www.postgresql.org/)
 [![pgrx 0.17](https://img.shields.io/badge/pgrx-0.17-orange)](https://github.com/pgcentralfoundation/pgrx)
 
-**A high-performance RDF triple store inside PostgreSQL.**
+**A knowledge graph engine built into PostgreSQL.**
 
-pg_ripple is a PostgreSQL 18 extension building toward a fully-featured knowledge graph inside the database. It stores RDF data, queries it with SPARQL, validates it with SHACL, and reasons over it with Datalog — all without leaving PostgreSQL.
+pg_ripple is a PostgreSQL 18 extension that turns your database into a knowledge graph store. You can model data as a web of connected facts — entities, relationships, and properties — and then query, validate, and reason over those connections, all from within the database you already run.
+
+No separate graph database. No data pipelines. No extra infrastructure.
+
+> **New to knowledge graphs?** Think of a knowledge graph as a smarter, more connected way to store data. Instead of rows in tables, you store facts: *Alice knows Bob*, *Bob works at Acme Corp*, *Acme Corp is in Oslo*. You can then ask questions that span many hops: *"Who are all the people in Alice's extended professional network?"* — the kind of question that is painful in SQL but natural in a graph.
 
 ---
 
 ## What works today (v0.29.0)
 
-**pg_ripple is now 100% conformant with the W3C SPARQL 1.1 Query, SPARQL 1.1 Update, and SHACL Core test suites.** Twenty-nine versions in, pg_ripple covers the full SPARQL 1.1 stack, SHACL validation, goal-directed Datalog reasoning with magic sets, streaming RDF export, incremental live views, a standard HTTP endpoint, high-performance federated queries across remote SPARQL services, frame-driven JSON-LD export, GraphRAG integration, and vector + SPARQL hybrid search — all inside PostgreSQL with no separate process required.
+pg_ripple passes **100% of the W3C SPARQL 1.1 and SHACL Core conformance test suites** — the industry benchmarks for correctness in knowledge graph systems. After 29 releases it covers the full feature set described below.
 
-| Area | What's included |
+| What you can do | How it works |
 |---|---|
-| **Storage** | VP tables (one per predicate), HTAP delta/main split, background merge worker, shared-memory dictionary cache; `source` column (`0`=explicit, `1`=derived) |
-| **Encoding** | Dictionary encoding (IRI, blank node, literal → i64), inline encoding for numbers and dates, RDF-star / quoted triples; hot dictionary tier for high-frequency IRIs |
-| **Import** | N-Triples, Turtle, TriG, N-Quads, RDF/XML; named-graph bulk loaders; file variants; remote `LOAD <url>` via SPARQL Update; `strict := true` mode for abort-on-error loading |
-| **SPARQL** | Full SPARQL 1.1 — SELECT, CONSTRUCT, DESCRIBE, ASK; property paths, aggregates, UNION/MINUS, subqueries, BIND, VALUES, OPTIONAL, named graphs; INSERT/DELETE DATA; pattern-based DELETE/INSERT WHERE; USING/WITH clauses; graph management (CLEAR ALL/DEFAULT/NAMED, DROP ALL/DEFAULT/NAMED, ADD, COPY, MOVE, CREATE); **100% W3C SPARQL 1.1 Query & Update conformance** |
-| **Output formats** | SELECT → JSONB; CONSTRUCT/DESCRIBE → JSONB, Turtle, or JSON-LD |
-| **Export** | `export_turtle()`, `export_jsonld()`, `export_ntriples()`, streaming variants |
-| **JSON-LD Framing** | `export_jsonld_framed(frame)` — frame-driven CONSTRUCT → nested JSON-LD; `jsonld_frame_to_sparql(frame)` — inspect the generated SPARQL; `export_jsonld_framed_stream(frame)` — NDJSON one object per root; `jsonld_frame(input, frame)` — general-purpose framing; `create_framing_view` / `drop_framing_view` / `list_framing_views` |
-| **HTTP API** | `pg_ripple_http` companion service: W3C SPARQL 1.1 Protocol over HTTP/HTTPS; content negotiation (JSON, XML, CSV, TSV, Turtle, N-Triples, JSON-LD); bearer/basic auth; CORS; Prometheus metrics; Docker Compose included |
-| **Federation** | `SERVICE <url> { … }` in any SPARQL query; SSRF-safe endpoint allowlist; `SERVICE SILENT`; configurable timeout, result cap, and error mode; health monitoring; local view rewrite; connection pooling; result caching with TTL; explicit variable projection; batch `SERVICE` (two clauses to the same endpoint → one HTTP request); adaptive timeouts; endpoint complexity hints; partial-result tolerance |
-| **SPARQL views** | `create_sparql_view(name, sparql, schedule, decode)` — always-fresh stream table from any SPARQL SELECT; `drop_sparql_view`, `list_sparql_views` |
-| **Datalog views** | `create_datalog_view(name, rules, goal, …)` — self-refreshing table from inline rules + goal; `create_datalog_view_from_rule_set`; `drop_datalog_view`, `list_datalog_views` |
-| **Framing views** | `create_framing_view(name, frame)` — incrementally-maintained JSON-LD stream table (requires pg_trickle) |
-| **ExtVP** | `create_extvp(name, pred1_iri, pred2_iri, schedule)` — pre-computed semi-join stream table for star queries; `drop_extvp`, `list_extvp` |
-| **SHACL** | Core constraints (`sh:minCount`, `sh:maxCount`, `sh:datatype`, `sh:in`, `sh:pattern`, `sh:class`, `sh:hasValue`, `sh:nodeKind`, `sh:languageIn`, `sh:uniqueLang`, `sh:lessThan`, `sh:greaterThan`, `sh:closed`, …); combinators (`sh:or`, `sh:and`, `sh:not`); sync and async validation modes; SHACL-AF `sh:rule` bridge; **100% W3C SHACL Core conformance** |
-| **Datalog** | Custom inference rules (Turtle-flavoured syntax); built-in RDFS (13 rules) and OWL RL (~20 core rules); stratified negation; arithmetic/string built-ins; integrity constraints; on-demand execution mode; **semi-naive evaluation** via `infer_with_stats(rule_set)` returning `{"derived": N, "iterations": K}` |
-| **Performance** | Selectivity-based BGP reordering (subject-bound 1%, object-bound 5% of row estimates); plan cache with hit/miss stats; parallel query hints for star patterns; extended statistics on VP column pairs; SHACL-informed optimizer hints; streaming cursor-based export (`pg_ripple.export_batch_size` GUC); `pg_ripple.property_path_max_depth` GUC (default 64) to cap recursive property-path depth; post-merge `ANALYZE` via `pg_ripple.auto_analyze` GUC; BRIN index on SID column for range-scan acceleration; `pg_ripple.explain_sparql(query, format)` for SQL/algebra/plan introspection |
-| **Admin & Security** | `vacuum()`, `reindex()`, `vacuum_dictionary()`, `dictionary_stats()`; graph-level Row-Level Security via `enable_graph_rls`, `grant_graph`, `revoke_graph`; `rls_bypass` GUC for superuser sessions; `canary()` health-check function |
-| **Full-text search** | `fts_search()` over literal values via PostgreSQL GIN indexes |
-| **GraphRAG** | `export_graphrag_entities()`, `export_graphrag_relationships()`, `export_graphrag_text_units()` — Parquet export matching Microsoft GraphRAG's BYOG schema; bundled ontology, SHACL shapes, and Datalog enrichment rules; Python CLI bridge (`scripts/graphrag_export.py`) |
-| **Vector search & RAG** | `store_embedding()`, `similar_entities()`, `embed_entities()`, `refresh_embeddings()` — pgvector integration for RDF entities; `hybrid_search()` (SPARQL + k-NN via Reciprocal Rank Fusion); `rag_retrieve()` — end-to-end RAG pipeline returning structured JSONB or JSON-LD; `contextualize_entity()` — graph-serialized text for embeddings; incremental embedding worker; external vector service federation (Weaviate, Qdrant, Pinecone) |
-| **Datalog optimization** | Goal-directed inference via `infer_goal(rule_set, goal)` (magic sets transformation); cost-based join reordering; anti-join negation (`LEFT JOIN … IS NULL` for large VP tables); predicate-filter pushdown; delta-table B-tree indexing; subsumption-based redundant-rule elimination |
+| **Import knowledge** | Load data in standard formats: Turtle, N-Triples, N-Quads, TriG, or RDF/XML — from files, inline text, or remote URLs. Named graphs let you organize facts into logical groups (e.g. one graph per data source or topic). |
+| **Query with SPARQL** | Ask complex questions using SPARQL 1.1 — the W3C standard query language for linked data (similar to SQL, but designed for graphs). Follow chains of relationships, apply filters, aggregate results, and query across multiple graphs. Fully W3C conformant. |
+| **Validate data quality** | Define quality rules with SHACL: *"every Person must have exactly one name"*, *"age must be a positive integer"*. Violations are caught on insert (immediate feedback) or checked in the background. Fully W3C conformant. |
+| **Infer new facts automatically** | Write Datalog rules to derive conclusions from what you already know — *"if Alice manages Bob and Bob manages Carol, then Alice indirectly manages Carol"*. Includes built-in support for standard RDFS and OWL reasoning. Goal-directed mode derives only the facts relevant to your actual query, so it stays fast on large graphs. |
+| **Export and share** | Export your graph as Turtle, N-Triples, JSON-LD, or RDF/XML. Use JSON-LD framing to produce nested documents shaped for REST APIs or LLM prompts. |
+| **Standard HTTP endpoint** | The companion `pg_ripple_http` service exposes a W3C SPARQL Protocol endpoint over HTTP/HTTPS. Supports JSON, XML, CSV, Turtle, and JSON-LD responses; authentication; Prometheus metrics; and Docker Compose for easy deployment. |
+| **Query remote graph services** | Use the SPARQL `SERVICE` keyword to query external SPARQL endpoints as part of a single query — your local data and a remote public dataset in one request. Includes connection pooling, result caching, and safe timeouts. |
+| **AI and LLM integration** | Store vector embeddings alongside graph facts. Combine semantic similarity search (*"find things similar to X"*) with SPARQL graph traversal in one query. Built-in RAG pipeline retrieves graph-contextualized context for language model prompts. |
+| **Microsoft GraphRAG** | Export entities and relationships in GraphRAG's BYOG (Bring Your Own Graph) Parquet format. Enrich the graph with Datalog rules. Validate quality with SHACL. |
+| **Live, auto-updating views** | Define a SPARQL query as a view; pg_ripple (with the optional `pg_trickle` companion) keeps it automatically up to date as data changes. |
+| **Access control** | Named graphs have row-level security backed by PostgreSQL's built-in permission system. Each graph can be granted to specific database roles, just like a table. |
+| **Full-text search** | Search the text of literal values (names, descriptions, notes) using PostgreSQL's fast full-text search indexes. |
+
+Here is a taste of what working with pg_ripple looks like from SQL:
 
 ```sql
 CREATE EXTENSION pg_ripple;
 
--- Import a Turtle file
+-- Import a Turtle file (a standard text format for RDF knowledge graphs)
 SELECT pg_ripple.load_turtle(pg_read_file('/data/people.ttl'));
 
--- Query with a property path: everyone Alice can reach via "knows"
+-- Query with a property path: find everyone Alice can reach via "knows"
+-- (follows the chain Alice→Bob→Carol→… automatically)
 SELECT * FROM pg_ripple.sparql('
   PREFIX foaf: <http://xmlns.com/foaf/0.1/>
   SELECT ?name WHERE {
@@ -73,10 +71,10 @@ SELECT pg_ripple.sparql_construct_jsonld('
 ');
 
 -- Load RDFS entailment rules and run inference
+-- After this, if :Dog is a subclass of :Animal, and :Rex is a Dog,
+-- then SPARQL will also return :Rex when you ask for Animals.
 SELECT pg_ripple.load_rules_builtin('rdfs');
 SELECT pg_ripple.infer('rdfs');
--- Now SPARQL sees inferred triples: if :Dog rdfs:subClassOf :Animal
--- and :Rex rdf:type :Dog, then ?x rdf:type :Animal binds :Rex too
 
 -- Write custom rules (transitive management chain)
 SELECT pg_ripple.load_rules(
@@ -86,8 +84,6 @@ SELECT pg_ripple.load_rules(
 );
 SELECT pg_ripple.infer('org_rules');
 ```
-
-**Storage architecture**: every IRI, blank node, and literal is dictionary-encoded to a compact integer; numeric and date literals use *inline encoding* (bit-packed integers, no dictionary round-trip). Facts are stored in per-predicate VP tables. From v0.6.0, each VP table is split into a write-optimised delta and a read-optimised BRIN-indexed main partition — a background worker continuously merges them, so heavy reads and writes never block each other.
 
 ---
 
@@ -135,9 +131,9 @@ This means you get:
 
 ## Architecture
 
-pg_ripple is built from the ground up for performance.
+pg_ripple is built from the ground up for performance inside PostgreSQL.
 
-> The diagram below shows the v0.6.0+ architecture with the HTAP split and shared-memory cache.
+> The diagram below shows the internal pipeline: a query enters as SPARQL text, is optimised, translated to SQL, and executed against the storage layer — all inside a single PostgreSQL session.
 
 ```
  SPARQL Query / Update                   HTTP API
@@ -179,23 +175,22 @@ pg_ripple is built from the ground up for performance.
               └────────────┘
 ```
 
-### Storage design
+### How data is stored
 
-- **Dictionary encoding**: Every IRI, blank node, and literal is mapped to a dense sequential `BIGINT` via a hash-backed sequence. XXH3-128 is computed over the term (with the term-kind discriminant mixed in) and stored in full as a 16-byte `BYTEA` collision-detection key; a PostgreSQL IDENTITY sequence generates the actual join key. All VP-table joins operate on integers — no string comparisons in the hot path.
-- **Vertical partitioning**: Each predicate gets its own table (`_pg_ripple.vp_{id}`) with columns `(s, o, g)`. This means queries that bind a predicate touch only one compact, heavily-indexed table.
-- **Rare-predicate consolidation**: Predicates with fewer than 1,000 triples share a single table to avoid catalog bloat on predicate-rich datasets.
-- **HTAP architecture**: Writes go to a small delta partition (B-tree indexed); a background worker asynchronously merges deltas into the read-optimised main partition (BRIN indexed). Reads and writes never block each other.
+- **Compact IDs for everything**: every value — URIs, labels, literals — is assigned a short integer ID. Internal joins use these integers, not raw strings, which keeps storage small and queries fast.
+- **One table per relationship type**: facts about `worksAt`, `knows`, `birthDate`, etc. are stored in separate tables. A query asking only about `worksAt` scans only that table, not your entire dataset.
+- **Separate lanes for reads and writes**: new data goes into a fast "delta" area; a background worker continuously moves it to an optimised "main" area. Heavy insert workloads and complex queries never slow each other down.
 
 ### Performance targets
 
 | Operation | Target | At scale |
 |---|---|---|
-| Bulk load | >100,000 triples/sec | Batch COPY with deferred indexing |
-| Transactional insert | >10,000 triples/sec | Delta partition, async validation |
-| Simple query (BGP) | <5 ms | 10M triples |
-| Star query (5 patterns) | <20 ms | 10M triples |
-| Property path (depth 10) | <100 ms | 10M triples |
-| Dictionary lookup (cache hit) | <1 μs | Sharded shared-memory LRU |
+| Bulk load | >100,000 facts/sec | Batch import with deferred indexing |
+| Transactional insert | >10,000 facts/sec | Delta partition, async validation |
+| Simple query | <5 ms | 10 million facts |
+| Multi-hop query (5 patterns) | <20 ms | 10 million facts |
+| Deep path traversal (depth 10) | <100 ms | 10 million facts |
+| Dictionary lookup (cache hit) | <1 μs | Sharded in-memory cache |
 
 ---
 
@@ -226,7 +221,7 @@ pg_ripple is built from the ground up for performance.
 ### Prerequisites
 
 - PostgreSQL 18
-- Rust stable toolchain
+- Rust stable toolchain (pg_ripple is a compiled extension)
 - [pgrx](https://github.com/pgcentralfoundation/pgrx) 0.17
 
 ### Build and install
@@ -257,22 +252,20 @@ CREATE EXTENSION pg_ripple;
 
 ## Quality & Testing
 
-pg_ripple aims for production-grade quality:
+pg_ripple is built to production-grade standards:
 
-- **Unit tests** — pgrx `#[pg_test]` for every SQL-exposed function, property-based testing with `proptest`
-- **Integration tests** — 78 pg_regress test files covering every feature
-- **Security testing** — SQL injection prevention, malformed input resilience, resource exhaustion defence
-- **Fuzz testing** — continuous fuzzing of the SPARQL→SQL pipeline with `cargo-fuzz`
-- **Concurrency testing** — dictionary cache correctness, merge worker data integrity under concurrent writes
-- **Performance regression CI** — automated benchmarks fail the build on >10% throughput regression
-- **W3C conformance** — 100% pass rate on SPARQL 1.1 Query, SPARQL 1.1 Update, and SHACL Core test suites (verified in `w3c_sparql_query_conformance`, `w3c_sparql_update_conformance`, `w3c_shacl_conformance` pg_regress tests)
-- **Stability hardening** — 72-hour soak test, Valgrind memory leak detection, crash recovery testing
+- **W3C conformance** — 100% pass rate on the official SPARQL 1.1 Query, SPARQL 1.1 Update, and SHACL Core test suites
+- **Extensive test suite** — automated tests cover every SQL-exposed function, every feature, and every edge case
+- **Security testing** — resistance to injection attacks, malformed inputs, and resource exhaustion
+- **Fuzz testing** — the query pipeline is continuously fuzz-tested for robustness
+- **Performance regression CI** — automated benchmarks fail the build if throughput drops by more than 10%
+- **Stability** — 72-hour soak test, memory leak detection, and crash recovery testing
 
 ---
 
 ## Contributing
 
-pg_ripple is in early development. Contributions, feedback, and design discussions are welcome. Please open an issue to discuss before submitting a pull request.
+Contributions, feedback, and design discussions are welcome. Please open an issue to discuss before submitting a pull request.
 
 ---
 
