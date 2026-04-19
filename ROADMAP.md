@@ -2554,6 +2554,9 @@ See [plans/ecosystem/datalog.md §14.2](plans/ecosystem/datalog.md) for design n
 >
 > **Effort estimate: 5–7 person-weeks**
 
+<details>
+<summary>Completed items (click to expand)</summary>
+
 ### Background
 
 See [plans/ecosystem/datalog.md §14.2](plans/ecosystem/datalog.md) for design notes. Well-founded semantics (Van Gelder et al., 1991) extends stratified Datalog with a three-valued model: facts are true, false, or *unknown* (neither provably true nor provably false). The SQL encoding uses an iterative alternating fixpoint: two parallel CTE chains compute the *well-founded model* over at most `pg_ripple.wfs_max_iterations` rounds. Tabling (subsumptive tabling, inspired by XSB Prolog) stores derived sub-goals in a session-scoped cache table `_pg_ripple.tabling_cache (goal_hash BIGINT, result JSONB, computed_at TIMESTAMPTZ)` and reuses results within a configurable TTL.
@@ -2599,6 +2602,8 @@ See [plans/ecosystem/datalog.md §14.2](plans/ecosystem/datalog.md) for design n
 
 `datalog_wfs.sql`, `datalog_tabling.sql`, and `sparql_tabling.sql` all pass in `cargo pgrx regress pg18`. A SPARQL query with a repeated transitive-closure sub-pattern on a 1M-triple dataset completes in <50% of the time on the second execution (tabling cache hit). `infer_wfs()` on a stratifiable rule set produces identical results to `infer()`. Migration scripts from 0.1.0 through 0.32.0 run cleanly via `just test-migration`.
 
+</details>
+
 ---
 
 ## v0.33.0 — Documentation Site & Content Overhaul
@@ -2608,6 +2613,9 @@ See [plans/ecosystem/datalog.md §14.2](plans/ecosystem/datalog.md) for design n
 > **In plain language:** pg_ripple is a mature system — v0.32.0 delivers full SPARQL 1.1 and SHACL Core conformance across 32 releases — but its documentation has grown organically alongside the codebase rather than being designed for the people who use it. This release delivers documentation that meets users where they are: a problem-centric information architecture written for five distinct archetypes (Data Engineer, Application Developer, Knowledge Architect, Decision-Maker, AI/ML Engineer), eight feature-deep-dive chapters, a full operations guide, a SQL function reference with working examples for every function, and a CI harness that keeps every code example honest by running it against a real pg_ripple instance on every pull request. The full plan is in [plans/documentation.md](plans/documentation.md).
 >
 > **Effort estimate: 8–12 person-weeks**
+
+<details>
+<summary>Completed items (click to expand)</summary>
 
 ### Background
 
@@ -2696,6 +2704,8 @@ This version *is* the documentation release. The deliverables above are the docu
 - `mdbook-linkcheck` reports zero broken internal links.
 - Migration scripts from 0.1.0 through 0.33.0 run cleanly via `just test-migration`.
 
+</details>
+
 ---
 
 ## v0.34.0 — Bounded-Depth Termination & Incremental Retraction (DRed)
@@ -2705,6 +2715,9 @@ This version *is* the documentation release. The deliverables above are the docu
 > **In plain language:** Two complementary improvements for production workloads. First, when an ontology has a known maximum hierarchy depth (e.g., a SHACL shape says class hierarchies are at most 5 levels deep), the inference engine can stop early instead of running one final "did anything change?" check — shaving 20–50% off property path queries and fixpoint loops. Second, the Delete-Rederive (DRed) algorithm means that deleting a base triple no longer requires re-materializing the entire derived closure: the engine surgically removes only the affected derived facts, re-derives any that survive via alternative paths, and leaves everything else untouched. Materialized SPARQL predicates stay correct in milliseconds after deletes instead of seconds.
 >
 > **Effort estimate: 5–7 person-weeks**
+
+<details>
+<summary>Completed items (click to expand)</summary>
 
 ### Background
 
@@ -2750,6 +2763,8 @@ See [plans/ecosystem/datalog.md §14.2.7 and §14.2.12](plans/ecosystem/datalog.
 
 `datalog_bounded_depth.sql`, `datalog_dred.sql`, and `datalog_incremental_rules.sql` all pass in `cargo pgrx regress pg18`. Deleting a base triple from a 1M-triple RDFS-materialized dataset with DRed enabled completes in <500ms (vs. full recompute taking >5s). A SPARQL `rdfs:subClassOf*` property path query on a hierarchy with `sh:maxDepth 5` completes in <50% of the time compared to the unbounded version on a 10-level test hierarchy. Migration scripts from 0.1.0 through 0.34.0 run cleanly via `just test-migration`.
 
+</details>
+
 ---
 
 ## v0.35.0 — Parallel Stratum Evaluation & Incremental Rule Updates
@@ -2759,6 +2774,9 @@ See [plans/ecosystem/datalog.md §14.2.7 and §14.2.12](plans/ecosystem/datalog.
 > **In plain language:** The Datalog engine currently evaluates rules one at a time within each stratum. This release allows rules that derive different predicates — and therefore cannot interfere with each other — to run concurrently using PostgreSQL's background worker infrastructure. For OWL RL, which has roughly 10 independent rule groups in its first stratum, this means the full ontology closure can materialize up to 10× faster. SPARQL queries that depend on materialized predicates (the common production mode) benefit directly: derived VP tables become fresh sooner after bulk data loads, reducing the staleness window.
 >
 > **Effort estimate: 5–7 person-weeks**
+
+<details>
+<summary>Completed items (click to expand)</summary>
 
 ### Background
 
@@ -2795,6 +2813,8 @@ See [plans/ecosystem/datalog.md §14.2.11](plans/ecosystem/datalog.md) for desig
 
 `datalog_parallel.sql` passes in `cargo pgrx regress pg18`. OWL RL full closure on a 1M-triple dataset with `datalog_parallel_workers = 4` completes in <40% of the time compared to `datalog_parallel_workers = 1`. Results are identical in both cases. Migration scripts from 0.1.0 through 0.35.0 run cleanly via `just test-migration`.
 
+</details>
+
 ---
 
 ## v0.36.0 — Worst-Case Optimal Joins & Lattice-Based Datalog
@@ -2804,6 +2824,9 @@ See [plans/ecosystem/datalog.md §14.2.11](plans/ecosystem/datalog.md) for desig
 > **In plain language:** Two ambitious features that push pg_ripple to the frontier of Datalog and graph database research. Worst-case optimal joins tackle the hardest SPARQL performance problem: cyclic query patterns (think "find all triangles" or "find paths that loop back") where standard database joins produce enormous intermediate results. The Leapfrog Triejoin algorithm solves this class of problem with a mathematically optimal algorithm, giving 10×–100× speedups on queries that previously timed out. Lattice-based Datalog extends rules to work with custom algebraic structures — for example, propagating trust scores (where "trust of X through Y" is the minimum of individual trust values), or interval types, or set-valued annotations — enabling a new class of analytical reasoning that standard Datalog cannot express.
 >
 > **Effort estimate: 6–9 person-weeks**
+
+<details>
+<summary>Completed items (click to expand)</summary>
 
 ### Background
 
@@ -2847,6 +2870,8 @@ See [plans/ecosystem/datalog.md §14.2.8 and §14.2.14](plans/ecosystem/datalog.
 ### Exit Criteria
 
 `sparql_wcoj.sql` and `datalog_lattice.sql` pass in `cargo pgrx regress pg18`. A triangle-pattern SPARQL query on a 1M-edge social graph VP table completes in <10% of the time compared to the standard planner (WCOJ enabled). A trust-propagation lattice rule on 100K triples converges to the correct fixed point. Migration scripts from 0.1.0 through 0.36.0 run cleanly via `just test-migration`.
+
+</details>
 
 ---
 
