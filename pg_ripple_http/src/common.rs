@@ -1,0 +1,89 @@
+//! Shared application state and helper functions used by both SPARQL and
+//! Datalog handlers.
+
+use axum::body::Body;
+use axum::http::{HeaderMap, StatusCode};
+use axum::response::{IntoResponse, Response};
+use constant_time_eq::constant_time_eq;
+use deadpool_postgres::Pool;
+use uuid::Uuid;
+
+use crate::metrics::Metrics;
+
+// ─── Application state ───────────────────────────────────────────────────────
+
+/// Shared state injected into every axum handler via `State<Arc<AppState>>`.
+pub struct AppState {
+    pub pool: Pool,
+    pub auth_token: Option<String>,
+    /// Optional separate write token for Datalog mutating endpoints
+    /// (`POST /datalog/rules/*`, `PUT`, `DELETE`). When `None`, the main
+    /// `auth_token` governs all requests.
+    pub datalog_write_token: Option<String>,
+    pub metrics: Metrics,
+}
+
+// ─── Configuration ────────────────────────────────────────────────────────────
+
+/// Read an environment variable or fall back to a default.
+pub fn env_or(key: &str, default: &str) -> String {
+    std::env::var(key).unwrap_or_else(|_| default.to_owned())
+}
+
+// ─── Error redaction ──────────────────────────────────────────────────────────
+
+/// Build a redacted error response that hides internal database details from
+/// API clients. Logs the full error + trace ID at ERROR level.
+pub fn redacted_error(category: &str, detail: &str, status: StatusCode) -> Response {
+    let trace_id = Uuid::new_v4().to_string();
+    tracing::error!(trace_id = %trace_id, detail = %detail, "query error");
+    let body = serde_json::json!({
+        "error": category,
+        "trace_id": trace_id
+    });
+    Response::builder()
+        .status(status)
+        .header("content-type", "application/json")
+        .body(Body::from(body.to_string()))
+        .unwrap()
+}
+
+// ─── Authentication ───────────────────────────────────────────────────────────
+
+/// Check the `Authorization` header against the read token. Returns `Err`
+/// with a `401 Unauthorized` response if authentication fails.
+#[allow(clippy::result_large_err)]
+pub fn check_auth(state: &AppState, headers: &HeaderMap) -> Result<(), Response> {
+    check_token(state.auth_token.as_deref(), headers)
+}
+
+/// Check the `Authorization` header against the Datalog write token (if
+/// configured) or fall back to the main auth token.
+#[allow(clippy::result_large_err)]
+pub fn check_auth_write(state: &AppState, headers: &HeaderMap) -> Result<(), Response> {
+    let token = state
+        .datalog_write_token
+        .as_deref()
+        .or(state.auth_token.as_deref());
+    check_token(token, headers)
+}
+
+#[allow(clippy::result_large_err)]
+fn check_token(expected: Option<&str>, headers: &HeaderMap) -> Result<(), Response> {
+    if let Some(expected) = expected {
+        let provided = headers
+            .get("authorization")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("");
+        // Support "Bearer <token>" and "Basic <token>".
+        let token = provided
+            .strip_prefix("Bearer ")
+            .or_else(|| provided.strip_prefix("Basic "))
+            .unwrap_or(provided);
+        // Constant-time comparison prevents timing side-channels (v0.22.0 S-4).
+        if !constant_time_eq(token.as_bytes(), expected.as_bytes()) {
+            return Err((StatusCode::UNAUTHORIZED, "unauthorized").into_response());
+        }
+    }
+    Ok(())
+}

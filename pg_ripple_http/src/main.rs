@@ -1,7 +1,9 @@
-//! pg_ripple_http — SPARQL 1.1 Protocol HTTP endpoint for pg_ripple.
+//! pg_ripple_http — SPARQL 1.1 Protocol HTTP endpoint and Datalog REST API
+//! for pg_ripple.
 //!
 //! Standalone Rust binary that connects to PostgreSQL (with pg_ripple installed)
-//! and exposes a W3C-compliant SPARQL HTTP endpoint.
+//! and exposes a W3C-compliant SPARQL HTTP endpoint at `/sparql` plus a full
+//! Datalog REST API at `/datalog`.
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -12,31 +14,19 @@ use axum::body::Body;
 use axum::extract::{Query, State};
 use axum::http::{HeaderMap, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
-use axum::routing::get;
-use constant_time_eq::constant_time_eq;
-use deadpool_postgres::{Config, Pool, Runtime};
+use axum::routing::{delete, get, post, put};
+use deadpool_postgres::{Config, Runtime};
 use serde::{Deserialize, Serialize};
 use tokio_postgres::NoTls;
 use tower_governor::GovernorLayer;
 use tower_governor::governor::GovernorConfigBuilder;
 use tower_http::cors::{AllowOrigin, CorsLayer};
-use uuid::Uuid;
 
-mod metrics;
+pub mod common;
+pub mod datalog;
+pub mod metrics;
 
-// ─── Application state ──────────────────────────────────────────────────────
-
-struct AppState {
-    pool: Pool,
-    auth_token: Option<String>,
-    metrics: metrics::Metrics,
-}
-
-// ─── Configuration ───────────────────────────────────────────────────────────
-
-fn env_or(key: &str, default: &str) -> String {
-    std::env::var(key).unwrap_or_else(|_| default.to_owned())
-}
+use common::{AppState, check_auth, env_or, redacted_error};
 
 // ─── Content types ───────────────────────────────────────────────────────────
 
@@ -125,6 +115,7 @@ async fn main() {
         }
     };
     let auth_token = std::env::var("PG_RIPPLE_HTTP_AUTH_TOKEN").ok();
+    let datalog_write_token = std::env::var("PG_RIPPLE_HTTP_DATALOG_WRITE_TOKEN").ok();
     let rate_limit: u32 = match env_or("PG_RIPPLE_HTTP_RATE_LIMIT", "0").parse() {
         Ok(r) => r,
         Err(e) => {
@@ -178,6 +169,7 @@ async fn main() {
     let state = Arc::new(AppState {
         pool,
         auth_token,
+        datalog_write_token,
         metrics: metrics::Metrics::new(),
     });
 
@@ -195,10 +187,69 @@ async fn main() {
     // Build the rate-limiting layer (governor) if a rate limit is configured.
     // governor operates per source IP; 0 means unlimited.
     let mut app = Router::new()
+        // SPARQL 1.1 Protocol
         .route("/sparql", get(sparql_get).post(sparql_post))
-        .route("/rag", axum::routing::post(rag_post))
+        .route("/rag", post(rag_post))
         .route("/health", get(health))
         .route("/metrics", get(metrics_endpoint))
+        // Datalog — Phase 1: Rule management
+        .route("/datalog/rules", get(datalog::list_rules))
+        .route(
+            "/datalog/rules/:rule_set",
+            post(datalog::load_rules).delete(datalog::drop_rules),
+        )
+        .route(
+            "/datalog/rules/:rule_set/builtin",
+            post(datalog::load_builtin),
+        )
+        .route("/datalog/rules/:rule_set/add", post(datalog::add_rule))
+        .route(
+            "/datalog/rules/:rule_set/:rule_id",
+            delete(datalog::remove_rule),
+        )
+        .route(
+            "/datalog/rules/:rule_set/enable",
+            put(datalog::enable_rule_set),
+        )
+        .route(
+            "/datalog/rules/:rule_set/disable",
+            put(datalog::disable_rule_set),
+        )
+        // Datalog — Phase 2: Inference
+        .route("/datalog/infer/:rule_set", post(datalog::infer))
+        .route(
+            "/datalog/infer/:rule_set/stats",
+            post(datalog::infer_with_stats),
+        )
+        .route("/datalog/infer/:rule_set/agg", post(datalog::infer_agg))
+        .route("/datalog/infer/:rule_set/wfs", post(datalog::infer_wfs))
+        .route(
+            "/datalog/infer/:rule_set/demand",
+            post(datalog::infer_demand),
+        )
+        .route(
+            "/datalog/infer/:rule_set/lattice",
+            post(datalog::infer_lattice),
+        )
+        // Datalog — Phase 3: Query & constraints
+        .route("/datalog/query/:rule_set", post(datalog::query_goal))
+        .route("/datalog/constraints", get(datalog::check_constraints_all))
+        .route(
+            "/datalog/constraints/:rule_set",
+            get(datalog::check_constraints),
+        )
+        // Datalog — Phase 4: Admin & monitoring
+        .route("/datalog/stats/cache", get(datalog::cache_stats))
+        .route("/datalog/stats/tabling", get(datalog::tabling_stats))
+        .route(
+            "/datalog/lattices",
+            get(datalog::list_lattices).post(datalog::create_lattice),
+        )
+        .route(
+            "/datalog/views",
+            get(datalog::list_views).post(datalog::create_view),
+        )
+        .route("/datalog/views/:name", delete(datalog::drop_view))
         .layer(cors)
         .with_state(state);
 
@@ -237,46 +288,6 @@ async fn main() {
         tracing::error!("server error: {e}");
         std::process::exit(1);
     }
-}
-
-// ─── Error redaction ─────────────────────────────────────────────────────────
-
-/// v0.22.0 H-14: Build a redacted error response that hides internal database
-/// details from API clients. Logs the full error + trace ID at ERROR level.
-fn redacted_error(category: &str, detail: &str, status: StatusCode) -> Response {
-    let trace_id = Uuid::new_v4().to_string();
-    tracing::error!(trace_id = %trace_id, detail = %detail, "query error");
-    let body = serde_json::json!({
-        "error": category,
-        "trace_id": trace_id
-    });
-    Response::builder()
-        .status(status)
-        .header("content-type", "application/json")
-        .body(Body::from(body.to_string()))
-        .unwrap()
-}
-
-// ─── Authentication ──────────────────────────────────────────────────────────
-
-#[allow(clippy::result_large_err)]
-fn check_auth(state: &AppState, headers: &HeaderMap) -> Result<(), Response> {
-    if let Some(expected) = &state.auth_token {
-        let provided = headers
-            .get("authorization")
-            .and_then(|v| v.to_str().ok())
-            .unwrap_or("");
-        // Support "Bearer <token>" and "Basic <token>".
-        let token = provided
-            .strip_prefix("Bearer ")
-            .or_else(|| provided.strip_prefix("Basic "))
-            .unwrap_or(provided);
-        // v0.22.0 S-4: Use constant-time comparison to prevent timing side-channels.
-        if !constant_time_eq(token.as_bytes(), expected.as_bytes()) {
-            return Err((StatusCode::UNAUTHORIZED, "unauthorized").into_response());
-        }
-    }
-    Ok(())
 }
 
 // ─── SPARQL GET handler ──────────────────────────────────────────────────────
@@ -1005,19 +1016,23 @@ async fn health(State(state): State<Arc<AppState>>) -> Response {
 async fn metrics_endpoint(State(state): State<Arc<AppState>>) -> Response {
     let m = &state.metrics;
     let body = format!(
-        "# HELP pg_ripple_queries_total Total SPARQL queries executed\n\
-         # TYPE pg_ripple_queries_total counter\n\
-         pg_ripple_queries_total {}\n\
-         # HELP pg_ripple_errors_total Total SPARQL query errors\n\
-         # TYPE pg_ripple_errors_total counter\n\
-         pg_ripple_errors_total {}\n\
-         # HELP pg_ripple_query_duration_seconds_sum Total query duration in seconds\n\
-         # TYPE pg_ripple_query_duration_seconds_sum counter\n\
-         pg_ripple_query_duration_seconds_sum {:.6}\n\
-         # HELP pg_ripple_pool_size Current connection pool size\n\
-         # TYPE pg_ripple_pool_size gauge\n\
-         pg_ripple_pool_size {}\n",
-        m.query_count(),
+        "# HELP pg_ripple_http_sparql_queries_total Total SPARQL queries executed\n\
+         # TYPE pg_ripple_http_sparql_queries_total counter\n\
+         pg_ripple_http_sparql_queries_total {}\n\
+         # HELP pg_ripple_http_datalog_queries_total Total Datalog API calls executed\n\
+         # TYPE pg_ripple_http_datalog_queries_total counter\n\
+         pg_ripple_http_datalog_queries_total {}\n\
+         # HELP pg_ripple_http_errors_total Total query errors\n\
+         # TYPE pg_ripple_http_errors_total counter\n\
+         pg_ripple_http_errors_total {}\n\
+         # HELP pg_ripple_http_query_duration_seconds_total Total query duration in seconds\n\
+         # TYPE pg_ripple_http_query_duration_seconds_total counter\n\
+         pg_ripple_http_query_duration_seconds_total {:.6}\n\
+         # HELP pg_ripple_http_pool_size Current connection pool size\n\
+         # TYPE pg_ripple_http_pool_size gauge\n\
+         pg_ripple_http_pool_size {}\n",
+        m.sparql_query_count(),
+        m.datalog_query_count(),
         m.error_count(),
         m.total_duration_secs(),
         state.pool.status().size,

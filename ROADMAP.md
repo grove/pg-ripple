@@ -2954,6 +2954,9 @@ No `.expect()`/`.unwrap()` in non-test Rust code; clippy deny enforced in CI. Th
 >
 > **Effort estimate: 9–11 person-weeks**
 
+<details>
+<summary>Completed items (click to expand)</summary>
+
 ### Deliverables
 
 - [x] **Split `src/lib.rs` into subsystem modules**
@@ -3013,6 +3016,8 @@ No `.expect()`/`.unwrap()` in non-test Rust code; clippy deny enforced in CI. Th
 
 `src/lib.rs` ≤1,500 lines. Each `translate/` module file ≤200 lines. `validate_shape()` dispatcher ≤50 lines. SCBD DESCRIBE tests pass. SPARQL Update advanced tests pass. SHACL hints pg_regress passes. Predicate OID cache reduces SPI calls for 10-atom BGP from 10 to 1. Migration chain test passes.
 
+</details>
+
 ---
 
 ## v0.39.0 — Datalog HTTP API for pg_ripple_http
@@ -3027,10 +3032,10 @@ No `.expect()`/`.unwrap()` in non-test Rust code; clippy deny enforced in CI. Th
 
 ### Deliverables
 
-- [ ] **Extract shared helpers** (`pg_ripple_http/src/common.rs` new module)
+- [x] **Extract shared helpers** (`pg_ripple_http/src/common.rs` new module)
   - Move `AppState`, `check_auth()`, `redacted_error()`, and `env_or()` from `main.rs` to `common.rs`
   - Both SPARQL and Datalog handlers import from this module
-- [ ] **Phase 1 — Rule management** (`pg_ripple_http/src/datalog.rs` new module)
+- [x] **Phase 1 — Rule management** (`pg_ripple_http/src/datalog.rs` new module)
   - `POST /datalog/rules/{rule_set}` — body `text/x-datalog`; calls `pg_ripple.load_rules($1, $2)`; returns `{"rule_set": "…", "rules_loaded": N}`
   - `POST /datalog/rules/{rule_set}/builtin` — calls `pg_ripple.load_rules_builtin($1)`
   - `GET /datalog/rules` — calls `pg_ripple.list_rules()`; returns JSONB array
@@ -3039,18 +3044,18 @@ No `.expect()`/`.unwrap()` in non-test Rust code; clippy deny enforced in CI. Th
   - `DELETE /datalog/rules/{rule_set}/{rule_id}` — calls `pg_ripple.remove_rule($1::bigint)` (triggers DRed)
   - `PUT /datalog/rules/{rule_set}/enable` — calls `pg_ripple.enable_rule_set($1)`
   - `PUT /datalog/rules/{rule_set}/disable` — calls `pg_ripple.disable_rule_set($1)`
-- [ ] **Phase 2 — Inference** (`pg_ripple_http/src/datalog.rs`)
+- [x] **Phase 2 — Inference** (`pg_ripple_http/src/datalog.rs`)
   - `POST /datalog/infer/{rule_set}` — calls `pg_ripple.infer($1)`; returns `{"derived": N}`
   - `POST /datalog/infer/{rule_set}/stats` — calls `pg_ripple.infer_with_stats($1)`; returns full stats JSONB
   - `POST /datalog/infer/{rule_set}/agg` — calls `pg_ripple.infer_agg($1)`
   - `POST /datalog/infer/{rule_set}/wfs` — calls `pg_ripple.infer_wfs($1)`
   - `POST /datalog/infer/{rule_set}/demand` — body `{"demands": […]}`; calls `pg_ripple.infer_demand($1, $2::jsonb)`
   - `POST /datalog/infer/{rule_set}/lattice` — body `{"lattice": "min"}`; calls `pg_ripple.infer_lattice($1, $2)`
-- [ ] **Phase 3 — Query & constraints** (`pg_ripple_http/src/datalog.rs`)
+- [x] **Phase 3 — Query & constraints** (`pg_ripple_http/src/datalog.rs`)
   - `POST /datalog/query/{rule_set}` — body Datalog goal text; calls `pg_ripple.infer_goal($1, $2)`; returns `{"derived": N, "iterations": N, "matching": […]}`
   - `GET /datalog/constraints` — calls `pg_ripple.check_constraints(NULL)`; returns violation array
   - `GET /datalog/constraints/{rule_set}` — calls `pg_ripple.check_constraints($1)`
-- [ ] **Phase 4 — Admin & monitoring** (`pg_ripple_http/src/datalog.rs`)
+- [x] **Phase 4 — Admin & monitoring** (`pg_ripple_http/src/datalog.rs`)
   - `GET /datalog/stats/cache` — calls `pg_ripple.rule_plan_cache_stats()`
   - `GET /datalog/stats/tabling` — calls `pg_ripple.tabling_stats()`
   - `GET /datalog/lattices` — calls `pg_ripple.list_lattices()`
@@ -3058,33 +3063,33 @@ No `.expect()`/`.unwrap()` in non-test Rust code; clippy deny enforced in CI. Th
   - `GET /datalog/views` — calls `pg_ripple.list_datalog_views()`
   - `POST /datalog/views` — body JSON; calls `pg_ripple.create_datalog_view(…)`
   - `DELETE /datalog/views/{name}` — calls `pg_ripple.drop_datalog_view($1)`
-- [ ] **Route registration** (`pg_ripple_http/src/main.rs`)
+- [x] **Route registration** (`pg_ripple_http/src/main.rs`)
   - `mod datalog;` and `mod common;` declarations
   - 24 `.route(…)` entries wired under `/datalog`
-- [ ] **Metrics extension** (`pg_ripple_http/src/metrics.rs`)
+- [x] **Metrics extension** (`pg_ripple_http/src/metrics.rs`)
   - Add `datalog_queries: AtomicU64` counter; expose as `pg_ripple_http_datalog_queries_total` in `/metrics`
-- [ ] **Authentication & security**
+- [x] **Authentication & security**
   - All `/datalog/*` handlers call `check_auth()` — same token as SPARQL
   - Optional write-protection: `PG_RIPPLE_HTTP_DATALOG_WRITE_TOKEN` env var gates `POST /datalog/rules/*`, `DELETE`, and `PUT` endpoints independently of the read token
   - All SQL calls use `$1`, `$2`, … parameterized queries — never string concatenation
   - Request body limit: 10 MB via `axum::body::to_bytes(body, 10 * 1024 * 1024)`
-- [ ] **Error mapping**
+- [x] **Error mapping**
   - `400 datalog_parse_error` — malformed rule text returned by extension
   - `400 datalog_goal_error` — invalid goal pattern
   - `400 invalid_request` — missing body, wrong content-type, non-numeric rule_id
   - `404 rule_set_not_found` — infer/drop on nonexistent rule set
   - `503 service_unavailable` — pool exhausted
-- [ ] **Migration script** `sql/pg_ripple--0.38.0--0.39.0.sql`
+- [x] **Migration script** `sql/pg_ripple--0.38.0--0.39.0.sql`
   - No schema changes to pg_ripple itself; comment-only header documenting the new HTTP surface
-- [ ] **Tests**
+- [x] **Tests**
   - Integration tests using `axum-test` (or equivalent): round-trip load → infer → query goal → drop for the `custom` rule set
   - Error path tests: malformed Datalog, missing auth, oversized body
   - Smoke test script `tests/datalog_http_smoke.sh` (curl-based)
 
 ### Documentation
 
-- [ ] `pg_ripple_http/README.md` — new `## Datalog API` section with curl examples for all 24 endpoints, content types, and error codes
-- [ ] Release notes for v0.39.0
+- [x] `pg_ripple_http/README.md` — new `## Datalog API` section with curl examples for all 24 endpoints, content types, and error codes
+- [x] Release notes for v0.39.0
 
 ### Exit Criteria
 

@@ -9,7 +9,51 @@ Versions correspond to the milestones in [ROADMAP.md](ROADMAP.md).
 
 ## [Unreleased]
 
-> Changes for the next version (v1.0.0 — Production Release) will appear here.
+> Changes for the next version (v0.40.0 — Streaming Results, Explain & Observability) will appear here.
+
+---
+
+## [0.39.0] — 2026-04-19 — Datalog HTTP API
+
+**HTTP release: 24 new REST endpoints expose all pg_ripple Datalog functions in `pg_ripple_http`.**
+
+### What you can do
+
+- Manage Datalog rule sets over HTTP — load, list, add, remove, enable, or disable rules without a PostgreSQL driver.
+- Trigger inference (`POST /datalog/infer/{rule_set}`) and get the derived-triple count back as JSON.
+- Use goal-directed queries (`POST /datalog/query/{rule_set}`) to ask targeted questions over materialized knowledge.
+- Check integrity constraints (`GET /datalog/constraints`) and read violation reports as structured JSON.
+- Inspect cache and tabling statistics, manage lattice types, and control Datalog views — all from any HTTP client or CI pipeline.
+- Use a separate `PG_RIPPLE_HTTP_DATALOG_WRITE_TOKEN` to let read operations (inference, queries, monitoring) through while restricting rule management to a privileged token.
+
+### What happens behind the scenes
+
+The `pg_ripple_http` service gains a new `/datalog` route namespace built as a thin axum layer. Each of the 24 endpoints maps directly to a single `pg_ripple.*` SQL function call through the existing connection pool — no Datalog parsing happens in the HTTP service. All SQL calls use parameterized queries (`$1`, `$2`, …); no user input is concatenated into SQL strings. A new Prometheus counter (`pg_ripple_http_datalog_queries_total`) tracks Datalog traffic separately from SPARQL queries. Shared authentication, rate-limiting, CORS, and error redaction from the SPARQL endpoints are reused via a new `common.rs` module.
+
+<details>
+<summary>Technical details</summary>
+
+### New files
+
+- `pg_ripple_http/src/common.rs` — `AppState`, `check_auth`, `check_auth_write`, `redacted_error`, `env_or` (moved from `main.rs`)
+- `pg_ripple_http/src/datalog.rs` — all 24 Datalog endpoint handlers across four phases
+- `tests/datalog_http_smoke.sh` — curl-based end-to-end smoke test
+
+### Changed files
+
+- `pg_ripple_http/src/main.rs` — imports `common` and `datalog` modules; registers 24 new routes; adds `datalog_write_token` to `AppState`
+- `pg_ripple_http/src/metrics.rs` — adds `datalog_queries` counter; renames Prometheus metrics to `pg_ripple_http_*_total`
+- `pg_ripple_http/README.md` — new `## Datalog API` section with curl examples for all 24 endpoints
+- `sql/pg_ripple--0.38.0--0.39.0.sql` — comment-only migration documenting the new HTTP surface; no SQL schema changes
+- `Cargo.toml` — version bumped to `0.39.0`
+- `pg_ripple.control` — `default_version` updated to `0.39.0`
+- `pg_ripple_http/Cargo.toml` — version bumped to `0.16.0`
+
+### New environment variable
+
+- `PG_RIPPLE_HTTP_DATALOG_WRITE_TOKEN` — optional; gates mutating Datalog endpoints independently of the main auth token
+
+</details>
 
 ---
 
