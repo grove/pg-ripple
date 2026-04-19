@@ -25,13 +25,13 @@ pg_ripple passes **100% of the W3C SPARQL 1.1 and SHACL Core conformance test su
 |---|---|
 | **Import knowledge** | Load data in standard formats: Turtle, N-Triples, N-Quads, TriG, or RDF/XML — from files, inline text, or remote URLs. Named graphs let you organize facts into logical groups (e.g. one graph per data source or topic). |
 | **Query with SPARQL** | Ask complex questions using SPARQL 1.1 — the W3C standard query language for linked data (similar to SQL, but designed for graphs). Follow chains of relationships, apply filters, aggregate results, and query across multiple graphs. Fully W3C conformant. |
+| **AI and LLM integration** | Store vector embeddings alongside graph facts. Combine semantic similarity search (*"find things similar to X"*) with SPARQL graph traversal in one query. Built-in RAG pipeline retrieves graph-contextualized context for language model prompts. Use `sparql_construct_jsonld()` with a JSON-LD frame to generate structured, token-efficient system prompts directly from a SPARQL CONSTRUCT query. |
+| **Microsoft GraphRAG** | Export entities and relationships in GraphRAG's BYOG (Bring Your Own Graph) Parquet format. Enrich the graph with Datalog rules. Validate export quality with SHACL. Connect your knowledge graph to Microsoft's GraphRAG pipeline with a single SQL call. |
 | **Validate data quality** | Define quality rules with SHACL: *"every Person must have exactly one name"*, *"age must be a positive integer"*. Violations are caught on insert (immediate feedback) or checked in the background. Fully W3C conformant. |
 | **Infer new facts automatically** | Write Datalog rules to derive conclusions from what you already know — *"if Alice manages Bob and Bob manages Carol, then Alice indirectly manages Carol"*. Includes built-in support for standard RDFS and OWL reasoning. Goal-directed mode (`infer_goal()`) and demand-filtered mode (`infer_demand()`) derive only the facts relevant to your query, reducing inference work by 50–90% on large programs. `owl:sameAs` entity canonicalization is applied automatically before inference, so equivalent entities are treated as one. |
 | **Export and share** | Export your graph as Turtle, N-Triples, JSON-LD, or RDF/XML. Use JSON-LD framing to produce nested documents shaped for REST APIs or LLM prompts. |
 | **Standard HTTP endpoint** | The companion `pg_ripple_http` service exposes a W3C SPARQL Protocol endpoint over HTTP/HTTPS. Supports JSON, XML, CSV, Turtle, and JSON-LD responses; authentication; Prometheus metrics; and Docker Compose for easy deployment. |
 | **Query remote graph services** | Use the SPARQL `SERVICE` keyword to query external SPARQL endpoints as part of a single query — your local data and a remote public dataset in one request. Includes connection pooling, result caching, and safe timeouts. |
-| **AI and LLM integration** | Store vector embeddings alongside graph facts. Combine semantic similarity search (*"find things similar to X"*) with SPARQL graph traversal in one query. Built-in RAG pipeline retrieves graph-contextualized context for language model prompts. |
-| **Microsoft GraphRAG** | Export entities and relationships in GraphRAG's BYOG (Bring Your Own Graph) Parquet format. Enrich the graph with Datalog rules. Validate quality with SHACL. |
 | **Live, auto-updating views** | Define a SPARQL query as a view; pg_ripple (with the optional `pg_trickle` companion) keeps it automatically up to date as data changes. |
 | **Access control** | Named graphs have row-level security backed by PostgreSQL's built-in permission system. Each graph can be granted to specific database roles, just like a table. |
 | **Full-text search** | Search the text of literal values (names, descriptions, notes) using PostgreSQL's fast full-text search indexes. |
@@ -83,7 +83,60 @@ SELECT pg_ripple.load_rules(
   'org_rules'
 );
 SELECT pg_ripple.infer('org_rules');
+
+-- ── AI / LLM integration ──────────────────────────────────────────────
+
+-- Hybrid retrieval: graph pattern + vector similarity in one query
+-- Find papers semantically similar to a topic, authored by co-authors
+SELECT * FROM pg_ripple.sparql('
+  PREFIX ex: <http://example.org/>
+  PREFIX pg:  <http://pg-ripple.io/fn/>
+  SELECT ?paper ?title ?score WHERE {
+    <http://example.org/Alice> ex:coAuthor+ ?colleague .
+    ?colleague ex:authored ?paper .
+    ?paper ex:title ?title .
+    BIND(pg:similar(?paper, "graph neural networks") AS ?score)
+    FILTER(?score > 0.75)
+  }
+  ORDER BY DESC(?score)
+');
+
+-- Generate a structured JSON-LD system prompt for an LLM
+-- The frame shapes the output to exactly the JSON your prompt template expects
+SELECT pg_ripple.sparql_construct_jsonld(
+  'CONSTRUCT { ?s ex:name ?name ; ex:role ?role ; ex:manages ?report }
+   WHERE   { ?s a ex:Person ; ex:name ?name ; ex:role ?role .
+             OPTIONAL { ?s ex:manages ?report } }',
+  -- JSON-LD frame: produces nested {"name":..., "manages":[...]} objects
+  '{"@type": "ex:Person", "ex:manages": {}}'
+);
+
+-- Graph-contextualized RAG retrieval
+-- Returns a JSONB context block ready for use as an LLM system prompt
+SELECT pg_ripple.rag_retrieve(
+  query_embedding  => ai.embed('Who manages the Oslo team?'),
+  graph_patterns   => ARRAY['?s ex:locatedIn ex:Oslo', '?s ex:role ?role'],
+  top_k            => 10
+);
 ```
+
+---
+
+## AI and LLM use cases
+
+pg_ripple is a natural fit for AI applications that need structured, explainable context — not just a bag of vectors. Here are three concrete scenarios.
+
+### Knowledge-augmented RAG
+
+Pure vector search finds *similar* documents but loses the *relationships* between them. pg_ripple lets you combine both: a SPARQL graph pattern selects entities by relationship ("papers authored by Alice's co-authors in the last two years"), and a vector similarity filter (`pg:similar()`) ranks them by semantic closeness to the query. Reciprocal Rank Fusion merges the two result lists. The retrieval context sent to the LLM is more precise and more explainable than a flat top-k vector search.
+
+### Entity resolution before embedding
+
+Enterprise data has duplicates: `"Alice Smith"`, `"A. Smith"`, and `"alice.smith@example.com"` may all refer to the same person. pg_ripple's `owl:sameAs` entity canonicalization collapses these into a single canonical entity before inference or embedding. When the LLM asks about Alice, it gets a unified view — not three contradictory fragments.
+
+### Structured prompts via JSON-LD framing
+
+Token budgets matter. `sparql_construct_jsonld()` takes a SPARQL CONSTRUCT query and a JSON-LD frame — a template describing the exact shape of JSON you want — and produces a compact, structured prompt context with no redundant triples, no flat dumps, and no post-processing needed. The frame defines which properties to include, in what order, and how to nest them. The output plugs directly into a system prompt.
 
 ---
 

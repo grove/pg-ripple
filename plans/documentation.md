@@ -14,7 +14,7 @@ The philosophy is problem-centric. Users arrive with goals — load data, run a 
 
 pg_ripple is a mature system (v0.31.0, 100% W3C SPARQL 1.1 and SHACL Core conformance) with a comprehensive feature set spanning data loading, SPARQL querying, SHACL validation, Datalog reasoning, JSON-LD framing, vector-hybrid search, federation, and HTTP endpoints. The documentation must reflect that maturity. It should read like the documentation of a system that has been in production for years — confident, precise, and complete — rather than a collection of feature announcements.
 
-Four user archetypes drive content decisions: the Data Engineer who needs reliable data pipelines, the Application Developer who wants to power features with graph queries, the Knowledge Architect who models domains and writes inference rules, and the Decision-Maker who evaluates whether pg_ripple fits the architecture. Every page has a primary audience, and every section includes signposts that guide readers to the depth they need.
+Four user archetypes drive content decisions: the Data Engineer who needs reliable data pipelines, the Application Developer who wants to power features with graph queries, the Knowledge Architect who models domains and writes inference rules, the Decision-Maker who evaluates whether pg_ripple fits the architecture, and the AI/ML Engineer who builds LLM-powered retrieval pipelines. Every page has a primary audience, and every section includes signposts that guide readers to the depth they need.
 
 ---
 
@@ -43,6 +43,12 @@ They care about expressiveness — what SHACL constraints are supported, what Da
 The Decision-Maker evaluates tools. They need to understand what pg_ripple does, when it is the right choice, and when it is not. Their entry point is: *What problems does pg_ripple solve? Should we use it?*
 
 They care about comparison matrices, production readiness, support for standards, operational complexity, and the trajectory of the project. They want honest trade-offs, not marketing. A page that says "pg_ripple is not yet suitable for graphs exceeding 10 billion triples" earns more trust than one that avoids the question.
+
+### AI/ML Engineer
+
+The AI/ML Engineer builds retrieval pipelines and LLM-powered applications. They are evaluating pg_ripple as a backend for RAG (Retrieval-Augmented Generation), entity resolution, or structured prompt generation. Their entry point is: *Can I combine graph traversal with vector similarity? How do I get structured context for an LLM?*
+
+They care about hybrid retrieval (SPARQL + embeddings in one query), JSON-LD framing for prompt construction, `owl:sameAs` entity deduplication before embedding, the `rag_retrieve()` function, and how pg_ripple compares to a pure vector store like Qdrant or pgvector alone. They are comfortable with Python and SQL but may be new to RDF and SPARQL. They want documentation that leads with the AI use case and explains the graph concepts only as they become necessary.
 
 ---
 
@@ -76,7 +82,7 @@ A single printable or shareable page for evaluators who will not read the full d
 
 #### When to Use pg_ripple
 
-A comparison page with an honest matrix: pg_ripple vs. plain SQL, vs. standalone RDF stores (Blazegraph, Virtuoso, Fuseki), vs. LPG systems (Neo4j, Amazon Neptune), vs. embedded solutions. For each row, state what pg_ripple does well, where it has limitations, and when the alternative is a better fit. Include a decision flowchart: "Do you already run PostgreSQL? → Do you need SPARQL? → How large is your dataset?" This page must be scrupulously honest — it builds trust with evaluators who will check claims against reality.
+A comparison page with an honest matrix: pg_ripple vs. plain SQL, vs. standalone RDF stores (Blazegraph, Virtuoso, Fuseki), vs. LPG systems (Neo4j, Amazon Neptune), vs. embedded solutions, and vs. pure vector databases (Qdrant, Weaviate, pgvector-only). For each row, state what pg_ripple does well, where it has limitations, and when the alternative is a better fit. Dedicate a specific section to the AI/LLM comparison: when does a knowledge graph outperform flat vector retrieval for RAG? (Answer: when the query requires multi-hop reasoning, entity deduplication, or structured output that a top-k vector search cannot provide.) Include a decision flowchart: "Do you already run PostgreSQL? → Do you need SPARQL? → How large is your dataset? → Do you need graph context for LLM prompts?" This page must be scrupulously honest — it builds trust with evaluators who will check claims against reality.
 
 *Primary audience*: Decision-Maker, Application Developer evaluating options.
 
@@ -161,11 +167,27 @@ How to get data out of pg_ripple. Cover all export formats: Turtle (human-readab
 
 *Primary audience*: Data Engineer, Application Developer.
 
-#### 2.7 Search and Discovery
+#### 2.7 AI Retrieval & Graph RAG
 
-How to find knowledge when you don't know the exact IRIs. Cover full-text search: indexing literal values (names, descriptions, notes) with PostgreSQL's GIN indexes, and searching them with `fts_search()`. Introduce vector embeddings: storing embeddings alongside graph facts, building HNSW indexes, and using `pg:similar()` in SPARQL to find semantically similar entities. Show hybrid retrieval: combining a SPARQL graph pattern with a vector similarity search in a single query, using Reciprocal Rank Fusion to merge results. Cover the RAG pipeline: using pg_ripple to retrieve graph-contextualized context for language model prompts. Include the keyword expansion feature for broadening search queries automatically.
+How to use pg_ripple as the retrieval layer for AI and LLM applications. This chapter is the canonical reference for all AI-related capabilities; §2.6 (Exporting) and §2.8 (APIs) cross-reference it for LLM-specific workflows.
 
-*Primary audience*: Application Developer, Knowledge Architect.
+Open with the motivating contrast: flat vector search finds similar documents but loses the relationships between them. A graph-augmented retrieval query can answer "find papers semantically similar to X that were authored by someone in Alice's co-author network" — combining similarity, traversal, and filtering in one operation that pure pgvector cannot express.
+
+Cover the full retrieval stack:
+
+- **Vector embeddings**: storing embeddings alongside graph facts in `_pg_ripple.embeddings`, building HNSW indexes, the `pg:similar()` SPARQL function.
+- **Hybrid retrieval**: combining a SPARQL graph pattern with a vector similarity filter in one query; Reciprocal Rank Fusion merging the two result lists; when hybrid outperforms pure-vector and when it does not.
+- **`rag_retrieve()`**: the high-level function that accepts a query embedding, a set of graph patterns, and a `top_k` parameter, and returns a JSONB context block ready for use as an LLM system prompt.
+- **JSON-LD framing for prompts**: using `sparql_construct_jsonld()` with a frame template to produce structured, token-efficient prompt context; how to design frames for common LLM prompt patterns; avoiding flat triple dumps.
+- **`owl:sameAs` before embedding**: why entity canonicalization matters for embedding quality; how to run the sameAs pre-pass before bulk-embedding with `infer_demand()`.
+- **Full-text search**: `fts_search()` for keyword expansion and broadening vector queries.
+- **RAG pipeline end to end**: a worked example using a document corpus with named entities and relationships; load data → embed entities → infer relationships → retrieve context → generate prompt.
+
+Performance section: HNSW index sizing, embedding worker throughput, when to pre-materialize RAG contexts as SPARQL views.
+
+Comparison with pure vector stores (Qdrant, Weaviate, pgvector-only): when graph context adds value, when it adds complexity without benefit, and when to use each.
+
+*Primary audience*: AI/ML Engineer, Application Developer.
 
 #### 2.8 APIs and Integration
 
@@ -321,7 +343,7 @@ Each page sets a `title` and `description` in mdBook front matter. Titles follow
 
 ### Phase 0: CI Test Harness (Prerequisite)
 
-Build the infrastructure that keeps examples honest before writing any new pages. The harness is a script that: (1) spins up a local pg_ripple instance via `cargo pgrx run pg18` or Docker, (2) extracts fenced SQL code blocks from markdown files under `docs/src/`, (3) executes them in document order with per-file setup and teardown, and (4) compares stdout against expected output embedded in the markdown as a comment block directly below each code block. Fixture data lives in `docs/fixtures/` and is loaded once per test run. The CI job runs the harness on every PR that touches `docs/`. Without this infrastructure, Phase 1 examples will rot immediately. Estimated scope: one or two days.
+Build the infrastructure that keeps examples honest before writing any new pages. The harness is a script that: (1) spins up a local pg_ripple instance via `cargo pgrx run pg18` or Docker, (2) extracts fenced SQL code blocks from markdown files under `docs/src/`, (3) executes them in document order with per-file setup and teardown, and (4) compares stdout against expected output embedded in the markdown as a comment block directly below each code block. Fixture data lives in `docs/fixtures/` and is loaded once per test run. Two fixture datasets are required: the **movie/person/organization dataset** used by the core feature chapters, and a **document corpus dataset** (a small collection of research papers with authors, citations, topics, and embeddings) used by the AI Retrieval & Graph RAG chapter. The CI job runs the harness on every PR that touches `docs/`. Without this infrastructure, Phase 1 examples will rot immediately. Estimated scope: one or two days.
 
 ### Phase 1: Foundation (Immediate)
 
