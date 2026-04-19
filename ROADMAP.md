@@ -3138,15 +3138,22 @@ All 24 Datalog endpoints respond correctly in integration tests. `GET /datalog/r
   - GUC `pg_ripple.tracing_enabled` (bool, default `false`) — zero overhead when off
   - GUC `pg_ripple.tracing_exporter` (string: `stdout` / `otlp`, default `stdout`); `otlp` reads `OTEL_EXPORTER_OTLP_ENDPOINT`
   - pg_regress test `telemetry.sql`: toggle on/off; assert no performance regression in execute path with tracing off
-- [ ] **Bug fix: property path inside `GRAPH {}` fails on `vp_rare` predicates** (`src/sparql/sqlgen.rs`)
-  - Property path operators (`+`, `*`, `?`) inside a `GRAPH <iri> { }` block generate a `WITH RECURSIVE` CTE that selects only `(s, o)`, but the outer named-graph filter references `.g` — producing `column _t0.g does not exist`
-  - Fix: the recursive CTE must project `(s, o, g)` (or the outer join must not filter on `g` from the CTE node); apply the graph constraint inside the anchor/step selects instead
-  - Affected only when the predicate lands in `vp_rare` (below promotion threshold); dedicated VP tables are not affected
+- [ ] **Bug fix: `OPTIONAL {}` inside `GRAPH {}` silently fails for all predicates** (`src/sparql/sqlgen.rs`)
+  - **Root cause**: The `GraphPattern::Graph` handler applies the named-graph filter *after* the inner pattern is fully translated. When the inner pattern contains an `OPTIONAL` (spargebra `LeftJoin`), the `LeftJoin` translator wraps both sides in aliased subqueries that only project `_lj_<varname>` columns — the `g` column is intentionally stripped. The `Graph` handler then emits `{lj_alias}.g = {gid}`, which PostgreSQL rejects with `column does not exist`. This fails for **all** predicates (both dedicated VP tables and `vp_rare`); it was only observed first with `vp_rare` predicates (`rdfs:subClassOf`, `rdfs:label`, etc.) because typical test graphs have very few schema triples.
+  - **Correct fix — graph-filter context propagation** (`src/sparql/sqlgen.rs`, `Ctx`):
+    1. Add `graph_filter: Option<i64>` to `Ctx`.
+    2. In `GraphPattern::Graph`, set `ctx.graph_filter = Some(gid)` *before* recursing into the inner pattern, then clear it after.
+    3. In `translate_bgp` / `table_expr` / `build_all_predicates_union`, when `ctx.graph_filter` is `Some(gid)`, inject `WHERE g = {gid}` (or `AND g = {gid}`) directly into each VP table scan.
+    4. Remove the post-hoc `for (alias, _) in &frag.from_items { frag.conditions.push(format!("{alias}.g = {gid}")); }` loop from the `Graph` handler — the filter is now baked into every leaf VP scan before any `LEFT JOIN`, `WITH RECURSIVE`, or subquery wrapper is built.
+  - This also fixes `OPTIONAL {}` combined with `GROUP BY` on variables from the optional side, and `OPTIONAL {}` inside `GRAPH {}` with `FILTER`, property paths, nested `UNION`, and federated `SERVICE` sub-patterns.
+  - Regression tests:
+    - `sparql_optional_in_graph.sql` — `OPTIONAL` triple with a dedicated-VP predicate inside a named graph; assert NULL vs non-NULL row counts
+    - `sparql_optional_in_graph_rare.sql` — same pattern with a `vp_rare` predicate; assert NULL vs non-NULL row counts
+    - `sparql_optional_group_by_in_graph.sql` — `OPTIONAL` + `GROUP BY` on optional variable inside a named graph (the original failing query shape); assert `instanceCount` per class is correct
+- [ ] **Bug fix: property path inside `GRAPH {}` fails for all predicates** (`src/sparql/sqlgen.rs`)
+  - **Root cause**: identical to the `OPTIONAL` bug above — the `WITH RECURSIVE` CTE emitted for property path operators (`+`, `*`, `?`) selects only `(s, o)`, but the post-hoc `Graph` handler tries to reference `{cte_alias}.g`, producing `column does not exist`.
+  - **Fix**: same graph-filter context propagation as above; anchor and recursive step selects must include `g` and filter on it when `ctx.graph_filter` is set, rather than relying on the outer `Graph` handler to inject the condition.
   - Regression test: `sparql_path_in_graph.sql` — property path on a rare predicate inside a named graph; assert correct row count
-- [ ] **Bug fix: `OPTIONAL {}` inside `GRAPH {}` fails on `vp_rare` predicates** (`src/sparql/sqlgen.rs`)
-  - Same root cause: the left-join wrapper emitted for `OPTIONAL` references `.g` on a CTE column that does not expose `g`
-  - Fix: ensure the `vp_rare` sub-select in optional branches always projects `(s, o, g)` before the LEFT JOIN is applied
-  - Regression test: `sparql_optional_in_graph.sql` — OPTIONAL triple with a rare predicate inside a named graph; assert NULL vs non-NULL rows are correct
 - [ ] **Migration header standardisation** (`sql/*.sql`)
   - Backfill headers in all existing scripts: `-- Migration X.Y.Z → A.B.C | Schema changes: … | Data-rewrite cost: Low/Medium/High | Downgrade: …`
   - All future scripts from v0.37.0 onward follow this template automatically
@@ -3166,7 +3173,7 @@ All 24 Datalog endpoints respond correctly in integration tests. `GET /datalog/r
 
 ### Exit Criteria
 
-`sparql_cursor.sql` passes with 500K triples. `explain_sparql()` returns IRI-decoded algebra and SQL. OpenTelemetry spans emitted for a sample query when `tracing_enabled = on`. All resource governor tests pass. `stat_statements_decoded` returns decoded query text. Migration chain test passes.
+`sparql_cursor.sql` passes with 500K triples. `explain_sparql()` returns IRI-decoded algebra and SQL. OpenTelemetry spans emitted for a sample query when `tracing_enabled = on`. All resource governor tests pass. `stat_statements_decoded` returns decoded query text. `sparql_optional_in_graph.sql`, `sparql_optional_in_graph_rare.sql`, and `sparql_optional_group_by_in_graph.sql` all pass (OPTIONAL inside GRAPH). `sparql_path_in_graph.sql` passes (property path inside GRAPH). Migration chain test passes.
 
 ---
 
