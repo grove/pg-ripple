@@ -36,13 +36,17 @@
 
 pub mod builtins;
 pub mod compiler;
+pub mod magic;
 pub mod parser;
 pub mod stratify;
 
 pub use compiler::compile_rule_delta_variants_to;
 pub use compiler::compile_rule_set;
 pub use compiler::compile_single_rule_to;
+pub use magic::parse_goal;
+pub use magic::run_infer_goal;
 pub use parser::parse_rules;
+pub use stratify::check_subsumption;
 pub use stratify::stratify;
 
 use pgrx::prelude::*;
@@ -341,6 +345,23 @@ pub fn run_inference_seminaive(rule_set_name: &str) -> (i64, i32) {
         })
         .collect();
 
+    // ── 3a. Subsumption checking (v0.29.0) ────────────────────────────────────
+    // Check for subsumed rules and exclude them from the fixpoint evaluation.
+    // Subsumed rules are those whose body atoms form a superset of another
+    // rule's body atoms with the same head predicate.
+    let eliminated_rules = check_subsumption(&all_rules);
+    let active_rules: Vec<Rule> = if eliminated_rules.is_empty() {
+        all_rules.clone()
+    } else {
+        let eliminated_set: std::collections::HashSet<&str> =
+            eliminated_rules.iter().map(|s| s.as_str()).collect();
+        all_rules
+            .iter()
+            .filter(|r| !eliminated_set.contains(r.rule_text.as_str()))
+            .cloned()
+            .collect()
+    };
+
     // ── 4. Create delta temp tables for each derived predicate ─────────────────
     // We use temp tables exclusively to avoid creating permanent HTAP tables for
     // predicates that may be below the promotion threshold.  Derived triples are
@@ -360,7 +381,7 @@ pub fn run_inference_seminaive(rule_set_name: &str) -> (i64, i32) {
 
     // ── 5. Seeding pass: run all rules once, inserting into temp delta tables ──
     let seed_target_fn = |pred_id: i64| -> String { format!("_dl_delta_{pred_id}") };
-    for rule in &all_rules {
+    for rule in &active_rules {
         if rule.head.is_none() {
             continue;
         }
@@ -379,6 +400,27 @@ pub fn run_inference_seminaive(rule_set_name: &str) -> (i64, i32) {
                 }
             }
             Err(e) => pgrx::warning!("semi-naive rule compile error: {e}"),
+        }
+    }
+
+    // ── 5a. Delta table indexing (v0.29.0) ────────────────────────────────────
+    // After the seeding pass, create B-tree indices on delta tables that have
+    // enough rows to benefit from index access in subsequent fixpoint iterations.
+    let delta_index_threshold = crate::DELTA_INDEX_THRESHOLD.get() as i64;
+    if delta_index_threshold > 0 {
+        for &pred_id in &derived_pred_ids {
+            let row_cnt = Spi::get_one::<i64>(&format!("SELECT count(*) FROM _dl_delta_{pred_id}"))
+                .unwrap_or(None)
+                .unwrap_or(0);
+            if row_cnt >= delta_index_threshold {
+                // Create a B-tree index on the join columns used by the next iteration.
+                let idx_name = format!("_dl_delta_{pred_id}_so_idx");
+                let _ = Spi::run_with_args(&format!("DROP INDEX IF EXISTS {idx_name}"), &[]);
+                let _ = Spi::run_with_args(
+                    &format!("CREATE INDEX {idx_name} ON _dl_delta_{pred_id} (s, o)"),
+                    &[],
+                );
+            }
         }
     }
 
@@ -417,7 +459,7 @@ pub fn run_inference_seminaive(rule_set_name: &str) -> (i64, i32) {
         let delta_fn = |pred_id: i64| -> String { format!("_dl_delta_{pred_id}") };
         let new_delta_fn = |pred_id: i64| -> String { format!("_dl_delta_new_{pred_id}") };
 
-        for rule in &all_rules {
+        for rule in &active_rules {
             if rule.head.is_none() {
                 continue;
             }
@@ -524,6 +566,50 @@ pub fn run_inference_seminaive(rule_set_name: &str) -> (i64, i32) {
     }
 
     (total_derived, iteration_count)
+}
+
+/// Like `run_inference_seminaive` but also returns eliminated rules from subsumption
+/// checking.  Returns `(total_derived, iterations, eliminated_rule_texts)`.
+///
+/// Used by `infer_with_stats()` to populate the `"eliminated_rules"` field (v0.29.0).
+pub fn run_inference_seminaive_full(rule_set_name: &str) -> (i64, i32, Vec<String>) {
+    ensure_catalog();
+
+    // Load all rules to check subsumption before running inference.
+    let rule_rows: Vec<(String, i32, bool)> = {
+        let sql = "SELECT rule_text, stratum, is_recursive \
+                   FROM _pg_ripple.rules \
+                   WHERE rule_set = $1 AND active = true \
+                   ORDER BY stratum, id";
+        Spi::connect(|client| {
+            client
+                .select(sql, None, &[pgrx::datum::DatumWithOid::from(rule_set_name)])
+                .unwrap_or_else(|e| pgrx::error!("rule select SPI error: {e}"))
+                .map(|row| {
+                    let text: String = row.get::<String>(1).ok().flatten().unwrap_or_default();
+                    let stratum: i32 = row.get::<i32>(2).ok().flatten().unwrap_or(0);
+                    let recursive: bool = row.get::<bool>(3).ok().flatten().unwrap_or(false);
+                    (text, stratum, recursive)
+                })
+                .collect::<Vec<_>>()
+        })
+    };
+
+    if rule_rows.is_empty() {
+        return (0, 0, vec![]);
+    }
+
+    let mut all_rules: Vec<Rule> = Vec::new();
+    for (rule_text, _stratum, _recursive) in &rule_rows {
+        match parse_rules(rule_text, rule_set_name) {
+            Ok(rs) => all_rules.extend(rs.rules),
+            Err(e) => pgrx::warning!("rule parse error during full semi-naive inference: {e}"),
+        }
+    }
+
+    let eliminated = check_subsumption(&all_rules);
+    let (derived, iters) = run_inference_seminaive(rule_set_name);
+    (derived, iters, eliminated)
 }
 
 /// Execute on-demand materialization for a rule set: run all rules in stratum

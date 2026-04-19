@@ -870,6 +870,28 @@ pub static USE_GRAPH_CONTEXT: pgrx::GucSetting<bool> = pgrx::GucSetting::<bool>:
 /// registered via `pg_ripple.register_vector_endpoint()`.
 pub static VECTOR_FEDERATION_TIMEOUT_MS: pgrx::GucSetting<i32> = pgrx::GucSetting::<i32>::new(5000);
 
+// ─── v0.29.0 GUCs ────────────────────────────────────────────────────────────
+
+/// GUC: master switch for magic sets goal-directed inference (v0.29.0).
+///
+/// When `true` (default), `infer_goal()` uses a simplified magic sets
+/// transformation to derive only facts relevant to the goal pattern.
+/// When `false`, falls back to full materialization + post-hoc filtering.
+pub static MAGIC_SETS: pgrx::GucSetting<bool> = pgrx::GucSetting::<bool>::new(true);
+
+/// GUC: when `true` (default), sort Datalog rule body atoms by ascending estimated
+/// VP-table cardinality before SQL compilation (cost-based join reordering, v0.29.0).
+pub static DATALOG_COST_REORDER: pgrx::GucSetting<bool> = pgrx::GucSetting::<bool>::new(true);
+
+/// GUC: minimum VP-table row count for negated body atoms to use `LEFT JOIN … IS NULL`
+/// anti-join form instead of `NOT EXISTS` (v0.29.0).  Default: 1000.
+pub static DATALOG_ANTIJOIN_THRESHOLD: pgrx::GucSetting<i32> = pgrx::GucSetting::<i32>::new(1000);
+
+/// GUC: minimum semi-naive delta temp-table row count before creating a B-tree index
+/// on `(s, o)` join columns prior to the next fixpoint iteration (v0.29.0).
+/// Set to `0` to disable delta table indexing.  Default: 500.
+pub static DELTA_INDEX_THRESHOLD: pgrx::GucSetting<i32> = pgrx::GucSetting::<i32>::new(500);
+
 // ─── pg_trickle runtime detection (v0.6.0) ───────────────────────────────────
 
 /// The pg_trickle version that pg_ripple was tested against (A-4, v0.25.0).
@@ -1511,6 +1533,53 @@ pub extern "C-unwind" fn _PG_init() {
         GucContext::Userset,
         GucFlags::default(),
     );
+
+    // ── v0.29.0 GUCs ─────────────────────────────────────────────────────────
+
+    pgrx::GucRegistry::define_bool_guc(
+        c"pg_ripple.magic_sets",
+        c"When on (default), infer_goal() uses magic sets for goal-directed inference; \
+          off falls back to full materialization + filter (v0.29.0)",
+        c"",
+        &MAGIC_SETS,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+
+    pgrx::GucRegistry::define_bool_guc(
+        c"pg_ripple.datalog_cost_reorder",
+        c"When on (default), sort Datalog rule body atoms by ascending estimated \
+          VP-table cardinality before SQL compilation (v0.29.0)",
+        c"",
+        &DATALOG_COST_REORDER,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+
+    pgrx::GucRegistry::define_int_guc(
+        c"pg_ripple.datalog_antijoin_threshold",
+        c"Minimum VP-table rows for NOT body atoms to compile to LEFT JOIN IS NULL \
+          anti-join form instead of NOT EXISTS (default: 1000, 0=always NOT EXISTS; v0.29.0)",
+        c"",
+        &DATALOG_ANTIJOIN_THRESHOLD,
+        0,
+        10_000_000,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+
+    pgrx::GucRegistry::define_int_guc(
+        c"pg_ripple.delta_index_threshold",
+        c"Minimum semi-naive delta-table rows before creating a B-tree index on (s,o) \
+          join columns (default: 500, 0=disabled; v0.29.0)",
+        c"",
+        &DELTA_INDEX_THRESHOLD,
+        0,
+        10_000_000,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+
     // PGC_POSTMASTER GUCs can only be registered during shared_preload_libraries
     // loading.  `process_shared_preload_libraries_in_progress` is the correct
     // flag — `IsPostmasterEnvironment` is true in every server process and
@@ -3583,13 +3652,17 @@ mod pg_ripple {
     /// Returns a JSONB object with:
     /// - `"derived"`: total number of triples derived (i64)
     /// - `"iterations"`: number of fixpoint iterations performed (i32)
+    /// - `"eliminated_rules"`: array of rule texts eliminated by subsumption checking (v0.29.0)
     ///
     /// Semi-naive evaluation avoids re-examining unchanged rows on each iteration,
     /// achieving iteration counts bounded by the longest derivation chain rather
-    /// than the full relation size.
+    /// than the full relation size.  Subsumption checking (v0.29.0) removes rules
+    /// whose body is a superset of another rule's body, reducing SQL statements per
+    /// iteration.
     #[pg_extern]
     fn infer_with_stats(rule_set: default!(&str, "'custom'")) -> pgrx::JsonB {
-        let (derived, iterations) = crate::datalog::run_inference_seminaive(rule_set);
+        let (derived, iterations, eliminated) =
+            crate::datalog::run_inference_seminaive_full(rule_set);
         let mut obj = serde_json::Map::new();
         obj.insert(
             "derived".to_owned(),
@@ -3598,6 +3671,82 @@ mod pg_ripple {
         obj.insert(
             "iterations".to_owned(),
             serde_json::Value::Number(serde_json::Number::from(iterations)),
+        );
+        obj.insert(
+            "eliminated_rules".to_owned(),
+            serde_json::Value::Array(
+                eliminated
+                    .into_iter()
+                    .map(serde_json::Value::String)
+                    .collect(),
+            ),
+        );
+        pgrx::JsonB(serde_json::Value::Object(obj))
+    }
+
+    /// Run goal-directed inference using magic sets (v0.29.0).
+    ///
+    /// Materialises only facts relevant to the goal triple pattern and returns
+    /// a JSONB object with:
+    /// - `"derived"`: total triples derived by inference
+    /// - `"iterations"`: fixpoint iteration count
+    /// - `"matching"`: count of triples in the store matching the goal pattern
+    ///
+    /// The `goal` parameter is a whitespace-delimited triple pattern:
+    /// - `?varname` — free variable (any value matches)
+    /// - `<iri>` — bound IRI
+    /// - `prefix:local` — bound prefixed IRI
+    /// - `"literal"` — bound literal
+    ///
+    /// Example: `pg_ripple.infer_goal('rdfs', '?x rdf:type foaf:Person')`
+    ///
+    /// When `pg_ripple.magic_sets = false`, runs full materialization and
+    /// filters the results post-hoc (functionally correct but slower).
+    #[pg_extern]
+    fn infer_goal(rule_set: &str, goal: &str) -> pgrx::JsonB {
+        let goal_pattern = match crate::datalog::parse_goal(goal) {
+            Ok(g) => g,
+            Err(e) => {
+                pgrx::warning!("infer_goal: failed to parse goal '{}': {e}", goal);
+                // Return empty result on parse error.
+                let mut obj = serde_json::Map::new();
+                obj.insert(
+                    "derived".to_owned(),
+                    serde_json::Value::Number(serde_json::Number::from(0i64)),
+                );
+                obj.insert(
+                    "iterations".to_owned(),
+                    serde_json::Value::Number(serde_json::Number::from(0i32)),
+                );
+                obj.insert(
+                    "matching".to_owned(),
+                    serde_json::Value::Number(serde_json::Number::from(0i64)),
+                );
+                return pgrx::JsonB(serde_json::Value::Object(obj));
+            }
+        };
+
+        let (matching, derived, iterations) =
+            match crate::datalog::run_infer_goal(rule_set, &goal_pattern) {
+                Ok(r) => r,
+                Err(e) => {
+                    pgrx::warning!("infer_goal: inference failed: {e}");
+                    (0, 0, 0)
+                }
+            };
+
+        let mut obj = serde_json::Map::new();
+        obj.insert(
+            "derived".to_owned(),
+            serde_json::Value::Number(serde_json::Number::from(derived)),
+        );
+        obj.insert(
+            "iterations".to_owned(),
+            serde_json::Value::Number(serde_json::Number::from(iterations)),
+        );
+        obj.insert(
+            "matching".to_owned(),
+            serde_json::Value::Number(serde_json::Number::from(matching)),
         );
         pgrx::JsonB(serde_json::Value::Object(obj))
     }

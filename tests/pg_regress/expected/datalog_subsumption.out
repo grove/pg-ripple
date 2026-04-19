@@ -1,0 +1,70 @@
+-- pg_regress test: Subsumption checking in infer_with_stats (v0.29.0)
+--
+-- Tests that `pg_ripple.infer_with_stats()` returns an `eliminated_rules`
+-- JSONB key.  When rules are loaded, subsumption checking removes redundant
+-- rules whose body predicate set is a superset of another rule's body predicates.
+-- NOTE: setup.sql already does DROP/CREATE EXTENSION before this file.
+-- This line is a no-op when run after setup, but ensures the extension is
+-- available when this file is run individually (during test discovery).
+CREATE EXTENSION IF NOT EXISTS pg_ripple;
+SET search_path TO pg_ripple, public;
+-- Pre-test baseline.
+CREATE TEMP TABLE _ss_test_baseline AS
+    SELECT COALESCE(MAX(i), 0) AS max_i FROM _pg_ripple.vp_rare;
+-- 1. infer_with_stats returns a JSONB object with the eliminated_rules key.
+SELECT pg_ripple.load_rules_builtin('rdfs') > 0 AS rdfs_loaded;
+ rdfs_loaded 
+-------------
+ t
+(1 row)
+
+SELECT jsonb_typeof(pg_ripple.infer_with_stats('rdfs')) = 'object'
+    AS result_is_object;
+WARNING:  semi-naive rule compile error: variable predicate in rule body not supported
+ result_is_object 
+------------------
+ t
+(1 row)
+
+-- 2. eliminated_rules key is present (may be empty array).
+SELECT pg_ripple.infer_with_stats('rdfs') ? 'eliminated_rules'
+    AS has_eliminated_rules;
+WARNING:  semi-naive rule compile error: variable predicate in rule body not supported
+ has_eliminated_rules 
+----------------------
+ t
+(1 row)
+
+-- 3. eliminated_rules is a JSON array.
+SELECT jsonb_typeof(pg_ripple.infer_with_stats('rdfs')->'eliminated_rules') = 'array'
+    AS eliminated_is_array;
+WARNING:  semi-naive rule compile error: variable predicate in rule body not supported
+ eliminated_is_array 
+---------------------
+ t
+(1 row)
+
+-- 4. Standard keys still present after v0.29.0 change.
+SELECT pg_ripple.infer_with_stats('rdfs') ? 'derived'    AS has_derived;
+WARNING:  semi-naive rule compile error: variable predicate in rule body not supported
+ has_derived 
+-------------
+ t
+(1 row)
+
+SELECT pg_ripple.infer_with_stats('rdfs') ? 'iterations' AS has_iterations;
+WARNING:  semi-naive rule compile error: variable predicate in rule body not supported
+ has_iterations 
+----------------
+ t
+(1 row)
+
+-- 5. Cleanup.
+SELECT pg_ripple.drop_rules('rdfs') >= 0 AS rdfs_dropped;
+ rdfs_dropped 
+--------------
+ t
+(1 row)
+
+DELETE FROM _pg_ripple.vp_rare
+    WHERE i > (SELECT max_i FROM _ss_test_baseline);

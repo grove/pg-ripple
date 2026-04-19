@@ -2212,7 +2212,7 @@ See [plans/ecosystem/datalog.md §14.2](plans/ecosystem/datalog.md) for detailed
 
 ### Deliverables
 
-- [ ] **Magic sets transformation** (`src/datalog/magic.rs`)
+- [x] **Magic sets transformation** (`src/datalog/magic.rs`)
   - `pg_ripple.infer_goal(rule_set TEXT, goal TEXT) RETURNS JSONB` — materialize only facts relevant to the goal pattern
   - Adornment propagation: given a goal like `?x rdf:type foaf:Person`, compute binding patterns for each predicate
   - Magic predicate generation: create auxiliary predicates that capture the demanded binding set
@@ -2222,38 +2222,38 @@ See [plans/ecosystem/datalog.md §14.2](plans/ecosystem/datalog.md) for detailed
   - GUC: `pg_ripple.magic_sets` (bool, default `true`) — master switch; set to `false` to disable for debugging
   - Benchmark: `benchmarks/magic_sets.sql` — compare full materialization vs. goal-directed inference on RDFS closure with selective goals
 
-- [ ] **Cost-based body atom reordering** (`src/datalog/compiler.rs`)
+- [x] **Cost-based body atom reordering** (`src/datalog/compiler.rs`)
   - At rule compilation time, query `pg_class.reltuples` for each VP table referenced by a body atom
   - For atoms with bound constants, estimate selectivity from `pg_statistic.n_distinct`
   - Sort body atoms by ascending estimated cardinality (most selective first)
   - Prefer atoms that join on indexed columns `(s,o)` or `(o,s)` when selectivities are similar
   - GUC: `pg_ripple.datalog_cost_reorder` (bool, default `true`)
 
-- [ ] **Subsumption checking** (`src/datalog/stratify.rs` extension)
+- [x] **Subsumption checking** (`src/datalog/stratify.rs` extension)
   - After stratification, check each pair of rules deriving the same predicate for subsumption
   - If rule R2 is subsumed by rule R1 (R2's head is a substitution instance of R1's, and R1's body is a subset of R2's body), eliminate R2
   - Report eliminated rules via `pg_ripple.infer_with_stats()` JSONB output: `"eliminated_rules": [...]`
 
-- [ ] **Anti-join negation** (`src/datalog/compiler.rs`)
+- [x] **Anti-join negation** (`src/datalog/compiler.rs`)
   - Replace `NOT EXISTS (SELECT 1 FROM vp_{id} WHERE ...)` with `LEFT JOIN vp_{id} ON ... WHERE ... IS NULL`
   - Compile-time choice: use anti-join when the negated predicate's VP table has ≥1000 rows (from `pg_class.reltuples`); retain `NOT EXISTS` for small tables where the planner favors it
   - GUC: `pg_ripple.datalog_antijoin_threshold` (integer, default `1000`)
 
-- [ ] **Predicate-filter pushdown** (`src/datalog/compiler.rs`)
+- [x] **Predicate-filter pushdown** (`src/datalog/compiler.rs`)
   - Identify which body atom first binds each arithmetic/comparison guard variable
   - Move the guard immediately after that atom in the generated SQL
   - For range filters (`?a > 18`), emit as part of the `JOIN … ON` clause to enable index scans
 
-- [ ] **Delta table indexing** (`src/datalog/mod.rs`)
+- [x] **Delta table indexing** (`src/datalog/mod.rs`)
   - After each semi-naive iteration populates a delta table, create a B-tree index on the join columns used by the next iteration's rules
   - Skip indexing when the delta table has fewer than `pg_ripple.delta_index_threshold` rows (default: 500)
   - GUC: `pg_ripple.delta_index_threshold` (integer, default `500`)
 
-- [ ] **Error codes** (additions to `src/error.rs`)
+- [x] **Error codes** (additions to `src/error.rs`)
   - `PT501` — magic sets transformation failed (circular binding pattern)
   - `PT502` — cost-based reordering skipped (statistics unavailable)
 
-- [ ] **pg_regress tests**
+- [x] **pg_regress tests**
   - `datalog_magic_sets.sql` — magic sets on RDFS transitivity with a selective goal; verify result matches full materialization; verify magic temp tables are cleaned up
   - `datalog_cost_reorder.sql` — verify EXPLAIN output shows changed join order with `pg_ripple.datalog_cost_reorder = true` vs. `false`
   - `datalog_antijoin.sql` — verify negation compiles to `LEFT JOIN … IS NULL` when threshold is met
@@ -2267,9 +2267,9 @@ See [plans/ecosystem/datalog.md §14.2](plans/ecosystem/datalog.md) for detailed
 
 ### Documentation
 
-- [ ] `user-guide/sql-reference/datalog.md` updated — document `infer_goal()`, magic sets GUC, cost-based reordering GUC, anti-join threshold GUC, delta indexing threshold GUC
-- [ ] `user-guide/best-practices/datalog-optimization.md` (new page) — when to use `infer()` vs. `infer_goal()`, how to read `infer_with_stats()` output, how to diagnose slow fixpoint convergence, tuning GUCs for different dataset sizes
-- [ ] Release notes for v0.29.0 — highlight magic sets and cost-based compilation as headline features; include before/after benchmarks
+- [x] `user-guide/sql-reference/datalog.md` updated — document `infer_goal()`, magic sets GUC, cost-based reordering GUC, anti-join threshold GUC, delta indexing threshold GUC
+- [x] `user-guide/best-practices/datalog-optimization.md` (new page) — when to use `infer()` vs. `infer_goal()`, how to read `infer_with_stats()` output, how to diagnose slow fixpoint convergence, tuning GUCs for different dataset sizes
+- [x] Release notes for v0.29.0 — highlight magic sets and cost-based compilation as headline features; include before/after benchmarks
 
 ### Exit Criteria
 

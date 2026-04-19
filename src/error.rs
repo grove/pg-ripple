@@ -82,3 +82,32 @@ pub enum EmbeddingError {
     )]
     VectorEndpointNotRegistered { url: String },
 }
+
+/// Datalog optimization errors (PT501–PT502) — v0.29.0.
+#[allow(dead_code)]
+#[derive(Debug, Error)]
+pub enum DatalogOptError {
+    /// PT501 — magic sets transformation failed due to a circular binding pattern.
+    ///
+    /// Occurs when adornment propagation produces a circular dependency in the
+    /// magic predicate generation graph, preventing goal-directed inference.
+    /// Fallback: run full materialization and filter post-hoc.
+    #[error(
+        "magic sets transformation failed for goal '{goal}': \
+         circular binding pattern detected in rule set '{rule_set}'; \
+         falling back to full materialization (PT501)"
+    )]
+    MagicSetsCircularBinding { goal: String, rule_set: String },
+
+    /// PT502 — cost-based body atom reordering skipped (statistics unavailable).
+    ///
+    /// Emitted as a WARNING (not ERROR) when `pg_class.reltuples` returns -1
+    /// (unanalyzed table) for one or more VP tables referenced by a rule body.
+    /// The rule is compiled with the original atom order in this case.
+    #[error(
+        "cost-based reordering skipped for rule '{rule_text}': \
+         VP table statistics unavailable (run ANALYZE on _pg_ripple schema); \
+         using original atom order (PT502)"
+    )]
+    CostReorderSkipped { rule_text: String },
+}

@@ -44,6 +44,7 @@
   - [Update Patterns](user-guide/best-practices/update-patterns.md)
   - [SHACL Patterns](user-guide/best-practices/shacl-patterns.md)
   - [Federation Performance](user-guide/best-practices/federation-performance.md)
+  - [Datalog Optimization](user-guide/best-practices/datalog-optimization.md)
 
 ---
 

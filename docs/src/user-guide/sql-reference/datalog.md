@@ -149,10 +149,12 @@ Runs semi-naive fixpoint evaluation on the named rule set and returns a JSONB ob
 
 ```sql
 SELECT pg_ripple.infer_with_stats('rdfs');
--- Returns: {"derived": 42, "iterations": 3}
+-- Returns: {"derived": 42, "iterations": 3, "eliminated_rules": []}
 ```
 
 **Why use this instead of `infer()`?** For large ontologies, semi-naive evaluation is significantly faster because each fixpoint iteration only re-evaluates rules against *new* triples derived in the previous iteration (the ΔR delta), rather than rescanning the entire derived relation. The `iterations` counter tells you how many iterations the engine needed to reach the fixpoint — bounded by the longest derivation chain, not the size of the dataset.
+
+The `eliminated_rules` array (v0.29.0+) lists any rules that were removed by **subsumption checking** before evaluation: a rule R2 is subsumed by R1 when R1's body is a multiset-subset of R2's body (R2 would only derive a subset of what R1 derives). Eliminating subsumed rules reduces the number of SQL statements executed per fixpoint iteration.
 
 ### Semi-naive evaluation mechanics
 
@@ -196,6 +198,46 @@ The built-in `owl-rl` rule set implements the following OWL 2 RL axioms:
 | owl:onProperty + allValuesFrom | cls-avf full form | ✅ |
 
 Rules that require decidable enumeration (e.g. `owl:oneOf`, `cls-oo`) or second-order patterns are outside the OWL RL profile and are not implemented.
+
+---
+
+## infer_goal
+
+```sql
+pg_ripple.infer_goal(rule_set TEXT, goal TEXT) → JSONB
+```
+
+Runs **goal-directed inference** using a simplified magic sets transformation (v0.29.0+). Instead of deriving every possible fact, only the facts relevant to the specified goal triple pattern are materialized. Returns a JSONB object with three fields:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `derived` | bigint | Total triples inserted by the inference |
+| `iterations` | integer | Number of fixpoint iterations |
+| `matching` | bigint | Triples that match the goal pattern after inference |
+
+```sql
+-- How many rdfs:type triples can we derive with type foaf:Person?
+SELECT pg_ripple.infer_goal('rdfs', '?x <http://xmlns.com/foaf/0.1/type> <http://xmlns.com/foaf/0.1/Person>');
+-- Returns: {"derived": 14, "iterations": 2, "matching": 5}
+
+-- Fully open goal (equivalent to infer_with_stats but goal-directed machinery still prunes internally)
+SELECT pg_ripple.infer_goal('rdfs', '?x ?p ?y');
+```
+
+### Goal syntax
+
+A goal is a triple pattern string. Variables are written as `?name`. IRIs use angle-bracket notation:
+
+- `?x rdf:type ex:Person` — find all persons (prefix form — uses registered prefix map)
+- `?x <http://example.org/knows> ?y` — all knows triples
+- `<http://example.org/alice> ?p ?o` — all triples about Alice
+- `?x ?p ?y` — fully open (all triples)
+
+### Magic sets strategy
+
+For each bound term in the goal, the engine identifies which rules can derive triples matching that pattern and restricts the fixpoint evaluation to those rules. Magic temp tables (`_magic_{rule_set}_{pred}`) hold the demanded binding set and are automatically dropped at the end of inference.
+
+Set `pg_ripple.magic_sets = false` to disable the transformation and fall back to full bottom-up evaluation (useful for debugging).
 
 ---
 
@@ -298,6 +340,10 @@ When shapes loaded via `load_shacl()` contain `sh:rule` properties, pg_ripple de
 | `pg_ripple.inference_mode` | `'on_demand'` | `'off'` disables the engine entirely; `'on_demand'` evaluates via CTEs when `infer()` is called; `'materialized'` uses pg_trickle stream tables for automatic refresh |
 | `pg_ripple.enforce_constraints` | `'warn'` | `'off'` silences constraint violations; `'warn'` logs them; `'error'` raises an exception |
 | `pg_ripple.rule_graph_scope` | `'default'` | `'default'` applies rules to the default graph only; `'all'` applies rules across all named graphs |
+| `pg_ripple.magic_sets` | `true` | Master switch for goal-directed magic sets inference (v0.29.0+) |
+| `pg_ripple.datalog_cost_reorder` | `true` | Sort Datalog body atoms by VP-table cardinality at compile time (v0.29.0+) |
+| `pg_ripple.datalog_antijoin_threshold` | `1000` | Minimum VP-table row count for using `LEFT JOIN … IS NULL` anti-join form for negation (v0.29.0+) |
+| `pg_ripple.delta_index_threshold` | `500` | Minimum delta-table row count before creating a B-tree index on `(s, o)` (v0.29.0+) |
 
 ```sql
 -- Enable strict constraint enforcement
@@ -305,6 +351,12 @@ SET pg_ripple.enforce_constraints = 'error';
 
 -- Apply rules across all graphs
 SET pg_ripple.rule_graph_scope = 'all';
+
+-- Disable magic sets for debugging goal-directed inference
+SET pg_ripple.magic_sets = false;
+
+-- Force anti-join form for all negated atoms (even small tables)
+SET pg_ripple.datalog_antijoin_threshold = 1;
 ```
 
 ---

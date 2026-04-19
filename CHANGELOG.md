@@ -9,7 +9,42 @@ Versions correspond to the milestones in [ROADMAP.md](ROADMAP.md).
 
 ## [Unreleased]
 
-Points at the next milestone: v0.29.0 — Datalog Optimization: Magic Sets & Cost-Based Compilation.
+Points at the next milestone: v0.30.0 — Datalog Aggregation & Compiled Rule Plans.
+
+---
+
+## [0.29.0] — 2026-04-20 — Datalog Optimization: Magic Sets & Cost-Based Compilation
+
+**pg_ripple's Datalog engine gains goal-directed inference (magic sets), cost-based join reordering, anti-join negation, predicate-filter pushdown, delta-table indexing, and redundant-rule elimination.** All pg_regress tests pass (6 new tests for v0.29.0 features).
+
+### What you can do
+
+- **Goal-directed inference** — `pg_ripple.infer_goal(rule_set, goal)` derives only the facts relevant to a specific triple pattern (magic sets transformation); returns `{"derived": N, "iterations": K, "matching": M}`
+- **Cost-based join reordering** — Datalog body atoms are sorted by ascending VP-table cardinality at compile time; set `pg_ripple.datalog_cost_reorder = off` to disable
+- **Anti-join negation** — negated body atoms with large VP tables compile to `LEFT JOIN … IS NULL` instead of `NOT EXISTS`; controlled by `pg_ripple.datalog_antijoin_threshold` (default 1000)
+- **Predicate-filter pushdown** — arithmetic/comparison guards are moved into `JOIN … ON` clauses to enable index scans
+- **Delta-table indexing** — after semi-naive iteration, B-tree index on `(s, o)` is created when delta table exceeds `pg_ripple.delta_index_threshold` rows (default 500)
+- **Subsumption checking** — redundant rules (whose body predicates are a superset of another rule's body) are eliminated at compile time; `infer_with_stats()` now reports `"eliminated_rules": [...]`
+- **New error codes** — PT501 (magic sets circular binding), PT502 (cost-based reordering skipped)
+
+### New GUC parameters
+
+| GUC | Type | Default | Description |
+|-----|------|---------|-------------|
+| `pg_ripple.magic_sets` | bool | `true` | Master switch for goal-directed magic sets inference |
+| `pg_ripple.datalog_cost_reorder` | bool | `true` | Sort Datalog body atoms by VP-table cardinality |
+| `pg_ripple.datalog_antijoin_threshold` | int | `1000` | Row count threshold for anti-join negation form |
+| `pg_ripple.delta_index_threshold` | int | `500` | Row count threshold for delta table B-tree index |
+
+### New SQL functions
+
+| Function | Description |
+|----------|-------------|
+| `pg_ripple.infer_goal(rule_set TEXT, goal TEXT) → JSONB` | Goal-directed inference returning derived/matching counts |
+
+### Changed SQL functions
+
+- `pg_ripple.infer_with_stats(rule_set TEXT) → JSONB` — now includes `"eliminated_rules": [...]` array in returned JSONB
 
 ---
 

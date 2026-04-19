@@ -5,7 +5,8 @@
 //!
 //! - **Non-recursive rules** → `INSERT … SELECT … ON CONFLICT DO NOTHING`
 //! - **Recursive rules**     → `WITH RECURSIVE … CYCLE … INSERT … SELECT`
-//! - **Negation**            → `NOT EXISTS (…)` in the WHERE clause
+//! - **Negation** → `NOT EXISTS (…)` in the WHERE clause (small tables) or
+//!   `LEFT JOIN … IS NULL` anti-join form (large tables, v0.29.0)
 //! - **Constraint rules**    → `SELECT EXISTS (…) AS violated`
 //! - **On-demand CTEs**      → `WITH RECURSIVE cte AS (…)` prepended to SPARQL SQL
 //!
@@ -13,6 +14,18 @@
 //!
 //! All IRI and literal constants in rules are dictionary-encoded (`i64`)
 //! at parse time.  The SQL generator never emits string comparisons.
+//!
+//! # v0.29.0 optimizations
+//!
+//! - **Cost-based body atom reordering**: positive body atoms are sorted by ascending
+//!   estimated VP-table cardinality (`_pg_ripple.predicates.triple_count`) before SQL
+//!   generation.  Controlled by `pg_ripple.datalog_cost_reorder` (default: true).
+//! - **Anti-join negation**: negated body atoms with VP-table row count ≥
+//!   `pg_ripple.datalog_antijoin_threshold` compile to `LEFT JOIN … IS NULL` for
+//!   better index utilisation (default threshold: 1000).
+//! - **Predicate-filter pushdown**: arithmetic/comparison guards are moved into the
+//!   `JOIN … ON` clause of the atom that first binds all the guard's variables,
+//!   enabling the PostgreSQL planner to apply index scans early.
 
 use crate::datalog::{ArithOp, Atom, BodyLiteral, CompareOp, Rule, StringBuiltin, Term};
 use pgrx::datum::DatumWithOid;
@@ -79,6 +92,155 @@ fn vp_read_expr(pred_id: i64) -> String {
         format!("(SELECT s, o, g FROM _pg_ripple.vp_rare WHERE p = {pred_id})")
     }
 }
+
+// ─── v0.29.0: Cost-based reordering & anti-join helpers ──────────────────────
+
+/// Estimate the cardinality of a predicate's VP table.
+///
+/// Returns the `triple_count` from `_pg_ripple.predicates`, or 0 when the
+/// predicate is not in the catalog (e.g., a newly derived predicate).
+/// Used to sort body atoms by ascending estimated cardinality (v0.29.0).
+fn estimate_pred_cardinality(pred_id: i64) -> i64 {
+    pgrx::Spi::get_one_with_args::<i64>(
+        "SELECT triple_count FROM _pg_ripple.predicates WHERE id = $1",
+        &[DatumWithOid::from(pred_id)],
+    )
+    .ok()
+    .flatten()
+    .unwrap_or(0)
+}
+
+/// Sort positive body atoms from a rule by ascending estimated VP-table cardinality.
+///
+/// Atoms with bound constants (s or o is `Term::Const`) get a synthetic lower
+/// cardinality because a constant filter dramatically reduces the result set.
+/// Returns a `Vec` of references in cost-ascending order.
+///
+/// Called only when `pg_ripple.datalog_cost_reorder = true`.
+fn cost_order_atoms(rule: &Rule) -> Vec<&Atom> {
+    let mut atoms: Vec<&Atom> = rule
+        .body
+        .iter()
+        .filter_map(|lit| {
+            if let BodyLiteral::Positive(a) = lit {
+                Some(a)
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    atoms.sort_by_key(|atom| {
+        let base = match &atom.p {
+            Term::Const(id) => estimate_pred_cardinality(*id),
+            _ => i64::MAX, // variable predicate: put last
+        };
+        // Atoms with one or two bound positions are highly selective.
+        let has_bound_s = !matches!(&atom.s, Term::Var(_) | Term::Wildcard);
+        let has_bound_o = !matches!(&atom.o, Term::Var(_) | Term::Wildcard);
+        let divisor: i64 = match (has_bound_s, has_bound_o) {
+            (true, true) => 100,
+            (true, false) | (false, true) => 10,
+            (false, false) => 1,
+        };
+        base / divisor.max(1)
+    });
+
+    atoms
+}
+
+/// Compute the SQL condition string for an anti-join `LEFT JOIN … ON` clause.
+///
+/// Equivalent semantics to `build_not_exists_conds` but generates conditions
+/// suitable for a `JOIN … ON` expression (with table alias prefixes).
+fn build_antijoin_on_cond(aj_alias: &str, atom: &Atom, var_map: &VarMap) -> String {
+    let mut conds = Vec::new();
+    if let Term::Var(v) = &atom.s {
+        if let Some(ref_col) = var_map.col_ref(v) {
+            conds.push(format!("{aj_alias}.s = {ref_col}"));
+        }
+    } else if let Term::Const(c) = &atom.s {
+        conds.push(format!("{aj_alias}.s = {}", const_sql(*c)));
+    }
+    if let Term::Var(v) = &atom.o {
+        if let Some(ref_col) = var_map.col_ref(v) {
+            conds.push(format!("{aj_alias}.o = {ref_col}"));
+        }
+    } else if let Term::Const(c) = &atom.o {
+        conds.push(format!("{aj_alias}.o = {}", const_sql(*c)));
+    }
+    if conds.is_empty() {
+        "TRUE".to_owned()
+    } else {
+        conds.join(" AND ")
+    }
+}
+
+/// Return true if all variables referenced by a guard literal are present in var_map.
+///
+/// Used to decide whether a Compare or Assign guard can be pushed down into
+/// the most recent JOIN's ON clause (v0.29.0 filter pushdown).
+fn guard_fully_bound(guard: &BodyLiteral, var_map: &VarMap) -> bool {
+    let check_term = |t: &Term| -> bool {
+        match t {
+            Term::Var(v) => var_map.col_ref(v).is_some(),
+            _ => true,
+        }
+    };
+    match guard {
+        BodyLiteral::Compare(lhs, _, rhs) => check_term(lhs) && check_term(rhs),
+        BodyLiteral::Assign(_var, lhs, _, rhs) => {
+            // The var being assigned is allowed to be unbound here (it's being introduced).
+            check_term(lhs) && check_term(rhs)
+        }
+        BodyLiteral::StringBuiltin(sb) => match sb {
+            StringBuiltin::Strlen(t, _, r) => check_term(t) && check_term(r),
+            StringBuiltin::Regex(t, _) => check_term(t),
+        },
+        _ => false,
+    }
+}
+
+/// Compile a guard literal (Compare, Assign, StringBuiltin) to a SQL string
+/// suitable for inclusion in a WHERE or JOIN ON clause.
+fn compile_guard_sql(guard: &BodyLiteral, var_map: &VarMap) -> Option<String> {
+    match guard {
+        BodyLiteral::Compare(lhs, op, rhs) => {
+            let l = render_comparison_term(lhs, var_map);
+            let r = render_comparison_term(rhs, var_map);
+            Some(format!("{l} {} {r}", compare_op_sql(op)))
+        }
+        BodyLiteral::Assign(var, lhs, op, rhs) => {
+            let l = render_comparison_term(lhs, var_map);
+            let r_raw = render_comparison_term(rhs, var_map);
+            let r = if matches!(op, ArithOp::Div) {
+                format!("NULLIF({r_raw}, 0)")
+            } else {
+                r_raw
+            };
+            let col_expr = format!("({l} {} {r})", arith_op_sql(op));
+            // Bind the computed variable so downstream code can reference it.
+            // We return None here because Assign is handled separately (needs var_map mutation).
+            let _ = (var, col_expr); // suppress unused warning
+            None
+        }
+        BodyLiteral::StringBuiltin(sb) => match sb {
+            StringBuiltin::Strlen(term, op, rhs_term) => {
+                let col = render_comparison_term(term, var_map);
+                let r = render_comparison_term(rhs_term, var_map);
+                Some(format!("LENGTH({col}::text) {} {r}", compare_op_sql(op)))
+            }
+            StringBuiltin::Regex(term, pattern) => {
+                let col = render_comparison_term(term, var_map);
+                let escaped = pattern.replace('\'', "''");
+                Some(format!("{col}::text ~ '{escaped}'"))
+            }
+        },
+        _ => None,
+    }
+}
+
+// ─── Variable map ─────────────────────────────────────────────────────────────
 
 /// Variable→(alias, column) mapping built while iterating body atoms.
 #[derive(Default)]
@@ -206,6 +368,16 @@ fn is_recursive_rule(rule: &Rule, head_pred: i64) -> bool {
 }
 
 /// Compile a non-recursive rule to `INSERT … SELECT … ON CONFLICT DO NOTHING`.
+///
+/// # v0.29.0 optimizations applied here
+///
+/// 1. **Cost-based body atom reordering**: positive atoms sorted by estimated
+///    VP-table cardinality when `pg_ripple.datalog_cost_reorder = true`.
+/// 2. **Anti-join negation**: negated atoms compile to `LEFT JOIN … IS NULL`
+///    when the table has ≥ `pg_ripple.datalog_antijoin_threshold` rows.
+/// 3. **Predicate-filter pushdown**: Compare/StringBuiltin guards that have all
+///    their variables bound after the most recent positive atom are inlined into
+///    that atom's `JOIN … ON` clause instead of the outer `WHERE` clause.
 fn compile_nonrecursive_rule(
     rule: &Rule,
     _head_pred: i64,
@@ -214,75 +386,144 @@ fn compile_nonrecursive_rule(
 ) -> Result<String, String> {
     let head = rule.head.as_ref().unwrap();
 
+    // ── Step 1: Sort positive body atoms by cost (v0.29.0) ────────────────────
+    let sorted_positive: Vec<&Atom> = if crate::DATALOG_COST_REORDER.get() {
+        cost_order_atoms(rule)
+    } else {
+        rule.body
+            .iter()
+            .filter_map(|lit| {
+                if let BodyLiteral::Positive(a) = lit {
+                    Some(a)
+                } else {
+                    None
+                }
+            })
+            .collect()
+    };
+
+    // ── Step 2: Collect guards for filter-pushdown (v0.29.0) ──────────────────
+    // Guards that are not yet pushed will remain as WHERE conditions.
+    let all_guards: Vec<&BodyLiteral> = rule
+        .body
+        .iter()
+        .filter(|lit| {
+            matches!(
+                lit,
+                BodyLiteral::Compare(..) | BodyLiteral::StringBuiltin(_)
+            )
+        })
+        .collect();
+    let mut pushed_guards: std::collections::HashSet<usize> = std::collections::HashSet::new();
+
     let mut from_clauses: Vec<String> = Vec::new();
     let mut where_clauses: Vec<String> = Vec::new();
     let mut var_map = VarMap::default();
-    let mut atom_idx = 0usize;
+    let mut antijoin_idx = 0usize;
 
-    // Process positive body atoms.
-    for lit in &rule.body {
-        match lit {
-            BodyLiteral::Positive(atom) => {
-                let alias = format!("t{atom_idx}");
-                let pred_id = match &atom.p {
-                    Term::Const(id) => *id,
-                    Term::Var(_) => {
-                        return Err("variable predicate in rule body not supported".to_owned());
-                    }
-                    _ => return Err("invalid predicate term in rule body".to_owned()),
-                };
-
-                // Bind variables.
-                if let Term::Var(v) = &atom.s {
-                    var_map.bind(v, &alias, "s");
-                } else if let Term::Const(c) = &atom.s {
-                    where_clauses.push(format!("{alias}.s = {}", const_sql(*c)));
-                }
-                if let Term::Var(v) = &atom.o {
-                    var_map.bind(v, &alias, "o");
-                } else if let Term::Const(c) = &atom.o {
-                    where_clauses.push(format!("{alias}.o = {}", const_sql(*c)));
-                }
-                if let Term::Var(v) = &atom.g {
-                    var_map.bind(v, &alias, "g");
-                } else if let Term::Const(c) = &atom.g {
-                    where_clauses.push(format!("{alias}.g = {}", const_sql(*c)));
-                } else {
-                    // DefaultGraph: g = 0 (unless rule_graph_scope = 'all')
-                    let scope = crate::RULE_GRAPH_SCOPE
-                        .get()
-                        .as_ref()
-                        .and_then(|c| c.to_str().ok())
-                        .unwrap_or("default")
-                        .to_owned();
-                    if scope == "default" {
-                        where_clauses.push(format!("{alias}.g = 0"));
-                    }
-                }
-
-                if atom_idx == 0 {
-                    from_clauses.push(format!("{} {alias}", vp_read_expr(pred_id)));
-                } else {
-                    // Emit as JOIN with equality conditions for shared variables.
-                    let join_cond = build_join_cond(&alias, atom, &var_map);
-                    if join_cond.is_empty() {
-                        from_clauses.push(format!("{} {alias}", vp_read_expr(pred_id)));
-                    } else {
-                        from_clauses.push(format!(
-                            "JOIN {} {alias} ON {}",
-                            vp_read_expr(pred_id),
-                            join_cond
-                        ));
-                    }
-                }
-                atom_idx += 1;
+    // ── Step 3: Process positive atoms with pushdown ───────────────────────────
+    for (atom_idx, atom) in sorted_positive.iter().enumerate() {
+        let alias = format!("t{atom_idx}");
+        let pred_id = match &atom.p {
+            Term::Const(id) => *id,
+            Term::Var(_) => {
+                return Err("variable predicate in rule body not supported".to_owned());
             }
-            BodyLiteral::Negated(atom) => {
-                // NOT EXISTS subquery.
-                let pred_id = match &atom.p {
-                    Term::Const(id) => *id,
-                    _ => return Err("variable predicate in NOT atom not supported".to_owned()),
-                };
+            _ => return Err("invalid predicate term in rule body".to_owned()),
+        };
+
+        // Bind variables.
+        if let Term::Var(v) = &atom.s {
+            var_map.bind(v, &alias, "s");
+        } else if let Term::Const(c) = &atom.s {
+            where_clauses.push(format!("{alias}.s = {}", const_sql(*c)));
+        }
+        if let Term::Var(v) = &atom.o {
+            var_map.bind(v, &alias, "o");
+        } else if let Term::Const(c) = &atom.o {
+            where_clauses.push(format!("{alias}.o = {}", const_sql(*c)));
+        }
+        if let Term::Var(v) = &atom.g {
+            var_map.bind(v, &alias, "g");
+        } else if let Term::Const(c) = &atom.g {
+            where_clauses.push(format!("{alias}.g = {}", const_sql(*c)));
+        } else {
+            // DefaultGraph: g = 0 (unless rule_graph_scope = 'all')
+            let scope = crate::RULE_GRAPH_SCOPE
+                .get()
+                .as_ref()
+                .and_then(|c| c.to_str().ok())
+                .unwrap_or("default")
+                .to_owned();
+            if scope == "default" {
+                where_clauses.push(format!("{alias}.g = 0"));
+            }
+        }
+
+        // After binding, check which guards can be pushed into this JOIN ON.
+        let mut pushdown_conds: Vec<String> = Vec::new();
+        for (gi, guard) in all_guards.iter().enumerate() {
+            if !pushed_guards.contains(&gi)
+                && guard_fully_bound(guard, &var_map)
+                && let Some(cond_sql) = compile_guard_sql(guard, &var_map)
+            {
+                pushdown_conds.push(cond_sql);
+                pushed_guards.insert(gi);
+            }
+        }
+
+        if atom_idx == 0 {
+            from_clauses.push(format!("{} {alias}", vp_read_expr(pred_id)));
+            // Pushdown conditions on the first atom go to WHERE (no JOIN ON).
+            where_clauses.extend(pushdown_conds);
+        } else {
+            let mut join_cond = build_join_cond(&alias, atom, &var_map);
+            if !pushdown_conds.is_empty() {
+                if join_cond.is_empty() {
+                    join_cond = pushdown_conds.join(" AND ");
+                } else {
+                    join_cond = format!("{join_cond} AND {}", pushdown_conds.join(" AND "));
+                }
+            }
+            if join_cond.is_empty() {
+                from_clauses.push(format!("{} {alias}", vp_read_expr(pred_id)));
+            } else {
+                from_clauses.push(format!(
+                    "JOIN {} {alias} ON {}",
+                    vp_read_expr(pred_id),
+                    join_cond
+                ));
+            }
+        }
+    }
+
+    // ── Step 4: Process negated atoms (anti-join or NOT EXISTS) ───────────────
+    for lit in &rule.body {
+        if let BodyLiteral::Negated(atom) = lit {
+            let pred_id = match &atom.p {
+                Term::Const(id) => *id,
+                _ => return Err("variable predicate in NOT atom not supported".to_owned()),
+            };
+
+            let threshold = crate::DATALOG_ANTIJOIN_THRESHOLD.get() as i64;
+            let row_count = if threshold > 0 {
+                estimate_pred_cardinality(pred_id)
+            } else {
+                0
+            };
+
+            if threshold > 0 && row_count >= threshold {
+                // ── Anti-join form (v0.29.0): LEFT JOIN … IS NULL ────────────
+                let aj_alias = format!("aj{antijoin_idx}");
+                antijoin_idx += 1;
+                let on_cond = build_antijoin_on_cond(&aj_alias, atom, &var_map);
+                from_clauses.push(format!(
+                    "LEFT JOIN {} {aj_alias} ON {on_cond}",
+                    vp_read_expr(pred_id)
+                ));
+                where_clauses.push(format!("{aj_alias}.s IS NULL"));
+            } else {
+                // ── NOT EXISTS form (original behavior) ──────────────────────
                 let inner_conds = build_not_exists_conds(atom, &var_map);
                 let cond_str = if inner_conds.is_empty() {
                     "TRUE".to_owned()
@@ -294,46 +535,37 @@ fn compile_nonrecursive_rule(
                     vp_read_expr(pred_id)
                 ));
             }
-            BodyLiteral::Compare(lhs, op, rhs) => {
-                let l = render_comparison_term(lhs, &var_map);
-                let r = render_comparison_term(rhs, &var_map);
-                let op_str = compare_op_sql(op);
-                where_clauses.push(format!("{l} {op_str} {r}"));
-            }
-            BodyLiteral::Assign(var, lhs, op, rhs) => {
-                // M-1: wrap divisor with NULLIF to prevent division-by-zero.
-                // Bind the computed value as a column alias for use in the SELECT.
-                let l = render_comparison_term(lhs, &var_map);
-                let r_raw = render_comparison_term(rhs, &var_map);
-                let r = if matches!(op, crate::datalog::ArithOp::Div) {
-                    format!("NULLIF({r_raw}, 0)")
-                } else {
-                    r_raw
-                };
-                let op_str = arith_op_sql(op);
-                // Register the computed column so it can be used as a variable.
-                let col_expr = format!("({l} {op_str} {r})");
-                var_map.bind(var, &col_expr, "");
-            }
-            BodyLiteral::StringBuiltin(builtin) => match builtin {
-                StringBuiltin::Strlen(term, op, rhs_term) => {
-                    let col = render_comparison_term(term, &var_map);
-                    let r = render_comparison_term(rhs_term, &var_map);
-                    let op_str = compare_op_sql(op);
-                    where_clauses.push(format!("LENGTH({col}::text) {op_str} {r}"));
-                }
-                StringBuiltin::Regex(term, pattern) => {
-                    let col = render_comparison_term(term, &var_map);
-                    let escaped = pattern.replace('\'', "''");
-                    where_clauses.push(format!("{col}::text ~ '{escaped}'"));
-                }
-            },
+        }
+    }
+
+    // ── Step 5: Process remaining guards (not pushed down) ────────────────────
+    for (gi, lit) in all_guards.iter().enumerate() {
+        if pushed_guards.contains(&gi) {
+            continue; // already handled in pushdown
+        }
+        if let Some(cond_sql) = compile_guard_sql(lit, &var_map) {
+            where_clauses.push(cond_sql);
+        }
+    }
+
+    // ── Step 6: Process Assign literals (always in WHERE — they mutate var_map) ─
+    for lit in &rule.body {
+        if let BodyLiteral::Assign(var, lhs, op, rhs) = lit {
+            // M-1: wrap divisor with NULLIF to prevent division-by-zero.
+            let l = render_comparison_term(lhs, &var_map);
+            let r_raw = render_comparison_term(rhs, &var_map);
+            let r = if matches!(op, crate::datalog::ArithOp::Div) {
+                format!("NULLIF({r_raw}, 0)")
+            } else {
+                r_raw
+            };
+            let op_str = arith_op_sql(op);
+            let col_expr = format!("({l} {op_str} {r})");
+            var_map.bind(var, &col_expr, "");
         }
     }
 
     // M-2: Compile-time check for unbound variables in comparisons and assigns.
-    // Any variable used in a Compare or Assign that is not bound by a positive body
-    // literal will produce `WHERE x = NULL` (matches nothing) — detect and reject.
     let head_text = rule
         .rule_text
         .lines()

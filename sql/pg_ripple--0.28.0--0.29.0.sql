@@ -1,0 +1,44 @@
+-- Migration script: pg_ripple 0.28.0 → 0.29.0
+--
+-- Release: v0.29.0 — Datalog Optimization: Magic Sets & Cost-Based Compilation
+--
+-- Schema changes: None.
+--
+-- New SQL functions registered by this migration:
+--
+--   pg_ripple.infer_goal(rule_set TEXT, goal TEXT) → JSONB
+--     Run goal-directed inference using a simplified magic sets transformation.
+--     Returns {"derived": N, "iterations": K, "matching": M}.
+--
+-- Updated SQL functions:
+--
+--   pg_ripple.infer_with_stats(rule_set TEXT) → JSONB
+--     Now includes "eliminated_rules": [...] key in the returned JSONB,
+--     listing rules removed by subsumption checking before fixpoint evaluation.
+--
+-- New GUC parameters (all runtime-settable, no restart required):
+--
+--   pg_ripple.magic_sets            BOOL    DEFAULT true
+--     Master switch for magic sets goal-directed inference.
+--
+--   pg_ripple.datalog_cost_reorder  BOOL    DEFAULT true
+--     Sort Datalog body atoms by ascending VP-table cardinality before SQL
+--     compilation (cost-based join reordering).
+--
+--   pg_ripple.datalog_antijoin_threshold  INT  DEFAULT 1000
+--     Minimum VP-table row count for negated body atoms to use LEFT JOIN IS NULL
+--     anti-join form instead of NOT EXISTS.
+--
+--   pg_ripple.delta_index_threshold  INT  DEFAULT 500
+--     Minimum semi-naive delta-table row count before creating a B-tree index
+--     on (s, o) join columns prior to the next fixpoint iteration.
+--
+-- New error codes:
+--
+--   PT501  magic sets transformation failed (circular binding pattern)
+--   PT502  cost-based reordering skipped (statistics unavailable)
+--
+-- All new GUCs are registered via pgrx::GucRegistry in _PG_init.
+-- No changes to VP table schema, catalog tables, or dictionary encoding.
+-- The migration path from any earlier version through 0.28.0 → 0.29.0
+-- via ALTER EXTENSION pg_ripple UPDATE requires no SQL DDL changes.

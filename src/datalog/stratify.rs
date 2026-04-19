@@ -493,6 +493,120 @@ pub fn stratify(rules: &[Rule]) -> Result<StratifiedProgram, String> {
     Ok(StratifiedProgram { strata })
 }
 
+// ─── v0.29.0: Subsumption checking ───────────────────────────────────────────
+
+/// Check each pair of rules in a stratified program for subsumption.
+///
+/// Rule R2 is subsumed by rule R1 when:
+/// - Both rules have the same head predicate.
+/// - R1's positive body atoms are a (non-strict) subset of R2's positive body atoms
+///   (up to variable renaming within each rule).
+/// - R2 therefore always derives the same facts as R1, plus possibly more —
+///   so R1 is strictly more general and R2 can be eliminated without changing
+///   the minimal model.
+///
+/// Returns the list of `rule_text` values of eliminated (subsumed) rules.
+///
+/// This function is a compile-time optimization: subsumed rules are removed
+/// before fixpoint evaluation, reducing the number of SQL statements generated
+/// per iteration.  Controlled by (always-on for now; future GUC planned).
+pub fn check_subsumption(rules: &[Rule]) -> Vec<String> {
+    let mut eliminated: Vec<String> = Vec::new();
+    let n = rules.len();
+
+    'outer: for j in 0..n {
+        let r2 = &rules[j];
+        let Some(r2_head) = &r2.head else { continue };
+        let Term::Const(r2_head_pred) = &r2_head.p else {
+            continue;
+        };
+
+        // Collect r2's positive body predicate IDs (multiset).
+        let r2_body_preds: Vec<i64> = r2
+            .body
+            .iter()
+            .filter_map(|lit| {
+                if let BodyLiteral::Positive(a) = lit
+                    && let Term::Const(id) = &a.p
+                {
+                    return Some(*id);
+                }
+                None
+            })
+            .collect();
+
+        // Check if any other rule R1 (i ≠ j) subsumes R2.
+        for (i, r1) in rules.iter().enumerate() {
+            if i == j {
+                continue;
+            }
+            let Some(r1_head) = &r1.head else { continue };
+            let Term::Const(r1_head_pred) = &r1_head.p else {
+                continue;
+            };
+
+            // Same head predicate required.
+            if r1_head_pred != r2_head_pred {
+                continue;
+            }
+
+            // Collect r1's positive body predicate IDs.
+            let r1_body_preds: Vec<i64> = r1
+                .body
+                .iter()
+                .filter_map(|lit| {
+                    if let BodyLiteral::Positive(a) = lit
+                        && let Term::Const(id) = &a.p
+                    {
+                        return Some(*id);
+                    }
+                    None
+                })
+                .collect();
+
+            // R2 is subsumed by R1 when:
+            // 1. R1's body pred multiset ⊆ R2's body pred multiset (R1 is more general).
+            // 2. R1 has strictly fewer body atoms (so R2 is the redundant one).
+            // 3. Neither rule is a constraint rule (handled separately).
+            if r1_body_preds.len() < r2_body_preds.len()
+                && is_multiset_subset(&r1_body_preds, &r2_body_preds)
+            {
+                eliminated.push(r2.rule_text.clone());
+                continue 'outer;
+            }
+
+            // Identical rules (same head, same body multiset) — keep only one.
+            if i < j
+                && r1_body_preds.len() == r2_body_preds.len()
+                && is_multiset_subset(&r1_body_preds, &r2_body_preds)
+                && is_multiset_subset(&r2_body_preds, &r1_body_preds)
+            {
+                eliminated.push(r2.rule_text.clone());
+                continue 'outer;
+            }
+        }
+    }
+
+    eliminated
+}
+
+/// Test whether `a` is a multiset subset of `b`
+/// (every element in `a` appears at least as many times in `b`).
+fn is_multiset_subset(a: &[i64], b: &[i64]) -> bool {
+    let mut counts: HashMap<i64, usize> = HashMap::new();
+    for &x in b {
+        *counts.entry(x).or_insert(0) += 1;
+    }
+    for &x in a {
+        let count = counts.entry(x).or_insert(0);
+        if *count == 0 {
+            return false;
+        }
+        *count -= 1;
+    }
+    true
+}
+
 // ─── Tests ───────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
