@@ -356,3 +356,57 @@ SHOW pg_ripple.plan_cache_size;
 SET pg_ripple.plan_cache_size = 256;  -- enable if it was 0
 ```
 
+---
+
+## Vector Federation Timeouts (v0.28.0)
+
+**Symptom**: Calls to `pg_ripple.hybrid_search()` with a registered external endpoint fail with a timeout error.
+
+**Diagnosis**: The external vector service is either unreachable or slow. pg_ripple makes a synchronous HTTP call to the registered endpoint; if it does not respond within `pg_ripple.vector_federation_timeout_ms` milliseconds, the call fails.
+
+**Fix**:
+
+1. Check endpoint connectivity:
+   ```sql
+   SELECT url, enabled FROM _pg_ripple.vector_endpoints;
+   ```
+
+2. Increase the timeout:
+   ```sql
+   SET pg_ripple.vector_federation_timeout_ms = 30000;
+   ```
+
+3. If the endpoint is permanently unavailable, disable it:
+   ```sql
+   UPDATE _pg_ripple.vector_endpoints SET enabled = false WHERE url = 'https://my-endpoint/';
+   ```
+
+---
+
+## SSRF Errors on Vector Endpoint Registration
+
+**Symptom**: `pg_ripple.register_vector_endpoint()` registers a URL, but the federation call fails when that URL points to an internal service not meant to be accessed from PostgreSQL.
+
+**Prevention**: Use network-level controls (AWS security groups, Kubernetes NetworkPolicy, or firewall rules) to restrict which external hosts your PostgreSQL server can reach. pg_ripple does not perform SSRF validation at registration time — network policies are the correct enforcement layer.
+
+---
+
+## Endpoint Unreachable After Registration
+
+**Symptom**: A vector endpoint was registered with `register_vector_endpoint()`, but `hybrid_search()` returns zero results with a `PT607` warning.
+
+**Diagnosis**:
+- The endpoint URL may have changed.
+- The endpoint service may be down.
+- The `enabled` column in `_pg_ripple.vector_endpoints` may have been set to `false`.
+
+**Fix**:
+
+```sql
+-- Re-register with the correct URL
+SELECT pg_ripple.register_vector_endpoint('https://new-url/', 'qdrant');
+
+-- Or re-enable a disabled endpoint
+UPDATE _pg_ripple.vector_endpoints SET enabled = true WHERE url = 'https://my-endpoint/';
+```
+

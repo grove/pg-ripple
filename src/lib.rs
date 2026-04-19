@@ -394,7 +394,66 @@ $$;
     requires = ["v025_custom_aggregates"]
 );
 
-// v0.11.0: SPARQL views, Datalog views, and ExtVP catalog tables.
+// v0.28.0: Embedding queue table and vector endpoint catalog.
+pgrx::extension_sql!(
+    r#"
+-- Embedding queue (v0.28.0): entities awaiting embedding by the background worker.
+-- Populated by a trigger on _pg_ripple.dictionary when pg_ripple.auto_embed = true.
+CREATE TABLE IF NOT EXISTS _pg_ripple.embedding_queue (
+    entity_id   BIGINT      NOT NULL PRIMARY KEY,
+    enqueued_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+COMMENT ON TABLE _pg_ripple.embedding_queue IS
+    'Queue of entity_ids awaiting embedding by the background worker. '
+    'Populated by a trigger on _pg_ripple.dictionary when pg_ripple.auto_embed = true.';
+
+-- Vector endpoint catalog (v0.28.0): external vector service endpoints for
+-- SPARQL federation with pg:similarTo predicates.
+CREATE TABLE IF NOT EXISTS _pg_ripple.vector_endpoints (
+    url         TEXT NOT NULL PRIMARY KEY,
+    api_type    TEXT NOT NULL CHECK (api_type IN ('pgvector', 'weaviate', 'qdrant', 'pinecone')),
+    enabled     BOOLEAN NOT NULL DEFAULT true,
+    registered_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+COMMENT ON TABLE _pg_ripple.vector_endpoints IS
+    'External vector service endpoints registered for SPARQL SERVICE federation '
+    'with the pg:similarTo predicate.';
+
+-- Trigger function: enqueue new dictionary IRI entries for embedding
+-- when pg_ripple.auto_embed is on.
+CREATE OR REPLACE FUNCTION _pg_ripple.auto_embed_trigger()
+RETURNS TRIGGER LANGUAGE plpgsql AS $body$
+BEGIN
+    -- Only enqueue IRI entities (kind = 0).
+    IF NEW.kind = 0
+       AND current_setting('pg_ripple.auto_embed', true)::boolean IS TRUE
+    THEN
+        INSERT INTO _pg_ripple.embedding_queue (entity_id)
+        VALUES (NEW.id)
+        ON CONFLICT (entity_id) DO NOTHING;
+    END IF;
+    RETURN NEW;
+END;
+$body$;
+
+-- Attach the trigger to the dictionary table.
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_trigger
+        WHERE tgname = 'auto_embed_dict_trigger'
+          AND tgrelid = '_pg_ripple.dictionary'::regclass
+    ) THEN
+        CREATE TRIGGER auto_embed_dict_trigger
+            AFTER INSERT ON _pg_ripple.dictionary
+            FOR EACH ROW EXECUTE FUNCTION _pg_ripple.auto_embed_trigger();
+    END IF;
+END;
+$$;
+"#,
+    name = "v028_embedding_queue",
+    requires = ["v027_embeddings_table"]
+);
 pgrx::extension_sql!(
     r#"
 -- SPARQL views catalog (v0.11.0)
@@ -791,6 +850,25 @@ pub static EMBEDDING_INDEX_TYPE: pgrx::GucSetting<Option<std::ffi::CString>> =
 /// ~96% storage reduction, Hamming distance).  Requires pgvector ≥ 0.7.0.
 pub static EMBEDDING_PRECISION: pgrx::GucSetting<Option<std::ffi::CString>> =
     pgrx::GucSetting::<Option<std::ffi::CString>>::new(None);
+
+// ─── v0.28.0 GUCs ────────────────────────────────────────────────────────────
+
+/// GUC: master switch for trigger-based auto-embedding of new dictionary entries.
+/// When `true`, a trigger on `_pg_ripple.dictionary` enqueues new entity IDs
+/// for the background embedding worker.  Off by default to avoid surprise API charges.
+pub static AUTO_EMBED: pgrx::GucSetting<bool> = pgrx::GucSetting::<bool>::new(false);
+
+/// GUC: number of entities dequeued and embedded per background worker batch.
+pub static EMBEDDING_BATCH_SIZE: pgrx::GucSetting<i32> = pgrx::GucSetting::<i32>::new(100);
+
+/// GUC: when `true`, `embed_entities()` serializes each entity's RDF neighborhood
+/// before embedding instead of using only the IRI local name.
+/// Produces richer vectors but requires a SPARQL query per entity.
+pub static USE_GRAPH_CONTEXT: pgrx::GucSetting<bool> = pgrx::GucSetting::<bool>::new(false);
+
+/// GUC: HTTP timeout in milliseconds for calls to external vector service endpoints
+/// registered via `pg_ripple.register_vector_endpoint()`.
+pub static VECTOR_FEDERATION_TIMEOUT_MS: pgrx::GucSetting<i32> = pgrx::GucSetting::<i32>::new(5000);
 
 // ─── pg_trickle runtime detection (v0.6.0) ───────────────────────────────────
 
@@ -1392,7 +1470,47 @@ pub extern "C-unwind" fn _PG_init() {
         GucFlags::default(),
     );
 
-    // ── Postmaster-only GUCs and shared memory (v0.6.0) ─────────────────────
+    // ── v0.28.0 GUCs ─────────────────────────────────────────────────────────
+
+    pgrx::GucRegistry::define_bool_guc(
+        c"pg_ripple.auto_embed",
+        c"When on, a trigger on _pg_ripple.dictionary enqueues new entity IDs for automatic embedding (default: off)",
+        c"",
+        &AUTO_EMBED,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+
+    pgrx::GucRegistry::define_int_guc(
+        c"pg_ripple.embedding_batch_size",
+        c"Number of entities dequeued and embedded per background worker batch (default: 100, range: 1–10000)",
+        c"",
+        &EMBEDDING_BATCH_SIZE,
+        1,
+        10_000,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+
+    pgrx::GucRegistry::define_bool_guc(
+        c"pg_ripple.use_graph_context",
+        c"When on, embed_entities() serializes each entity's RDF neighborhood for richer vectors (default: off)",
+        c"",
+        &USE_GRAPH_CONTEXT,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+
+    pgrx::GucRegistry::define_int_guc(
+        c"pg_ripple.vector_federation_timeout_ms",
+        c"HTTP timeout in milliseconds for external vector service endpoint calls (default: 5000, range: 100–300000)",
+        c"",
+        &VECTOR_FEDERATION_TIMEOUT_MS,
+        100,
+        300_000,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
     // PGC_POSTMASTER GUCs can only be registered during shared_preload_libraries
     // loading.  `process_shared_preload_libraries_in_progress` is the correct
     // flag — `IsPostmasterEnvironment` is true in every server process and
@@ -4213,6 +4331,128 @@ mod pg_ripple {
         force: default!(bool, false),
     ) -> i64 {
         crate::sparql::embedding::refresh_embeddings(graph_iri, model, force)
+    }
+
+    // ── v0.28.0: Advanced Hybrid Search & RAG Pipeline ────────────────────────
+
+    /// Enumerate all embedding models stored in `_pg_ripple.embeddings`.
+    ///
+    /// Returns one row per model with the entity count and vector dimension.
+    /// Returns zero rows when pgvector is absent.
+    #[pg_extern]
+    fn list_embedding_models() -> TableIterator<
+        'static,
+        (
+            name!(model, String),
+            name!(entity_count, i64),
+            name!(dimensions, i32),
+        ),
+    > {
+        let rows = crate::sparql::embedding::list_embedding_models();
+        TableIterator::new(rows)
+    }
+
+    /// Materialise `pg:hasEmbedding` triples for entities in `_pg_ripple.embeddings`.
+    ///
+    /// Inserts `<entity_iri> <pg:hasEmbedding> "true"^^xsd:boolean` for every
+    /// embedded entity.  This makes embedding completeness checkable via SHACL.
+    ///
+    /// Returns the count of newly inserted triples.
+    #[pg_extern]
+    fn add_embedding_triples() -> i64 {
+        crate::sparql::embedding::add_embedding_triples()
+    }
+
+    /// Produce a text representation of an entity's RDF neighborhood for embedding.
+    ///
+    /// Gathers the entity's label, type(s), and neighboring entity labels within
+    /// `depth` hops (up to `max_neighbors`).  Returns a plain-text string suitable
+    /// for passing to an embedding API.
+    #[pg_extern]
+    fn contextualize_entity(
+        entity_iri: &str,
+        depth: default!(i32, 1),
+        max_neighbors: default!(i32, 20),
+    ) -> String {
+        crate::sparql::embedding::contextualize_entity(entity_iri, depth, max_neighbors)
+    }
+
+    /// Hybrid search using Reciprocal Rank Fusion of SPARQL and vector results.
+    ///
+    /// Executes `sparql_query` (a SPARQL SELECT returning `?entity`) for the
+    /// SPARQL-ranked candidate set, then executes `similar_entities(query_text)`
+    /// for the vector-ranked set.  Applies RRF with k_rrf = 60.
+    ///
+    /// `alpha` controls weighting: 0.0 = vector only, 1.0 = SPARQL only, 0.5 = equal.
+    ///
+    /// Returns zero rows when pgvector is absent (PT603 WARNING).
+    #[pg_extern]
+    fn hybrid_search(
+        sparql_query: &str,
+        query_text: &str,
+        k: default!(i32, 10),
+        alpha: default!(f64, 0.5),
+        model: default!(Option<&str>, "NULL"),
+    ) -> TableIterator<
+        'static,
+        (
+            name!(entity_id, i64),
+            name!(entity_iri, String),
+            name!(rrf_score, f64),
+            name!(sparql_rank, i32),
+            name!(vector_rank, i32),
+        ),
+    > {
+        let rows =
+            crate::sparql::embedding::hybrid_search(sparql_query, query_text, k, alpha, model);
+        TableIterator::new(rows)
+    }
+
+    /// End-to-end RAG retrieval: find k nearest entities to `question`, collect context.
+    ///
+    /// Step 1: vector search for `k` candidates.
+    /// Step 2: apply optional `sparql_filter` WHERE clause on candidates.
+    /// Step 3: contextualize each surviving entity.
+    /// Step 4: return rows with `entity_iri`, `label`, `context_json`, `distance`.
+    ///
+    /// `output_format`: `'jsonb'` (default) or `'jsonld'`.  When `'jsonld'`,
+    /// `context_json` includes `@type` and `@context` keys.
+    ///
+    /// Returns zero rows when pgvector is absent (PT603 WARNING).
+    #[pg_extern]
+    fn rag_retrieve(
+        question: &str,
+        sparql_filter: default!(Option<&str>, "NULL"),
+        k: default!(i32, 5),
+        model: default!(Option<&str>, "NULL"),
+        output_format: default!(&str, "'jsonb'"),
+    ) -> TableIterator<
+        'static,
+        (
+            name!(entity_iri, String),
+            name!(label, String),
+            name!(context_json, pgrx::JsonB),
+            name!(distance, f64),
+        ),
+    > {
+        let rows = crate::sparql::embedding::rag_retrieve(
+            question,
+            sparql_filter,
+            k,
+            model,
+            output_format,
+        );
+        TableIterator::new(rows)
+    }
+
+    /// Register an external vector service endpoint for SPARQL SERVICE federation.
+    ///
+    /// `api_type` must be one of `'pgvector'`, `'weaviate'`, `'qdrant'`, or `'pinecone'`.
+    ///
+    /// Registered endpoints can be queried via `SERVICE <url> { ?e pg:similarTo "text" }`.
+    #[pg_extern]
+    fn register_vector_endpoint(url: &str, api_type: &str) {
+        crate::sparql::federation::register_vector_endpoint(url, api_type)
     }
 }
 

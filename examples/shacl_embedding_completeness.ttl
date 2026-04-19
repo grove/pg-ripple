@@ -1,0 +1,44 @@
+@prefix sh:   <http://www.w3.org/ns/shacl#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix pg:   <http://pg-ripple.org/functions/> .
+@prefix xsd:  <http://www.w3.org/2001/XMLSchema#> .
+
+# pg_ripple v0.28.0 — SHACL shape for embedding completeness.
+#
+# Validates that every entity in the knowledge graph that has an rdfs:label
+# also has at least one pg:hasEmbedding triple (materialised by
+# pg_ripple.add_embedding_triples()).
+#
+# Usage:
+#   1. Run:  SELECT pg_ripple.add_embedding_triples();
+#            -- Materialises <entity> pg:hasEmbedding "true"^^xsd:boolean triples
+#            -- for all entities that are present in _pg_ripple.embeddings.
+#   2. Load this shape file via:
+#            SELECT pg_ripple.load_turtle(pg_read_file('/path/to/this.ttl'));
+#   3. Validate:
+#            SELECT * FROM pg_ripple.validate_shapes();
+#            -- Violations list entities that have a label but no embedding.
+
+<#EmbeddingCompletenessShape>
+    a sh:NodeShape ;
+    sh:targetClass rdfs:Resource ;
+    sh:name "EmbeddingCompleteness" ;
+    sh:description "Every entity with an rdfs:label must have a pg:hasEmbedding triple." ;
+
+    # Entities without any rdfs:label are out of scope.
+    sh:property [
+        sh:path rdfs:label ;
+        sh:minCount 1 ;
+        sh:name "label-required" ;
+        sh:description "Must have at least one rdfs:label to be in scope." ;
+    ] ;
+
+    # Entities with a label must also have an embedding.
+    sh:property [
+        sh:path pg:hasEmbedding ;
+        sh:minCount 1 ;
+        sh:hasValue "true"^^xsd:boolean ;
+        sh:name "embedding-required" ;
+        sh:message "Entity has a label but no embedding. Run pg_ripple.embed_entities() then pg_ripple.add_embedding_triples()." ;
+        sh:severity sh:Violation ;
+    ] .

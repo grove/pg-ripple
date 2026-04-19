@@ -2103,47 +2103,47 @@ See [plans/vector_sparql_hybrid.md](plans/vector_sparql_hybrid.md) §5 (Advanced
 
 ### Deliverables
 
-- [ ] **`pg_ripple.hybrid_search()` — RRF fusion** (`src/sparql/embedding.rs`)
+- [x] **`pg_ripple.hybrid_search()` — RRF fusion** (`src/sparql/embedding.rs`)
   - `pg_ripple.hybrid_search(sparql_query TEXT, query_text TEXT, k INT DEFAULT 10, alpha FLOAT8 DEFAULT 0.5, model TEXT DEFAULT NULL) RETURNS TABLE (entity_id BIGINT, entity_iri TEXT, rrf_score FLOAT8, sparql_rank INT, vector_rank INT)` *(optional at runtime — pgvector must be installed)*
   - Executes `sparql_query` (a SPARQL SELECT returning `?entity`) to get the SPARQL-ranked candidate set
   - Executes `pg_ripple.similar_entities(query_text, k * 10)` to get the vector-ranked candidate set
   - Applies Reciprocal Rank Fusion with $k_{rrf} = 60$; `alpha` controls SPARQL vs. vector weight (0.0 = vector only, 1.0 = SPARQL only, 0.5 = equal)
   - Returns top-`k` entities sorted by descending `rrf_score`
 
-- [ ] **Incremental embedding background worker** (`src/worker.rs` extension)
+- [x] **Incremental embedding background worker** (`src/worker.rs` extension)
   - New table `_pg_ripple.embedding_queue (entity_id BIGINT PRIMARY KEY, enqueued_at TIMESTAMPTZ NOT NULL DEFAULT now())`
   - Trigger on `_pg_ripple.dictionary`: inserts new entity IDs into `embedding_queue` when `pg_ripple.auto_embed = true`
   - Background worker dequeues entities in batches of `pg_ripple.embedding_batch_size`, calls the embedding API, upserts into `_pg_ripple.embeddings`
   - GUC: `pg_ripple.auto_embed` (bool, default `false`) — master switch for trigger-based embedding; off by default to avoid surprise API charges
   - GUC: `pg_ripple.embedding_batch_size` (integer, default `100`, range `1–10000`)
 
-- [ ] **`pg_ripple.contextualize_entity()` — graph-serialized text** (`src/sparql/embedding.rs`)
+- [x] **`pg_ripple.contextualize_entity()` — graph-serialized text** (`src/sparql/embedding.rs`)
   - `pg_ripple.contextualize_entity(entity_iri TEXT, depth INT DEFAULT 1, max_neighbors INT DEFAULT 20) RETURNS TEXT`
   - Runs an internal SPARQL CONSTRUCT to gather the entity's label, type(s), and up-to-`max_neighbors` neighboring entity labels within `depth` hops
   - Serialises the neighborhood as structured text: `"[entity_label]. Type: [types]. Related: [neighbor_labels]."` — suitable for embedding
   - Used internally by `pg_ripple.embed_entities()` when `pg_ripple.use_graph_context = true` (new GUC, bool, default `false`)
 
-- [ ] **`pg_ripple.rag_retrieve()` — end-to-end RAG** (`src/sparql/embedding.rs`)
+- [x] **`pg_ripple.rag_retrieve()` — end-to-end RAG** (`src/sparql/embedding.rs`)
   - `pg_ripple.rag_retrieve(question TEXT, sparql_filter TEXT DEFAULT NULL, k INT DEFAULT 5, model TEXT DEFAULT NULL) RETURNS TABLE (entity_iri TEXT, label TEXT, context_json JSONB, distance FLOAT8)` *(optional at runtime — pgvector must be installed)*
   - Step 1: encode `question` to a vector; find `k` nearest entities via HNSW
   - Step 2: if `sparql_filter` is non-NULL, apply it as a SPARQL WHERE clause filter on the candidate set
   - Step 3: for each surviving entity, call `pg_ripple.contextualize_entity()` to build a rich context
   - Step 4: return `context_json` as JSONB with keys `label`, `types`, `properties`, `neighbors` — formatted for direct use as an LLM system prompt fragment; structure mirrors the JSON-LD framing output from v0.17.0
 
-- [ ] **`pg_ripple_http` RAG endpoint** (`pg_ripple_http/src/main.rs`)
+- [x] **`pg_ripple_http` RAG endpoint** (`pg_ripple_http/src/main.rs`)
   - `POST /rag` — accepts `{"question": "...", "sparql_filter": "...", "k": 5}` JSON body
   - Calls `pg_ripple.rag_retrieve()` via the existing SPI connection
   - Returns `{"results": [...], "context": "..."}` where `context` is the concatenated `context_json` entries formatted as a plain-text LLM prompt
   - Authentication: same bearer-token auth as existing `pg_ripple_http` endpoints
   - Rate limiting: inherits the `pg_ripple_http.max_requests_per_second` GUC
 
-- [ ] **JSON-LD framing for RAG context output** (`src/framing/` extension)
+- [x] **JSON-LD framing for RAG context output** (`src/framing/` extension)
   - `pg_ripple.rag_retrieve()` gains an optional `output_format TEXT DEFAULT 'jsonb'` parameter accepting `'jsonb'` or `'jsonld'`
   - When `output_format = 'jsonld'`, each `context_json` row is formatted as a JSON-LD frame using the framing engine from v0.17.0: entity types map to `@type`, property-value pairs map to their IRI keys, and `@context` is auto-populated from the registered prefix table
   - Enables direct use of `context_json` as a JSON-LD-framed system prompt for LLMs that prefer structured data (e.g. OpenAI structured outputs)
   - New pg_regress test `vector_rag_jsonld.sql` — call `pg_ripple.rag_retrieve(... output_format := 'jsonld')` and verify `@type` and `@context` keys are present in the output
 
-- [ ] **SPARQL federation with external vector services** (`src/sparql/federation.rs` extension)
+- [x] **SPARQL federation with external vector services** (`src/sparql/federation.rs` extension)
   - Extends the SERVICE handler (v0.16.0) to recognise vector service endpoints registered via `pg_ripple.register_vector_endpoint(url TEXT, api_type TEXT)` where `api_type` is `'pgvector'`, `'weaviate'`, `'qdrant'`, or `'pinecone'`
   - Syntax: `SERVICE <http://vector-service/search> { ?entity pg:similarTo "query" ; pg:score ?score }` — translated to the appropriate external API call (HTTP) rather than a local pgvector scan
   - Returned `?entity` IRIs are resolved against the local dictionary; matched entities can participate in subsequent local triple pattern joins in the same SPARQL query
@@ -2152,22 +2152,22 @@ See [plans/vector_sparql_hybrid.md](plans/vector_sparql_hybrid.md) §5 (Advanced
   - Raises `PT607 — vector service endpoint not registered` if an unregistered SERVICE URL is used with a `pg:similarTo` predicate
   - New pg_regress test `vector_federation.sql` — register a mock vector endpoint, issue a federated SPARQL query, verify graceful fallback when the endpoint is unavailable
 
-- [ ] **SHACL embedding completeness shape**
+- [x] **SHACL embedding completeness shape**
   - `examples/shacl_embedding_completeness.ttl` — reusable SHACL shape that validates all entities of a given class have embeddings (uses `sh:path :hasEmbedding ; sh:minCount 1`)
   - `pg_ripple.add_embedding_triples() RETURNS BIGINT` — materialises `:hasEmbedding` triples for entities present in `_pg_ripple.embeddings`, making the SHACL shape checkable
 
-- [ ] **Multi-model support**
+- [x] **Multi-model support**
   - `pg_ripple.list_embedding_models() RETURNS TABLE (model TEXT, entity_count BIGINT, dimensions INT)` — enumerate all models in `_pg_ripple.embeddings`
   - `pg_ripple.similar_entities()`, `pg:similar()`, and `pg_ripple.rag_retrieve()` all accept an optional `model` argument; default is the `pg_ripple.embedding_model` GUC value
 
-- [ ] **Benchmarks**
+- [x] **Benchmarks**
   - `benchmarks/hybrid_search.sql` — pgbench-based benchmark measuring hybrid search latency and throughput; tests vector-only, SPARQL-only, and RRF-fused patterns
   - Target: hybrid search over 1M entities, 1,536-dimensional embeddings, HNSW index, < 50 ms P99 latency for top-10 results
 
-- [ ] **Error codes** (additions to `src/error.rs`)
+- [x] **Error codes** (additions to `src/error.rs`)
   - `PT607` — vector service endpoint not registered
 
-- [ ] **pg_regress tests**
+- [x] **pg_regress tests**
   - `vector_hybrid.sql` — `pg_ripple.hybrid_search()` with a SPARQL SELECT + vector query; verify RRF scores are non-zero and results are sorted
   - `vector_rag.sql` — `pg_ripple.rag_retrieve()` end-to-end; verify `context_json` contains expected keys
   - `vector_rag_jsonld.sql` — `pg_ripple.rag_retrieve(... output_format := 'jsonld')`; verify `@type` and `@context` keys are present
@@ -2181,12 +2181,12 @@ See [plans/vector_sparql_hybrid.md](plans/vector_sparql_hybrid.md) §5 (Advanced
 
 ### Documentation
 
-- [ ] `user-guide/hybrid-search.md` updated — add RRF fusion and RAG sections; include end-to-end worked example from question to LLM context
-- [ ] `user-guide/rag.md` (new page) — step-by-step guide to using `pg_ripple.rag_retrieve()` as a backend for LangChain, LlamaIndex, and raw OpenAI API calls; includes `pg_ripple_http` REST example
-- [ ] `reference/embedding-functions.md` updated — document `hybrid_search`, `rag_retrieve` (including `output_format` parameter), `contextualize_entity`, `list_embedding_models`, `register_vector_endpoint`
-- [ ] `reference/http-api.md` updated — document `POST /rag` endpoint with request/response examples and JSON-LD output mode
-- [ ] `user-guide/vector-federation.md` (new page) — how to register external vector services, write federated SPARQL queries, and configure timeouts; includes worked examples for Weaviate, Qdrant, and Pinecone endpoints
-- [ ] Release notes for v0.28.0 — highlight `rag_retrieve` and `hybrid_search` as headline features; link to the hybrid-search and RAG user guides
+- [x] `user-guide/hybrid-search.md` updated — add RRF fusion and RAG sections; include end-to-end worked example from question to LLM context
+- [x] `user-guide/rag.md` (new page) — step-by-step guide to using `pg_ripple.rag_retrieve()` as a backend for LangChain, LlamaIndex, and raw OpenAI API calls; includes `pg_ripple_http` REST example
+- [x] `reference/embedding-functions.md` updated — document `hybrid_search`, `rag_retrieve` (including `output_format` parameter), `contextualize_entity`, `list_embedding_models`, `register_vector_endpoint`
+- [x] `reference/http-api.md` updated — document `POST /rag` endpoint with request/response examples and JSON-LD output mode
+- [x] `user-guide/vector-federation.md` (new page) — how to register external vector services, write federated SPARQL queries, and configure timeouts; includes worked examples for Weaviate, Qdrant, and Pinecone endpoints
+- [x] Release notes for v0.28.0 — highlight `rag_retrieve` and `hybrid_search` as headline features; link to the hybrid-search and RAG user guides
 
 ### Exit Criteria
 

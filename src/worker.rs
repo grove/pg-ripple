@@ -197,9 +197,149 @@ fn run_merge_cycle() {
     // Evict expired federation cache entries on each polling cycle (v0.19.0).
     crate::sparql::federation::evict_expired_cache();
 
+    // v0.28.0: drain embedding queue if auto_embed is on.
+    drain_embedding_queue();
+
     // A-3: clear backend-local LRU cache at end of merge transaction to prevent
     // stale IDs from being used if dictionary rows are rewritten by a future migration.
     crate::dictionary::clear_caches();
+}
+
+// ─── v0.28.0: Embedding queue drain ──────────────────────────────────────────
+
+/// Drain the embedding queue: dequeue up to `pg_ripple.embedding_batch_size`
+/// entities and generate embeddings for them via the configured API.
+///
+/// Only runs when `pg_ripple.auto_embed = true` AND an embedding API URL is
+/// configured.  Silently skips when either condition is not met.
+fn drain_embedding_queue() {
+    if !crate::AUTO_EMBED.get() {
+        return;
+    }
+
+    let api_url_guc = crate::EMBEDDING_API_URL.get();
+    let api_url = api_url_guc
+        .as_ref()
+        .and_then(|s| s.to_str().ok())
+        .unwrap_or("");
+    if api_url.is_empty() {
+        return; // API not configured — silently skip.
+    }
+
+    let batch_size = crate::EMBEDDING_BATCH_SIZE.get().clamp(1, 10_000);
+
+    // Dequeue entity IDs from the queue.
+    let queued: Vec<i64> = pgrx::Spi::connect(|c| {
+        c.select(
+            &format!(
+                "DELETE FROM _pg_ripple.embedding_queue \
+                 WHERE entity_id IN ( \
+                     SELECT entity_id FROM _pg_ripple.embedding_queue \
+                     ORDER BY enqueued_at \
+                     LIMIT {batch_size} \
+                 ) \
+                 RETURNING entity_id"
+            ),
+            None,
+            &[],
+        )
+        .unwrap_or_else(|e| pgrx::error!("drain_embedding_queue: SPI error: {e}"))
+        .map(|row| row.get::<i64>(1).ok().flatten().unwrap_or(0))
+        .filter(|&id| id != 0)
+        .collect()
+    });
+
+    if queued.is_empty() {
+        return;
+    }
+
+    let api_key_guc = crate::EMBEDDING_API_KEY.get();
+    let api_key = api_key_guc
+        .as_ref()
+        .and_then(|s| s.to_str().ok())
+        .unwrap_or("");
+
+    let model_tag = {
+        let m = crate::EMBEDDING_MODEL.get();
+        m.as_ref()
+            .and_then(|s| s.to_str().ok())
+            .filter(|s| !s.is_empty())
+            .unwrap_or("text-embedding-3-small")
+            .to_owned()
+    };
+
+    let dims = crate::EMBEDDING_DIMENSIONS.get();
+    let mut embedded = 0u32;
+
+    for entity_id in &queued {
+        // Resolve IRI from dictionary.
+        let iri = match crate::dictionary::decode(*entity_id) {
+            Some(v) => v,
+            None => continue,
+        };
+
+        // Use graph context if enabled.
+        let text_to_embed = if crate::USE_GRAPH_CONTEXT.get() {
+            crate::sparql::embedding::contextualize_entity(&iri, 1, 20)
+        } else {
+            // Use local name as fallback.
+            iri.rfind(['#', '/'])
+                .map(|pos| iri[pos + 1..].to_owned())
+                .filter(|s| !s.is_empty())
+                .unwrap_or_else(|| iri.clone())
+        };
+
+        let embedding = match crate::sparql::embedding::call_embedding_api_pub(
+            &text_to_embed,
+            &model_tag,
+            api_url,
+            api_key,
+        ) {
+            Ok(v) => v,
+            Err(e) => {
+                pgrx::log!("pg_ripple embed worker: API error for entity {entity_id}: {e}");
+                continue;
+            }
+        };
+
+        if embedding.len() != dims as usize {
+            pgrx::log!(
+                "pg_ripple embed worker: dimension mismatch for entity {entity_id}: \
+                 expected {dims}, got {}",
+                embedding.len()
+            );
+            continue;
+        }
+
+        let array_lit = format!(
+            "ARRAY[{}]::float8[]",
+            embedding
+                .iter()
+                .map(|f| f.to_string())
+                .collect::<Vec<_>>()
+                .join(",")
+        );
+
+        let sql = format!(
+            "INSERT INTO _pg_ripple.embeddings (entity_id, model, embedding, updated_at) \
+             VALUES ({entity_id}, $1, ({array_lit})::vector, now()) \
+             ON CONFLICT (entity_id, model) \
+             DO UPDATE SET embedding = EXCLUDED.embedding, updated_at = now()"
+        );
+
+        if pgrx::Spi::run_with_args(&sql, &[pgrx::datum::DatumWithOid::from(model_tag.as_str())])
+            .is_ok()
+        {
+            embedded += 1;
+        }
+    }
+
+    if embedded > 0 {
+        pgrx::log!(
+            "pg_ripple embed worker: embedded {embedded}/{} entities",
+            queued.len()
+        );
+    }
 }
 
 // ─── GUC helpers ─────────────────────────────────────────────────────────────

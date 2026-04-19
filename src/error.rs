@@ -41,7 +41,7 @@ pub enum StorageError {
     Spi { msg: String },
 }
 
-/// Embedding / vector subsystem errors (PT601–PT606) — v0.27.0.
+/// Embedding / vector subsystem errors (PT601–PT607) — v0.27.0 / v0.28.0.
 #[allow(dead_code)]
 #[derive(Debug, Error)]
 pub enum EmbeddingError {
@@ -74,4 +74,11 @@ pub enum EmbeddingError {
     /// PT606 — no stale embeddings found (NOTICE level).
     #[error("no stale embeddings found")]
     NoStaleEmbeddings,
+
+    /// PT607 — vector service endpoint not registered (v0.28.0).
+    #[error(
+        "vector service endpoint not registered: {url}; \
+         register it with pg_ripple.register_vector_endpoint() first"
+    )]
+    VectorEndpointNotRegistered { url: String },
 }

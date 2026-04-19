@@ -742,3 +742,399 @@ fn collect_vars_recursive(pattern: &GraphPattern, out: &mut HashSet<String>) {
         }
     }
 }
+
+// ─── v0.28.0: Vector endpoint federation ─────────────────────────────────────
+
+/// Register an external vector service endpoint for SPARQL SERVICE federation.
+///
+/// `api_type` must be one of `'pgvector'`, `'weaviate'`, `'qdrant'`, or `'pinecone'`.
+///
+/// Returns a WARNING (not ERROR) if the URL is already registered (idempotent upsert).
+pub fn register_vector_endpoint(url: &str, api_type: &str) {
+    let valid_types = ["pgvector", "weaviate", "qdrant", "pinecone"];
+    if !valid_types.contains(&api_type) {
+        pgrx::warning!(
+            "pg_ripple.register_vector_endpoint: unknown api_type '{}'; \
+             must be one of: pgvector, weaviate, qdrant, pinecone",
+            api_type
+        );
+        return;
+    }
+
+    pgrx::Spi::run_with_args(
+        "INSERT INTO _pg_ripple.vector_endpoints (url, api_type, enabled) \
+         VALUES ($1, $2, true) \
+         ON CONFLICT (url) DO UPDATE SET api_type = EXCLUDED.api_type, enabled = true",
+        &[
+            pgrx::datum::DatumWithOid::from(url),
+            pgrx::datum::DatumWithOid::from(api_type),
+        ],
+    )
+    .unwrap_or_else(|e| pgrx::warning!("register_vector_endpoint: SPI error: {e}"));
+}
+
+/// Returns `true` when `url` is registered in `_pg_ripple.vector_endpoints`
+/// with `enabled = true`.
+#[allow(dead_code)]
+pub fn is_vector_endpoint_registered(url: &str) -> bool {
+    pgrx::Spi::get_one_with_args::<bool>(
+        "SELECT EXISTS(
+            SELECT 1 FROM _pg_ripple.vector_endpoints
+            WHERE url = $1 AND enabled = true
+         )",
+        &[pgrx::datum::DatumWithOid::from(url)],
+    )
+    .unwrap_or(None)
+    .unwrap_or(false)
+}
+
+/// Query an external vector service endpoint with a similarity query.
+///
+/// Returns a list of `(entity_id, entity_iri, score)` triples by:
+/// 1. Calling the external API with `query_text` and `k`.
+/// 2. Resolving returned IRIs against the local dictionary.
+/// 3. Returning only entities known to the local dictionary.
+///
+/// When the endpoint is unavailable or times out, emits a WARNING and returns
+/// an empty vector (graceful degradation per the v0.28.0 spec).
+///
+/// Currently supports Weaviate GraphQL, Qdrant REST, and Pinecone REST APIs.
+/// The `pgvector` api_type is handled locally (no HTTP call needed).
+#[allow(dead_code)]
+pub fn query_vector_endpoint(url: &str, query_text: &str, k: i32) -> Vec<(i64, String, f64)> {
+    if !is_vector_endpoint_registered(url) {
+        pgrx::warning!(
+            "pg_ripple.vector_endpoint: endpoint not registered (PT607): {url}; \
+             use pg_ripple.register_vector_endpoint() to register it"
+        );
+        return Vec::new();
+    }
+
+    // Get api_type for this endpoint.
+    let api_type: String = pgrx::Spi::get_one_with_args::<String>(
+        "SELECT api_type FROM _pg_ripple.vector_endpoints WHERE url = $1",
+        &[pgrx::datum::DatumWithOid::from(url)],
+    )
+    .unwrap_or(None)
+    .unwrap_or_else(|| "unknown".to_owned());
+
+    let timeout_ms = crate::VECTOR_FEDERATION_TIMEOUT_MS.get() as u64;
+    let timeout = std::time::Duration::from_millis(timeout_ms);
+
+    match api_type.as_str() {
+        "pgvector" => {
+            // pgvector is local — fall back to the local embeddings table.
+            pgrx::warning!(
+                "pg_ripple.query_vector_endpoint: api_type 'pgvector' is local; \
+                 use pg_ripple.similar_entities() instead"
+            );
+            Vec::new()
+        }
+        "weaviate" => query_weaviate_endpoint(url, query_text, k, timeout),
+        "qdrant" => query_qdrant_endpoint(url, query_text, k, timeout),
+        "pinecone" => query_pinecone_endpoint(url, query_text, k, timeout),
+        other => {
+            pgrx::warning!("pg_ripple.query_vector_endpoint: unsupported api_type '{other}'");
+            Vec::new()
+        }
+    }
+}
+
+/// Query a Weaviate v4 GraphQL `/v1/graphql` endpoint.
+#[allow(dead_code)]
+fn query_weaviate_endpoint(
+    base_url: &str,
+    query_text: &str,
+    k: i32,
+    timeout: std::time::Duration,
+) -> Vec<(i64, String, f64)> {
+    let endpoint = format!("{}/v1/graphql", base_url.trim_end_matches('/'));
+    let gql = serde_json::json!({
+        "query": format!(
+            r#"{{ Get {{ Entity(nearText: {{concepts: ["{query_text}"]}}, limit: {k}) {{ _additional {{ id certainty }} iri }} }} }}"#
+        )
+    });
+    let body_str = match serde_json::to_string(&gql) {
+        Ok(s) => s,
+        Err(e) => {
+            pgrx::warning!("query_weaviate_endpoint: JSON serialization error: {e}");
+            return Vec::new();
+        }
+    };
+
+    let agent = ureq::AgentBuilder::new().timeout(timeout).build();
+    let response = match agent
+        .post(&endpoint)
+        .set("Content-Type", "application/json")
+        .send_string(&body_str)
+    {
+        Ok(r) => r,
+        Err(e) => {
+            pgrx::warning!("pg_ripple.query_vector_endpoint (weaviate): request failed: {e}");
+            return Vec::new();
+        }
+    };
+
+    let body = match response.into_string() {
+        Ok(s) => s,
+        Err(e) => {
+            pgrx::warning!("query_weaviate_endpoint: response read error: {e}");
+            return Vec::new();
+        }
+    };
+
+    let json: serde_json::Value = match serde_json::from_str(&body) {
+        Ok(v) => v,
+        Err(e) => {
+            pgrx::warning!("query_weaviate_endpoint: JSON parse error: {e}");
+            return Vec::new();
+        }
+    };
+
+    // Parse Weaviate response: data.Get.Entity[].{iri, _additional.certainty}
+    let entities = json
+        .pointer("/data/Get/Entity")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+
+    resolve_iri_scores(entities, "iri", "_additional/certainty")
+}
+
+/// Query a Qdrant REST `/collections/{name}/points/search` endpoint.
+#[allow(dead_code)]
+fn query_qdrant_endpoint(
+    base_url: &str,
+    query_text: &str,
+    k: i32,
+    timeout: std::time::Duration,
+) -> Vec<(i64, String, f64)> {
+    // Qdrant requires a pre-embedded query vector. We embed via the local API
+    // if configured, otherwise we return empty with a WARNING.
+    let api_url_guc = crate::EMBEDDING_API_URL.get();
+    let api_url = api_url_guc
+        .as_ref()
+        .and_then(|s| s.to_str().ok())
+        .unwrap_or("");
+
+    if api_url.is_empty() {
+        pgrx::warning!(
+            "pg_ripple.query_vector_endpoint (qdrant): embedding API URL not configured; \
+             set pg_ripple.embedding_api_url to enable Qdrant federation"
+        );
+        return Vec::new();
+    }
+
+    let api_key_guc = crate::EMBEDDING_API_KEY.get();
+    let api_key = api_key_guc
+        .as_ref()
+        .and_then(|s| s.to_str().ok())
+        .unwrap_or("");
+
+    let model_guc = crate::EMBEDDING_MODEL.get();
+    let model = model_guc
+        .as_ref()
+        .and_then(|s| s.to_str().ok())
+        .unwrap_or("text-embedding-3-small");
+
+    let embedding =
+        match crate::sparql::embedding::call_embedding_api_pub(query_text, model, api_url, api_key)
+        {
+            Ok(v) => v,
+            Err(e) => {
+                pgrx::warning!("query_qdrant_endpoint: embedding API error: {e}");
+                return Vec::new();
+            }
+        };
+
+    let endpoint = format!(
+        "{}/collections/entities/points/search",
+        base_url.trim_end_matches('/')
+    );
+    let body = serde_json::json!({
+        "vector": embedding,
+        "limit": k,
+        "with_payload": true
+    });
+    let body_str = match serde_json::to_string(&body) {
+        Ok(s) => s,
+        Err(e) => {
+            pgrx::warning!("query_qdrant_endpoint: JSON serialization error: {e}");
+            return Vec::new();
+        }
+    };
+
+    let agent = ureq::AgentBuilder::new().timeout(timeout).build();
+    let response = match agent
+        .post(&endpoint)
+        .set("Content-Type", "application/json")
+        .send_string(&body_str)
+    {
+        Ok(r) => r,
+        Err(e) => {
+            pgrx::warning!("pg_ripple.query_vector_endpoint (qdrant): request failed: {e}");
+            return Vec::new();
+        }
+    };
+
+    let body = match response.into_string() {
+        Ok(s) => s,
+        Err(e) => {
+            pgrx::warning!("query_qdrant_endpoint: response read error: {e}");
+            return Vec::new();
+        }
+    };
+
+    let json: serde_json::Value = match serde_json::from_str(&body) {
+        Ok(v) => v,
+        Err(e) => {
+            pgrx::warning!("query_qdrant_endpoint: JSON parse error: {e}");
+            return Vec::new();
+        }
+    };
+
+    let results = json
+        .pointer("/result")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+
+    resolve_iri_scores(results, "payload/iri", "score")
+}
+
+/// Query a Pinecone REST `/query` endpoint.
+#[allow(dead_code)]
+fn query_pinecone_endpoint(
+    base_url: &str,
+    query_text: &str,
+    k: i32,
+    timeout: std::time::Duration,
+) -> Vec<(i64, String, f64)> {
+    // Like Qdrant, Pinecone requires a pre-embedded vector.
+    let api_url_guc = crate::EMBEDDING_API_URL.get();
+    let api_url = api_url_guc
+        .as_ref()
+        .and_then(|s| s.to_str().ok())
+        .unwrap_or("");
+
+    if api_url.is_empty() {
+        pgrx::warning!(
+            "pg_ripple.query_vector_endpoint (pinecone): embedding API URL not configured"
+        );
+        return Vec::new();
+    }
+
+    let api_key_guc = crate::EMBEDDING_API_KEY.get();
+    let api_key = api_key_guc
+        .as_ref()
+        .and_then(|s| s.to_str().ok())
+        .unwrap_or("");
+
+    let model_guc = crate::EMBEDDING_MODEL.get();
+    let model = model_guc
+        .as_ref()
+        .and_then(|s| s.to_str().ok())
+        .unwrap_or("text-embedding-3-small");
+
+    let embedding =
+        match crate::sparql::embedding::call_embedding_api_pub(query_text, model, api_url, api_key)
+        {
+            Ok(v) => v,
+            Err(e) => {
+                pgrx::warning!("query_pinecone_endpoint: embedding API error: {e}");
+                return Vec::new();
+            }
+        };
+
+    let endpoint = format!("{}/query", base_url.trim_end_matches('/'));
+    let body = serde_json::json!({
+        "vector": embedding,
+        "topK": k,
+        "includeMetadata": true
+    });
+    let body_str = match serde_json::to_string(&body) {
+        Ok(s) => s,
+        Err(e) => {
+            pgrx::warning!("query_pinecone_endpoint: JSON serialization error: {e}");
+            return Vec::new();
+        }
+    };
+
+    let pinecone_key_guc = crate::EMBEDDING_API_KEY.get();
+    let pinecone_key = pinecone_key_guc
+        .as_ref()
+        .and_then(|s| s.to_str().ok())
+        .unwrap_or("");
+
+    let agent = ureq::AgentBuilder::new().timeout(timeout).build();
+    let mut req = agent
+        .post(&endpoint)
+        .set("Content-Type", "application/json");
+    if !pinecone_key.is_empty() {
+        req = req.set("Api-Key", pinecone_key);
+    }
+
+    let response = match req.send_string(&body_str) {
+        Ok(r) => r,
+        Err(e) => {
+            pgrx::warning!("pg_ripple.query_vector_endpoint (pinecone): request failed: {e}");
+            return Vec::new();
+        }
+    };
+
+    let body = match response.into_string() {
+        Ok(s) => s,
+        Err(e) => {
+            pgrx::warning!("query_pinecone_endpoint: response read error: {e}");
+            return Vec::new();
+        }
+    };
+
+    let json: serde_json::Value = match serde_json::from_str(&body) {
+        Ok(v) => v,
+        Err(e) => {
+            pgrx::warning!("query_pinecone_endpoint: JSON parse error: {e}");
+            return Vec::new();
+        }
+    };
+
+    let matches = json
+        .pointer("/matches")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+
+    // Pinecone: matches[].{id (iri), score, metadata.iri}
+    resolve_iri_scores(matches, "metadata/iri", "score")
+}
+
+/// Resolve a list of JSON result objects with IRI and score fields into
+/// dictionary-encoded `(entity_id, entity_iri, score)` triples.
+///
+/// `iri_path` is a JSON pointer relative to each result object.
+/// `score_path` is a JSON pointer for the score field.
+#[allow(dead_code)]
+fn resolve_iri_scores(
+    items: Vec<serde_json::Value>,
+    iri_path: &str,
+    score_path: &str,
+) -> Vec<(i64, String, f64)> {
+    items
+        .iter()
+        .filter_map(|item| {
+            let iri_ptr = format!("/{}", iri_path.replace('.', "/"));
+            let score_ptr = format!("/{}", score_path.replace('.', "/"));
+            let iri = item.pointer(&iri_ptr).and_then(|v| v.as_str())?.to_owned();
+            let score = item
+                .pointer(&score_ptr)
+                .and_then(|v| v.as_f64())
+                .unwrap_or(0.0);
+            let bare_iri = iri.trim_start_matches('<').trim_end_matches('>');
+            let entity_id = crate::dictionary::encode(bare_iri, crate::dictionary::KIND_IRI);
+            if entity_id == 0 {
+                return None; // Not in local dictionary — skip.
+            }
+            Some((entity_id, iri, score))
+        })
+        .collect()
+}

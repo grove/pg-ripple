@@ -9,6 +9,52 @@ Versions correspond to the milestones in [ROADMAP.md](ROADMAP.md).
 
 ## [Unreleased]
 
+Points at the next milestone: v0.29.0 — Datalog Optimization: Magic Sets & Cost-Based Compilation.
+
+---
+
+## [0.28.0] — 2026-04-18 — Advanced Hybrid Search & RAG Pipeline
+
+**pg_ripple completes its hybrid search stack with Reciprocal Rank Fusion, graph-contextualized embeddings, end-to-end RAG retrieval, incremental embedding, multi-model support, and SPARQL federation with external vector services.** All pg_regress tests pass (6 new tests for v0.28.0 features).
+
+### What you can do
+
+- **Hybrid search with RRF fusion** — `pg_ripple.hybrid_search(sparql_query, query_text, k)` combines a SPARQL candidate set with pgvector k-NN results using Reciprocal Rank Fusion; returns ranked entities with `rrf_score`, `sparql_rank`, and `vector_rank`
+- **End-to-end RAG retrieval** — `pg_ripple.rag_retrieve('what treats headaches?', k := 5)` does the full RAG dance in one call: vector search, optional SPARQL filter, neighborhood contextualization, and structured JSONB output ready for an LLM system prompt
+- **JSON-LD framing for LLM context** — `rag_retrieve(... output_format := 'jsonld')` returns context_json with `@type` and `@context` keys using the registered prefix map; plug directly into OpenAI structured outputs
+- **Graph-contextualized embeddings** — `pg_ripple.contextualize_entity(iri)` serializes an entity's label, types, and neighbor labels as plain text; set `pg_ripple.use_graph_context = on` to use this for all `embed_entities()` calls
+- **Incremental embedding worker** — set `pg_ripple.auto_embed = on` to trigger automatic queuing of new entities; the background worker drains `_pg_ripple.embedding_queue` in batches
+- **Multi-model support** — `pg_ripple.list_embedding_models()` enumerates all models in `_pg_ripple.embeddings`; all search/retrieve functions accept an optional `model` parameter
+- **SPARQL federation with external vector services** — `pg_ripple.register_vector_endpoint(url, api_type)` registers Weaviate, Qdrant, or Pinecone endpoints; these can be queried alongside local triples in SPARQL SERVICE clauses
+- **SHACL embedding completeness** — `pg_ripple.add_embedding_triples()` materialises `pg:hasEmbedding` triples; the included SHACL shape validates completeness via `sh:minCount 1`
+
+### Added
+
+- `pg_ripple.hybrid_search(sparql_query TEXT, query_text TEXT, k INT DEFAULT 10, alpha FLOAT8 DEFAULT 0.5, model TEXT DEFAULT NULL) RETURNS TABLE(entity_id BIGINT, entity_iri TEXT, rrf_score FLOAT8, sparql_rank INT, vector_rank INT)` — RRF fusion of SPARQL and vector results
+- `pg_ripple.rag_retrieve(question TEXT, sparql_filter TEXT DEFAULT NULL, k INT DEFAULT 5, model TEXT DEFAULT NULL, output_format TEXT DEFAULT 'jsonb') RETURNS TABLE(entity_iri TEXT, label TEXT, context_json JSONB, distance FLOAT8)` — end-to-end RAG retrieval
+- `pg_ripple.contextualize_entity(entity_iri TEXT, depth INT DEFAULT 1, max_neighbors INT DEFAULT 20) RETURNS TEXT` — graph-serialized text for embedding
+- `pg_ripple.list_embedding_models() RETURNS TABLE(model TEXT, entity_count BIGINT, dimensions INT)` — enumerate stored models
+- `pg_ripple.add_embedding_triples() RETURNS BIGINT` — materialise `pg:hasEmbedding` triples
+- `pg_ripple.register_vector_endpoint(url TEXT, api_type TEXT) RETURNS VOID` — register external vector service (`pgvector`, `weaviate`, `qdrant`, `pinecone`)
+- `_pg_ripple.embedding_queue` table — incremental embedding queue (v0.28.0)
+- `_pg_ripple.vector_endpoints` table — external vector service catalog
+- `_pg_ripple.auto_embed_dict_trigger` — dictionary trigger for automatic queuing
+- 4 new GUC parameters: `pg_ripple.auto_embed`, `pg_ripple.embedding_batch_size`, `pg_ripple.use_graph_context`, `pg_ripple.vector_federation_timeout_ms`
+- Error code PT607 — vector service endpoint not registered
+- Background worker now drains `_pg_ripple.embedding_queue` when `pg_ripple.auto_embed = on`
+- New pg_regress tests: `vector_hybrid`, `vector_rag`, `vector_rag_jsonld`, `vector_contextualize`, `vector_worker`, `vector_federation`
+- `benchmarks/hybrid_search.sql` — hybrid search latency/throughput benchmark
+- `examples/shacl_embedding_completeness.ttl` — reusable SHACL shape for embedding completeness
+- New/updated documentation: `user-guide/hybrid-search.md`, `user-guide/rag.md`, `user-guide/vector-federation.md`, `reference/embedding-functions.md`, `reference/http-api.md`
+
+### Migration
+
+Run `sql/pg_ripple--0.27.0--0.28.0.sql` on existing installations. Creates `_pg_ripple.embedding_queue` and `_pg_ripple.vector_endpoints` tables plus the `auto_embed_dict_trigger` trigger. No VP table schema changes.
+
+---
+
+## [Unreleased]
+
 Points at the next milestone: v0.28.0 — Advanced Hybrid Search & RAG Pipeline.
 
 ---

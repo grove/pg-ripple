@@ -235,3 +235,30 @@ Value pattern matching would allow frames like `{"ex:name": {"@language": "en"}}
 SPARQL views (`create_sparql_view`) store raw SPARQL SELECT results as integer ID columns in a stream table. Framing views (`create_framing_view`) run the full embedding and compaction pipeline over CONSTRUCT results, so each row in the stream table contains a ready-to-serve nested JSON-LD document rather than raw projection values.
 
 Use SPARQL views when you need low-level access to result bindings; use framing views when you want ready-to-serve nested JSON-LD for an API.
+
+
+---
+
+## Vector Federation (v0.28.0)
+
+### How does vector federation work?
+
+After registering an external endpoint with `pg_ripple.register_vector_endpoint(url, api_type)`, pg_ripple can route similarity queries to Weaviate, Qdrant, Pinecone, or a remote pgvector instance. The results are merged with local triple store data using Reciprocal Rank Fusion inside `hybrid_search()`.
+
+### How do I prevent SSRF attacks when using vector federation?
+
+pg_ripple does not restrict which URLs can be registered. You should use network policies (e.g., Kubernetes NetworkPolicy, AWS security groups) to restrict which external hosts your PostgreSQL server can reach. Only register endpoints that belong to trusted vector services in your infrastructure.
+
+### Why does my federated query time out?
+
+The default timeout is 5000 ms. Increase it with:
+
+```sql
+SET pg_ripple.vector_federation_timeout_ms = 30000;
+```
+
+Or configure it globally via `ALTER SYSTEM SET pg_ripple.vector_federation_timeout_ms = 30000; SELECT pg_reload_conf();`
+
+### How do I configure a remote endpoint's API key?
+
+pg_ripple does not store API keys for external vector services. Pass the API key in the endpoint URL if the service supports it, or configure it via environment variables in your application layer before calling the endpoint.
