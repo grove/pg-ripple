@@ -9,6 +9,8 @@ Versions correspond to the milestones in [ROADMAP.md](ROADMAP.md).
 
 ## [Unreleased]
 
+> Changes for the next version (v1.0.0 — Production Release) will appear here.
+
 ---
 
 ## [0.36.0] — 2026-04-25 — Worst-Case Optimal Joins & Lattice-Based Datalog
