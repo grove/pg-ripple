@@ -2395,7 +2395,7 @@ See [plans/ecosystem/datalog.md §14.2](plans/ecosystem/datalog.md) for design n
 
 ### Deliverables
 
-- [ ] **Well-founded semantics** (`src/datalog/wfs.rs` new module)
+- [x] **Well-founded semantics** (`src/datalog/wfs.rs` new module)
   - Alternating fixpoint algorithm: compute `T_P↑` (positive) and `T_P↓` (negative) iteratively until fixpoint
   - Three-valued result: derived facts carry a `certainty` column (`true` / `unknown`) in the query output
   - `pg_ripple.infer_wfs(rule_set TEXT) RETURNS JSONB` — run well-founded fixpoint instead of stratified evaluation
@@ -2404,7 +2404,7 @@ See [plans/ecosystem/datalog.md §14.2](plans/ecosystem/datalog.md) for design n
   - Error code `PT520` — well-founded fixpoint did not converge within `wfs_max_iterations`
   - Benchmark: `benchmarks/wfs.sql` — cyclic ontology with mutual negation; verify unknown facts are correctly identified
 
-- [ ] **Tabling / memoization** (`src/datalog/tabling.rs` new module)
+- [x] **Tabling / memoization** (`src/datalog/tabling.rs` new module)
   - Session-scoped cache: `_pg_ripple.tabling_cache (goal_hash BIGINT PRIMARY KEY, result BYTEA, computed_at TIMESTAMPTZ)`
   - Cache key: XXH3-128 of the normalised goal pattern (predicate ID + bound-variable encoding)
   - SPARQL integration: SPARQL sub-query patterns (e.g., property path closures, OPTIONAL blocks) that match a cached goal are served from the tabling cache without re-executing the CTE — implemented at the SPARQL→SQL translation layer
@@ -2414,7 +2414,7 @@ See [plans/ecosystem/datalog.md §14.2](plans/ecosystem/datalog.md) for design n
   - Invalidation: cache is automatically cleared on any triple insert/delete/update (via CDC hook), and on `drop_rules()`
   - Expose stats: `pg_ripple.tabling_stats() RETURNS TABLE(goal_hash BIGINT, hits BIGINT, computed_ms FLOAT, cached_at TIMESTAMPTZ)`
 
-- [ ] **pg_regress tests**
+- [x] **pg_regress tests**
   - `datalog_wfs.sql` — verify well-founded semantics on a cyclic negation program; verify `certainty = 'unknown'` for unresolvable facts; verify stratifiable programs return same results as `infer()`
   - `datalog_tabling.sql` — verify cache hit/miss counts via `tabling_stats()`; verify TTL expiry; verify cache invalidation on triple insert
   - `sparql_tabling.sql` — SPARQL query with repeated sub-pattern; verify tabling stats show hit > 0 on second identical sub-pattern within one query
@@ -2425,10 +2425,10 @@ See [plans/ecosystem/datalog.md §14.2](plans/ecosystem/datalog.md) for design n
 
 ### Documentation
 
-- [ ] `user-guide/sql-reference/datalog.md` updated — document `infer_wfs()`, tabling GUCs, `tabling_stats()`
-- [ ] `user-guide/best-practices/datalog-optimization.md` updated — add section on when to use `infer_wfs()`, tabling tuning, SPARQL sub-query caching behaviour
-- [ ] `user-guide/best-practices/sparql-performance.md` (new page) — how tabling accelerates SPARQL property paths and repeated sub-queries; how demand transformation reduces CTE size; how rule plan caching (v0.30.0) interacts with SPARQL on-demand mode
-- [ ] Release notes for v0.32.0
+- [x] `user-guide/sql-reference/datalog.md` updated — document `infer_wfs()`, tabling GUCs, `tabling_stats()`
+- [x] `user-guide/best-practices/datalog-optimization.md` updated — add section on when to use `infer_wfs()`, tabling tuning, SPARQL sub-query caching behaviour
+- [x] `user-guide/best-practices/sparql-performance.md` (new page) — how tabling accelerates SPARQL property paths and repeated sub-queries; how demand transformation reduces CTE size; how rule plan caching (v0.30.0) interacts with SPARQL on-demand mode
+- [x] Release notes for v0.32.0
 
 ### Exit Criteria
 

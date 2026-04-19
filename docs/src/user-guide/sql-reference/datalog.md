@@ -536,3 +536,68 @@ SET pg_ripple.rule_plan_cache_size = 16;
 | `_pg_ripple.dictionary_hot` | UNLOGGED hot cache for frequently-used IRIs |
 
 Derived triples are stored in the same VP tables as explicit triples, distinguished by the `source` column: `0` = explicit, `1` = derived.
+
+---
+
+## Well-founded semantics (v0.32.0)
+
+For programs with **cyclic negation** (rules that are mutually recursive through `NOT`), stratification fails and `infer()` cannot be used. `infer_wfs()` handles these programs using the alternating-fixpoint algorithm (Van Gelder et al., 1991), which assigns a third truth value — *unknown* — to facts that are neither provably true nor false.
+
+```sql
+-- Load a non-stratifiable rule set (mutual negation)
+SELECT pg_ripple.load_rules('
+  ?x <https://ex.org/trusted>   <https://ex.org/yes> :-
+    ?x <https://ex.org/person>    <https://ex.org/yes> ,
+    NOT ?x <https://ex.org/untrusted> <https://ex.org/yes> .
+  ?x <https://ex.org/untrusted> <https://ex.org/yes> :-
+    ?x <https://ex.org/person>    <https://ex.org/yes> ,
+    NOT ?x <https://ex.org/trusted>   <https://ex.org/yes> .
+', 'trust');
+
+SELECT pg_ripple.infer_wfs('trust');
+-- Returns: {"certain": 0, "unknown": 2, "derived": 2, "iterations": 2, "stratifiable": false}
+```
+
+For **stratifiable** programs, `infer_wfs()` falls through to `run_inference_seminaive` and returns `"stratifiable": true` with `"unknown": 0`.
+
+### `pg_ripple.infer_wfs(rule_set TEXT DEFAULT 'custom') RETURNS JSONB`
+
+| Key | Type | Description |
+|-----|------|-------------|
+| `certain` | integer | Facts concluded with certainty (true) |
+| `unknown` | integer | Facts that are neither true nor false |
+| `derived` | integer | Total derived facts (`certain + unknown`) |
+| `iterations` | integer | Number of alternating fixpoint rounds |
+| `stratifiable` | boolean | Whether the program was stratifiable (fast path) |
+
+### Tabling cache integration
+
+`infer_wfs()` results are automatically cached in `_pg_ripple.tabling_cache` (when `pg_ripple.tabling = on`). Repeated calls with the same rule set return the cached result without re-running the fixpoint. The cache is invalidated by `insert_triple()`, `delete_triple()`, `drop_rules()`, and `load_rules()`.
+
+---
+
+## Tabling / memoisation (v0.32.0)
+
+The tabling cache stores results of `infer_wfs()` calls, keyed by an XXH3-64 hash of the goal string, so repeated identical calls pay zero computation cost within the TTL.
+
+### `pg_ripple.tabling_stats() RETURNS TABLE(...)`
+
+```sql
+SELECT * FROM pg_ripple.tabling_stats();
+-- goal_hash | hits | computed_ms | cached_at
+```
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `goal_hash` | `BIGINT` | XXH3-64 hash of the cached goal key |
+| `hits` | `BIGINT` | Number of cache hits for this entry |
+| `computed_ms` | `FLOAT8` | Wall-clock time (ms) of the original computation |
+| `cached_at` | `TEXT` | ISO-8601 timestamp of when the entry was written |
+
+### Tabling GUCs
+
+| GUC | Type | Default | Description |
+|-----|------|---------|-------------|
+| `pg_ripple.tabling` | bool | `true` | Enable/disable the tabling cache |
+| `pg_ripple.tabling_ttl` | integer | `300` | Cache TTL in seconds; `0` = never expire |
+| `pg_ripple.wfs_max_iterations` | integer | `100` | Safety cap on WFS fixpoint rounds; emits WARNING PT520 if exceeded |

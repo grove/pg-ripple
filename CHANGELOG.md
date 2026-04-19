@@ -9,7 +9,38 @@ Versions correspond to the milestones in [ROADMAP.md](ROADMAP.md).
 
 ## [Unreleased]
 
-Points at the next milestone: v0.32.0 — Well-Founded Semantics & Tabling.
+---
+
+## [0.32.0] — 2026-04-19 — Well-Founded Semantics & Tabling
+
+**pg_ripple handles non-stratifiable Datalog programs and caches repeated inference results.** All pg_regress tests pass (3 new tests for v0.32.0 features).
+
+### What you can do
+
+- **Well-founded semantics** — `pg_ripple.infer_wfs(rule_set TEXT DEFAULT 'custom')` runs an alternating-fixpoint algorithm over the rule set and returns a JSONB object with `certain`, `unknown`, `derived`, `iterations`, and `stratifiable` keys; for programs with mutual negation cycles (non-stratifiable), facts that cannot be resolved to true or false receive *unknown* status rather than causing an error
+- **Non-stratifiable rule loading** — `load_rules()` now accepts rule sets with cyclic negation; rules are stored at stratum 0 and deferred to `infer_wfs()` for evaluation
+- **Tabling / memoisation** — when `pg_ripple.tabling = on` (default), results of `infer_wfs()` are stored in `_pg_ripple.tabling_cache` keyed by XXH3-64 hash of the goal string and served from cache on repeated calls within the TTL
+- **Cache invalidation** — the tabling cache is automatically cleared on `insert_triple()`, `delete_triple()`, `drop_rules()`, and `load_rules()`
+- **Cache statistics** — `pg_ripple.tabling_stats()` returns per-entry statistics: `goal_hash`, `hits`, `computed_ms`, `cached_at`
+
+### New GUC parameters
+
+| GUC | Type | Default | Description |
+|-----|------|---------|-------------|
+| `pg_ripple.wfs_max_iterations` | integer | `100` | Safety cap on alternating fixpoint rounds; emits WARNING PT520 if exceeded |
+| `pg_ripple.tabling` | bool | `true` | Enable tabling / memoisation cache |
+| `pg_ripple.tabling_ttl` | integer | `300` | Cache entry TTL in seconds; `0` = no expiry |
+
+### New SQL functions
+
+| Function | Returns | Description |
+|----------|---------|-------------|
+| `pg_ripple.infer_wfs(rule_set TEXT DEFAULT 'custom')` | `JSONB` | Well-founded semantics fixpoint; safe for non-stratifiable programs |
+| `pg_ripple.tabling_stats()` | `TABLE(goal_hash BIGINT, hits BIGINT, computed_ms FLOAT8, cached_at TEXT)` | Tabling cache statistics |
+
+### Migration
+
+Run `ALTER EXTENSION pg_ripple UPDATE TO '0.32.0'` (applies `sql/pg_ripple--0.31.0--0.32.0.sql` which creates `_pg_ripple.tabling_cache`).
 
 ---
 

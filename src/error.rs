@@ -140,3 +140,22 @@ pub enum DatalogAggError {
     )]
     UnsupportedAggFunc { func: String, rule_text: String },
 }
+
+/// Well-founded semantics errors (PT520) — v0.32.0.
+#[allow(dead_code)]
+#[derive(Debug, Error)]
+pub enum WfsError {
+    /// PT520 — well-founded fixpoint did not converge within `wfs_max_iterations`.
+    ///
+    /// The alternating fixpoint passes (positive closure + full inference) are
+    /// each bounded by `pg_ripple.wfs_max_iterations`.  If either pass reaches
+    /// this limit without converging, this error is emitted as a WARNING and the
+    /// (possibly partial) results are returned.  Increase
+    /// `pg_ripple.wfs_max_iterations` or simplify the rule set to eliminate
+    /// very long derivation chains.
+    #[error(
+        "well-founded fixpoint did not converge within {max_iter} iterations \
+         for rule set '{rule_set}'; results may be incomplete (PT520)"
+    )]
+    FixpointNotConverged { rule_set: String, max_iter: i32 },
+}

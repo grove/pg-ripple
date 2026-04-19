@@ -42,6 +42,8 @@ pub mod magic;
 pub mod parser;
 pub mod rewrite;
 pub mod stratify;
+pub mod tabling;
+pub mod wfs;
 
 pub use compiler::compile_aggregate_rule;
 pub use compiler::compile_rule_delta_variants_to;
@@ -55,6 +57,11 @@ pub use parser::parse_rules;
 pub use stratify::check_aggregation_stratification;
 pub use stratify::check_subsumption;
 pub use stratify::stratify;
+pub use tabling::{
+    compute_goal_hash, ensure_tabling_catalog, tabling_invalidate_all, tabling_lookup,
+    tabling_stats_impl, tabling_store,
+};
+pub use wfs::{build_wfs_jsonb, run_wfs};
 
 use pgrx::prelude::*;
 
@@ -263,10 +270,22 @@ pub fn load_and_store_rules(rules_text: &str, rule_set_name: &str) -> i64 {
 pub fn store_rules(rule_set: &str, rules: &[Rule]) -> i64 {
     ensure_catalog();
 
-    // Stratify the rule set.
+    // Stratify the rule set.  For non-stratifiable programs (cyclic negation),
+    // fall back to a single stratum containing all rules at stratum 0 so that
+    // the rules are stored and can be processed by `infer_wfs()` later.
     let stratified = match stratify(rules) {
         Ok(s) => s,
-        Err(e) => pgrx::error!("{e}"),
+        Err(_) => {
+            // Non-stratifiable: store all rules in stratum 0, recursive = true.
+            // WFS inference re-stratifies at query time.
+            crate::datalog::stratify::StratifiedProgram {
+                strata: vec![crate::datalog::stratify::Stratum {
+                    rules: rules.to_vec(),
+                    is_recursive: true,
+                    derived_predicates: vec![],
+                }],
+            }
+        }
     };
 
     // Upsert the rule set record.

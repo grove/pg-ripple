@@ -261,3 +261,51 @@ Set `pg_ripple.demand_transform = off` to fall back to full inference within a v
 ### `owl:sameAs` with demand transformation
 
 When `pg_ripple.sameas_reasoning = on` (default), `infer_demand()` applies the `owl:sameAs` canonicalization pre-pass before the demand-filtered inference. This ensures correct results even when entity aliases are involved, while still limiting the inference to the minimum required work.
+
+---
+
+## Well-founded semantics & tabling (v0.32.0)
+
+### When to use `infer_wfs()`
+
+Use `infer_wfs()` instead of `infer()` when:
+
+- Your rules contain **mutual negation** (cyclic through `NOT`) that `infer()` rejects with a stratification error.
+- You want a **three-valued result**: facts that cannot be resolved are labeled *unknown* rather than causing an error.
+- You need to reason over open-world ontologies where absence of a fact is not the same as its negation.
+
+For purely positive or stratifiable programs, `infer_wfs()` detects stratifiability and delegates to the same semi-naive engine as `infer()` — there is no performance penalty.
+
+```sql
+-- Test whether a rule set is stratifiable without committing to full inference.
+SELECT (pg_ripple.infer_wfs('my_rules') ->> 'stratifiable')::boolean AS stratifiable;
+```
+
+### Tuning the WFS iteration cap
+
+The GUC `pg_ripple.wfs_max_iterations` (default `100`) limits alternating-fixpoint rounds. If WARNING PT520 appears, increase the cap or review rules for non-terminating patterns:
+
+```sql
+SET pg_ripple.wfs_max_iterations = 500;
+SELECT pg_ripple.infer_wfs('large_ontology');
+```
+
+### Tabling tuning
+
+The tabling cache (`pg_ripple.tabling = on`) avoids re-running the fixpoint on repeated identical calls. Key settings:
+
+```sql
+-- Disable tabling for debugging (always recompute).
+SET pg_ripple.tabling = off;
+
+-- Set TTL to 10 minutes (default is 5 minutes).
+SET pg_ripple.tabling_ttl = 600;
+
+-- Set TTL to 0 to never expire entries.
+SET pg_ripple.tabling_ttl = 0;
+
+-- Inspect cache contents and hit rates.
+SELECT * FROM pg_ripple.tabling_stats() ORDER BY hits DESC;
+```
+
+Cache invalidation is automatic on data changes (`insert_triple`, `delete_triple`) and rule changes (`load_rules`, `drop_rules`). No manual cache management is required.

@@ -926,6 +926,32 @@ pub static SAMEAS_REASONING: pgrx::GucSetting<bool> = pgrx::GucSetting::<bool>::
 /// GUC.
 pub static DEMAND_TRANSFORM: pgrx::GucSetting<bool> = pgrx::GucSetting::<bool>::new(true);
 
+// ─── v0.32.0 GUCs ────────────────────────────────────────────────────────────
+
+/// GUC: safety cap on alternating fixpoint rounds for well-founded semantics (v0.32.0).
+///
+/// `pg_ripple.infer_wfs()` runs two fixpoint passes (positive closure + full
+/// inference).  Each pass terminates early when no new facts are derived; this
+/// GUC bounds the maximum iteration count per pass.  If either pass reaches the
+/// limit without converging a WARNING with code PT520 is emitted and the partial
+/// results are returned.
+pub static WFS_MAX_ITERATIONS: pgrx::GucSetting<i32> = pgrx::GucSetting::<i32>::new(100);
+
+/// GUC: master switch for the Datalog / SPARQL tabling cache (v0.32.0).
+///
+/// When `true` (default), `infer_wfs()` results and SPARQL query results are
+/// cached in `_pg_ripple.tabling_cache` and reused on subsequent calls with the
+/// same goal hash.  The cache is invalidated on any triple insert/delete or
+/// `drop_rules()` call.
+pub static TABLING: pgrx::GucSetting<bool> = pgrx::GucSetting::<bool>::new(true);
+
+/// GUC: TTL in seconds for tabling cache entries (v0.32.0).
+///
+/// Entries older than this value are ignored on lookup and overwritten on the
+/// next call.  Set to `0` to disable TTL-based expiry (entries survive until
+/// explicit invalidation).  Default: `300` seconds (5 minutes).
+pub static TABLING_TTL: pgrx::GucSetting<i32> = pgrx::GucSetting::<i32>::new(300);
+
 // ─── pg_trickle runtime detection (v0.6.0) ───────────────────────────────────
 
 /// The pg_trickle version that pg_ripple was tested against (A-4, v0.25.0).
@@ -1664,6 +1690,43 @@ pub extern "C-unwind" fn _PG_init() {
         GucFlags::default(),
     );
 
+    // ── v0.32.0 GUCs ─────────────────────────────────────────────────────────
+
+    pgrx::GucRegistry::define_int_guc(
+        c"pg_ripple.wfs_max_iterations",
+        c"Safety cap on alternating fixpoint rounds per WFS pass (default: 100, \
+          min: 1, max: 10000); emits PT520 WARNING if a pass does not converge (v0.32.0)",
+        c"",
+        &WFS_MAX_ITERATIONS,
+        1,
+        10_000,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+
+    pgrx::GucRegistry::define_bool_guc(
+        c"pg_ripple.tabling",
+        c"When on (default), infer_wfs() and SPARQL results are cached in \
+          _pg_ripple.tabling_cache and reused on matching subsequent calls; \
+          invalidated by drop_rules(), load_rules(), and triple modifications (v0.32.0)",
+        c"",
+        &TABLING,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+
+    pgrx::GucRegistry::define_int_guc(
+        c"pg_ripple.tabling_ttl",
+        c"TTL in seconds for tabling cache entries (default: 300; set 0 to disable \
+          TTL-based expiry) (v0.32.0)",
+        c"",
+        &TABLING_TTL,
+        0,
+        86_400,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+
     // PGC_POSTMASTER GUCs can only be registered during shared_preload_libraries
     // loading.  `process_shared_preload_libraries_in_progress` is the correct
     // flag — `IsPostmasterEnvironment` is true in every server process and
@@ -1852,6 +1915,11 @@ mod pg_ripple {
 
         let sid = crate::storage::insert_triple(s, p, o, g_id);
 
+        // ── v0.32.0: Tabling cache invalidation ────────────────────────────
+        if sid > 0 {
+            crate::datalog::tabling_invalidate_all();
+        }
+
         // ── v0.7.0: SHACL async queue ───────────────────────────────────────
         if shacl_mode_str == "async" && sid > 0 {
             let s_id = crate::storage::encode_rdf_term(s);
@@ -1894,7 +1962,12 @@ mod pg_ripple {
     /// Delete a triple.  Returns the number of rows removed (0 or 1).
     #[pg_extern]
     fn delete_triple(s: &str, p: &str, o: &str) -> i64 {
-        crate::storage::delete_triple(s, p, o, 0_i64)
+        let deleted = crate::storage::delete_triple(s, p, o, 0_i64);
+        // Invalidate tabling cache on data change (v0.32.0).
+        if deleted > 0 {
+            crate::datalog::tabling_invalidate_all();
+        }
+        deleted
     }
 
     /// Return the total number of triples across all VP tables and vp_rare.
@@ -3588,6 +3661,8 @@ mod pg_ripple {
         crate::datalog::builtins::register_standard_prefixes();
         // Invalidate plan cache for this rule set (v0.30.0).
         crate::datalog::cache::invalidate(rule_set);
+        // Invalidate tabling cache (v0.32.0).
+        crate::datalog::tabling_invalidate_all();
         let rule_set_ir = match crate::datalog::parse_rules(rules, rule_set) {
             Ok(rs) => rs,
             Err(e) => pgrx::error!("rule parse error: {e}"),
@@ -3695,6 +3770,8 @@ mod pg_ripple {
         crate::datalog::ensure_catalog();
         // Invalidate plan cache for this rule set (v0.30.0).
         crate::datalog::cache::invalidate(rule_set);
+        // Invalidate tabling cache (v0.32.0).
+        crate::datalog::tabling_invalidate_all();
         pgrx::Spi::get_one_with_args::<i64>(
             "WITH deleted AS ( \
                  DELETE FROM _pg_ripple.rules WHERE rule_set = $1 RETURNING 1 \
@@ -3950,6 +4027,75 @@ mod pg_ripple {
                 .into_iter()
                 .map(|s| (s.rule_set, s.hits, s.misses, s.entries)),
         )
+    }
+
+    // ── v0.32.0: Well-Founded Semantics ───────────────────────────────────────
+
+    /// Run well-founded semantics inference for the named rule set (v0.32.0).
+    ///
+    /// For **stratifiable programs** (no cyclic negation): identical to
+    /// `infer_with_stats()` — all derived facts have `certainty = 'true'`.
+    ///
+    /// For **non-stratifiable programs** (cyclic negation detected):
+    /// - Facts derivable from purely positive rules → `certainty = 'true'`
+    ///   (materialised into VP tables like normal inference).
+    /// - Facts only derivable via negation of uncertain atoms → `certainty = 'unknown'`
+    ///   (reported in the JSONB output but NOT materialised into VP tables).
+    ///
+    /// Returns a JSONB object with:
+    /// - `"derived"`: total facts (certain + unknown)
+    /// - `"certain"`: facts with `certainty = 'true'`
+    /// - `"unknown"`: facts with `certainty = 'unknown'`
+    /// - `"iterations"`: number of fixpoint passes performed
+    /// - `"stratifiable"`: `true` if the program is stratifiable, `false` otherwise
+    ///
+    /// GUC: `pg_ripple.wfs_max_iterations` (default 100) — safety cap per pass.
+    /// Emits WARNING PT520 if a pass does not converge within the limit.
+    #[pg_extern]
+    fn infer_wfs(rule_set: default!(&str, "'custom'")) -> pgrx::JsonB {
+        // Ensure the tabling catalog exists before any call that may try to
+        // invalidate it (tabling_invalidate_all checks for the table first).
+        crate::datalog::ensure_tabling_catalog();
+
+        // Check tabling cache for a previous result.
+        let goal_hash = crate::datalog::compute_goal_hash(&format!("wfs:{rule_set}"));
+        if let Some(cached) = crate::datalog::tabling_lookup(goal_hash) {
+            return pgrx::JsonB(cached);
+        }
+
+        // Cache miss — run WFS inference.
+        let start = std::time::Instant::now();
+        let (certain, unknown, total, iters, stratifiable) = crate::datalog::run_wfs(rule_set);
+        let result = crate::datalog::build_wfs_jsonb(certain, unknown, total, iters, stratifiable);
+        let elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;
+
+        // Store result in the tabling cache for future calls.
+        crate::datalog::tabling_store(goal_hash, &result.0, elapsed_ms);
+
+        result
+    }
+
+    // ── v0.32.0: Tabling / memoisation ───────────────────────────────────────
+
+    /// Return statistics for the tabling / memoisation cache (v0.32.0).
+    ///
+    /// Each row has:
+    /// - `goal_hash BIGINT` — XXH3-64 hash of the cached goal string
+    /// - `hits BIGINT` — number of cache hits for this entry
+    /// - `computed_ms FLOAT` — wall-clock time (ms) for the original computation
+    /// - `cached_at TIMESTAMPTZ` — when the entry was last written
+    #[pg_extern]
+    fn tabling_stats() -> TableIterator<
+        'static,
+        (
+            name!(goal_hash, i64),
+            name!(hits, i64),
+            name!(computed_ms, f64),
+            name!(cached_at, String),
+        ),
+    > {
+        let rows = crate::datalog::tabling_stats_impl();
+        TableIterator::new(rows)
     }
 
     /// Check all active constraint rules and return violations as JSONB.
