@@ -11,7 +11,7 @@ Each release below has two layers:
 - **The plain-language summary** (in the coloured box) explains *what* the release delivers and *why it matters* — no programming knowledge required.
 - **The technical deliverables** list the specific items developers will build. Feel free to skip these if you're reading for the big picture.
 
-**Effort estimates** are given as *person-weeks* — e.g. "6–8 pw" means the release would take roughly 6–8 weeks for a single full-time developer, or 3–4 weeks for a pair working together. The total estimated effort from v0.1.0 to v1.0.0 is **250–340 person-weeks** (~57–78 months for one developer; ~29–39 months for a pair).
+**Effort estimates** are given as *person-weeks* — e.g. "6–8 pw" means the release would take roughly 6–8 weeks for a single full-time developer, or 3–4 weeks for a pair working together. The total estimated effort from v0.1.0 to v1.0.0 is **252–344 person-weeks** (~58–79 months for one developer; ~29–40 months for a pair).
 
 **"optional at runtime" items**: some deliverables are annotated *(optional at runtime — X must be installed)*. This means the feature depends on an external extension (e.g. pg_trickle) that may not be installed in every deployment. The feature is **required by this roadmap** and must be implemented; the Rust code gates on a runtime availability check and degrades gracefully (returns 0 / false / empty, emits a WARNING, never raises an ERROR) when the dependency is absent. These items are not optional from a delivery standpoint.
 
@@ -65,9 +65,9 @@ Each release below has two layers:
 | [0.41.0](#v0410--full-w3c-sparql-11-test-suite) | Full W3C SPARQL 1.1 Test Suite | Complete W3C SPARQL 1.1 Query + Update + Graph Patterns + Aggregates test suite harness with parallelized execution; 3,000+ tests in < 2 min CI | 5–7 pw |
 | [0.42.0](#v0420--parallel-merge-cost-based-federation--live-cdc) | Parallel Merge, Cost-Based Federation & Live CDC | Multi-worker HTAP merge, FedX-style federation planner, parallel SERVICE, live RDF change subscriptions | 10–12 pw |
 | [0.43.0](#v0430--watdiv--jena-conformance-suite) | WatDiv + Jena Conformance Suite | Apache Jena edge-case tests (~1,000) and WatDiv scale-correctness benchmark (10M+ triples, star/chain/snowflake/complex patterns); 90% harness reuse from v0.41.0 | 5–7 pw |
-| [0.44.0](#v0440--lubm-conformance-suite) | LUBM Conformance Suite | Lehigh University Benchmark — OWL RL inference correctness across 14 canonical queries on 1K–8M triple datasets; validates Datalog + SPARQL integration under ontological reasoning | 1–2 pw |
+| [0.44.0](#v0440--lubm-conformance-suite) | LUBM Conformance Suite | Lehigh University Benchmark — OWL RL inference correctness across 14 canonical queries on 1K–8M triple datasets; includes Datalog API validation sub-suite for rule compilation, iteration tracking, inferred triples, goal queries, and performance baseline | 3–5 pw |
 | [1.0.0](#v100--production-release) | Production Release | Standards conformance, stress testing, security audit | 6–8 pw |
-| | | **Total estimated effort** | **250–340 pw** |
+| | | **Total estimated effort** | **252–344 pw** |
 
 ---
 
@@ -3394,9 +3394,9 @@ Full Jena suite (1,000 tests) completes in < 3 minutes on CI. WatDiv 100-templat
 
 **Theme**: OWL RL inference correctness under ontological reasoning via the Lehigh University Benchmark (LUBM).
 
-> **In plain language:** LUBM is a classic academic benchmark that generates a synthetic university-domain ontology dataset (scalable from 1K to 8M+ triples) and defines 14 canonical queries that exercise OWL RL inference rules — subclass traversal, property inheritance, inverse properties, transitivity, and domain/range entailments. This release wires LUBM into the conformance harness to validate that pg_ripple's Datalog engine and SPARQL query layer produce correct results when ontological reasoning is active. It is the only benchmark that tests the *interaction* between the SPARQL translator and the Datalog inference engine under realistic ontological load.
+> **In plain language:** LUBM is a classic academic benchmark that generates a synthetic university-domain ontology dataset (scalable from 1K to 8M+ triples) and defines 14 canonical queries that exercise OWL RL inference rules — subclass traversal, property inheritance, inverse properties, transitivity, and domain/range entailments. This release wires LUBM into the conformance harness to validate that pg_ripple's Datalog engine and SPARQL query layer produce correct results when ontological reasoning is active. A dedicated Datalog validation sub-suite tests the Datalog API directly (rule compilation, stratification, iterative inference, goal queries, and materialization) to catch bugs invisible to SPARQL-level testing. It is the only benchmark that tests the *interaction* between the SPARQL translator and the Datalog inference engine under realistic ontological load.
 >
-> **Effort estimate: 1–2 person-weeks** (80% harness reuse from v0.41.0 and v0.43.0)
+> **Effort estimate: 3–5 person-weeks** (80% harness reuse from v0.41.0 and v0.43.0; +2–3 pw for Datalog API validation sub-suite)
 
 ### Deliverables
 
@@ -3422,6 +3422,14 @@ Full Jena suite (1,000 tests) completes in < 3 minutes on CI. WatDiv 100-templat
   - Non-blocking for `--univ 10` (larger dataset run triggered weekly or on release branches)
   - Reuse unified `tests/conformance/runner.rs` from v0.43.0; add `lubm:` prefix to known-failures format
 - [ ] **Known-failures manifest** — add `lubm:Q{N}` entries for any query that fails at release, with one-line root-cause note
+- [ ] **Datalog validation sub-suite** (`tests/lubm/datalog/` new module) — test the Datalog API directly on the same `--univ 1` and `--univ 10` LUBM datasets
+  - **Rule compilation correctness** (`tests/lubm/datalog/rule_compilation.sql`): call `pg_ripple.add_rules()` with the OWL RL ruleset; use `pg_ripple.rules()` to inspect compiled rules; assert rule count and stratification matches specification
+  - **Inference iteration tracking** (`tests/lubm/datalog/inference_iterations.sql`): use `pg_ripple.rule_statistics()` after `pg_ripple.materialize_owl_rl()` to count iterations per stratum; validate that fixpoint is reached without over-iteration (off-by-one detection)
+  - **Inferred triple counts** (`tests/lubm/datalog/inferred_triples.sql`): call `pg_ripple.inferred_triples(rule_name)` for key OWL RL rules (e.g. `subclass_entail`, `subproperty_entail`, `domain_range`); assert row counts match pre-computed baselines for `--univ 1` and `--univ 10`
+  - **Direct goal queries** (`tests/lubm/datalog/goal_queries.sql`): use `pg_ripple.goal()` directly on Datalog-computed facts; verify results match SPARQL query results (validates inference engine independence from SPARQL translation)
+  - **Materialization performance baseline** (`tests/lubm/datalog/materialization_perf.sql`): benchmark `pg_ripple.materialize_owl_rl()` at `--univ 1` (target < 5 seconds) and `--univ 10` (target < 60 seconds); flag > 10% regression in CI
+  - **Custom rule validation** (`tests/lubm/datalog/custom_rules.sql`): define ad-hoc Datalog rules (e.g. transitive closure over a custom predicate) on LUBM data; compare against ground-truth computed via Datalog vs. SPARQL; catch rule-compiler edge cases
+  - Results compared against unified baseline (`tests/lubm/baselines/datalog_validation.json`).
 
 ### Migration Script
 
@@ -3436,7 +3444,7 @@ Full Jena suite (1,000 tests) completes in < 3 minutes on CI. WatDiv 100-templat
 
 ### Exit Criteria
 
-All 14 LUBM queries return exact reference cardinalities at `--univ 1`. Ontology + `--univ 1` dataset loads and all queries complete in < 30 seconds on CI. Known-failures manifest has 0 `lubm:` entries at release. Migration chain test passes through 0.44.0.
+All 14 LUBM queries return exact reference cardinalities at `--univ 1`. Ontology + `--univ 1` dataset loads and all queries complete in < 30 seconds on CI. All Datalog API calls in the sub-suite return results matching pre-computed baselines (rule count, iteration count, inferred triple counts, goal query results). Materialization performance at `--univ 1` is < 5 seconds. Custom Datalog rule validation passes (transitive closure results match ground truth). Known-failures manifest has 0 `lubm:` entries at release. Migration chain test passes through 0.44.0.
 
 ---
 
