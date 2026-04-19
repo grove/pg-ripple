@@ -56,11 +56,23 @@ They care about hybrid retrieval (SPARQL + embeddings in one query), JSON-LD fra
 
 The documentation site is organized into four sections, each serving a distinct purpose. A reader should be able to identify which section they need within five seconds of arriving.
 
-**Information architecture**: The site is built with mdBook. URL slugs follow the pattern `section/page-name` (e.g., `/feature-deep-dives/querying-with-sparql`). The left sidebar has two levels: sections and pages. Cross-references use relative links. mdBook does not support HTML `<details>` collapsible blocks without a preprocessor — use admonition-style blockquotes (`> **Note**:`) for optional-depth content instead of `<details>`. If richer callout styling is needed, add the `mdbook-admonish` preprocessor to `book.toml` and use its fenced ` ```admonish note ``` ` blocks; without that preprocessor in `book.toml`, raw `> **Note**` renders as a plain blockquote and authors must not assume any special styling. Each page must have a `description` in its front matter for SEO; the sitemap is auto-generated. Page titles should use the vocabulary users type into search: "Load RDF Data" not "Data Loading," "Property Paths" not "Path Expressions."
+**Information architecture**: The site is built with mdBook. URL slugs follow the pattern `section/page-name` (e.g., `/feature-deep-dives/querying-with-sparql`). The left sidebar has two levels: sections and pages. Cross-references use relative links. mdBook does not support HTML `<details>` collapsible blocks without a preprocessor — use admonition-style blockquotes (`> **Note**:`) for optional-depth content instead of `<details>`. **Decision**: use `mdbook-admonish`. Add `mdbook-admonish` to `book.toml` and the `[preprocessor.admonish]` block before Phase 1 content work starts. All callout blocks (notes, warnings, advanced sections, version callouts) must use `mdbook-admonish` fenced syntax (` ```admonish note ``` `, ` ```admonish warning ``` `, ` ```admonish tip ``` `). Plain `> **Note**:` blockquotes are acceptable only in pages not yet restructured; all new and restructured pages use `mdbook-admonish` syntax exclusively. Each page must have a `description` in its front matter for SEO; the sitemap is auto-generated. Page titles should use the vocabulary users type into search: "Load RDF Data" not "Data Loading," "Property Paths" not "Path Expressions."
+
+### Evaluate
+
+A single page for readers who need to decide whether pg_ripple fits their architecture before installing anything. Link this page from the landing page and the README, but keep it outside the getting-started flow — readers who have already chosen pg_ripple should skip directly to Section 1.
+
+#### When to Use pg_ripple
+
+A comparison page with an honest matrix: pg_ripple vs. plain SQL, vs. standalone RDF stores (Blazegraph, Virtuoso, Fuseki), vs. LPG systems (Neo4j, Amazon Neptune), vs. embedded solutions, and vs. pure vector databases (Qdrant, Weaviate, pgvector-only). For each row, state what pg_ripple does well, where it has limitations, and when the alternative is a better fit. Dedicate a specific section to the AI/LLM comparison: when does a knowledge graph outperform flat vector retrieval for RAG? (Answer: when the query requires multi-hop reasoning, entity deduplication, or structured output that a top-k vector search cannot provide.) Include a decision flowchart: "Do you already run PostgreSQL? → Do you need SPARQL? → How large is your dataset? → Do you need graph context for LLM prompts?" This page must be scrupulously honest — it builds trust with evaluators who will check claims against reality.
+
+*Primary audience*: Decision-Maker, Application Developer evaluating options.
+
+---
 
 ### Section 1: Core Concepts & Getting Started
 
-These pages answer foundational questions and get users to working code within ten minutes. They are the front door of the documentation — the pages linked from the README, shared in conference talks, and bookmarked by evaluators.
+These pages answer foundational questions and get users to working code within ten minutes. They are the front door of the documentation — the pages linked from the README and shared in conference talks. Readers who are still evaluating whether to use pg_ripple should start with the Evaluate section above.
 
 #### Landing Page — What Is pg_ripple?
 
@@ -79,12 +91,6 @@ This content — a non-technical narrative explaining why knowledge graphs matte
 The content here — key numbers, a comparison matrix, a "when to use / when not to use" summary — belongs as a visually distinct summary section at the bottom of the landing page, not as a separate URL. A separate page adds navigation overhead: evaluators who share a link want the landing page, not a sub-page. If a printable one-pager is needed for conference or sales use, produce it as a PDF artifact outside the docs site.
 
 *Action*: Remove from site structure. Incorporate the key-numbers block and comparison summary into the landing page layout.
-
-#### When to Use pg_ripple
-
-A comparison page with an honest matrix: pg_ripple vs. plain SQL, vs. standalone RDF stores (Blazegraph, Virtuoso, Fuseki), vs. LPG systems (Neo4j, Amazon Neptune), vs. embedded solutions, and vs. pure vector databases (Qdrant, Weaviate, pgvector-only). For each row, state what pg_ripple does well, where it has limitations, and when the alternative is a better fit. Dedicate a specific section to the AI/LLM comparison: when does a knowledge graph outperform flat vector retrieval for RAG? (Answer: when the query requires multi-hop reasoning, entity deduplication, or structured output that a top-k vector search cannot provide.) Include a decision flowchart: "Do you already run PostgreSQL? → Do you need SPARQL? → How large is your dataset? → Do you need graph context for LLM prompts?" This page must be scrupulously honest — it builds trust with evaluators who will check claims against reality.
-
-*Primary audience*: Decision-Maker, Application Developer evaluating options.
 
 #### Installation
 
@@ -302,6 +308,10 @@ Write in active voice with short sentences (average 15 words). Lead with what th
 
 Each paragraph conveys a complete thought in 150–250 words. Resist the urge to break prose into bullet lists unless the content is genuinely a checklist, a comparison matrix, or a sequence of steps. Bullet-point avalanches feel comprehensive but communicate poorly — readers skim them without absorbing the relationships between ideas.
 
+### Voice and Person
+
+Write in second person, addressing the reader directly: "you can load a Turtle file with one call" not "the user can load a Turtle file" and not "one can load a Turtle file." pg_ripple is referred to as "pg_ripple" (never "we" in user-facing pages; "the system" is acceptable in architecture and operations pages when describing system behavior). Instructions use imperative mood: "Run the following command," not "You should run the following command." Use American English spelling throughout ("color" not "colour," "initialize" not "initialise"). Contractions are acceptable in informal sections (FAQ, tutorials) but should be avoided in reference pages.
+
 ### pg_ripple-Specific Anti-Patterns
 
 Avoid these patterns that appear repeatedly in first-draft documentation for this project:
@@ -333,7 +343,9 @@ Features introduced in specific versions get a callout: `> **Available since v0.
 
 The documentation tracks the current release. When a feature changes incompatibly, add a versioned callout explaining both old and new behaviour. Do not maintain separate documentation trees for old versions — migration guides and CHANGELOG provide backward-compatibility information. When a deprecation is introduced, add `> **Deprecated since vX.Y.Z**` alongside the existing `> **Available since**` callout. Remove deprecated content only after two minor releases have passed.
 
-When a single page accumulates more than three simultaneous `> **Available since**` callouts across different sections — roughly the density at which a reader begins skimming past version metadata without absorbing it — the prose has grown too fragmented for versioned callouts to carry alone. Refactor the page around current behavior and move earlier-version details to a dedicated migration note in `docs/src/reference/migration-notes.md` or to the CHANGELOG, rather than adding another inline callout.
+when a single page accumulates more than three `> **Available since**` callouts anywhere in the document — the threshold is three total, regardless of how far apart they appear in the page — the prose has grown too fragmented for versioned callouts to carry alone. Refactor the page around current behavior and move earlier-version details to a dedicated migration note in `docs/src/reference/migration-notes.md` or to the CHANGELOG, rather than adding another inline callout.
+
+**URL versioning**: The documentation site always reflects the current release. There are no per-version URL snapshots (e.g., no `/v0.31/`). This is a deliberate decision: maintaining parallel documentation trees is expensive, and pg_ripple's migration scripts plus CHANGELOG provide the backward-compatibility story. Any content that describes behavior specific to an older version must be placed in `docs/src/reference/migration-notes.md` or the CHANGELOG — not in main documentation pages — so that users on older versions can find it even when the current page no longer describes their behavior.
 
 ### Term Formatting
 
@@ -349,7 +361,7 @@ Each page sets a `title` and `description` in mdBook front matter. Titles follow
 
 ### Phase 0: CI Test Harness (Prerequisite)
 
-Build the infrastructure that keeps examples honest before writing any new pages. The harness is a script that: (1) spins up a local pg_ripple instance via `cargo pgrx run pg18` or Docker, (2) extracts fenced SQL code blocks from markdown files under `docs/src/`, (3) executes them in document order with per-file setup and teardown, and (4) compares stdout against expected output embedded in the markdown as a comment block directly below each code block. Fixture data lives in `docs/fixtures/` and is loaded once per test run. One shared fixture dataset is required: a **bibliographic dataset** (papers, authors, institutions, topics, citations, and pre-computed embeddings). This dataset is realistic, enterprise-adjacent, and supports every feature chapter naturally — entity relationships (authors/papers/institutions), typed literals (publication dates, DOIs), named graphs (conference proceedings as separate graphs), inference (co-authorship transitivity), SHACL validation (mandatory fields), and hybrid retrieval (vector similarity over paper embeddings). A single shared dataset across all chapters is simpler to maintain than the separate “movie/person dataset for features” + “document corpus for AI” split. The CI job runs the harness on every PR that touches `docs/`. Without this infrastructure, Phase 1 examples will rot immediately. Estimated scope: approximately one week (harness script + Docker integration + fixture datasets + CI job wiring + first end-to-end green run). Phase 0 is considered done only when the CI job has passed on a real PR, not merely when the script runs locally.
+Build the infrastructure that keeps examples honest before writing any new pages. The harness is a script that: (1) spins up a local pg_ripple instance via `cargo pgrx run pg18` or Docker, (2) extracts fenced SQL code blocks from markdown files under `docs/src/`, (3) executes them in document order with per-file setup and teardown, and (4) compares stdout against expected output embedded in the markdown as a comment block directly below each code block. Fixture data lives in `docs/fixtures/` and is loaded once per test run. One shared fixture dataset is required: a **bibliographic dataset** (papers, authors, institutions, topics, citations, and pre-computed embeddings). This dataset is intentionally academic: papers, authors, and citations are well-understood, license-clear, and supported by public data sources (Semantic Scholar Open Graph, OpenAlex), which simplifies fixture generation. The tradeoff against a product-catalog or supply-chain dataset is domain specificity — acknowledge this honestly in the tutorial introduction so that Data Engineers from non-academic industries can map the patterns to their own domains. The coverage remains strong — entity relationships (authors/papers/institutions), typed literals (publication dates, DOIs), named graphs (conference proceedings as separate graphs), inference (co-authorship transitivity), SHACL validation (mandatory fields), and hybrid retrieval (vector similarity over paper embeddings). Where a feature chapter benefits from a more commercial scenario, supplement the shared dataset with a brief inline example rather than replacing the dataset. A single shared dataset across all chapters is simpler to maintain than the separate “movie/person dataset for features” + “document corpus for AI” split. The CI job runs the harness on every PR that touches `docs/`. Without this infrastructure, Phase 1 examples will rot immediately. Estimated scope: approximately one week (harness script + Docker integration + fixture datasets + CI job wiring + first end-to-end green run). Phase 0 is considered done only when the CI job has passed on a real PR, not merely when the script runs locally.
 
 ### Phase 1: Foundation (Immediate)
 
@@ -396,7 +408,7 @@ Documentation succeeds when:
 
 2. **Thirty-minute onboarding**: A developer loads data, runs a query, and understands the core concepts within thirty minutes, following the guided tutorial.
 
-3. **Self-service problem solving**: At least 80% of "Was this helpful?" widget responses on any given page are positive, measured monthly. A supplementary metric is the ratio of `docs-gap`-labelled GitHub Discussions to total questions per quarter, with a target of below 20%. (The widget measures satisfaction, not self-service rate directly — the `docs-gap` ratio provides the self-service signal.) Tracked via: a "Was this helpful?" two-button widget on each page (results posted to a dedicated GitHub Discussion thread monthly), GitHub Discussions tagged with a `docs-gap` label in a dedicated category, and a quarterly review of site search queries that return zero results. **Tooling required** (mdBook provides none of this natively): select and configure (1) a privacy-respecting analytics provider (Plausible, Umami, or GoatCounter) for page-view and zero-result search tracking, (2) a custom mdBook preprocessor or lightweight JavaScript snippet for the two-button widget, and (3) a GitHub Discussion category with a `docs-gap` label and triage workflow. Tooling selection and integration must be confirmed before Phase 0 is considered complete; without it, this success criterion is unmeasurable.
+3. **Self-service problem solving**: At least 80% of "Was this helpful?" widget responses on any given page are positive, measured monthly. A supplementary metric is the ratio of `docs-gap`-labelled GitHub Discussions to total questions per quarter, with a target of below 20%. (The widget measures satisfaction, not self-service rate directly — the `docs-gap` ratio provides the self-service signal.) Tracked via: a "Was this helpful?" two-button widget on each page (results posted to a dedicated GitHub Discussion thread monthly), GitHub Discussions tagged with a `docs-gap` label in a dedicated category, and a quarterly review of site search queries that return zero results. **Tooling required** (mdBook provides none of this natively): select and configure (1) a privacy-respecting analytics provider (Plausible, Umami, or GoatCounter) for page-view and zero-result search tracking, (2) a custom mdBook preprocessor or lightweight JavaScript snippet for the two-button widget, and (3) a GitHub Discussion category with a `docs-gap` label and triage workflow. Tooling selection and integration must be completed and merged before Phase 2 ships; without it, this success criterion is unmeasurable. This work is tracked independently of Phase 0 — the CI harness must not be blocked on analytics procurement or tooling decisions.
 
 4. **Working examples**: Every code example works without modification against the current release. CI enforces this.
 
@@ -404,64 +416,66 @@ Documentation succeeds when:
 
 6. **Honest comparisons**: The “When to Use pg_ripple” page contains zero factually incorrect comparison claims. Verified by a scheduled team review within 30 days of any major competing product release and within 30 days of each pg_ripple minor release. Claims that cannot be verified against current third-party documentation are replaced with links to that documentation rather than maintained as inline assertions.
 
-7. **Community contribution**: Documentation PRs from external contributors indicate that the structure is clear enough for others to extend.
+7. **Community contribution**: At least two documentation PRs from external contributors are merged within six months of Phase 2 completion. This is a lagging signal that the structure is navigable enough for others to extend without guidance from the core team. Track via a `docs-contributor` GitHub PR label; declare the criterion failed if no external docs PRs arrive and investigate whether onboarding friction (missing contributor guide, complex toolchain) is the cause.
 
 ---
 
 ## Appendix: Existing Documentation Inventory
 
-The following pages exist in `docs/src/` and should be restructured or rewritten to match this plan:
+The following pages exist in `docs/src/` and should be restructured or rewritten to match this plan.
+
+**Quality ratings**: **K** = Keep (light restructuring, content is largely sound), **R** = Rewrite (existing content is a useful starting point but needs substantial revision — typically because it is in function-listing reference format and must become a narrative guide), **X** = Replace from scratch (current content is inadequate as a starting point).
 
 ### Pages to restructure into Feature Deep Dives
-- `user-guide/sql-reference/triple-crud.md` → Storing Knowledge chapter
-- `user-guide/sql-reference/bulk-load.md` → Loading Data chapter
-- `user-guide/sql-reference/sparql-query.md` → Querying with SPARQL chapter
-- `user-guide/sql-reference/sparql-update.md` → Querying with SPARQL chapter (Update section)
-- `user-guide/sql-reference/shacl.md` → Validating Data Quality chapter
-- `user-guide/sql-reference/datalog.md` → Reasoning and Inference chapter
-- `user-guide/sql-reference/serialization.md` → Exporting and Sharing chapter
-- `user-guide/sql-reference/fts.md` → AI Retrieval & Graph RAG chapter (§2.7, full-text search section)
-- `user-guide/sql-reference/http-endpoint.md` → APIs and Integration chapter
-- `user-guide/sql-reference/federation.md` → APIs and Integration chapter
-- `user-guide/sql-reference/framing-views.md` → Exporting and Sharing chapter
+- `user-guide/sql-reference/triple-crud.md` → Storing Knowledge chapter — **R**
+- `user-guide/sql-reference/bulk-load.md` → Loading Data chapter — **R**
+- `user-guide/sql-reference/sparql-query.md` → Querying with SPARQL chapter — **R**
+- `user-guide/sql-reference/sparql-update.md` → Querying with SPARQL chapter (Update section) — **R**
+- `user-guide/sql-reference/shacl.md` → Validating Data Quality chapter — **R**
+- `user-guide/sql-reference/datalog.md` → Reasoning and Inference chapter — **R**
+- `user-guide/sql-reference/serialization.md` → Exporting and Sharing chapter — **R**
+- `user-guide/sql-reference/fts.md` → AI Retrieval & Graph RAG chapter (§2.7, full-text search section) — **R**
+- `user-guide/sql-reference/http-endpoint.md` → APIs and Integration chapter — **R**
+- `user-guide/sql-reference/federation.md` → APIs and Integration chapter — **R**
+- `user-guide/sql-reference/framing-views.md` → Exporting and Sharing chapter — **R**
 
 ### Pages to restructure into Operations
-- `user-guide/configuration.md` → Configuration and Tuning
-- `user-guide/scaling.md` → Scaling
-- `user-guide/operations.md` → Monitoring and Observability
-- `user-guide/pre-deployment.md` → Deployment Models
-- `user-guide/backup-restore.md` → Backup and Disaster Recovery
-- `user-guide/upgrading.md` → Upgrading Safely
+- `user-guide/configuration.md` → Configuration and Tuning — **K**
+- `user-guide/scaling.md` → Scaling — **K**
+- `user-guide/operations.md` → Monitoring and Observability — **K**
+- `user-guide/pre-deployment.md` → Deployment Models — **K**
+- `user-guide/backup-restore.md` → Backup and Disaster Recovery — **K**
+- `user-guide/upgrading.md` → Upgrading Safely — **K**
 
 ### Pages to preserve and enhance
-- `user-guide/introduction.md` → Landing Page (rewrite for non-technical audience)
-- `user-guide/installation.md` → Installation (expand with Docker-first approach)
-- `user-guide/getting-started.md` → Hello World walkthrough (expand with expected output)
-- `user-guide/playground.md` → Part of Installation (Docker section)
-- `user-guide/contributing.md` → Contributing (Reference section)
-- `user-guide/graphrag.md` → Exporting and Sharing chapter (§2.6, GraphRAG section)
-- `user-guide/hybrid-search.md` → AI Retrieval & Graph RAG chapter (§2.7, hybrid retrieval section)
-- `user-guide/rag.md` → AI Retrieval & Graph RAG chapter (§2.7, RAG pipeline section)
-- `user-guide/geospatial.md` → **Deprecated**: geospatial is out of scope for §2.1–2.8 and has no current roadmap item. Replace the page content with a deprecation notice during Phase 1 and remove the page entirely in Phase 4. No `docs-gap` issue required.
-- `user-guide/vector-federation.md` → AI Retrieval & Graph RAG chapter (§2.7, hybrid retrieval section)
-- `user-guide/graphrag-enrichment.md` → Exporting and Sharing chapter (§2.6, alongside `graphrag.md`)
+- `user-guide/introduction.md` → Landing Page (rewrite for non-technical audience) — **R**
+- `user-guide/installation.md` → Installation (expand with Docker-first approach) — **K**
+- `user-guide/getting-started.md` → Hello World walkthrough (expand with expected output) — **K**
+- `user-guide/playground.md` → Part of Installation (Docker section) — **K**
+- `user-guide/contributing.md` → Contributing (Reference section) — **K**
+- `user-guide/graphrag.md` → Exporting and Sharing chapter (§2.6, GraphRAG section) — **K**
+- `user-guide/hybrid-search.md` → AI Retrieval & Graph RAG chapter (§2.7, hybrid retrieval section) — **K**
+- `user-guide/rag.md` → AI Retrieval & Graph RAG chapter (§2.7, RAG pipeline section) — **K**
+- `user-guide/geospatial.md` → **Deprecated**: geospatial is out of scope for §2.1–2.8 and has no current roadmap item. Replace the page content with a deprecation notice during Phase 1 and remove the page entirely in Phase 4. No `docs-gap` issue required. — **X**
+- `user-guide/vector-federation.md` → AI Retrieval & Graph RAG chapter (§2.7, hybrid retrieval section) — **K**
+- `user-guide/graphrag-enrichment.md` → Exporting and Sharing chapter (§2.6, alongside `graphrag.md`) — **K**
 
 ### Best-practices pages to fold into Feature Deep Dives
-- `user-guide/best-practices/bulk-loading.md` → Loading Data (Performance section)
-- `user-guide/best-practices/sparql-patterns.md` → Querying with SPARQL (Performance section)
-- `user-guide/best-practices/shacl-patterns.md` → Validating Data Quality (Common Patterns)
-- `user-guide/best-practices/datalog-optimization.md` → Reasoning and Inference (Performance)
-- `user-guide/best-practices/federation-performance.md` → APIs and Integration (Performance)
-- `user-guide/best-practices/update-patterns.md` → Querying with SPARQL (Update Patterns)
-- `user-guide/best-practices/data-modeling.md` → Storing Knowledge (Common Patterns)
+- `user-guide/best-practices/bulk-loading.md` → Loading Data (Performance section) — **K**
+- `user-guide/best-practices/sparql-patterns.md` → Querying with SPARQL (Performance section) — **K**
+- `user-guide/best-practices/shacl-patterns.md` → Validating Data Quality (Common Patterns) — **K**
+- `user-guide/best-practices/datalog-optimization.md` → Reasoning and Inference (Performance) — **K**
+- `user-guide/best-practices/federation-performance.md` → APIs and Integration (Performance) — **K**
+- `user-guide/best-practices/update-patterns.md` → Querying with SPARQL (Update Patterns) — **K**
+- `user-guide/best-practices/data-modeling.md` → Storing Knowledge (Common Patterns) — **K**
 
 ### Reference pages to preserve
-- `reference/faq.md` → FAQ (expand to 25–30 questions)
-- `reference/troubleshooting.md` → Troubleshooting (operations section)
-- `reference/error-reference.md` → Error Message Catalog
-- `reference/changelog.md` → Release Notes (mirror)
-- `reference/roadmap.md` → Roadmap (mirror)
-- `reference/security.md` → Security (operations section)
-- `reference/w3c-conformance.md` → SPARQL Compliance Matrix
-- `reference/guc-reference.md` → Fold into Configuration and Tuning
-- `reference/api-stability.md` → Preserve in Reference section
+- `reference/faq.md` → FAQ (expand to 25–30 questions) — **K**
+- `reference/troubleshooting.md` → Troubleshooting (operations section) — **K**
+- `reference/error-reference.md` → Error Message Catalog — **K**
+- `reference/changelog.md` → Release Notes (mirror) — **K**
+- `reference/roadmap.md` → Roadmap (mirror) — **K**
+- `reference/security.md` → Security (operations section) — **K**
+- `reference/w3c-conformance.md` → SPARQL Compliance Matrix — **K**
+- `reference/guc-reference.md` → Fold into Configuration and Tuning — **K**
+- `reference/api-stability.md` → Preserve in Reference section — **K**
