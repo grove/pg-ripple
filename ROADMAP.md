@@ -2876,7 +2876,7 @@ See [plans/ecosystem/datalog.md §14.2.8 and §14.2.14](plans/ecosystem/datalog.
 ---
 
 <details>
-<summary><strong>v0.37.0 — Storage Concurrency Hardening &amp; Error Safety</strong> ✅ Released</summary>
+<summary>Completed items (click to expand)</summary>
 
 ## v0.37.0 — Storage Concurrency Hardening & Error Safety
 
