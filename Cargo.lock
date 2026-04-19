@@ -460,6 +460,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "crossbeam-channel"
+version = "0.5.15"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "82b8f8f868b36967f9606790d1903570de9ceaf870a7bf9fbbd3016d636a2cb2"
+dependencies = [
+ "crossbeam-utils",
+]
+
+[[package]]
 name = "crossbeam-utils"
 version = "0.8.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1647,15 +1656,17 @@ dependencies = [
 
 [[package]]
 name = "pg_ripple"
-version = "0.40.0"
+version = "0.41.0"
 dependencies = [
  "chrono",
+ "crossbeam-channel",
  "libc",
  "lru",
  "oxrdf",
  "parquet",
  "pgrx",
  "pgrx-tests",
+ "postgres",
  "rio_api",
  "rio_turtle",
  "rio_xml",

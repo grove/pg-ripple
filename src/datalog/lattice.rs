@@ -565,6 +565,7 @@ fn vp_read_expr(pred_id: i64) -> String {
 #[pgrx::pg_schema]
 mod tests {
     use super::*;
+    #[allow(unused_imports)]
     use pgrx::prelude::*;
 
     #[test]

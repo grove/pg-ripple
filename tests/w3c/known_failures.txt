@@ -1,0 +1,20 @@
+# W3C SPARQL 1.1 known failures
+#
+# Format: <test-IRI>  <one-line reason>
+#
+# Failures listed here are reported as XFAIL (expected failure) in CI.
+# Any test listed here that unexpectedly passes is reported as XPASS — a CI
+# warning indicating the entry should be removed.
+#
+# Guidelines:
+#   - Only add entries for confirmed bugs, not test framework issues.
+#   - Add a ticket link or short explanation in the comment.
+#   - Remove entries as soon as the underlying bug is fixed.
+#   - SERVICE tests against live external endpoints are always SKIP (not here).
+#
+# Target at release v0.41.0: 0 entries for optional and aggregates categories.
+# Full suite target: ≤ 50 entries.
+#
+# ─────────────────────────────────────────────────────────────────────────────
+# Property-path tests with GRAPH — fix pending in v0.42.0
+# http://www.w3.org/2009/sparql/docs/tests/data-sparql11/property-path/manifest#pp35  property path inside GRAPH — fix pending

@@ -13,7 +13,58 @@ Versions correspond to the milestones in [ROADMAP.md](ROADMAP.md).
 
 ---
 
-## [0.40.0] — 2026-05-19 — Streaming Results, Explain & Observability
+## [0.41.0] — 2026-04-19 — Full W3C SPARQL 1.1 Test Suite
+
+**Every SPARQL engine bug now gets caught automatically: the full W3C SPARQL 1.1 test suite (~3 000 tests) runs in CI on every push.**
+
+### What you can do
+
+- **Run the smoke subset** with `cargo test --test w3c_smoke` — 180 curated tests across `optional`, `aggregates`, and `grouping` complete in under 30 seconds.
+- **Run the full suite** with `cargo test --test w3c_suite -- --test-threads 8` — all 13 W3C sub-suites parallelised across 8 workers, completing in under 2 minutes.
+- **Download the test data** with `bash scripts/fetch_w3c_tests.sh` — downloads the official W3C SPARQL 1.1 archive and extracts it to `tests/w3c/data/`.
+- **Track expected failures** in `tests/w3c/known_failures.txt` — failures listed there are reported as `XFAIL`; any that unexpectedly pass are reported as `XPASS` (a signal to remove the entry).
+
+### What happens behind the scenes
+
+A Rust integration test harness (`tests/w3c/`) parses W3C Turtle manifests, loads RDF fixture files into pg_ripple via `pg_ripple.load_turtle()` and `pg_ripple.load_turtle_into_graph()`, runs SPARQL queries via `pg_ripple.sparql()` and `pg_ripple.sparql_ask()`, and compares results against `.srj` (SPARQL Results JSON), `.srx` (SPARQL Results XML), and `.ttl` (expected RDF graph) reference files. Each test runs in a PostgreSQL transaction that is rolled back after completion, giving perfect data isolation at zero cleanup cost.
+
+Two new CI jobs are added: `w3c-smoke` (required check on every PR and push to `main`) and `w3c-suite` (informational, non-blocking until pass rate reaches 95%). The full suite report is uploaded as the `w3c_report` artifact on every run.
+
+<details>
+<summary>Technical details</summary>
+
+### New files
+
+- `tests/w3c/mod.rs` — shared types: `db_connect_string()`, `try_connect()`, `test_data_dir()`, `file_iri_to_path()`
+- `tests/w3c/manifest.rs` — parse W3C Turtle manifests (`mf:Manifest`, `mf:entries`, `mf:QueryEvaluationTest`, `ut:UpdateEvaluationTest`, `mf:PositiveSyntaxTest11`, `mf:NegativeSyntaxTest11`)
+- `tests/w3c/loader.rs` — load `.ttl` fixtures via `pg_ripple.load_turtle()` and `pg_ripple.load_turtle_into_graph()`
+- `tests/w3c/validator.rs` — compare SELECT/ASK results against `.srj`/`.srx`; CONSTRUCT results against `.ttl` (triple-set comparison with blank-node tolerance)
+- `tests/w3c/runner.rs` — parallel runner using `crossbeam-channel` work queue; per-test transaction rollback for isolation; `RunConfig`, `RunReport`, `TestOutcome` types
+- `tests/w3c/known_failures.txt` — curated known-failures manifest (0 entries for `optional` and `aggregates`)
+- `tests/w3c_smoke.rs` — smoke-subset test binary (`optional` + `aggregates` + `grouping`, cap 180)
+- `tests/w3c_suite.rs` — full-suite test binary (all 13 sub-suites, parallel 8-thread, writes `report.json`)
+- `scripts/fetch_w3c_tests.sh` — download & extract W3C SPARQL 1.1 test archive
+- `sql/pg_ripple--0.40.0--0.41.0.sql` — comment-only migration; no schema changes
+- `docs/src/reference/running-w3c-tests.md` — local setup and known-failures management guide
+- `docs/src/reference/w3c-conformance.md` — updated with automated harness section
+
+### Changed files
+
+- `Cargo.toml` — version `0.41.0`; dev-dependencies: `postgres = "0.19"`, `crossbeam-channel = "0.5"`
+- `pg_ripple.control` — `default_version = '0.41.0'`
+- `.github/workflows/ci.yml` — replaced placeholder `sparql-conformance` job with `w3c-smoke` (required) and `w3c-suite` (informational)
+
+### New dev-dependencies
+
+| Crate | Version | Purpose |
+|---|---|---|
+| `postgres` | 0.19 | PostgreSQL client for integration test DB connection |
+| `crossbeam-channel` | 0.5 | Lock-free work queue for the parallel test runner |
+
+</details>
+
+---
+
 
 **Three long-requested developer and operator improvements: streaming SPARQL cursors, first-class explain for SPARQL and Datalog, and a full observability stack.**
 

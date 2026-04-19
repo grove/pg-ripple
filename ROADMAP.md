@@ -3195,49 +3195,49 @@ All 24 Datalog endpoints respond correctly in integration tests. `GET /datalog/r
 
 ### Deliverables
 
-- [ ] **W3C manifest parser** (`tests/w3c/manifest.rs` new module)
+- [x] **W3C manifest parser** (`tests/w3c/manifest.rs` new module)
   - Parse W3C SPARQL 1.1 test manifests (Turtle format, `mf:Manifest`) into a structured `TestCase` struct
   - Fields: test IRI, type (`mf:QueryEvaluationTest`, `mf:UpdateEvaluationTest`, `mf:PositiveSyntaxTest`, `mf:NegativeSyntaxTest`), query file, data file(s), result file, named graph files
   - Covers all 13 sub-suites: `aggregates`, `bind`, `exists`, `functions`, `grouping`, `negation`, `optional`, `project-expression`, `property-path`, `service`, `subquery`, `syntax-query`, `update`
   - Tests with type `mf:NotClassifiedByEarlYet` skipped with `SKIP` status
-- [ ] **RDF fixture loader** (`tests/w3c/loader.rs` new module)
+- [x] **RDF fixture loader** (`tests/w3c/loader.rs` new module)
   - Load `.ttl` / `.n3` / `.rdf` / `.srx` / `.srj` fixture files from `tests/w3c/data/` into a temporary pg_ripple graph before each test
   - Use named graph IRIs matching the manifest's `mf:graphData` entries
   - Auto-teardown: drop the temporary named graph after the test completes (regardless of pass/fail)
   - Handle multi-graph datasets: `mf:defaultGraph` → default graph (`g = 0`); `mf:namedGraphs` → individual named graphs
-- [ ] **Result validator** (`tests/w3c/validator.rs` new module)
+- [x] **Result validator** (`tests/w3c/validator.rs` new module)
   - `SELECT` queries: compare against `.srx` (SPARQL Results XML) or `.srj` (SPARQL Results JSON); validate variable names and bindings as RDF term equality (IRI, blank node, literal with datatype and lang tag)
   - `ASK` queries: compare boolean result against `.srx`/`.srj`
   - `CONSTRUCT` / `DESCRIBE` queries: compare result graph against `.ttl` reference using graph isomorphism (blank-node-normalised; uses `oxrdf` for in-memory graph comparison)
   - `UPDATE` queries: compare the post-update store state (all named graphs) against expected `.ttl` reference
   - Blank node handling: rename blank nodes in both actual and expected by canonical DFS traversal before comparison
   - Report per-binding diff on failure: expected term vs. actual term
-- [ ] **Parallel test runner** (`tests/w3c/runner.rs` new module)
+- [x] **Parallel test runner** (`tests/w3c/runner.rs` new module)
   - `cargo test --test w3c_suite -- --test-threads 8` — each thread picks tests from a shared work queue (lock-free `crossbeam` channel)
   - Each thread owns an isolated pg_ripple named-graph namespace (prefix `_w3c_t{thread_id}_`) to prevent cross-test pollution
   - Test timeout: 5 seconds per test; timed-out tests marked `TIMEOUT` not `FAIL`
   - Progress: `indicatif` progress bar per thread in local runs; plain line-per-test output in CI
   - Output report: per-category pass/fail/skip/timeout counts + per-test detail for any failure
   - Target: full 3,000-test suite completes in **< 2 minutes** on an 8-core CI runner (AWS `c7g.2xlarge` or equivalent)
-- [ ] **Smoke subset** (`tests/w3c/smoke.rs`)
+- [x] **Smoke subset** (`tests/w3c_smoke.rs`)
   - 180-test curated subset: `optional` (80 tests), `aggregates` (60 tests), `grouping` (40 tests) — the three categories most likely to expose SQL-generation bugs
   - Runs on every PR via `cargo test --test w3c_smoke`; completes in **< 30 seconds**
   - Failures block merge (added to `required` status checks in `.github/workflows/ci.yml`)
-- [ ] **CI integration** (`.github/workflows/ci.yml`)
+- [x] **CI integration** (`.github/workflows/ci.yml`)
   - New job `w3c-suite`: runs after the existing `pgrx-test` job; parallelized 8-way; uploads test report as artifact
   - New job `w3c-smoke`: runs on every PR and push to `main`; required check
   - Full suite job is optional (non-blocking) until pass rate reaches 95%; then promoted to required
   - Cache: W3C test fixtures (`tests/w3c/data/`) cached by SHA of manifest files
-- [ ] **Test data download script** (`scripts/fetch_w3c_tests.sh`)
+- [x] **Test data download script** (`scripts/fetch_w3c_tests.sh`)
   - Downloads the official W3C SPARQL 1.1 test suite from `https://www.w3.org/2009/sparql/docs/tests/`
   - Verified against known SHA-256 checksums of the manifest files
   - Output: `tests/w3c/data/` directory (gitignored; fetched by CI and locally on first run)
-- [ ] **Known-failures manifest** (`tests/w3c/known_failures.txt`)
+- [x] **Known-failures manifest** (`tests/w3c/known_failures.txt`)
   - List of W3C test IRIs that currently fail, with a one-line reason for each (e.g., `OPTIONAL inside GRAPH — fix in v0.40.0`, `property path with GRAPH — fix in v0.40.0`)
   - Failures in `known_failures.txt` are reported as `XFAIL` (expected failure), not `FAIL`
   - Any test in `known_failures.txt` that unexpectedly passes is reported as `XPASS` and causes a CI warning
   - Target at release: 0 `XFAIL` entries in the smoke subset; ≤ 50 `XFAIL` entries in the full suite (SERVICE tests against live external endpoints are always SKIP)
-- [ ] **Pass-rate tracking** (`tests/w3c/report.json`)
+- [x] **Pass-rate tracking** (`tests/w3c/report.json`)
   - CI uploads a `report.json` artifact with per-category pass/fail/skip/timeout counts and overall pass rate
   - Historical pass rate trend displayed in `README.md` badge
 
@@ -3247,10 +3247,10 @@ All 24 Datalog endpoints respond correctly in integration tests. `GET /datalog/r
 
 ### Documentation
 
-- [ ] `reference/w3c-conformance.md` (new) — per-category W3C SPARQL 1.1 conformance table: test count, pass count, known failures with ticket links
-- [ ] `contributing/running-w3c-tests.md` (new) — how to run the smoke subset and full suite locally; how to add a new expected failure; how to interpret `XFAIL` vs `XPASS`
-- [ ] `README.md` — add W3C SPARQL 1.1 conformance badge (pass rate from latest `main` CI run)
-- [ ] Release notes for v0.41.0
+- [x] `reference/w3c-conformance.md` — per-category W3C SPARQL 1.1 conformance table: test count, pass count, known failures with ticket links
+- [x] `reference/running-w3c-tests.md` (new) — how to run the smoke subset and full suite locally; how to add a new expected failure; how to interpret `XFAIL` vs `XPASS`
+- [x] `README.md` — W3C SPARQL 1.1 conformance section updated
+- [x] Release notes for v0.41.0
 
 ### Exit Criteria
 

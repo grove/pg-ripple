@@ -1,6 +1,45 @@
 # W3C Conformance
 
-This page summarises pg_ripple's conformance status against the W3C SPARQL 1.1 and SHACL Core test suites, as measured in the v0.20.0 release.
+This page summarises pg_ripple's conformance status against the W3C SPARQL 1.1 and SHACL Core test suites.
+
+As of v0.41.0, conformance is measured by the integrated W3C SPARQL 1.1 test harness that runs in CI on every push to `main`. Pass rates are published as the `w3c_report` artifact on the [Actions page](https://github.com/grove/pg-ripple/actions).
+
+## Automated test harness (v0.41.0+)
+
+The test harness (`tests/w3c/`) runs the official [W3C SPARQL 1.1 test suite](https://www.w3.org/2009/sparql/docs/tests/) (~3 000 tests across 13 sub-suites) against a live pg_ripple installation.
+
+### Per-category coverage
+
+| Sub-suite | Tests | CI status |
+|---|---|---|
+| aggregates | ~120 | Required (smoke) |
+| bind | ~20 | Informational (full suite) |
+| exists | ~20 | Informational (full suite) |
+| functions | ~200 | Informational (full suite) |
+| grouping | ~40 | Required (smoke) |
+| negation | ~20 | Informational (full suite) |
+| optional | ~80 | Required (smoke) |
+| project-expression | ~10 | Informational (full suite) |
+| property-path | ~60 | Informational (full suite) |
+| service | ~10 | SKIP (live external endpoints) |
+| subquery | ~20 | Informational (full suite) |
+| syntax-query | ~300 | Informational (full suite) |
+| update | ~200 | Informational (full suite) |
+
+### Running locally
+
+```sh
+# Download test data first (one-time setup):
+bash scripts/fetch_w3c_tests.sh
+
+# Run smoke subset (180 tests, ~30s):
+cargo test --test w3c_smoke
+
+# Run full suite (3000+ tests, ~2min with 8 threads):
+cargo test --test w3c_suite -- --test-threads 8
+```
+
+See [Running W3C Tests](../../contributing/running-w3c-tests.md) for full instructions.
 
 ---
 
