@@ -981,6 +981,26 @@ pub static DRED_ENABLED: pgrx::GucSetting<bool> = pgrx::GucSetting::<bool>::new(
 /// triples at once.  Default: `1000`.
 pub static DRED_BATCH_SIZE: pgrx::GucSetting<i32> = pgrx::GucSetting::<i32>::new(1000);
 
+// ─── v0.35.0 GUCs ────────────────────────────────────────────────────────────
+
+/// GUC: maximum number of parallel background workers for Datalog stratum
+/// evaluation (v0.35.0).
+///
+/// Within a single stratum, rules deriving different predicates with no shared
+/// body dependencies are independent and can execute concurrently.  This GUC
+/// caps the concurrency at the given number.  Set to `1` (default) to use the
+/// serial path.  Higher values enable parallelism analysis and group-aware
+/// scheduling.  Maximum: `max_worker_processes - 3`.
+pub static DATALOG_PARALLEL_WORKERS: pgrx::GucSetting<i32> = pgrx::GucSetting::<i32>::new(4);
+
+/// GUC: minimum estimated total row count for a stratum before parallel group
+/// analysis is applied (v0.35.0).
+///
+/// When the estimated total row count across all derived predicates in a stratum
+/// is below this threshold, the serial evaluation path is used to avoid the
+/// overhead of dependency analysis.  Default: `10000`.
+pub static DATALOG_PARALLEL_THRESHOLD: pgrx::GucSetting<i32> = pgrx::GucSetting::<i32>::new(10_000);
+
 // ─── pg_trickle runtime detection (v0.6.0) ───────────────────────────────────
 
 /// The pg_trickle version that pg_ripple was tested against (A-4, v0.25.0).
@@ -1788,6 +1808,32 @@ pub extern "C-unwind" fn _PG_init() {
         &DRED_BATCH_SIZE,
         1,
         1_000_000,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+
+    // ── v0.35.0 GUCs ─────────────────────────────────────────────────────────
+
+    pgrx::GucRegistry::define_int_guc(
+        c"pg_ripple.datalog_parallel_workers",
+        c"Maximum parallel worker count for Datalog stratum evaluation; 1 = serial \
+          (default: 4, min: 1, max: 32) (v0.35.0)",
+        c"",
+        &DATALOG_PARALLEL_WORKERS,
+        1,
+        32,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+
+    pgrx::GucRegistry::define_int_guc(
+        c"pg_ripple.datalog_parallel_threshold",
+        c"Minimum estimated total-row count for a stratum before parallel group \
+          analysis is applied (default: 10000, min: 0) (v0.35.0)",
+        c"",
+        &DATALOG_PARALLEL_THRESHOLD,
+        0,
+        100_000_000,
         GucContext::Userset,
         GucFlags::default(),
     );
@@ -3935,6 +3981,8 @@ mod pg_ripple {
     /// - `"derived"`: total number of triples derived (i64)
     /// - `"iterations"`: number of fixpoint iterations performed (i32)
     /// - `"eliminated_rules"`: array of rule texts eliminated by subsumption checking (v0.29.0)
+    /// - `"parallel_groups"`: number of independent rule groups detected in the first stratum (v0.35.0)
+    /// - `"max_concurrent"`: effective worker count that would be used given `datalog_parallel_workers` (v0.35.0)
     ///
     /// Semi-naive evaluation avoids re-examining unchanged rows on each iteration,
     /// achieving iteration counts bounded by the longest derivation chain rather
@@ -3943,7 +3991,7 @@ mod pg_ripple {
     /// iteration.
     #[pg_extern]
     fn infer_with_stats(rule_set: default!(&str, "'custom'")) -> pgrx::JsonB {
-        let (derived, iterations, eliminated) =
+        let (derived, iterations, eliminated, parallel_groups, max_concurrent) =
             crate::datalog::run_inference_seminaive_full(rule_set);
         let mut obj = serde_json::Map::new();
         obj.insert(
@@ -3962,6 +4010,14 @@ mod pg_ripple {
                     .map(serde_json::Value::String)
                     .collect(),
             ),
+        );
+        obj.insert(
+            "parallel_groups".to_owned(),
+            serde_json::Value::Number(serde_json::Number::from(parallel_groups as i64)),
+        );
+        obj.insert(
+            "max_concurrent".to_owned(),
+            serde_json::Value::Number(serde_json::Number::from(max_concurrent as i64)),
         );
         pgrx::JsonB(serde_json::Value::Object(obj))
     }

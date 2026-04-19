@@ -1,0 +1,13 @@
+-- Migration 0.34.0 → 0.35.0: Parallel Stratum Evaluation & Incremental Rule Updates
+--
+-- New features in this release:
+--   - Parallel group analysis for Datalog stratum evaluation (v0.35.0)
+--   - `infer_with_stats()` now reports `"parallel_groups"` and `"max_concurrent"` fields
+--
+-- New GUCs (registered in _PG_init — no SQL DDL required):
+--   pg_ripple.datalog_parallel_workers  INT  DEFAULT 4
+--   pg_ripple.datalog_parallel_threshold INT DEFAULT 10000
+--
+-- No VP table schema changes in this release.
+-- All new functionality is delivered via compiled Rust functions registered
+-- through pgrx's CREATE FUNCTION machinery at extension update time.

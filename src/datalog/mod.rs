@@ -40,6 +40,7 @@ pub mod compiler;
 pub mod demand;
 pub mod dred;
 pub mod magic;
+pub mod parallel;
 pub mod parser;
 pub mod rewrite;
 pub mod stratify;
@@ -55,6 +56,7 @@ pub use demand::run_infer_demand;
 pub use dred::{check_dred_safety, run_dred_on_delete};
 pub use magic::parse_goal;
 pub use magic::run_infer_goal;
+pub use parallel::partition_into_parallel_groups;
 pub use parser::parse_rules;
 pub use stratify::check_aggregation_stratification;
 pub use stratify::check_subsumption;
@@ -637,10 +639,16 @@ pub fn run_inference_seminaive(rule_set_name: &str) -> (i64, i32) {
 }
 
 /// Like `run_inference_seminaive` but also returns eliminated rules from subsumption
-/// checking.  Returns `(total_derived, iterations, eliminated_rule_texts)`.
+/// checking and parallel analysis statistics.
 ///
-/// Used by `infer_with_stats()` to populate the `"eliminated_rules"` field (v0.29.0).
-pub fn run_inference_seminaive_full(rule_set_name: &str) -> (i64, i32, Vec<String>) {
+/// Returns `(total_derived, iterations, eliminated_rule_texts, parallel_groups, max_concurrent)`.
+///
+/// - `eliminated_rule_texts`: rule texts eliminated by subsumption checking (v0.29.0).
+/// - `parallel_groups`: number of independent rule groups in the first stratum (v0.35.0).
+/// - `max_concurrent`: effective worker count given `datalog_parallel_workers` (v0.35.0).
+///
+/// Used by `infer_with_stats()`.
+pub fn run_inference_seminaive_full(rule_set_name: &str) -> (i64, i32, Vec<String>, usize, usize) {
     ensure_catalog();
 
     // Load all rules to check subsumption before running inference.
@@ -664,7 +672,7 @@ pub fn run_inference_seminaive_full(rule_set_name: &str) -> (i64, i32, Vec<Strin
     };
 
     if rule_rows.is_empty() {
-        return (0, 0, vec![]);
+        return (0, 0, vec![], 0, 0);
     }
 
     let mut all_rules: Vec<Rule> = Vec::new();
@@ -675,9 +683,15 @@ pub fn run_inference_seminaive_full(rule_set_name: &str) -> (i64, i32, Vec<Strin
         }
     }
 
+    // Parallel analysis: partition rules into independent groups (v0.35.0).
+    let parallel_workers = crate::DATALOG_PARALLEL_WORKERS.get();
+    let analysis = crate::datalog::partition_into_parallel_groups(&all_rules, parallel_workers);
+    let parallel_groups = analysis.parallel_groups;
+    let max_concurrent = analysis.max_concurrent;
+
     let eliminated = check_subsumption(&all_rules);
     let (derived, iters) = run_inference_seminaive(rule_set_name);
-    (derived, iters, eliminated)
+    (derived, iters, eliminated, parallel_groups, max_concurrent)
 }
 
 /// Execute on-demand materialization for a rule set: run all rules in stratum

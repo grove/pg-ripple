@@ -343,3 +343,84 @@ SET pg_ripple.dred_enabled = false;
 SELECT pg_ripple.infer('my_rules');   -- full recompute once
 SET pg_ripple.dred_enabled = true;
 ```
+
+---
+
+## Parallel stratum evaluation (v0.35.0)
+
+Within a single stratum, rules deriving *different* predicates with no shared body dependencies are fully independent — their `INSERT … SELECT` statements touch distinct VP tables. pg_ripple analyses this dependency structure at inference time and partitions rules into parallel groups. The `infer_with_stats()` function reports this analysis.
+
+### Reading the parallel fields in infer_with_stats()
+
+```sql
+SELECT pg_ripple.infer_with_stats('owl-rl');
+```
+
+Example output:
+```json
+{
+  "derived": 1240,
+  "iterations": 4,
+  "eliminated_rules": [],
+  "parallel_groups": 3,
+  "max_concurrent": 3
+}
+```
+
+| Field | What it tells you |
+|-------|------------------|
+| `parallel_groups` | Number of independent rule groups detected in the rule set |
+| `max_concurrent` | Effective concurrent worker count: `min(parallel_groups, datalog_parallel_workers)` |
+
+A `parallel_groups` value of 1 means all rules form a single dependency chain — no parallelism is possible. Values > 1 indicate independent groups that can execute concurrently.
+
+### Tuning datalog_parallel_workers
+
+| Hardware | Recommended setting |
+|----------|---------------------|
+| Single-core or low-memory instance | `datalog_parallel_workers = 1` (serial) |
+| 2–4 core server | `datalog_parallel_workers = 2` |
+| 8+ core server | `datalog_parallel_workers = 4` (default) |
+| Dedicated inference workload | Set to `parallel_groups` value from `infer_with_stats()` |
+
+```sql
+-- Check how many parallel groups your rule set has before tuning workers.
+SELECT pg_ripple.infer_with_stats('my_rules')->>'parallel_groups' AS groups;
+
+-- Then set workers to match (capped at your CPU count - 3 for system workers).
+SET pg_ripple.datalog_parallel_workers = 4;
+```
+
+### Avoiding overhead on small rule sets
+
+The parallel analysis step adds a small overhead (dependency graph construction). For small rule sets or datasets, this overhead exceeds the parallelism benefit. Use `datalog_parallel_threshold` to skip analysis when the estimated total row count is below the threshold:
+
+```sql
+-- Skip parallel analysis for small strata (< 5000 rows).
+SET pg_ripple.datalog_parallel_threshold = 5000;
+
+-- Always analyse regardless of stratum size.
+SET pg_ripple.datalog_parallel_threshold = 0;
+```
+
+The default threshold of 10,000 rows eliminates overhead for typical development datasets while enabling parallelism for production-scale ontology closures.
+
+### SPARQL materialization freshness
+
+Parallel evaluation reduces the wall-clock time from a bulk `insert_triple` call to a fully materialized state. After calling `pg_ripple.infer()` or `pg_ripple.infer_with_stats()`, SPARQL queries that target derived VP tables immediately observe the newly derived facts:
+
+```sql
+-- Insert new data.
+SELECT pg_ripple.load_turtle($$ ... $$);
+
+-- Materialize derived predicates in parallel.
+SET pg_ripple.datalog_parallel_workers = 4;
+SELECT pg_ripple.infer_with_stats('owl-rl');
+
+-- SPARQL queries now see all derived facts.
+SELECT pg_ripple.sparql_query($$
+    SELECT ?x ?type WHERE { ?x a ?type . }
+$$);
+```
+
+The staleness window (the gap between data arrival and query visibility of derived facts) shrinks proportionally to the number of independent rule groups and available workers.

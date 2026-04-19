@@ -140,3 +140,26 @@ SELECT * FROM pg_ripple.sparql('
 ```
 
 For hierarchies where the maximum depth is known (e.g., from a SHACL `sh:maxDepth` annotation), this pattern typically reduces property path query latency by 30-60% compared to the unbounded inline recursive CTE.
+
+---
+
+## Materialization freshness after parallel inference (v0.35.0)
+
+When `pg_ripple.datalog_parallel_workers > 1`, the Datalog engine partitions rules into independent groups and executes them in the optimal order within a single transaction. After `infer_with_stats()` or `infer()` returns, SPARQL queries immediately observe all derived facts — there is no staleness window within the same session.
+
+```sql
+-- After bulk loading, re-materialize derived predicates.
+SELECT pg_ripple.load_turtle($$ <Alice> a <Person> . $$);
+SET pg_ripple.datalog_parallel_workers = 4;
+SELECT pg_ripple.infer_with_stats('owl-rl');
+
+-- SPARQL now sees all derived rdf:type, rdfs:subClassOf, owl:sameAs facts.
+SELECT pg_ripple.sparql('SELECT ?x ?type WHERE { ?x a ?type . }');
+```
+
+**Tip:** Check `parallel_groups` in the `infer_with_stats()` output to verify that your rule set benefits from parallelism. A value of 1 means all rules are in a single dependency chain; a value > 1 confirms that concurrent execution is possible.
+
+```sql
+-- Check parallel group count before tuning workers.
+SELECT pg_ripple.infer_with_stats('owl-rl')->>'parallel_groups';  -- e.g., "3"
+```

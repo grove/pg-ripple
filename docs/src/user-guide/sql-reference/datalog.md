@@ -663,3 +663,45 @@ Low-level entry point for the Delete-Rederive (DRed) algorithm. Normally invoked
 |-----|------|---------|-------------|
 | `pg_ripple.dred_enabled` | bool | `true` | Enable DRed incremental retraction; `false` falls back to full recompute |
 | `pg_ripple.dred_batch_size` | integer | `1000` | Maximum base triples to process in a single DRed transaction |
+
+---
+
+## Parallel Stratum Evaluation (v0.35.0)
+
+### Parallel evaluation GUCs
+
+Within a single stratum, rules that derive different predicates with no shared body dependencies can execute independently. pg_ripple analyses this dependency graph and partitions rules into groups. The `infer_with_stats()` function reports the number of groups detected.
+
+| GUC | Type | Default | Description |
+|-----|------|---------|-------------|
+| `pg_ripple.datalog_parallel_workers` | integer | `4` | Maximum parallel worker count for stratum evaluation; `1` = serial |
+| `pg_ripple.datalog_parallel_threshold` | integer | `10000` | Minimum estimated total row count before parallel analysis is applied |
+
+```sql
+-- Enable maximum parallelism for a large OWL RL closure.
+SET pg_ripple.datalog_parallel_workers = 8;
+SET pg_ripple.datalog_parallel_threshold = 0;
+SELECT pg_ripple.infer_with_stats('owl-rl');
+```
+
+### `infer_with_stats()` parallel fields
+
+The `infer_with_stats()` function now includes two additional fields in its JSONB output (v0.35.0):
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `parallel_groups` | integer | Number of independent rule groups detected in the rule set |
+| `max_concurrent` | integer | Effective worker count: `min(parallel_groups, datalog_parallel_workers)` |
+
+```sql
+SELECT pg_ripple.infer_with_stats('owl-rl');
+-- {
+--   "derived": 1240,
+--   "iterations": 4,
+--   "eliminated_rules": [],
+--   "parallel_groups": 3,
+--   "max_concurrent": 3
+-- }
+```
+
+A `parallel_groups` value of 1 means all rules form a single dependency chain and no parallelism is possible. Values > 1 indicate that independent groups exist.

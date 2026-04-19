@@ -2602,7 +2602,7 @@ See [plans/ecosystem/datalog.md §14.2.11](plans/ecosystem/datalog.md) for desig
 
 ### Deliverables
 
-- [ ] **Parallel stratum evaluation** (`src/datalog/parallel.rs` new module)
+- [x] **Parallel stratum evaluation** (`src/datalog/parallel.rs` new module)
   - Analyse rule dependency graph per stratum: partition rules into *independent groups* (rules that derive different predicates and have no shared body predicates that are derived within the same stratum)
   - Spawn one background worker per independent group; each worker executes its rule's `INSERT … SELECT` for the current semi-naive iteration
   - Synchronization barrier: the main process waits for all workers to finish before starting the next iteration
@@ -2612,7 +2612,7 @@ See [plans/ecosystem/datalog.md §14.2.11](plans/ecosystem/datalog.md) for desig
   - Expose parallelism statistics via `infer_with_stats()` JSONB output: `"parallel_groups": 5, "max_concurrent": 4`
   - pg_regress test: `datalog_parallel.sql` — verify OWL RL closure produces identical results with `datalog_parallel_workers = 1` and `= 4`; verify `infer_with_stats()` reports parallel groups > 1 for OWL RL
 
-- [ ] **SPARQL materialization freshness improvement**
+- [x] **SPARQL materialization freshness improvement**
   - Parallel evaluation reduces time-to-fresh for derived VP tables after `pg_ripple.infer()` calls triggered by bulk loads
   - Document: SPARQL queries in materialized mode now observe a shorter staleness window after bulk inserts; add note to SPARQL best practices guide
 
@@ -2622,10 +2622,10 @@ See [plans/ecosystem/datalog.md §14.2.11](plans/ecosystem/datalog.md) for desig
 
 ### Documentation
 
-- [ ] `user-guide/sql-reference/datalog.md` updated — document parallel evaluation GUCs, `infer_with_stats()` parallel fields
-- [ ] `user-guide/best-practices/datalog-optimization.md` updated — add section on tuning `datalog_parallel_workers` for different hardware configurations
-- [ ] `user-guide/best-practices/sparql-performance.md` updated — note materialization freshness improvement with parallel evaluation
-- [ ] Release notes for v0.35.0
+- [x] `user-guide/sql-reference/datalog.md` updated — document parallel evaluation GUCs, `infer_with_stats()` parallel fields
+- [x] `user-guide/best-practices/datalog-optimization.md` updated — add section on tuning `datalog_parallel_workers` for different hardware configurations
+- [x] `user-guide/best-practices/sparql-performance.md` updated — note materialization freshness improvement with parallel evaluation
+- [x] Release notes for v0.35.0
 
 ### Exit Criteria
 

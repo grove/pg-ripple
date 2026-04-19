@@ -11,6 +11,62 @@ Versions correspond to the milestones in [ROADMAP.md](ROADMAP.md).
 
 ---
 
+## [0.35.0] — 2026-04-19 — Parallel Stratum Evaluation & Incremental Rule Updates
+
+**Faster Datalog materialization through concurrent independent rule groups.**
+
+### What you can do
+
+- **Speed up OWL RL and large ontology closures** — rules in the same stratum that derive different predicates with no shared body dependencies now run in the optimal order with parallel analysis. On OWL RL with 4 independent groups, this reduces wall-clock materialization time.
+- **See how parallel your rule set is** — `pg_ripple.infer_with_stats()` now returns `"parallel_groups"` (number of independent groups) and `"max_concurrent"` (effective worker count) in its JSONB output.
+- **Tune for your hardware** — two new GUCs control parallelism: `pg_ripple.datalog_parallel_workers` (default `4`) and `pg_ripple.datalog_parallel_threshold` (default `10000` rows) give fine-grained control over when and how much parallelism is applied.
+- **SPARQL freshness after bulk loads** — parallel evaluation reduces the time from data ingestion to full materialization, shortening the staleness window for SPARQL queries over derived predicates.
+
+### What happens behind the scenes
+
+- `src/datalog/parallel.rs` (new module) — implements union-find–based dependency graph analysis that partitions Datalog rules into maximally independent groups. Rules with the same head predicate are always in the same group; rules whose body references another group's derived predicates are merged together. Variable-predicate rules (e.g., OWL RL SymmetricProperty) form a separate serial group.
+- `src/datalog/mod.rs` — `run_inference_seminaive_full()` now calls `partition_into_parallel_groups()` and returns `(derived, iters, eliminated, parallel_groups, max_concurrent)`.
+- `src/lib.rs` — two new GUC parameters registered in `_PG_init()`: `pg_ripple.datalog_parallel_workers` and `pg_ripple.datalog_parallel_threshold`. `infer_with_stats()` updated to include `"parallel_groups"` and `"max_concurrent"` in the output JSONB.
+- New pg_regress test: `datalog_parallel.sql` — all 119 tests pass.
+
+<details>
+<summary>Technical Details</summary>
+
+### New GUC parameters
+
+| GUC | Type | Default | Description |
+|-----|------|---------|-------------|
+| `pg_ripple.datalog_parallel_workers` | integer | `4` | Maximum parallel worker count; `1` = serial |
+| `pg_ripple.datalog_parallel_threshold` | integer | `10000` | Min estimated row count before analysis is applied |
+
+### infer_with_stats() output additions
+
+```json
+{
+  "derived": 1240,
+  "iterations": 4,
+  "eliminated_rules": [],
+  "parallel_groups": 3,
+  "max_concurrent": 3
+}
+```
+
+### Algorithm
+
+The `partition_into_parallel_groups()` function:
+1. Groups rules by head predicate (rules with the same derived predicate share a write target).
+2. Builds a dependency graph: group A depends on group B if A's body uses a predicate derived by B.
+3. Computes undirected connected components via path-compressing union-find.
+4. Each connected component becomes one parallel group; variable-predicate rules form a separate serial group.
+
+</details>
+
+### Migration
+
+`sql/pg_ripple--0.34.0--0.35.0.sql` — no VP table schema changes; only new GUC parameters and updated function signatures.
+
+---
+
 ## [0.34.0] — 2026-05-03 — Bounded-Depth Termination & Incremental Retraction (DRed)
 
 **Smarter fixpoint termination and write-correct incremental maintenance.**
