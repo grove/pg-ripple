@@ -68,17 +68,17 @@ A single screen that explains what pg_ripple does, what makes it different from 
 
 *Primary audience*: Decision-Maker, everyone arriving for the first time.
 
-#### Why Knowledge Graphs Matter
+#### Why Knowledge Graphs Matter *(publish as blog post, not a docs page)*
 
-A non-technical page (no code) explaining the problem pg_ripple solves in business terms. Use a concrete scenario: a company has customer data in one table, product data in another, interaction logs in a third, and a partner's product catalog in an external system. A knowledge graph connects all of these into a single queryable web of relationships. Show what questions become easy ("Which customers bought products similar to ones their connections recommended?") and what would be painful to answer with pure SQL. This page is for the Decision-Maker who needs to justify the technology to stakeholders.
+This content — a non-technical narrative explaining why knowledge graphs matter using a concrete business scenario — is better suited to a blog post or conference talk than a documentation page. Documentation users arrive with a specific task; they do not browse explainer articles in a sidebar. Publish this as an external post and link to it from the landing page under "Learn more."
 
-*Primary audience*: Decision-Maker, non-technical stakeholders.
+*Action*: Remove from site structure. File a content item to publish as a blog post on the project website or dev.to before Phase 1 ships.
 
-#### pg_ripple in 60 Seconds — One-Page Summary
+#### pg_ripple in 60 Seconds *(fold into landing page, not a separate URL)*
 
-A single printable or shareable page for evaluators who will not read the full documentation. Top half: three sentences on what pg_ripple does, one architecture diagram, and the three most important numbers (triples per second, conformance level, PostgreSQL version required). Bottom half: a comparison matrix against the three most common alternatives, a "when to use" / "when not to use" table, and a link to the installation page. This page is what gets shared in a Slack message or attached to an evaluation report. It must be accurate, unadorned, and current with every release.
+The content here — key numbers, a comparison matrix, a "when to use / when not to use" summary — belongs as a visually distinct summary section at the bottom of the landing page, not as a separate URL. A separate page adds navigation overhead: evaluators who share a link want the landing page, not a sub-page. If a printable one-pager is needed for conference or sales use, produce it as a PDF artifact outside the docs site.
 
-*Primary audience*: Decision-Maker.
+*Action*: Remove from site structure. Incorporate the key-numbers block and comparison summary into the landing page layout.
 
 #### When to Use pg_ripple
 
@@ -102,12 +102,12 @@ The fastest path from zero to working queries. Load ten triples about people and
 
 Picks up where Hello World ends. Assumes the reader has loaded and queried triples. The tutorial is structured in four self-contained segments of under ten minutes each, so readers can stop at any point with a working system — each segment leaves the reader with a functional, incrementally richer knowledge graph:
 
-1. **Load and Explore** — Import a Turtle file of movie/person/organization data; run SPARQL queries of increasing complexity (genre lookup, co-starring chains, decade aggregation); understand named graphs.
+1. **Load and Explore** — Import a Turtle file of bibliographic data (papers, authors, institutions); run SPARQL queries of increasing complexity (author lookup, citation chains, publication-decade aggregation); understand named graphs.
 2. **Validate** — Add SHACL shapes requiring every Movie to have a title and release year; observe a violation; fix it.
 3. **Reason** — Write a Datalog rule for transitive “worked-with” relationships; run `infer()`; query the derived facts.
 4. **Export** — Produce a JSON-LD document shaped for a REST API using `sparql_construct_jsonld()`.
 
-Readers who complete all four segments finish with a validated, reasoning-capable knowledge graph. Expected output is shown after every query. The movie/person/organization dataset established here is reused across the feature deep-dive chapters.
+Readers who complete all four segments finish with a validated, reasoning-capable knowledge graph. Expected output is shown after every query. The bibliographic dataset established here (papers, authors, institutions, topics, citations) is reused across the feature deep-dive chapters and the AI Retrieval & Graph RAG chapter.
 
 *Primary audience*: Data Engineer, Application Developer, Knowledge Architect.
 
@@ -133,7 +133,7 @@ Each major capability gets a self-contained chapter. These are not reference pag
 
 #### 2.1 Storing Knowledge
 
-How to model data as triples. Walk through a concrete domain (movies, people, organizations) and show each fact becoming a triple. Explain named graphs — when you need them (multi-source data, access control, versioning) and when you don't. Cover blank nodes (anonymous entities) with honest advice about when to use them and when to avoid them. Introduce RDF-star for statements about statements (provenance, confidence scores, temporal annotations). Show how types work (`rdf:type`) and how they interact with SHACL and Datalog. The reader finishes understanding how to translate a relational schema or a domain model into an RDF graph.
+How to model data as triples. Walk through a concrete domain (research papers, authors, institutions, topics) and show each fact becoming a triple. Explain named graphs — when you need them (multi-source data, access control, versioning) and when you don't. Cover blank nodes (anonymous entities) with honest advice about when to use them and when to avoid them. Introduce RDF-star for statements about statements (provenance, confidence scores, temporal annotations). Show how types work (`rdf:type`) and how they interact with SHACL and Datalog. The reader finishes understanding how to translate a relational schema or a domain model into an RDF graph.
 
 *Primary audience*: Knowledge Architect, Data Engineer.
 
@@ -252,7 +252,7 @@ Quick-lookup resources. These pages are not for reading front-to-back — they a
 All pg_ripple SQL functions, organized by use case rather than alphabetically:
 
 - **Loading**: `insert_triple`, `load_turtle`, `load_turtle_file`, `load_ntriples`, `load_ntriples_file`, `load_nquads`, `load_nquads_file`, `load_trig`, `load_trig_file`, `load_rdfxml`, `load_rdfxml_file`, `load_graph_turtle`, `load_graph_ntriples`, `sparql_update`
-- **Querying**: `sparql`, `sparql_ask`, `sparql_explain`, `find_triples`, `triple_count`, `fts_search`
+- **Querying**: `sparql`, `sparql_ask`, `sparql_explain`, `sparql_update`, `find_triples`, `triple_count`, `fts_search`
 - **Validating**: `load_shacl`, `validate`, `list_shapes`, `drop_shape`
 - **Reasoning**: `load_rules`, `load_rules_builtin`, `infer`, `list_rules`, `drop_rules`
 - **Exporting**: `export_turtle`, `export_ntriples`, `export_jsonld`, `sparql_construct_jsonld`
@@ -284,9 +284,13 @@ The CHANGELOG.md and ROADMAP.md mirrored into the docs site. Each release entry 
 
 How to improve pg_ripple: development environment setup, running tests (`cargo pgrx test pg18`, `cargo pgrx regress pg18`), PR workflow, code conventions (from AGENTS.md), and how to contribute documentation. Include a section on reporting issues and requesting documentation improvements.
 
-#### Research and Foundations
+**Visibility**: “Contributing” buried at the end of Section 4 sends the wrong signal for a project seeking community growth. Add a persistent “Contribute” entry in the top-level mdBook navigation alongside the main section links, and include a brief callout card (“Want to improve pg_ripple? Start here →”) on the landing page. The full contributing guide remains here, but entry points must be visible from the landing page.
 
-Academic background: the VP storage model (Abadi et al.), dictionary encoding, HTAP architecture rationale, SPARQL-to-SQL compilation strategy, and Datalog evaluation techniques. Links to relevant papers. This section is for readers who want to understand why pg_ripple is designed the way it is, not how to use it.
+#### Research and Foundations *(move to contributor documentation, not user-facing reference)*
+
+Academic citations (Abadi et al., VP storage model, Datalog evaluation techniques, SPARQL-to-SQL compilation strategy) are relevant to contributors, not users. This content belongs in `CONTRIBUTING.md` under an “Architecture and Background” heading, or as `docs/src/contributing/architecture.md` linked from the contributor guide. Do not include it in the user-facing Reference & Community section. Users who want to understand *why* pg_ripple is designed a certain way are served by the Operations § Architecture Overview chapter.
+
+*Action*: Move content to `CONTRIBUTING.md`. Remove this entry from the Section 4 site structure.
 
 ---
 
@@ -313,7 +317,7 @@ Avoid these patterns that appear repeatedly in first-draft documentation for thi
 
 Every code example is copy-pasteable and runnable against a real pg_ripple instance. No pseudocode, no illustrative snippets with `...` elisions. Each example includes: (1) the sample data (INSERT or LOAD statement), (2) the operation, and (3) the expected output. Examples are tested in CI — a broken example fails the build.
 
-Use consistent sample data across related examples. The guided tutorial establishes a movie/person/organization dataset; feature deep-dives reuse it where possible so readers build familiarity. When a feature needs different data, introduce it explicitly.
+Use consistent sample data across related examples. The guided tutorial establishes a bibliographic dataset (papers, authors, institutions, topics, citations); feature deep-dives reuse it where possible so readers build familiarity. When a feature needs different data, introduce it explicitly.
 
 ### Organization
 
@@ -329,7 +333,7 @@ Features introduced in specific versions get a callout: `> **Available since v0.
 
 The documentation tracks the current release. When a feature changes incompatibly, add a versioned callout explaining both old and new behaviour. Do not maintain separate documentation trees for old versions — migration guides and CHANGELOG provide backward-compatibility information. When a deprecation is introduced, add `> **Deprecated since vX.Y.Z**` alongside the existing `> **Available since**` callout. Remove deprecated content only after two minor releases have passed.
 
-When a single page accumulates more than three simultaneous `> **Available since**` callouts across different sections, the prose has grown too fragmented for versioned callouts to carry alone. Refactor the page around current behavior and move earlier-version details to a dedicated migration note in `docs/src/reference/migration-notes.md` or to the CHANGELOG, rather than adding another inline callout.
+When a single page accumulates more than three simultaneous `> **Available since**` callouts across different sections — roughly the density at which a reader begins skimming past version metadata without absorbing it — the prose has grown too fragmented for versioned callouts to carry alone. Refactor the page around current behavior and move earlier-version details to a dedicated migration note in `docs/src/reference/migration-notes.md` or to the CHANGELOG, rather than adding another inline callout.
 
 ### Term Formatting
 
@@ -345,11 +349,11 @@ Each page sets a `title` and `description` in mdBook front matter. Titles follow
 
 ### Phase 0: CI Test Harness (Prerequisite)
 
-Build the infrastructure that keeps examples honest before writing any new pages. The harness is a script that: (1) spins up a local pg_ripple instance via `cargo pgrx run pg18` or Docker, (2) extracts fenced SQL code blocks from markdown files under `docs/src/`, (3) executes them in document order with per-file setup and teardown, and (4) compares stdout against expected output embedded in the markdown as a comment block directly below each code block. Fixture data lives in `docs/fixtures/` and is loaded once per test run. Two fixture datasets are required: the **movie/person/organization dataset** used by the core feature chapters, and a **document corpus dataset** (a small collection of research papers with authors, citations, topics, and embeddings) used by the AI Retrieval & Graph RAG chapter. The CI job runs the harness on every PR that touches `docs/`. Without this infrastructure, Phase 1 examples will rot immediately. Estimated scope: approximately one week (harness script + Docker integration + fixture datasets + CI job wiring + first end-to-end green run). Phase 0 is considered done only when the CI job has passed on a real PR, not merely when the script runs locally.
+Build the infrastructure that keeps examples honest before writing any new pages. The harness is a script that: (1) spins up a local pg_ripple instance via `cargo pgrx run pg18` or Docker, (2) extracts fenced SQL code blocks from markdown files under `docs/src/`, (3) executes them in document order with per-file setup and teardown, and (4) compares stdout against expected output embedded in the markdown as a comment block directly below each code block. Fixture data lives in `docs/fixtures/` and is loaded once per test run. One shared fixture dataset is required: a **bibliographic dataset** (papers, authors, institutions, topics, citations, and pre-computed embeddings). This dataset is realistic, enterprise-adjacent, and supports every feature chapter naturally — entity relationships (authors/papers/institutions), typed literals (publication dates, DOIs), named graphs (conference proceedings as separate graphs), inference (co-authorship transitivity), SHACL validation (mandatory fields), and hybrid retrieval (vector similarity over paper embeddings). A single shared dataset across all chapters is simpler to maintain than the separate “movie/person dataset for features” + “document corpus for AI” split. The CI job runs the harness on every PR that touches `docs/`. Without this infrastructure, Phase 1 examples will rot immediately. Estimated scope: approximately one week (harness script + Docker integration + fixture datasets + CI job wiring + first end-to-end green run). Phase 0 is considered done only when the CI job has passed on a real PR, not merely when the script runs locally.
 
 ### Phase 1: Foundation (Immediate)
 
-**Prerequisite**: Phase 0 (CI harness) must be complete and passing in CI before Phase 1 content is committed. Writing examples before the harness is in place creates untested content that rots immediately.
+**Prerequisite**: Phase 0 (CI harness) must be complete and passing in CI before Phase 1 *new code examples* are committed. Prose corrections, restructuring, and rewrites that contain no runnable SQL blocks may land before Phase 0 is complete. Writing new examples before the harness is in place creates untested content that rots immediately.
 
 Rewrite the landing page, installation, hello-world walkthrough, and key-concepts pages. These are the front door — they determine first impressions. Restructure the existing SQL reference pages into the feature deep-dive format, converting function-by-function listings into narrative guides organized around user goals. Estimated scope: **M** (2–3 weeks).
 
@@ -377,7 +381,8 @@ User questions on GitHub drive documentation improvements. Every question that t
 
 CI catches broken examples; nothing automatically catches outdated prose. As the project moves fast (32 releases to date), prose rot is the primary long-term documentation risk. To mitigate it:
 
-- Any PR that changes a user-visible API (function signature, GUC parameter name or default, behavior change, new format supported) **must** include either a `docs/` update or a `docs-gap` issue in the same commit — enforced by a PR template checkbox.
+- Any PR that changes a user-visible API (function signature, GUC parameter name or default, behavior change, new format supported) must include either a `docs/` update or a `docs-gap` issue in the same commit. Enforced by a CI job (`scripts/check_docs_coverage.sh`) that diffs exported function signatures in `src/lib.rs` against the SQL Function Reference and fails the build when a changed signature has no corresponding `docs/` touch in the same PR. A PR template checkbox is included as a human-readable reminder but is not the primary enforcement mechanism.
+- Run a CI broken-link check (`mdbook-linkcheck` or equivalent) on every PR that touches `docs/`. Whenever a page is moved or removed, update a redirect map (`docs/redirects.toml` or equivalent) in the same commit; the CI job verifies the redirect map is current.
 - The Phase 4 audit repeats at every minor release: run a script that diffs the function signatures in `src/lib.rs` against the SQL Function Reference and flags mismatches.
 - The `> **Available since**` callout system (§4, Documentation Versioning) provides per-feature version tracking; the three-callout density limit prevents fragmentation.
 
@@ -391,13 +396,13 @@ Documentation succeeds when:
 
 2. **Thirty-minute onboarding**: A developer loads data, runs a query, and understands the core concepts within thirty minutes, following the guided tutorial.
 
-3. **Self-service problem solving**: At least 80% of "Was this helpful?" widget responses on any given page are positive, measured monthly. A supplementary metric is the ratio of `docs-gap`-labelled GitHub Discussions to total questions per quarter, with a target of below 20%. (The widget measures satisfaction, not self-service rate directly — the `docs-gap` ratio provides the self-service signal.) Tracked via: a "Was this helpful?" two-button widget on each page (results posted to a dedicated GitHub Discussion thread monthly), GitHub Discussions tagged with a `docs-gap` label in a dedicated category, and a quarterly review of site search queries that return zero results.
+3. **Self-service problem solving**: At least 80% of "Was this helpful?" widget responses on any given page are positive, measured monthly. A supplementary metric is the ratio of `docs-gap`-labelled GitHub Discussions to total questions per quarter, with a target of below 20%. (The widget measures satisfaction, not self-service rate directly — the `docs-gap` ratio provides the self-service signal.) Tracked via: a "Was this helpful?" two-button widget on each page (results posted to a dedicated GitHub Discussion thread monthly), GitHub Discussions tagged with a `docs-gap` label in a dedicated category, and a quarterly review of site search queries that return zero results. **Tooling required** (mdBook provides none of this natively): select and configure (1) a privacy-respecting analytics provider (Plausible, Umami, or GoatCounter) for page-view and zero-result search tracking, (2) a custom mdBook preprocessor or lightweight JavaScript snippet for the two-button widget, and (3) a GitHub Discussion category with a `docs-gap` label and triage workflow. Tooling selection and integration must be confirmed before Phase 0 is considered complete; without it, this success criterion is unmeasurable.
 
 4. **Working examples**: Every code example works without modification against the current release. CI enforces this.
 
 5. **Operator confidence**: A DBA can deploy pg_ripple to production, configure it for their workload, and set up monitoring by following the operations section — without reading the source code or asking the development team.
 
-6. **Honest comparisons**: The "When to Use pg_ripple" page is cited by third-party reviewers as a model of honest, useful comparison documentation.
+6. **Honest comparisons**: The “When to Use pg_ripple” page contains zero factually incorrect comparison claims. Verified by a scheduled team review within 30 days of any major competing product release and within 30 days of each pg_ripple minor release. Claims that cannot be verified against current third-party documentation are replaced with links to that documentation rather than maintained as inline assertions.
 
 7. **Community contribution**: Documentation PRs from external contributors indicate that the structure is clear enough for others to extend.
 
@@ -437,8 +442,8 @@ The following pages exist in `docs/src/` and should be restructured or rewritten
 - `user-guide/graphrag.md` → Exporting and Sharing chapter (§2.6, GraphRAG section)
 - `user-guide/hybrid-search.md` → AI Retrieval & Graph RAG chapter (§2.7, hybrid retrieval section)
 - `user-guide/rag.md` → AI Retrieval & Graph RAG chapter (§2.7, RAG pipeline section)
-- `user-guide/geospatial.md` → **Deprecate or promote**: not covered by §2.1–2.8; open a `docs-gap` issue to decide whether to add a dedicated chapter or remove the page
-- `user-guide/vector-federation.md` → AI Retrieval & Graph RAG chapter (§2.7) or APIs and Integration (§2.8); resolve during Phase 2 authoring
+- `user-guide/geospatial.md` → **Deprecated**: geospatial is out of scope for §2.1–2.8 and has no current roadmap item. Replace the page content with a deprecation notice during Phase 1 and remove the page entirely in Phase 4. No `docs-gap` issue required.
+- `user-guide/vector-federation.md` → AI Retrieval & Graph RAG chapter (§2.7, hybrid retrieval section)
 - `user-guide/graphrag-enrichment.md` → Exporting and Sharing chapter (§2.6, alongside `graphrag.md`)
 
 ### Best-practices pages to fold into Feature Deep Dives
