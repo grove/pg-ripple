@@ -62,8 +62,8 @@ Each release below has two layers:
 | [0.38.0](#v0380--architecture-refactoring--query-completeness) | Architecture Refactoring & Query Completeness | Split god-module, PredicateCatalog trait, batch encoding, SCBD, SPARQL Update completeness, SHACL hints in planner | 9–11 pw |
 | [0.39.0](#v0390--datalog-http-api-for-pg_ripple_http) | Datalog HTTP API | REST API exposing all 27 Datalog SQL functions in `pg_ripple_http`: rule management, inference, goal queries, constraints, admin | 3–5 pw |
 | [0.40.0](#v0400--streaming-results-explain--observability) | Streaming Results, Explain & Observability | Server-side SPARQL cursors, `explain_sparql()`, `explain_datalog()`, OpenTelemetry tracing, resource governors | 9–11 pw |
-| [0.41.0](#v0410--parallel-merge-cost-based-federation--live-cdc) | Parallel Merge, Cost-Based Federation & Live CDC | Multi-worker HTAP merge, FedX-style federation planner, parallel SERVICE, live RDF change subscriptions | 10–12 pw |
-| [0.42.0](#v0420--full-w3c-sparql-11-test-suite) | Full W3C SPARQL 1.1 Test Suite | Complete W3C SPARQL 1.1 Query + Update + Graph Patterns + Aggregates test suite harness with parallelized execution; 3,000+ tests in < 2 min CI | 5–7 pw |
+| [0.41.0](#v0410--full-w3c-sparql-11-test-suite) | Full W3C SPARQL 1.1 Test Suite | Complete W3C SPARQL 1.1 Query + Update + Graph Patterns + Aggregates test suite harness with parallelized execution; 3,000+ tests in < 2 min CI | 5–7 pw |
+| [0.42.0](#v0420--parallel-merge-cost-based-federation--live-cdc) | Parallel Merge, Cost-Based Federation & Live CDC | Multi-worker HTAP merge, FedX-style federation planner, parallel SERVICE, live RDF change subscriptions | 10–12 pw |
 | [1.0.0](#v100--production-release) | Production Release | Standards conformance, stress testing, security audit | 6–8 pw |
 | | | **Total estimated effort** | **244–331 pw** |
 
@@ -3178,7 +3178,7 @@ All 24 Datalog endpoints respond correctly in integration tests. `GET /datalog/r
 
 ---
 
-## v0.41.0 — Parallel Merge, Cost-Based Federation & Live CDC
+## v0.42.0 — Parallel Merge, Cost-Based Federation & Live CDC
 
 **Theme**: Multi-worker HTAP merge, intelligent federation query planning, and real-time RDF change subscriptions.
 
@@ -3237,7 +3237,7 @@ All 24 Datalog endpoints respond correctly in integration tests. `GET /datalog/r
 
 ### Migration Script
 
-`sql/pg_ripple--0.40.0--0.41.0.sql` — creates `_pg_ripple.endpoint_stats` table; creates `_pg_ripple.subscriptions` table; registers new GUCs (`merge_workers`, `sameas_max_cluster_size`, `federation_stats_ttl_secs`, `federation_planner_enabled`, `federation_parallel_max`, `federation_parallel_timeout`, `federation_inline_max_rows`, `federation_allow_private`).
+`sql/pg_ripple--0.41.0--0.42.0.sql` — creates `_pg_ripple.endpoint_stats` table; creates `_pg_ripple.subscriptions` table; registers new GUCs (`merge_workers`, `sameas_max_cluster_size`, `federation_stats_ttl_secs`, `federation_planner_enabled`, `federation_parallel_max`, `federation_parallel_timeout`, `federation_inline_max_rows`, `federation_allow_private`).
 
 ### Documentation
 
@@ -3246,15 +3246,15 @@ All 24 Datalog endpoints respond correctly in integration tests. `GET /datalog/r
 - [ ] `user-guide/features/federation.md` — updated: VoID stats, cost-based planner, parallel SERVICE, result streaming, IP restrictions
 - [ ] `reference/guc-reference.md` — all new GUCs documented; security guidance on `federation_allow_private`
 - [ ] `reference/error-reference.md` — PT550, PT620, PT621 documented
-- [ ] Release notes for v0.41.0
+- [ ] Release notes for v0.42.0
 
 ### Exit Criteria
 
-Parallel merge stress test passes (100 writers, 4 workers, no lost deletes). VoID stats fetched on endpoint registration. Independent SERVICE clauses execute in parallel (verifiable via `explain_sparql()`). CDC subscription delivers `NOTIFY` payloads for all inserts matching the filter. HTTPS cert validation enforced in `pg_ripple_http`. Migration chain test passes through 0.41.0.
+Parallel merge stress test passes (100 writers, 4 workers, no lost deletes). VoID stats fetched on endpoint registration. Independent SERVICE clauses execute in parallel (verifiable via `explain_sparql()`). CDC subscription delivers `NOTIFY` payloads for all inserts matching the filter. HTTPS cert validation enforced in `pg_ripple_http`. Migration chain test passes through 0.42.0.
 
 ---
 
-## v0.42.0 — Full W3C SPARQL 1.1 Test Suite
+## v0.41.0 — Full W3C SPARQL 1.1 Test Suite
 
 **Theme**: Complete standards conformance verification via the full W3C SPARQL 1.1 test suite, run in parallel under 2 minutes in CI.
 
@@ -3312,18 +3312,18 @@ Parallel merge stress test passes (100 writers, 4 workers, no lost deletes). VoI
 
 ### Migration Script
 
-`sql/pg_ripple--0.41.0--0.42.0.sql` — no schema changes. Adds a comment-only header noting that v0.42.0 is a test infrastructure release.
+`sql/pg_ripple--0.40.0--0.41.0.sql` — no schema changes. Adds a comment-only header noting that v0.41.0 is a test infrastructure release.
 
 ### Documentation
 
 - [ ] `reference/w3c-conformance.md` (new) — per-category W3C SPARQL 1.1 conformance table: test count, pass count, known failures with ticket links
 - [ ] `contributing/running-w3c-tests.md` (new) — how to run the smoke subset and full suite locally; how to add a new expected failure; how to interpret `XFAIL` vs `XPASS`
 - [ ] `README.md` — add W3C SPARQL 1.1 conformance badge (pass rate from latest `main` CI run)
-- [ ] Release notes for v0.42.0
+- [ ] Release notes for v0.41.0
 
 ### Exit Criteria
 
-Smoke subset (180 tests) passes with 0 unexpected failures on `main`. Full suite (3,000+ tests) runs in < 2 minutes on an 8-core CI runner. Per-category pass rate report uploaded as CI artifact. Known-failures manifest has 0 entries for `optional` and `aggregates` categories (those bugs fixed in v0.40.0). Migration chain test passes through 0.42.0.
+Smoke subset (180 tests) passes with 0 unexpected failures on `main`. Full suite (3,000+ tests) runs in < 2 minutes on an 8-core CI runner. Per-category pass rate report uploaded as CI artifact. Known-failures manifest has 0 entries for `optional` and `aggregates` categories (those bugs fixed in v0.40.0). Migration chain test passes through 0.41.0.
 
 ---
 
