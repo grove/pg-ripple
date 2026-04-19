@@ -12,7 +12,7 @@ pg_ripple's documentation exists to answer one question: *How do I use this to s
 
 The philosophy is problem-centric. Users arrive with goals — load data, run a query, enforce quality rules, deploy to production — and the documentation meets them where they are. A database administrator with two decades of PostgreSQL experience and a data scientist who has never touched a terminal should both find their way to working code within ten minutes. We achieve this through layered explanations: plain language up front, technical depth available on demand, and worked examples that are copy-pasteable without modification.
 
-pg_ripple is a mature system (v0.29.0, 100% W3C SPARQL 1.1 and SHACL Core conformance) with a comprehensive feature set spanning data loading, SPARQL querying, SHACL validation, Datalog reasoning, JSON-LD framing, vector-hybrid search, federation, and HTTP endpoints. The documentation must reflect that maturity. It should read like the documentation of a system that has been in production for years — confident, precise, and complete — rather than a collection of feature announcements.
+pg_ripple is a mature system (v0.31.0, 100% W3C SPARQL 1.1 and SHACL Core conformance) with a comprehensive feature set spanning data loading, SPARQL querying, SHACL validation, Datalog reasoning, JSON-LD framing, vector-hybrid search, federation, and HTTP endpoints. The documentation must reflect that maturity. It should read like the documentation of a system that has been in production for years — confident, precise, and complete — rather than a collection of feature announcements.
 
 Four user archetypes drive content decisions: the Data Engineer who needs reliable data pipelines, the Application Developer who wants to power features with graph queries, the Knowledge Architect who models domains and writes inference rules, and the Decision-Maker who evaluates whether pg_ripple fits the architecture. Every page has a primary audience, and every section includes signposts that guide readers to the depth they need.
 
@@ -205,7 +205,7 @@ How to back up and restore a pg_ripple database. Explain that `pg_dump`/`pg_rest
 
 #### Upgrading Safely
 
-How to upgrade from one pg_ripple version to the next. Explain the migration path: `ALTER EXTENSION pg_ripple UPDATE` walks through the chain of migration scripts (`pg_ripple--0.28.0--0.29.0.sql`, etc.). Cover pre-upgrade checks, the upgrade command, post-upgrade verification, and rollback strategy. Address zero-downtime upgrades for systems that cannot afford downtime.
+How to upgrade from one pg_ripple version to the next. Explain the migration path: `ALTER EXTENSION pg_ripple UPDATE` walks through the chain of migration scripts (`pg_ripple--0.30.0--0.31.0.sql`, etc.). Cover pre-upgrade checks, the upgrade command, post-upgrade verification, and rollback strategy. Address zero-downtime upgrades for systems that cannot afford downtime.
 
 #### Scaling
 

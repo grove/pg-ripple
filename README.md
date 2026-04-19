@@ -17,16 +17,16 @@ No separate graph database. No data pipelines. No extra infrastructure.
 
 ---
 
-## What works today (v0.29.0)
+## What works today (v0.31.0)
 
-pg_ripple passes **100% of the W3C SPARQL 1.1 and SHACL Core conformance test suites** — the industry benchmarks for correctness in knowledge graph systems. After 29 releases it covers the full feature set described below.
+pg_ripple passes **100% of the W3C SPARQL 1.1 and SHACL Core conformance test suites** — the industry benchmarks for correctness in knowledge graph systems. After 31 releases it covers the full feature set described below.
 
 | What you can do | How it works |
 |---|---|
 | **Import knowledge** | Load data in standard formats: Turtle, N-Triples, N-Quads, TriG, or RDF/XML — from files, inline text, or remote URLs. Named graphs let you organize facts into logical groups (e.g. one graph per data source or topic). |
 | **Query with SPARQL** | Ask complex questions using SPARQL 1.1 — the W3C standard query language for linked data (similar to SQL, but designed for graphs). Follow chains of relationships, apply filters, aggregate results, and query across multiple graphs. Fully W3C conformant. |
 | **Validate data quality** | Define quality rules with SHACL: *"every Person must have exactly one name"*, *"age must be a positive integer"*. Violations are caught on insert (immediate feedback) or checked in the background. Fully W3C conformant. |
-| **Infer new facts automatically** | Write Datalog rules to derive conclusions from what you already know — *"if Alice manages Bob and Bob manages Carol, then Alice indirectly manages Carol"*. Includes built-in support for standard RDFS and OWL reasoning. Goal-directed mode derives only the facts relevant to your actual query, so it stays fast on large graphs. |
+| **Infer new facts automatically** | Write Datalog rules to derive conclusions from what you already know — *"if Alice manages Bob and Bob manages Carol, then Alice indirectly manages Carol"*. Includes built-in support for standard RDFS and OWL reasoning. Goal-directed mode (`infer_goal()`) and demand-filtered mode (`infer_demand()`) derive only the facts relevant to your query, reducing inference work by 50–90% on large programs. `owl:sameAs` entity canonicalization is applied automatically before inference, so equivalent entities are treated as one. |
 | **Export and share** | Export your graph as Turtle, N-Triples, JSON-LD, or RDF/XML. Use JSON-LD framing to produce nested documents shaped for REST APIs or LLM prompts. |
 | **Standard HTTP endpoint** | The companion `pg_ripple_http` service exposes a W3C SPARQL Protocol endpoint over HTTP/HTTPS. Supports JSON, XML, CSV, Turtle, and JSON-LD responses; authentication; Prometheus metrics; and Docker Compose for easy deployment. |
 | **Query remote graph services** | Use the SPARQL `SERVICE` keyword to query external SPARQL endpoints as part of a single query — your local data and a remote public dataset in one request. Includes connection pooling, result caching, and safe timeouts. |
@@ -89,11 +89,15 @@ SELECT pg_ripple.infer('org_rules');
 
 ## Where we're headed
 
-One release remains on the path to v1.0.0.
+Two releases remain on the path to v1.0.0.
+
+### v0.32.0 — Well-Founded Semantics & Tabling
+
+The next release extends pg_ripple's Datalog engine to handle programs with mutual negation — the edge cases that stratified Datalog cannot resolve — using well-founded semantics (three-valued logic: true / false / unknown). It also adds tabling: a session-scoped cache that stores derived sub-goals so repeated sub-queries (in Datalog or SPARQL) are computed once and reused. For analytical workloads with repeated sub-query patterns, tabling delivers a 2–5× speedup.
 
 ### v1.0.0 — Production Release
 
-With 100% W3C conformance achieved, GraphRAG integration complete, vector + SPARQL hybrid search in place, and goal-directed Datalog reasoning delivered, the final release focuses on production hardening: a full 72-hour continuous load test, final security audit sign-off, stress testing at 100 M+ triple scale, and a hardened upgrade path from every prior version. This is the version intended for production deployments.
+With 100% W3C conformance achieved, GraphRAG integration complete, vector + SPARQL hybrid search in place, entity resolution, and demand-filtered Datalog reasoning delivered, the final release focuses on production hardening: a full 72-hour continuous load test, final security audit sign-off, stress testing at 100 M+ triple scale, and a hardened upgrade path from every prior version. This is the version intended for production deployments.
 
 ---
 
@@ -110,7 +114,7 @@ This means you get:
 
 ### How it compares
 
-> **Note**: pg_ripple features marked "Yes" in the table below are implemented across v0.1.0–v0.29.0. W3C SPARQL 1.1 Query, Update, and SHACL Core conformance is 100% (achieved in v0.20.0). Competitor capabilities reflect publicly documented feature sets.
+> **Note**: pg_ripple features marked "Yes" in the table below are implemented across v0.1.0–v0.31.0. W3C SPARQL 1.1 Query, Update, and SHACL Core conformance is 100% (achieved in v0.20.0). Competitor capabilities reflect publicly documented feature sets.
 
 | Capability | pg_ripple | Blazegraph | Virtuoso | Apache Fuseki |
 |---|---|---|---|---|

@@ -2,7 +2,7 @@
 
 **pg_ripple** is a PostgreSQL 18 extension written in Rust (pgrx 0.17) that implements a high-performance RDF triple store with native SPARQL query execution. See [plans/implementation_plan.md](plans/implementation_plan.md) for the full architecture and [ROADMAP.md](ROADMAP.md) for the phased delivery plan.
 
-> **Implementation status** (as of 2026-04-16): v0.19.0 is released and passing all 64 pg_regress tests. The full SPARQL 1.1 stack, SHACL, Datalog, HTAP storage, federation with performance improvements, JSON-LD framing, CONSTRUCT/DESCRIBE/ASK views, and the `pg_ripple_http` companion service are all implemented. One release remains: v1.0.0 (W3C conformance certification, stress testing, security audit).
+> **Implementation status** (as of 2026-04-19): v0.31.0 is released and all pg_regress tests pass. The full SPARQL 1.1 stack, SHACL, Datalog (including aggregation, magic sets, `owl:sameAs` canonicalization, and demand-filtered inference), HTAP storage, federation with performance improvements, JSON-LD framing, CONSTRUCT/DESCRIBE/ASK views, vector + SPARQL hybrid search, GraphRAG export, and the `pg_ripple_http` companion service are all implemented. Two releases remain: v0.32.0 (Well-Founded Semantics & Tabling) and v1.0.0 (production hardening, stress testing, security audit).
 
 ## Tech Stack
 
