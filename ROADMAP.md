@@ -2875,6 +2875,9 @@ See [plans/ecosystem/datalog.md §14.2.8 and §14.2.14](plans/ecosystem/datalog.
 
 ---
 
+<details>
+<summary><strong>v0.37.0 — Storage Concurrency Hardening &amp; Error Safety</strong> ✅ Released</summary>
+
 ## v0.37.0 — Storage Concurrency Hardening & Error Safety
 
 **Theme**: Fix the highest-severity correctness bugs identified in the deep-analysis audit and eliminate all hard panics from library code.
@@ -2937,6 +2940,8 @@ See [plans/ecosystem/datalog.md §14.2.8 and §14.2.14](plans/ecosystem/datalog.
 ### Exit Criteria
 
 No `.expect()`/`.unwrap()` in non-test Rust code; clippy deny enforced in CI. The concurrent-delete stress test (`merge_concurrent_delete.sh`) passes at 50 writers + 1-second merge interval. All GUC enum validators active. `diagnostic_report()` passes pg_regress. Migration scripts from 0.1.0 through 0.37.0 run cleanly via `just test-migration`.
+
+</details>
 
 ---
 
