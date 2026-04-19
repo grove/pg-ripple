@@ -13,7 +13,7 @@ Points at the next milestone: v0.31.0 — Demand-Driven Evaluation & sameAs Reas
 
 ---
 
-## [0.30.0] — 2026-04-26 — Datalog Aggregation & Compiled Rule Plans
+## [0.30.0] — 2025-04-19 — Datalog Aggregation & Compiled Rule Plans
 
 **pg_ripple's Datalog engine gains Datalog^agg (aggregate literals in rule bodies) and a process-local rule plan cache.** All pg_regress tests pass (3 new tests for v0.30.0 features).
 
@@ -124,12 +124,6 @@ No schema changes. Run `ALTER EXTENSION pg_ripple UPDATE` to upgrade.
 ### Migration
 
 Run `sql/pg_ripple--0.27.0--0.28.0.sql` on existing installations. Creates `_pg_ripple.embedding_queue` and `_pg_ripple.vector_endpoints` tables plus the `auto_embed_dict_trigger` trigger. No VP table schema changes.
-
----
-
-## [Unreleased]
-
-Points at the next milestone: v0.28.0 — Advanced Hybrid Search & RAG Pipeline.
 
 ---
 
