@@ -721,6 +721,35 @@ pub fn add_embedding_triples() -> i64 {
 /// Returns a plain-text string suitable for passing to an embedding API.
 ///
 /// When the entity is not found in the dictionary, returns the IRI local name.
+/// Build a SQL fragment that retrieves decoded object strings for a given
+/// subject (`s_id`) and predicate (`pred_id`).  Handles both predicates that
+/// are still in `vp_rare` and predicates that have been promoted to a
+/// dedicated HTAP VP table.
+fn vp_objects_sql(s_id: i64, pred_id: i64, limit: i32) -> String {
+    let has_dedicated = pgrx::Spi::get_one_with_args::<bool>(
+        "SELECT table_oid IS NOT NULL FROM _pg_ripple.predicates WHERE id = $1",
+        &[pgrx::datum::DatumWithOid::from(pred_id)],
+    )
+    .unwrap_or(None)
+    .unwrap_or(false);
+
+    if has_dedicated {
+        format!(
+            "SELECT d.value \
+             FROM _pg_ripple.vp_{pred_id} vp \
+             JOIN _pg_ripple.dictionary d ON d.id = vp.o \
+             WHERE vp.s = {s_id} LIMIT {limit}"
+        )
+    } else {
+        format!(
+            "SELECT d.value \
+             FROM _pg_ripple.vp_rare vr \
+             JOIN _pg_ripple.dictionary d ON d.id = vr.o \
+             WHERE vr.s = {s_id} AND vr.p = {pred_id} LIMIT {limit}"
+        )
+    }
+}
+
 pub fn contextualize_entity(entity_iri: &str, depth: i32, max_neighbors: i32) -> String {
     let iri_bare = entity_iri
         .trim_start_matches('<')
@@ -734,31 +763,18 @@ pub fn contextualize_entity(entity_iri: &str, depth: i32, max_neighbors: i32) ->
     let rdf_type_iri = "http://www.w3.org/1999/02/22-rdf-syntax-ns#type";
     let type_id = crate::dictionary::encode(rdf_type_iri, crate::dictionary::KIND_IRI);
 
-    let label: String = pgrx::Spi::get_one_with_args::<String>(
-        "SELECT d.value FROM _pg_ripple.vp_rare vr \
-         JOIN _pg_ripple.dictionary d ON d.id = vr.o \
-         WHERE vr.s = $1 AND vr.p = $2 \
-         LIMIT 1",
-        &[
-            pgrx::datum::DatumWithOid::from(entity_id),
-            pgrx::datum::DatumWithOid::from(label_id),
-        ],
-    )
-    .unwrap_or(None)
-    .unwrap_or_else(|| extract_local_name(&iri_bare));
+    // Build SQL for label lookup — works regardless of whether rdfs:label is promoted.
+    let label_sql = vp_objects_sql(entity_id, label_id, 1);
+    let label: String = pgrx::Spi::get_one::<String>(&label_sql)
+        .unwrap_or(None)
+        .unwrap_or_else(|| extract_local_name(&iri_bare));
+
+    // Build SQL for type lookup — works regardless of whether rdf:type is promoted.
+    let type_sql = vp_objects_sql(entity_id, type_id, 10);
 
     // Collect types.
     let types: Vec<String> = pgrx::Spi::connect(|c| {
-        c.select(
-            &format!(
-                "SELECT d.value FROM _pg_ripple.vp_rare vr \
-                 JOIN _pg_ripple.dictionary d ON d.id = vr.o \
-                 WHERE vr.s = {entity_id} AND vr.p = {type_id} \
-                 LIMIT 10"
-            ),
-            None,
-            &[],
-        )
+        c.select(&type_sql, None, &[])
         .unwrap_or_else(|e| pgrx::error!("contextualize_entity: SPI error: {e}"))
         .map(|row: pgrx::spi::SpiHeapTupleData| {
             let v: String = row.get::<String>(1).ok().flatten().unwrap_or_default();
@@ -794,18 +810,10 @@ pub fn contextualize_entity(entity_iri: &str, depth: i32, max_neighbors: i32) ->
             .map(|v| {
                 // Look up label for this neighbor if available.
                 let neighbor_id = crate::dictionary::encode(&v, crate::dictionary::KIND_IRI);
-                pgrx::Spi::get_one_with_args::<String>(
-                    "SELECT d.value FROM _pg_ripple.vp_rare vr2 \
-                     JOIN _pg_ripple.dictionary d ON d.id = vr2.o \
-                     WHERE vr2.s = $1 AND vr2.p = $2 \
-                     LIMIT 1",
-                    &[
-                        pgrx::datum::DatumWithOid::from(neighbor_id),
-                        pgrx::datum::DatumWithOid::from(label_id),
-                    ],
-                )
-                .unwrap_or(None)
-                .unwrap_or_else(|| extract_local_name(&v))
+                let nb_label_sql = vp_objects_sql(neighbor_id, label_id, 1);
+                pgrx::Spi::get_one::<String>(&nb_label_sql)
+                    .unwrap_or(None)
+                    .unwrap_or_else(|| extract_local_name(&v))
             })
             .collect()
     } else {

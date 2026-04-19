@@ -57,3 +57,7 @@ SELECT
 SELECT
     length(pg_ripple.contextualize_entity('https://pharma.example/aspirin', 1, 1)) > 0
     AS max_neighbors_parameter_accepted;
+
+-- ── Cleanup ───────────────────────────────────────────────────────────────────
+-- Remove test triples so they do not bleed into subsequent tests.
+SELECT pg_ripple.sparql_update('DELETE WHERE { ?s ?p ?o }') >= 0 AS cleaned;

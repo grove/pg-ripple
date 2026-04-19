@@ -582,7 +582,10 @@ pub fn batch_insert_encoded(p_id: i64, rows: &[(i64, i64, i64)]) -> i64 {
             .iter()
             .map(|(s, o, g)| format!("({},{},{})", s, o, g))
             .collect();
-        let sql = format!("INSERT INTO {delta} (s, o, g) VALUES {}", values.join(","));
+        let sql = format!(
+            "INSERT INTO {delta} (s, o, g) VALUES {} ON CONFLICT (s, o, g) DO NOTHING",
+            values.join(","),
+        );
         Spi::run_with_args(&sql, &[])
             .unwrap_or_else(|e| pgrx::error!("batch VP delta insert SPI error: {e}"));
 

@@ -88,3 +88,11 @@ SELECT
  t
 (1 row)
 
+-- ── Cleanup ───────────────────────────────────────────────────────────────────
+-- Remove test triples so they do not bleed into subsequent tests.
+SELECT pg_ripple.sparql_update('DELETE WHERE { ?s ?p ?o }') >= 0 AS cleaned;
+ cleaned 
+---------
+ t
+(1 row)
+

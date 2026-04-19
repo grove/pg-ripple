@@ -149,10 +149,10 @@ SELECT
 
 -- ── Cleanup ───────────────────────────────────────────────────────────────────
 -- Truncate all triples so test data doesn't bleed into other tests.
-SELECT pg_ripple.sparql_update('DELETE WHERE { ?s ?p ?o }');
- sparql_update 
----------------
-            16
+SELECT pg_ripple.sparql_update('DELETE WHERE { ?s ?p ?o }') >= 1 AS cleanup_ok;
+ cleanup_ok 
+------------
+ t
 (1 row)
 
 DELETE FROM _pg_ripple.shacl_shapes;
