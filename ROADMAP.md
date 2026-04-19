@@ -3033,6 +3033,9 @@ No `.expect()`/`.unwrap()` in non-test Rust code; clippy deny enforced in CI. Th
 >
 > **Implementation plan:** [plans/pg_ripple_http_datalog.md](plans/pg_ripple_http_datalog.md)
 
+<details>
+<summary>Completed items (click to expand)</summary>
+
 ### Deliverables
 
 - [x] **Extract shared helpers** (`pg_ripple_http/src/common.rs` new module)
@@ -3097,6 +3100,8 @@ No `.expect()`/`.unwrap()` in non-test Rust code; clippy deny enforced in CI. Th
 ### Exit Criteria
 
 All 24 Datalog endpoints respond correctly in integration tests. `GET /datalog/rules` returns the JSONB array from `list_rules()`. `POST /datalog/infer/custom` triggers materialization and returns `{"derived": N}`. `GET /datalog/constraints` returns violation JSONB. Auth check rejects requests with invalid token. Parameterized-query requirement verified by code review (no `format!()` calls mixing user input into SQL strings). Migration chain test passes.
+
+</details>
 
 ---
 
