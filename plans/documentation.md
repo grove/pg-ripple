@@ -50,6 +50,8 @@ They care about comparison matrices, production readiness, support for standards
 
 The documentation site is organized into four sections, each serving a distinct purpose. A reader should be able to identify which section they need within five seconds of arriving.
 
+**Information architecture**: The site is built with mdBook. URL slugs follow the pattern `section/page-name` (e.g., `/feature-deep-dives/querying-with-sparql`). The left sidebar has two levels: sections and pages. Cross-references use relative links. mdBook does not support HTML `<details>` collapsible blocks without a preprocessor — use admonition blocks (`> **Note**`) for optional-depth content instead of `<details>`. Each page must have a `description` in its front matter for SEO; the sitemap is auto-generated. Page titles should use the vocabulary users type into search: "Load RDF Data" not "Data Loading," "Property Paths" not "Path Expressions."
+
 ### Section 1: Core Concepts & Getting Started
 
 These pages answer foundational questions and get users to working code within ten minutes. They are the front door of the documentation — the pages linked from the README, shared in conference talks, and bookmarked by evaluators.
@@ -65,6 +67,12 @@ A single screen that explains what pg_ripple does, what makes it different from 
 A non-technical page (no code) explaining the problem pg_ripple solves in business terms. Use a concrete scenario: a company has customer data in one table, product data in another, interaction logs in a third, and a partner's product catalog in an external system. A knowledge graph connects all of these into a single queryable web of relationships. Show what questions become easy ("Which customers bought products similar to ones their connections recommended?") and what would be painful to answer with pure SQL. This page is for the Decision-Maker who needs to justify the technology to stakeholders.
 
 *Primary audience*: Decision-Maker, non-technical stakeholders.
+
+#### pg_ripple in 60 Seconds — One-Page Summary
+
+A single printable or shareable page for evaluators who will not read the full documentation. Top half: three sentences on what pg_ripple does, one architecture diagram, and the three most important numbers (triples per second, conformance level, PostgreSQL version required). Bottom half: a comparison matrix against the three most common alternatives, a "when to use" / "when not to use" table, and a link to the installation page. This page is what gets shared in a Slack message or attached to an evaluation report. It must be accurate, unadorned, and current with every release.
+
+*Primary audience*: Decision-Maker.
 
 #### When to Use pg_ripple
 
@@ -86,7 +94,14 @@ The fastest path from zero to working queries. Load ten triples about people and
 
 #### Guided Tutorial — Build a Knowledge Graph in 30 Minutes
 
-A complete project: build a movie/person/organization knowledge graph. Start with a Turtle file (provided inline and as a downloadable file). Load it. Query it with SPARQL (find all actors in a genre, follow co-starring chains, aggregate by decade). Add SHACL constraints (every Movie must have a title and release year). Write a Datalog rule (transitive "worked-with" relationships). Export the result as JSON-LD for a hypothetical REST API. Each step builds on the previous one, and the reader finishes with a working system they can extend.
+Picks up where Hello World ends. Assumes the reader has loaded and queried triples. The tutorial is structured in four independent segments of under ten minutes each, so readers can stop at any point with a working system:
+
+1. **Load and Explore** — Import a Turtle file of movie/person/organization data; run SPARQL queries of increasing complexity (genre lookup, co-starring chains, decade aggregation); understand named graphs.
+2. **Validate** — Add SHACL shapes requiring every Movie to have a title and release year; observe a violation; fix it.
+3. **Reason** — Write a Datalog rule for transitive “worked-with” relationships; run `infer()`; query the derived facts.
+4. **Export** — Produce a JSON-LD document shaped for a REST API using `sparql_construct_jsonld()`.
+
+Readers who complete all four segments finish with a validated, reasoning-capable knowledge graph. Expected output is shown after every query. The movie/person/organization dataset established here is reused across the feature deep-dive chapters.
 
 *Primary audience*: Data Engineer, Application Developer, Knowledge Architect.
 
@@ -114,33 +129,49 @@ Each major capability gets a self-contained chapter. These are not reference pag
 
 How to model data as triples. Walk through a concrete domain (movies, people, organizations) and show each fact becoming a triple. Explain named graphs — when you need them (multi-source data, access control, versioning) and when you don't. Cover blank nodes (anonymous entities) with honest advice about when to use them and when to avoid them. Introduce RDF-star for statements about statements (provenance, confidence scores, temporal annotations). Show how types work (`rdf:type`) and how they interact with SHACL and Datalog. The reader finishes understanding how to translate a relational schema or a domain model into an RDF graph.
 
+*Primary audience*: Knowledge Architect, Data Engineer.
+
 #### 2.2 Loading Data
 
 How to get data into pg_ripple. Cover all supported formats: Turtle (human-readable, the default recommendation), N-Triples (fastest for bulk loading), N-Quads (with named graphs), TriG (Turtle with named graphs), and RDF/XML (legacy interoperability). Explain the three loading modes: inline text (`load_turtle('...')`), file path (`load_turtle_file('/path')`), and individual inserts (`insert_triple()`). Discuss bulk loading performance: batch sizes, the VP promotion threshold (rare predicates consolidate into a shared table until they exceed the threshold), when to run ANALYZE afterward, and how to monitor progress. Cover blank-node scoping (blank nodes are local to each load call — loading the same blank node label from two separate calls creates two distinct entities). Show how to generate triples from existing SQL tables using INSERT combined with encode patterns.
+
+*Primary audience*: Data Engineer.
 
 #### 2.3 Querying with SPARQL
 
 The heart of pg_ripple. Start with basic graph patterns — matching triples by subject, predicate, and object. Progress to OPTIONAL (left joins), FILTER (restricting results), BIND (computed variables), and VALUES (parameterized lookup). Introduce property paths — following chains of relationships automatically (`foaf:knows+` to find friends-of-friends) — with clear explanation of the path operators (`+`, `*`, `?`, `/`, `|`, `^`). Cover aggregation (COUNT, SUM, GROUP BY, HAVING), subqueries, UNION, MINUS, and GRAPH patterns for querying specific named graphs. Dedicate a section to performance: how to read `sparql_explain()` output, what makes a query fast or slow, how filter pushdown works, and the `max_path_depth` safety limit. Include a recipe section with real-world query patterns: entity resolution, recommendation, transitive closure, temporal queries over RDF-star. Mention SPARQL Update (INSERT DATA, DELETE DATA, DELETE/INSERT WHERE) as the write counterpart.
 
+*Primary audience*: Application Developer, Data Engineer.
+
 #### 2.4 Validating Data Quality
 
 How to define and enforce data quality rules using SHACL (Shapes Constraint Language). Start with simple shapes: "every Person must have exactly one name" (`sh:minCount 1`, `sh:maxCount 1`). Progress to type constraints (`sh:datatype`), value range constraints, pattern constraints (`sh:pattern`), and class constraints. Explain the two validation modes: synchronous (violations are caught on insert — immediate feedback, slight latency cost) and asynchronous (background worker checks periodically — no insert latency, but violations are detected after the fact). Show how to read a validation report, how to fix violations, and how to use the dead-letter queue for async violations. Include patterns for common quality rules: referential integrity between entities, mandatory properties for specific types, allowed value lists, and cross-property constraints using `sh:or`/`sh:and`/`sh:not`.
+
+*Primary audience*: Knowledge Architect, Data Engineer.
 
 #### 2.5 Reasoning and Inference
 
 How to derive new facts from existing ones using Datalog rules. Start with the motivating example: "if Alice manages Bob and Bob manages Carol, then Alice indirectly manages Carol." Show how to write this as a Datalog rule, load it, and run inference. Explain the built-in rule sets (RDFS for subclass/subproperty hierarchies, OWL RL for richer ontological reasoning) and when to use each. Cover stratification — the requirement that negation and aggregation in rules follow a layered structure — and explain what it means in practice (which rules can depend on which). Discuss the distinction between explicit and inferred triples (the `source` column in VP tables) and how SPARQL queries interact with inferred data. Include performance guidance: how inference time scales with rule count and data size, when to use goal-directed mode (derive only what a query needs) vs. full materialization. Cover advanced features: magic sets optimization, semi-naive evaluation, demand transformation.
 
+*Primary audience*: Knowledge Architect.
+
 #### 2.6 Exporting and Sharing
 
-How to get data out of pg_ripple. Cover all export formats: Turtle (human-readable, good for inspection and version control), N-Triples (line-oriented, good for streaming and large exports), JSON-LD (the bridge to web applications, REST APIs, and LLMs), and RDF/XML (legacy interoperability). Dedicate significant space to JSON-LD framing — the ability to produce nested JSON documents shaped for a specific API contract, not flat triple dumps. Show how to use `sparql_construct_jsonld()` with a frame to produce exactly the JSON structure an API consumer expects. Cover the GraphRAG export pipeline: exporting entities and relationships in Microsoft GraphRAG's BYOG Parquet format, enriching the graph with Datalog rules, and validating export quality with SHACL.
+How to get data out of pg_ripple. Cover all export formats: Turtle (human-readable, good for inspection and version control), N-Triples (line-oriented, good for streaming and large exports), JSON-LD (the bridge to web applications, REST APIs, and LLMs), and RDF/XML (legacy interoperability). Dedicate significant space to JSON-LD framing — the ability to produce nested JSON documents shaped for a specific API contract, not flat triple dumps. Show how to use `sparql_construct_jsonld()` with a frame to produce exactly the JSON structure an API consumer expects. Cover the GraphRAG export pipeline: exporting entities and relationships in Microsoft GraphRAG's BYOG Parquet format, enriching the graph with Datalog rules, and validating export quality with SHACL. **GraphRAG canonical chapter**: all other mentions of GraphRAG in the documentation cross-reference this chapter. Do not duplicate the full GraphRAG workflow elsewhere.
+
+*Primary audience*: Data Engineer, Application Developer.
 
 #### 2.7 Search and Discovery
 
 How to find knowledge when you don't know the exact IRIs. Cover full-text search: indexing literal values (names, descriptions, notes) with PostgreSQL's GIN indexes, and searching them with `fts_search()`. Introduce vector embeddings: storing embeddings alongside graph facts, building HNSW indexes, and using `pg:similar()` in SPARQL to find semantically similar entities. Show hybrid retrieval: combining a SPARQL graph pattern with a vector similarity search in a single query, using Reciprocal Rank Fusion to merge results. Cover the RAG pipeline: using pg_ripple to retrieve graph-contextualized context for language model prompts. Include the keyword expansion feature for broadening search queries automatically.
 
+*Primary audience*: Application Developer, Knowledge Architect.
+
 #### 2.8 APIs and Integration
 
 How to expose pg_ripple to applications. Cover the SPARQL Protocol HTTP endpoint (`pg_ripple_http`): configuration, supported response formats (JSON, XML, CSV, Turtle, JSON-LD), authentication, and Docker Compose deployment. Show how to call pg_ripple from application code: Python with `psycopg2` or `SPARQLWrapper`, JavaScript with `pg`, Java with JDBC. Cover SPARQL federation: querying remote SPARQL endpoints alongside local data using the `SERVICE` keyword, with connection pooling, result caching, and timeout configuration. Discuss caching strategies for production: plan cache tuning, result caching at the HTTP layer, and when to use materialized SPARQL views for frequently-run queries.
+
+*Primary audience*: Application Developer.
 
 ---
 
@@ -205,7 +236,7 @@ All pg_ripple SQL functions, organized by use case rather than alphabetically:
 - **Exporting**: `export_turtle`, `export_ntriples`, `export_jsonld`, `sparql_construct_jsonld`
 - **Administration**: `stats`, `vacuum`, `reindex`, `promote_rare_predicates`, `register_prefix`, `prefixes`, `create_graph`, `drop_graph`, `list_graphs`, `encode_term`, `decode_id`
 
-For each function: one-sentence description, full signature with parameter types and defaults, parameter table, one working example (with sample data and expected output), and edge-case notes.
+For each function: one-sentence description, full signature with parameter types and defaults, parameter table, one working example (with sample data and expected output), and edge-case notes. This reference supplements, not replaces, doc comments in the Rust source (`src/lib.rs` and related files). The Rust comments are for contributors; this page is for users. Keep them in sync when functions change signatures.
 
 #### SPARQL Compliance Matrix
 
@@ -237,49 +268,24 @@ Academic background: the VP storage model (Abadi et al.), dictionary encoding, H
 
 ---
 
-## 4. Feature Deep Dives — Prose Summaries
-
-### Storing Knowledge
-
-Users model their domain as a web of connected facts. Consider a movie database: the fact "Inception was directed by Christopher Nolan" becomes the triple `<:Inception> <:directedBy> <:ChristopherNolan>`. Each entity (a movie, a person, a genre) is identified by an IRI — a globally unique name. Properties like titles and release dates are stored as literals with types: `"Inception"` is a string, `"2010"^^xsd:gYear` is a typed year. Named graphs group facts by source or context: one graph for IMDb data, another for user ratings, a third for inferred relationships. Blank nodes represent anonymous entities (an unnamed address, a list item) but should be used sparingly — they cannot be referenced from outside their graph. RDF-star extends the model to make statements about statements: "Alice said (on Tuesday) that Inception is excellent" — useful for provenance, confidence scores, and temporal annotations.
-
-### Loading Data
-
-pg_ripple accepts data in every standard RDF serialization format. Turtle is the recommended default for human-authored data — it is compact and readable. N-Triples is the fastest format for bulk loading because each line is self-contained (no prefix resolution, no nesting). N-Quads adds named-graph support to N-Triples. TriG is Turtle with named graphs. RDF/XML exists for legacy systems. Bulk loading uses batch dictionary encoding and deferred index maintenance to achieve over 100,000 triples per second. Individual inserts via `insert_triple()` are suitable for application-driven writes at lower throughput. Blank nodes are scoped to each load call — the same label `_:x` in two separate `load_turtle()` calls creates two distinct entities. After a large bulk load, running `ANALYZE` helps the PostgreSQL query planner choose optimal execution plans for subsequent SPARQL queries.
-
-### Querying with SPARQL
-
-SPARQL is the query language of the semantic web, and pg_ripple implements the full SPARQL 1.1 specification. A basic graph pattern matches triples: `?person foaf:name ?name` finds every person with a name. Property paths follow chains automatically: `foaf:knows+` traverses the "knows" relationship transitively, discovering friends-of-friends without writing recursive queries by hand. Aggregation (COUNT, SUM, AVG, GROUP BY) answers analytical questions. FILTER narrows results by condition. OPTIONAL produces left-join semantics — include the data if it exists, return NULL if it does not. Subqueries, UNION, and MINUS compose complex logic from simple parts. Behind the scenes, pg_ripple compiles every SPARQL query to optimized SQL using integer joins against VP tables, with filter pushdown and self-join elimination. The `sparql_explain()` function reveals the generated SQL for debugging and performance analysis.
-
-### Validating Data Quality
-
-SHACL lets users define the shape of valid data. A shape says: "every instance of Person must have exactly one `foaf:name` of type `xsd:string`, an optional `foaf:age` that is a positive integer, and at least one `foaf:knows` link to another Person." When `shacl_mode` is set to `sync`, violations are caught at insert time — an insert that would create a Person without a name is rejected with a clear error. When set to `async`, a background worker checks data periodically, logging violations to a report table without blocking writes. Sync mode is best for transactional applications where data integrity is non-negotiable. Async mode suits high-throughput ingestion pipelines where occasional violations are acceptable and can be reviewed later.
-
-### Reasoning and Inference
-
-Datalog rules let pg_ripple derive new facts from existing ones. The rule `?x ex:indirectManager ?z :- ?x ex:manager ?y, ?y ex:indirectManager ?z` computes the transitive management chain automatically. Load the rule, run `infer()`, and every indirect management relationship becomes a queryable fact. Built-in rule sets handle common reasoning tasks: RDFS entailment (subclass and subproperty hierarchies) and OWL RL (richer ontological reasoning including inverse properties, transitive properties, and class equivalence). Goal-directed mode derives only the facts needed by a specific query, avoiding the cost of materializing everything. Semi-naive evaluation and magic sets optimization keep inference fast even on large graphs.
-
-### Exporting and Sharing
-
-pg_ripple exports graphs in every standard RDF format. Turtle is ideal for human review and version control. N-Triples suits high-throughput pipelines. JSON-LD is the bridge to web applications and AI systems. The JSON-LD framing feature is particularly powerful: given a frame (a template describing the desired JSON structure), pg_ripple produces nested JSON documents shaped for a specific API contract — not flat triple dumps. This means a REST endpoint can return a properly structured JSON response directly from a SPARQL CONSTRUCT query. The GraphRAG export pipeline produces Parquet files compatible with Microsoft's GraphRAG BYOG format, enabling AI integration with graph-enriched context.
-
-### Search and Discovery
-
-Full-text search indexes the text of literal values — names, descriptions, notes — using PostgreSQL's GIN indexes. `fts_search('knowledge graph')` returns matching triples ranked by relevance. Vector embeddings go further: store an embedding vector alongside each entity, build an HNSW index, and use `pg:similar()` in SPARQL to find semantically similar entities. Hybrid retrieval combines graph patterns with vector similarity: "find entities of type Paper that are semantically similar to 'graph neural networks' and were authored by someone in my co-author network." Reciprocal Rank Fusion merges results from the graph and vector channels into a single ranked list.
-
-### APIs and Integration
-
-The `pg_ripple_http` companion service exposes a W3C SPARQL Protocol endpoint over HTTP/HTTPS. Applications send SPARQL queries via HTTP POST and receive results in JSON, XML, CSV, Turtle, or JSON-LD. Authentication, TLS, and Prometheus metrics are built in. For applications that connect directly to PostgreSQL, pg_ripple functions are callable from any PostgreSQL client library — `psycopg2` in Python, `pg` in Node.js, JDBC in Java. SPARQL federation extends queries beyond the local database: the `SERVICE` keyword routes part of a query to a remote SPARQL endpoint (Wikidata, DBpedia, a partner's knowledge graph) and joins the results with local data in a single query.
-
----
-
-## 5. Content Guidelines
+## 4. Content Guidelines
 
 ### Language and Style
 
-Write in active voice with short sentences (average 15 words). Lead with what the user can do, not how the implementation works: "Load a Turtle file in one call" before any mention of VP tables or dictionary encoding. Avoid jargon without explanation — the first use of any term links to the Glossary page. Use parenthetical asides for optional depth: "pg_ripple compiles this to a recursive CTE (a technique for following chains in SQL) with hash-based cycle detection." Put advanced implementation details in collapsible `<details>` blocks.
+Write in active voice with short sentences (average 15 words). Lead with what the user can do, not how the implementation works: "Load a Turtle file in one call" before any mention of VP tables or dictionary encoding. Avoid jargon without explanation — the first use of any term links to the Glossary page. Use parenthetical asides for optional depth: "pg_ripple compiles this to a recursive CTE (a technique for following chains in SQL) with hash-based cycle detection." Put advanced implementation details in admonition blocks (`> **Advanced**`) rather than inline, to keep the main path readable.
 
 Each paragraph conveys a complete thought in 150–250 words. Resist the urge to break prose into bullet lists unless the content is genuinely a checklist, a comparison matrix, or a sequence of steps. Bullet-point avalanches feel comprehensive but communicate poorly — readers skim them without absorbing the relationships between ideas.
+
+### pg_ripple-Specific Anti-Patterns
+
+Avoid these patterns that appear repeatedly in first-draft documentation for this project:
+
+- **Explaining VP tables before explaining triples.** Implementation details belong in "How It Works," never the opening paragraph. Lead with what the user does.
+- **Conflating SPARQL-the-language with SPARQL-the-protocol.** "SPARQL" in query context is the W3C query language. The HTTP interface is the SPARQL Protocol. The `pg_ripple_http` service implements the Protocol. Keep these distinct.
+- **Using `INSERT DATA` examples when `load_turtle()` is the natural entry point.** Lead bulk-loading examples with `load_turtle()`; `INSERT DATA` belongs only in the SPARQL Update section.
+- **Omitting the `SELECT pg_ripple.sparql(...)` wrapper.** Every SPARQL example must show the full SQL call, not just the bare SPARQL string.
+- **Presenting integer IDs as user-visible.** Dictionary IDs are internal. Never show raw `i64` values as if users interact with them; use `decode_id()` in any example that must mention an ID.
+- **Asserting blank-node identity across loads.** Blank nodes are scoped per `load_turtle()` call. Examples that imply `_:x` inserted in one call is the same entity as `_:x` in a second call are incorrect.
 
 ### Examples
 
@@ -297,27 +303,25 @@ Mark sections with difficulty levels: **Beginner**, **Intermediate**, **Advanced
 
 Features introduced in specific versions get a callout: `> **Available since v0.10.0**`. This helps users on older versions understand which sections apply to them.
 
+### Documentation Versioning
+
+The documentation tracks the current release. When a feature changes incompatibly, add a versioned callout explaining both old and new behaviour. Do not maintain separate documentation trees for old versions — migration guides and CHANGELOG provide backward-compatibility information. When a deprecation is introduced, add `> **Deprecated since vX.Y.Z**` alongside the existing `> **Available since**` callout. Remove deprecated content only after two minor releases have passed.
+
 ### Term Formatting
 
 Follow project conventions: IRIs in `<angle brackets>`, literals in `"double quotes"^^xsd:type`, blank nodes as `_:label`, function names as `function_name()`, GUC parameters as `parameter_name`.
 
----
+### Discoverability
 
-## 6. Operations and Production
-
-Production documentation is not an afterthought — it is the documentation that determines whether pg_ripple is adopted or abandoned after evaluation. A system that is easy to evaluate but hard to operate will not survive contact with a production SLA.
-
-The operations section must answer every question a DBA asks before putting a new extension into production: What resources does it need? How do I monitor it? What breaks, and how do I fix it? How do I back it up? How do I upgrade without downtime? How do I scale when the data grows?
-
-The architecture overview page is the foundation — it gives operators a mental model of the system so they can reason about problems they have never seen before. The configuration page is the most-referenced page in the operations section — it must be exhaustive, well-organized, and include recommended values for common deployment sizes. The troubleshooting page is a living document that grows with every support interaction — every user question that takes more than five minutes to answer becomes a new entry.
-
-Performance tuning documentation must include realistic numbers. "Tune `merge_threshold` for your workload" is useless without guidance on what values work for what workloads. Include benchmark results, recommended starting points, and the diagnostic steps to determine whether a change helped.
-
-Security documentation must be honest about the threat model. pg_ripple runs inside PostgreSQL with full access to the database — this is both its strength (no network boundary, transactional writes) and its risk surface. Document what is protected (dictionary encoding prevents string injection in VP queries), what requires configuration (file-path loaders need superuser), and what users must handle themselves (network security, TLS, authentication).
+Each page sets a `title` and `description` in mdBook front matter. Titles follow the pattern `{Task} — pg_ripple` (e.g., "Load RDF Data — pg_ripple"). Descriptions are one sentence of 100–160 characters phrased as a concrete capability ("Load Turtle, N-Triples, or RDF/XML files into pg_ripple at over 100,000 triples per second."). The sitemap is auto-generated by mdBook. Heading text in feature chapters must use the vocabulary users type into search engines: "property paths" not "path expressions," "bulk loading" not "batch insertion." The SQL Function Reference groups functions by task to match how users search, not alphabetically.
 
 ---
 
-## 7. Delivery Strategy
+## 5. Delivery Strategy
+
+### Phase 0: CI Test Harness (Prerequisite)
+
+Build the infrastructure that keeps examples honest before writing any new pages. The harness is a script that: (1) spins up a local pg_ripple instance via `cargo pgrx run pg18` or Docker, (2) extracts fenced SQL code blocks from markdown files under `docs/src/`, (3) executes them in document order with per-file setup and teardown, and (4) compares stdout against expected output embedded in the markdown as a comment block directly below each code block. Fixture data lives in `docs/fixtures/` and is loaded once per test run. The CI job runs the harness on every PR that touches `docs/`. Without this infrastructure, Phase 1 examples will rot immediately. Estimated scope: one or two days.
 
 ### Phase 1: Foundation (Immediate)
 
@@ -345,7 +349,7 @@ User questions on GitHub drive documentation improvements. Every question that t
 
 ---
 
-## 8. Success Criteria
+## 6. Success Criteria
 
 Documentation succeeds when:
 
@@ -353,7 +357,7 @@ Documentation succeeds when:
 
 2. **Thirty-minute onboarding**: A developer loads data, runs a query, and understands the core concepts within thirty minutes, following the guided tutorial.
 
-3. **Self-service problem solving**: Users resolve 80% of their problems by searching the documentation. The remaining 20% require asking on GitHub — and each of those questions becomes a documentation improvement.
+3. **Self-service problem solving**: Users resolve 80% of their problems by searching the documentation. The remaining 20% require asking on GitHub — and each of those questions becomes a documentation improvement. Tracked via: a “Was this helpful?” two-button widget on each page (results posted to a dedicated GitHub Discussion thread monthly), GitHub Discussions tagged with a `docs-gap` label in a dedicated category, and a quarterly review of site search queries that return zero results.
 
 4. **Working examples**: Every code example works without modification against the current release. CI enforces this.
 
