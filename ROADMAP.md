@@ -11,7 +11,7 @@ Each release below has two layers:
 - **The plain-language summary** (in the coloured box) explains *what* the release delivers and *why it matters* — no programming knowledge required.
 - **The technical deliverables** list the specific items developers will build. Feel free to skip these if you're reading for the big picture.
 
-**Effort estimates** are given as *person-weeks* — e.g. "6–8 pw" means the release would take roughly 6–8 weeks for a single full-time developer, or 3–4 weeks for a pair working together. The total estimated effort from v0.1.0 to v1.0.0 is **236–319 person-weeks** (~55–74 months for one developer; ~27–37 months for a pair).
+**Effort estimates** are given as *person-weeks* — e.g. "6–8 pw" means the release would take roughly 6–8 weeks for a single full-time developer, or 3–4 weeks for a pair working together. The total estimated effort from v0.1.0 to v1.0.0 is **239–324 person-weeks** (~55–75 months for one developer; ~27–37 months for a pair).
 
 **"optional at runtime" items**: some deliverables are annotated *(optional at runtime — X must be installed)*. This means the feature depends on an external extension (e.g. pg_trickle) that may not be installed in every deployment. The feature is **required by this roadmap** and must be implemented; the Rust code gates on a runtime availability check and degrades gracefully (returns 0 / false / empty, emits a WARNING, never raises an ERROR) when the dependency is absent. These items are not optional from a delivery standpoint.
 
@@ -60,10 +60,11 @@ Each release below has two layers:
 | [0.36.0](#v0360--worst-case-optimal-joins--lattice-based-datalog) | Worst-Case Optimal Joins & Lattice-Based Datalog | Leapfrog Triejoin for cyclic SPARQL patterns (10×–100× speedup); Datalog^L monotone lattice aggregation | 6–9 pw |
 | [0.37.0](#v0370--storage-concurrency-hardening--error-safety) | Storage Concurrency Hardening & Error Safety | Fix HTAP merge race, rare-predicate promotion race, dictionary cache rollback; eliminate all hard panics; add GUC validators | 9–11 pw |
 | [0.38.0](#v0380--architecture-refactoring--query-completeness) | Architecture Refactoring & Query Completeness | Split god-module, PredicateCatalog trait, batch encoding, SCBD, SPARQL Update completeness, SHACL hints in planner | 9–11 pw |
-| [0.39.0](#v0390--streaming-results-explain--observability) | Streaming Results, Explain & Observability | Server-side SPARQL cursors, `explain_sparql()`, `explain_datalog()`, OpenTelemetry tracing, resource governors | 9–11 pw |
-| [0.40.0](#v0400--parallel-merge-cost-based-federation--live-cdc) | Parallel Merge, Cost-Based Federation & Live CDC | Multi-worker HTAP merge, FedX-style federation planner, parallel SERVICE, live RDF change subscriptions | 10–12 pw |
+| [0.39.0](#v0390--datalog-http-api-for-pg_ripple_http) | Datalog HTTP API | REST API exposing all 27 Datalog SQL functions in `pg_ripple_http`: rule management, inference, goal queries, constraints, admin | 3–5 pw |
+| [0.40.0](#v0400--streaming-results-explain--observability) | Streaming Results, Explain & Observability | Server-side SPARQL cursors, `explain_sparql()`, `explain_datalog()`, OpenTelemetry tracing, resource governors | 9–11 pw |
+| [0.41.0](#v0410--parallel-merge-cost-based-federation--live-cdc) | Parallel Merge, Cost-Based Federation & Live CDC | Multi-worker HTAP merge, FedX-style federation planner, parallel SERVICE, live RDF change subscriptions | 10–12 pw |
 | [1.0.0](#v100--production-release) | Production Release | Standards conformance, stress testing, security audit | 6–8 pw |
-| | | **Total estimated effort** | **236–319 pw** |
+| | | **Total estimated effort** | **239–324 pw** |
 
 ---
 
@@ -3014,7 +3015,84 @@ No `.expect()`/`.unwrap()` in non-test Rust code; clippy deny enforced in CI. Th
 
 ---
 
-## v0.39.0 — Streaming Results, Explain & Observability
+## v0.39.0 — Datalog HTTP API for pg_ripple_http
+
+**Theme**: Expose all pg_ripple Datalog SQL functions as a REST API in the `pg_ripple_http` companion service.
+
+> **In plain language:** The `pg_ripple_http` service currently speaks only SPARQL. This release adds a `/datalog` namespace that lets any HTTP client — without a PostgreSQL driver — manage rule sets, trigger inference, run goal-directed queries, check integrity constraints, and inspect monitoring statistics. The implementation is a thin axum layer; all heavy lifting stays inside the PostgreSQL extension.
+>
+> **Effort estimate: 3–5 person-weeks**
+>
+> **Implementation plan:** [plans/pg_ripple_http_datalog.md](plans/pg_ripple_http_datalog.md)
+
+### Deliverables
+
+- [ ] **Extract shared helpers** (`pg_ripple_http/src/common.rs` new module)
+  - Move `AppState`, `check_auth()`, `redacted_error()`, and `env_or()` from `main.rs` to `common.rs`
+  - Both SPARQL and Datalog handlers import from this module
+- [ ] **Phase 1 — Rule management** (`pg_ripple_http/src/datalog.rs` new module)
+  - `POST /datalog/rules/{rule_set}` — body `text/x-datalog`; calls `pg_ripple.load_rules($1, $2)`; returns `{"rule_set": "…", "rules_loaded": N}`
+  - `POST /datalog/rules/{rule_set}/builtin` — calls `pg_ripple.load_rules_builtin($1)`
+  - `GET /datalog/rules` — calls `pg_ripple.list_rules()`; returns JSONB array
+  - `DELETE /datalog/rules/{rule_set}` — calls `pg_ripple.drop_rules($1)`; returns `{"deleted": N}`
+  - `POST /datalog/rules/{rule_set}/add` — single-rule add; calls `pg_ripple.add_rule($1, $2)`
+  - `DELETE /datalog/rules/{rule_set}/{rule_id}` — calls `pg_ripple.remove_rule($1::bigint)` (triggers DRed)
+  - `PUT /datalog/rules/{rule_set}/enable` — calls `pg_ripple.enable_rule_set($1)`
+  - `PUT /datalog/rules/{rule_set}/disable` — calls `pg_ripple.disable_rule_set($1)`
+- [ ] **Phase 2 — Inference** (`pg_ripple_http/src/datalog.rs`)
+  - `POST /datalog/infer/{rule_set}` — calls `pg_ripple.infer($1)`; returns `{"derived": N}`
+  - `POST /datalog/infer/{rule_set}/stats` — calls `pg_ripple.infer_with_stats($1)`; returns full stats JSONB
+  - `POST /datalog/infer/{rule_set}/agg` — calls `pg_ripple.infer_agg($1)`
+  - `POST /datalog/infer/{rule_set}/wfs` — calls `pg_ripple.infer_wfs($1)`
+  - `POST /datalog/infer/{rule_set}/demand` — body `{"demands": […]}`; calls `pg_ripple.infer_demand($1, $2::jsonb)`
+  - `POST /datalog/infer/{rule_set}/lattice` — body `{"lattice": "min"}`; calls `pg_ripple.infer_lattice($1, $2)`
+- [ ] **Phase 3 — Query & constraints** (`pg_ripple_http/src/datalog.rs`)
+  - `POST /datalog/query/{rule_set}` — body Datalog goal text; calls `pg_ripple.infer_goal($1, $2)`; returns `{"derived": N, "iterations": N, "matching": […]}`
+  - `GET /datalog/constraints` — calls `pg_ripple.check_constraints(NULL)`; returns violation array
+  - `GET /datalog/constraints/{rule_set}` — calls `pg_ripple.check_constraints($1)`
+- [ ] **Phase 4 — Admin & monitoring** (`pg_ripple_http/src/datalog.rs`)
+  - `GET /datalog/stats/cache` — calls `pg_ripple.rule_plan_cache_stats()`
+  - `GET /datalog/stats/tabling` — calls `pg_ripple.tabling_stats()`
+  - `GET /datalog/lattices` — calls `pg_ripple.list_lattices()`
+  - `POST /datalog/lattices` — body `{"name": "…", "join_fn": "…", "bottom": "…"}`; calls `pg_ripple.create_lattice($1, $2, $3)`
+  - `GET /datalog/views` — calls `pg_ripple.list_datalog_views()`
+  - `POST /datalog/views` — body JSON; calls `pg_ripple.create_datalog_view(…)`
+  - `DELETE /datalog/views/{name}` — calls `pg_ripple.drop_datalog_view($1)`
+- [ ] **Route registration** (`pg_ripple_http/src/main.rs`)
+  - `mod datalog;` and `mod common;` declarations
+  - 24 `.route(…)` entries wired under `/datalog`
+- [ ] **Metrics extension** (`pg_ripple_http/src/metrics.rs`)
+  - Add `datalog_queries: AtomicU64` counter; expose as `pg_ripple_http_datalog_queries_total` in `/metrics`
+- [ ] **Authentication & security**
+  - All `/datalog/*` handlers call `check_auth()` — same token as SPARQL
+  - Optional write-protection: `PG_RIPPLE_HTTP_DATALOG_WRITE_TOKEN` env var gates `POST /datalog/rules/*`, `DELETE`, and `PUT` endpoints independently of the read token
+  - All SQL calls use `$1`, `$2`, … parameterized queries — never string concatenation
+  - Request body limit: 10 MB via `axum::body::to_bytes(body, 10 * 1024 * 1024)`
+- [ ] **Error mapping**
+  - `400 datalog_parse_error` — malformed rule text returned by extension
+  - `400 datalog_goal_error` — invalid goal pattern
+  - `400 invalid_request` — missing body, wrong content-type, non-numeric rule_id
+  - `404 rule_set_not_found` — infer/drop on nonexistent rule set
+  - `503 service_unavailable` — pool exhausted
+- [ ] **Migration script** `sql/pg_ripple--0.38.0--0.39.0.sql`
+  - No schema changes to pg_ripple itself; comment-only header documenting the new HTTP surface
+- [ ] **Tests**
+  - Integration tests using `axum-test` (or equivalent): round-trip load → infer → query goal → drop for the `custom` rule set
+  - Error path tests: malformed Datalog, missing auth, oversized body
+  - Smoke test script `tests/datalog_http_smoke.sh` (curl-based)
+
+### Documentation
+
+- [ ] `pg_ripple_http/README.md` — new `## Datalog API` section with curl examples for all 24 endpoints, content types, and error codes
+- [ ] Release notes for v0.39.0
+
+### Exit Criteria
+
+All 24 Datalog endpoints respond correctly in integration tests. `GET /datalog/rules` returns the JSONB array from `list_rules()`. `POST /datalog/infer/custom` triggers materialization and returns `{"derived": N}`. `GET /datalog/constraints` returns violation JSONB. Auth check rejects requests with invalid token. Parameterized-query requirement verified by code review (no `format!()` calls mixing user input into SQL strings). Migration chain test passes.
+
+---
+
+## v0.40.0 — Streaming Results, Explain & Observability
 
 **Theme**: Streaming cursor API for large result sets, first-class query explain, and full observability stack.
 
@@ -3061,7 +3139,7 @@ No `.expect()`/`.unwrap()` in non-test Rust code; clippy deny enforced in CI. Th
 
 ### Migration Script
 
-`sql/pg_ripple--0.38.0--0.39.0.sql` — registers new GUCs (`sparql_max_rows`, `datalog_max_derived`, `export_max_rows`, `sparql_overflow_action`, `tracing_enabled`, `tracing_exporter`). No VP table schema changes.
+`sql/pg_ripple--0.39.0--0.40.0.sql` — registers new GUCs (`sparql_max_rows`, `datalog_max_derived`, `export_max_rows`, `sparql_overflow_action`, `tracing_enabled`, `tracing_exporter`). No VP table schema changes.
 
 ### Documentation
 
@@ -3070,7 +3148,7 @@ No `.expect()`/`.unwrap()` in non-test Rust code; clippy deny enforced in CI. Th
 - [ ] `reference/observability.md` (new) — OpenTelemetry integration guide: exporter setup, span taxonomy, Grafana/Jaeger integration examples
 - [ ] `user-guide/operations/monitoring.md` — `cache_stats()`, `diagnostic_report()`, `stat_statements_decoded` usage
 - [ ] `reference/error-reference.md` — PT601, PT602, PT603 documented
-- [ ] Release notes for v0.39.0
+- [ ] Release notes for v0.40.0
 
 ### Exit Criteria
 
@@ -3078,7 +3156,7 @@ No `.expect()`/`.unwrap()` in non-test Rust code; clippy deny enforced in CI. Th
 
 ---
 
-## v0.40.0 — Parallel Merge, Cost-Based Federation & Live CDC
+## v0.41.0 — Parallel Merge, Cost-Based Federation & Live CDC
 
 **Theme**: Multi-worker HTAP merge, intelligent federation query planning, and real-time RDF change subscriptions.
 
@@ -3137,7 +3215,7 @@ No `.expect()`/`.unwrap()` in non-test Rust code; clippy deny enforced in CI. Th
 
 ### Migration Script
 
-`sql/pg_ripple--0.39.0--0.40.0.sql` — creates `_pg_ripple.endpoint_stats` table; creates `_pg_ripple.subscriptions` table; registers new GUCs (`merge_workers`, `sameas_max_cluster_size`, `federation_stats_ttl_secs`, `federation_planner_enabled`, `federation_parallel_max`, `federation_parallel_timeout`, `federation_inline_max_rows`, `federation_allow_private`).
+`sql/pg_ripple--0.40.0--0.41.0.sql` — creates `_pg_ripple.endpoint_stats` table; creates `_pg_ripple.subscriptions` table; registers new GUCs (`merge_workers`, `sameas_max_cluster_size`, `federation_stats_ttl_secs`, `federation_planner_enabled`, `federation_parallel_max`, `federation_parallel_timeout`, `federation_inline_max_rows`, `federation_allow_private`).
 
 ### Documentation
 
@@ -3146,11 +3224,11 @@ No `.expect()`/`.unwrap()` in non-test Rust code; clippy deny enforced in CI. Th
 - [ ] `user-guide/features/federation.md` — updated: VoID stats, cost-based planner, parallel SERVICE, result streaming, IP restrictions
 - [ ] `reference/guc-reference.md` — all new GUCs documented; security guidance on `federation_allow_private`
 - [ ] `reference/error-reference.md` — PT550, PT620, PT621 documented
-- [ ] Release notes for v0.40.0
+- [ ] Release notes for v0.41.0
 
 ### Exit Criteria
 
-Parallel merge stress test passes (100 writers, 4 workers, no lost deletes). VoID stats fetched on endpoint registration. Independent SERVICE clauses execute in parallel (verifiable via `explain_sparql()`). CDC subscription delivers `NOTIFY` payloads for all inserts matching the filter. HTTPS cert validation enforced in `pg_ripple_http`. Migration chain test passes through 0.40.0.
+Parallel merge stress test passes (100 writers, 4 workers, no lost deletes). VoID stats fetched on endpoint registration. Independent SERVICE clauses execute in parallel (verifiable via `explain_sparql()`). CDC subscription delivers `NOTIFY` payloads for all inserts matching the filter. HTTPS cert validation enforced in `pg_ripple_http`. Migration chain test passes through 0.41.0.
 
 ---
 
