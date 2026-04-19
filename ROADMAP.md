@@ -11,7 +11,7 @@ Each release below has two layers:
 - **The plain-language summary** (in the coloured box) explains *what* the release delivers and *why it matters* — no programming knowledge required.
 - **The technical deliverables** list the specific items developers will build. Feel free to skip these if you're reading for the big picture.
 
-**Effort estimates** are given as *person-weeks* — e.g. "6–8 pw" means the release would take roughly 6–8 weeks for a single full-time developer, or 3–4 weeks for a pair working together. The total estimated effort from v0.1.0 to v1.0.0 is **239–324 person-weeks** (~55–75 months for one developer; ~27–37 months for a pair).
+**Effort estimates** are given as *person-weeks* — e.g. "6–8 pw" means the release would take roughly 6–8 weeks for a single full-time developer, or 3–4 weeks for a pair working together. The total estimated effort from v0.1.0 to v1.0.0 is **249–338 person-weeks** (~57–78 months for one developer; ~29–39 months for a pair).
 
 **"optional at runtime" items**: some deliverables are annotated *(optional at runtime — X must be installed)*. This means the feature depends on an external extension (e.g. pg_trickle) that may not be installed in every deployment. The feature is **required by this roadmap** and must be implemented; the Rust code gates on a runtime availability check and degrades gracefully (returns 0 / false / empty, emits a WARNING, never raises an ERROR) when the dependency is absent. These items are not optional from a delivery standpoint.
 
@@ -64,8 +64,9 @@ Each release below has two layers:
 | [0.40.0](#v0400--streaming-results-explain--observability) | Streaming Results, Explain & Observability | Server-side SPARQL cursors, `explain_sparql()`, `explain_datalog()`, OpenTelemetry tracing, resource governors | 9–11 pw |
 | [0.41.0](#v0410--full-w3c-sparql-11-test-suite) | Full W3C SPARQL 1.1 Test Suite | Complete W3C SPARQL 1.1 Query + Update + Graph Patterns + Aggregates test suite harness with parallelized execution; 3,000+ tests in < 2 min CI | 5–7 pw |
 | [0.42.0](#v0420--parallel-merge-cost-based-federation--live-cdc) | Parallel Merge, Cost-Based Federation & Live CDC | Multi-worker HTAP merge, FedX-style federation planner, parallel SERVICE, live RDF change subscriptions | 10–12 pw |
+| [0.43.0](#v0430--watdiv--jena-conformance-suite) | WatDiv + Jena Conformance Suite | Apache Jena edge-case tests (~1,000) and WatDiv scale-correctness benchmark (10M+ triples, star/chain/snowflake/complex patterns); 90% harness reuse from v0.41.0 | 5–7 pw |
 | [1.0.0](#v100--production-release) | Production Release | Standards conformance, stress testing, security audit | 6–8 pw |
-| | | **Total estimated effort** | **244–331 pw** |
+| | | **Total estimated effort** | **249–338 pw** |
 
 ---
 
@@ -3324,6 +3325,67 @@ Parallel merge stress test passes (100 writers, 4 workers, no lost deletes). VoI
 ### Exit Criteria
 
 Smoke subset (180 tests) passes with 0 unexpected failures on `main`. Full suite (3,000+ tests) runs in < 2 minutes on an 8-core CI runner. Per-category pass rate report uploaded as CI artifact. Known-failures manifest has 0 entries for `optional` and `aggregates` categories (those bugs fixed in v0.40.0). Migration chain test passes through 0.41.0.
+
+---
+
+## v0.43.0 — WatDiv + Jena Conformance Suite
+
+**Theme**: Scale-correctness and semantic edge-case coverage via the WatDiv benchmark and Apache Jena test suite, reusing the harness infrastructure from v0.41.0.
+
+> **In plain language:** W3C conformance (v0.41.0) proves pg_ripple is correct on small, well-defined fixtures. This release proves it is correct *at scale* and on the implementation edge cases that W3C deliberately leaves underspecified. WatDiv loads 10M–100M triples and runs 100–1,000 queries across four complexity levels (star, chain, snowflake, complex) — catching SQL planner regressions and VP table performance cliffs that only appear under realistic data distributions. Apache Jena contributes ~1,000 additional tests covering type coercion corner cases, timezone handling in date comparisons, numeric precision, and blank-node scoping rules that the W3C suite glosses over.
+>
+> **Effort estimate: 5–7 person-weeks** (90% infrastructure reuse from v0.41.0)
+
+### Deliverables
+
+- [ ] **Apache Jena adapter** (`tests/jena/` new module)
+  - Adapt v0.41.0 manifest parser to handle Jena-specific manifest fields (`jt:QueryEvaluationTest`, `jt:UpdateEvaluationTest`) and Jena result extensions (e.g. `rdf:XMLLiteral`, extended numeric types)
+  - ~1,000 tests across Jena's `sparql-query`, `sparql-update`, `sparql-syntax`, and `algebra` sub-suites
+  - Reuse v0.41.0 RDF fixture loader, result validator, parallel runner, and known-failures manifest format
+  - Specific coverage targets:
+    - **Type coercion**: XSD numeric promotions (`xsd:integer` → `xsd:decimal` → `xsd:double`); mixed-type comparisons
+    - **Date/time**: timezone-aware `xsd:dateTime` comparisons; `NOW()`, `YEAR()`, `MONTH()`, `DAY()`, `HOURS()`, `MINUTES()`, `SECONDS()`, `TZ()` builtins
+    - **Numeric precision**: `xsd:decimal` arithmetic; `ROUND()`, `CEIL()`, `FLOOR()`, `ABS()`
+    - **Blank-node scoping**: blank nodes in CONSTRUCT templates; blank nodes across GRAPH boundaries; blank-node identity in OPTIONAL
+    - **String functions**: `STRLEN()`, `SUBSTR()`, `UCASE()`, `LCASE()`, `STRSTARTS()`, `STRENDS()`, `CONTAINS()`, `ENCODE_FOR_URI()`, `CONCAT()`
+  - Target: full Jena suite completes in **< 3 minutes** alongside W3C suite on CI
+  - New CI job `jena-suite` — non-blocking until pass rate ≥ 95%; then promoted to required
+- [ ] **WatDiv harness** (`tests/watdiv/` new module)
+  - Data generation: integrate `watdiv` Rust port or call the upstream C++ binary via `std::process::Command`; generate 10M-triple dataset once and cache in CI artifact storage
+  - Query templates: all 100 WatDiv query templates across four structural classes:
+    - **Star** (S1–S7): all predicates share a single subject; tests VP table scan and star-join optimisation
+    - **Chain** (C1–C3): predicates form a linear path; tests join ordering
+    - **Snowflake** (F1–F5): star + chain hybrid; tests mixed join strategies
+    - **Complex** (B1–B12, L1–L5): multi-hop patterns with OPTIONAL and UNION; tests full algebra
+  - Correctness validation: run each query against a baseline (pre-computed expected cardinalities from a reference run) and assert within ±0.1% row count
+  - Performance baseline: record median query latency per template at 10M triples; flag regressions > 20% in CI
+  - Separate `cargo bench --bench watdiv` target using `criterion` — feeds into `benchmarks/` results
+  - Target: full 100-template suite at 10M triples completes in **< 5 minutes** on an 8-core CI runner
+  - New CI job `watdiv-suite` — non-blocking (performance regressions are warnings, not failures)
+- [ ] **Shared harness improvements** (backport to `tests/w3c/`)
+  - Unified `tests/conformance/runner.rs` — single parallel runner used by W3C, Jena, and WatDiv; eliminates code duplication
+  - Unified `known_failures.txt` format with `suite:` prefix (e.g. `w3c:`, `jena:`, `watdiv:`)
+  - Unified CI report artifact: per-suite pass/fail/skip/timeout counts in one `conformance_report.json`
+- [ ] **Test data download script** (`scripts/fetch_conformance_tests.sh`)
+  - Extends `scripts/fetch_w3c_tests.sh` to also download Jena test suite from Apache mirror and WatDiv query templates from GitHub
+  - All downloads verified against SHA-256 checksums
+  - WatDiv 10M dataset generated once and stored as a CI artifact (not re-generated on every run)
+
+### Migration Script
+
+`sql/pg_ripple--0.42.0--0.43.0.sql` — no schema changes. Comment-only header noting that v0.43.0 is a test infrastructure release.
+
+### Documentation
+
+- [ ] `reference/w3c-conformance.md` — updated to include Jena sub-suite pass rates alongside W3C categories
+- [ ] `reference/watdiv-results.md` (new) — WatDiv benchmark results table: query class, template ID, median latency at 10M triples, pass/fail status; updated on each release
+- [ ] `contributing/running-conformance-tests.md` — updated to cover Jena and WatDiv; how to regenerate WatDiv dataset; how to update performance baselines
+- [ ] `README.md` — add WatDiv correctness badge alongside W3C conformance badge
+- [ ] Release notes for v0.43.0
+
+### Exit Criteria
+
+Full Jena suite (1,000 tests) completes in < 3 minutes on CI. WatDiv 100-template suite at 10M triples completes in < 5 minutes. Jena known-failures manifest ≤ 30 `XFAIL` entries (type coercion and date-time edge cases acceptable until addressed post-1.0). WatDiv row-count correctness within ±0.1% for all 100 templates. Migration chain test passes through 0.43.0.
 
 ---
 
