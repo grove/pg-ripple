@@ -1,0 +1,18 @@
+-- Migration 0.30.0 → 0.31.0: Entity Resolution & Demand Transformation
+--
+-- New features in v0.31.0:
+--   - owl:sameAs entity canonicalization (src/datalog/rewrite.rs)
+--     Inference engine computes equivalence classes from owl:sameAs triples and
+--     rewrites rule-body constants to their canonical (lowest-ID) representative.
+--   - Demand transformation (src/datalog/demand.rs)
+--     pg_ripple.infer_demand(rule_set TEXT, demands JSONB) RETURNS JSONB
+--     Goal-directed inference filtered to the subset of rules that can
+--     contribute to the specified demand patterns.
+--
+-- New GUCs:
+--   pg_ripple.sameas_reasoning  BOOL DEFAULT true
+--   pg_ripple.demand_transform  BOOL DEFAULT true
+--
+-- Schema changes: None.
+-- No VP table structure changes are required; both features operate entirely
+-- at the rule-compilation and inference-execution layer.

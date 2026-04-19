@@ -2346,7 +2346,7 @@ See [plans/ecosystem/datalog.md §14.2](plans/ecosystem/datalog.md) for design n
 
 ### Deliverables
 
-- [ ] **`owl:sameAs` entity canonicalization** (`src/datalog/rewrite.rs` new module)
+- [x] **`owl:sameAs` entity canonicalization** (`src/datalog/rewrite.rs` new module)
   - Pre-pass: at the start of each inference run, compute equivalence classes of `owl:sameAs` (VP table for `sameAs` predicate) using union-find over dictionary IDs
   - Canonicalization map: each non-canonical ID maps to the lowest ID in its class
   - Rule compiler rewrite: substitute all occurrences of non-canonical IDs in rule bodies before SQL generation
@@ -2354,14 +2354,14 @@ See [plans/ecosystem/datalog.md §14.2](plans/ecosystem/datalog.md) for design n
   - GUC: `pg_ripple.sameas_reasoning` (bool, default `true`)
   - Benchmark: `benchmarks/sameas.sql` — query entity with 100 `sameAs` aliases; verify all facts visible via any alias
 
-- [ ] **Demand transformation** (`src/datalog/demand.rs` new module)
+- [x] **Demand transformation** (`src/datalog/demand.rs` new module)
   - Generalised magic sets: compute demand sets for all predicates simultaneously via a fixed-point on the program dependency graph
   - API: `pg_ripple.infer_demand(rule_set TEXT, demands JSONB) RETURNS JSONB` — `demands` is an array of goal patterns `[{"p": "rdf:type", "o": "foaf:Person"}, ...]`
   - Automatically applied in `create_datalog_view()` when multiple goal patterns are specified
   - SPARQL on-demand integration: when a SPARQL query references multiple derived predicates, compute a joint demand set and apply it to all relevant rules before generating inline CTEs; reduces CTE size and join cost
   - GUC: `pg_ripple.demand_transform` (bool, default `true`)
 
-- [ ] **pg_regress tests**
+- [x] **pg_regress tests**
   - `datalog_sameas.sql` — load `sameAs` assertions; verify inference results are visible via all aliases; verify canonicalization in SPARQL query results
   - `datalog_demand.sql` — verify `infer_demand()` derives same results as `infer()` filtered to the demand set; verify EXPLAIN shows smaller CTE for SPARQL on-demand queries with demand transform enabled
 
@@ -2371,9 +2371,9 @@ See [plans/ecosystem/datalog.md §14.2](plans/ecosystem/datalog.md) for design n
 
 ### Documentation
 
-- [ ] `user-guide/sql-reference/datalog.md` updated — document `infer_demand()`, `owl:sameAs` behaviour, `sameas_reasoning` GUC
-- [ ] `user-guide/best-practices/datalog-optimization.md` updated — add section on demand transformation vs. magic sets, when to use `infer_demand()` vs. `infer_goal()`
-- [ ] Release notes for v0.31.0
+- [x] `user-guide/sql-reference/datalog.md` updated — document `infer_demand()`, `owl:sameAs` behaviour, `sameas_reasoning` GUC
+- [x] `user-guide/best-practices/datalog-optimization.md` updated — add section on demand transformation vs. magic sets, when to use `infer_demand()` vs. `infer_goal()`
+- [x] Release notes for v0.31.0
 
 ### Exit Criteria
 

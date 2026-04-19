@@ -37,14 +37,18 @@
 pub mod builtins;
 pub mod cache;
 pub mod compiler;
+pub mod demand;
 pub mod magic;
 pub mod parser;
+pub mod rewrite;
 pub mod stratify;
 
 pub use compiler::compile_aggregate_rule;
 pub use compiler::compile_rule_delta_variants_to;
 pub use compiler::compile_rule_set;
 pub use compiler::compile_single_rule_to;
+pub use demand::parse_demands_json;
+pub use demand::run_infer_demand;
 pub use magic::parse_goal;
 pub use magic::run_infer_goal;
 pub use parser::parse_rules;
@@ -365,6 +369,14 @@ pub fn run_inference_seminaive(rule_set_name: &str) -> (i64, i32) {
     if all_rules.is_empty() {
         return (0, 0);
     }
+
+    // ── 2a. sameAs canonicalization pre-pass (v0.31.0) ────────────────────────
+    let all_rules = if crate::SAMEAS_REASONING.get() {
+        let sameas_map = rewrite::compute_sameas_map();
+        rewrite::apply_sameas_to_rules(&all_rules, &sameas_map)
+    } else {
+        all_rules
+    };
 
     // ── 3. Collect derived predicate IDs (rule heads) ─────────────────────────
     let derived_pred_ids: std::collections::HashSet<i64> = all_rules
@@ -924,7 +936,7 @@ pub fn run_inference_agg(rule_set_name: &str) -> (i64, i64, i32) {
 
 /// Inner helper: run semi-naive inference over a specific set of (non-aggregate)
 /// rules and materialise results into vp_rare.  Returns (total_derived, iterations).
-fn run_seminaive_inner(rules: &[Rule], rule_set_name: &str) -> (i64, i32) {
+pub(crate) fn run_seminaive_inner(rules: &[Rule], rule_set_name: &str) -> (i64, i32) {
     // Collect derived predicate IDs.
     let derived_pred_ids: std::collections::HashSet<i64> = rules
         .iter()

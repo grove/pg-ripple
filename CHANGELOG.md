@@ -9,7 +9,37 @@ Versions correspond to the milestones in [ROADMAP.md](ROADMAP.md).
 
 ## [Unreleased]
 
-Points at the next milestone: v0.31.0 — Demand-Driven Evaluation & sameAs Reasoning.
+Points at the next milestone: v0.32.0 — Well-Founded Semantics & Tabling.
+
+---
+
+## [0.31.0] — 2026-04-19 — Entity Resolution & Demand Transformation
+
+**pg_ripple's Datalog engine gains `owl:sameAs` entity canonicalization and demand-filtered inference.** All pg_regress tests pass (2 new tests for v0.31.0 features).
+
+### What you can do
+
+- **`owl:sameAs` reasoning** — when `pg_ripple.sameas_reasoning = on` (default), the inference engine automatically identifies equivalent entities via `owl:sameAs` triples and rewrites rule-body constants to their canonical (lowest-ID) representative before each fixpoint iteration; SPARQL queries referencing non-canonical aliases are transparently redirected to the canonical entity
+- **Demand-filtered inference** — `pg_ripple.infer_demand(rule_set, demands JSONB)` accepts a JSON array of goal patterns and derives only the facts needed to answer those goals; for programs with many rules and multiple derived predicates, this can reduce inference work by 50–90%
+- **Multi-goal demand sets** — unlike `infer_goal()` (single predicate), `infer_demand()` accepts multiple demand predicates simultaneously and computes a joint demand set via fixed-point propagation through the dependency graph; mutually recursive rules with multiple entry points are handled correctly
+- **Demand + sameAs composition** — `infer_demand()` applies the sameAs canonicalization pre-pass before running demand-filtered inference, combining both optimizations in one call
+
+### New GUC parameters
+
+| GUC | Type | Default | Description |
+|-----|------|---------|-------------|
+| `pg_ripple.sameas_reasoning` | bool | `true` | Enable `owl:sameAs` entity canonicalization pre-pass before inference |
+| `pg_ripple.demand_transform` | bool | `true` | Auto-apply demand transformation in `create_datalog_view()` with multiple goals |
+
+### New SQL functions
+
+| Function | Returns | Description |
+|----------|---------|-------------|
+| `pg_ripple.infer_demand(rule_set TEXT DEFAULT 'custom', demands JSONB)` | `JSONB` | Run demand-filtered inference; `demands` is `[{"p": "<iri>"}, …]`; empty array = full inference |
+
+### Migration
+
+No schema changes. Run `ALTER EXTENSION pg_ripple UPDATE` to upgrade from v0.30.0.
 
 ---
 

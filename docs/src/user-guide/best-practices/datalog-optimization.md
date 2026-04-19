@@ -222,3 +222,42 @@ The cache is automatically invalidated per rule set when:
 - `pg_ripple.drop_rules()` is called for that rule set
 
 The cache is **not** shared across backends (it is process-local). Each new backend connection starts with an empty cache, so the first `infer_agg()` call per backend always incurs a compile step.
+
+---
+
+## Demand transformation vs. magic sets (v0.31.0)
+
+Both demand transformation and magic sets (`infer_goal()`) are goal-directed inference techniques that derive only the facts needed to answer a query. They differ in scope:
+
+| Technique | Function | Best for |
+|-----------|----------|----------|
+| Magic sets | `infer_goal(rule_set, goal)` | Single goal predicate, one specific goal pattern |
+| Demand transformation | `infer_demand(rule_set, demands)` | Multiple goal predicates, mutually dependent rules |
+
+### When to use `infer_demand()` instead of `infer_goal()`
+
+Use `infer_demand()` when:
+
+1. **Multiple derived predicates in one query**: a SPARQL query touches several derived predicates that share common base predicates. `infer_demand()` computes a joint demand set and derives all needed facts in a single pass.
+
+2. **Mutually recursive rules**: rules for predicate A reference predicate B, which in turn references A. Magic sets handles one entry point; demand transformation propagates binding demands through the full dependency graph.
+
+3. **Selective analytics**: you only need results for a subset of derived predicates, not the full materialization.
+
+```sql
+-- Derive only "manager" and "department" predicates, ignoring unrelated HR predicates.
+SELECT pg_ripple.infer_demand('hr_rules',
+    '[{"p": "<https://hr.example.org/manager>"},
+      {"p": "<https://hr.example.org/department>"}]'
+);
+```
+
+### Auto-application in `create_datalog_view()`
+
+When `pg_ripple.demand_transform = on` (default), `create_datalog_view()` automatically applies demand transformation when multiple goal patterns are specified. This makes materialized views more selective.
+
+Set `pg_ripple.demand_transform = off` to fall back to full inference within a view definition.
+
+### `owl:sameAs` with demand transformation
+
+When `pg_ripple.sameas_reasoning = on` (default), `infer_demand()` applies the `owl:sameAs` canonicalization pre-pass before the demand-filtered inference. This ensures correct results even when entity aliases are involved, while still limiting the inference to the minimum required work.

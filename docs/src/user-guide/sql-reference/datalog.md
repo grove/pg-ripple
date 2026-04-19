@@ -443,6 +443,52 @@ SELECT * FROM pg_ripple.rule_plan_cache_stats();
 
 ---
 
+## Entity Resolution & Demand Transformation (v0.31.0)
+
+### `owl:sameAs` entity canonicalization
+
+When `pg_ripple.sameas_reasoning = on` (default), the inference engine automatically handles `owl:sameAs` triples. Before each fixpoint iteration, it computes equivalence classes from all `owl:sameAs` triples in the store, then rewrites rule-body constants to their canonical (lowest dictionary-ID) representative.
+
+This means that if your knowledge graph contains:
+```sparql
+ex:Alice owl:sameAs ex:A.Smith .
+ex:Alice ex:name "Alice" .
+```
+then rules that would derive new facts for `ex:A.Smith` (e.g., from patterns that match `ex:name`) will correctly produce results for the canonical `ex:Alice` entity. SPARQL queries referencing `ex:A.Smith` are transparently redirected to `ex:Alice`.
+
+**GUC:** `pg_ripple.sameas_reasoning` (bool, default `true`) — set to `false` to disable the pre-pass.
+
+### `pg_ripple.infer_demand(rule_set TEXT DEFAULT 'custom', demands JSONB) RETURNS JSONB`
+
+Goal-directed inference restricted to the subset of rules needed to derive the specified demands. This is a generalisation of `infer_goal()` (single goal, single predicate) that supports multiple goal patterns at once.
+
+`demands` is a JSONB array of goal patterns. Each element is an object with optional `"s"`, `"p"`, `"o"` keys:
+
+```sql
+SELECT pg_ripple.infer_demand('rdfs', '[{"p": "<http://www.w3.org/1999/02/22-rdf-syntax-ns#type>"}]');
+-- Derives only triples needed to answer rdf:type queries.
+```
+
+When `demands` is an empty array (`'[]'`), runs full inference identically to `infer()`.
+
+**Return value** (JSONB):
+
+| Key | Type | Description |
+|-----|------|-------------|
+| `derived` | number | Total triples derived |
+| `iterations` | number | Fixpoint iteration count |
+| `demand_predicates` | array | Predicate IRIs used as demand seeds (decoded) |
+
+```sql
+-- Derive only "descendantOf" and its dependencies, ignoring unrelated rules.
+SELECT pg_ripple.infer_demand('hierarchy', '[{"p": "<https://ex.org/descendantOf>"}]');
+-- {"derived": 5, "iterations": 2, "demand_predicates": ["https://ex.org/descendantOf"]}
+```
+
+**GUC:** `pg_ripple.demand_transform` (bool, default `true`) — when `true`, `create_datalog_view()` automatically applies demand transformation when multiple goal patterns are specified.
+
+---
+
 ## Configuration
 
 | GUC | Default | Description |
@@ -456,6 +502,8 @@ SELECT * FROM pg_ripple.rule_plan_cache_stats();
 | `pg_ripple.delta_index_threshold` | `500` | Minimum delta-table row count before creating a B-tree index on `(s, o)` (v0.29.0+) |
 | `pg_ripple.rule_plan_cache` | `true` | Master switch for the Datalog rule plan cache (v0.30.0+) |
 | `pg_ripple.rule_plan_cache_size` | `64` | Maximum number of rule sets kept in the plan cache; oldest entries evicted on overflow (v0.30.0+) |
+| `pg_ripple.sameas_reasoning` | `true` | Enable `owl:sameAs` canonicalization pre-pass before each inference run (v0.31.0+) |
+| `pg_ripple.demand_transform` | `true` | Auto-apply demand transformation in `create_datalog_view()` with multiple goals (v0.31.0+) |
 
 ```sql
 -- Enable strict constraint enforcement

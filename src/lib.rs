@@ -907,6 +907,25 @@ pub static RULE_PLAN_CACHE: pgrx::GucSetting<bool> = pgrx::GucSetting::<bool>::n
 /// Default: 64.
 pub static RULE_PLAN_CACHE_SIZE: pgrx::GucSetting<i32> = pgrx::GucSetting::<i32>::new(64);
 
+// ─── v0.31.0 GUCs ────────────────────────────────────────────────────────────
+
+/// GUC: master switch for `owl:sameAs` entity canonicalization (v0.31.0).
+///
+/// When `true` (default), the Datalog inference engine performs a pre-pass
+/// before each fixpoint iteration that computes equivalence classes of
+/// `owl:sameAs` triples and rewrites rule-body constants to their canonical
+/// (lowest dictionary ID) representative.  Queries that reference non-canonical
+/// entity IRIs are transparently redirected to the canonical form.
+pub static SAMEAS_REASONING: pgrx::GucSetting<bool> = pgrx::GucSetting::<bool>::new(true);
+
+/// GUC: master switch for demand transformation (v0.31.0).
+///
+/// When `true` (default), `create_datalog_view()` automatically applies demand
+/// transformation when multiple goal patterns are specified.  The
+/// `infer_demand()` function always applies demand filtering regardless of this
+/// GUC.
+pub static DEMAND_TRANSFORM: pgrx::GucSetting<bool> = pgrx::GucSetting::<bool>::new(true);
+
 // ─── pg_trickle runtime detection (v0.6.0) ───────────────────────────────────
 
 /// The pg_trickle version that pg_ripple was tested against (A-4, v0.25.0).
@@ -1616,6 +1635,31 @@ pub extern "C-unwind" fn _PG_init() {
         &RULE_PLAN_CACHE_SIZE,
         1,
         4096,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+
+    // ── v0.31.0 GUCs ─────────────────────────────────────────────────────────
+
+    pgrx::GucRegistry::define_bool_guc(
+        c"pg_ripple.sameas_reasoning",
+        c"When on (default), Datalog inference applies an owl:sameAs \
+          canonicalization pre-pass so that rules and SPARQL queries referencing \
+          non-canonical entities are transparently rewritten to the canonical form \
+          (v0.31.0)",
+        c"",
+        &SAMEAS_REASONING,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+
+    pgrx::GucRegistry::define_bool_guc(
+        c"pg_ripple.demand_transform",
+        c"When on (default), create_datalog_view() automatically applies demand \
+          transformation when multiple goal patterns are specified; infer_demand() \
+          always applies demand filtering regardless (v0.31.0)",
+        c"",
+        &DEMAND_TRANSFORM,
         GucContext::Userset,
         GucFlags::default(),
     );
@@ -3824,6 +3868,62 @@ mod pg_ripple {
             "iterations".to_owned(),
             serde_json::Value::Number(serde_json::Number::from(iterations)),
         );
+        pgrx::JsonB(serde_json::Value::Object(obj))
+    }
+
+    /// Run inference for a rule set, restricted to rules that can contribute to
+    /// the given demand patterns (demand transformation, v0.31.0).
+    ///
+    /// `demands` is a JSONB array of goal patterns, e.g.:
+    /// ```json
+    /// [{"p": "<https://example.org/transitive>"}, {"s": "<https://ex.org/a>", "p": "<https://ex.org/childOf>"}]
+    /// ```
+    /// Each element has optional `"s"`, `"p"`, `"o"` keys with IRI values.
+    /// Omitted keys are treated as free variables.
+    ///
+    /// When `demands` is an empty array (`'[]'`), runs full inference (same as
+    /// `infer()`).
+    ///
+    /// Returns a JSONB object with:
+    /// - `"derived"`: total triples derived
+    /// - `"iterations"`: fixpoint iteration count
+    /// - `"demand_predicates"`: array of predicate IRI strings that were used as
+    ///   demand seeds (decoded from dictionary)
+    ///
+    /// Also applies `owl:sameAs` canonicalization when
+    /// `pg_ripple.sameas_reasoning` is `on` (default).
+    #[pg_extern]
+    fn infer_demand(
+        rule_set: default!(&str, "'custom'"),
+        demands: default!(pgrx::JsonB, "'[]'::jsonb"),
+    ) -> pgrx::JsonB {
+        let demands_str = demands.0.to_string();
+        let demand_specs = crate::datalog::parse_demands_json(&demands_str);
+
+        let (derived, iterations, demand_pred_ids) =
+            crate::datalog::run_infer_demand(rule_set, &demand_specs);
+
+        // Decode demand predicate IDs back to IRI strings for the output.
+        let demand_preds_json: serde_json::Value = if demand_pred_ids.is_empty() {
+            serde_json::Value::Array(vec![])
+        } else {
+            let decoded: Vec<serde_json::Value> = demand_pred_ids
+                .iter()
+                .filter_map(|&id| crate::dictionary::decode(id).map(serde_json::Value::String))
+                .collect();
+            serde_json::Value::Array(decoded)
+        };
+
+        let mut obj = serde_json::Map::new();
+        obj.insert(
+            "derived".to_owned(),
+            serde_json::Value::Number(serde_json::Number::from(derived)),
+        );
+        obj.insert(
+            "iterations".to_owned(),
+            serde_json::Value::Number(serde_json::Number::from(iterations)),
+        );
+        obj.insert("demand_predicates".to_owned(), demand_preds_json);
         pgrx::JsonB(serde_json::Value::Object(obj))
     }
 
