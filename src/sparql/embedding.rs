@@ -775,12 +775,12 @@ pub fn contextualize_entity(entity_iri: &str, depth: i32, max_neighbors: i32) ->
     // Collect types.
     let types: Vec<String> = pgrx::Spi::connect(|c| {
         c.select(&type_sql, None, &[])
-        .unwrap_or_else(|e| pgrx::error!("contextualize_entity: SPI error: {e}"))
-        .map(|row: pgrx::spi::SpiHeapTupleData| {
-            let v: String = row.get::<String>(1).ok().flatten().unwrap_or_default();
-            extract_local_name(&v)
-        })
-        .collect()
+            .unwrap_or_else(|e| pgrx::error!("contextualize_entity: SPI error: {e}"))
+            .map(|row: pgrx::spi::SpiHeapTupleData| {
+                let v: String = row.get::<String>(1).ok().flatten().unwrap_or_default();
+                extract_local_name(&v)
+            })
+            .collect()
     });
 
     // Collect neighbor labels (1-hop via vp_rare within depth=1 by default).
