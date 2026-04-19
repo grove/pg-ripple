@@ -28,24 +28,35 @@ use spargebra::term::NamedNode;
 
 use crate::dictionary;
 
-/// Resolve a NamedNode IRI to its VP table expression.
-/// Returns `(table_expr, None)` for a dedicated VP table or
-/// `(vp_rare, Some(pred_id))` for a rare predicate.
-/// Returns `None` if the predicate is unknown (yields zero rows).
-fn pred_table_expr(nn: &NamedNode) -> Option<String> {
+/// Resolve a NamedNode IRI to its VP table expression returning `(s, o)`.
+/// When `graph_filter` is `Some(gid)`, the expression filters to triples in
+/// graph `gid` — baked into the leaf so WITH RECURSIVE paths work correctly
+/// inside `GRAPH <G> { }` (v0.40.0 fix).
+fn pred_table_expr(nn: &NamedNode, graph_filter: Option<i64>) -> Option<String> {
     use pgrx::datum::DatumWithOid;
     use pgrx::prelude::*;
 
     let pred_id = dictionary::lookup_iri(nn.as_str())?;
+    let g_cond = graph_filter
+        .map(|gid| format!(" AND g = {gid}"))
+        .unwrap_or_default();
 
     // Check whether the predicate has a dedicated VP table.
     match Spi::get_one_with_args::<i64>(
         "SELECT table_oid::bigint FROM _pg_ripple.predicates WHERE id = $1",
         &[DatumWithOid::from(pred_id)],
     ) {
-        Ok(Some(_oid)) => Some(format!("SELECT s, o FROM _pg_ripple.vp_{pred_id}")),
+        Ok(Some(_oid)) => {
+            if g_cond.is_empty() {
+                Some(format!("SELECT s, o FROM _pg_ripple.vp_{pred_id}"))
+            } else {
+                Some(format!(
+                    "SELECT s, o FROM _pg_ripple.vp_{pred_id} WHERE TRUE{g_cond}"
+                ))
+            }
+        }
         Ok(None) => Some(format!(
-            "SELECT s, o FROM _pg_ripple.vp_rare WHERE p = {pred_id}"
+            "SELECT s, o FROM _pg_ripple.vp_rare WHERE p = {pred_id}{g_cond}"
         )),
         Err(_) => None,
     }
@@ -74,6 +85,9 @@ impl PathCtx {
 /// provided, are pushed into the anchor (for start node) or final filter
 /// (for end node) to reduce CTE work-table size.
 ///
+/// `graph_filter` — when `Some(gid)`, every leaf VP scan filters to `g = gid`
+/// so that property paths inside `GRAPH <G> { }` stay within that named graph.
+///
 /// Returns a SQL string representing an inline subquery `(SELECT s, o FROM ...)`.
 pub fn compile_path(
     path: &PropertyPathExpression,
@@ -81,11 +95,12 @@ pub fn compile_path(
     o_filter: Option<&str>,
     ctx: &mut PathCtx,
     max_depth: i32,
+    graph_filter: Option<i64>,
 ) -> String {
     match path {
         // ── Simple predicate (degenerate case) ──────────────────────────────
         PropertyPathExpression::NamedNode(nn) => {
-            let base = match pred_table_expr(nn) {
+            let base = match pred_table_expr(nn, graph_filter) {
                 Some(e) => e,
                 None => "SELECT NULL::bigint AS s, NULL::bigint AS o LIMIT 0".to_owned(),
             };
@@ -107,7 +122,7 @@ pub fn compile_path(
         // ── Reverse: swap s and o ────────────────────────────────────────────
         PropertyPathExpression::Reverse(inner) => {
             // Swap s_filter and o_filter when descending.
-            let inner_sql = compile_path(inner, o_filter, s_filter, ctx, max_depth);
+            let inner_sql = compile_path(inner, o_filter, s_filter, ctx, max_depth, graph_filter);
             format!(
                 "(SELECT o AS s, s AS o FROM {inner_sql} _prev{})",
                 ctx.next()
@@ -118,8 +133,8 @@ pub fn compile_path(
         PropertyPathExpression::Sequence(left, right) => {
             let n = ctx.next();
             // left returns (?x, ?mid); right returns (?mid, ?y)
-            let left_sql = compile_path(left, s_filter, None, ctx, max_depth);
-            let right_sql = compile_path(right, None, o_filter, ctx, max_depth);
+            let left_sql = compile_path(left, s_filter, None, ctx, max_depth, graph_filter);
+            let right_sql = compile_path(right, None, o_filter, ctx, max_depth, graph_filter);
             format!(
                 "(SELECT _lseq{n}.s, _rseq{n}.o \
                  FROM {left_sql} AS _lseq{n} \
@@ -129,8 +144,8 @@ pub fn compile_path(
 
         // ── Alternative: a|b → UNION ALL ────────────────────────────────────
         PropertyPathExpression::Alternative(left, right) => {
-            let left_sql = compile_path(left, s_filter, o_filter, ctx, max_depth);
-            let right_sql = compile_path(right, s_filter, o_filter, ctx, max_depth);
+            let left_sql = compile_path(left, s_filter, o_filter, ctx, max_depth, graph_filter);
+            let right_sql = compile_path(right, s_filter, o_filter, ctx, max_depth, graph_filter);
             let n = ctx.next();
             let mut conditions = Vec::new();
             if let Some(sf) = s_filter {
@@ -154,23 +169,10 @@ pub fn compile_path(
         }
 
         // ── OneOrMore (p+) ───────────────────────────────────────────────────
-        //
-        // WITH RECURSIVE _path(s, o, depth) AS (
-        //   -- anchor: all direct edges (optionally filtered to start node)
-        //   SELECT s, o, 1 FROM {base}
-        //   UNION ALL
-        //   -- recurse: extend by one hop
-        //   SELECT _path.s, vp.o, _path.depth + 1
-        //   FROM _path
-        //   JOIN {base} vp ON _path.o = vp.s
-        //   WHERE _path.depth < {max_depth}
-        // )
-        // CYCLE s, o SET _is_cycle USING _cycle_path   ← v0.21.0 fix
-        // SELECT DISTINCT s, o FROM _path WHERE NOT _is_cycle
         PropertyPathExpression::OneOrMore(inner) => {
             let n = ctx.next();
             let cte_name = format!("_opm{n}");
-            let base_sql = compile_path(inner, None, None, ctx, max_depth);
+            let base_sql = compile_path(inner, None, None, ctx, max_depth, graph_filter);
             let depth_guard = depth_guard_clause(max_depth, &cte_name);
             let anchor_where = s_filter
                 .map(|sf| format!(" WHERE _anchor{n}.s = {sf}"))
@@ -194,28 +196,17 @@ pub fn compile_path(
         }
 
         // ── ZeroOrMore (p*) ──────────────────────────────────────────────────
-        //
-        // Same as OneOrMore but adds a zero-hop anchor (identity: s = o).
-        //
-        // v0.21.0 fix: restrict the zero-hop identity row to subjects that
-        // actually appear in the predicate's VP tables.  Previously, all graph
-        // nodes (any subject in any triple) would get a spurious reflexive row
-        // even if they never appear in the predicate being traversed.
         PropertyPathExpression::ZeroOrMore(inner) => {
             let n = ctx.next();
             let cte_name = format!("_zom{n}");
-            let base_sql = compile_path(inner, None, None, ctx, max_depth);
+            let base_sql = compile_path(inner, None, None, ctx, max_depth, graph_filter);
             let depth_guard = depth_guard_clause(max_depth, &cte_name);
-            // Filters for anchor arms (subject-start constraint).
             let sf_cond = s_filter
                 .map(|sf| format!(" WHERE s = {sf}"))
                 .unwrap_or_default();
             let final_where = o_filter
                 .map(|of| format!(" AND o = {of}"))
                 .unwrap_or_default();
-            // v0.21.0: Zero-hop rows use the same {base_sql} source, so the
-            // identity (s = o) is only generated for nodes that actually appear
-            // as subjects (s column) in the predicate's VP tables.
             format!(
                 "(WITH RECURSIVE {cte_name}(s, o, _depth) AS (\
                  SELECT _anc{n}.s, _anc{n}.o, _anc{n}._depth \
@@ -236,11 +227,9 @@ pub fn compile_path(
         }
 
         // ── ZeroOrOne (p?) ───────────────────────────────────────────────────
-        //
-        // Direct edge OR identity (s = o if subject is in graph)
         PropertyPathExpression::ZeroOrOne(inner) => {
             let n = ctx.next();
-            let base_sql = compile_path(inner, s_filter, o_filter, ctx, max_depth);
+            let base_sql = compile_path(inner, s_filter, o_filter, ctx, max_depth, graph_filter);
             let mut conditions = Vec::new();
             if let Some(sf) = s_filter {
                 conditions.push(format!("s = {sf}"));
@@ -253,7 +242,6 @@ pub fn compile_path(
             } else {
                 format!(" WHERE {}", conditions.join(" AND "))
             };
-            // Zero-hop: identity edges for all subjects that appear in the base
             format!(
                 "(SELECT s, o FROM {base_sql} AS _onepart{n} \
                  UNION \
@@ -262,10 +250,6 @@ pub fn compile_path(
         }
 
         // ── NegatedPropertySet !(p1|p2|...) ────────────────────────────────
-        //
-        // v0.21.0: scan both dedicated VP tables and vp_rare, excluding the
-        // listed predicates.  Previously only vp_rare was scanned, which missed
-        // triples stored in dedicated tables.
         PropertyPathExpression::NegatedPropertySet(excluded) => {
             let n = ctx.next();
             let excluded_ids: Vec<String> = excluded
@@ -278,6 +262,9 @@ pub fn compile_path(
             } else {
                 format!(" AND p NOT IN ({})", excluded_ids.join(", "))
             };
+            let g_cond = graph_filter
+                .map(|gid| format!(" AND g = {gid}"))
+                .unwrap_or_default();
             let mut conditions = Vec::new();
             if let Some(sf) = s_filter {
                 conditions.push(format!("s = {sf}"));
@@ -286,14 +273,11 @@ pub fn compile_path(
                 conditions.push(format!("o = {of}"));
             }
             let where_clause = if conditions.is_empty() {
-                format!("WHERE TRUE{not_in_clause}")
+                format!("WHERE TRUE{not_in_clause}{g_cond}")
             } else {
-                format!("WHERE {}{not_in_clause}", conditions.join(" AND "))
+                format!("WHERE {}{not_in_clause}{g_cond}", conditions.join(" AND "))
             };
 
-            // Build a UNION ALL that covers all predicates: both dedicated VP
-            // tables (projected with a `p` column equal to their predicate ID)
-            // and vp_rare (which already has a `p` column).
             let all_preds_union = build_all_predicates_with_p();
 
             format!("(SELECT s, o FROM ({all_preds_union}) _neg{n} {where_clause})")

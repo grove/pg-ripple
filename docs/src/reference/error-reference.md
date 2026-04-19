@@ -86,6 +86,9 @@ pg_ripple uses a structured error code system with codes in the range PT001–PT
 | PT602 | enable_graph_rls: RLS policy creation failed | Check superuser privileges and `_pg_ripple.graph_access` table existence |
 | PT603 | grant_graph: invalid permission | Permission must be `'read'`, `'write'`, or `'admin'` |
 | PT604 | enable_schema_summary: pg_trickle not installed | Install pg_trickle or use `schema_summary()` for a one-shot scan |
+| PT640 | SPARQL result set exceeded sparql_max_rows limit | Raise `pg_ripple.sparql_max_rows` or set `pg_ripple.sparql_overflow_action = 'warn'` to truncate instead of error |
+| PT641 | Datalog derived facts exceeded datalog_max_derived | Raise `pg_ripple.datalog_max_derived` or 0 (unlimited) |
+| PT642 | Export rows exceeded export_max_rows | Raise `pg_ripple.export_max_rows` or 0 (unlimited) |
 
 ---
 

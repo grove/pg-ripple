@@ -159,26 +159,6 @@ mod pg_ripple {
         crate::storage::total_triple_count()
     }
 
-    /// Return shared-memory encode cache statistics (v0.22.0+).
-    ///
-    /// Returns (hits, misses, evictions, utilisation) where:
-    /// - `hits`: count of cache hits since startup
-    /// - `misses`: count of cache misses since startup
-    /// - `evictions`: count of cache evictions since startup
-    /// - `utilisation`: fraction of cache capacity in use (0.0–1.0)
-    ///
-    /// Returns (0, 0, 0, 0.0) when shmem is not initialized.
-    #[pg_extern]
-    fn cache_stats() -> pgrx::JsonB {
-        let (hits, misses, evictions, utilisation) = crate::shmem::get_cache_stats();
-        let mut obj = serde_json::Map::new();
-        obj.insert("hits".to_string(), serde_json::json!(hits));
-        obj.insert("misses".to_string(), serde_json::json!(misses));
-        obj.insert("evictions".to_string(), serde_json::json!(evictions));
-        obj.insert("utilisation".to_string(), serde_json::json!(utilisation));
-        pgrx::JsonB(serde_json::Value::Object(obj))
-    }
-
     /// Flush the backend-local predicate OID cache (v0.38.0).
     ///
     /// Forces the next SPARQL query to re-query `_pg_ripple.predicates` for

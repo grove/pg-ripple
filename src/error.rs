@@ -3,7 +3,8 @@
 //! Error code ranges:
 //! - PT001–PT099: dictionary errors
 //! - PT100–PT199: storage errors
-//! - PT601–PT606: embedding / vector errors (v0.27.0)
+//! - PT601–PT607: embedding / vector errors (v0.27.0)
+//! - PT640–PT642: result-set / export overflow errors (v0.40.0)
 
 use thiserror::Error;
 

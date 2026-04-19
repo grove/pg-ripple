@@ -686,4 +686,18 @@ mod pg_ripple {
             .unwrap_or(None)
             .unwrap_or(0)
     }
+
+    // ── v0.40.0: explain_datalog ──────────────────────────────────────────────
+
+    /// Return a JSONB explain document for a named Datalog rule set.
+    ///
+    /// Keys:
+    /// - `"strata"` — per-stratum dependency graph with predicate IDs and rule count
+    /// - `"rules"` — rewritten rule texts stored in the catalog
+    /// - `"sql_per_rule"` — compiled SQL for each rule
+    /// - `"last_run_stats"` — per-iteration delta row counts from the last `infer()` run
+    #[pg_extern]
+    fn explain_datalog(rule_set_name: &str) -> pgrx::JsonB {
+        crate::datalog::explain::explain_datalog(rule_set_name)
+    }
 }

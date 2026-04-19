@@ -39,6 +39,7 @@ pub mod cache;
 pub mod compiler;
 pub mod demand;
 pub mod dred;
+pub mod explain;
 pub mod lattice;
 pub mod magic;
 pub mod parallel;

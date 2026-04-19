@@ -428,3 +428,44 @@ pub static TOMBSTONE_GC_THRESHOLD_STR: pgrx::GucSetting<Option<std::ffi::CString
 /// Set `false` to disable for debugging or in environments with very frequent
 /// DDL changes to `_pg_ripple.predicates`.
 pub static PREDICATE_CACHE_ENABLED: pgrx::GucSetting<bool> = pgrx::GucSetting::<bool>::new(true);
+
+// ── v0.40.0 GUC statics ───────────────────────────────────────────────────────
+
+/// GUC: maximum rows returned by a SPARQL SELECT or CONSTRUCT query (v0.40.0).
+///
+/// `0` (default) means unlimited.  When a query exceeds this limit, the
+/// behaviour is controlled by `pg_ripple.sparql_overflow_action`.
+pub static SPARQL_MAX_ROWS: pgrx::GucSetting<i32> = pgrx::GucSetting::<i32>::new(0);
+
+/// GUC: maximum derived facts produced by a single `infer()` call (v0.40.0).
+///
+/// `0` (default) means unlimited.  When exceeded, a PT602 WARNING is emitted
+/// and partial results are returned.
+pub static DATALOG_MAX_DERIVED: pgrx::GucSetting<i32> = pgrx::GucSetting::<i32>::new(0);
+
+/// GUC: maximum rows returned by export functions (Turtle/N-Triples/JSON-LD) (v0.40.0).
+///
+/// `0` (default) means unlimited.  When exceeded, a PT603 WARNING is emitted.
+pub static EXPORT_MAX_ROWS: pgrx::GucSetting<i32> = pgrx::GucSetting::<i32>::new(0);
+
+/// GUC: action when `sparql_max_rows` is exceeded (v0.40.0).
+///
+/// `'warn'` (default) — emit a WARNING with error code PT601 and truncate the result.
+/// `'error'` — raise an ERROR and abort the query.
+pub static SPARQL_OVERFLOW_ACTION: pgrx::GucSetting<Option<std::ffi::CString>> =
+    pgrx::GucSetting::<Option<std::ffi::CString>>::new(None);
+
+/// GUC: master switch for OpenTelemetry tracing (v0.40.0).
+///
+/// When `true`, spans are emitted for SPARQL parse/translate/execute, merge
+/// cycles, federation calls, and Datalog inference.  When `false` (default),
+/// the tracing facade is a no-op with zero overhead.
+pub static TRACING_ENABLED: pgrx::GucSetting<bool> = pgrx::GucSetting::<bool>::new(false);
+
+/// GUC: OpenTelemetry exporter backend (v0.40.0).
+///
+/// `'stdout'` (default) — write spans as JSON lines to the PostgreSQL log.
+/// `'otlp'` — export via OTLP gRPC; reads the `OTEL_EXPORTER_OTLP_ENDPOINT`
+/// environment variable for the collector address.
+pub static TRACING_EXPORTER: pgrx::GucSetting<Option<std::ffi::CString>> =
+    pgrx::GucSetting::<Option<std::ffi::CString>>::new(None);

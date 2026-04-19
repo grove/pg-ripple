@@ -9,7 +9,71 @@ Versions correspond to the milestones in [ROADMAP.md](ROADMAP.md).
 
 ## [Unreleased]
 
-> Changes for the next version (v0.40.0 — Streaming Results, Explain & Observability) will appear here.
+> Changes for the next version will appear here.
+
+---
+
+## [0.40.0] — 2026-05-19 — Streaming Results, Explain & Observability
+
+**Three long-requested developer and operator improvements: streaming SPARQL cursors, first-class explain for SPARQL and Datalog, and a full observability stack.**
+
+### What you can do
+
+- **Stream large SPARQL results** with `sparql_cursor()`, `sparql_cursor_turtle()`, and `sparql_cursor_jsonld()` — batch results 1 024 rows at a time without materialising the entire result set in memory.
+- **Set resource limits** via `pg_ripple.sparql_max_rows`, `pg_ripple.datalog_max_derived`, and `pg_ripple.export_max_rows`. When exceeded, choose between a `'warn'` (truncate) or `'error'` action.
+- **Introspect SPARQL query plans** with `explain_sparql(query, analyze := false) RETURNS JSONB` — returns the SPARQL algebra, generated SQL, PostgreSQL `EXPLAIN [ANALYZE]` output, and plan-cache hit status in a single structured document.
+- **Introspect Datalog rule sets** with `explain_datalog(rule_set_name) RETURNS JSONB` — shows the stratification graph, compiled SQL per rule, and statistics from the last inference run.
+- **Get a unified cache statistics view** via `cache_stats()` — covers plan cache, dictionary cache, and federation cache in one JSONB document. Reset counters with `reset_cache_stats()`.
+- **Enable OpenTelemetry spans** with `SET pg_ripple.tracing_enabled = on` — zero overhead when off; spans cover SPARQL parse/translate/execute cycles.
+- **Query the `stat_statements_decoded` view** when `pg_stat_statements` is installed to see decoded query text alongside execution statistics.
+
+### Bug fixes
+
+- **OPTIONAL inside GRAPH**: `OPTIONAL {}` patterns inside `GRAPH {}` now correctly scope the optional join to the named graph. Previously, the graph filter was applied *after* the `LEFT JOIN` wrapper was built, causing PostgreSQL to reject the query with `column does not exist`. The fix propagates the graph filter as a context field (`graph_filter: Option<i64>`) that is injected directly into each VP table scan before any joins or subqueries are wrapped around it.
+- **Property paths inside GRAPH**: Property path expressions (e.g., `p+`, `p*`) inside `GRAPH {}` now filter the `WITH RECURSIVE` CTE anchor and recursive steps to the correct named graph. Previously the graph filter was lost.
+
+### What happens behind the scenes
+
+Six new GUCs are registered at startup (`sparql_max_rows`, `datalog_max_derived`, `export_max_rows`, `sparql_overflow_action`, `tracing_enabled`, `tracing_exporter`). No VP table schema changes; the migration script is comment-only. Three new Rust modules are added: `src/sparql/cursor.rs`, `src/sparql/explain.rs`, and `src/datalog/explain.rs`. The `src/telemetry.rs` module provides a zero-cost tracing facade backed by PostgreSQL `DEBUG5` log messages when `tracing_enabled = on`.
+
+<details>
+<summary>Technical details</summary>
+
+### New files
+
+- `src/sparql/cursor.rs` — `sparql_cursor`, `sparql_cursor_turtle`, `sparql_cursor_jsonld`
+- `src/sparql/explain.rs` — `explain_sparql_jsonb` (new JSONB overload)
+- `src/datalog/explain.rs` — `explain_datalog`
+- `src/telemetry.rs` — OpenTelemetry span facade
+- `sql/pg_ripple--0.39.0--0.40.0.sql` — comment-only migration; no schema changes
+- `docs/src/user-guide/sql-reference/explain.md`
+- `docs/src/user-guide/sql-reference/cursor-api.md`
+- `docs/src/reference/observability.md`
+
+### Changed files
+
+- `src/sparql/sqlgen.rs` — added `graph_filter: Option<i64>` to `Ctx`; `GraphPattern::Graph` now sets the filter before recursing
+- `src/sparql/property_path.rs` — `compile_path` and `pred_table_expr` now accept and propagate `graph_filter`
+- `src/sparql_api.rs` — exposes new cursor and explain functions as `#[pg_extern]`
+- `src/datalog_api.rs` — exposes `explain_datalog` as `#[pg_extern]`
+- `src/shmem.rs` — adds `reset_cache_stats()`
+- `src/schema.rs` — adds `stat_statements_decoded` view
+- `src/gucs.rs` — six new v0.40.0 GUC statics
+- `src/lib.rs` — registers six new GUCs in `_PG_init`; adds `telemetry` module
+- `src/error.rs` — documents PT640–PT642 range
+- `Cargo.toml` — version bumped to `0.40.0`
+- `pg_ripple.control` — `default_version` updated to `0.40.0`
+- `docs/src/reference/error-reference.md` — PT640, PT641, PT642 added
+
+### New error codes
+
+| Code | Meaning |
+|------|---------|
+| PT640 | SPARQL result set exceeded `sparql_max_rows` |
+| PT641 | Datalog derived facts exceeded `datalog_max_derived` |
+| PT642 | Export rows exceeded `export_max_rows` |
+
+</details>
 
 ---
 

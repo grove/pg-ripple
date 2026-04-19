@@ -1,0 +1,55 @@
+-- sparql_optional_in_graph_rare.sql — OPTIONAL inside GRAPH with vp_rare predicate (v0.40.0 bug fix)
+--
+-- Verifies OPTIONAL {} inside GRAPH <g> {} works for predicates stored
+-- in the vp_rare table (low-frequency predicates).
+-- Before v0.40.0 this produced: column "..." does not exist
+
+SET search_path TO pg_ripple, public;
+
+CREATE EXTENSION IF NOT EXISTS pg_ripple;
+
+-- Use rdfs:label (a typical vp_rare predicate — stored in vp_rare, not a dedicated table).
+-- Force vp_rare by using a unique-enough predicate that won't hit the promotion threshold.
+SELECT pg_ripple.load_ntriples_into_graph($$
+<https://rare.test/c1> <https://rare.test/p/rare001> "Class One" .
+<https://rare.test/c2> <https://rare.test/p/rare001> "Class Two" .
+<https://rare.test/c1> <https://rare.test/p/rare002> "Description One" .
+$$, 'https://rare.test/g1') = 3 AS named_graph_triples_loaded;
+
+-- ── Test: OPTIONAL with rare predicate inside GRAPH ─────────────────────────
+
+-- 2 rows: c1 has rare002, c2 does not.
+SELECT count(*) = 2 AS optional_rare_row_count
+FROM pg_ripple.sparql($$
+    SELECT ?c ?desc WHERE {
+        GRAPH <https://rare.test/g1> {
+            ?c <https://rare.test/p/rare001> ?label .
+            OPTIONAL { ?c <https://rare.test/p/rare002> ?desc }
+        }
+    }
+$$);
+
+-- c2 should have NULL desc.
+SELECT (result->>'desc') IS NULL AS c2_desc_is_null
+FROM pg_ripple.sparql($$
+    SELECT ?desc WHERE {
+        GRAPH <https://rare.test/g1> {
+            <https://rare.test/c2> <https://rare.test/p/rare001> ?label .
+            OPTIONAL { <https://rare.test/c2> <https://rare.test/p/rare002> ?desc }
+        }
+    }
+$$);
+
+-- c1 should have non-NULL desc.
+SELECT (result->>'desc') IS NOT NULL AS c1_desc_is_not_null
+FROM pg_ripple.sparql($$
+    SELECT ?desc WHERE {
+        GRAPH <https://rare.test/g1> {
+            <https://rare.test/c1> <https://rare.test/p/rare001> ?label .
+            OPTIONAL { <https://rare.test/c1> <https://rare.test/p/rare002> ?desc }
+        }
+    }
+$$);
+
+-- ── Cleanup ───────────────────────────────────────────────────────────────────
+SELECT pg_ripple.drop_graph('https://rare.test/g1') IS NOT NULL AS graph_dropped;

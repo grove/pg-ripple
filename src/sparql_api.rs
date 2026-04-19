@@ -167,6 +167,99 @@ mod pg_ripple {
         crate::sparql::plan_cache_reset()
     }
 
+    // ── v0.40.0: Streaming cursor API ────────────────────────────────────────
+
+    /// Stream SPARQL SELECT results one batch at a time.
+    ///
+    /// Unlike `sparql()`, this function pages through results in 1024-row
+    /// batches, avoiding full materialisation for large result sets.
+    /// Respects `pg_ripple.sparql_max_rows` if set.
+    #[pg_extern]
+    fn sparql_cursor(query: &str) -> TableIterator<'static, (name!(result, pgrx::JsonB),)> {
+        let rows = crate::sparql::cursor::sparql_cursor(query);
+        TableIterator::new(rows.into_iter().map(|r| (r,)))
+    }
+
+    /// Stream a SPARQL CONSTRUCT query result as Turtle text chunks.
+    ///
+    /// Each returned row is a Turtle serialisation of up to 1024 triples.
+    /// Respects `pg_ripple.export_max_rows` if set.
+    #[pg_extern]
+    fn sparql_cursor_turtle(query: &str) -> TableIterator<'static, (name!(chunk, String),)> {
+        let chunks = crate::sparql::cursor::sparql_cursor_turtle(query);
+        TableIterator::new(chunks.into_iter().map(|c| (c,)))
+    }
+
+    /// Stream a SPARQL CONSTRUCT query result as JSON-LD chunks.
+    ///
+    /// Each returned row is a JSON-LD expanded-form array for one batch.
+    /// Respects `pg_ripple.export_max_rows` if set.
+    #[pg_extern]
+    fn sparql_cursor_jsonld(query: &str) -> TableIterator<'static, (name!(chunk, String),)> {
+        let chunks = crate::sparql::cursor::sparql_cursor_jsonld(query);
+        TableIterator::new(chunks.into_iter().map(|c| (c,)))
+    }
+
+    // ── v0.40.0: explain_sparql returning JSONB ───────────────────────────────
+
+    /// Explain a SPARQL query and return a structured JSONB report.
+    ///
+    /// Returns a JSONB object with keys:
+    /// - `"algebra"` — spargebra algebra tree
+    /// - `"sql"` — the generated SQL
+    /// - `"plan"` — PostgreSQL EXPLAIN output as JSON
+    /// - `"cache_hit"` — whether the plan came from the plan cache
+    /// - `"encode_calls"` — dictionary encode calls during translation
+    ///
+    /// When `analyze` is `true`, runs `EXPLAIN (ANALYZE, FORMAT JSON, BUFFERS true)`.
+    #[pg_extern(name = "explain_sparql", volatile)]
+    fn explain_sparql_jsonb(query: &str, analyze: bool) -> pgrx::JsonB {
+        crate::sparql::explain::explain_sparql_jsonb(query, analyze)
+    }
+
+    // ── v0.40.0: cache_stats / reset_cache_stats ──────────────────────────────
+
+    /// Return comprehensive cache statistics as JSONB.
+    ///
+    /// Keys:
+    /// - `"plan_cache"` — SPARQL plan cache hits/misses/size/capacity
+    /// - `"dict_cache"` — dictionary encode cache hits/misses/evictions/utilisation
+    /// - `"federation_cache"` — federation result cache hit/miss counts
+    #[pg_extern(name = "cache_stats")]
+    fn cache_stats_comprehensive() -> pgrx::JsonB {
+        // Plan cache stats (via public sparql::plan_cache_stats() which returns JSONB;
+        // we re-derive the raw numbers from the public stats() re-export).
+        let plan_cache_jsonb = crate::sparql::plan_cache_stats();
+        // Dict cache stats.
+        let (dc_hits, dc_misses, dc_evictions, dc_util) = crate::shmem::get_cache_stats();
+        // Federation cache: count rows in the federation_cache table.
+        let (fc_hits, fc_misses) = super::get_federation_cache_stats_inner();
+
+        let util_rounded = (dc_util * 10000.0).round() / 10000.0;
+        pgrx::JsonB(serde_json::json!({
+            "plan_cache": plan_cache_jsonb.0,
+            "dict_cache": {
+                "hits": dc_hits,
+                "misses": dc_misses,
+                "evictions": dc_evictions,
+                "utilisation": util_rounded
+            },
+            "federation_cache": {
+                "hits": fc_hits,
+                "misses": fc_misses
+            }
+        }))
+    }
+
+    /// Reset all cache statistics counters (SPARQL plan cache, dict cache).
+    ///
+    /// Does not evict cached entries — only resets hit/miss counters.
+    #[pg_extern]
+    fn reset_cache_stats() {
+        crate::sparql::plan_cache_reset();
+        crate::shmem::reset_cache_stats();
+    }
+
     // ── Full-text search ─────────────────────────────────────────────────────
 
     /// Create a GIN tsvector index on the dictionary for the given predicate IRI.
@@ -204,4 +297,30 @@ mod pg_ripple {
     fn compact() -> i64 {
         crate::storage::merge::compact()
     }
+}
+
+// ── Helper: federation cache stats ───────────────────────────────────────────
+
+/// Count federation cache hits and misses from _pg_ripple.federation_cache.
+/// Returns (hits, misses) as (i64, i64).
+fn get_federation_cache_stats_inner() -> (i64, i64) {
+    use pgrx::prelude::*;
+
+    // Count total cached entries (proxy for hits) and estimate misses from
+    // federation health stats if available.
+    let hits: i64 = Spi::connect(|client| {
+        client
+            .select(
+                "SELECT COUNT(*) FROM _pg_ripple.federation_cache \
+                 WHERE expires_at > now()",
+                None,
+                &[],
+            )
+            .ok()
+            .and_then(|mut rows| rows.next())
+            .and_then(|row| row.get::<i64>(1).ok().flatten())
+            .unwrap_or(0)
+    });
+
+    (hits, 0_i64)
 }

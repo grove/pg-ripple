@@ -41,6 +41,7 @@ mod sparql;
 mod sparql_api;
 mod stats_admin;
 mod storage;
+pub(crate) mod telemetry;
 mod views;
 mod views_api;
 mod worker;
@@ -1092,6 +1093,74 @@ pub extern "C-unwind" fn _PG_init() {
           (v0.38.0)",
         c"",
         &PREDICATE_CACHE_ENABLED,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+
+    // ── v0.40.0 GUCs ─────────────────────────────────────────────────────────
+
+    pgrx::GucRegistry::define_int_guc(
+        c"pg_ripple.sparql_max_rows",
+        c"Maximum rows returned by a SPARQL SELECT/CONSTRUCT query. \
+          0 = unlimited (default). Overflow behaviour: sparql_overflow_action (v0.40.0)",
+        c"",
+        &SPARQL_MAX_ROWS,
+        0,
+        i32::MAX,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+
+    pgrx::GucRegistry::define_int_guc(
+        c"pg_ripple.datalog_max_derived",
+        c"Maximum derived facts produced by a single infer() call. \
+          0 = unlimited (default). Emits PT602 WARNING when exceeded (v0.40.0)",
+        c"",
+        &DATALOG_MAX_DERIVED,
+        0,
+        i32::MAX,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+
+    pgrx::GucRegistry::define_int_guc(
+        c"pg_ripple.export_max_rows",
+        c"Maximum rows returned by export functions (Turtle/N-Triples/JSON-LD). \
+          0 = unlimited (default). Emits PT603 WARNING when exceeded (v0.40.0)",
+        c"",
+        &EXPORT_MAX_ROWS,
+        0,
+        i32::MAX,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+
+    pgrx::GucRegistry::define_string_guc(
+        c"pg_ripple.sparql_overflow_action",
+        c"Action when sparql_max_rows is exceeded: 'warn' (default, truncate with PT601 WARNING) \
+          or 'error' (raise ERROR) (v0.40.0)",
+        c"",
+        &SPARQL_OVERFLOW_ACTION,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+
+    pgrx::GucRegistry::define_bool_guc(
+        c"pg_ripple.tracing_enabled",
+        c"When on, emit OpenTelemetry spans for SPARQL/merge/federation/Datalog operations. \
+          Off by default (zero overhead when off) (v0.40.0)",
+        c"",
+        &TRACING_ENABLED,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+
+    pgrx::GucRegistry::define_string_guc(
+        c"pg_ripple.tracing_exporter",
+        c"OpenTelemetry exporter backend: 'stdout' (default, writes to PG log at DEBUG5) \
+          or 'otlp' (reads OTEL_EXPORTER_OTLP_ENDPOINT) (v0.40.0)",
+        c"",
+        &TRACING_EXPORTER,
         GucContext::Userset,
         GucFlags::default(),
     );

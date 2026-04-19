@@ -484,3 +484,16 @@ pub fn get_cache_stats() -> (u64, u64, u64, f64) {
 
     (hits, misses, evictions, utilisation)
 }
+
+/// Reset dict cache hit/miss/eviction counters to zero (v0.40.0).
+///
+/// Does not evict cached entries; only resets the counters.
+/// No-op when shmem is not initialised.
+pub fn reset_cache_stats() {
+    if !SHMEM_READY.load(Ordering::Acquire) {
+        return;
+    }
+    CACHE_HITS.get().store(0, Ordering::Relaxed);
+    CACHE_MISSES.get().store(0, Ordering::Relaxed);
+    CACHE_EVICTIONS.get().store(0, Ordering::Relaxed);
+}

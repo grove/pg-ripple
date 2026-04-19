@@ -627,6 +627,24 @@ ON CONFLICT DO NOTHING;
     requires = ["v036_lattice_types"]
 );
 
+// v0.38.0: SHACL-to-SPARQL planner hints catalog.
+// Populated automatically when shapes are loaded via pg_ripple.load_shacl().
+pgrx::extension_sql!(
+    r#"
+CREATE TABLE IF NOT EXISTS _pg_ripple.shape_hints (
+    predicate_id  BIGINT  NOT NULL,
+    hint_type     TEXT    NOT NULL,  -- 'max_count_1' | 'min_count_1'
+    shape_iri_id  BIGINT  NOT NULL,
+    updated_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (predicate_id, hint_type)
+);
+CREATE INDEX IF NOT EXISTS shape_hints_pred_idx
+    ON _pg_ripple.shape_hints (predicate_id);
+"#,
+    name = "v038_shape_hints",
+    requires = ["v037_schema_version"]
+);
+
 // Create the predicate_stats view after the base tables exist.
 pgrx::extension_sql!(
     r#"
@@ -642,4 +660,36 @@ ORDER BY p.triple_count DESC;
     name = "predicate_stats_view",
     requires = ["schema_setup"],
     finalize
+);
+
+// v0.40.0: stat_statements_decoded view.
+// Wraps pg_stat_statements with a helper column for decoded query text.
+// Only created when pg_stat_statements extension is installed.
+pgrx::extension_sql!(
+    r#"
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM pg_extension WHERE extname = 'pg_stat_statements'
+    ) THEN
+        EXECUTE $view$
+            CREATE OR REPLACE VIEW pg_ripple.stat_statements_decoded AS
+            SELECT
+                pss.userid,
+                pss.dbid,
+                pss.queryid,
+                pss.query,
+                pss.calls,
+                pss.total_exec_time,
+                pss.mean_exec_time,
+                pss.rows,
+                pss.query AS query_decoded
+            FROM pg_stat_statements pss
+        $view$;
+    END IF;
+END;
+$$;
+"#,
+    name = "stat_statements_decoded_view",
+    requires = ["predicate_stats_view"]
 );

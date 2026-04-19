@@ -3110,38 +3110,38 @@ All 24 Datalog endpoints respond correctly in integration tests. `GET /datalog/r
 
 ### Deliverables
 
-- [ ] **Streaming SPARQL cursor API** (`src/sparql/cursor.rs` new module)
+- [x] **Streaming SPARQL cursor API** (`src/sparql/cursor.rs` new module)
   - `pg_ripple.sparql_cursor(query TEXT) RETURNS SETOF RECORD` — SRF paging through results 1024 rows at a time with batched dictionary decode
   - `pg_ripple.sparql_cursor_turtle(query TEXT) RETURNS SETOF TEXT` — emits Turtle lines
   - `pg_ripple.sparql_cursor_jsonld(query TEXT) RETURNS SETOF TEXT` — emits JSON-LD object chunks
   - Wire to `pg_ripple_http`: `Accept: text/turtle` or `Accept: application/ld+json` triggers `Transfer-Encoding: chunked` streaming response
   - pg_regress test `sparql_cursor.sql`: load 500K triples; verify cursor returns correct count; verify chunked Turtle export round-trips
-- [ ] **Resource governors** (`src/lib.rs`)
+- [x] **Resource governors** (`src/lib.rs`)
   - `pg_ripple.sparql_max_rows` (integer, default `0` = unlimited)
   - `pg_ripple.datalog_max_derived` (integer, default `0` = unlimited)
   - `pg_ripple.export_max_rows` (integer, default `0` = unlimited)
   - `pg_ripple.sparql_overflow_action` (enum: `warn` / `error`, default `warn`)
-  - Error codes: `PT601` (SPARQL row limit exceeded), `PT602` (Datalog derived limit exceeded), `PT603` (export row limit exceeded)
-- [ ] **`pg_ripple.explain_sparql(query TEXT, analyze BOOLEAN DEFAULT false) RETURNS JSONB`** (`src/sparql/explain.rs` new module)
+  - Error codes: `PT640` (SPARQL row limit exceeded), `PT641` (Datalog derived limit exceeded), `PT642` (export row limit exceeded)
+- [x] **`pg_ripple.explain_sparql(query TEXT, analyze BOOLEAN DEFAULT false) RETURNS JSONB`** (`src/sparql/explain.rs` new module)
   - Step 1: parse + optimise via `spargebra`/`sparopt`; emit algebra tree as JSON with predicate IRIs decoded
   - Step 2: run `EXPLAIN (FORMAT JSON, BUFFERS true [, ANALYZE true])` on the generated SQL; attach as `"plan"` key
   - Output keys: `"algebra"`, `"sql"` (IRI-decoded), `"plan"`, `"cache_hit"` (bool), `"encode_calls"` (int)
-  - pg_regress test `sparql_explain.sql`: verify all output keys; verify IRI decoding; verify `analyze: true` adds `"Actual Rows"`
-- [ ] **`pg_ripple.explain_datalog(rule_set_name TEXT) RETURNS JSONB`** (`src/datalog/explain.rs` new module)
+  - pg_regress test `sparql_explain_jsonb.sql`: verify all output keys; verify `analyze: true` adds `"Actual Rows"`
+- [x] **`pg_ripple.explain_datalog(rule_set_name TEXT) RETURNS JSONB`** (`src/datalog/explain.rs` new module)
   - Returns per-stratum dependency graph, magic-set rewritten rules, compiled SQL per rule, and per-iteration delta-row counts from last inference run
   - Output keys: `"strata"`, `"rules"` (rewritten), `"sql_per_rule"`, `"last_run_stats"`
   - pg_regress test `datalog_explain.sql`
-- [ ] **`pg_ripple.cache_stats() RETURNS JSONB`** and **`pg_ripple.reset_cache_stats()`** (`src/lib.rs`)
+- [x] **`pg_ripple.cache_stats() RETURNS JSONB`** and **`pg_ripple.reset_cache_stats()`** (`src/lib.rs`)
   - Keys: plan cache size/hits/misses, dict cache hits/misses, federation cache hits/misses
   - pg_regress test `cache_stats.sql`
-- [ ] **`pg_ripple.stat_statements_decoded` view** (`src/lib.rs`)
+- [x] **`pg_ripple.stat_statements_decoded` view** (`src/lib.rs`)
   - View over `pg_stat_statements` that regex-decodes predicate IDs in `query` text via `pg_ripple.decode_id()` join; exposes `query_decoded` column
-- [ ] **OpenTelemetry tracing** (`src/telemetry.rs` new module)
+- [x] **OpenTelemetry tracing** (`src/telemetry.rs` new module)
   - Thin facade over the `tracing` crate; spans for: SPARQL parse/translate/execute, merge cycle (per predicate), federation call (per SERVICE), Datalog inference (per stratum)
   - GUC `pg_ripple.tracing_enabled` (bool, default `false`) — zero overhead when off
   - GUC `pg_ripple.tracing_exporter` (string: `stdout` / `otlp`, default `stdout`); `otlp` reads `OTEL_EXPORTER_OTLP_ENDPOINT`
   - pg_regress test `telemetry.sql`: toggle on/off; assert no performance regression in execute path with tracing off
-- [ ] **Bug fix: `OPTIONAL {}` inside `GRAPH {}` silently fails for all predicates** (`src/sparql/sqlgen.rs`)
+- [x] **Bug fix: `OPTIONAL {}` inside `GRAPH {}` silently fails for all predicates** (`src/sparql/sqlgen.rs`)
   - **Root cause**: The `GraphPattern::Graph` handler applies the named-graph filter *after* the inner pattern is fully translated. When the inner pattern contains an `OPTIONAL` (spargebra `LeftJoin`), the `LeftJoin` translator wraps both sides in aliased subqueries that only project `_lj_<varname>` columns — the `g` column is intentionally stripped. The `Graph` handler then emits `{lj_alias}.g = {gid}`, which PostgreSQL rejects with `column does not exist`. This fails for **all** predicates (both dedicated VP tables and `vp_rare`); it was only observed first with `vp_rare` predicates (`rdfs:subClassOf`, `rdfs:label`, etc.) because typical test graphs have very few schema triples.
   - **Correct fix — graph-filter context propagation** (`src/sparql/sqlgen.rs`, `Ctx`):
     1. Add `graph_filter: Option<i64>` to `Ctx`.
@@ -3153,11 +3153,11 @@ All 24 Datalog endpoints respond correctly in integration tests. `GET /datalog/r
     - `sparql_optional_in_graph.sql` — `OPTIONAL` triple with a dedicated-VP predicate inside a named graph; assert NULL vs non-NULL row counts
     - `sparql_optional_in_graph_rare.sql` — same pattern with a `vp_rare` predicate; assert NULL vs non-NULL row counts
     - `sparql_optional_group_by_in_graph.sql` — `OPTIONAL` + `GROUP BY` on optional variable inside a named graph (the original failing query shape); assert `instanceCount` per class is correct
-- [ ] **Bug fix: property path inside `GRAPH {}` fails for all predicates** (`src/sparql/sqlgen.rs`)
+- [x] **Bug fix: property path inside `GRAPH {}` fails for all predicates** (`src/sparql/sqlgen.rs`)
   - **Root cause**: identical to the `OPTIONAL` bug above — the `WITH RECURSIVE` CTE emitted for property path operators (`+`, `*`, `?`) selects only `(s, o)`, but the post-hoc `Graph` handler tries to reference `{cte_alias}.g`, producing `column does not exist`.
   - **Fix**: same graph-filter context propagation as above; anchor and recursive step selects must include `g` and filter on it when `ctx.graph_filter` is set, rather than relying on the outer `Graph` handler to inject the condition.
   - Regression test: `sparql_path_in_graph.sql` — property path on a rare predicate inside a named graph; assert correct row count
-- [ ] **Migration header standardisation** (`sql/*.sql`)
+- [x] **Migration header standardisation** (`sql/*.sql`)
   - Backfill headers in all existing scripts: `-- Migration X.Y.Z → A.B.C | Schema changes: … | Data-rewrite cost: Low/Medium/High | Downgrade: …`
   - All future scripts from v0.37.0 onward follow this template automatically
 
@@ -3167,12 +3167,12 @@ All 24 Datalog endpoints respond correctly in integration tests. `GET /datalog/r
 
 ### Documentation
 
-- [ ] `user-guide/sql-reference/explain.md` — full tutorial on `explain_sparql()` and `explain_datalog()`; reading the algebra tree and decoded SQL
-- [ ] `user-guide/sql-reference/cursor-api.md` — streaming cursor API; format options; resource governors
-- [ ] `reference/observability.md` (new) — OpenTelemetry integration guide: exporter setup, span taxonomy, Grafana/Jaeger integration examples
-- [ ] `user-guide/operations/monitoring.md` — `cache_stats()`, `diagnostic_report()`, `stat_statements_decoded` usage
-- [ ] `reference/error-reference.md` — PT601, PT602, PT603 documented
-- [ ] Release notes for v0.40.0
+- [x] `user-guide/sql-reference/explain.md` — full tutorial on `explain_sparql()` and `explain_datalog()`; reading the algebra tree and decoded SQL
+- [x] `user-guide/sql-reference/cursor-api.md` — streaming cursor API; format options; resource governors
+- [x] `reference/observability.md` (new) — OpenTelemetry integration guide: exporter setup, span taxonomy, Grafana/Jaeger integration examples
+- [x] `user-guide/operations/monitoring.md` — `cache_stats()`, `diagnostic_report()`, `stat_statements_decoded` usage
+- [x] `reference/error-reference.md` — PT640, PT641, PT642 documented
+- [x] Release notes for v0.40.0
 
 ### Exit Criteria
 

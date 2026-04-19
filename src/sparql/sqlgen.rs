@@ -61,12 +61,20 @@ fn vp_source(pred_id: i64) -> VpSource {
 }
 
 /// Build a SQL table expression for one triple pattern (exposing `s`, `o`, `g`).
-fn table_expr(src: &VpSource) -> String {
+/// When `graph_filter` is `Some(gid)`, injects `WHERE g = {gid}` so that the
+/// filter is baked into the leaf scan before any `LEFT JOIN` or CTE wrapper is built.
+fn table_expr(src: &VpSource, graph_filter: Option<i64>) -> String {
     match src {
-        VpSource::Dedicated(name) => name.clone(),
-        VpSource::Rare(p) => {
-            format!("(SELECT s, o, g FROM _pg_ripple.vp_rare WHERE p = {p})")
-        }
+        VpSource::Dedicated(name) => match graph_filter {
+            None => name.clone(),
+            Some(gid) => format!("(SELECT s, o, g FROM {name} WHERE g = {gid})"),
+        },
+        VpSource::Rare(p) => match graph_filter {
+            None => format!("(SELECT s, o, g FROM _pg_ripple.vp_rare WHERE p = {p})"),
+            Some(gid) => {
+                format!("(SELECT s, o, g FROM _pg_ripple.vp_rare WHERE p = {p} AND g = {gid})")
+            }
+        },
         VpSource::Empty => {
             "(SELECT NULL::bigint AS s, NULL::bigint AS o, NULL::bigint AS g LIMIT 0)".to_owned()
         }
@@ -77,9 +85,9 @@ fn table_expr(src: &VpSource) -> String {
 /// tables and `vp_rare`.  Each branch projects `(p, s, o, g)` so the caller
 /// can bind the predicate variable.
 ///
-/// The list of dedicated VP tables is fetched from `_pg_ripple.predicates` at
-/// query-translation time via SPI.
-fn build_all_predicates_union() -> String {
+/// When `graph_filter` is `Some(gid)`, injects `WHERE g = {gid}` into every
+/// branch so the filter is baked in before any outer `LEFT JOIN` wrapper.
+fn build_all_predicates_union(graph_filter: Option<i64>) -> String {
     let mut branches: Vec<String> = Vec::new();
 
     // Collect dedicated VP table predicate IDs.
@@ -93,15 +101,25 @@ fn build_all_predicates_union() -> String {
             .unwrap_or_else(|e| pgrx::error!("variable-predicate SPI error: {e}"));
         for row in rows {
             if let Ok(Some(pred_id)) = row.get::<i64>(1) {
-                branches.push(format!(
-                    "SELECT {pred_id}::bigint AS p, s, o, g FROM _pg_ripple.vp_{pred_id}"
-                ));
+                match graph_filter {
+                    None => branches.push(format!(
+                        "SELECT {pred_id}::bigint AS p, s, o, g FROM _pg_ripple.vp_{pred_id}"
+                    )),
+                    Some(gid) => branches.push(format!(
+                        "SELECT {pred_id}::bigint AS p, s, o, g FROM _pg_ripple.vp_{pred_id} WHERE g = {gid}"
+                    )),
+                }
             }
         }
     });
 
     // Always include vp_rare (it already has a `p` column).
-    branches.push("SELECT p, s, o, g FROM _pg_ripple.vp_rare".to_owned());
+    match graph_filter {
+        None => branches.push("SELECT p, s, o, g FROM _pg_ripple.vp_rare".to_owned()),
+        Some(gid) => branches.push(format!(
+            "SELECT p, s, o, g FROM _pg_ripple.vp_rare WHERE g = {gid}"
+        )),
+    }
 
     branches.join(" UNION ALL ")
 }
@@ -120,6 +138,15 @@ pub(super) struct Ctx {
     /// FILTER constants compared against these must stay as raw SQL values,
     /// not be re-encoded as inline IDs.
     raw_numeric_vars: std::collections::HashSet<String>,
+    /// Graph filter propagated by `GRAPH <G> { ... }` context (v0.40.0).
+    ///
+    /// When `Some(gid)`, every VP table scan emitted by `translate_bgp`,
+    /// `table_expr`, `build_all_predicates_union`, and property paths injects
+    /// `WHERE g = gid` directly into the leaf expression.  This ensures the
+    /// filter is present *before* any `LEFT JOIN` or `WITH RECURSIVE` wrapper
+    /// is built, so `OPTIONAL {}` and property paths inside `GRAPH {}` work
+    /// correctly without relying on post-hoc alias lookups.
+    pub(super) graph_filter: Option<i64>,
 }
 
 impl Ctx {
@@ -130,6 +157,7 @@ impl Ctx {
             path_counter: 0,
             per_query: HashMap::new(),
             raw_numeric_vars: std::collections::HashSet::new(),
+            graph_filter: None,
         }
     }
 
@@ -411,9 +439,10 @@ fn translate_bgp(patterns: &[spargebra::term::TriplePattern], ctx: &mut Ctx) -> 
             NamedNodePattern::Variable(v) => {
                 // Unbound predicate: build UNION ALL of every dedicated VP table
                 // plus vp_rare so that all predicates are covered.
+                // v0.40.0: pass graph_filter so the union branches include WHERE g = gid.
                 let vname = v.as_str().to_owned();
                 let a = alias.clone();
-                let union_subquery = build_all_predicates_union();
+                let union_subquery = build_all_predicates_union(ctx.graph_filter);
                 frag.from_items
                     .push((a.clone(), format!("({union_subquery})")));
                 if let Some(existing) = frag.bindings.get(&vname) {
@@ -441,7 +470,8 @@ fn translate_bgp(patterns: &[spargebra::term::TriplePattern], ctx: &mut Ctx) -> 
             }
         };
 
-        let tbl = table_expr(&source);
+        // v0.40.0: pass ctx.graph_filter so graph filters are baked into leaf scans.
+        let tbl = table_expr(&source, ctx.graph_filter);
         frag.from_items.push((alias.clone(), tbl));
         for c in pred_conditions {
             frag.conditions.push(c);
@@ -704,24 +734,42 @@ fn translate_pattern(pattern: &GraphPattern, ctx: &mut Ctx) -> Fragment {
         }
 
         GraphPattern::Graph { name, inner } => {
-            let mut frag = translate_pattern(inner, ctx);
-            // Add graph filter to all tables that expose a `g` column.
+            // v0.40.0: graph-filter context propagation.
+            //
+            // The pre-v0.40.0 approach applied the graph filter post-hoc by
+            // iterating over `frag.from_items` after the inner pattern was
+            // translated.  This failed when the inner pattern contained an
+            // OPTIONAL (LeftJoin) or WITH RECURSIVE property path because those
+            // wrap their children in aliased subqueries that strip the `g` column.
+            //
+            // Fix: propagate `ctx.graph_filter` *before* recursing.  Every leaf
+            // VP scan in `translate_bgp` / `table_expr` / `build_all_predicates_union`
+            // now bakes in `WHERE g = {gid}` directly, so no post-hoc alias loop
+            // is needed and LeftJoin / Path nodes work correctly.
             match name {
                 NamedNodePattern::NamedNode(nn) => {
                     match ctx.encode_iri(nn.as_str()) {
                         Some(gid) => {
-                            // Apply g = gid to every table alias in the fragment.
-                            for (alias, _) in &frag.from_items {
-                                frag.conditions.push(format!("{alias}.g = {gid}"));
-                            }
+                            // Propagate into the recursive translation.
+                            let saved = ctx.graph_filter;
+                            ctx.graph_filter = Some(gid);
+                            let frag = translate_pattern(inner, ctx);
+                            ctx.graph_filter = saved;
+                            frag
                         }
                         None => {
+                            // Named graph IRI not in dictionary → no results.
+                            let mut frag = Fragment::empty();
                             frag.conditions.push("FALSE".to_owned());
+                            frag
                         }
                     }
                 }
                 NamedNodePattern::Variable(v) => {
+                    // Variable graph: translate inner normally, then bind the g
+                    // column of the first from_item to the variable.
                     let vname = v.as_str().to_owned();
+                    let mut frag = translate_pattern(inner, ctx);
                     if let Some((alias, _)) = frag.from_items.first() {
                         let col = format!("{alias}.g");
                         if let Some(existing) = frag.bindings.get(&vname) {
@@ -730,9 +778,9 @@ fn translate_pattern(pattern: &GraphPattern, ctx: &mut Ctx) -> Fragment {
                             frag.bindings.insert(vname, col);
                         }
                     }
+                    frag
                 }
             }
-            frag
         }
 
         // Modifiers are peeled off by translate_query — these are fall-throughs
@@ -842,6 +890,7 @@ fn translate_pattern(pattern: &GraphPattern, ctx: &mut Ctx) -> Fragment {
                 o_const.as_deref(),
                 &mut path_ctx,
                 max_depth,
+                ctx.graph_filter,
             );
             ctx.path_counter = path_ctx.counter;
 

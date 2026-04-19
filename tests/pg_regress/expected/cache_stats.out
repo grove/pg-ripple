@@ -1,0 +1,94 @@
+-- cache_stats.sql — Comprehensive cache_stats() and reset_cache_stats() tests (v0.40.0)
+--
+-- Verifies that:
+--   1. cache_stats() exists and returns JSONB with top-level keys:
+--      plan_cache, dict_cache, federation_cache
+--   2. Each sub-object has expected keys
+--   3. reset_cache_stats() exists and returns void without error
+SET search_path TO pg_ripple, public;
+CREATE EXTENSION IF NOT EXISTS pg_ripple;
+-- ── 1. cache_stats() returns required top-level keys ─────────────────────────
+SELECT
+    (result ? 'plan_cache')        AND
+    (result ? 'dict_cache')        AND
+    (result ? 'federation_cache')  AS has_top_level_keys
+FROM (
+    SELECT pg_ripple.cache_stats() AS result
+) t;
+ has_top_level_keys 
+--------------------
+ t
+(1 row)
+
+-- ── 2. plan_cache sub-object has numeric fields ────────────────────────────────
+SELECT
+    jsonb_typeof(result->'plan_cache'->'hits')   = 'number' AND
+    jsonb_typeof(result->'plan_cache'->'misses')  = 'number' AND
+    jsonb_typeof(result->'plan_cache'->'size') = 'number'
+    AS plan_cache_has_numeric_fields
+FROM (
+    SELECT pg_ripple.cache_stats() AS result
+) t;
+ plan_cache_has_numeric_fields 
+-------------------------------
+ t
+(1 row)
+
+-- ── 3. dict_cache sub-object has numeric fields ───────────────────────────────
+SELECT
+    jsonb_typeof(result->'dict_cache'->'hits')   = 'number' AND
+    jsonb_typeof(result->'dict_cache'->'misses')  = 'number'
+    AS dict_cache_has_numeric_fields
+FROM (
+    SELECT pg_ripple.cache_stats() AS result
+) t;
+ dict_cache_has_numeric_fields 
+-------------------------------
+ t
+(1 row)
+
+-- ── 4. federation_cache sub-object has expected fields ───────────────────────
+SELECT
+    jsonb_typeof(result->'federation_cache'->'hits') = 'number'
+    AS federation_cache_has_hits
+FROM (
+    SELECT pg_ripple.cache_stats() AS result
+) t;
+ federation_cache_has_hits 
+---------------------------
+ t
+(1 row)
+
+-- ── 5. reset_cache_stats() returns void (no error) ───────────────────────────
+SELECT pg_ripple.reset_cache_stats() IS NULL AS reset_returns_void;
+ reset_returns_void 
+--------------------
+ f
+(1 row)
+
+-- ── 6. After reset, hit/miss counts are zero ──────────────────────────────────
+-- Run a query to warm the cache.
+SELECT count(*) >= 0 AS warm_cache
+FROM pg_ripple.sparql('ASK { ?s ?p ?o }');
+ warm_cache 
+------------
+ t
+(1 row)
+
+-- Reset stats.
+SELECT pg_ripple.reset_cache_stats() IS NULL AS reset_ok;
+ reset_ok 
+----------
+ f
+(1 row)
+
+-- After reset, dict_cache hits should be 0.
+SELECT (result->'dict_cache'->>'hits')::bigint = 0 AS dict_hits_zero_after_reset
+FROM (
+    SELECT pg_ripple.cache_stats() AS result
+) t;
+ dict_hits_zero_after_reset 
+----------------------------
+ t
+(1 row)
+
