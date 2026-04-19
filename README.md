@@ -256,48 +256,6 @@ CREATE EXTENSION pg_ripple;
 
 ---
 
-## Roadmap
-
-26 releases from v0.1.0 to v1.0.0, with two remaining.
-
-| Version | Name | What it delivers | Status |
-|---|---|---|---|
-| **0.1.0** | **Foundation** | Dictionary encoding, VP storage, basic triple CRUD | ✅ Done |
-| **0.2.0** | **Bulk Loading & Named Graphs** | Turtle/N-Triples/N-Quads/TriG import, named graphs, rare-predicate table | ✅ Done |
-| **0.3.0** | **SPARQL Basic** | SELECT, ASK, BGPs, FILTER, OPTIONAL, GRAPH patterns, plan cache | ✅ Done |
-| **0.4.0** | **RDF-star** | Quoted triples, statement metadata, LPG-ready storage | ✅ Done |
-| **0.5.0** | **SPARQL Advanced (Query)** | Property paths, aggregates, UNION/MINUS, subqueries, BIND/VALUES | ✅ Done |
-| **0.5.1** | **SPARQL Advanced (Write)** | Inline encoding, CONSTRUCT/DESCRIBE, INSERT/DELETE DATA, full-text search | ✅ Done |
-| **0.6.0** | **HTAP Architecture** | Concurrent reads/writes, shared-memory dictionary cache | ✅ Done |
-| **0.7.0** | **SHACL Core** | Constraint shapes, synchronous validation on insert | ✅ Done |
-| **0.8.0** | **SHACL Advanced** | Complex shapes, async background validation pipeline | ✅ Done |
-| **0.9.0** | **Serialization** | Turtle/N-Triples/JSON-LD/RDF-XML export, RDF-star formats | ✅ Done |
-| **0.10.0** | **Datalog Reasoning** | RDFS (13 rules), OWL 2 RL (~20 core rules), custom rules, integrity constraints | ✅ Done |
-| **0.11.0** | **SPARQL & Datalog Views** | Incremental live views via pg_trickle, ExtVP | ✅ Done |
-| **0.12.0** | **SPARQL Update (Advanced)** | DELETE/INSERT WHERE, LOAD, CLEAR, DROP, CREATE | ✅ Done |
-| **0.13.0** | **Performance** | BSBM benchmarks, prepared statements, planner statistics | ✅ Done |
-| **0.14.0** | **Admin & Security** | Graph-level RLS, vacuum/reindex, packaging, full docs | ✅ Done |
-| **0.15.0** | **SPARQL Protocol** | Standard W3C HTTP endpoint (`pg_ripple_http` binary) | ✅ Done |
-| **0.16.0** | **SPARQL Federation** | `SERVICE` keyword, SSRF allowlist, error handling, health monitoring | ✅ Done |
-| **0.17.0** | **JSON-LD Framing** | Frame-driven CONSTRUCT export, framing views, general-purpose `jsonld_frame()` | ✅ Done |
-| **0.18.0** | **CONSTRUCT/DESCRIBE/ASK Views** | Incremental live views for all four SPARQL query forms | ✅ Done |
-| **0.19.0** | **Federation Performance** | Connection pooling, result caching, variable projection, batch SERVICE, adaptive timeouts | ✅ Done |
-| **0.20.0** | **W3C Conformance & Stability** | 100% W3C SPARQL 1.1 Query/Update/SHACL Core conformance, crash recovery, security audit Phase 1, API stability contract | ✅ Done |
-| **0.21.0** | **SPARQL Built-in Functions** | All ~40 SPARQL 1.1 built-in functions, query correctness fixes, `sparql_strict` GUC | ✅ Done |
-| **0.22.0** | **Storage Correctness & Security Hardening** | Dictionary rollback safety, merge race fixes, atomic predicate promotion, HTTP rate limiting, error redaction, constant-time auth | ✅ Done |
-| **0.23.0** | **SHACL Core Completion & SPARQL Diagnostics** | `sh:hasValue`, `sh:nodeKind`, `sh:languageIn`, `sh:uniqueLang`, `sh:lessThan`, `sh:greaterThan`, `sh:closed`; `explain_sparql()`; Datalog division/unbound-var/negation-cycle fixes | ✅ Done |
-| **0.24.0** | **Semi-naive Datalog & Performance Hardening** | Semi-naive evaluation with `infer_with_stats()`; streaming export; `property_path_max_depth` GUC; BGP selectivity model; BRIN-on-SID migration; SPARQL-star Update fixes | ✅ Done |
-| **0.25.0** | **Architectural Polish & Health Checks** | `canary()` health function, strict bulk-load mode, merge-worker LRU isolation, pg_trickle version probe, federation byte gate | ✅ Done |
-| **1.0.0** | **Production Release** | Stress testing (72h), final security sign-off, production certification | ⏳ Planned |
-
-See [ROADMAP.md](ROADMAP.md) for deliverables and exit criteria for every release.
-
-### Beyond 1.0
-
-Planned future directions: distributed storage (Citus), vector + graph hybrid search (pgvector), temporal queries (TimescaleDB), GeoSPARQL (PostGIS), Cypher/GQL query language, and R2RML virtual graphs.
-
----
-
 ## Quality & Testing
 
 pg_ripple aims for production-grade quality:
@@ -310,18 +268,6 @@ pg_ripple aims for production-grade quality:
 - **Performance regression CI** — automated benchmarks fail the build on >10% throughput regression
 - **W3C conformance** — 100% pass rate on SPARQL 1.1 Query, SPARQL 1.1 Update, and SHACL Core test suites (verified in `w3c_sparql_query_conformance`, `w3c_sparql_update_conformance`, `w3c_shacl_conformance` pg_regress tests)
 - **Stability hardening** — 72-hour soak test, Valgrind memory leak detection, crash recovery testing
-
----
-
-## Documentation
-
-| Document | Description |
-|---|---|
-| [ROADMAP.md](ROADMAP.md) | Version-by-version release plan with deliverables and effort estimates |
-| [Implementation Plan](plans/implementation_plan.md) | Detailed technical architecture, module breakdown, and data flow |
-| [Datalog Design](plans/ecosystem/datalog.md) | Reasoning engine: syntax, stratification, SQL compilation, built-in rules |
-| [pg_trickle Integration](plans/ecosystem/pg_trickle.md) | IVM, SPARQL views, ExtVP, and live statistics via stream tables |
-| [Cypher/GQL Analysis](plans/cypher/) | Exploratory analysis for post-1.0 Cypher/GQL query language support |
 
 ---
 
