@@ -26,6 +26,7 @@
 //!
 //! The default graph has identifier `0`.  Named graphs have positive `i64` ids.
 
+pub mod catalog;
 pub mod merge;
 
 use pgrx::datum::DatumWithOid;

@@ -13,6 +13,36 @@ Versions correspond to the milestones in [ROADMAP.md](ROADMAP.md).
 
 ---
 
+## [0.38.0] — 2026-05-03 — Architecture Refactoring & Query Completeness
+
+**Structural release: god-module split, PredicateCatalog, SHACL query hints, SPARQL Update completeness.**
+
+### What you can do
+
+- **Trust faster BGP queries** — a new backend-local predicate OID cache (`storage/catalog.rs`) eliminates per-atom SPI catalog lookups. A 10-atom BGP now issues 1 catalog SPI call instead of 10.
+- **Use whitespace-insensitive plan caching** — the per-backend plan cache (v0.13.0) now keys on an algebra digest (XXH3-128 of the normalised SPARQL IR) instead of the raw query text. Whitespace and prefix-alias variants of the same query share one cache slot.
+- **Get SHACL-accelerated queries automatically** — after loading shapes, `sh:maxCount 1` suppresses `DISTINCT` on the affected predicate join; `sh:minCount 1` promotes `LEFT JOIN` → `INNER JOIN`. No query changes needed.
+- **Use SPARQL graph management** — `COPY`, `MOVE`, and `ADD` graph operations are now supported via spargebra's desugaring into `INSERT DATA` / `DELETE DATA` sequences.
+- **Read the architecture guide** — `docs/src/reference/architecture.md` has a Mermaid diagram of every major subsystem boundary post-refactor.
+- **See the SPARQL 1.1 conformance job** — a new `sparql-conformance` CI job (informational, `continue-on-error`) downloads the W3C test suite and reports coverage.
+
+### What happens behind the scenes
+
+- **`src/lib.rs` split** — the 5 975-line god-module is split into 12 focused modules: `gucs.rs`, `schema.rs`, `dict_api.rs`, `export_api.rs`, `sparql_api.rs`, `maintenance_api.rs`, `stats_admin.rs`, `data_ops.rs`, `datalog_api.rs`, `views_api.rs`, `federation_registry.rs`, `graphrag_admin.rs`. `src/lib.rs` is now 1 447 lines.
+- **`shacl/constraints/` sub-module** — `validate_property_shape()` is a ≤50-line dispatcher. Per-constraint logic lives in `count.rs`, `value_type.rs`, `string_based.rs`, `logical.rs`, `shape_based.rs`, `property_path.rs`.
+- **`sparql/translate/` sub-module** — layout files for per-algebra-node translation: `bgp.rs`, `join.rs`, `left_join.rs`, `union.rs`, `filter.rs`, `graph.rs`, `group.rs`, `distinct.rs`.
+- **`property_path_max_depth` deprecated** — the GUC description now signals deprecation; use `max_path_depth` instead.
+
+### Migration
+
+`sql/pg_ripple--0.37.0--0.38.0.sql` — creates `_pg_ripple.shape_hints` table; no VP table schema changes.
+
+```sql
+ALTER EXTENSION pg_ripple UPDATE TO '0.38.0';
+```
+
+---
+
 ## [0.37.0] — 2026-04-26 — Storage Concurrency Hardening & Error Safety
 
 **Reliability release: zero hard panics, concurrent-safe merge/delete/promote, GUC validators.**

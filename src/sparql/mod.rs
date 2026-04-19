@@ -28,6 +28,7 @@ mod optimizer;
 mod plan_cache;
 mod property_path;
 pub(crate) mod sqlgen;
+pub mod translate;
 pub(crate) mod wcoj;
 
 use std::collections::HashMap;

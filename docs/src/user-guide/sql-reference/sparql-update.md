@@ -278,3 +278,24 @@ The following SPARQL Update forms are **not yet supported** in v0.5.1:
 - `DROP GRAPH <g>` (v0.12.0)
 - `CREATE GRAPH <g>` (v0.12.0)
 - Update sequences (`; UPDATE1 ; UPDATE2`) (v0.12.0)
+
+## Graph management operations (v0.38.0)
+
+`ADD`, `COPY`, and `MOVE` are supported from v0.38.0. These operations are
+desugared by the spargebra parser into equivalent `INSERT DATA` / `DELETE DATA`
+sequences before execution.
+
+```sql
+-- ADD: copy all triples from SOURCE into DEST (SOURCE is preserved)
+SELECT sparql_update('ADD GRAPH <http://example.org/source> TO GRAPH <http://example.org/dest>');
+
+-- COPY: replace DEST with the contents of SOURCE (SOURCE is preserved)
+SELECT sparql_update('COPY GRAPH <http://example.org/source> TO GRAPH <http://example.org/dest>');
+
+-- MOVE: rename SOURCE to DEST (SOURCE is emptied)
+SELECT sparql_update('MOVE GRAPH <http://example.org/source> TO GRAPH <http://example.org/dest>');
+```
+
+All three operations use `DEFAULT` in place of a named graph IRI to refer to
+the default graph.
+

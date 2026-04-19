@@ -50,6 +50,8 @@
 # Reference
 
 - [SQL Function Reference](reference/sql-functions.md)
+- [Architecture](reference/architecture.md)
+- [GUC Reference](reference/guc-reference.md)
 - [SPARQL Compliance Matrix](reference/sparql-compliance.md)
 - [Error Message Catalog](reference/error-catalog.md)
 - [Lattice-Based Datalog (Datalog^L)](reference/lattice-datalog.md)

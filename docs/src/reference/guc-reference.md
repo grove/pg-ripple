@@ -18,6 +18,20 @@ Maximum recursion depth for SPARQL property paths (`*`, `+`). Increase for deepl
 
 ---
 
+### `pg_ripple.property_path_max_depth` *(deprecated)*
+
+| | |
+|---|---|
+| Type | Integer |
+| Default | `64` |
+| Range | 1–100 000 |
+| Status | **Deprecated** since v0.38.0 — use `max_path_depth` instead |
+
+Legacy alias for `max_path_depth`. Setting this GUC still works but emits a
+deprecation notice. It will be removed in a future major release.
+
+---
+
 ### `pg_ripple.federation_timeout`
 
 | | |

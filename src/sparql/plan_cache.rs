@@ -75,9 +75,20 @@ pub fn reset() {
     PLAN_CACHE.with(|c| c.borrow_mut().clear());
 }
 
-/// Build the cache key: query text + GUC values that influence SQL generation.
+/// Build the cache key: algebra digest (XXH3-128 of the normalised SPARQL IR)
+/// plus GUC values that influence SQL generation.
+///
+/// Using the algebra IR (via `spargebra::Query`'s `Display` impl) instead of
+/// the raw query text means whitespace variants and prefix-form variants share
+/// the same cache slot.  Falls back to the raw text hash when parsing fails.
 fn cache_key(query_text: &str) -> String {
     let max_depth = crate::MAX_PATH_DEPTH.get();
     let bgp_reorder = crate::BGP_REORDER.get();
-    format!("{query_text}\x00max_depth={max_depth}\x00bgp_reorder={bgp_reorder}")
+    // Normalise via spargebra Display → canonical SPARQL → hash.
+    let text_to_hash = match spargebra::SparqlParser::new().parse_query(query_text) {
+        Ok(q) => format!("{q}"),
+        Err(_) => query_text.to_owned(),
+    };
+    let digest = xxhash_rust::xxh3::xxh3_128(text_to_hash.as_bytes());
+    format!("{digest:x}\x00max_depth={max_depth}\x00bgp_reorder={bgp_reorder}")
 }

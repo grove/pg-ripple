@@ -2955,44 +2955,44 @@ No `.expect()`/`.unwrap()` in non-test Rust code; clippy deny enforced in CI. Th
 
 ### Deliverables
 
-- [ ] **Split `src/lib.rs` into subsystem modules**
+- [x] **Split `src/lib.rs` into subsystem modules**
   - Extract `src/rare_predicate.rs`, `src/shacl_admin.rs`, `src/federation_registry.rs`, `src/graphrag_admin.rs`, `src/stats_admin.rs` from `src/lib.rs`
   - Target: `src/lib.rs` ≤1,500 lines covering `_PG_init`, GUC registration, `extension_sql!` blocks, and thin `#[pg_extern]` delegation shims
   - No change to public SQL API; all existing `pg_ripple.*` functions remain
-- [ ] **`PredicateCatalog` trait and backend-local OID cache** (`src/storage/catalog.rs` new module)
+- [x] **`PredicateCatalog` trait and backend-local OID cache** (`src/storage/catalog.rs` new module)
   - Define `trait PredicateCatalog { fn resolve(&self, pred_id: i64) -> Option<TableDesc>; }`
   - Implement a backend-local `HashMap<i64, TableDesc>` cache invalidated by a syscache callback on `_pg_ripple.predicates`
   - Wire into `src/sparql/sqlgen.rs` and `src/datalog/compiler.rs` — eliminates per-atom SPI catalog lookup for hot BGPs
   - New GUC `pg_ripple.predicate_cache_enabled` (bool, default `true`)
   - Benchmark: 10-atom BGP must show 1 catalog SPI call instead of 10
-- [ ] **Refactor `validate_shape()` → per-constraint helpers** (`src/shacl/constraints/` new sub-module)
+- [x] **Refactor `validate_shape()` → per-constraint helpers** (`src/shacl/constraints/` new sub-module)
   - One file per constraint family: `count.rs`, `value_type.rs`, `string_based.rs`, `logical.rs`, `property_path.rs`, `shape_based.rs`
   - Each exported function ≤80 lines; top-level `validate_shape()` becomes a dispatcher ≤50 lines
   - All existing `shacl_*.sql` pg_regress tests must pass unchanged
-- [ ] **Refactor `translate_pattern()` → per-algebra-node helpers** (`src/sparql/translate/` new sub-module)
+- [x] **Refactor `translate_pattern()` → per-algebra-node helpers** (`src/sparql/translate/` new sub-module)
   - One file per algebra node: `bgp.rs`, `join.rs`, `left_join.rs`, `union.rs`, `filter.rs`, `graph.rs`, `group.rs`, `distinct.rs`
   - Shared context struct `TranslateCtx` carries encode cache, catalog handle, and query-level state
   - All existing `sparql_*.sql` pg_regress tests must pass unchanged
-- [ ] **Batch dictionary encoding in SPARQL translation**
+- [x] **Batch dictionary encoding in SPARQL translation**
   - In `translate_pattern`, collect all unresolved IRI/literal constants in a first pass; resolve via one `encode_terms_batch(&[Term]) -> Vec<i64>` SPI call (single `INSERT … ON CONFLICT … RETURNING` batch)
   - Benchmark: BGP with 20 FILTER constants must show 1 encode SPI call instead of 20
-- [ ] **Plan-cache key normalisation** (`src/sparql/plan_cache.rs`)
+- [x] **Plan-cache key normalisation** (`src/sparql/plan_cache.rs`)
   - Cache on algebra digest (serialize `spargebra::Query` IR → compact bytes → XXH3-128) instead of raw query text
   - Whitespace and prefix-form variants now share the same cache slot
-- [ ] **SCBD DESCRIBE — implemented** (`src/sparql/mod.rs`)
+- [x] **SCBD DESCRIBE — implemented** (`src/sparql/mod.rs`)
   - Implement Symmetric Concise Bounded Description: all triples where the resource is subject *or* object, with blank-node recursion
   - `describe_strategy = 'scbd'` now functional; remove the "not implemented" caveat from docs
-- [ ] **SPARQL Update: DELETE WHERE / INSERT WHERE / graph management** (`src/sparql/update.rs`)
+- [x] **SPARQL Update: DELETE WHERE / INSERT WHERE / graph management** (`src/sparql/update.rs`)
   - Implement `DELETE { … } WHERE { … }`, `INSERT { … } WHERE { … }`, `DELETE WHERE { … }`
   - Implement graph management: `CLEAR GRAPH`, `DROP GRAPH`, `COPY`, `MOVE`, `ADD`
   - pg_regress test `sparql_update_advanced.sql`: pattern-based deletes spanning multiple VP tables; cross-graph COPY/MOVE
-- [ ] **Consolidate property-path depth GUCs** (`src/lib.rs`)
+- [x] **Consolidate property-path depth GUCs** (`src/lib.rs`)
   - Deprecate `property_path_max_depth`; make it an alias for `max_path_depth` with a one-time `NOTICE`
-- [ ] **Wire SHACL hints into SPARQL planner** (`src/shacl/hints.rs` new module, `src/sparql/sqlgen.rs`)
+- [x] **Wire SHACL hints into SPARQL planner** (`src/shacl/hints.rs` new module, `src/sparql/sqlgen.rs`)
   - At query-translation time, query `_pg_ripple.shape_hints` (populated from loaded shapes) per predicate
   - `sh:maxCount 1` → suppress `DISTINCT` on that predicate's join; `sh:minCount 1` → downgrade `LEFT JOIN` to `INNER JOIN`
   - pg_regress test `shacl_sparql_hints.sql`: verify join-type changes with and without shapes; assert result equivalence
-- [ ] **SPARQL 1.1 conformance suite in CI** (allowed-to-warn job)
+- [x] **SPARQL 1.1 conformance suite in CI** (allowed-to-warn job)
   - Download W3C SPARQL 1.1 test suite; run via `cargo pgrx regress`; report pass/skip/fail counts
   - Publish conformance percentage in `CHANGELOG.md` per release
 
@@ -3002,11 +3002,11 @@ No `.expect()`/`.unwrap()` in non-test Rust code; clippy deny enforced in CI. Th
 
 ### Documentation
 
-- [ ] `reference/architecture.md` — Mermaid architecture diagram showing post-refactor module boundaries (dictionary → storage/catalog → sparql/translate + datalog/compiler → shacl/constraints → views/exporters)
-- [ ] `user-guide/sql-reference/sparql-update.md` — document DELETE WHERE / INSERT WHERE / CLEAR / COPY / MOVE / ADD with examples
-- [ ] `reference/guc-reference.md` — `predicate_cache_enabled`; deprecation notice for `property_path_max_depth`
-- [ ] `user-guide/performance/query-planning.md` — new section on SHACL hints and their effect on join selection
-- [ ] Release notes for v0.38.0
+- [x] `reference/architecture.md` — Mermaid architecture diagram showing post-refactor module boundaries (dictionary → storage/catalog → sparql/translate + datalog/compiler → shacl/constraints → views/exporters)
+- [x] `user-guide/sql-reference/sparql-update.md` — document DELETE WHERE / INSERT WHERE / CLEAR / COPY / MOVE / ADD with examples
+- [x] `reference/guc-reference.md` — `predicate_cache_enabled`; deprecation notice for `property_path_max_depth`
+- [x] `user-guide/performance/query-planning.md` — new section on SHACL hints and their effect on join selection
+- [x] Release notes for v0.38.0
 
 ### Exit Criteria
 

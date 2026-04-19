@@ -24,6 +24,9 @@
 //!
 //! `sh:or`, `sh:and`, `sh:not`, and qualified constraints are v0.8.0.
 
+pub mod constraints;
+pub mod hints;
+
 use pgrx::datum::DatumWithOid;
 use pgrx::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -793,7 +796,11 @@ pub fn parse_and_store_shapes(data: &str) -> i32 {
     let mut stored = 0i32;
     for shape in &shapes {
         match store_shape(shape) {
-            Ok(()) => stored += 1,
+            Ok(()) => {
+                stored += 1;
+                // v0.38.0: populate query-planner hints from shape constraints.
+                hints::populate_hints(shape);
+            }
             Err(e) => pgrx::error!("failed to store shape '{}': {e}", shape.shape_iri),
         }
     }
@@ -905,7 +912,7 @@ pub struct Violation {
 /// Returns `true` when the node conforms (or when the shape is not found —
 /// open-world assumption).  Depth-limited to 32 levels to prevent infinite
 /// recursion on cyclic shape references.
-fn node_conforms_to_shape(
+pub(crate) fn node_conforms_to_shape(
     node_id: i64,
     shape_iri: &str,
     graph_id: i64,
@@ -997,6 +1004,8 @@ fn validate_property_shape_depth(
 /// Execute validation for a single `PropertyShape` against all focus nodes in
 /// graph `g` (0 = default graph, -1 = all graphs).
 /// Returns all violations found.
+///
+/// This is the ≤50-line dispatcher that delegates to `constraints/` sub-modules.
 fn validate_property_shape(
     ps: &PropertyShape,
     focus_nodes: &[i64],
@@ -1005,12 +1014,10 @@ fn validate_property_shape(
     all_shapes: &[Shape],
 ) -> Vec<Violation> {
     let mut violations: Vec<Violation> = Vec::new();
-    let path_id_opt = crate::dictionary::lookup_iri(&ps.path_iri);
-    let path_id = match path_id_opt {
+    let path_id = match crate::dictionary::lookup_iri(&ps.path_iri) {
         Some(id) => id,
         None => {
-            // Path predicate not in dictionary — no triples can match, so
-            // minCount violations may apply.
+            // Path predicate not in dictionary — only MinCount can fire (found 0 values).
             for &focus in focus_nodes {
                 for c in &ps.constraints {
                     if let ShapeConstraint::MinCount(n) = c
@@ -1035,468 +1042,76 @@ fn validate_property_shape(
             return violations;
         }
     };
-
     for &focus in focus_nodes {
-        // Count value nodes for this focus node along the path predicate.
-        let count: i64 = if graph_id < 0 {
+        let count = if graph_id < 0 {
             count_values_all_graphs(focus, path_id)
         } else {
             count_values_in_graph(focus, path_id, graph_id)
         };
-
+        let args = constraints::ConstraintArgs {
+            focus,
+            count,
+            path_id,
+            graph_id,
+            shape_iri,
+            path_iri: &ps.path_iri,
+            all_shapes,
+        };
         for c in &ps.constraints {
-            match c {
-                ShapeConstraint::MinCount(n) => {
-                    if count < *n {
-                        let focus_iri = crate::dictionary::decode(focus)
-                            .unwrap_or_else(|| format!("_id_{focus}"));
-                        violations.push(Violation {
-                            focus_node: focus_iri,
-                            shape_iri: shape_iri.to_owned(),
-                            path: Some(ps.path_iri.clone()),
-                            constraint: "sh:minCount".to_owned(),
-                            message: format!(
-                                "expected at least {n} value(s) for <{}>, found {count}",
-                                ps.path_iri
-                            ),
-                            severity: "Violation".to_owned(),
-                        });
-                    }
-                }
-                ShapeConstraint::MaxCount(n) => {
-                    if count > *n {
-                        let focus_iri = crate::dictionary::decode(focus)
-                            .unwrap_or_else(|| format!("_id_{focus}"));
-                        violations.push(Violation {
-                            focus_node: focus_iri,
-                            shape_iri: shape_iri.to_owned(),
-                            path: Some(ps.path_iri.clone()),
-                            constraint: "sh:maxCount".to_owned(),
-                            message: format!(
-                                "expected at most {n} value(s) for <{}>, found {count}",
-                                ps.path_iri
-                            ),
-                            severity: "Violation".to_owned(),
-                        });
-                    }
-                }
-                ShapeConstraint::Datatype(dt_iri) => {
-                    // Retrieve all value nodes and check their datatype.
-                    let value_ids = get_value_ids(focus, path_id, graph_id);
-                    for v_id in value_ids {
-                        if !value_has_datatype(v_id, dt_iri) {
-                            let focus_iri = crate::dictionary::decode(focus)
-                                .unwrap_or_else(|| format!("_id_{focus}"));
-                            violations.push(Violation {
-                                focus_node: focus_iri,
-                                shape_iri: shape_iri.to_owned(),
-                                path: Some(ps.path_iri.clone()),
-                                constraint: "sh:datatype".to_owned(),
-                                message: format!(
-                                    "value node id {v_id} does not have datatype <{dt_iri}>"
-                                ),
-                                severity: "Violation".to_owned(),
-                            });
-                        }
-                    }
-                }
-                ShapeConstraint::In(allowed_values) => {
-                    let allowed_ids: Vec<i64> = allowed_values
-                        .iter()
-                        .filter_map(|val| encode_shacl_in_value(val))
-                        .collect();
-                    let value_ids = get_value_ids(focus, path_id, graph_id);
-                    for v_id in value_ids {
-                        if !allowed_ids.contains(&v_id) {
-                            let focus_iri = crate::dictionary::decode(focus)
-                                .unwrap_or_else(|| format!("_id_{focus}"));
-                            violations.push(Violation {
-                                focus_node: focus_iri,
-                                shape_iri: shape_iri.to_owned(),
-                                path: Some(ps.path_iri.clone()),
-                                constraint: "sh:in".to_owned(),
-                                message: format!(
-                                    "value node id {v_id} is not in the allowed value set"
-                                ),
-                                severity: "Violation".to_owned(),
-                            });
-                        }
-                    }
-                }
-                ShapeConstraint::Pattern(regex, _flags) => {
-                    let value_ids = get_value_ids(focus, path_id, graph_id);
-                    for v_id in value_ids {
-                        let lexical = crate::dictionary::decode(v_id).unwrap_or_default();
-                        // Strip surrounding quotes for string literals.
-                        let lexical = if lexical.starts_with('"') {
-                            lexical
-                                .trim_start_matches('"')
-                                .split('"')
-                                .next()
-                                .unwrap_or(&lexical)
-                                .to_owned()
-                        } else {
-                            lexical
-                        };
-                        let matches: Option<bool> = Spi::get_one_with_args::<bool>(
-                            "SELECT $1 ~ $2",
-                            &[
-                                DatumWithOid::from(lexical.as_str()),
-                                DatumWithOid::from(regex.as_str()),
-                            ],
-                        )
-                        .unwrap_or(None);
-                        if !matches.unwrap_or(false) {
-                            let focus_iri = crate::dictionary::decode(focus)
-                                .unwrap_or_else(|| format!("_id_{focus}"));
-                            violations.push(Violation {
-                                focus_node: focus_iri,
-                                shape_iri: shape_iri.to_owned(),
-                                path: Some(ps.path_iri.clone()),
-                                constraint: "sh:pattern".to_owned(),
-                                message: format!(
-                                    "value '{lexical}' does not match pattern '{regex}'"
-                                ),
-                                severity: "Violation".to_owned(),
-                            });
-                        }
-                    }
-                }
-                ShapeConstraint::Class(class_iri) => {
-                    let class_id_opt = crate::dictionary::lookup_iri(class_iri);
-                    let rdf_type_id_opt = crate::dictionary::lookup_iri(
-                        "http://www.w3.org/1999/02/22-rdf-syntax-ns#type",
-                    );
-                    let value_ids = get_value_ids(focus, path_id, graph_id);
-                    for v_id in value_ids {
-                        let has_class = match (class_id_opt, rdf_type_id_opt) {
-                            (Some(cid), Some(tid)) => value_has_rdf_type(v_id, tid, cid),
-                            _ => false,
-                        };
-                        if !has_class {
-                            let focus_iri = crate::dictionary::decode(focus)
-                                .unwrap_or_else(|| format!("_id_{focus}"));
-                            violations.push(Violation {
-                                focus_node: focus_iri,
-                                shape_iri: shape_iri.to_owned(),
-                                path: Some(ps.path_iri.clone()),
-                                constraint: "sh:class".to_owned(),
-                                message: format!(
-                                    "value node id {v_id} is not an instance of <{class_iri}>"
-                                ),
-                                severity: "Violation".to_owned(),
-                            });
-                        }
-                    }
-                }
-                ShapeConstraint::Node(ref_shape_iri) => {
-                    // Value nodes must conform to the referenced shape (v0.8.0).
-                    let value_ids = get_value_ids(focus, path_id, graph_id);
-                    for v_id in value_ids {
-                        if !node_conforms_to_shape(v_id, ref_shape_iri, graph_id, all_shapes) {
-                            let focus_iri = crate::dictionary::decode(focus)
-                                .unwrap_or_else(|| format!("_id_{focus}"));
-                            violations.push(Violation {
-                                focus_node: focus_iri,
-                                shape_iri: shape_iri.to_owned(),
-                                path: Some(ps.path_iri.clone()),
-                                constraint: "sh:node".to_owned(),
-                                message: format!(
-                                    "value node id {v_id} does not conform to shape <{ref_shape_iri}>"
-                                ),
-                                severity: "Violation".to_owned(),
-                            });
-                        }
-                    }
-                }
-                ShapeConstraint::Or(shape_iris) => {
-                    // Value nodes must conform to at least one listed shape.
-                    let value_ids = get_value_ids(focus, path_id, graph_id);
-                    for v_id in value_ids {
-                        let conforms = shape_iris
-                            .iter()
-                            .any(|s| node_conforms_to_shape(v_id, s, graph_id, all_shapes));
-                        if !conforms {
-                            let focus_iri = crate::dictionary::decode(focus)
-                                .unwrap_or_else(|| format!("_id_{focus}"));
-                            violations.push(Violation {
-                                focus_node: focus_iri,
-                                shape_iri: shape_iri.to_owned(),
-                                path: Some(ps.path_iri.clone()),
-                                constraint: "sh:or".to_owned(),
-                                message: format!(
-                                    "value node id {v_id} does not conform to any of the sh:or shapes"
-                                ),
-                                severity: "Violation".to_owned(),
-                            });
-                        }
-                    }
-                }
-                ShapeConstraint::And(shape_iris) => {
-                    // Value nodes must conform to all listed shapes.
-                    let value_ids = get_value_ids(focus, path_id, graph_id);
-                    for v_id in value_ids {
-                        for s in shape_iris {
-                            if !node_conforms_to_shape(v_id, s, graph_id, all_shapes) {
-                                let focus_iri = crate::dictionary::decode(focus)
-                                    .unwrap_or_else(|| format!("_id_{focus}"));
-                                violations.push(Violation {
-                                    focus_node: focus_iri,
-                                    shape_iri: shape_iri.to_owned(),
-                                    path: Some(ps.path_iri.clone()),
-                                    constraint: "sh:and".to_owned(),
-                                    message: format!(
-                                        "value node id {v_id} does not conform to sh:and shape <{s}>"
-                                    ),
-                                    severity: "Violation".to_owned(),
-                                });
-                            }
-                        }
-                    }
-                }
-                ShapeConstraint::Not(ref_shape_iri) => {
-                    // Value nodes must NOT conform to the referenced shape.
-                    let value_ids = get_value_ids(focus, path_id, graph_id);
-                    for v_id in value_ids {
-                        if node_conforms_to_shape(v_id, ref_shape_iri, graph_id, all_shapes) {
-                            let focus_iri = crate::dictionary::decode(focus)
-                                .unwrap_or_else(|| format!("_id_{focus}"));
-                            violations.push(Violation {
-                                focus_node: focus_iri,
-                                shape_iri: shape_iri.to_owned(),
-                                path: Some(ps.path_iri.clone()),
-                                constraint: "sh:not".to_owned(),
-                                message: format!(
-                                    "value node id {v_id} must not conform to shape <{ref_shape_iri}>"
-                                ),
-                                severity: "Violation".to_owned(),
-                            });
-                        }
-                    }
-                }
-                ShapeConstraint::QualifiedValueShape {
-                    shape_iri: qvs_iri,
-                    min_count,
-                    max_count,
-                } => {
-                    // Count how many value nodes along the path conform to the qualified shape.
-                    let value_ids = get_value_ids(focus, path_id, graph_id);
-                    let qualifying_count = value_ids
-                        .iter()
-                        .filter(|&&v| node_conforms_to_shape(v, qvs_iri, graph_id, all_shapes))
-                        .count() as i64;
-                    let focus_iri =
-                        crate::dictionary::decode(focus).unwrap_or_else(|| format!("_id_{focus}"));
-                    if let Some(min) = min_count
-                        && qualifying_count < *min
-                    {
-                        violations.push(Violation {
-                            focus_node: focus_iri.clone(),
-                            shape_iri: shape_iri.to_owned(),
-                            path: Some(ps.path_iri.clone()),
-                            constraint: "sh:qualifiedMinCount".to_owned(),
-                            message: format!(
-                                "expected at least {min} value(s) conforming to <{qvs_iri}>, found {qualifying_count}"
-                            ),
-                            severity: "Violation".to_owned(),
-                        });
-                    }
-                    if let Some(max) = max_count
-                        && qualifying_count > *max
-                    {
-                        violations.push(Violation {
-                            focus_node: focus_iri,
-                            shape_iri: shape_iri.to_owned(),
-                            path: Some(ps.path_iri.clone()),
-                            constraint: "sh:qualifiedMaxCount".to_owned(),
-                            message: format!(
-                                "expected at most {max} value(s) conforming to <{qvs_iri}>, found {qualifying_count}"
-                            ),
-                            severity: "Violation".to_owned(),
-                        });
-                    }
-                }
-                // ── v0.23.0 new constraints ────────────────────────────────────
-                ShapeConstraint::HasValue(expected_val) => {
-                    // At least one value node must equal the given RDF term.
-                    let expected_id_opt = crate::dictionary::lookup_iri(expected_val);
-                    let value_ids = get_value_ids(focus, path_id, graph_id);
-                    let has_match = match expected_id_opt {
-                        Some(eid) => value_ids.contains(&eid),
-                        None => false,
-                    };
-                    if !has_match {
-                        let focus_iri = crate::dictionary::decode(focus)
-                            .unwrap_or_else(|| format!("_id_{focus}"));
-                        violations.push(Violation {
-                            focus_node: focus_iri,
-                            shape_iri: shape_iri.to_owned(),
-                            path: Some(ps.path_iri.clone()),
-                            constraint: "sh:hasValue".to_owned(),
-                            message: format!(
-                                "no value node equal to <{expected_val}> found for <{}>",
-                                ps.path_iri
-                            ),
-                            severity: "Violation".to_owned(),
-                        });
-                    }
-                }
-                ShapeConstraint::NodeKind(kind_iri) => {
-                    // Value nodes must be of the specified node kind.
-                    let value_ids = get_value_ids(focus, path_id, graph_id);
-                    for v_id in value_ids {
-                        if !value_has_node_kind(v_id, kind_iri) {
-                            let focus_iri = crate::dictionary::decode(focus)
-                                .unwrap_or_else(|| format!("_id_{focus}"));
-                            violations.push(Violation {
-                                focus_node: focus_iri,
-                                shape_iri: shape_iri.to_owned(),
-                                path: Some(ps.path_iri.clone()),
-                                constraint: "sh:nodeKind".to_owned(),
-                                message: format!(
-                                    "value node id {v_id} does not match sh:nodeKind <{kind_iri}>"
-                                ),
-                                severity: "Violation".to_owned(),
-                            });
-                        }
-                    }
-                }
-                ShapeConstraint::LanguageIn(allowed_tags) => {
-                    // Value nodes must have a language tag in the allowed list.
-                    // Tags in `allowed_tags` come from the Turtle parser and may still
-                    // be wrapped in Turtle string-literal quotes (e.g. `"en"` stored
-                    // as 4 chars including the `"` characters).  Strip those so that
-                    // the comparison with the dictionary `lang` column (bare tag, e.g. `en`)
-                    // works correctly.
-                    let value_ids = get_value_ids(focus, path_id, graph_id);
-                    for v_id in value_ids {
-                        let lang_opt = get_language_tag(v_id);
-                        let ok = match &lang_opt {
-                            Some(lang) => {
-                                let lang_lower = lang.to_lowercase();
-                                allowed_tags.iter().any(|t| {
-                                    let bare = t.trim_matches('"');
-                                    bare.to_lowercase() == lang_lower
-                                })
-                            }
-                            None => false, // not a language-tagged literal
-                        };
-                        if !ok {
-                            let focus_iri = crate::dictionary::decode(focus)
-                                .unwrap_or_else(|| format!("_id_{focus}"));
-                            violations.push(Violation {
-                                focus_node: focus_iri,
-                                shape_iri: shape_iri.to_owned(),
-                                path: Some(ps.path_iri.clone()),
-                                constraint: "sh:languageIn".to_owned(),
-                                message: format!(
-                                    "value node id {v_id} has language tag {:?} not in allowed list {:?}",
-                                    lang_opt.as_deref().unwrap_or("none"),
-                                    allowed_tags
-                                ),
-                                severity: "Violation".to_owned(),
-                            });
-                        }
-                    }
-                }
-                ShapeConstraint::UniqueLang => {
-                    // No two value nodes may have the same non-empty language tag.
-                    let value_ids = get_value_ids(focus, path_id, graph_id);
-                    let mut seen_langs: std::collections::HashMap<String, i64> =
-                        std::collections::HashMap::new();
-                    for v_id in value_ids {
-                        if let Some(lang) = get_language_tag(v_id)
-                            && !lang.is_empty()
-                        {
-                            let lang_lower = lang.to_lowercase();
-                            if let Some(prev_id) = seen_langs.get(&lang_lower) {
-                                let focus_iri = crate::dictionary::decode(focus)
-                                    .unwrap_or_else(|| format!("_id_{focus}"));
-                                violations.push(Violation {
-                                    focus_node: focus_iri,
-                                    shape_iri: shape_iri.to_owned(),
-                                    path: Some(ps.path_iri.clone()),
-                                    constraint: "sh:uniqueLang".to_owned(),
-                                    message: format!(
-                                        "duplicate language tag '{lang}' on value nodes {prev_id} and {v_id}"
-                                    ),
-                                    severity: "Violation".to_owned(),
-                                });
-                            } else {
-                                seen_langs.insert(lang_lower, v_id);
-                            }
-                        }
-                    }
-                }
-                ShapeConstraint::LessThan(other_path_iri) => {
-                    // Each value on this path must be < each value on other_path.
-                    let other_path_id = match crate::dictionary::lookup_iri(other_path_iri) {
-                        Some(id) => id,
-                        None => continue,
-                    };
-                    let this_values = get_value_ids(focus, path_id, graph_id);
-                    let other_values = get_value_ids(focus, other_path_id, graph_id);
-                    for v_id in &this_values {
-                        for o_id in &other_values {
-                            let ok = compare_dictionary_values(*v_id, *o_id)
-                                .map(|ord| ord == std::cmp::Ordering::Less)
-                                .unwrap_or(false);
-                            if !ok {
-                                let focus_iri = crate::dictionary::decode(focus)
-                                    .unwrap_or_else(|| format!("_id_{focus}"));
-                                violations.push(Violation {
-                                    focus_node: focus_iri,
-                                    shape_iri: shape_iri.to_owned(),
-                                    path: Some(ps.path_iri.clone()),
-                                    constraint: "sh:lessThan".to_owned(),
-                                    message: format!(
-                                        "value {v_id} on <{}> is not less than value {o_id} on <{other_path_iri}>",
-                                        ps.path_iri
-                                    ),
-                                    severity: "Violation".to_owned(),
-                                });
-                            }
-                        }
-                    }
-                }
-                ShapeConstraint::GreaterThan(other_path_iri) => {
-                    // Each value on this path must be > each value on other_path.
-                    let other_path_id = match crate::dictionary::lookup_iri(other_path_iri) {
-                        Some(id) => id,
-                        None => continue,
-                    };
-                    let this_values = get_value_ids(focus, path_id, graph_id);
-                    let other_values = get_value_ids(focus, other_path_id, graph_id);
-                    for v_id in &this_values {
-                        for o_id in &other_values {
-                            let ok = compare_dictionary_values(*v_id, *o_id)
-                                .map(|ord| ord == std::cmp::Ordering::Greater)
-                                .unwrap_or(false);
-                            if !ok {
-                                let focus_iri = crate::dictionary::decode(focus)
-                                    .unwrap_or_else(|| format!("_id_{focus}"));
-                                violations.push(Violation {
-                                    focus_node: focus_iri,
-                                    shape_iri: shape_iri.to_owned(),
-                                    path: Some(ps.path_iri.clone()),
-                                    constraint: "sh:greaterThan".to_owned(),
-                                    message: format!(
-                                        "value {v_id} on <{}> is not greater than value {o_id} on <{other_path_iri}>",
-                                        ps.path_iri
-                                    ),
-                                    severity: "Violation".to_owned(),
-                                });
-                            }
-                        }
-                    }
-                }
-                // Closed is validated at the shape level, not per-property.
-                ShapeConstraint::Closed { .. } => {}
-            }
+            dispatch_constraint(c, &args, &mut violations);
         }
     }
-
     violations
+}
+
+/// Dispatch a single `ShapeConstraint` to the appropriate per-family checker.
+fn dispatch_constraint(
+    c: &ShapeConstraint,
+    args: &constraints::ConstraintArgs,
+    violations: &mut Vec<Violation>,
+) {
+    match c {
+        ShapeConstraint::MinCount(n) => constraints::count::check_min_count(*n, args, violations),
+        ShapeConstraint::MaxCount(n) => constraints::count::check_max_count(*n, args, violations),
+        ShapeConstraint::Datatype(dt) => {
+            constraints::value_type::check_datatype(dt, args, violations)
+        }
+        ShapeConstraint::Class(cls) => constraints::value_type::check_class(cls, args, violations),
+        ShapeConstraint::NodeKind(k) => {
+            constraints::value_type::check_node_kind(k, args, violations)
+        }
+        ShapeConstraint::Pattern(rx, _) => {
+            constraints::string_based::check_pattern(rx, args, violations)
+        }
+        ShapeConstraint::LanguageIn(tags) => {
+            constraints::string_based::check_language_in(tags, args, violations)
+        }
+        ShapeConstraint::UniqueLang => {
+            constraints::string_based::check_unique_lang(args, violations)
+        }
+        ShapeConstraint::Node(s) => constraints::logical::check_node(s, args, violations),
+        ShapeConstraint::Or(ss) => constraints::logical::check_or(ss, args, violations),
+        ShapeConstraint::And(ss) => constraints::logical::check_and(ss, args, violations),
+        ShapeConstraint::Not(s) => constraints::logical::check_not(s, args, violations),
+        ShapeConstraint::QualifiedValueShape {
+            shape_iri: qiri,
+            min_count,
+            max_count,
+        } => {
+            constraints::logical::check_qualified(qiri, *min_count, *max_count, args, violations);
+        }
+        ShapeConstraint::In(vals) => constraints::shape_based::check_in(vals, args, violations),
+        ShapeConstraint::HasValue(v) => {
+            constraints::shape_based::check_has_value(v, args, violations)
+        }
+        ShapeConstraint::LessThan(p) => {
+            constraints::shape_based::check_less_than(p, args, violations)
+        }
+        ShapeConstraint::GreaterThan(p) => {
+            constraints::shape_based::check_greater_than(p, args, violations)
+        }
+        ShapeConstraint::Closed { .. } => constraints::shape_based::check_closed(args, violations),
+    }
 }
 
 /// Collect all focus nodes for a shape in the given graph.
@@ -1540,7 +1155,7 @@ fn collect_focus_nodes(target: &ShapeTarget, graph_id: i64) -> Vec<i64> {
 
 // ─── Low-level query helpers ──────────────────────────────────────────────────
 
-fn count_values_in_graph(focus: i64, path_id: i64, graph_id: i64) -> i64 {
+pub(crate) fn count_values_in_graph(focus: i64, path_id: i64, graph_id: i64) -> i64 {
     // Use the unified VP view for the path predicate.
     let table = get_vp_table_name(path_id);
     let sql = format!("SELECT COUNT(*) FROM {table} WHERE s = $1 AND g = $2");
@@ -1552,7 +1167,7 @@ fn count_values_in_graph(focus: i64, path_id: i64, graph_id: i64) -> i64 {
     .unwrap_or(0)
 }
 
-fn count_values_all_graphs(focus: i64, path_id: i64) -> i64 {
+pub(crate) fn count_values_all_graphs(focus: i64, path_id: i64) -> i64 {
     let table = get_vp_table_name(path_id);
     let sql = format!("SELECT COUNT(*) FROM {table} WHERE s = $1");
     Spi::get_one_with_args::<i64>(&sql, &[DatumWithOid::from(focus)])
@@ -1560,7 +1175,7 @@ fn count_values_all_graphs(focus: i64, path_id: i64) -> i64 {
         .unwrap_or(0)
 }
 
-fn get_value_ids(focus: i64, path_id: i64, graph_id: i64) -> Vec<i64> {
+pub(crate) fn get_value_ids(focus: i64, path_id: i64, graph_id: i64) -> Vec<i64> {
     let table = get_vp_table_name(path_id);
     let sql = if graph_id < 0 {
         format!("SELECT o FROM {table} WHERE s = $1")
@@ -1669,7 +1284,7 @@ fn get_objects_of_predicate(pred_id: i64, graph_id: i64) -> Vec<i64> {
 /// Tokens that start with `"` are treated as string literals (plain, typed, or
 /// language-tagged). All other tokens are treated as IRIs (read-only lookup).
 /// Returns `None` if the value is not in the dictionary.
-fn encode_shacl_in_value(val: &str) -> Option<i64> {
+pub(crate) fn encode_shacl_in_value(val: &str) -> Option<i64> {
     if let Some(inner) = val.strip_prefix('"') {
         // String literal: extract the lexical value between the first pair of
         // double quotes, then check for ^^<datatype> or @lang suffix.
@@ -1700,7 +1315,7 @@ fn encode_shacl_in_value(val: &str) -> Option<i64> {
     }
 }
 
-fn value_has_datatype(value_id: i64, dt_iri: &str) -> bool {
+pub(crate) fn value_has_datatype(value_id: i64, dt_iri: &str) -> bool {
     use crate::dictionary::inline;
 
     // Inline-encoded values (bit 63 = 1) are never stored in the dictionary.
@@ -1738,7 +1353,7 @@ fn value_has_datatype(value_id: i64, dt_iri: &str) -> bool {
     .unwrap_or(false)
 }
 
-fn value_has_rdf_type(value_id: i64, rdf_type_pred_id: i64, class_id: i64) -> bool {
+pub(crate) fn value_has_rdf_type(value_id: i64, rdf_type_pred_id: i64, class_id: i64) -> bool {
     let table = get_vp_table_name(rdf_type_pred_id);
     let sql = format!("SELECT EXISTS(SELECT 1 FROM {table} WHERE s = $1 AND o = $2)");
     Spi::get_one_with_args::<bool>(
@@ -1751,7 +1366,7 @@ fn value_has_rdf_type(value_id: i64, rdf_type_pred_id: i64, class_id: i64) -> bo
 
 /// Return the best available VP table/view name for a predicate ID.
 /// Falls back to `_pg_ripple.vp_rare` with a WHERE clause prefix hint.
-fn get_vp_table_name(pred_id: i64) -> String {
+pub(crate) fn get_vp_table_name(pred_id: i64) -> String {
     let has_dedicated = Spi::get_one_with_args::<bool>(
         "SELECT EXISTS(SELECT 1 FROM _pg_ripple.predicates WHERE id = $1 AND table_oid IS NOT NULL)",
         &[DatumWithOid::from(pred_id)],
@@ -1776,7 +1391,7 @@ fn get_vp_table_name(pred_id: i64) -> String {
 /// kind_iri must be one of the W3C SHACL node kind IRIs:
 /// sh:IRI, sh:BlankNode, sh:Literal, sh:BlankNodeOrIRI,
 /// sh:BlankNodeOrLiteral, sh:IRIOrLiteral.
-fn value_has_node_kind(value_id: i64, kind_iri: &str) -> bool {
+pub(crate) fn value_has_node_kind(value_id: i64, kind_iri: &str) -> bool {
     // Determine the actual kind from the dictionary.
     let kind: i16 = Spi::get_one_with_args::<i16>(
         "SELECT kind FROM _pg_ripple.dictionary WHERE id = $1",
@@ -1810,7 +1425,7 @@ fn value_has_node_kind(value_id: i64, kind_iri: &str) -> bool {
 ///
 /// Returns `Some(lang)` for language-tagged literals (kind = KIND_LANG_LITERAL),
 /// `None` for all other term kinds.
-fn get_language_tag(value_id: i64) -> Option<String> {
+pub(crate) fn get_language_tag(value_id: i64) -> Option<String> {
     Spi::get_one_with_args::<String>(
         "SELECT lang FROM _pg_ripple.dictionary WHERE id = $1 AND lang IS NOT NULL",
         &[DatumWithOid::from(value_id)],
@@ -1824,7 +1439,7 @@ fn get_language_tag(value_id: i64) -> Option<String> {
 /// Decodes both values to their lexical forms and attempts a numeric comparison;
 /// falls back to lexicographic comparison.  Returns `None` when comparison is
 /// not meaningful (different types, IRIs, etc.).
-fn compare_dictionary_values(a: i64, b: i64) -> Option<std::cmp::Ordering> {
+pub(crate) fn compare_dictionary_values(a: i64, b: i64) -> Option<std::cmp::Ordering> {
     let a_str = crate::dictionary::decode(a)?;
     let b_str = crate::dictionary::decode(b)?;
 

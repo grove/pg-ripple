@@ -1,0 +1,113 @@
+-- pg_regress test: SHACL → SPARQL planner hints (v0.38.0)
+-- Namespace: https://hints.test/
+--
+-- Verifies that load_shacl() populates _pg_ripple.shape_hints with
+-- min_count_1 and max_count_1 rows, and that drop_shape() removes them.
+
+SET search_path TO pg_ripple, public;
+
+-- ── Cleanup from any prior run ────────────────────────────────────────────────
+DO $$
+BEGIN
+    DELETE FROM _pg_ripple.vp_rare
+    WHERE p IN (
+        SELECT id FROM _pg_ripple.dictionary
+        WHERE value LIKE 'https://hints.test/%'
+    );
+END $$;
+
+-- ── 1. Load a shape with sh:minCount 1 and sh:maxCount 1 ─────────────────────
+SELECT pg_ripple.load_shacl($SHACL$
+@prefix sh:  <http://www.w3.org/ns/shacl#> .
+@prefix ex:  <https://hints.test/> .
+
+ex:PersonShape
+    a sh:NodeShape ;
+    sh:targetClass ex:Person ;
+    sh:property [
+        sh:path ex:name ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+    ] .
+$SHACL$) = 1 AS one_shape_loaded;
+
+-- ── 2. shape_hints has a min_count_1 row for ex:name ─────────────────────────
+SELECT count(*) = 1 AS has_min_count_hint
+FROM _pg_ripple.shape_hints sh
+JOIN _pg_ripple.dictionary d ON d.id = sh.predicate_id
+WHERE d.value = 'https://hints.test/name'
+  AND sh.hint_type = 'min_count_1';
+
+-- ── 3. shape_hints has a max_count_1 row for ex:name ─────────────────────────
+SELECT count(*) = 1 AS has_max_count_hint
+FROM _pg_ripple.shape_hints sh
+JOIN _pg_ripple.dictionary d ON d.id = sh.predicate_id
+WHERE d.value = 'https://hints.test/name'
+  AND sh.hint_type = 'max_count_1';
+
+-- ── 4. Load a shape with only sh:minCount 1 (no maxCount) ────────────────────
+SELECT pg_ripple.load_shacl($SHACL$
+@prefix sh:  <http://www.w3.org/ns/shacl#> .
+@prefix ex:  <https://hints.test/> .
+
+ex:OrgShape
+    a sh:NodeShape ;
+    sh:targetClass ex:Org ;
+    sh:property [
+        sh:path ex:foundedYear ;
+        sh:minCount 1 ;
+    ] .
+$SHACL$) = 1 AS org_shape_loaded;
+
+-- ex:foundedYear should have min_count_1 hint …
+SELECT count(*) = 1 AS foundedyear_min_hint
+FROM _pg_ripple.shape_hints sh
+JOIN _pg_ripple.dictionary d ON d.id = sh.predicate_id
+WHERE d.value = 'https://hints.test/foundedYear'
+  AND sh.hint_type = 'min_count_1';
+
+-- … but NOT a max_count_1 hint.
+SELECT count(*) = 0 AS foundedyear_no_max_hint
+FROM _pg_ripple.shape_hints sh
+JOIN _pg_ripple.dictionary d ON d.id = sh.predicate_id
+WHERE d.value = 'https://hints.test/foundedYear'
+  AND sh.hint_type = 'max_count_1';
+
+-- ── 5. drop_shape removes the hints ──────────────────────────────────────────
+SELECT pg_ripple.drop_shape('https://hints.test/PersonShape') AS person_shape_dropped;
+
+-- After drop, min_count_1 hint for ex:name is gone.
+SELECT count(*) = 0 AS name_min_hint_removed
+FROM _pg_ripple.shape_hints sh
+JOIN _pg_ripple.dictionary d ON d.id = sh.predicate_id
+WHERE d.value = 'https://hints.test/name'
+  AND sh.hint_type = 'min_count_1';
+
+-- max_count_1 hint for ex:name is also gone.
+SELECT count(*) = 0 AS name_max_hint_removed
+FROM _pg_ripple.shape_hints sh
+JOIN _pg_ripple.dictionary d ON d.id = sh.predicate_id
+WHERE d.value = 'https://hints.test/name'
+  AND sh.hint_type = 'max_count_1';
+
+-- OrgShape hints are unaffected.
+SELECT count(*) = 1 AS foundedyear_hint_still_present
+FROM _pg_ripple.shape_hints sh
+JOIN _pg_ripple.dictionary d ON d.id = sh.predicate_id
+WHERE d.value = 'https://hints.test/foundedYear'
+  AND sh.hint_type = 'min_count_1';
+
+-- ── 6. invalidate_catalog_cache runs without error ────────────────────────────
+SELECT pg_ripple.invalidate_catalog_cache() IS NULL AS cache_invalidated;
+
+-- ── Cleanup ───────────────────────────────────────────────────────────────────
+SELECT pg_ripple.drop_shape('https://hints.test/OrgShape') AS org_shape_dropped;
+
+DO $$
+BEGIN
+    DELETE FROM _pg_ripple.vp_rare
+    WHERE p IN (
+        SELECT id FROM _pg_ripple.dictionary
+        WHERE value LIKE 'https://hints.test/%'
+    );
+END $$;
