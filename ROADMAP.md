@@ -63,8 +63,9 @@ Each release below has two layers:
 | [0.39.0](#v0390--datalog-http-api-for-pg_ripple_http) | Datalog HTTP API | REST API exposing all 27 Datalog SQL functions in `pg_ripple_http`: rule management, inference, goal queries, constraints, admin | 3–5 pw |
 | [0.40.0](#v0400--streaming-results-explain--observability) | Streaming Results, Explain & Observability | Server-side SPARQL cursors, `explain_sparql()`, `explain_datalog()`, OpenTelemetry tracing, resource governors | 9–11 pw |
 | [0.41.0](#v0410--parallel-merge-cost-based-federation--live-cdc) | Parallel Merge, Cost-Based Federation & Live CDC | Multi-worker HTAP merge, FedX-style federation planner, parallel SERVICE, live RDF change subscriptions | 10–12 pw |
+| [0.42.0](#v0420--full-w3c-sparql-11-test-suite) | Full W3C SPARQL 1.1 Test Suite | Complete W3C SPARQL 1.1 Query + Update + Graph Patterns + Aggregates test suite harness with parallelized execution; 3,000+ tests in < 2 min CI | 5–7 pw |
 | [1.0.0](#v100--production-release) | Production Release | Standards conformance, stress testing, security audit | 6–8 pw |
-| | | **Total estimated effort** | **239–324 pw** |
+| | | **Total estimated effort** | **244–331 pw** |
 
 ---
 
@@ -3250,6 +3251,79 @@ All 24 Datalog endpoints respond correctly in integration tests. `GET /datalog/r
 ### Exit Criteria
 
 Parallel merge stress test passes (100 writers, 4 workers, no lost deletes). VoID stats fetched on endpoint registration. Independent SERVICE clauses execute in parallel (verifiable via `explain_sparql()`). CDC subscription delivers `NOTIFY` payloads for all inserts matching the filter. HTTPS cert validation enforced in `pg_ripple_http`. Migration chain test passes through 0.41.0.
+
+---
+
+## v0.42.0 — Full W3C SPARQL 1.1 Test Suite
+
+**Theme**: Complete standards conformance verification via the full W3C SPARQL 1.1 test suite, run in parallel under 2 minutes in CI.
+
+> **In plain language:** Every major SPARQL engine bug — including the `OPTIONAL inside GRAPH` failure found in April 2026 — was caught by manual testing rather than by the test suite. This version fixes that by implementing a full harness for the official W3C SPARQL 1.1 test suite (~3,000 tests), parallelized across 8 workers so the entire suite completes in under 2 minutes. The harness parses W3C test manifests, auto-loads RDF fixtures per test, runs queries against a live pg_ripple instance, and validates results using RDF graph equivalence (not row counting). Per-category pass rates are reported in CI so regressions are caught immediately. A curated 180-test "smoke" subset (Graph Patterns + Aggregates) runs on every PR in under 30 seconds.
+>
+> **Effort estimate: 5–7 person-weeks**
+
+### Deliverables
+
+- [ ] **W3C manifest parser** (`tests/w3c/manifest.rs` new module)
+  - Parse W3C SPARQL 1.1 test manifests (Turtle format, `mf:Manifest`) into a structured `TestCase` struct
+  - Fields: test IRI, type (`mf:QueryEvaluationTest`, `mf:UpdateEvaluationTest`, `mf:PositiveSyntaxTest`, `mf:NegativeSyntaxTest`), query file, data file(s), result file, named graph files
+  - Covers all 13 sub-suites: `aggregates`, `bind`, `exists`, `functions`, `grouping`, `negation`, `optional`, `project-expression`, `property-path`, `service`, `subquery`, `syntax-query`, `update`
+  - Tests with type `mf:NotClassifiedByEarlYet` skipped with `SKIP` status
+- [ ] **RDF fixture loader** (`tests/w3c/loader.rs` new module)
+  - Load `.ttl` / `.n3` / `.rdf` / `.srx` / `.srj` fixture files from `tests/w3c/data/` into a temporary pg_ripple graph before each test
+  - Use named graph IRIs matching the manifest's `mf:graphData` entries
+  - Auto-teardown: drop the temporary named graph after the test completes (regardless of pass/fail)
+  - Handle multi-graph datasets: `mf:defaultGraph` → default graph (`g = 0`); `mf:namedGraphs` → individual named graphs
+- [ ] **Result validator** (`tests/w3c/validator.rs` new module)
+  - `SELECT` queries: compare against `.srx` (SPARQL Results XML) or `.srj` (SPARQL Results JSON); validate variable names and bindings as RDF term equality (IRI, blank node, literal with datatype and lang tag)
+  - `ASK` queries: compare boolean result against `.srx`/`.srj`
+  - `CONSTRUCT` / `DESCRIBE` queries: compare result graph against `.ttl` reference using graph isomorphism (blank-node-normalised; uses `oxrdf` for in-memory graph comparison)
+  - `UPDATE` queries: compare the post-update store state (all named graphs) against expected `.ttl` reference
+  - Blank node handling: rename blank nodes in both actual and expected by canonical DFS traversal before comparison
+  - Report per-binding diff on failure: expected term vs. actual term
+- [ ] **Parallel test runner** (`tests/w3c/runner.rs` new module)
+  - `cargo test --test w3c_suite -- --test-threads 8` — each thread picks tests from a shared work queue (lock-free `crossbeam` channel)
+  - Each thread owns an isolated pg_ripple named-graph namespace (prefix `_w3c_t{thread_id}_`) to prevent cross-test pollution
+  - Test timeout: 5 seconds per test; timed-out tests marked `TIMEOUT` not `FAIL`
+  - Progress: `indicatif` progress bar per thread in local runs; plain line-per-test output in CI
+  - Output report: per-category pass/fail/skip/timeout counts + per-test detail for any failure
+  - Target: full 3,000-test suite completes in **< 2 minutes** on an 8-core CI runner (AWS `c7g.2xlarge` or equivalent)
+- [ ] **Smoke subset** (`tests/w3c/smoke.rs`)
+  - 180-test curated subset: `optional` (80 tests), `aggregates` (60 tests), `grouping` (40 tests) — the three categories most likely to expose SQL-generation bugs
+  - Runs on every PR via `cargo test --test w3c_smoke`; completes in **< 30 seconds**
+  - Failures block merge (added to `required` status checks in `.github/workflows/ci.yml`)
+- [ ] **CI integration** (`.github/workflows/ci.yml`)
+  - New job `w3c-suite`: runs after the existing `pgrx-test` job; parallelized 8-way; uploads test report as artifact
+  - New job `w3c-smoke`: runs on every PR and push to `main`; required check
+  - Full suite job is optional (non-blocking) until pass rate reaches 95%; then promoted to required
+  - Cache: W3C test fixtures (`tests/w3c/data/`) cached by SHA of manifest files
+- [ ] **Test data download script** (`scripts/fetch_w3c_tests.sh`)
+  - Downloads the official W3C SPARQL 1.1 test suite from `https://www.w3.org/2009/sparql/docs/tests/`
+  - Verified against known SHA-256 checksums of the manifest files
+  - Output: `tests/w3c/data/` directory (gitignored; fetched by CI and locally on first run)
+- [ ] **Known-failures manifest** (`tests/w3c/known_failures.txt`)
+  - List of W3C test IRIs that currently fail, with a one-line reason for each (e.g., `OPTIONAL inside GRAPH — fix in v0.40.0`, `property path with GRAPH — fix in v0.40.0`)
+  - Failures in `known_failures.txt` are reported as `XFAIL` (expected failure), not `FAIL`
+  - Any test in `known_failures.txt` that unexpectedly passes is reported as `XPASS` and causes a CI warning
+  - Target at release: 0 `XFAIL` entries in the smoke subset; ≤ 50 `XFAIL` entries in the full suite (SERVICE tests against live external endpoints are always SKIP)
+- [ ] **Pass-rate tracking** (`tests/w3c/report.json`)
+  - CI uploads a `report.json` artifact with per-category pass/fail/skip/timeout counts and overall pass rate
+  - Historical pass rate trend displayed in `README.md` badge
+
+### Migration Script
+
+`sql/pg_ripple--0.41.0--0.42.0.sql` — no schema changes. Adds a comment-only header noting that v0.42.0 is a test infrastructure release.
+
+### Documentation
+
+- [ ] `reference/w3c-conformance.md` (new) — per-category W3C SPARQL 1.1 conformance table: test count, pass count, known failures with ticket links
+- [ ] `contributing/running-w3c-tests.md` (new) — how to run the smoke subset and full suite locally; how to add a new expected failure; how to interpret `XFAIL` vs `XPASS`
+- [ ] `README.md` — add W3C SPARQL 1.1 conformance badge (pass rate from latest `main` CI run)
+- [ ] Release notes for v0.42.0
+
+### Exit Criteria
+
+Smoke subset (180 tests) passes with 0 unexpected failures on `main`. Full suite (3,000+ tests) runs in < 2 minutes on an 8-core CI runner. Per-category pass rate report uploaded as CI artifact. Known-failures manifest has 0 entries for `optional` and `aggregates` categories (those bugs fixed in v0.40.0). Migration chain test passes through 0.42.0.
 
 ---
 
