@@ -11,7 +11,7 @@ Each release below has two layers:
 - **The plain-language summary** (in the coloured box) explains *what* the release delivers and *why it matters* — no programming knowledge required.
 - **The technical deliverables** list the specific items developers will build. Feel free to skip these if you're reading for the big picture.
 
-**Effort estimates** are given as *person-weeks* — e.g. "6–8 pw" means the release would take roughly 6–8 weeks for a single full-time developer, or 3–4 weeks for a pair working together. The total estimated effort from v0.1.0 to v1.0.0 is **191–262 person-weeks** (~44–60 months for one developer; ~22–30 months for a pair).
+**Effort estimates** are given as *person-weeks* — e.g. "6–8 pw" means the release would take roughly 6–8 weeks for a single full-time developer, or 3–4 weeks for a pair working together. The total estimated effort from v0.1.0 to v1.0.0 is **199–274 person-weeks** (~45–63 months for one developer; ~22–31 months for a pair).
 
 **"optional at runtime" items**: some deliverables are annotated *(optional at runtime — X must be installed)*. This means the feature depends on an external extension (e.g. pg_trickle) that may not be installed in every deployment. The feature is **required by this roadmap** and must be implemented; the Rust code gates on a runtime availability check and degrades gracefully (returns 0 / false / empty, emits a WARNING, never raises an ERROR) when the dependency is absent. These items are not optional from a delivery standpoint.
 
@@ -54,11 +54,12 @@ Each release below has two layers:
 | [0.30.0](#v0300--datalog-aggregation--compiled-rule-plans) | Datalog Aggregation & Compiled Rule Plans | Aggregation in rule bodies (Datalog^agg), SQL plan caching across inference runs, SPARQL on-demand query speedup | 5–7 pw |
 | [0.31.0](#v0310--entity-resolution--demand-transformation) | Entity Resolution & Demand Transformation | `owl:sameAs` entity canonicalization, demand transformation for goal-directed rule rewriting, SPARQL query planner integration | 5–7 pw |
 | [0.32.0](#v0320--well-founded-semantics--tabling) | Well-Founded Semantics & Tabling | Three-valued semantics for cyclic ontologies, subsumptive result caching for Datalog and SPARQL repeated sub-queries | 5–7 pw |
-| [0.33.0](#v0330--bounded-depth-termination--incremental-retraction-dred) | Bounded-Depth Termination & Incremental Retraction (DRed) | Early fixpoint termination for bounded hierarchies (20–50% faster SPARQL property paths); Delete-Rederive for write-correct materialized predicates | 5–7 pw |
-| [0.34.0](#v0340--parallel-stratum-evaluation--incremental-rule-updates) | Parallel Stratum Evaluation & Incremental Rule Updates | Background-worker parallelism for independent rules (2–5× faster materialization); add/remove rules without full recompute | 5–7 pw |
-| [0.35.0](#v0350--worst-case-optimal-joins--lattice-based-datalog) | Worst-Case Optimal Joins & Lattice-Based Datalog | Leapfrog Triejoin for cyclic SPARQL patterns (10×–100× speedup); Datalog^L monotone lattice aggregation | 6–9 pw |
+| [0.33.0](#v0330--documentation-site--content-overhaul) | Documentation Site & Content Overhaul | Complete docs site rebuild — CI harness, eight feature-deep-dive chapters, operations guide, reference section, and content governance | 8–12 pw |
+| [0.34.0](#v0340--bounded-depth-termination--incremental-retraction-dred) | Bounded-Depth Termination & Incremental Retraction (DRed) | Early fixpoint termination for bounded hierarchies (20–50% faster SPARQL property paths); Delete-Rederive for write-correct materialized predicates | 5–7 pw |
+| [0.35.0](#v0350--parallel-stratum-evaluation--incremental-rule-updates) | Parallel Stratum Evaluation & Incremental Rule Updates | Background-worker parallelism for independent rules (2–5× faster materialization); add/remove rules without full recompute | 5–7 pw |
+| [0.36.0](#v0360--worst-case-optimal-joins--lattice-based-datalog) | Worst-Case Optimal Joins & Lattice-Based Datalog | Leapfrog Triejoin for cyclic SPARQL patterns (10×–100× speedup); Datalog^L monotone lattice aggregation | 6–9 pw |
 | [1.0.0](#v100--production-release) | Production Release | Standards conformance, stress testing, security audit | 6–8 pw |
-| | | **Total estimated effort** | **191–262 pw** |
+| | | **Total estimated effort** | **199–274 pw** |
 
 ---
 
@@ -2436,7 +2437,104 @@ See [plans/ecosystem/datalog.md §14.2](plans/ecosystem/datalog.md) for design n
 
 ---
 
-## v0.33.0 — Bounded-Depth Termination & Incremental Retraction (DRed)
+## v0.33.0 — Documentation Site & Content Overhaul
+
+**Theme**: A documentation site worthy of a production-grade triple store.
+
+> **In plain language:** pg_ripple is a mature system — v0.32.0 delivers full SPARQL 1.1 and SHACL Core conformance across 32 releases — but its documentation has grown organically alongside the codebase rather than being designed for the people who use it. This release delivers documentation that meets users where they are: a problem-centric information architecture written for five distinct archetypes (Data Engineer, Application Developer, Knowledge Architect, Decision-Maker, AI/ML Engineer), eight feature-deep-dive chapters, a full operations guide, a SQL function reference with working examples for every function, and a CI harness that keeps every code example honest by running it against a real pg_ripple instance on every pull request. The full plan is in [plans/documentation.md](plans/documentation.md).
+>
+> **Effort estimate: 8–12 person-weeks**
+
+### Background
+
+See [plans/documentation.md](plans/documentation.md) for the authoritative plan — site structure, content guidelines, five user archetypes, and four delivery phases. Everything described in that plan is in scope for this version.
+
+The documentation site is built with mdBook. `mdbook-admonish` is added before Phase 1 content work starts (`book.toml` updated with `[preprocessor.admonish]`); all new and restructured pages use its fenced callout syntax exclusively. A shared bibliographic fixture dataset (papers, authors, institutions, topics, citations, pre-computed embeddings) is established in `docs/fixtures/` and reused across all chapters.
+
+### Deliverables
+
+#### Phase 0 — CI Test Harness (prerequisite)
+
+- [ ] `scripts/test_docs.sh` — CI harness: spins up pg_ripple via Docker, extracts fenced SQL blocks from `docs/src/`, executes them in document order, compares stdout against expected-output comment blocks embedded directly below each code block
+- [ ] `docs/fixtures/bibliography.sql` — shared bibliographic fixture dataset (papers, authors, institutions, topics, citations, pre-computed embeddings) reused across all chapters
+- [ ] `.github/workflows/docs-test.yml` — CI job that runs the harness on every PR touching `docs/`
+- [ ] `mdbook-admonish` added to `book.toml` and `[preprocessor.admonish]` block configured
+- [ ] Exit criterion: CI job passes on a real PR (not just locally)
+
+#### Phase 1 — Foundation
+
+- [ ] **Landing page** — value proposition, architecture diagram, one compelling code example; key-numbers block and comparison summary absorbed from the former "60 Seconds" content
+- [ ] **Evaluate / When to Use pg_ripple** — honest comparison matrix (pg_ripple vs. plain SQL, standalone RDF stores, LPG systems, pure vector databases); decision flowchart; AI/LLM section on when graph context outperforms flat vector retrieval
+- [ ] **Installation** — Docker (recommended default), from source (`cargo pgrx`), prerequisites, verification step (`SELECT pg_ripple.triple_count()` returns 0), troubleshooting for the five most common failures
+- [ ] **Hello World — Five-Minute Walkthrough** — ten triples, three queries of increasing complexity (basic pattern → OPTIONAL → property path), annotated output after every step
+- [ ] **Guided Tutorial — Build a Knowledge Graph in 30 Minutes** — four self-contained ≤10-minute segments: Load & Explore, Validate, Reason, Export; uses the shared bibliographic dataset; each segment is independently complete
+- [ ] **Key Concepts — RDF for PostgreSQL Users** — triples, IRIs, blank nodes, literals, named graphs, RDF-star, SPARQL; PostgreSQL analogies with diagrams for every concept
+
+#### Phase 2 — Feature Deep Dives
+
+Eight chapters, each following the seven-part structure: What & Why → How It Works → Worked Examples → Common Patterns → Performance & Trade-offs → Gotchas & Debugging → Next Steps.
+
+- [ ] **§2.1 Storing Knowledge** — modeling a domain as triples; named graphs (when needed vs. when not); blank nodes with honest caveats; RDF-star for provenance and confidence scores; translating a relational schema to RDF
+- [ ] **§2.2 Loading Data** — all formats (Turtle, N-Triples, N-Quads, TriG, RDF/XML); three loading modes (`load_turtle()`, `load_turtle_file()`, `insert_triple()`); bulk-load performance numbers; blank-node scoping across calls; SQL-to-triples patterns; when to run ANALYZE
+- [ ] **§2.3 Querying with SPARQL** — basic patterns through property paths (all operators: `+`, `*`, `?`, `/`, `|`, `^`); aggregation; subqueries; UNION/MINUS; GRAPH patterns; `sparql_explain()` guide; filter pushdown; `max_path_depth` safety limit; real-world query recipes (entity resolution, recommendations, transitive closure, temporal queries)
+- [ ] **§2.4 Validating Data Quality** — SHACL shapes from simple (`sh:minCount`/`sh:maxCount`) to complex (`sh:or`, `sh:pattern`, cross-property constraints); synchronous vs. asynchronous validation modes; dead-letter queue; common quality rule patterns
+- [ ] **§2.5 Reasoning and Inference** — Datalog rules; built-in RDFS/OWL RL rule sets; stratification explained plainly; explicit vs. inferred triples (`source` column); goal-directed vs. full materialization; magic sets and semi-naive evaluation
+- [ ] **§2.6 Exporting and Sharing** — all export formats; JSON-LD framing with `sparql_construct_jsonld()` and frame templates; **canonical GraphRAG chapter**: BYOG Parquet export, Datalog enrichment, SHACL quality enforcement (all other GraphRAG mentions cross-reference here)
+- [ ] **§2.7 AI Retrieval & Graph RAG** — **canonical AI chapter**: vector embeddings, HNSW indexes, `pg:similar()`, hybrid retrieval with RRF, `rag_retrieve()`, JSON-LD framing for LLM prompts, `owl:sameAs` pre-pass before embedding, FTS broadening, end-to-end RAG pipeline; comparison with pure vector stores (Qdrant, Weaviate, pgvector-only)
+- [ ] **§2.8 APIs and Integration** — `pg_ripple_http` SPARQL Protocol HTTP endpoint (configuration, response formats, authentication, Docker Compose); application code examples (Python `psycopg2`/`SPARQLWrapper`, JavaScript `pg`, Java JDBC); SPARQL federation; caching strategies
+
+#### Phase 3 — Operations
+
+- [ ] **Architecture Overview** — dictionary, VP tables, HTAP storage, shmem cache; SPARQL query execution flow for operators
+- [ ] **Deployment Models** — standalone, Docker/Compose, managed PostgreSQL services; trade-offs and the recommended starting point
+- [ ] **Configuration and Tuning** — all GUC parameters by subsystem (storage, query engine, inference, validation, caching, system); three-size production config (small: <1M triples; medium: 1M–100M; large: >100M)
+- [ ] **Monitoring and Observability** — `pg_ripple.stats()`, `pg_stat_statements`, `sparql_explain(analyze := true)`, Prometheus metrics; Grafana panel descriptions; health-check thresholds
+- [ ] **Performance Tuning** — bottleneck identification for query, write throughput, and cache pressure; realistic BSBM numbers; tuning recipes for read-heavy, write-heavy, and mixed HTAP workloads
+- [ ] **Backup and Disaster Recovery** — `pg_dump`/`pg_restore`; point-in-time recovery; verified backup/restore procedure with exact commands
+- [ ] **Upgrading Safely** — `ALTER EXTENSION pg_ripple UPDATE`; pre/post-upgrade steps; rollback strategy; maintenance-window guidance; explicit note that zero-downtime upgrades are not yet supported
+- [ ] **Scaling** — vertical scaling guide; merge-worker tuning; read replicas for horizontal scale; honest statement of what is not yet supported
+- [ ] **Troubleshooting** — runbook format: ≥15 symptom → cause → diagnostic → fix entries across all subsystems
+- [ ] **Security** — named-graph row-level security; injection prevention; `pg_ripple_http` TLS and authentication; file-path loader delegation
+
+#### Phase 4 — Reference and Polish
+
+- [ ] **SQL Function Reference** — all functions grouped by use case (Loading, Querying, Validating, Reasoning, Exporting, Administration); each entry has full signature, parameter table, and one working example with expected output
+- [ ] **SPARQL Compliance Matrix** — every SPARQL 1.1 Query, Update, and Protocol feature with status (Supported / Partial / Not Supported); link to W3C test suite results; workarounds for partial/unsupported features
+- [ ] **Error Message Catalog** — every PT001–PT799 code with cause and fix; auto-generated from `src/error.rs` where possible
+- [ ] **FAQ** — 25–30 questions across Getting Started, Data Modeling, Querying, Performance, Operations, and Comparisons; each answer 50–150 words with links to the relevant deep-dive page
+- [ ] **Glossary** — plain-language definitions of every term used in the documentation
+- [ ] **Release Notes and Roadmap** mirrored into the docs site
+- [ ] **Contributing guide** — dev environment setup, test commands, PR workflow, code conventions; top-level "Contribute" navigation entry and landing-page callout card; academic citations and architecture background moved to `CONTRIBUTING.md` (not user-facing reference)
+- [ ] Full audit: every code example verified against v0.33.0, all `TODO` / stub markers resolved
+
+#### Content Governance
+
+- [ ] `scripts/check_docs_coverage.sh` — CI job that diffs exported function signatures in `src/lib.rs` against the SQL Function Reference and fails the build when a changed signature has no corresponding `docs/` touch in the same PR
+- [ ] `mdbook-linkcheck` broken-link CI job on every PR touching `docs/`; redirect map (`docs/redirects.toml`) kept current when pages are moved or removed
+- [ ] PR template updated with docs-gap reminder (CI enforcement is primary; checkbox is a reminder only)
+- [ ] 30-day documentation review schedule: at every minor release, run the signature-diff script and triage GitHub issues tagged `docs` to fill gaps
+
+### Migration Script
+
+`sql/pg_ripple--0.32.0--0.33.0.sql` — no schema changes. This version delivers documentation infrastructure and content only; all pg_ripple SQL functions, GUCs, and VP table schemas are unchanged from v0.32.0.
+
+### Documentation
+
+This version *is* the documentation release. The deliverables above are the documentation.
+
+### Exit Criteria
+
+- Phase 0 CI harness is complete and passing in CI (verified by a real PR, not just locally).
+- The eight feature-deep-dive chapters (§2.1–§2.8) are published with no unresolved stubs or TODO markers.
+- The operations section (10 pages) is complete and published.
+- The SQL Function Reference covers every function listed in §4 of [plans/documentation.md](plans/documentation.md).
+- `check_docs_coverage.sh` CI job passes on a PR that changes a function signature.
+- `mdbook-linkcheck` reports zero broken internal links.
+- Migration scripts from 0.1.0 through 0.33.0 run cleanly via `just test-migration`.
+
+---
+
+## v0.34.0 — Bounded-Depth Termination & Incremental Retraction (DRed)
 
 **Theme**: Smarter fixpoint termination and write-correct incremental maintenance.
 
@@ -2475,22 +2573,22 @@ See [plans/ecosystem/datalog.md §14.2.7 and §14.2.12](plans/ecosystem/datalog.
 
 ### Migration Script
 
-`sql/pg_ripple--0.32.0--0.33.0.sql` — registers `pg_ripple.datalog_max_depth`, `pg_ripple.dred_enabled`, `pg_ripple.dred_batch_size` GUCs. No VP table schema changes.
+`sql/pg_ripple--0.33.0--0.34.0.sql` — registers `pg_ripple.datalog_max_depth`, `pg_ripple.dred_enabled`, `pg_ripple.dred_batch_size` GUCs. No VP table schema changes.
 
 ### Documentation
 
 - [ ] `user-guide/sql-reference/datalog.md` updated — document `add_rule()`, `remove_rule()`, DRed GUCs, `datalog_max_depth` GUC
 - [ ] `user-guide/best-practices/datalog-optimization.md` updated — add section on DRed vs. full recompute trade-offs; bounded-depth tuning with SHACL
 - [ ] `user-guide/best-practices/sparql-performance.md` updated — add section on bounded-depth SPARQL property paths
-- [ ] Release notes for v0.33.0
+- [ ] Release notes for v0.34.0
 
 ### Exit Criteria
 
-`datalog_bounded_depth.sql`, `datalog_dred.sql`, and `datalog_incremental_rules.sql` all pass in `cargo pgrx regress pg18`. Deleting a base triple from a 1M-triple RDFS-materialized dataset with DRed enabled completes in <500ms (vs. full recompute taking >5s). A SPARQL `rdfs:subClassOf*` property path query on a hierarchy with `sh:maxDepth 5` completes in <50% of the time compared to the unbounded version on a 10-level test hierarchy. Migration scripts from 0.1.0 through 0.33.0 run cleanly via `just test-migration`.
+`datalog_bounded_depth.sql`, `datalog_dred.sql`, and `datalog_incremental_rules.sql` all pass in `cargo pgrx regress pg18`. Deleting a base triple from a 1M-triple RDFS-materialized dataset with DRed enabled completes in <500ms (vs. full recompute taking >5s). A SPARQL `rdfs:subClassOf*` property path query on a hierarchy with `sh:maxDepth 5` completes in <50% of the time compared to the unbounded version on a 10-level test hierarchy. Migration scripts from 0.1.0 through 0.34.0 run cleanly via `just test-migration`.
 
 ---
 
-## v0.34.0 — Parallel Stratum Evaluation & Incremental Rule Updates
+## v0.35.0 — Parallel Stratum Evaluation & Incremental Rule Updates
 
 **Theme**: Concurrent rule evaluation for faster materialization of large rule sets.
 
@@ -2520,22 +2618,22 @@ See [plans/ecosystem/datalog.md §14.2.11](plans/ecosystem/datalog.md) for desig
 
 ### Migration Script
 
-`sql/pg_ripple--0.33.0--0.34.0.sql` — registers `pg_ripple.datalog_parallel_workers` and `pg_ripple.datalog_parallel_threshold` GUCs. No VP table schema changes.
+`sql/pg_ripple--0.34.0--0.35.0.sql` — registers `pg_ripple.datalog_parallel_workers` and `pg_ripple.datalog_parallel_threshold` GUCs. No VP table schema changes.
 
 ### Documentation
 
 - [ ] `user-guide/sql-reference/datalog.md` updated — document parallel evaluation GUCs, `infer_with_stats()` parallel fields
 - [ ] `user-guide/best-practices/datalog-optimization.md` updated — add section on tuning `datalog_parallel_workers` for different hardware configurations
 - [ ] `user-guide/best-practices/sparql-performance.md` updated — note materialization freshness improvement with parallel evaluation
-- [ ] Release notes for v0.34.0
+- [ ] Release notes for v0.35.0
 
 ### Exit Criteria
 
-`datalog_parallel.sql` passes in `cargo pgrx regress pg18`. OWL RL full closure on a 1M-triple dataset with `datalog_parallel_workers = 4` completes in <40% of the time compared to `datalog_parallel_workers = 1`. Results are identical in both cases. Migration scripts from 0.1.0 through 0.34.0 run cleanly via `just test-migration`.
+`datalog_parallel.sql` passes in `cargo pgrx regress pg18`. OWL RL full closure on a 1M-triple dataset with `datalog_parallel_workers = 4` completes in <40% of the time compared to `datalog_parallel_workers = 1`. Results are identical in both cases. Migration scripts from 0.1.0 through 0.35.0 run cleanly via `just test-migration`.
 
 ---
 
-## v0.35.0 — Worst-Case Optimal Joins & Lattice-Based Datalog
+## v0.36.0 — Worst-Case Optimal Joins & Lattice-Based Datalog
 
 **Theme**: Advanced join algorithms for cyclic graph patterns and monotone lattice aggregation.
 
@@ -2573,18 +2671,18 @@ See [plans/ecosystem/datalog.md §14.2.8 and §14.2.14](plans/ecosystem/datalog.
 
 ### Migration Script
 
-`sql/pg_ripple--0.34.0--0.35.0.sql` — registers WCOJ and lattice GUCs; creates `pg_ripple.create_lattice()` SQL function. No VP table schema changes.
+`sql/pg_ripple--0.35.0--0.36.0.sql` — registers WCOJ and lattice GUCs; creates `pg_ripple.create_lattice()` SQL function. No VP table schema changes.
 
 ### Documentation
 
 - [ ] `user-guide/sql-reference/datalog.md` updated — document `create_lattice()`, lattice rule syntax, lattice GUCs
 - [ ] `user-guide/best-practices/sparql-performance.md` updated — add section on cyclic SPARQL pattern detection and WCOJ; when to set `wcoj_min_tables`
 - [ ] `reference/lattice-datalog.md` (new page) — full tutorial on Datalog^L: lattice types, monotone rules, convergence guarantees, use cases (trust propagation, interval reasoning, set-valued annotations)
-- [ ] Release notes for v0.35.0
+- [ ] Release notes for v0.36.0
 
 ### Exit Criteria
 
-`sparql_wcoj.sql` and `datalog_lattice.sql` pass in `cargo pgrx regress pg18`. A triangle-pattern SPARQL query on a 1M-edge social graph VP table completes in <10% of the time compared to the standard planner (WCOJ enabled). A trust-propagation lattice rule on 100K triples converges to the correct fixed point. Migration scripts from 0.1.0 through 0.35.0 run cleanly via `just test-migration`.
+`sparql_wcoj.sql` and `datalog_lattice.sql` pass in `cargo pgrx regress pg18`. A triangle-pattern SPARQL query on a 1M-edge social graph VP table completes in <10% of the time compared to the standard planner (WCOJ enabled). A trust-propagation lattice rule on 100K triples converges to the correct fixed point. Migration scripts from 0.1.0 through 0.36.0 run cleanly via `just test-migration`.
 
 ---
 

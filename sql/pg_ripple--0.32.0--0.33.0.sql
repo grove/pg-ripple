@@ -1,0 +1,5 @@
+-- Migration 0.32.0 → 0.33.0: Documentation Site & Content Overhaul
+--
+-- This version delivers documentation infrastructure and content only.
+-- All pg_ripple SQL functions, GUCs, and VP table schemas are unchanged
+-- from v0.32.0. No DDL changes required.
