@@ -663,6 +663,9 @@ fn compile_recursive_rule(
 ) -> Result<String, String> {
     let head = rule.head.as_ref().unwrap();
 
+    // v0.34.0: bounded-depth termination — read GUC at compile time.
+    let max_depth = crate::DATALOG_MAX_DEPTH.get();
+
     // CTE name for the recursive derived predicate.
     let cte_name = format!("derived_{head_pred}");
 
@@ -761,19 +764,51 @@ fn compile_recursive_rule(
         _ => format!("{cte_name}.o"),
     };
 
-    Ok(format!(
-        "WITH RECURSIVE {cte_name}(s, o, g) AS (\n\
-             {base_sql}\n\
-           UNION\n\
-             {rec_sql}\n\
-         )\n\
-         CYCLE {cycle_cols} SET is_cycle USING cycle_path\n\
-         INSERT INTO {target} (s, o, g)\n\
-         SELECT {select_s}, {select_o}, {cte_name}.g\n\
-         FROM {cte_name}\n\
-         WHERE NOT is_cycle\n\
-         ON CONFLICT DO NOTHING"
-    ))
+    // v0.34.0: bounded-depth termination using a depth counter column.
+    if max_depth > 0 {
+        // Inject a depth column into both base and recursive cases.
+        //
+        // base_sql has the form: SELECT s, o, g FROM ...
+        // We inject ", 0 AS depth" into the SELECT list.
+        let base_sql_depth = base_sql.replacen("SELECT s, o, g", "SELECT s, o, g, 0 AS depth", 1);
+        // For multi-union base (UNION of multiple base predicates), replace all occurrences.
+        let base_sql_depth =
+            base_sql_depth.replace("SELECT s, o, g FROM", "SELECT s, o, g, 0 AS depth FROM");
+
+        // rec_sql has the form:
+        //   SELECT base.s, r.o, base.g\nFROM vp_X base\nJOIN {cte_name} r ON r.s = base.o
+        // We inject "r.depth + 1 AS depth" into the SELECT list and add WHERE r.depth < max_depth.
+        let rec_sql_depth = rec_sql.replacen("base.g", "base.g, r.depth + 1 AS depth", 1);
+        let rec_sql_depth = format!("{rec_sql_depth}\nWHERE r.depth < {max_depth}");
+
+        Ok(format!(
+            "WITH RECURSIVE {cte_name}(s, o, g, depth) AS (\n\
+                 {base_sql_depth}\n\
+               UNION\n\
+                 {rec_sql_depth}\n\
+             )\n\
+             CYCLE {cycle_cols} SET is_cycle USING cycle_path\n\
+             INSERT INTO {target} (s, o, g)\n\
+             SELECT {select_s}, {select_o}, {cte_name}.g\n\
+             FROM {cte_name}\n\
+             WHERE NOT is_cycle\n\
+             ON CONFLICT DO NOTHING"
+        ))
+    } else {
+        Ok(format!(
+            "WITH RECURSIVE {cte_name}(s, o, g) AS (\n\
+                 {base_sql}\n\
+               UNION\n\
+                 {rec_sql}\n\
+             )\n\
+             CYCLE {cycle_cols} SET is_cycle USING cycle_path\n\
+             INSERT INTO {target} (s, o, g)\n\
+             SELECT {select_s}, {select_o}, {cte_name}.g\n\
+             FROM {cte_name}\n\
+             WHERE NOT is_cycle\n\
+             ON CONFLICT DO NOTHING"
+        ))
+    }
 }
 
 // ─── Constraint check compiler ────────────────────────────────────────────────

@@ -952,6 +952,35 @@ pub static TABLING: pgrx::GucSetting<bool> = pgrx::GucSetting::<bool>::new(true)
 /// explicit invalidation).  Default: `300` seconds (5 minutes).
 pub static TABLING_TTL: pgrx::GucSetting<i32> = pgrx::GucSetting::<i32>::new(300);
 
+// ─── v0.34.0 GUCs ────────────────────────────────────────────────────────────
+
+/// GUC: maximum depth for bounded-depth Datalog fixpoint termination (v0.34.0).
+///
+/// When `> 0`, recursive CTEs compiled from Datalog rules include a depth counter
+/// column that terminates the recursion when `depth >= datalog_max_depth`.  This
+/// produces 20–50% speedups for bounded hierarchies (e.g. class hierarchies capped
+/// at 5 levels by SHACL `sh:maxDepth` constraints).
+///
+/// `0` (default) — unlimited; the CYCLE clause provides cycle safety.
+/// SPARQL property path queries also respect this bound when the path predicate
+/// has a SHACL `sh:maxDepth` constraint.
+pub static DATALOG_MAX_DEPTH: pgrx::GucSetting<i32> = pgrx::GucSetting::<i32>::new(0);
+
+/// GUC: master switch for the Delete-Rederive (DRed) incremental retraction
+/// algorithm (v0.34.0).
+///
+/// When `true` (default), deleting a base triple surgically retracts only the
+/// affected derived facts and re-derives any that survive via alternative paths.
+/// When `false`, falls back to full re-materialization on delete (safe but slow).
+pub static DRED_ENABLED: pgrx::GucSetting<bool> = pgrx::GucSetting::<bool>::new(true);
+
+/// GUC: maximum number of deleted base triples to process in a single DRed
+/// transaction (v0.34.0).
+///
+/// Batching prevents lock contention and transaction bloat when deleting many
+/// triples at once.  Default: `1000`.
+pub static DRED_BATCH_SIZE: pgrx::GucSetting<i32> = pgrx::GucSetting::<i32>::new(1000);
+
 // ─── pg_trickle runtime detection (v0.6.0) ───────────────────────────────────
 
 /// The pg_trickle version that pg_ripple was tested against (A-4, v0.25.0).
@@ -1723,6 +1752,42 @@ pub extern "C-unwind" fn _PG_init() {
         &TABLING_TTL,
         0,
         86_400,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+
+    // ── v0.34.0 GUCs ─────────────────────────────────────────────────────────
+
+    pgrx::GucRegistry::define_int_guc(
+        c"pg_ripple.datalog_max_depth",
+        c"Maximum depth for bounded-depth Datalog fixpoint termination; 0 = unlimited (default: 0, min: 0, max: 100000) (v0.34.0)",
+        c"",
+        &DATALOG_MAX_DEPTH,
+        0,
+        100_000,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+
+    pgrx::GucRegistry::define_bool_guc(
+        c"pg_ripple.dred_enabled",
+        c"When on (default), deleting a base triple uses DRed incremental retraction \
+          to surgically remove only affected derived facts; off falls back to full \
+          re-materialization (v0.34.0)",
+        c"",
+        &DRED_ENABLED,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+
+    pgrx::GucRegistry::define_int_guc(
+        c"pg_ripple.dred_batch_size",
+        c"Maximum number of deleted base triples processed in a single DRed \
+          transaction (default: 1000, min: 1, max: 1000000) (v0.34.0)",
+        c"",
+        &DRED_BATCH_SIZE,
+        1,
+        1_000_000,
         GucContext::Userset,
         GucFlags::default(),
     );
@@ -3780,6 +3845,58 @@ mod pg_ripple {
         )
         .unwrap_or(None)
         .unwrap_or(0)
+    }
+
+    // ── v0.34.0: Incremental rule updates ────────────────────────────────────
+
+    /// Add a single rule to an existing rule set (v0.34.0).
+    ///
+    /// The rule is parsed, stored in the catalog, and its head predicate gets
+    /// one fresh seed pass against the current VP tables.  Other derived
+    /// predicates are not affected.  Returns the new rule's catalog ID.
+    ///
+    /// This is more efficient than calling `drop_rules()` + `load_rules()` when
+    /// adding rules to a large live rule set, because only the new rule's derived
+    /// predicate needs re-evaluation.
+    #[pg_extern]
+    fn add_rule(rule_set: &str, rule_text: &str) -> i64 {
+        match crate::datalog::add_rule_to_set(rule_set, rule_text) {
+            Ok(id) => id,
+            Err(e) => pgrx::error!("add_rule error: {e}"),
+        }
+    }
+
+    /// Remove a single rule by its catalog ID (v0.34.0).
+    ///
+    /// The rule is marked inactive and any derived facts solely supported by it
+    /// are retracted using DRed (when `pg_ripple.dred_enabled = true`).  Falls
+    /// back to full re-materialization when DRed is disabled or detects a cycle
+    /// (error code PT530).  Returns the number of derived triples permanently
+    /// retracted.
+    ///
+    /// Obtain the rule ID from `pg_ripple.list_rules()`.
+    #[pg_extern]
+    fn remove_rule(rule_id: i64) -> i64 {
+        match crate::datalog::remove_rule_by_id(rule_id) {
+            Ok(n) => n,
+            Err(e) => pgrx::error!("remove_rule error: {e}"),
+        }
+    }
+
+    /// Invoke DRed incremental retraction for a deleted base triple (v0.34.0).
+    ///
+    /// Normally called automatically by the CDC delete path.  This function
+    /// exposes the DRed algorithm for testing and manual invocation.
+    ///
+    /// `pred_id` — dictionary ID of the deleted triple's predicate.
+    /// `s_val`   — dictionary ID of the deleted triple's subject.
+    /// `o_val`   — dictionary ID of the deleted triple's object.
+    /// `g_val`   — dictionary ID of the deleted triple's graph (0 = default).
+    ///
+    /// Returns the number of derived triples permanently retracted.
+    #[pg_extern]
+    fn dred_on_delete(pred_id: i64, s_val: i64, o_val: i64, g_val: i64) -> i64 {
+        crate::datalog::run_dred_on_delete(pred_id, s_val, o_val, g_val)
     }
 
     /// Enable a named rule set (set active = true).

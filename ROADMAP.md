@@ -2548,14 +2548,14 @@ See [plans/ecosystem/datalog.md §14.2.7 and §14.2.12](plans/ecosystem/datalog.
 
 ### Deliverables
 
-- [ ] **Bounded-depth early termination** (`src/datalog/compiler.rs`)
+- [x] **Bounded-depth early termination** (`src/datalog/compiler.rs`)
   - Read SHACL `sh:maxDepth` annotations for property paths used in rule bodies; fall back to GUC `pg_ripple.datalog_max_depth` (integer, default `0` = unlimited)
   - When a depth bound `d` is known, emit `WITH RECURSIVE … (MAXDEPTH d)` hint (PostgreSQL 18 syntax) or use a depth counter column in the recursive CTE: `depth INT`, terminating when `depth > d`
   - SPARQL property path integration: property path CTEs (`rdfs:subClassOf*`, `ex:knows+`) respect the same bound when the path predicate has a SHACL `sh:maxDepth` constraint
   - GUC: `pg_ripple.datalog_max_depth` (integer, default `0` — unlimited)
   - pg_regress test: `datalog_bounded_depth.sql` — verify fixpoint terminates after `d` iterations; verify SPARQL property path honours depth bound; verify unbounded rule still produces full closure
 
-- [ ] **Incremental retraction — DRed algorithm** (`src/datalog/dred.rs` new module)
+- [x] **Incremental retraction — DRed algorithm** (`src/datalog/dred.rs` new module)
   - Hook into the CDC delete path: when a base triple is deleted from a VP table, identify all derived predicates whose SQL rules reference that VP table
   - **Phase 1 — Over-delete**: for each affected derived predicate, delete all rows that *could* depend on the deleted triple (pessimistic, using rule SQL with the deleted triple as a positive filter)
   - **Phase 2 — Re-derive**: re-run the rule SQL restricted to the over-deleted set; rows that are re-derived via an alternative derivation path are reinserted
@@ -2565,7 +2565,7 @@ See [plans/ecosystem/datalog.md §14.2.7 and §14.2.12](plans/ecosystem/datalog.
   - Error code `PT530` — DRed cycle detected (derived predicate self-references in a way DRed cannot safely resolve; falls back to full recompute)
   - pg_regress test: `datalog_dred.sql` — insert triples, materialize RDFS closure, delete one base triple, verify only the correctly-affected derived triples are removed; verify triples supported by alternative paths survive
 
-- [ ] **Incremental rule updates** (`src/datalog/mod.rs`)
+- [x] **Incremental rule updates** (`src/datalog/mod.rs`)
   - `pg_ripple.add_rule(rule_set TEXT, rule_text TEXT)` — add a single rule to an existing rule set without full recompute; only the new rule's derived predicate needs one fresh iteration pass
   - `pg_ripple.remove_rule(rule_id BIGINT)` — remove a rule and retract any derived facts that were solely supported by it (uses DRed internally)
   - Dependency-aware invalidation: `add_rule` triggers one additional semi-naive pass on the affected stratum only
@@ -2577,10 +2577,10 @@ See [plans/ecosystem/datalog.md §14.2.7 and §14.2.12](plans/ecosystem/datalog.
 
 ### Documentation
 
-- [ ] `user-guide/sql-reference/datalog.md` updated — document `add_rule()`, `remove_rule()`, DRed GUCs, `datalog_max_depth` GUC
-- [ ] `user-guide/best-practices/datalog-optimization.md` updated — add section on DRed vs. full recompute trade-offs; bounded-depth tuning with SHACL
-- [ ] `user-guide/best-practices/sparql-performance.md` updated — add section on bounded-depth SPARQL property paths
-- [ ] Release notes for v0.34.0
+- [x] `user-guide/sql-reference/datalog.md` updated — document `add_rule()`, `remove_rule()`, DRed GUCs, `datalog_max_depth` GUC
+- [x] `user-guide/best-practices/datalog-optimization.md` updated — add section on DRed vs. full recompute trade-offs; bounded-depth tuning with SHACL
+- [x] `user-guide/best-practices/sparql-performance.md` updated — add section on bounded-depth SPARQL property paths
+- [x] Release notes for v0.34.0
 
 ### Exit Criteria
 

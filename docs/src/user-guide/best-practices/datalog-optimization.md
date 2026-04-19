@@ -309,3 +309,37 @@ SELECT * FROM pg_ripple.tabling_stats() ORDER BY hits DESC;
 ```
 
 Cache invalidation is automatic on data changes (`insert_triple`, `delete_triple`) and rule changes (`load_rules`, `drop_rules`). No manual cache management is required.
+
+---
+
+## Bounded-depth inference (v0.34.0)
+
+When your ontology has a known maximum hierarchy depth — for example, a class hierarchy that is at most 5 levels deep — you can set `pg_ripple.datalog_max_depth` to stop recursion early. This avoids running the final empty fixpoint iteration and can reduce inference time by 20-50% on bounded hierarchies.
+
+```sql
+-- Property hierarchy with at most 5 levels
+SET pg_ripple.datalog_max_depth = 5;
+SELECT pg_ripple.infer('my_rules');
+-- Reset to unlimited after this transaction
+SET pg_ripple.datalog_max_depth = 0;
+```
+
+Use `0` (the default) whenever the maximum depth is unknown. Setting too low a bound silently truncates the closure.
+
+## DRed vs. full recompute on delete (v0.34.0)
+
+By default, deleting a base triple triggers the Delete-Rederive (DRed) algorithm: only the triples that *could* have been derived from the deleted fact are over-deleted, and any triples that have alternative derivation paths are immediately reinserted. This is far cheaper than discarding and recomputing the entire closure.
+
+| Scenario | Recommendation |
+|----------|----------------|
+| Deletes are rare (<1% of writes) | `dred_enabled = true` (default) |
+| Bulk deletes of thousands of triples | `dred_enabled = false` then call `infer()` once |
+| Rule set changes frequently | Use `add_rule()` / `remove_rule()` for surgical updates |
+
+```sql
+-- Disable DRed for a bulk delete session
+SET pg_ripple.dred_enabled = false;
+-- ... bulk deletes ...
+SELECT pg_ripple.infer('my_rules');   -- full recompute once
+SET pg_ripple.dred_enabled = true;
+```

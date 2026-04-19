@@ -11,6 +11,30 @@ Versions correspond to the milestones in [ROADMAP.md](ROADMAP.md).
 
 ---
 
+## [0.34.0] — 2026-05-03 — Bounded-Depth Termination & Incremental Retraction (DRed)
+
+**Smarter fixpoint termination and write-correct incremental maintenance.**
+
+### What you can do
+
+- **Cap inference depth** — set `pg_ripple.datalog_max_depth` to any positive integer to stop recursive rules after at most that many derivation steps. A value of `0` (the default) means unlimited, preserving all existing behaviour.
+- **Add or remove rules without full recompute** — `pg_ripple.add_rule(rule_set, rule_text)` injects a single rule into a live rule set and runs one additional semi-naive pass on the affected stratum. `pg_ripple.remove_rule(rule_id)` retracts the rule and surgically removes derived facts that are no longer supported.
+- **Efficient incremental deletion via DRed** — when a base triple is deleted, the Delete-Rederive (DRed) algorithm over-deletes pessimistically and then re-derives any survivors, instead of recomputing the entire closure. Controlled by `pg_ripple.dred_enabled` (default `true`) and `pg_ripple.dred_batch_size` (default `1000`).
+
+### What happens behind the scenes
+
+- `src/datalog/compiler.rs` — `compile_recursive_rule()` reads `pg_ripple.datalog_max_depth` at compile time. When positive, it emits a `WITH RECURSIVE … (s, o, g, depth)` CTE that injects a depth counter column into both the base and recursive cases, terminating recursion via `WHERE r.depth < max_depth`.
+- `src/datalog/dred.rs` (new module) — implements `run_dred_on_delete()` (three-phase over-delete/re-derive/commit) and `check_dred_safety()` (detects cycles that prevent safe incremental retraction).
+- `src/datalog/mod.rs` — exposes `add_rule_to_set()` and `remove_rule_by_id()`.
+- `src/lib.rs` — three new GUC parameters registered in `_PG_init()`: `pg_ripple.datalog_max_depth`, `pg_ripple.dred_enabled`, `pg_ripple.dred_batch_size`. Three new `#[pg_extern]` functions: `add_rule()`, `remove_rule()`, `dred_on_delete()`.
+- New pg_regress tests: `datalog_bounded_depth.sql`, `datalog_dred.sql`, `datalog_incremental_rules.sql` — all 118 tests pass.
+
+### Migration
+
+`sql/pg_ripple--0.33.0--0.34.0.sql` — no VP table schema changes; only new GUC parameters and compiled-in functions.
+
+---
+
 ## [0.33.0] — 2026-04-19 — Documentation Site & Content Overhaul
 
 **pg_ripple's documentation is rebuilt from the ground up.** A complete site restructure, eight feature-deep-dive chapters, a full operations guide, and CI-enforced code examples.

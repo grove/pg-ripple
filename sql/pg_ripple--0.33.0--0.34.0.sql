@@ -1,0 +1,20 @@
+-- Migration 0.33.0 → 0.34.0: Bounded-Depth Termination & Incremental Retraction (DRed)
+--
+-- New features in this release:
+--
+--   1. Bounded-depth early termination for Datalog recursive CTEs
+--      GUC: pg_ripple.datalog_max_depth (integer, default 0 = unlimited)
+--      When > 0, recursive CTEs include a depth counter that stops the
+--      fixpoint when depth >= datalog_max_depth.
+--
+--   2. Delete-Rederive (DRed) incremental retraction
+--      GUC: pg_ripple.dred_enabled (bool, default true)
+--      GUC: pg_ripple.dred_batch_size (integer, default 1000)
+--      New SQL function: pg_ripple.dred_on_delete(pred_id, s, o, g)
+--
+--   3. Incremental rule updates
+--      New SQL function: pg_ripple.add_rule(rule_set, rule_text) → bigint
+--      New SQL function: pg_ripple.remove_rule(rule_id) → bigint
+--
+-- No VP table schema changes are required.
+-- The three new GUCs are registered via _PG_init when the shared library loads.

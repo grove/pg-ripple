@@ -601,3 +601,65 @@ SELECT * FROM pg_ripple.tabling_stats();
 | `pg_ripple.tabling` | bool | `true` | Enable/disable the tabling cache |
 | `pg_ripple.tabling_ttl` | integer | `300` | Cache TTL in seconds; `0` = never expire |
 | `pg_ripple.wfs_max_iterations` | integer | `100` | Safety cap on WFS fixpoint rounds; emits WARNING PT520 if exceeded |
+
+---
+
+## Bounded-Depth Termination & Incremental Retraction (v0.34.0)
+
+### `pg_ripple.datalog_max_depth` GUC
+
+| GUC | Type | Default | Description |
+|-----|------|---------|-------------|
+| `pg_ripple.datalog_max_depth` | integer | `0` | Maximum derivation depth for recursive rules; `0` = unlimited |
+
+When set to a positive integer `d`, any recursive Datalog rule compiled by `load_rules()` emits a `WITH RECURSIVE (s, o, g, depth)` CTE that adds a depth counter column. The base case starts at `depth = 0`; each recursive step increments `depth` and the recursion terminates when `depth >= d`. Non-recursive rules are unaffected.
+
+```sql
+-- Limit inference to 3 hops
+SET pg_ripple.datalog_max_depth = 3;
+SELECT pg_ripple.load_rules('...', 'my_rules');
+SELECT pg_ripple.infer('my_rules');
+-- Reset to unlimited
+SET pg_ripple.datalog_max_depth = 0;
+```
+
+### `pg_ripple.add_rule(rule_set TEXT, rule_text TEXT) RETURNS BIGINT`
+
+Adds a single rule to an existing rule set without discarding previous materialization. Returns the new rule's ID.
+
+```sql
+SELECT pg_ripple.add_rule(
+  'my_rules',
+  '?x <https://ex.org/knows2> ?z :- ?x <https://ex.org/knows> ?y , ?y <https://ex.org/knows> ?z .'
+);
+```
+
+After insertion, one additional semi-naive pass is triggered for the affected stratum only. All previously derived facts are preserved.
+
+### `pg_ripple.remove_rule(rule_id BIGINT) RETURNS BIGINT`
+
+Removes a rule by its ID (as returned by `list_rules()` or `add_rule()`). Returns the ID of the removed rule, or `0` if no matching rule was found.
+
+```sql
+SELECT pg_ripple.remove_rule(42);
+```
+
+Derived facts that were solely supported by the removed rule are retracted via the DRed algorithm (see below), provided `pg_ripple.dred_enabled = true`. Facts supported by alternative derivation paths are preserved.
+
+### `pg_ripple.dred_on_delete(pred_id BIGINT, s BIGINT, o BIGINT, g BIGINT) RETURNS BIGINT`
+
+Low-level entry point for the Delete-Rederive (DRed) algorithm. Normally invoked automatically by the CDC delete path. Returns the number of derived triples retracted.
+
+| Parameter | Description |
+|-----------|-------------|
+| `pred_id` | Encoded predicate ID (from the dictionary) |
+| `s` | Encoded subject ID |
+| `o` | Encoded object ID |
+| `g` | Encoded graph ID |
+
+### DRed GUCs
+
+| GUC | Type | Default | Description |
+|-----|------|---------|-------------|
+| `pg_ripple.dred_enabled` | bool | `true` | Enable DRed incremental retraction; `false` falls back to full recompute |
+| `pg_ripple.dred_batch_size` | integer | `1000` | Maximum base triples to process in a single DRed transaction |

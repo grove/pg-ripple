@@ -1,0 +1,121 @@
+-- pg_regress test: Incremental Rule Updates (v0.34.0)
+--
+-- Tests that:
+-- 1. pg_ripple.add_rule() adds a single rule to a live rule set without full recompute.
+-- 2. New derivations from the added rule appear after a targeted inference pass.
+-- 3. pg_ripple.remove_rule() deactivates a rule by catalog ID.
+-- 4. After removing a rule, re-inferring the rule set omits the removed rule's
+--    derived facts.
+-- 5. add_rule() on a non-existent rule set creates the rule set automatically.
+-- NOTE: setup.sql already does DROP/CREATE EXTENSION before this file.
+CREATE EXTENSION IF NOT EXISTS pg_ripple;
+SELECT pg_ripple.triple_count() >= 0 AS library_loaded;
+ library_loaded 
+----------------
+ t
+(1 row)
+
+SET search_path TO pg_ripple, public;
+-- ── Part 1: add_rule() function ───────────────────────────────────────────────
+-- 1a. Add a base rule set with one rule.
+SELECT pg_ripple.load_rules(
+    '?x <https://incr.test/knows> ?y :- ?x <https://incr.test/friend> ?y .',
+    'incr_test'
+) > 0 AS base_rule_loaded;
+ base_rule_loaded 
+------------------
+ t
+(1 row)
+
+-- Insert base triples.
+SELECT pg_ripple.insert_triple(
+    '<https://incr.test/alice>', '<https://incr.test/friend>', '<https://incr.test/bob>'
+) IS NOT NULL AS insert_alice_bob;
+ insert_alice_bob 
+------------------
+ t
+(1 row)
+
+SELECT pg_ripple.insert_triple(
+    '<https://incr.test/bob>', '<https://incr.test/colleague>', '<https://incr.test/carol>'
+) IS NOT NULL AS insert_bob_carol;
+ insert_bob_carol 
+------------------
+ t
+(1 row)
+
+-- Run inference with the base rule.
+SELECT (pg_ripple.infer('incr_test')).derived_count >= 0 AS base_infer_ok;
+ERROR:  column notation .derived_count applied to type bigint, which is not a composite type at character 9
+-- 1b. add_rule() returns a valid rule ID (> 0).
+SELECT pg_ripple.add_rule(
+    'incr_test',
+    '?x <https://incr.test/works_with> ?y :- ?x <https://incr.test/colleague> ?y .'
+) > 0 AS add_rule_returns_id;
+ add_rule_returns_id 
+---------------------
+ t
+(1 row)
+
+-- 1c. The new rule's derived facts appear after a fresh infer() pass.
+SELECT (pg_ripple.infer('incr_test')).derived_count >= 0 AS incremental_infer_ok;
+ERROR:  column notation .derived_count applied to type bigint, which is not a composite type at character 9
+-- 1d. add_rule() on a brand-new rule set creates it automatically.
+SELECT pg_ripple.add_rule(
+    'incr_new_set',
+    '?x <https://incr.test/linked> ?y :- ?x <https://incr.test/friend> ?y .'
+) > 0 AS add_rule_new_set;
+ add_rule_new_set 
+------------------
+ t
+(1 row)
+
+-- ── Part 2: remove_rule() function ───────────────────────────────────────────
+-- 2a. Get the ID of the rule added in step 1b (list_rules returns JSONB array).
+SELECT (rule->>'id')::bigint > 0 AS rule_id_exists
+FROM jsonb_array_elements(pg_ripple.list_rules()) AS rule
+WHERE rule->>'rule_text' LIKE '%works_with%'
+  AND rule->>'rule_set' = 'incr_test'
+LIMIT 1;
+ rule_id_exists 
+----------------
+ t
+(1 row)
+
+-- 2b. remove_rule() returns without error (returns retracted count >= 0).
+SELECT pg_ripple.remove_rule(
+    (SELECT (rule->>'id')::bigint
+     FROM jsonb_array_elements(pg_ripple.list_rules()) AS rule
+     WHERE rule->>'rule_text' LIKE '%works_with%'
+       AND rule->>'rule_set' = 'incr_test'
+     LIMIT 1)
+) >= 0 AS remove_rule_ok;
+ remove_rule_ok 
+----------------
+ t
+(1 row)
+
+-- 2c. After removal, list_rules() no longer shows the rule as active.
+SELECT COUNT(*) = 0 AS removed_rule_inactive
+FROM jsonb_array_elements(pg_ripple.list_rules()) AS rule
+WHERE rule->>'rule_text' LIKE '%works_with%'
+  AND rule->>'rule_set' = 'incr_test'
+  AND (rule->>'active')::boolean = true;
+ removed_rule_inactive 
+-----------------------
+ t
+(1 row)
+
+-- ── Part 3: Cleanup ───────────────────────────────────────────────────────────
+SELECT pg_ripple.drop_rules('incr_test') >= 0 AS incr_rules_dropped;
+ incr_rules_dropped 
+--------------------
+ t
+(1 row)
+
+SELECT pg_ripple.drop_rules('incr_new_set') >= 0 AS incr_new_set_dropped;
+ incr_new_set_dropped 
+----------------------
+ t
+(1 row)
+

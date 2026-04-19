@@ -38,6 +38,7 @@ pub mod builtins;
 pub mod cache;
 pub mod compiler;
 pub mod demand;
+pub mod dred;
 pub mod magic;
 pub mod parser;
 pub mod rewrite;
@@ -51,6 +52,7 @@ pub use compiler::compile_rule_set;
 pub use compiler::compile_single_rule_to;
 pub use demand::parse_demands_json;
 pub use demand::run_infer_demand;
+pub use dred::{check_dred_safety, run_dred_on_delete};
 pub use magic::parse_goal;
 pub use magic::run_infer_goal;
 pub use parser::parse_rules;
@@ -1134,4 +1136,231 @@ pub(crate) fn run_seminaive_inner(rules: &[Rule], rule_set_name: &str) -> (i64, 
     }
 
     (total, iteration_count)
+}
+
+// ─── Incremental rule updates (v0.34.0) ──────────────────────────────────────
+
+/// Add a single rule to an existing rule set without triggering a full recompute.
+///
+/// The rule is parsed, stratified with the existing rules, and stored in the
+/// catalog.  Only the new rule's derived predicate gets one fresh seed pass
+/// using the current VP-table data.  Other derived predicates are not affected.
+///
+/// Returns the new rule's catalog ID on success, or an error string.
+pub fn add_rule_to_set(rule_set_name: &str, rule_text: &str) -> Result<i64, String> {
+    ensure_catalog();
+
+    // Parse the new rule.
+    let rs = parse_rules(rule_text, rule_set_name).map_err(|e| e.to_string())?;
+    if rs.rules.is_empty() {
+        return Err("no rules parsed from rule_text".to_owned());
+    }
+
+    // Ensure the rule set exists.
+    Spi::run_with_args(
+        "INSERT INTO _pg_ripple.rule_sets (name, active) \
+         VALUES ($1, true) ON CONFLICT (name) DO UPDATE SET active = true",
+        &[pgrx::datum::DatumWithOid::from(rule_set_name)],
+    )
+    .map_err(|e| e.to_string())?;
+
+    let new_rule = &rs.rules[0];
+    let head_pred: Option<i64> = new_rule.head.as_ref().and_then(|h| {
+        if let Term::Const(id) = &h.p {
+            Some(*id)
+        } else {
+            None
+        }
+    });
+
+    // Determine stratum for the new rule.
+    let max_stratum: i32 = Spi::get_one_with_args::<i32>(
+        "SELECT COALESCE(MAX(stratum), 0) FROM _pg_ripple.rules WHERE rule_set = $1",
+        &[pgrx::datum::DatumWithOid::from(rule_set_name)],
+    )
+    .unwrap_or(None)
+    .unwrap_or(0);
+
+    let is_recursive = new_rule.head.as_ref().is_some_and(|h| {
+        if let Term::Const(head_p) = &h.p {
+            new_rule.body.iter().any(|lit| {
+                if let BodyLiteral::Positive(atom) = lit {
+                    if let Term::Const(body_p) = &atom.p {
+                        body_p == head_p
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                }
+            })
+        } else {
+            false
+        }
+    });
+
+    let new_rule_id: i64 = Spi::get_one_with_args::<i64>(
+        "INSERT INTO _pg_ripple.rules \
+             (rule_set, rule_text, head_pred, stratum, is_recursive) \
+             VALUES ($1, $2, $3, $4, $5) RETURNING id",
+        &[
+            pgrx::datum::DatumWithOid::from(rule_set_name),
+            pgrx::datum::DatumWithOid::from(rule_text),
+            pgrx::datum::DatumWithOid::from(head_pred),
+            pgrx::datum::DatumWithOid::from(max_stratum),
+            pgrx::datum::DatumWithOid::from(is_recursive),
+        ],
+    )
+    .map_err(|e| e.to_string())?
+    .unwrap_or(0);
+
+    // One fresh seed pass for the new rule's head predicate only.
+    if let Some(pred_id) = head_pred {
+        // Ensure HTAP tables exist.
+        crate::storage::merge::ensure_htap_tables(pred_id);
+
+        // Compile and execute the seed pass.
+        let target = format!("_pg_ripple.vp_{pred_id}_delta");
+        match compile_single_rule_to(new_rule, &target) {
+            Ok(sql) => {
+                if let Err(e) = Spi::run_with_args(&sql, &[]) {
+                    pgrx::warning!("add_rule: seed pass error: {e}");
+                }
+            }
+            Err(e) => pgrx::warning!("add_rule: rule compile error: {e}"),
+        }
+    }
+
+    Ok(new_rule_id)
+}
+
+/// Remove a rule from a rule set and retract any derived facts solely supported
+/// by it, using DRed internally when `pg_ripple.dred_enabled = true`.
+///
+/// Returns the number of derived triples permanently retracted.
+pub fn remove_rule_by_id(rule_id: i64) -> Result<i64, String> {
+    ensure_catalog();
+
+    // Fetch the rule before deletion.
+    let rule_info: Option<(String, Option<i64>)> = Spi::connect(|client| {
+        client
+            .select(
+                "SELECT rule_set, head_pred FROM _pg_ripple.rules WHERE id = $1",
+                None,
+                &[pgrx::datum::DatumWithOid::from(rule_id)],
+            )
+            .unwrap_or_else(|e| pgrx::error!("remove_rule: query error: {e}"))
+            .next()
+            .map(|row| {
+                let rs: String = row.get::<String>(1).ok().flatten().unwrap_or_default();
+                let hp: Option<i64> = row.get::<i64>(2).ok().flatten();
+                (rs, hp)
+            })
+    });
+
+    let (rule_set_name, head_pred) = match rule_info {
+        Some(info) => info,
+        None => return Err(format!("no rule with id {rule_id}")),
+    };
+
+    // Mark rule as inactive (soft-delete so the ID can still be referenced).
+    Spi::run_with_args(
+        "UPDATE _pg_ripple.rules SET active = false WHERE id = $1",
+        &[pgrx::datum::DatumWithOid::from(rule_id)],
+    )
+    .map_err(|e| e.to_string())?;
+
+    let mut retracted: i64 = 0;
+
+    // If there is a head predicate, retract derived facts for it.
+    if let Some(pred_id) = head_pred {
+        if crate::DRED_ENABLED.get() {
+            // Check DRed safety — if unsafe, fall back to full recompute.
+            match check_dred_safety(&rule_set_name) {
+                Ok(()) => {
+                    // DRed is safe: retract using a conservative approach.
+                    // Over-delete all rows derived by the removed rule and
+                    // re-derive survivors from remaining active rules.
+                    let has_dedicated = pgrx::Spi::get_one_with_args::<i64>(
+                        "SELECT table_oid::bigint FROM _pg_ripple.predicates \
+                         WHERE id = $1 AND table_oid IS NOT NULL",
+                        &[pgrx::datum::DatumWithOid::from(pred_id)],
+                    )
+                    .ok()
+                    .flatten()
+                    .is_some();
+
+                    if has_dedicated {
+                        // Clear the delta table and re-run all remaining active rules.
+                        Spi::run_with_args(
+                            &format!("DELETE FROM _pg_ripple.vp_{pred_id}_delta WHERE source = 1"),
+                            &[],
+                        )
+                        .unwrap_or_else(|e| pgrx::warning!("remove_rule: delta clear error: {e}"));
+                    } else {
+                        let deleted = Spi::get_one_with_args::<i64>(
+                            "WITH del AS (DELETE FROM _pg_ripple.vp_rare WHERE p = $1 AND source = 1 RETURNING 1) \
+                             SELECT count(*) FROM del",
+                            &[pgrx::datum::DatumWithOid::from(pred_id)],
+                        )
+                        .unwrap_or(None)
+                        .unwrap_or(0);
+                        retracted += deleted;
+                    }
+
+                    // Re-run remaining active rules for this head_pred.
+                    let remaining_rules: Vec<String> = {
+                        let sql = "SELECT rule_text FROM _pg_ripple.rules \
+                                   WHERE rule_set = $1 AND active = true AND head_pred = $2";
+                        Spi::connect(|client| {
+                            client
+                                .select(
+                                    sql,
+                                    None,
+                                    &[
+                                        pgrx::datum::DatumWithOid::from(rule_set_name.as_str()),
+                                        pgrx::datum::DatumWithOid::from(pred_id),
+                                    ],
+                                )
+                                .unwrap_or_else(|e| {
+                                    pgrx::error!("remove_rule: re-derive query error: {e}")
+                                })
+                                .map(|row| row.get::<String>(1).ok().flatten().unwrap_or_default())
+                                .collect::<Vec<_>>()
+                        })
+                    };
+
+                    for rt in &remaining_rules {
+                        if let Ok(rs) = parse_rules(rt, &rule_set_name) {
+                            for rule in &rs.rules {
+                                if rule.head.is_none() {
+                                    continue;
+                                }
+                                let target = if has_dedicated {
+                                    format!("_pg_ripple.vp_{pred_id}_delta")
+                                } else {
+                                    "_pg_ripple.vp_rare".to_owned()
+                                };
+                                if let Ok(sql) = compile_single_rule_to(rule, &target) {
+                                    let _ = Spi::run_with_args(&sql, &[]);
+                                }
+                            }
+                        }
+                    }
+                }
+                Err(warning) => {
+                    // Unsafe for DRed — fall back to full recompute.
+                    pgrx::warning!("{warning}");
+                    let (derived, _) = run_inference_seminaive(&rule_set_name);
+                    retracted = derived;
+                }
+            }
+        } else {
+            // DRed disabled — full recompute.
+            let (derived, _) = run_inference_seminaive(&rule_set_name);
+            retracted = derived;
+        }
+    }
+
+    Ok(retracted)
 }
