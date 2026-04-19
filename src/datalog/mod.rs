@@ -55,6 +55,7 @@ pub use compiler::compile_single_rule_to;
 pub use demand::parse_demands_json;
 pub use demand::run_infer_demand;
 pub use dred::{check_dred_safety, run_dred_on_delete};
+pub use lattice::{ensure_lattice_catalog, register_lattice, run_infer_lattice};
 pub use magic::parse_goal;
 pub use magic::run_infer_goal;
 pub use parallel::partition_into_parallel_groups;
@@ -67,7 +68,6 @@ pub use tabling::{
     tabling_stats_impl, tabling_store,
 };
 pub use wfs::{build_wfs_jsonb, run_wfs};
-pub use lattice::{ensure_lattice_catalog, register_lattice, run_infer_lattice};
 
 use pgrx::prelude::*;
 

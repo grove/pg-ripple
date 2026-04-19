@@ -100,8 +100,7 @@ pub fn detect_cyclic_bgp(pattern_vars: &[Vec<String>]) -> bool {
     let mut rec_stack: HashSet<String> = HashSet::new();
 
     for node in &nodes {
-        if !visited.contains(node)
-            && has_cycle_dfs(node, None, &adj, &mut visited, &mut rec_stack)
+        if !visited.contains(node) && has_cycle_dfs(node, None, &adj, &mut visited, &mut rec_stack)
         {
             return true;
         }
@@ -302,9 +301,7 @@ pub fn run_triangle_query(predicate_iri: &str) -> WcojBenchmarkResult {
         )
     };
 
-    let triangle_count = Spi::get_one::<i64>(&count_sql)
-        .unwrap_or(None)
-        .unwrap_or(0);
+    let triangle_count = Spi::get_one::<i64>(&count_sql).unwrap_or(None).unwrap_or(0);
 
     WcojBenchmarkResult {
         triangle_count,

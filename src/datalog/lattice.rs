@@ -584,7 +584,10 @@ mod tests {
             BuiltinLattice::from_name("interval"),
             Some(BuiltinLattice::Interval)
         );
-        assert_eq!(BuiltinLattice::from_name("MinLattice"), Some(BuiltinLattice::Min));
+        assert_eq!(
+            BuiltinLattice::from_name("MinLattice"),
+            Some(BuiltinLattice::Min)
+        );
         assert_eq!(BuiltinLattice::from_name("unknown"), None);
     }
 
