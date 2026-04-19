@@ -11,7 +11,7 @@ Each release below has two layers:
 - **The plain-language summary** (in the coloured box) explains *what* the release delivers and *why it matters* — no programming knowledge required.
 - **The technical deliverables** list the specific items developers will build. Feel free to skip these if you're reading for the big picture.
 
-**Effort estimates** are given as *person-weeks* — e.g. "6–8 pw" means the release would take roughly 6–8 weeks for a single full-time developer, or 3–4 weeks for a pair working together. The total estimated effort from v0.1.0 to v1.0.0 is **249–338 person-weeks** (~57–78 months for one developer; ~29–39 months for a pair).
+**Effort estimates** are given as *person-weeks* — e.g. "6–8 pw" means the release would take roughly 6–8 weeks for a single full-time developer, or 3–4 weeks for a pair working together. The total estimated effort from v0.1.0 to v1.0.0 is **250–340 person-weeks** (~57–78 months for one developer; ~29–39 months for a pair).
 
 **"optional at runtime" items**: some deliverables are annotated *(optional at runtime — X must be installed)*. This means the feature depends on an external extension (e.g. pg_trickle) that may not be installed in every deployment. The feature is **required by this roadmap** and must be implemented; the Rust code gates on a runtime availability check and degrades gracefully (returns 0 / false / empty, emits a WARNING, never raises an ERROR) when the dependency is absent. These items are not optional from a delivery standpoint.
 
@@ -65,8 +65,9 @@ Each release below has two layers:
 | [0.41.0](#v0410--full-w3c-sparql-11-test-suite) | Full W3C SPARQL 1.1 Test Suite | Complete W3C SPARQL 1.1 Query + Update + Graph Patterns + Aggregates test suite harness with parallelized execution; 3,000+ tests in < 2 min CI | 5–7 pw |
 | [0.42.0](#v0420--parallel-merge-cost-based-federation--live-cdc) | Parallel Merge, Cost-Based Federation & Live CDC | Multi-worker HTAP merge, FedX-style federation planner, parallel SERVICE, live RDF change subscriptions | 10–12 pw |
 | [0.43.0](#v0430--watdiv--jena-conformance-suite) | WatDiv + Jena Conformance Suite | Apache Jena edge-case tests (~1,000) and WatDiv scale-correctness benchmark (10M+ triples, star/chain/snowflake/complex patterns); 90% harness reuse from v0.41.0 | 5–7 pw |
+| [0.44.0](#v0440--lubm-conformance-suite) | LUBM Conformance Suite | Lehigh University Benchmark — OWL RL inference correctness across 14 canonical queries on 1K–8M triple datasets; validates Datalog + SPARQL integration under ontological reasoning | 1–2 pw |
 | [1.0.0](#v100--production-release) | Production Release | Standards conformance, stress testing, security audit | 6–8 pw |
-| | | **Total estimated effort** | **249–338 pw** |
+| | | **Total estimated effort** | **250–340 pw** |
 
 ---
 
@@ -3386,6 +3387,56 @@ Smoke subset (180 tests) passes with 0 unexpected failures on `main`. Full suite
 ### Exit Criteria
 
 Full Jena suite (1,000 tests) completes in < 3 minutes on CI. WatDiv 100-template suite at 10M triples completes in < 5 minutes. Jena known-failures manifest ≤ 30 `XFAIL` entries (type coercion and date-time edge cases acceptable until addressed post-1.0). WatDiv row-count correctness within ±0.1% for all 100 templates. Migration chain test passes through 0.43.0.
+
+---
+
+## v0.44.0 — LUBM Conformance Suite
+
+**Theme**: OWL RL inference correctness under ontological reasoning via the Lehigh University Benchmark (LUBM).
+
+> **In plain language:** LUBM is a classic academic benchmark that generates a synthetic university-domain ontology dataset (scalable from 1K to 8M+ triples) and defines 14 canonical queries that exercise OWL RL inference rules — subclass traversal, property inheritance, inverse properties, transitivity, and domain/range entailments. This release wires LUBM into the conformance harness to validate that pg_ripple's Datalog engine and SPARQL query layer produce correct results when ontological reasoning is active. It is the only benchmark that tests the *interaction* between the SPARQL translator and the Datalog inference engine under realistic ontological load.
+>
+> **Effort estimate: 1–2 person-weeks** (80% harness reuse from v0.41.0 and v0.43.0)
+
+### Deliverables
+
+- [ ] **LUBM data generator integration** (`tests/lubm/generator.rs` new module)
+  - Invoke the [UBA (Univ-Bench Artificial) data generator](http://swat.cse.lehigh.edu/projects/lubm/) via `std::process::Command`, or use a Rust port, to produce Turtle-serialised datasets at configurable university count (`--univ 1` → ~100K triples; `--univ 10` → ~1M triples; `--univ 50` → ~5M triples)
+  - Cache generated datasets as CI artifacts keyed by university count and seed; re-generate only when the generator binary changes
+  - Load into a named graph `<http://swat.cse.lehigh.edu/onto/univ-bench.owl>` via the v0.41.0 fixture loader
+  - Also load the `univ-bench.owl` ontology into the Datalog engine as an RDFS/OWL RL rule set before running queries
+- [ ] **14 canonical LUBM queries** (`tests/lubm/queries/q01.sparql` – `q14.sparql`)
+  - Implement all 14 LUBM queries verbatim from the benchmark specification
+  - Each query exercises at least one inference rule:
+    - Q1, Q2, Q4, Q6: `rdf:type` + subclass/subproperty entailment
+    - Q3, Q5, Q7: inverse property + domain/range reasoning
+    - Q8, Q12, Q13: multi-hop inference chains
+    - Q9, Q10, Q11, Q14: conjunctive patterns over inferred and asserted triples
+  - Reference results: pre-computed correct answer counts for `--univ 1` (published in the original LUBM paper); assert exact cardinality match
+- [ ] **Correctness validator** (`tests/lubm/validator.rs`)
+  - Compare actual row count against published reference counts for each of the 14 queries at `--univ 1`
+  - For `--univ 10`, compare against a locally pre-computed baseline (stored in `tests/lubm/baselines/univ10.json`)
+  - Fail on any count mismatch; report which inference rules produced wrong results
+- [ ] **CI integration** (`.github/workflows/ci.yml`)
+  - New job `lubm-suite`: runs after `w3c-suite`; generates `--univ 1` dataset (< 100K triples, < 30 seconds); loads ontology + triples; runs all 14 queries; reports pass/fail per query
+  - Non-blocking for `--univ 10` (larger dataset run triggered weekly or on release branches)
+  - Reuse unified `tests/conformance/runner.rs` from v0.43.0; add `lubm:` prefix to known-failures format
+- [ ] **Known-failures manifest** — add `lubm:Q{N}` entries for any query that fails at release, with one-line root-cause note
+
+### Migration Script
+
+`sql/pg_ripple--0.43.0--0.44.0.sql` — no schema changes. Comment-only header noting that v0.44.0 is a test infrastructure release.
+
+### Documentation
+
+- [ ] `reference/lubm-results.md` (new) — LUBM conformance table: query ID, description, inference rules exercised, reference count, pg_ripple result, pass/fail; updated each release
+- [ ] `reference/w3c-conformance.md` — updated to link to LUBM and WatDiv result pages for a complete conformance picture
+- [ ] `contributing/running-conformance-tests.md` — updated to cover LUBM data generation, ontology loading, and baseline regeneration
+- [ ] Release notes for v0.44.0
+
+### Exit Criteria
+
+All 14 LUBM queries return exact reference cardinalities at `--univ 1`. Ontology + `--univ 1` dataset loads and all queries complete in < 30 seconds on CI. Known-failures manifest has 0 `lubm:` entries at release. Migration chain test passes through 0.44.0.
 
 ---
 
