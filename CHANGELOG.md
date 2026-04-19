@@ -11,6 +11,56 @@ Versions correspond to the milestones in [ROADMAP.md](ROADMAP.md).
 
 ---
 
+## [0.33.0] — 2026-04-19 — Documentation Site & Content Overhaul
+
+**pg_ripple's documentation is rebuilt from the ground up.** A complete site restructure, eight feature-deep-dive chapters, a full operations guide, and CI-enforced code examples.
+
+### What you can do
+
+- **Find answers fast** — the documentation is reorganized into four clear sections: Getting Started, Feature Deep Dives, Operations, and Reference. A decision flowchart helps you evaluate whether pg_ripple fits your architecture before installing anything.
+- **Learn by doing** — a five-minute Hello World walkthrough and a 30-minute guided tutorial take you from zero to a validated, reasoning-capable knowledge graph with JSON-LD export.
+- **Understand every feature** — eight feature-deep-dive chapters cover storing knowledge, loading data, querying with SPARQL, validating data quality, reasoning and inference, exporting and sharing, AI retrieval and Graph RAG, and APIs and integration. Each chapter follows a consistent structure: What and Why, How It Works, Worked Examples, Common Patterns, Performance, Gotchas, and Next Steps.
+- **Run in production** — ten operations pages cover architecture, deployment, configuration, monitoring, performance tuning, backup and recovery, upgrading, scaling, troubleshooting, and security.
+- **Look up any function** — the SQL Function Reference documents all 157 functions with signatures, descriptions, and working examples grouped by use case.
+
+### What happens behind the scenes
+
+This is a documentation-only release. No SQL functions, GUC parameters, VP table schemas, or Rust code changed. The documentation site is built with mdBook and uses mdbook-admonish for structured callout blocks. A CI test harness (`scripts/test_docs.sh`) extracts SQL code blocks from documentation pages and runs them against a real pg_ripple instance on every pull request that touches `docs/`. A coverage script (`scripts/check_docs_coverage.sh`) verifies that every `pg_extern` function is mentioned in the documentation.
+
+<details>
+<summary>Technical Details</summary>
+
+### New files
+
+| File | Purpose |
+|------|---------|
+| `scripts/test_docs.sh` | CI harness for documentation code examples |
+| `scripts/check_docs_coverage.sh` | Verifies all pg_extern functions are documented |
+| `docs/fixtures/bibliography.sql` | Shared bibliographic fixture dataset |
+| `.github/workflows/docs-test.yml` | CI workflow for documentation tests and link checking |
+| `.github/PULL_REQUEST_TEMPLATE.md` | PR template with docs-gap reminder |
+
+### Site structure
+
+The documentation is restructured from a flat list of pages into a four-section information architecture:
+
+- **Getting Started**: Installation, Hello World, Guided Tutorial, Key Concepts
+- **Feature Deep Dives**: 8 chapters (§2.1–§2.8) following a consistent seven-part structure
+- **Operations**: 10 pages covering deployment through security
+- **Reference**: SQL Function Reference, SPARQL Compliance Matrix, Error Catalog, FAQ, Glossary, Contributing
+
+### mdbook-admonish
+
+`book.toml` updated with `[preprocessor.admonish]` and `[output.linkcheck]`. All new pages use fenced admonish callout syntax.
+
+</details>
+
+### Migration
+
+Run `ALTER EXTENSION pg_ripple UPDATE TO '0.33.0'` (applies `sql/pg_ripple--0.32.0--0.33.0.sql` — no schema changes).
+
+---
+
 ## [0.32.0] — 2026-04-19 — Well-Founded Semantics & Tabling
 
 **pg_ripple handles non-stratifiable Datalog programs and caches repeated inference results.** All pg_regress tests pass (3 new tests for v0.32.0 features).

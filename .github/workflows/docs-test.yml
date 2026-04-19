@@ -1,0 +1,111 @@
+name: Documentation Tests
+
+on:
+  pull_request:
+    paths:
+      - 'docs/**'
+      - 'scripts/test_docs.sh'
+      - 'docs/fixtures/**'
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  PGRX_VERSION: "0.17.0"
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  docs-test:
+    name: Test documentation examples
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo registry
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target/
+          key: ${{ runner.os }}-cargo-docs-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-docs-
+
+      - name: Cache cargo-pgrx binary
+        uses: actions/cache@v5
+        with:
+          path: ~/.cargo/bin/cargo-pgrx
+          key: ${{ runner.os }}-cargo-pgrx-${{ env.PGRX_VERSION }}
+
+      - name: Cache pgrx PostgreSQL build
+        uses: actions/cache@v5
+        with:
+          path: ~/.pgrx/
+          key: ${{ runner.os }}-pgrx-pgdata-${{ env.PGRX_VERSION }}-pg18
+          restore-keys: ${{ runner.os }}-pgrx-pgdata-
+
+      - name: Install cargo-pgrx
+        run: |
+          if ! command -v cargo-pgrx &>/dev/null; then
+            cargo install cargo-pgrx --version $PGRX_VERSION --locked
+          fi
+
+      - name: Initialize pgrx
+        run: cargo pgrx init --pg18 download
+
+      - name: Install pg_ripple
+        run: cargo pgrx install --pg-config ~/.pgrx/18.*/pgrx-install/bin/pg_config
+
+      - name: Start PostgreSQL
+        run: cargo pgrx start pg18
+
+      - name: Create test database
+        run: |
+          PG_PORT=$(grep -oP 'port\s*=\s*\K\d+' ~/.pgrx/data-18/postgresql.conf || echo 28818)
+          createdb -h localhost -p $PG_PORT docs_test
+          psql -h localhost -p $PG_PORT -d docs_test -c "CREATE EXTENSION pg_ripple"
+
+      - name: Run documentation tests
+        env:
+          PG_CONNSTR: "host=localhost port=28818 dbname=docs_test"
+        run: bash scripts/test_docs.sh
+
+      - name: Install mdBook
+        run: |
+          curl -sSL https://github.com/rust-lang/mdBook/releases/download/v0.4.40/mdbook-v0.4.40-x86_64-unknown-linux-gnu.tar.gz \
+            | tar -xz --directory=/usr/local/bin
+
+      - name: Install mdbook-admonish
+        run: |
+          cargo install mdbook-admonish --locked 2>/dev/null || true
+
+      - name: Install mdbook-linkcheck
+        run: |
+          cargo install mdbook-linkcheck --locked 2>/dev/null || true
+
+      - name: Build docs and check links
+        run: mdbook build docs
+
+  linkcheck:
+    name: Check broken links
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install mdBook
+        run: |
+          curl -sSL https://github.com/rust-lang/mdBook/releases/download/v0.4.40/mdbook-v0.4.40-x86_64-unknown-linux-gnu.tar.gz \
+            | tar -xz --directory=/usr/local/bin
+
+      - name: Install mdbook-linkcheck
+        run: cargo install mdbook-linkcheck --locked
+
+      - name: Install mdbook-admonish
+        run: cargo install mdbook-admonish --locked
+
+      - name: Build and check links
+        run: mdbook build docs
