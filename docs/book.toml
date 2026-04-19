@@ -16,12 +16,8 @@ default-theme = "navy"
 preferred-dark-theme = "navy"
 git-repository-url = "https://github.com/grove/pg-ripple"
 edit-url-template = "https://github.com/grove/pg-ripple/edit/main/docs/src/{path}"
-additional-css = ["./mdbook-admonish.css"]
 
 [output.html.search]
 enable = true
 limit-results = 20
 use-boolean-and = true
-
-[output.linkcheck]
-warning-policy = "error"
