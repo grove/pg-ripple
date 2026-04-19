@@ -13,9 +13,9 @@ pg_ripple is a PostgreSQL 18 extension building toward a fully-featured knowledg
 
 ---
 
-## What works today (v0.25.0)
+## What works today (v0.29.0)
 
-**pg_ripple is now 100% conformant with the W3C SPARQL 1.1 Query, SPARQL 1.1 Update, and SHACL Core test suites.** Twenty-five versions in, pg_ripple covers the full SPARQL 1.1 stack, SHACL validation, semi-naive Datalog reasoning, streaming RDF export, incremental live views, a standard HTTP endpoint, high-performance federated queries across remote SPARQL services, and frame-driven JSON-LD export — all inside PostgreSQL with no separate process required.
+**pg_ripple is now 100% conformant with the W3C SPARQL 1.1 Query, SPARQL 1.1 Update, and SHACL Core test suites.** Twenty-nine versions in, pg_ripple covers the full SPARQL 1.1 stack, SHACL validation, goal-directed Datalog reasoning with magic sets, streaming RDF export, incremental live views, a standard HTTP endpoint, high-performance federated queries across remote SPARQL services, frame-driven JSON-LD export, GraphRAG integration, and vector + SPARQL hybrid search — all inside PostgreSQL with no separate process required.
 
 | Area | What's included |
 |---|---|
@@ -37,6 +37,9 @@ pg_ripple is a PostgreSQL 18 extension building toward a fully-featured knowledg
 | **Performance** | Selectivity-based BGP reordering (subject-bound 1%, object-bound 5% of row estimates); plan cache with hit/miss stats; parallel query hints for star patterns; extended statistics on VP column pairs; SHACL-informed optimizer hints; streaming cursor-based export (`pg_ripple.export_batch_size` GUC); `pg_ripple.property_path_max_depth` GUC (default 64) to cap recursive property-path depth; post-merge `ANALYZE` via `pg_ripple.auto_analyze` GUC; BRIN index on SID column for range-scan acceleration; `pg_ripple.explain_sparql(query, format)` for SQL/algebra/plan introspection |
 | **Admin & Security** | `vacuum()`, `reindex()`, `vacuum_dictionary()`, `dictionary_stats()`; graph-level Row-Level Security via `enable_graph_rls`, `grant_graph`, `revoke_graph`; `rls_bypass` GUC for superuser sessions; `canary()` health-check function |
 | **Full-text search** | `fts_search()` over literal values via PostgreSQL GIN indexes |
+| **GraphRAG** | `export_graphrag_entities()`, `export_graphrag_relationships()`, `export_graphrag_text_units()` — Parquet export matching Microsoft GraphRAG's BYOG schema; bundled ontology, SHACL shapes, and Datalog enrichment rules; Python CLI bridge (`scripts/graphrag_export.py`) |
+| **Vector search & RAG** | `store_embedding()`, `similar_entities()`, `embed_entities()`, `refresh_embeddings()` — pgvector integration for RDF entities; `hybrid_search()` (SPARQL + k-NN via Reciprocal Rank Fusion); `rag_retrieve()` — end-to-end RAG pipeline returning structured JSONB or JSON-LD; `contextualize_entity()` — graph-serialized text for embeddings; incremental embedding worker; external vector service federation (Weaviate, Qdrant, Pinecone) |
+| **Datalog optimization** | Goal-directed inference via `infer_goal(rule_set, goal)` (magic sets transformation); cost-based join reordering; anti-join negation (`LEFT JOIN … IS NULL` for large VP tables); predicate-filter pushdown; delta-table B-tree indexing; subsumption-based redundant-rule elimination |
 
 ```sql
 CREATE EXTENSION pg_ripple;
@@ -90,15 +93,11 @@ SELECT pg_ripple.infer('org_rules');
 
 ## Where we're headed
 
-Two releases remain on the path to v1.0.0.
-
-### v0.25.0 — GeoSPARQL & Architectural Polish ✅ Done
-
-This release added `canary()` health checks, strict bulk-load mode (`strict := true` parameter on all loaders), merge-worker LRU cache isolation, a pg_trickle version probe, and a federation partial-result byte gate. 78 pg_regress tests pass.
+One release remains on the path to v1.0.0.
 
 ### v1.0.0 — Production Release
 
-With 100% W3C conformance achieved and GeoSPARQL added, the final release focuses on production hardening: a full 72-hour continuous load test, final security audit sign-off, stress testing at 100 M+ triple scale, and a hardened upgrade path from every prior version. This is the version intended for production deployments.
+With 100% W3C conformance achieved, GraphRAG integration complete, vector + SPARQL hybrid search in place, and goal-directed Datalog reasoning delivered, the final release focuses on production hardening: a full 72-hour continuous load test, final security audit sign-off, stress testing at 100 M+ triple scale, and a hardened upgrade path from every prior version. This is the version intended for production deployments.
 
 ---
 
@@ -115,7 +114,7 @@ This means you get:
 
 ### How it compares
 
-> **Note**: pg_ripple features marked "Yes" in the table below are implemented across v0.1.0–v0.25.0. W3C SPARQL 1.1 Query, Update, and SHACL Core conformance is 100% (achieved in v0.20.0). Competitor capabilities reflect publicly documented feature sets.
+> **Note**: pg_ripple features marked "Yes" in the table below are implemented across v0.1.0–v0.29.0. W3C SPARQL 1.1 Query, Update, and SHACL Core conformance is 100% (achieved in v0.20.0). Competitor capabilities reflect publicly documented feature sets.
 
 | Capability | pg_ripple | Blazegraph | Virtuoso | Apache Fuseki |
 |---|---|---|---|---|
