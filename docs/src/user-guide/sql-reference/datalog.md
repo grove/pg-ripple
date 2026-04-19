@@ -705,3 +705,124 @@ SELECT pg_ripple.infer_with_stats('owl-rl');
 ```
 
 A `parallel_groups` value of 1 means all rules form a single dependency chain and no parallelism is possible. Values > 1 indicate that independent groups exist.
+
+---
+
+## Lattice-Based Datalog — Datalog^L (v0.36.0)
+
+Standard Datalog^agg requires aggregation-stratification — aggregates can only appear in a strictly higher stratum than their inputs.  **Lattice-Based Datalog** relaxes this requirement by demanding only that the aggregation is *monotone* with respect to a user-specified partial order (a lattice).
+
+### What is a lattice?
+
+A *lattice* is an algebraic structure (L, ⊔) where:
+- L is the value domain (numbers, sets, intervals, etc.)
+- ⊔ is the *join* operation — commutative, associative, idempotent
+- There is a *bottom* element ⊥ such that ⊥ ⊔ x = x for all x
+
+Fixpoint computation over a lattice is guaranteed to terminate when the *ascending chain condition* holds (no infinite strictly ascending chains).
+
+### Built-in lattices
+
+| Name | Join | Bottom | Typical use |
+|------|------|--------|-------------|
+| `min` | MIN | +∞ (i64::MAX) | Trust propagation, shortest paths |
+| `max` | MAX | −∞ (i64::MIN) | Longest paths, reachability |
+| `set` | UNION | {} (empty set) | Set-valued annotations |
+| `interval` | interval hull | empty interval | Temporal/numeric ranges |
+
+### New GUC parameters (v0.36.0)
+
+| GUC | Default | Description |
+|-----|---------|-------------|
+| `pg_ripple.lattice_max_iterations` | `1000` | Maximum fixpoint iterations before PT540 warning |
+
+### Functions
+
+#### `pg_ripple.create_lattice(name, join_fn, bottom)` → `boolean`
+
+Register a user-defined lattice.
+
+- `name` — unique lattice identifier
+- `join_fn` — a PostgreSQL aggregate function (must be commutative and associative)
+- `bottom` — bottom element as text
+
+Returns `true` if newly registered, `false` if it already existed.
+
+```sql
+-- Trust scores over [0, 100] — min-lattice (lower is more trusted).
+SELECT pg_ripple.create_lattice('trust', 'min', '100');
+```
+
+#### `pg_ripple.list_lattices()` → `jsonb`
+
+List all registered lattice types.
+
+```sql
+SELECT jsonb_pretty(pg_ripple.list_lattices());
+```
+
+Example output:
+
+```json
+[
+  {"name": "min",   "join_fn": "min",       "bottom": "9223372036854775807", "builtin": true},
+  {"name": "max",   "join_fn": "max",       "bottom": "-9223372036854775808", "builtin": true},
+  {"name": "set",   "join_fn": "array_agg", "bottom": "{}", "builtin": true},
+  {"name": "trust", "join_fn": "min",       "bottom": "100", "builtin": false}
+]
+```
+
+#### `pg_ripple.infer_lattice(rule_set, lattice_name)` → `jsonb`
+
+Run a lattice-based Datalog fixpoint for all rules in `rule_set` using the specified lattice.
+
+```sql
+-- Run trust propagation using the MinLattice.
+SELECT pg_ripple.infer_lattice('trust_rules', 'min');
+-- {
+--   "derived": 42,
+--   "iterations": 5,
+--   "lattice": "min",
+--   "rule_set": "trust_rules"
+-- }
+```
+
+Returns JSONB with fields:
+- `derived` — number of new lattice values written
+- `iterations` — fixpoint iterations performed
+- `lattice` — lattice type used
+- `rule_set` — rule set evaluated
+
+### Trust propagation example
+
+```sql
+-- 1. Register a MinLattice for trust scores.
+SELECT pg_ripple.create_lattice('trust', 'min', '100');
+
+-- 2. Insert direct trust edges (score 0–100, lower = more trusted).
+SELECT pg_ripple.load_ntriples('
+  <https://example.org/alice> <https://example.org/directTrust> "80"^^<xsd:integer> .
+  <https://example.org/bob>   <https://example.org/directTrust> "70"^^<xsd:integer> .
+  <https://example.org/alice> <https://example.org/knows>       <https://example.org/bob> .
+');
+
+-- 3. Run lattice fixpoint to propagate transitive trust.
+SELECT pg_ripple.infer_lattice('trust_rules', 'trust');
+
+-- 4. Query propagated trust values.
+SELECT * FROM pg_ripple.sparql('
+  SELECT ?x ?t WHERE { ?x <https://example.org/directTrust> ?t }
+');
+```
+
+### Error code PT540
+
+When `pg_ripple.lattice_max_iterations` is exceeded, the engine emits a WARNING:
+
+```
+WARNING:  PT540: lattice fixpoint did not converge after 1000 iterations; returning partial results.
+```
+
+If you see this warning, either:
+- Increase `pg_ripple.lattice_max_iterations`, or
+- Verify that your lattice join function is truly monotone and the value domain is finite.

@@ -39,6 +39,7 @@ pub mod cache;
 pub mod compiler;
 pub mod demand;
 pub mod dred;
+pub mod lattice;
 pub mod magic;
 pub mod parallel;
 pub mod parser;
@@ -66,6 +67,7 @@ pub use tabling::{
     tabling_stats_impl, tabling_store,
 };
 pub use wfs::{build_wfs_jsonb, run_wfs};
+pub use lattice::{ensure_lattice_catalog, register_lattice, run_infer_lattice};
 
 use pgrx::prelude::*;
 

@@ -2647,7 +2647,7 @@ See [plans/ecosystem/datalog.md §14.2.8 and §14.2.14](plans/ecosystem/datalog.
 
 ### Deliverables
 
-- [ ] **Worst-case optimal joins — Leapfrog Triejoin** (`src/sparql/wcoj.rs` new module)
+- [x] **Worst-case optimal joins — Leapfrog Triejoin** (`src/sparql/wcoj.rs` new module)
   - Detect cyclic join patterns at SPARQL→SQL translation time: any SELECT with ≥3 triple patterns sharing variables in a cycle (triangle, square, etc.)
   - For detected cyclic patterns, route execution through a Leapfrog Triejoin scan node instead of standard PostgreSQL hash-joins
   - CustomScan implementation: register a scan provider in `_PG_init` that intercepts cyclic join nodes in the PostgreSQL planner's plan tree
@@ -2658,7 +2658,7 @@ See [plans/ecosystem/datalog.md §14.2.8 and §14.2.14](plans/ecosystem/datalog.
   - Benchmark: `benchmarks/wcoj.sql` — triangle query on a social-graph VP table; compare WCOJ vs. standard planner at 100K, 1M, 10M triples
   - pg_regress test: `sparql_wcoj.sql` — verify triangle query produces correct results with WCOJ enabled and disabled; verify `pg_ripple.wcoj_enabled = false` falls back to standard planner
 
-- [ ] **Lattice-Based Datalog — Datalog^L** (`src/datalog/lattice.rs` new module)
+- [x] **Lattice-Based Datalog — Datalog^L** (`src/datalog/lattice.rs` new module)
   - Extend rule IR: lattice term `LatticeVal(lattice_type, value)` alongside `Const` and `Var`
   - Built-in lattice types: `MinLattice` (meet = MIN), `MaxLattice` (join = MAX), `SetLattice` (join = UNION), `IntervalLattice` (join = interval hull)
   - User-defined lattice types via `pg_ripple.create_lattice(name TEXT, join_fn TEXT, bottom TEXT)` — `join_fn` is a PostgreSQL aggregate function name
@@ -2675,10 +2675,10 @@ See [plans/ecosystem/datalog.md §14.2.8 and §14.2.14](plans/ecosystem/datalog.
 
 ### Documentation
 
-- [ ] `user-guide/sql-reference/datalog.md` updated — document `create_lattice()`, lattice rule syntax, lattice GUCs
-- [ ] `user-guide/best-practices/sparql-performance.md` updated — add section on cyclic SPARQL pattern detection and WCOJ; when to set `wcoj_min_tables`
-- [ ] `reference/lattice-datalog.md` (new page) — full tutorial on Datalog^L: lattice types, monotone rules, convergence guarantees, use cases (trust propagation, interval reasoning, set-valued annotations)
-- [ ] Release notes for v0.36.0
+- [x] `user-guide/sql-reference/datalog.md` updated — document `create_lattice()`, lattice rule syntax, lattice GUCs
+- [x] `user-guide/best-practices/sparql-performance.md` updated — add section on cyclic SPARQL pattern detection and WCOJ; when to set `wcoj_min_tables`
+- [x] `reference/lattice-datalog.md` (new page) — full tutorial on Datalog^L: lattice types, monotone rules, convergence guarantees, use cases (trust propagation, interval reasoning, set-valued annotations)
+- [x] Release notes for v0.36.0
 
 ### Exit Criteria
 

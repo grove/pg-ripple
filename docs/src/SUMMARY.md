@@ -52,6 +52,7 @@
 - [SQL Function Reference](reference/sql-functions.md)
 - [SPARQL Compliance Matrix](reference/sparql-compliance.md)
 - [Error Message Catalog](reference/error-catalog.md)
+- [Lattice-Based Datalog (Datalog^L)](reference/lattice-datalog.md)
 - [FAQ](reference/faq.md)
 - [Glossary](reference/glossary.md)
 - [Release Notes](reference/changelog.md)

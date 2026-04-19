@@ -610,6 +610,31 @@ $$;
     requires = ["framing_views_schema_setup"]
 );
 
+// v0.36.0: Lattice-based Datalog catalog table.
+pgrx::extension_sql!(
+    r#"
+-- Lattice type catalog (v0.36.0)
+-- Stores registered lattice types for Datalog^L monotone aggregation rules.
+CREATE TABLE IF NOT EXISTS _pg_ripple.lattice_types (
+    name       TEXT        NOT NULL PRIMARY KEY,
+    join_fn    TEXT        NOT NULL,
+    bottom     TEXT        NOT NULL DEFAULT '0',
+    builtin    BOOLEAN     NOT NULL DEFAULT false,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Register built-in lattice types.
+INSERT INTO _pg_ripple.lattice_types (name, join_fn, bottom, builtin) VALUES
+    ('min',      'min',       '9223372036854775807',  true),
+    ('max',      'max',       '-9223372036854775808', true),
+    ('set',      'array_agg', '{}',                   true),
+    ('interval', 'max',       '0',                    true)
+ON CONFLICT (name) DO NOTHING;
+"#,
+    name = "v036_lattice_types",
+    requires = ["datalog_schema_setup"]
+);
+
 // Create the predicate_stats view after the base tables exist.
 pgrx::extension_sql!(
     r#"
@@ -1000,6 +1025,38 @@ pub static DATALOG_PARALLEL_WORKERS: pgrx::GucSetting<i32> = pgrx::GucSetting::<
 /// is below this threshold, the serial evaluation path is used to avoid the
 /// overhead of dependency analysis.  Default: `10000`.
 pub static DATALOG_PARALLEL_THRESHOLD: pgrx::GucSetting<i32> = pgrx::GucSetting::<i32>::new(10_000);
+
+// ─── v0.36.0 GUCs ────────────────────────────────────────────────────────────
+
+/// GUC: master switch for Worst-Case Optimal Join (WCOJ) optimisation (v0.36.0).
+///
+/// When `true` (default), cyclic SPARQL BGPs (triangle queries and other
+/// cyclic join patterns) are detected at translation time and routed through
+/// the Leapfrog Triejoin execution path, which forces sort-merge joins over
+/// the existing B-tree `(s, o)` indices on VP tables.
+///
+/// Set `false` to fall back to the standard PostgreSQL planner for all queries.
+pub static WCOJ_ENABLED: pgrx::GucSetting<bool> = pgrx::GucSetting::<bool>::new(true);
+
+/// GUC: minimum number of VP table joins before WCOJ analysis is applied (v0.36.0).
+///
+/// Queries with fewer VP table joins than this value use the standard planner
+/// even when cyclic.  Setting to `3` (default) means only triangle or larger
+/// cyclic patterns trigger WCOJ optimisation.  Set to `2` to also optimise
+/// 2-table cyclic patterns (uncommon in practice).
+pub static WCOJ_MIN_TABLES: pgrx::GucSetting<i32> = pgrx::GucSetting::<i32>::new(3);
+
+/// GUC: maximum fixpoint iterations for lattice-based Datalog inference (v0.36.0).
+///
+/// `pg_ripple.infer_lattice()` runs a monotone fixpoint loop over lattice rules.
+/// Termination is guaranteed when the lattice satisfies the ascending chain
+/// condition.  This GUC provides a safety cap — if a user-defined lattice's
+/// join function is not properly monotone, the fixpoint may not converge;
+/// after `lattice_max_iterations` rounds a WARNING is emitted with error code
+/// PT540 and the partial results are returned.
+///
+/// Default: `1000`.  Set higher for very large lattice computations.
+pub static LATTICE_MAX_ITERATIONS: pgrx::GucSetting<i32> = pgrx::GucSetting::<i32>::new(1000);
 
 // ─── pg_trickle runtime detection (v0.6.0) ───────────────────────────────────
 
@@ -1834,6 +1891,42 @@ pub extern "C-unwind" fn _PG_init() {
         &DATALOG_PARALLEL_THRESHOLD,
         0,
         100_000_000,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+
+    // ── v0.36.0 GUCs ─────────────────────────────────────────────────────────
+
+    pgrx::GucRegistry::define_bool_guc(
+        c"pg_ripple.wcoj_enabled",
+        c"When on (default), cyclic SPARQL BGPs are detected and executed via \
+          sort-merge join hints simulating Leapfrog Triejoin (v0.36.0)",
+        c"",
+        &WCOJ_ENABLED,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+
+    pgrx::GucRegistry::define_int_guc(
+        c"pg_ripple.wcoj_min_tables",
+        c"Minimum VP table join count before WCOJ cyclic-pattern detection is applied \
+          (default: 3, min: 2, max: 100) (v0.36.0)",
+        c"",
+        &WCOJ_MIN_TABLES,
+        2,
+        100,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+
+    pgrx::GucRegistry::define_int_guc(
+        c"pg_ripple.lattice_max_iterations",
+        c"Maximum fixpoint iterations for lattice-based Datalog inference; \
+          emits PT540 WARNING on non-convergence (default: 1000, min: 1, max: 1000000) (v0.36.0)",
+        c"",
+        &LATTICE_MAX_ITERATIONS,
+        1,
+        1_000_000,
         GucContext::Userset,
         GucFlags::default(),
     );
@@ -4246,6 +4339,154 @@ mod pg_ripple {
         crate::datalog::tabling_store(goal_hash, &result.0, elapsed_ms);
 
         result
+    }
+
+    // ── v0.36.0: WCOJ & Lattice-Based Datalog ────────────────────────────────
+
+    /// Detect whether a SPARQL triangle query is cyclic (v0.36.0).
+    ///
+    /// Returns `true` if the provided BGP variable pattern sets contain a cycle
+    /// (i.e. the variable adjacency graph has a back-edge).  Used internally
+    /// by the SPARQL→SQL translator; also exposed for testing and introspection.
+    ///
+    /// Each row in `pattern_vars_json` is a JSON array of variable name strings
+    /// representing the variables co-occurring in one triple pattern.
+    ///
+    /// Example:
+    /// ```sql
+    /// SELECT pg_ripple.wcoj_is_cyclic('[["a","b"],["b","c"],["c","a"]]');
+    /// -- returns true
+    /// ```
+    #[pg_extern]
+    fn wcoj_is_cyclic(pattern_vars_json: &str) -> bool {
+        let patterns: Vec<Vec<String>> = match serde_json::from_str(pattern_vars_json) {
+            Ok(v) => v,
+            Err(e) => pgrx::error!("wcoj_is_cyclic: invalid JSON input: {e}"),
+        };
+        crate::sparql::wcoj::detect_cyclic_bgp(&patterns)
+    }
+
+    /// Run a triangle-detection query on a VP predicate and return result stats (v0.36.0).
+    ///
+    /// Returns JSONB with `{"triangle_count": N, "wcoj_applied": bool, "predicate_iri": "..."}`.
+    ///
+    /// `predicate_iri` — the predicate IRI (without angle brackets) to use for all
+    /// three edges of the triangle.
+    ///
+    /// This function is primarily used by `benchmarks/wcoj.sql` to compare
+    /// WCOJ vs. standard planner execution.
+    #[pg_extern]
+    fn wcoj_triangle_query(predicate_iri: &str) -> pgrx::JsonB {
+        let result = crate::sparql::wcoj::run_triangle_query(predicate_iri);
+        pgrx::JsonB(serde_json::json!({
+            "triangle_count": result.triangle_count,
+            "wcoj_applied":   result.wcoj_applied,
+            "predicate_iri":  result.predicate_iri
+        }))
+    }
+
+    /// Register a user-defined lattice type for Datalog^L rules (v0.36.0).
+    ///
+    /// A lattice is an algebraic structure (L, ⊔) where the join operation ⊔
+    /// is commutative, associative, and idempotent, with a bottom element ⊥.
+    /// Fixpoint computation on a lattice terminates when the ascending chain
+    /// condition holds.
+    ///
+    /// # Parameters
+    ///
+    /// - `name` — unique lattice identifier (e.g. `'trust'`, `'my_lattice'`).
+    /// - `join_fn` — PostgreSQL aggregate function name implementing the join
+    ///   (e.g. `'min'`, `'max'`, `'array_agg'`, `'my_custom_agg'`).
+    ///   Must be commutative and associative.
+    /// - `bottom` — bottom element as a text string (e.g. `'9223372036854775807'`
+    ///   for a MinLattice over integer trust scores).
+    ///
+    /// Returns `true` if the lattice was newly registered, `false` if it already
+    /// existed.
+    ///
+    /// # Built-in lattices
+    ///
+    /// The following lattices are pre-registered and do not need to be created:
+    /// - `'min'` — MinLattice (join = MIN, bottom = i64::MAX)
+    /// - `'max'` — MaxLattice (join = MAX, bottom = i64::MIN)
+    /// - `'set'` — SetLattice (join = UNION via array_agg, bottom = {})
+    /// - `'interval'` — IntervalLattice (join = MAX, bottom = 0)
+    ///
+    /// # Example
+    ///
+    /// ```sql
+    /// -- Register a MinLattice for trust propagation over [0.0, 1.0] scores.
+    /// SELECT pg_ripple.create_lattice('trust_score', 'min', '1.0');
+    /// ```
+    #[pg_extern]
+    fn create_lattice(name: &str, join_fn: &str, bottom: &str) -> bool {
+        crate::datalog::register_lattice(name, join_fn, bottom)
+    }
+
+    /// List all registered lattice types as JSONB (v0.36.0).
+    ///
+    /// Returns an array of `{"name": "...", "join_fn": "...", "bottom": "...", "builtin": bool}`.
+    #[pg_extern]
+    fn list_lattices() -> pgrx::JsonB {
+        crate::datalog::ensure_lattice_catalog();
+        let rows: Vec<serde_json::Value> = pgrx::Spi::connect(|c| {
+            c.select(
+                "SELECT name, join_fn, bottom, builtin \
+                 FROM _pg_ripple.lattice_types \
+                 ORDER BY builtin DESC, name",
+                None,
+                &[],
+            )
+            .unwrap_or_else(|e| pgrx::error!("list_lattices: SPI error: {e}"))
+            .map(|row| {
+                let name: String = row.get::<String>(1).ok().flatten().unwrap_or_default();
+                let join_fn: String = row.get::<String>(2).ok().flatten().unwrap_or_default();
+                let bottom: String = row.get::<String>(3).ok().flatten().unwrap_or_default();
+                let builtin: bool = row.get::<bool>(4).ok().flatten().unwrap_or(false);
+                serde_json::json!({
+                    "name":    name,
+                    "join_fn": join_fn,
+                    "bottom":  bottom,
+                    "builtin": builtin
+                })
+            })
+            .collect()
+        });
+        pgrx::JsonB(serde_json::Value::Array(rows))
+    }
+
+    /// Run lattice-based Datalog inference for a rule set (v0.36.0).
+    ///
+    /// Executes a monotone fixpoint computation over the rules in `rule_set`
+    /// using `lattice_name` as the lattice type for head derivations.
+    ///
+    /// Terminates when no new values are derived (convergence), or when
+    /// `pg_ripple.lattice_max_iterations` is reached (emits WARNING PT540 and
+    /// returns partial results).
+    ///
+    /// Returns JSONB with:
+    /// - `"derived"` — total new lattice values written
+    /// - `"iterations"` — fixpoint iterations performed
+    /// - `"lattice"` — name of the lattice used
+    /// - `"rule_set"` — name of the rule set evaluated
+    ///
+    /// # Example
+    ///
+    /// ```sql
+    /// -- Trust propagation: min-cost path through a social graph.
+    /// SELECT pg_ripple.load_rules($$
+    ///     ?x <ex:trust> ?min_t :-
+    ///         ?x <ex:knows> ?y, ?y <ex:trust> ?t1, ?x <ex:directTrust> ?t2,
+    ///         COUNT(?z WHERE ?z <ex:knows> ?y) AS min_t = LEAST(?t1, ?t2) .
+    /// $$, 'trust_rules');
+    /// SELECT pg_ripple.infer_lattice('trust_rules', 'min');
+    /// ```
+    #[pg_extern]
+    fn infer_lattice(
+        rule_set: default!(&str, "'custom'"),
+        lattice_name: default!(&str, "'min'"),
+    ) -> pgrx::JsonB {
+        pgrx::JsonB(crate::datalog::run_infer_lattice(rule_set, lattice_name))
     }
 
     // ── v0.32.0: Tabling / memoisation ───────────────────────────────────────

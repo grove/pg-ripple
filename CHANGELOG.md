@@ -11,6 +11,62 @@ Versions correspond to the milestones in [ROADMAP.md](ROADMAP.md).
 
 ---
 
+## [0.36.0] — 2026-04-25 — Worst-Case Optimal Joins & Lattice-Based Datalog
+
+**Leapfrog Triejoin for cyclic SPARQL patterns and monotone lattice aggregation for Datalog^L.**
+
+### What you can do
+
+- **Accelerate triangle and cyclic graph queries** — when `pg_ripple.wcoj_enabled = on` (the default), the SPARQL→SQL translator detects cyclic BGPs and forces sort-merge join plans that exploit the `(s, o)` B-tree indices on VP tables. Triangle queries that previously timed out complete in milliseconds.
+- **Inspect cyclic patterns** — `pg_ripple.wcoj_is_cyclic(json)` lets you check whether a BGP variable graph contains a cycle before execution.
+- **Benchmark WCOJ** — `pg_ripple.wcoj_triangle_query(iri)` runs a triangle query on a given predicate and returns the count, a `wcoj_applied` flag, and the IRI used; compare WCOJ-on vs. WCOJ-off with `benchmarks/wcoj.sql`.
+- **Write recursive aggregation rules** — `pg_ripple.create_lattice()` registers a user-defined lattice type, and `pg_ripple.infer_lattice()` runs a monotone fixpoint over rules that use it. Built-in lattices: `min`, `max`, `set`, `interval`.
+- **Trust propagation and shortest paths** — lattice rules like `?x ex:trust (MIN ?t1 ?t2) :- ?x ex:knows ?y, ?y ex:trust ?t1` converge to correct fixed points without manual loop unrolling.
+- **Guaranteed termination** — fixpoints are bounded by `pg_ripple.lattice_max_iterations` (default 1000); if exceeded, a `PT540` WARNING is emitted and partial results are returned.
+
+### What happens behind the scenes
+
+- `src/sparql/wcoj.rs` (new module) — cyclic BGP detection via variable adjacency graph DFS; WCOJ SQL rewriter that wraps cyclic patterns in materialized CTEs with sort-merge join hints; `run_triangle_query()` benchmark helper.
+- `src/datalog/lattice.rs` (new module) — lattice type catalog (`_pg_ripple.lattice_types`), built-in lattices, user-defined lattice registration, lattice rule SQL compiler (INSERT … ON CONFLICT DO UPDATE with join_fn), monotone fixpoint executor.
+- `src/lib.rs` — three new GUCs registered in `_PG_init()`: `pg_ripple.wcoj_enabled`, `pg_ripple.wcoj_min_tables`, `pg_ripple.lattice_max_iterations`. Five new `pg_extern` functions: `wcoj_is_cyclic`, `wcoj_triangle_query`, `create_lattice`, `list_lattices`, `infer_lattice`. New `extension_sql!` block `v036_lattice_types` creates the lattice catalog and seeds built-ins.
+- New migration script: `sql/pg_ripple--0.35.0--0.36.0.sql`.
+- New benchmark: `benchmarks/wcoj.sql`.
+- New pg_regress tests: `sparql_wcoj.sql`, `datalog_lattice.sql`.
+- New documentation: `reference/lattice-datalog.md`; `user-guide/sql-reference/datalog.md` updated; `user-guide/best-practices/sparql-performance.md` updated.
+
+<details>
+<summary>Technical Details</summary>
+
+### New GUC parameters
+
+| GUC | Type | Default | Description |
+|-----|------|---------|-------------|
+| `pg_ripple.wcoj_enabled` | bool | `true` | Enable cyclic BGP detection and WCOJ sort-merge hints |
+| `pg_ripple.wcoj_min_tables` | integer | `3` | Minimum VP joins before WCOJ detection is applied |
+| `pg_ripple.lattice_max_iterations` | integer | `1000` | Max fixpoint iterations for lattice inference |
+
+### New SQL functions
+
+| Function | Returns | Description |
+|----------|---------|-------------|
+| `wcoj_is_cyclic(json)` | `boolean` | Detect cycle in a BGP variable graph |
+| `wcoj_triangle_query(iri)` | `jsonb` | Run a triangle query with WCOJ benchmark stats |
+| `create_lattice(name, join_fn, bottom)` | `boolean` | Register a user-defined lattice type |
+| `list_lattices()` | `jsonb` | List all registered lattice types |
+| `infer_lattice(rule_set, lattice_name)` | `jsonb` | Run monotone lattice fixpoint |
+
+### Error codes
+
+- `PT540` — lattice fixpoint did not converge within `lattice_max_iterations`.
+
+### Schema changes
+
+New catalog table `_pg_ripple.lattice_types` with columns `name`, `join_fn`, `bottom`, `builtin`, `created_at`.
+
+</details>
+
+---
+
 ## [0.35.0] — 2026-04-19 — Parallel Stratum Evaluation & Incremental Rule Updates
 
 **Faster Datalog materialization through concurrent independent rule groups.**
