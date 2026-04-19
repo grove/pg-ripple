@@ -11,7 +11,7 @@ Each release below has two layers:
 - **The plain-language summary** (in the coloured box) explains *what* the release delivers and *why it matters* — no programming knowledge required.
 - **The technical deliverables** list the specific items developers will build. Feel free to skip these if you're reading for the big picture.
 
-**Effort estimates** are given as *person-weeks* — e.g. "6–8 pw" means the release would take roughly 6–8 weeks for a single full-time developer, or 3–4 weeks for a pair working together. The total estimated effort from v0.1.0 to v1.0.0 is **199–274 person-weeks** (~45–63 months for one developer; ~22–31 months for a pair).
+**Effort estimates** are given as *person-weeks* — e.g. "6–8 pw" means the release would take roughly 6–8 weeks for a single full-time developer, or 3–4 weeks for a pair working together. The total estimated effort from v0.1.0 to v1.0.0 is **236–319 person-weeks** (~55–74 months for one developer; ~27–37 months for a pair).
 
 **"optional at runtime" items**: some deliverables are annotated *(optional at runtime — X must be installed)*. This means the feature depends on an external extension (e.g. pg_trickle) that may not be installed in every deployment. The feature is **required by this roadmap** and must be implemented; the Rust code gates on a runtime availability check and degrades gracefully (returns 0 / false / empty, emits a WARNING, never raises an ERROR) when the dependency is absent. These items are not optional from a delivery standpoint.
 
@@ -58,8 +58,12 @@ Each release below has two layers:
 | [0.34.0](#v0340--bounded-depth-termination--incremental-retraction-dred) | Bounded-Depth Termination & Incremental Retraction (DRed) | Early fixpoint termination for bounded hierarchies (20–50% faster SPARQL property paths); Delete-Rederive for write-correct materialized predicates | 5–7 pw |
 | [0.35.0](#v0350--parallel-stratum-evaluation--incremental-rule-updates) | Parallel Stratum Evaluation & Incremental Rule Updates | Background-worker parallelism for independent rules (2–5× faster materialization); add/remove rules without full recompute | 5–7 pw |
 | [0.36.0](#v0360--worst-case-optimal-joins--lattice-based-datalog) | Worst-Case Optimal Joins & Lattice-Based Datalog | Leapfrog Triejoin for cyclic SPARQL patterns (10×–100× speedup); Datalog^L monotone lattice aggregation | 6–9 pw |
+| [0.37.0](#v0370--storage-concurrency-hardening--error-safety) | Storage Concurrency Hardening & Error Safety | Fix HTAP merge race, rare-predicate promotion race, dictionary cache rollback; eliminate all hard panics; add GUC validators | 9–11 pw |
+| [0.38.0](#v0380--architecture-refactoring--query-completeness) | Architecture Refactoring & Query Completeness | Split god-module, PredicateCatalog trait, batch encoding, SCBD, SPARQL Update completeness, SHACL hints in planner | 9–11 pw |
+| [0.39.0](#v0390--streaming-results-explain--observability) | Streaming Results, Explain & Observability | Server-side SPARQL cursors, `explain_sparql()`, `explain_datalog()`, OpenTelemetry tracing, resource governors | 9–11 pw |
+| [0.40.0](#v0400--parallel-merge-cost-based-federation--live-cdc) | Parallel Merge, Cost-Based Federation & Live CDC | Multi-worker HTAP merge, FedX-style federation planner, parallel SERVICE, live RDF change subscriptions | 10–12 pw |
 | [1.0.0](#v100--production-release) | Production Release | Standards conformance, stress testing, security audit | 6–8 pw |
-| | | **Total estimated effort** | **199–274 pw** |
+| | | **Total estimated effort** | **236–319 pw** |
 
 ---
 
@@ -2683,6 +2687,280 @@ See [plans/ecosystem/datalog.md §14.2.8 and §14.2.14](plans/ecosystem/datalog.
 ### Exit Criteria
 
 `sparql_wcoj.sql` and `datalog_lattice.sql` pass in `cargo pgrx regress pg18`. A triangle-pattern SPARQL query on a 1M-edge social graph VP table completes in <10% of the time compared to the standard planner (WCOJ enabled). A trust-propagation lattice rule on 100K triples converges to the correct fixed point. Migration scripts from 0.1.0 through 0.36.0 run cleanly via `just test-migration`.
+
+---
+
+## v0.37.0 — Storage Concurrency Hardening & Error Safety
+
+**Theme**: Fix the highest-severity correctness bugs identified in the deep-analysis audit and eliminate all hard panics from library code.
+
+> **In plain language:** This is a reliability release — no new features, but a direct response to the first comprehensive code audit (see [plans/PLAN_OVERALL_ASSESSMENT_2.md](plans/PLAN_OVERALL_ASSESSMENT_2.md)). Two concurrency bugs that could silently drop deletes or strand predicates in a slow-path table are fixed with proper advisory-lock coordination. Every place in the code that could crash the database server on an unexpected error is replaced with a typed error message. Configuration parameters now validate their inputs so bad values are caught immediately instead of causing cryptic failures later. A new `diagnostic_report()` function gives a one-call health check of the running system.
+>
+> **Effort estimate: 9–11 person-weeks**
+
+### Deliverables
+
+- [ ] **HTAP merge cutover race — fixed** (`src/storage/merge.rs`)
+  - Wrap the delta→main swap in a per-predicate `pg_advisory_xact_lock`; concurrent `DELETE` path acquires the same lock in `share` mode
+  - Ensures deletes arriving during a merge cycle are never lost regardless of timing
+  - Add crash-recovery test `tests/crash_recovery/merge_concurrent_delete.sh`: 50 concurrent writers + 1-second merge interval, assert zero lost deletes after 5 minutes
+- [ ] **Tombstone GC integrated into merge worker** (`src/storage/merge.rs`, `src/worker.rs`)
+  - After each successful merge cycle, schedule `VACUUM` on VP tables where `tombstone_count / main_count > pg_ripple.tombstone_gc_threshold`
+  - New GUCs: `pg_ripple.tombstone_gc_enabled` (bool, default `true`), `pg_ripple.tombstone_gc_threshold` (float, default `0.05`)
+  - pg_regress test `storage_tombstone_gc.sql`: verify tombstones are vacuumed after threshold is crossed
+- [ ] **Rare-predicate promotion — idempotent and serialised** (`src/lib.rs`, `src/storage/mod.rs`)
+  - Acquire the per-predicate advisory lock before any promotion attempt
+  - Use `CREATE TABLE IF NOT EXISTS`; wrap data move in `WITH moved AS (DELETE … RETURNING *) INSERT INTO vp_N SELECT * FROM moved`
+  - Add crash-recovery test `tests/crash_recovery/promotion_race.sh`: two backends racing to promote the same predicate, assert exactly one succeeds
+- [ ] **Dictionary cache rollback on transaction abort** (`src/dictionary/mod.rs`, `src/shmem.rs`)
+  - Version-tag each shared-memory cache entry with the inserting `xid`; decode path checks `TransactionIdDidCommit` before trusting cached ID
+  - pg_regress test `dictionary_rollback.sql`: `BEGIN; encode_term('novel:term'); ROLLBACK; encode_term('novel:term')` — verify the second encode succeeds without error
+- [ ] **Bloom filter saturating counter fix** (`src/shmem.rs`)
+  - Replace all reference-counter decrements with `saturating_sub(1)`; document that a counter saturated at 255 is treated conservatively (bit kept set, no false negatives)
+- [ ] **`_pg_ripple.statements` atomic update** (`src/storage/merge.rs`)
+  - Perform SID-range catalog `DELETE + INSERT` in the same transaction as the VP table swap
+  - Eliminates the race where a mid-update worker kill leaves a stale SID→OID mapping for RDF-star queries
+- [ ] **`(o, s)` index on `vp_rare`** (`src/storage/mod.rs`)
+  - Add `CREATE INDEX IF NOT EXISTS vp_rare_os_idx ON _pg_ripple.vp_rare (o, s)` in bootstrap and migration script
+  - Eliminates sequential scans on object-leading patterns over rare predicates
+- [ ] **Eliminate `.expect()` / `.unwrap()` in all library code** (`src/lib.rs`, `src/bulk_load.rs`, `src/sparql/optimizer.rs`, `src/sparql/sqlgen.rs`, `src/export.rs`, `pg_ripple_http/src/main.rs`)
+  - Replace all 30+ `expect()`/`unwrap()` calls in non-test code with `Result`-propagating helpers; surface errors via `pgrx::error!()` at the pg_extern boundary
+  - Add `#![deny(clippy::unwrap_used, clippy::expect_used)]` to `src/lib.rs` (test code excluded via `#[cfg(test)]`)
+  - Fix `pg_ripple_http`: replace startup panics with graceful error logging and `process::exit(1)`
+- [ ] **GUC `check_hook` validators** (`src/lib.rs`)
+  - Implement validators for all string-enum GUCs: `inference_mode` (`off` / `on_demand` / `materialized`), `enforce_constraints` (`off` / `warn` / `error`), `rule_graph_scope` (`default` / `all`), `shacl_mode` (`off` / `sync` / `async`), `describe_strategy` (`cbd` / `scbd`)
+  - Implement `min_val` bounds for integer GUCs: `max_path_depth ≥ 1`, `property_path_max_depth ≥ 1`, `merge_threshold ≥ 1`, `merge_interval_secs ≥ 1`
+  - Promote `pg_ripple.rls_bypass` to `PGC_POSTMASTER` so it cannot be flipped per-session
+- [ ] **`pg_ripple.diagnostic_report() RETURNS TABLE (key TEXT, value TEXT)`** (`src/lib.rs`)
+  - Keys: GUC validity summary, shared-memory cache hit/miss rates, merge backlog (rows in all delta tables), validation queue depth, federation endpoint health, schema_version match
+  - pg_regress test `diagnostic_report.sql`: exercise all fields; assert no null values
+- [ ] **`_pg_ripple.schema_version` table** (`src/lib.rs`)
+  - Created at install time with columns `version TEXT, installed_at TIMESTAMPTZ, upgraded_from TEXT`
+  - Stamped on every `ALTER EXTENSION … UPDATE`
+
+### Migration Script
+
+`sql/pg_ripple--0.36.0--0.37.0.sql` — adds `(o, s)` index on `vp_rare`; creates `_pg_ripple.schema_version` table; registers `tombstone_gc_enabled` and `tombstone_gc_threshold` GUCs. No VP table schema changes.
+
+### Documentation
+
+- [ ] `user-guide/operations/troubleshooting.md` — new section: "Lost deletes after merge" runbook (cause, detection via `diagnostic_report()`, fix via advisory lock, upgrade to v0.37.0)
+- [ ] `reference/guc-reference.md` — document `tombstone_gc_threshold`, `tombstone_gc_enabled`; add validator-rules table for all enum GUCs; note `rls_bypass` scope change
+- [ ] `user-guide/operations/upgrade.md` — document the `schema_version` stamp and how to verify upgrade completeness
+- [ ] Release notes for v0.37.0
+
+### Exit Criteria
+
+No `.expect()`/`.unwrap()` in non-test Rust code; clippy deny enforced in CI. The concurrent-delete stress test (`merge_concurrent_delete.sh`) passes at 50 writers + 1-second merge interval. All GUC enum validators active. `diagnostic_report()` passes pg_regress. Migration scripts from 0.1.0 through 0.37.0 run cleanly via `just test-migration`.
+
+---
+
+## v0.38.0 — Architecture Refactoring & Query Completeness
+
+**Theme**: Split the god-module, introduce the `PredicateCatalog` abstraction, close SPARQL Update gaps, and wire SHACL hints into the query planner.
+
+> **In plain language:** After 37 releases, the codebase has accumulated structural debt — most visibly in a single 5,600-line "everything" file that makes every change risky. This release pays that debt: the central file is divided into focused modules, and a clean interface between the query engine and the storage layer is introduced so that future storage variants don't require rewriting the query translator. Users gain two concrete improvements: SPARQL UPDATE now supports pattern-based deletions (the commonly needed `DELETE WHERE` form that was missing), and SHACL shapes now automatically influence query planning so queries over shape-constrained predicates are faster.
+>
+> **Effort estimate: 9–11 person-weeks**
+
+### Deliverables
+
+- [ ] **Split `src/lib.rs` into subsystem modules**
+  - Extract `src/rare_predicate.rs`, `src/shacl_admin.rs`, `src/federation_registry.rs`, `src/graphrag_admin.rs`, `src/stats_admin.rs` from `src/lib.rs`
+  - Target: `src/lib.rs` ≤1,500 lines covering `_PG_init`, GUC registration, `extension_sql!` blocks, and thin `#[pg_extern]` delegation shims
+  - No change to public SQL API; all existing `pg_ripple.*` functions remain
+- [ ] **`PredicateCatalog` trait and backend-local OID cache** (`src/storage/catalog.rs` new module)
+  - Define `trait PredicateCatalog { fn resolve(&self, pred_id: i64) -> Option<TableDesc>; }`
+  - Implement a backend-local `HashMap<i64, TableDesc>` cache invalidated by a syscache callback on `_pg_ripple.predicates`
+  - Wire into `src/sparql/sqlgen.rs` and `src/datalog/compiler.rs` — eliminates per-atom SPI catalog lookup for hot BGPs
+  - New GUC `pg_ripple.predicate_cache_enabled` (bool, default `true`)
+  - Benchmark: 10-atom BGP must show 1 catalog SPI call instead of 10
+- [ ] **Refactor `validate_shape()` → per-constraint helpers** (`src/shacl/constraints/` new sub-module)
+  - One file per constraint family: `count.rs`, `value_type.rs`, `string_based.rs`, `logical.rs`, `property_path.rs`, `shape_based.rs`
+  - Each exported function ≤80 lines; top-level `validate_shape()` becomes a dispatcher ≤50 lines
+  - All existing `shacl_*.sql` pg_regress tests must pass unchanged
+- [ ] **Refactor `translate_pattern()` → per-algebra-node helpers** (`src/sparql/translate/` new sub-module)
+  - One file per algebra node: `bgp.rs`, `join.rs`, `left_join.rs`, `union.rs`, `filter.rs`, `graph.rs`, `group.rs`, `distinct.rs`
+  - Shared context struct `TranslateCtx` carries encode cache, catalog handle, and query-level state
+  - All existing `sparql_*.sql` pg_regress tests must pass unchanged
+- [ ] **Batch dictionary encoding in SPARQL translation**
+  - In `translate_pattern`, collect all unresolved IRI/literal constants in a first pass; resolve via one `encode_terms_batch(&[Term]) -> Vec<i64>` SPI call (single `INSERT … ON CONFLICT … RETURNING` batch)
+  - Benchmark: BGP with 20 FILTER constants must show 1 encode SPI call instead of 20
+- [ ] **Plan-cache key normalisation** (`src/sparql/plan_cache.rs`)
+  - Cache on algebra digest (serialize `spargebra::Query` IR → compact bytes → XXH3-128) instead of raw query text
+  - Whitespace and prefix-form variants now share the same cache slot
+- [ ] **SCBD DESCRIBE — implemented** (`src/sparql/mod.rs`)
+  - Implement Symmetric Concise Bounded Description: all triples where the resource is subject *or* object, with blank-node recursion
+  - `describe_strategy = 'scbd'` now functional; remove the "not implemented" caveat from docs
+- [ ] **SPARQL Update: DELETE WHERE / INSERT WHERE / graph management** (`src/sparql/update.rs`)
+  - Implement `DELETE { … } WHERE { … }`, `INSERT { … } WHERE { … }`, `DELETE WHERE { … }`
+  - Implement graph management: `CLEAR GRAPH`, `DROP GRAPH`, `COPY`, `MOVE`, `ADD`
+  - pg_regress test `sparql_update_advanced.sql`: pattern-based deletes spanning multiple VP tables; cross-graph COPY/MOVE
+- [ ] **Consolidate property-path depth GUCs** (`src/lib.rs`)
+  - Deprecate `property_path_max_depth`; make it an alias for `max_path_depth` with a one-time `NOTICE`
+- [ ] **Wire SHACL hints into SPARQL planner** (`src/shacl/hints.rs` new module, `src/sparql/sqlgen.rs`)
+  - At query-translation time, query `_pg_ripple.shape_hints` (populated from loaded shapes) per predicate
+  - `sh:maxCount 1` → suppress `DISTINCT` on that predicate's join; `sh:minCount 1` → downgrade `LEFT JOIN` to `INNER JOIN`
+  - pg_regress test `shacl_sparql_hints.sql`: verify join-type changes with and without shapes; assert result equivalence
+- [ ] **SPARQL 1.1 conformance suite in CI** (allowed-to-warn job)
+  - Download W3C SPARQL 1.1 test suite; run via `cargo pgrx regress`; report pass/skip/fail counts
+  - Publish conformance percentage in `CHANGELOG.md` per release
+
+### Migration Script
+
+`sql/pg_ripple--0.37.0--0.38.0.sql` — creates `_pg_ripple.shape_hints` table; registers `predicate_cache_enabled` GUC. No VP table schema changes.
+
+### Documentation
+
+- [ ] `reference/architecture.md` — Mermaid architecture diagram showing post-refactor module boundaries (dictionary → storage/catalog → sparql/translate + datalog/compiler → shacl/constraints → views/exporters)
+- [ ] `user-guide/sql-reference/sparql-update.md` — document DELETE WHERE / INSERT WHERE / CLEAR / COPY / MOVE / ADD with examples
+- [ ] `reference/guc-reference.md` — `predicate_cache_enabled`; deprecation notice for `property_path_max_depth`
+- [ ] `user-guide/performance/query-planning.md` — new section on SHACL hints and their effect on join selection
+- [ ] Release notes for v0.38.0
+
+### Exit Criteria
+
+`src/lib.rs` ≤1,500 lines. Each `translate/` module file ≤200 lines. `validate_shape()` dispatcher ≤50 lines. SCBD DESCRIBE tests pass. SPARQL Update advanced tests pass. SHACL hints pg_regress passes. Predicate OID cache reduces SPI calls for 10-atom BGP from 10 to 1. Migration chain test passes.
+
+---
+
+## v0.39.0 — Streaming Results, Explain & Observability
+
+**Theme**: Streaming cursor API for large result sets, first-class query explain, and full observability stack.
+
+> **In plain language:** Three long-requested developer and operator improvements land together. Large SPARQL queries can now stream their results instead of materialising everything in memory — making it safe to CONSTRUCT or export millions of triples without running out of memory. A new `explain_sparql()` function shows exactly what SQL the SPARQL engine generated, with cardinality estimates and actual timings in EXPLAIN ANALYZE format but with RDF IRIs instead of internal numbers. A new `explain_datalog()` function does the same for Datalog rule sets. Every significant operation now emits OpenTelemetry spans, and `diagnostic_report()` gives a one-call health summary of the running system.
+>
+> **Effort estimate: 9–11 person-weeks**
+
+### Deliverables
+
+- [ ] **Streaming SPARQL cursor API** (`src/sparql/cursor.rs` new module)
+  - `pg_ripple.sparql_cursor(query TEXT) RETURNS SETOF RECORD` — SRF paging through results 1024 rows at a time with batched dictionary decode
+  - `pg_ripple.sparql_cursor_turtle(query TEXT) RETURNS SETOF TEXT` — emits Turtle lines
+  - `pg_ripple.sparql_cursor_jsonld(query TEXT) RETURNS SETOF TEXT` — emits JSON-LD object chunks
+  - Wire to `pg_ripple_http`: `Accept: text/turtle` or `Accept: application/ld+json` triggers `Transfer-Encoding: chunked` streaming response
+  - pg_regress test `sparql_cursor.sql`: load 500K triples; verify cursor returns correct count; verify chunked Turtle export round-trips
+- [ ] **Resource governors** (`src/lib.rs`)
+  - `pg_ripple.sparql_max_rows` (integer, default `0` = unlimited)
+  - `pg_ripple.datalog_max_derived` (integer, default `0` = unlimited)
+  - `pg_ripple.export_max_rows` (integer, default `0` = unlimited)
+  - `pg_ripple.sparql_overflow_action` (enum: `warn` / `error`, default `warn`)
+  - Error codes: `PT601` (SPARQL row limit exceeded), `PT602` (Datalog derived limit exceeded), `PT603` (export row limit exceeded)
+- [ ] **`pg_ripple.explain_sparql(query TEXT, analyze BOOLEAN DEFAULT false) RETURNS JSONB`** (`src/sparql/explain.rs` new module)
+  - Step 1: parse + optimise via `spargebra`/`sparopt`; emit algebra tree as JSON with predicate IRIs decoded
+  - Step 2: run `EXPLAIN (FORMAT JSON, BUFFERS true [, ANALYZE true])` on the generated SQL; attach as `"plan"` key
+  - Output keys: `"algebra"`, `"sql"` (IRI-decoded), `"plan"`, `"cache_hit"` (bool), `"encode_calls"` (int)
+  - pg_regress test `sparql_explain.sql`: verify all output keys; verify IRI decoding; verify `analyze: true` adds `"Actual Rows"`
+- [ ] **`pg_ripple.explain_datalog(rule_set_name TEXT) RETURNS JSONB`** (`src/datalog/explain.rs` new module)
+  - Returns per-stratum dependency graph, magic-set rewritten rules, compiled SQL per rule, and per-iteration delta-row counts from last inference run
+  - Output keys: `"strata"`, `"rules"` (rewritten), `"sql_per_rule"`, `"last_run_stats"`
+  - pg_regress test `datalog_explain.sql`
+- [ ] **`pg_ripple.cache_stats() RETURNS JSONB`** and **`pg_ripple.reset_cache_stats()`** (`src/lib.rs`)
+  - Keys: plan cache size/hits/misses, dict cache hits/misses, federation cache hits/misses
+  - pg_regress test `cache_stats.sql`
+- [ ] **`pg_ripple.stat_statements_decoded` view** (`src/lib.rs`)
+  - View over `pg_stat_statements` that regex-decodes predicate IDs in `query` text via `pg_ripple.decode_id()` join; exposes `query_decoded` column
+- [ ] **OpenTelemetry tracing** (`src/telemetry.rs` new module)
+  - Thin facade over the `tracing` crate; spans for: SPARQL parse/translate/execute, merge cycle (per predicate), federation call (per SERVICE), Datalog inference (per stratum)
+  - GUC `pg_ripple.tracing_enabled` (bool, default `false`) — zero overhead when off
+  - GUC `pg_ripple.tracing_exporter` (string: `stdout` / `otlp`, default `stdout`); `otlp` reads `OTEL_EXPORTER_OTLP_ENDPOINT`
+  - pg_regress test `telemetry.sql`: toggle on/off; assert no performance regression in execute path with tracing off
+- [ ] **Migration header standardisation** (`sql/*.sql`)
+  - Backfill headers in all existing scripts: `-- Migration X.Y.Z → A.B.C | Schema changes: … | Data-rewrite cost: Low/Medium/High | Downgrade: …`
+  - All future scripts from v0.37.0 onward follow this template automatically
+
+### Migration Script
+
+`sql/pg_ripple--0.38.0--0.39.0.sql` — registers new GUCs (`sparql_max_rows`, `datalog_max_derived`, `export_max_rows`, `sparql_overflow_action`, `tracing_enabled`, `tracing_exporter`). No VP table schema changes.
+
+### Documentation
+
+- [ ] `user-guide/sql-reference/explain.md` — full tutorial on `explain_sparql()` and `explain_datalog()`; reading the algebra tree and decoded SQL
+- [ ] `user-guide/sql-reference/cursor-api.md` — streaming cursor API; format options; resource governors
+- [ ] `reference/observability.md` (new) — OpenTelemetry integration guide: exporter setup, span taxonomy, Grafana/Jaeger integration examples
+- [ ] `user-guide/operations/monitoring.md` — `cache_stats()`, `diagnostic_report()`, `stat_statements_decoded` usage
+- [ ] `reference/error-reference.md` — PT601, PT602, PT603 documented
+- [ ] Release notes for v0.39.0
+
+### Exit Criteria
+
+`sparql_cursor.sql` passes with 500K triples. `explain_sparql()` returns IRI-decoded algebra and SQL. OpenTelemetry spans emitted for a sample query when `tracing_enabled = on`. All resource governor tests pass. `stat_statements_decoded` returns decoded query text. Migration chain test passes.
+
+---
+
+## v0.40.0 — Parallel Merge, Cost-Based Federation & Live CDC
+
+**Theme**: Multi-worker HTAP merge, intelligent federation query planning, and real-time RDF change subscriptions.
+
+> **In plain language:** Three architectural improvements that close the last major gaps before the 1.0 production release. The merge worker — which keeps the read-optimised main partition in sync with incoming writes — is upgraded from a single process to a configurable pool of parallel workers, each responsible for a subset of predicates, directly improving write throughput for workloads with many distinct predicates. Federation queries now use a cost model to pick the best execution order and run independent fragments in parallel, eliminating the serial bottleneck. And for the first time, applications can subscribe to a real-time stream of triple changes filtered by SPARQL pattern or SHACL shape, enabling reactive GraphRAG pipelines, live dashboards, and ML feature stores without polling.
+>
+> **Effort estimate: 10–12 person-weeks**
+
+### Deliverables
+
+- [ ] **Parallel merge worker pool** (`src/worker.rs`, `src/storage/merge.rs`)
+  - New GUC `pg_ripple.merge_workers` (integer, default `1`, max `16`) — spawns N `BackgroundWorker` processes each managing a disjoint round-robin subset of predicates
+  - Per-predicate `pg_advisory_lock` (from v0.37.0) ensures no two workers race on the same VP table
+  - Work-stealing: idle workers check the global queue for any predicate above `pg_ripple.merge_threshold` not yet claimed
+  - Stress test `tests/stress/parallel_merge.sh`: 100 concurrent writers × 100 predicates × 4 workers; assert correctness and no deadlocks after 10 minutes
+  - Benchmark: 4 merge workers on a workload with 100 distinct predicates shows ≥3× throughput vs. single worker
+- [ ] **`owl:sameAs` cluster size bound** (`src/datalog/builtins.rs`)
+  - New GUC `pg_ripple.sameas_max_cluster_size` (integer, default `100_000`)
+  - Detect over-large equivalence classes during canonicalization; emit `PT550` WARNING and short-circuit with Tarjan-SCC sampling approximation
+  - pg_regress test `sameas_large_cluster.sql`
+- [ ] **VoID statistics catalog per federation endpoint** (`src/sparql/federation.rs`, `_pg_ripple.endpoint_stats` table)
+  - On endpoint registration, fetch and cache the endpoint's VoID description
+  - Refresh driven by new GUC `pg_ripple.federation_stats_ttl_secs` (integer, default `3600`)
+  - Statistics used by the planner: triple count per predicate, distinct subjects/objects
+- [ ] **Cost-based federation source selection** (`src/sparql/federation_planner.rs` new module)
+  - FedX-style planner: for each BGP atom rank endpoints by estimated selectivity using VoID stats; assign each atom to its best source
+  - Independent atoms (no shared variables) scheduled for parallel execution
+  - GUC `pg_ripple.federation_planner_enabled` (bool, default `true`)
+  - GUC `pg_ripple.federation_parallel_max` (integer, default `4`)
+  - GUC `pg_ripple.federation_parallel_timeout` (integer, default `60` seconds)
+  - pg_regress test `federation_planner.sql`: two registered mock endpoints; verify atom routing and timeout behaviour
+- [ ] **Parallel SERVICE execution** (`src/sparql/federation.rs`)
+  - Independent SERVICE clauses dispatched concurrently via background workers; results reassembled before outer join
+  - Bounded by `pg_ripple.federation_parallel_max`
+- [ ] **Federation result streaming** (`src/sparql/federation.rs`)
+  - SERVICE responses exceeding `pg_ripple.federation_inline_max_rows` (new GUC, default `10_000`) are spooled into a temporary table rather than inlined as `VALUES`
+  - Error code `PT620` INFO when spooling is triggered
+- [ ] **IP/CIDR allowlist for federation endpoints** (`src/sparql/federation.rs`)
+  - Resolve hostname on endpoint registration; deny RFC 1918, link-local (`169.254.x.x`), loopback, and IPv6 link-local by default
+  - New GUC `pg_ripple.federation_allow_private` (bool, default `false`) to override
+  - Error code `PT621` when a private-IP endpoint is rejected
+- [ ] **HTTPS certificate validation for HTTP companion** (`pg_ripple_http/src/main.rs`)
+  - Default to system trust store via `rustls-native-certs`
+  - Env var `PG_RIPPLE_HTTP_CA_BUNDLE` — path to a custom CA PEM for private-PKI federation targets
+  - Reject self-signed certificates unless `PG_RIPPLE_HTTP_ALLOW_SELF_SIGNED=true`
+  - Fix CORS defaults: explicit origin allowlist via `PG_RIPPLE_HTTP_CORS_ORIGINS`; `*` requires opt-in
+  - Fix X-Forwarded-For: trust only when `PG_RIPPLE_HTTP_TRUST_PROXY` env lists upstream IP/CIDR
+  - Body limit configurable via `PG_RIPPLE_HTTP_MAX_BODY_BYTES` (default `10_485_760`)
+- [ ] **Live RDF CDC subscriptions** (`src/cdc.rs`, `pg_ripple_http/src/ws.rs` new module)
+  - `pg_ripple.create_subscription(name TEXT, filter_sparql TEXT DEFAULT NULL, filter_shape TEXT DEFAULT NULL) RETURNS BOOLEAN`
+  - Publishes via `NOTIFY pg_ripple_cdc_{name}` with JSON payload: `{"op": "add"|"remove", "s": "…", "p": "…", "o": "…", "g": "…"}`
+  - WebSocket endpoint `/ws/subscriptions/{name}` in `pg_ripple_http`; supports `text/turtle`, `application/ld+json`, `application/json` via `Accept`
+  - Optional SPARQL filter: only matching triples published; optional SHACL filter: only shape-violating triples published
+  - `pg_ripple.drop_subscription(name TEXT)`, `pg_ripple.list_subscriptions() RETURNS TABLE`
+  - New catalog table `_pg_ripple.subscriptions (name, filter_sparql, filter_shape, created_at, queue_table_oid)`
+  - pg_regress test `cdc_subscriptions.sql`: create subscription, insert triples, verify `LISTEN` receives expected payloads
+
+### Migration Script
+
+`sql/pg_ripple--0.39.0--0.40.0.sql` — creates `_pg_ripple.endpoint_stats` table; creates `_pg_ripple.subscriptions` table; registers new GUCs (`merge_workers`, `sameas_max_cluster_size`, `federation_stats_ttl_secs`, `federation_planner_enabled`, `federation_parallel_max`, `federation_parallel_timeout`, `federation_inline_max_rows`, `federation_allow_private`).
+
+### Documentation
+
+- [ ] `user-guide/operations/merge-workers.md` (new) — tuning `merge_workers` for predicate-rich workloads; monitoring via `diagnostic_report()`
+- [ ] `user-guide/features/cdc-subscriptions.md` (new) — complete tutorial: subscribe, filter, consume via SQL LISTEN and WebSocket; integration patterns with GraphRAG, ML feature stores, and live dashboards
+- [ ] `user-guide/features/federation.md` — updated: VoID stats, cost-based planner, parallel SERVICE, result streaming, IP restrictions
+- [ ] `reference/guc-reference.md` — all new GUCs documented; security guidance on `federation_allow_private`
+- [ ] `reference/error-reference.md` — PT550, PT620, PT621 documented
+- [ ] Release notes for v0.40.0
+
+### Exit Criteria
+
+Parallel merge stress test passes (100 writers, 4 workers, no lost deletes). VoID stats fetched on endpoint registration. Independent SERVICE clauses execute in parallel (verifiable via `explain_sparql()`). CDC subscription delivers `NOTIFY` payloads for all inserts matching the filter. HTTPS cert validation enforced in `pg_ripple_http`. Migration chain test passes through 0.40.0.
 
 ---
 
