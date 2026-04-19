@@ -3133,6 +3133,15 @@ All 24 Datalog endpoints respond correctly in integration tests. `GET /datalog/r
   - GUC `pg_ripple.tracing_enabled` (bool, default `false`) — zero overhead when off
   - GUC `pg_ripple.tracing_exporter` (string: `stdout` / `otlp`, default `stdout`); `otlp` reads `OTEL_EXPORTER_OTLP_ENDPOINT`
   - pg_regress test `telemetry.sql`: toggle on/off; assert no performance regression in execute path with tracing off
+- [ ] **Bug fix: property path inside `GRAPH {}` fails on `vp_rare` predicates** (`src/sparql/sqlgen.rs`)
+  - Property path operators (`+`, `*`, `?`) inside a `GRAPH <iri> { }` block generate a `WITH RECURSIVE` CTE that selects only `(s, o)`, but the outer named-graph filter references `.g` — producing `column _t0.g does not exist`
+  - Fix: the recursive CTE must project `(s, o, g)` (or the outer join must not filter on `g` from the CTE node); apply the graph constraint inside the anchor/step selects instead
+  - Affected only when the predicate lands in `vp_rare` (below promotion threshold); dedicated VP tables are not affected
+  - Regression test: `sparql_path_in_graph.sql` — property path on a rare predicate inside a named graph; assert correct row count
+- [ ] **Bug fix: `OPTIONAL {}` inside `GRAPH {}` fails on `vp_rare` predicates** (`src/sparql/sqlgen.rs`)
+  - Same root cause: the left-join wrapper emitted for `OPTIONAL` references `.g` on a CTE column that does not expose `g`
+  - Fix: ensure the `vp_rare` sub-select in optional branches always projects `(s, o, g)` before the LEFT JOIN is applied
+  - Regression test: `sparql_optional_in_graph.sql` — OPTIONAL triple with a rare predicate inside a named graph; assert NULL vs non-NULL rows are correct
 - [ ] **Migration header standardisation** (`sql/*.sql`)
   - Backfill headers in all existing scripts: `-- Migration X.Y.Z → A.B.C | Schema changes: … | Data-rewrite cost: Low/Medium/High | Downgrade: …`
   - All future scripts from v0.37.0 onward follow this template automatically
