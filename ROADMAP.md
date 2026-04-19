@@ -2876,9 +2876,6 @@ See [plans/ecosystem/datalog.md §14.2.8 and §14.2.14](plans/ecosystem/datalog.
 
 ---
 
-<details>
-<summary>Completed items (click to expand)</summary>
-
 ## v0.37.0 — Storage Concurrency Hardening & Error Safety
 
 **Theme**: Fix the highest-severity correctness bugs identified in the deep-analysis audit and eliminate all hard panics from library code.
@@ -2886,6 +2883,9 @@ See [plans/ecosystem/datalog.md §14.2.8 and §14.2.14](plans/ecosystem/datalog.
 > **In plain language:** This is a reliability release — no new features, but a direct response to the first comprehensive code audit (see [plans/PLAN_OVERALL_ASSESSMENT_2.md](plans/PLAN_OVERALL_ASSESSMENT_2.md)). Two concurrency bugs that could silently drop deletes or strand predicates in a slow-path table are fixed with proper advisory-lock coordination. Every place in the code that could crash the database server on an unexpected error is replaced with a typed error message. Configuration parameters now validate their inputs so bad values are caught immediately instead of causing cryptic failures later. A new `diagnostic_report()` function gives a one-call health check of the running system.
 >
 > **Effort estimate: 9–11 person-weeks**
+
+<details>
+<summary>Completed items (click to expand)</summary>
 
 ### Deliverables
 
