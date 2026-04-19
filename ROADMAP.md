@@ -75,6 +75,9 @@ Each release below has two layers:
 >
 > **Effort estimate: 6–8 person-weeks**
 
+<details>
+<summary>Completed items (click to expand)</summary>
+
 ### Deliverables
 
 - [x] pgrx 0.17 project scaffolding targeting PostgreSQL 18
@@ -115,6 +118,8 @@ Each release below has two layers:
 
 A user can install the extension, insert triples (routed to per-predicate VP tables), and query them back by pattern. No `shared_preload_libraries` configuration required. VP tables are created dynamically on first encounter of a new predicate.
 
+</details>
+
 ---
 
 ## v0.2.0 — Bulk Loading & Named Graphs
@@ -125,6 +130,9 @@ A user can install the extension, insert triples (routed to per-predicate VP tab
 >
 > **Storage partition note**: In v0.2.0 through v0.5.0, each VP table is a *single flat table* — there is no delta/main split yet. All reads and writes target the same table. The HTAP dual-partition architecture (separate `_delta` and `_main` tables with a background merge worker) is introduced in v0.6.0 via an explicit schema migration that renames existing VP tables and creates the initial `_main` partition.
 > **Effort estimate: 6–8 person-weeks**
+
+<details>
+<summary>Completed items (click to expand)</summary>
 
 ### Deliverables
 
@@ -193,6 +201,8 @@ A user can install the extension, insert triples (routed to per-predicate VP tab
 
 Rare-predicate consolidation table absorbs low-frequency predicates. Bulk loading >50K triples/sec on commodity hardware. Named graphs functional. All four inline formats (N-Triples, N-Quads, Turtle, TriG) and their file-path counterparts load correctly. Multi-graph data can be loaded via N-Quads/TriG and round-tripped via N-Quads export. VP tables have current planner statistics after bulk load.
 
+</details>
+
 ---
 
 ## v0.3.0 — SPARQL Query Engine (Basic)
@@ -202,6 +212,9 @@ Rare-predicate consolidation table absorbs low-frequency predicates. Bulk loadin
 > **In plain language:** SPARQL is the standard language for asking questions over linked data — the same way SQL is for relational databases. This release makes pg_ripple understand SPARQL, so users can write queries like *"find all people who know someone who works at Acme Corp"* using the official W3C syntax. It also enables querying across named graphs (created in v0.2.0) using the standard SPARQL `GRAPH` keyword.
 >
 > **Effort estimate: 6–8 person-weeks**
+
+<details>
+<summary>Completed items (click to expand)</summary>
 
 ### Prerequisites
 
@@ -245,6 +258,8 @@ Rare-predicate consolidation table absorbs low-frequency predicates. Bulk loadin
 
 Users can run SPARQL SELECT and ASK queries with BGPs, FILTER, OPTIONAL, and GRAPH patterns against data loaded via bulk load. Named graph queries work correctly. Queries return correct results.
 
+</details>
+
 ---
 
 ## v0.4.0 — RDF-star / Statement Identifiers
@@ -254,6 +269,9 @@ Users can run SPARQL SELECT and ASK queries with BGPs, FILTER, OPTIONAL, and GRA
 > **In plain language:** Standard RDF can say "Alice knows Bob". But it can't directly say *"Alice said that she knows Bob"* or *"The fact that Alice knows Bob was recorded on January 5th"*. RDF-star (now part of the RDF 1.2 standard) solves this by allowing triples to be embedded inside other triples — called *quoted triples*. This is essential for provenance ("where did this fact come from?"), temporal annotations ("when was this true?"), and trust ("who asserted this?"). By delivering this immediately after basic SPARQL, pg_ripple becomes **LPG-ready from the start**: Labeled Property Graph edges with properties (e.g. `[:KNOWS {since: 2020}]`) map directly to RDF-star annotations over statement identifiers already present in the VP tables since v0.1.0. This is a cross-cutting change that touches parsing, storage, dictionary encoding, and the SPARQL engine.
 >
 > **Effort estimate: 8–10 person-weeks**
+
+<details>
+<summary>Completed items (click to expand)</summary>
 
 ### Design rationale — why so early?
 
@@ -293,6 +311,8 @@ The OneGraph (1G) research initiative (Lassila et al., 2023; Poseidon engine, AW
 
 Users can load RDF-star data (Turtle-star, N-Triples-star), query it with SPARQL-star triple term patterns, and use statement identifiers to model edge properties. SIDs are returned from insert operations and can be used as subjects/objects in subsequent triples. The storage layer is LPG-ready.
 
+</details>
+
 ---
 
 ## v0.5.0 — SPARQL Query Engine (Advanced — Query Completeness)
@@ -302,6 +322,9 @@ Users can load RDF-star data (Turtle-star, N-Triples-star), query it with SPARQL
 > **In plain language:** This release teaches the query engine to handle more powerful questions. *Property paths* let you follow chains of relationships — e.g. "find everyone reachable through any number of 'knows' links" (like a social network friend-of-a-friend search). *Aggregates* let you compute totals and averages ("how many people work in each department?"). This is a pure query-engine release with no storage changes, isolating query completeness from the inline encoding and write-path work in v0.5.1.
 >
 > **Effort estimate: 6–8 person-weeks**
+
+<details>
+<summary>Completed items (click to expand)</summary>
 
 ### Deliverables
 
@@ -365,6 +388,8 @@ Users can load RDF-star data (Turtle-star, N-Triples-star), query it with SPARQL
 
 SPARQL 1.1 Query coverage for property paths, UNION/MINUS, aggregates, subqueries, BIND/VALUES. Property path queries complete with hash-based cycle detection via PG18 `CYCLE` clause. Docs site is live on GitHub Pages with all catch-up pages written.
 
+</details>
+
 ---
 
 ## v0.5.1 — SPARQL Advanced (Storage, Serialization & Write)
@@ -374,6 +399,9 @@ SPARQL 1.1 Query coverage for property paths, UNION/MINUS, aggregates, subquerie
 > **In plain language:** This release introduces *inline value encoding* — a performance optimization that eliminates dictionary lookups for numeric and date comparisons. It changes the fundamental ID space model (introducing a dual-space interpretation), which is why it is separated from the pure query-engine work in v0.5.0. It also adds the two simplest SPARQL Update forms (`INSERT DATA` / `DELETE DATA`) so standard RDF tools can write to pg_ripple, *CONSTRUCT* and *DESCRIBE* to complete the four standard SPARQL query forms, and *full-text search* for efficient text matching.
 >
 > **Effort estimate: 6–8 person-weeks**
+
+<details>
+<summary>Completed items (click to expand)</summary>
 
 ### Deliverables
 
@@ -415,6 +443,8 @@ SPARQL 1.1 Query coverage for property paths, UNION/MINUS, aggregates, subquerie
 
 Inline value encoding eliminates dictionary lookups for numeric and date FILTER comparisons. SPARQL CONSTRUCT and DESCRIBE return correct JSONB results. `INSERT DATA` / `DELETE DATA` work for standard-compliant write operations. Full-text search on indexed literal predicates is functional.
 
+</details>
+
 ---
 
 ## v0.6.0 — HTAP Architecture
@@ -426,6 +456,9 @@ Inline value encoding eliminates dictionary lookups for numeric and date FILTER 
 > **Note**: This release introduces `shared_preload_libraries` as a requirement — v0.1.0–v0.5.1 do not require it because they use a backend-local dictionary cache. The `pg_ripple.shared_memory_size` startup GUC must be set in `postgresql.conf` before starting PostgreSQL.
 >
 > **Effort estimate: 8–10 person-weeks**
+
+<details>
+<summary>Completed items (click to expand)</summary>
 
 ### Deliverables
 
@@ -538,6 +571,8 @@ Inline value encoding eliminates dictionary lookups for numeric and date FILTER 
 
 Writes do not block reads. Merge worker operates correctly under concurrent writes and crash scenarios. >100K triples/sec bulk insert sustained. Change notifications fire correctly for matching patterns.
 
+</details>
+
 ---
 
 ## v0.7.0 — SHACL Validation (Core)
@@ -547,6 +582,9 @@ Writes do not block reads. Merge worker operates correctly under concurrent writ
 > **In plain language:** SHACL is a standard way to define *data quality rules* — for example, "every Person must have exactly one email address" or "an age must be a number". When these rules are loaded, pg_ripple can automatically reject data that violates them the moment it is inserted, rather than discovering errors later. This is similar to how a spreadsheet can reject invalid entries in a cell. A validation report function lets you check existing data against the rules at any time.
 >
 > **Effort estimate: 4–6 person-weeks**
+
+<details>
+<summary>Completed items (click to expand)</summary>
 
 ### Deliverables
 
@@ -598,6 +636,8 @@ Writes do not block reads. Merge worker operates correctly under concurrent writ
 
 Delivered SHACL Core features are enforced at insert time with exact W3C semantics. Validation reports conform to SHACL spec. Malformed shapes are rejected with actionable error messages. Explicit deduplication functions correctly remove duplicate triples from all VP tables. Merge-time deduplication (when `dedup_on_merge = true`) produces duplicate-free `_main` tables after each merge cycle.
 
+</details>
+
 ---
 
 ## v0.8.0 — SHACL Advanced
@@ -607,6 +647,9 @@ Delivered SHACL Core features are enforced at insert time with exact W3C semanti
 > **In plain language:** Builds on v0.7.0 by supporting more sophisticated data quality rules — for instance, "a person's address must be either a US address or a EU address (but not both)", or "if a company has more than 50 employees, it must have a compliance officer". It also adds a *background validation mode* so that checking complex rules doesn't slow down data loading — violations are flagged asynchronously and collected in a report queue.
 >
 > **Effort estimate: 4–6 person-weeks**
+
+<details>
+<summary>Completed items (click to expand)</summary>
 
 ### Deliverables
 
@@ -641,6 +684,8 @@ Delivered SHACL Core features are enforced at insert time with exact W3C semanti
 
 Async validation pipeline operational. Complex SHACL shapes validated correctly with the same semantics as synchronous validation.
 
+</details>
+
 ---
 
 ## v0.9.0 — Serialization, Export & Interop
@@ -652,6 +697,9 @@ Async validation pipeline operational. Complex SHACL shapes validated correctly 
 > **Effort estimate: 3–4 person-weeks** *(the hardest parts — Turtle import, N-Triples export, and CONSTRUCT/DESCRIBE JSONB — were already delivered in v0.2.0, v0.3.0, and v0.5.0)*
 
 *Note: Turtle import and N-Triples export were delivered in v0.2.0. CONSTRUCT/DESCRIBE (JSONB output) were delivered in v0.5.1.*
+
+<details>
+<summary>Completed items (click to expand)</summary>
 
 ### Deliverables
 
@@ -681,6 +729,8 @@ Async validation pipeline operational. Complex SHACL shapes validated correctly 
 
 Round-trip: load Turtle → query → export Turtle. All major RDF serialization formats supported for both import and export.
 
+</details>
+
 ---
 
 ## v0.10.0 — Datalog Reasoning Engine
@@ -692,6 +742,9 @@ Round-trip: load Turtle → query → export Turtle. All major RDF serialization
 > **Effort estimate: 10–12 person-weeks**
 
 See [plans/ecosystem/datalog.md](plans/ecosystem/datalog.md) for the full design.
+
+<details>
+<summary>Completed items (click to expand)</summary>
 
 ### Deliverables
 
@@ -774,6 +827,8 @@ See [plans/ecosystem/datalog.md](plans/ecosystem/datalog.md) for the full design
 
 Users can load RDFS or OWL RL rule sets (or custom rules), and SPARQL queries return inferred triples. Arithmetic built-ins filter correctly in rule bodies. Constraint rules detect and report violations (optionally rejecting transactions). Both on-demand and materialized modes operational. Stratified negation correctly validated and compiled. SHACL shapes with `sh:rule` entries are auto-compiled to Datalog rules.
 
+</details>
+
 ---
 
 ## v0.11.0 — Incremental SPARQL Views, Datalog Views & ExtVP
@@ -787,6 +842,9 @@ Users can load RDFS or OWL RL rule sets (or custom rules), and SPARQL queries re
 > **pg_trickle dependency**: This release requires [pg_trickle](https://github.com/grove/pg-trickle) to be installed. pg_trickle is a production-ready companion extension (same Rust/pgrx 0.17 / PostgreSQL 18 stack) available today. pg_ripple never hard-requires pg_trickle at load time — feature parity for the core triple store is preserved without it. Functions in this release that depend on pg_trickle (`create_sparql_view`, `create_datalog_view`, ExtVP setup, etc.) detect its presence at call time and return a clear error with an install hint if it is absent. The `pg_ripple.pg_trickle_available()` function lets users and tooling check availability before calling. See [plans/ecosystem/pg_trickle.md § 3](plans/ecosystem/pg_trickle.md) for the soft-detection design.
 
 See [plans/ecosystem/pg_trickle.md § 2.2](plans/ecosystem/pg_trickle.md) for the SPARQL views design and [plans/ecosystem/datalog.md § 15](plans/ecosystem/datalog.md) for the Datalog views design.
+
+<details>
+<summary>Completed items (click to expand)</summary>
 
 ### Deliverables
 
@@ -823,6 +881,8 @@ See [plans/ecosystem/pg_trickle.md § 2.2](plans/ecosystem/pg_trickle.md) for th
 
 Users can create SPARQL views and Datalog views that stay incrementally up-to-date. View queries are sub-millisecond table scans. Datalog views with goal patterns materialize only goal-relevant facts. Constraint monitoring views detect violations in real time. ExtVP semi-joins improve multi-predicate star-pattern performance.
 
+</details>
+
 ---
 
 ## v0.12.0 — SPARQL Update (Advanced)
@@ -832,6 +892,9 @@ Users can create SPARQL views and Datalog views that stay incrementally up-to-da
 > **In plain language:** Building on the basic `INSERT DATA` / `DELETE DATA` support from v0.5.1, this release adds *pattern-based updates* — the ability to find-and-replace data using SPARQL patterns (e.g. "for every person without an email, add a placeholder email"). It also adds commands for managing named graphs (create, clear, drop) and loading data from a URL. This completes the full SPARQL 1.1 Update specification.
 >
 > **Effort estimate: 3–4 person-weeks** *(simpler than originally estimated since INSERT DATA / DELETE DATA and the Update executor were delivered in v0.5.1)*
+
+<details>
+<summary>Completed items (click to expand)</summary>
 
 ### Deliverables
 
@@ -857,6 +920,8 @@ Users can create SPARQL views and Datalog views that stay incrementally up-to-da
 
 Full SPARQL 1.1 Update operations work correctly. Pattern-based updates compile WHERE clauses via the existing SPARQL→SQL engine.
 
+</details>
+
 ---
 
 ## v0.13.0 — Performance Hardening
@@ -866,6 +931,9 @@ Full SPARQL 1.1 Update operations work correctly. Pattern-based updates compile 
 > **In plain language:** This release is about *speed*. Using the benchmarks established in v0.5.0, we measure pg_ripple's performance against known baselines and then tune it. Improvements include caching query plans so repeated queries skip redundant work, loading data in parallel, and teaching the system to use data quality rules (from v0.7.0/v0.8.0) as hints to avoid unnecessary work during queries. The target is simple queries answering in under 10 milliseconds on a dataset of 10 million facts, and bulk loading sustained at over 100,000 facts per second.
 >
 > **Effort estimate: 6–8 person-weeks**
+
+<details>
+<summary>Completed items (click to expand)</summary>
 
 ### Deliverables
 
@@ -940,6 +1008,8 @@ Full SPARQL 1.1 Update operations work correctly. Pattern-based updates compile 
 
 BSBM results documented. >100K triples/sec sustained bulk load. <10ms for simple BGP queries at 10M triples. <5ms for cached repeat queries. SHACL metadata exploited only through semantics-preserving optimizer rules. PostgreSQL parallel plans verified for multi-VP-table joins.
 
+</details>
+
 ---
 
 ## v0.14.0 — Administrative & Operational Readiness
@@ -949,6 +1019,9 @@ BSBM results documented. >100K triples/sec sustained bulk load. <10ms for simple
 > **In plain language:** Everything a system administrator needs to run pg_ripple in production. This includes maintenance commands (clean up, rebuild indexes), monitoring and diagnostics, comprehensive documentation (quickstart guide, function reference, tuning guide), and *graph-level access control* — the ability to control which database users can see or modify which named graphs. It also covers packaging (Linux packages, Docker images) so the extension is easy to install in real environments. Think of this as the "operations manual" release.
 >
 > **Effort estimate: 4–6 person-weeks**
+
+<details>
+<summary>Completed items (click to expand)</summary>
 
 ### Deliverables
 
@@ -999,6 +1072,8 @@ BSBM results documented. >100K triples/sec sustained bulk load. <10ms for simple
 
 Extension is installable, upgradable, and documented. Operational tooling sufficient for production use. Graph-level RLS enforces access control per named graph.
 
+</details>
+
 ---
 
 ## v0.15.0 — SPARQL Protocol (HTTP Endpoint)
@@ -1008,6 +1083,9 @@ Extension is installable, upgradable, and documented. Operational tooling suffic
 > **In plain language:** Without this, the only way to talk to pg_ripple is through a PostgreSQL database connection (SQL). But the entire RDF ecosystem — SPARQL notebooks, visualization tools, ontology editors, web applications — expects to query a triple store over HTTP at a `/sparql` URL. This release adds a lightweight companion service that accepts standard SPARQL HTTP requests, forwards them to pg_ripple inside PostgreSQL, and returns results in all the standard formats (JSON, XML, CSV, Turtle). This is the single biggest adoption enabler: it lets pg_ripple drop in as a replacement for tools like Blazegraph, Virtuoso, or Apache Fuseki without requiring any client-side changes.
 >
 > **Effort estimate: 3–4 person-weeks**
+
+<details>
+<summary>Completed items (click to expand)</summary>
 
 ### Deliverables
 
@@ -1076,6 +1154,8 @@ Extension is installable, upgradable, and documented. Operational tooling suffic
 
 Standard SPARQL clients (YASGUI, Postman, RDF4J workbench, `curl`) can query and update pg_ripple over HTTP without any pg_ripple-specific configuration. Content negotiation returns correct formats. All graph-scoped load and delete operations available as first-class SQL functions. SQL API fully exposes internal capabilities (graph parameters, per-graph counts, diagnostic functions).
 
+</details>
+
 ---
 
 ## v0.16.0 — SPARQL Federation
@@ -1085,6 +1165,9 @@ Standard SPARQL clients (YASGUI, Postman, RDF4J workbench, `curl`) can query and
 > **In plain language:** Federation lets a single SPARQL query combine data from pg_ripple with data from external SPARQL endpoints on the web. For example, you could ask "find all my local employees and enrich their records with data from Wikidata" — and the system will automatically fetch the remote portion, join it with local results, and return a unified answer. This is part of the SPARQL 1.1 standard (`SERVICE` keyword) and is expected by many enterprise knowledge graph workflows that integrate multiple data sources. Multiple remote calls execute in parallel when possible to minimise latency.
 >
 > **Effort estimate: 4–6 person-weeks**
+
+<details>
+<summary>Completed items (click to expand)</summary>
 
 ### Deliverables
 
@@ -1133,6 +1216,8 @@ Standard SPARQL clients (YASGUI, Postman, RDF4J workbench, `curl`) can query and
 
 ✅ **DONE** — SPARQL queries with `SERVICE` clauses correctly fetch and join data from registered remote endpoints. Sequential execution in SPI context. Timeouts and error handling work as configured. No SSRF risk — only allowlisted endpoints are contacted.
 
+</details>
+
 ---
 
 ## v0.17.0 — JSON-LD Framing
@@ -1144,6 +1229,9 @@ Standard SPARQL clients (YASGUI, Postman, RDF4J workbench, `curl`) can query and
 > Unlike a naïve approach that fetches the entire graph and post-filters it, this implementation translates the frame directly into a SPARQL CONSTRUCT query. PostgreSQL then reads only the VP tables that are touched by the join — meaning a frame targeting 3 predicates on a graph with 10,000 predicates touches 3 VP tables, not 10,000. The `jsonld_frame_to_sparql()` inspection function exposes the generated SPARQL for debugging and for users who want to customise the query further before execution.
 >
 > **Effort estimate: 3–4 person-weeks**
+
+<details>
+<summary>Completed items (click to expand)</summary>
 
 ### Prerequisites
 
@@ -1241,6 +1329,8 @@ Standard SPARQL clients (YASGUI, Postman, RDF4J workbench, `curl`) can query and
 
 `export_jsonld_framed()` correctly translates a JSON-LD frame into a SPARQL CONSTRUCT query touching only the VP tables required by the frame, executes it via the existing SPARQL engine, and returns a nested JSON-LD document with correct `@context` compaction and W3C-conformant embedding semantics. The `jsonld_frame_to_sparql()` function exposes the generated CONSTRUCT query string. The `jsonld_frame()` general-purpose primitive correctly frames any expanded JSON-LD JSONB input. `create_framing_view()` creates an incrementally-maintained pg_trickle stream table whose rows stay current as triples change; the `IMMEDIATE` refresh mode correctly detects constraint violations within the same transaction. All supported frame features in the table above pass the pg_regress test suite.
 
+</details>
+
 ---
 
 ## v0.18.0 — SPARQL CONSTRUCT, DESCRIBE & ASK Views
@@ -1250,6 +1340,9 @@ Standard SPARQL clients (YASGUI, Postman, RDF4J workbench, `curl`) can query and
 > **In plain language:** pg_ripple already supports SPARQL CONSTRUCT, DESCRIBE, and ASK as one-shot queries. This release lets you register any of those query forms as a *live view* — a stream table that pg_trickle keeps incrementally up-to-date as triples are inserted or deleted. A CONSTRUCT view stores the derived triples it produces in a `(s, p, o, g)` table; this is ideal for materialising inferred facts, denormalised projections, or cached API responses. A DESCRIBE view stores all triples about the described resources. An ASK view stores a single `BOOLEAN` row that flips whenever the underlying pattern changes from matching to not-matching — useful for live constraint monitors and dashboard indicators.
 >
 > **Effort estimate: 2–3 person-weeks** *(the hard parts — CONSTRUCT/DESCRIBE SQL generation, spargebra algebra parsing, and pg_trickle stream table registration — are all already in place from v0.5.1 and v0.11.0)*
+
+<details>
+<summary>Completed items (click to expand)</summary>
 
 ### Prerequisites
 
@@ -1309,6 +1402,8 @@ Standard SPARQL clients (YASGUI, Postman, RDF4J workbench, `curl`) can query and
 
 `create_construct_view()` compiles a SPARQL CONSTRUCT query into a pg_trickle stream table whose rows reflect the CONSTRUCT output at all times; inserting or deleting triples that affect the WHERE pattern causes the stream table to update automatically. `create_describe_view()` correctly materialises the CBD of the described resources. `create_ask_view()` correctly updates the single-row result when the pattern's satisfiability changes. All three view types correctly reject wrong query forms with a clear error. The pg_trickle-absent error message is consistent with v0.11.0 behaviour. All new pg_regress tests pass.
 
+</details>
+
 ---
 
 ## v0.19.0 — Federation Performance
@@ -1318,6 +1413,9 @@ Standard SPARQL clients (YASGUI, Postman, RDF4J workbench, `curl`) can query and
 > **In plain language:** When querying remote SPARQL endpoints via `SERVICE`, every call currently creates a new HTTP connection, buffers all results in memory before processing, and makes no attempt to reduce the data fetched from the remote. This release addresses those bottlenecks: connections are reused across calls, frequently-used results are cached locally, queries are rewritten to project only the variables the outer query actually needs, multiple `SERVICE` clauses targeting the same endpoint are batched into a single HTTP request, and duplicate term encoding is eliminated. The result is significantly lower latency for federation-heavy workloads and better behaviour under load.
 >
 > **Effort estimate: 3–5 person-weeks**
+
+<details>
+<summary>Completed items (click to expand)</summary>
 
 ### Prerequisites
 
@@ -1396,6 +1494,8 @@ Standard SPARQL clients (YASGUI, Postman, RDF4J workbench, `curl`) can query and
 
 A federated query making repeated calls to the same endpoint is measurably faster due to connection reuse. A query with cacheable SERVICE results performs a single HTTP call across multiple executions within the TTL window. Multiple SERVICE clauses targeting the same endpoint are confirmed (via logged SPARQL text) to collapse into one HTTP request. Variable projection is confirmed by inspecting the SPARQL text sent to the endpoint. All new pg_regress tests pass.
 
+</details>
+
 ---
 
 ## v0.20.0 — W3C Conformance & Stability Foundation
@@ -1405,6 +1505,9 @@ A federated query making repeated calls to the same endpoint is measurably faste
 > **In plain language:** As we approach the 1.0 release, this milestone focuses on *confidence*. Instead of building new features, we verify that everything already built works *correctly* according to the official W3C standards. We run pg_ripple's SPARQL engine and SHACL validator against the W3C test suites and fix any edge cases. We test what happens when the database crashes and verify recovery is clean. We scan the code for security vulnerabilities. And we benchmark at scale (100M triples) to establish baselines. The result is a release that's ready for production users to rely on.
 >
 > **Effort estimate: 5–7 person-weeks**
+
+<details>
+<summary>Completed items (click to expand)</summary>
 
 ### Deliverables
 
@@ -1522,6 +1625,8 @@ A federated query making repeated calls to the same endpoint is measurably faste
 
 W3C SPARQL 1.1 Query test suite: ≥95% pass rate. W3C SPARQL 1.1 Update test suite: ≥95% pass rate. W3C SHACL Core test suite: ≥95% pass rate. Crash recovery framework operational: database recovers cleanly from kill -9 during merge, bulk load, and validation. Valgrind finds no definite memory leaks. Security review Phase 1 complete: all SPI injection vectors documented and mitigated, shared memory audit complete. BSBM 100M triple baseline published. API stability contract documented.
 
+</details>
+
 ---
 
 ## v0.21.0 — SPARQL Built-in Functions & Query Correctness
@@ -1531,6 +1636,9 @@ W3C SPARQL 1.1 Query test suite: ≥95% pass rate. W3C SPARQL 1.1 Update test su
 > **In plain language:** Until now, pg_ripple's SPARQL engine understood the *grammar* of standard functions like `UCASE`, `IF`, `DATATYPE`, and `isIRI` — but silently ignored them at runtime, returning too many rows instead of the correctly filtered set. This release makes those functions actually work. It also fixes several query-correctness issues that were masked by the existing conformance test suite: wrong sort-order for NULL values, `p*` paths generating phantom reflexive rows on nodes that don't participate in the property at all, and `GROUP_CONCAT` ignoring the `DISTINCT` keyword. After this release, any unsupported expression raises a clear named error rather than silently dropping the filter.
 >
 > **Effort estimate: 6–8 person-weeks**
+
+<details>
+<summary>Completed items (click to expand)</summary>
 
 ### Deliverables
 
@@ -1578,6 +1686,8 @@ W3C SPARQL 1.1 Query test suite: ≥95% pass rate. W3C SPARQL 1.1 Update test su
 
 Every SPARQL 1.1 built-in function from the W3C SPARQL 1.1 Appendix A either works correctly or raises a named `ERRCODE_FEATURE_NOT_SUPPORTED` error — never silently drops. `w3c_sparql_query_conformance.sql` passes with real value-checking assertions (no `>= 0` shims). `sparql_builtins.sql` passes for all implemented functions. `ORDER BY` NULL placement, property-path cycle detection on a DAG, ZeroOrMore scope restriction, and `GROUP_CONCAT DISTINCT` each have a dedicated passing regression test. `property_path_negated.sql` passes for single and multi-predicate negated sets. `service_silent.sql` returns zero rows rather than an error on an unreachable `SERVICE SILENT` endpoint. `reference/sparql-reference.md` documents the `REDUCED` → `DISTINCT` equivalence choice.
 
+</details>
+
 ---
 
 ## v0.22.0 — Storage Correctness & Security Hardening
@@ -1587,6 +1697,9 @@ Every SPARQL 1.1 built-in function from the W3C SPARQL 1.1 Appendix A either wor
 > **In plain language:** This release addresses issues that could silently corrupt data or create security vulnerabilities in production deployments. The most important fix: if a database transaction is rolled back, pg_ripple's internal term-ID cache now correctly discards the rolled-back entries — previously, stale IDs could be planted into the triple store, creating phantom references that make facts disappear or return the wrong data. Two race conditions in the background merge process that could cause deleted facts to reappear, or queries to error mid-merge, are also closed. The internal shared-memory cache is redesigned to handle large vocabularies without thrashing. On the security side, the HTTP companion service's rate-limiting finally works, error messages no longer leak internal database details to API clients, and the `_pg_ripple` internal schema is explicitly locked away from unprivileged roles.
 >
 > **Effort estimate: 6–8 person-weeks**
+
+<details>
+<summary>Completed items (click to expand)</summary>
 
 ### Deliverables
 
@@ -1648,6 +1761,8 @@ Every SPARQL 1.1 built-in function from the W3C SPARQL 1.1 Appendix A either wor
 
 Rolled-back `insert_triple` cannot plant a phantom ID (`dictionary_rollback.sql` pg_regress passes). `merge_race.sql` passes with zero tombstone resurrections and zero `relation does not exist` errors under a concurrent query. `merge_dedup.sql` passes — inserting the same triple across a merge boundary returns exactly one result row. Shmem cache benchmark reports ≥ 95% hit rate at 10k hot terms. `pg_ripple_http` returns `429` when rate limit is exceeded (verified by integration test). Unprivileged role is denied `SELECT` on `_pg_ripple.*` (`privilege_isolation.sql` passes). All migration scripts from 0.1.0 through 0.22.0 run cleanly via `just test-migration`.
 
+</details>
+
 ---
 
 ## v0.23.0 — SHACL Core Completion & SPARQL Diagnostics
@@ -1657,6 +1772,9 @@ Rolled-back `insert_triple` cannot plant a phantom ID (`dictionary_rollback.sql`
 > **In plain language:** This release makes pg_ripple's data-quality rules (SHACL) useful for real-world schemas. Until now, common constraints like "this property must have a specific value" (`sh:hasValue`), "this node must have exactly this type" (`sh:nodeKind`), and "no properties outside this allowed list" (`sh:closed`) were silently ignored. They now work. Separately, a new function `pg_ripple.explain_sparql()` lets you see exactly what SQL pg_ripple generates for a SPARQL query — invaluable for diagnosing slow queries. The Datalog engine also receives three correctness fixes: arithmetic division errors now name the rule that caused them, rules with undefined variables now error at compile time rather than silently matching nothing, and cyclic negation is correctly detected.
 >
 > **Effort estimate: 6–8 person-weeks**
+
+<details>
+<summary>Completed items (click to expand)</summary>
 
 ### Deliverables
 
@@ -1708,6 +1826,8 @@ Rolled-back `insert_triple` cannot plant a phantom ID (`dictionary_rollback.sql`
 
 W3C SHACL Core test suite pass rate increases to ≥ 98%. `shacl_core_completion.sql` pg_regress passes for all new constraint types including the `/* … */` block-comment case. `explain_sparql.sql` passes. `shacl_query_hints.sql` passes — `explain_sparql()` confirms no spurious DISTINCT or LEFT JOIN for constrained predicates. A Datalog rule with division, an unbound variable, and a negation cycle each raise the expected named error rather than silent failure or a crash. `src/framing/embedder.rs` no longer contains `unwrap()` on the CONSTRUCT result. All migration scripts from 0.1.0 through 0.23.0 run cleanly via `just test-migration`.
 
+</details>
+
 ---
 
 ## v0.24.0 — Semi-naive Datalog & Performance Hardening
@@ -1717,6 +1837,9 @@ W3C SHACL Core test suite pass rate increases to ≥ 98%. `shacl_core_completion
 > **In plain language:** pg_ripple can derive new facts automatically from rules (Datalog). Until now, on every iteration of the rule engine, all previously derived facts were re-checked — wasteful for large datasets where most facts don't change between iterations. This release switches to "semi-naive" evaluation: each iteration only looks at *newly* derived facts from the previous pass, which can be 10–100 × faster on large ontologies. For the same reason, four missing OWL reasoning rules that affect subclass and property chains are added. Two performance improvements round out the release: returning large SPARQL result sets is sped up by decoding all term IDs in a single batch rather than one-by-one, and property-path queries (`p*`, `p+`) gain a configurable depth limit to prevent runaway recursion on highly-connected graphs.
 >
 > **Effort estimate: 6–8 person-weeks**
+
+<details>
+<summary>Completed items (click to expand)</summary>
 
 ### Deliverables
 
@@ -1790,6 +1913,8 @@ W3C SHACL Core test suite pass rate increases to ≥ 98%. `shacl_core_completion
 
 `datalog_seminaive.sql` passes with correct closure count and iteration count ≤ longest derivation chain. Semi-naive benchmark is ≥ 5× faster than naive on the RDFS subgraph. All four new OWL RL rules derive correct inferences in the corresponding pg_regress tests. SPARQL result-set decoding issues ≤ 2 SPI round-trips for 1000-term results (verified by the bench gate). Property path with default depth limit correctly traverses a 100-hop chain; depth-10 truncation emits the expected WARNING. `sparql_star_update.sql` passes. The HTAP anti-join benchmark completes within 2× the no-tombstone baseline. Migration scripts from 0.1.0 through 0.24.0 run cleanly via `just test-migration`.
 
+</details>
+
 ---
 
 ## v0.25.0 — GeoSPARQL & Architectural Polish
@@ -1799,6 +1924,9 @@ W3C SHACL Core test suite pass rate increases to ≥ 98%. `shacl_core_completion
 > **In plain language:** PostgreSQL already understands geography — distances, containment, intersection — through the PostGIS extension. This release connects pg_ripple's RDF triple store to PostGIS so that SPARQL queries can filter and compute over geographic data: "which cities are within 50 km of Berlin?", "which roads cross this polygon?". This covers the most common GeoSPARQL functions used in open data publishing (Wikidata, LinkedGeoData, government datasets). The release also includes a set of smaller housekeeping improvements: the internal predicate catalog now stores table names instead of fragile OIDs, the HTTP companion service correctly validates federation endpoint URLs against SSRF schemes, bulk loads can now be run in strict mode that rolls back on any malformed triple, and the remaining low-priority issues from the v0.20.0 assessment are closed.
 >
 > **Effort estimate: 6–8 person-weeks**
+
+<details>
+<summary>Completed items (click to expand)</summary>
 
 ### Deliverables
 
@@ -1876,6 +2004,8 @@ W3C SHACL Core test suite pass rate increases to ≥ 98%. `shacl_core_completion
 
 `geosparql.sql` pg_regress passes when PostGIS is present and skips cleanly when PostGIS is absent. `bulk_load_strict.sql` passes for both strict and lenient modes. Blank-node prefix uses `nextval(…)` — no wall-clock-based prefix in `src/bulk_load.rs`. `SELECT pg_ripple.register_endpoint('file:///etc/passwd')` raises `ERRCODE_INVALID_PARAMETER_VALUE`. `_pg_ripple.predicates` has `schema_name` and `table_name` columns populated. `federation_cache.sql` passes — distinct endpoints are cached independently and oversized partial responses produce zero rows with a WARNING. `pg_ripple.canary()` returns `{"catalog_consistent": true, "orphaned_rare_rows": 0}` on a healthy database. `SELECT pg_ripple.load_turtle_file('/etc/passwd')` from a superuser session raises `ERRCODE_INSUFFICIENT_PRIVILEGE` (not silently succeeding) because `/etc/passwd` is outside allowed `pg_read_server_files` directories. Migration scripts from 0.1.0 through 0.25.0 run cleanly via `just test-migration`.
 
+</details>
+
 ---
 
 ## v0.26.0 — GraphRAG Integration
@@ -1885,6 +2015,9 @@ W3C SHACL Core test suite pass rate increases to ≥ 98%. `shacl_core_completion
 > **In plain language:** Microsoft GraphRAG is an open-source system (32k+ GitHub stars) that uses large language models to extract a knowledge graph from documents, detects thematic clusters, and answers complex questions far better than standard vector-search RAG. By default it stores its graph as flat Parquet files on disk — static, unqueryable, and requiring a full re-index every time new documents arrive. This release makes pg_ripple a drop-in backend for GraphRAG: entities and relationships extracted by the LLM are stored as RDF triples with full SPARQL queryability, Datalog reasoning derives implicit relationships the LLM missed, SHACL shapes reject malformed extractions before they corrupt the graph, and a Python CLI bridge exports the enriched graph back to Parquet for GraphRAG's community-detection step. The result is a richer, higher-quality knowledge graph that improves GraphRAG's Local, Global, and DRIFT search accuracy — all running inside the PostgreSQL instance you already have.
 >
 > **Effort estimate: 4–6 person-weeks**
+
+<details>
+<summary>Completed items (click to expand)</summary>
 
 ### Background
 
@@ -1980,6 +2113,8 @@ See [plans/graphrag.md](plans/graphrag.md) for the full synergy analysis, archit
 
 `graphrag_ontology.sql`, `graphrag_crud.sql`, `graphrag_enrichment.sql`, `graphrag_shacl.sql`, and `graphrag_export.sql` all pass in `cargo pgrx regress pg18`. `pg_ripple.export_graphrag_entities()` writes a valid Parquet file readable by `pyarrow.parquet.read_table()`. Loading a malformed entity (missing `gr:type`) with `shacl_mode = 'sync'` raises a validation error. Running `pg_ripple.infer('graphrag_enrichment')` on a graph with two entities both linked to the same organization produces at least one `gr:coworker` triple. `scripts/graphrag_export.py --validate` exits non-zero when SHACL violations are present. Migration scripts from 0.1.0 through 0.26.0 run cleanly via `just test-migration`.
 
+</details>
+
 ---
 
 ## v0.27.0 — Vector + SPARQL Hybrid: Foundation
@@ -1989,6 +2124,9 @@ See [plans/graphrag.md](plans/graphrag.md) for the full synergy analysis, archit
 > **In plain language:** This release adds AI-powered semantic search to pg_ripple. Every entity in your knowledge graph can now have a *vector embedding* — a compact numerical fingerprint that captures its meaning. You can then search for entities that are semantically similar to a phrase ("find drugs similar to anti-inflammatory agents"), and combine that similarity search with precise SPARQL queries ("but only drugs approved by the FDA that don't interact with methotrexate"). This is called *hybrid search*, and it's the dominant retrieval pattern for modern AI applications. pg_ripple's unique advantage is that both the graph query and the similarity search run inside the same PostgreSQL process — with zero overhead, ACID transactions, and the query planner optimising both together. No other triplestore offers this.
 >
 > **Effort estimate: 5–7 person-weeks**
+
+<details>
+<summary>Completed items (click to expand)</summary>
 
 ### Background
 
@@ -2087,6 +2225,8 @@ See [plans/vector_sparql_hybrid.md](plans/vector_sparql_hybrid.md) for the full 
 
 `vector_crud.sql`, `vector_sparql.sql`, `vector_filter.sql`, `vector_halfvec.sql`, `vector_binary.sql`, and `vector_refresh.sql` all pass in `cargo pgrx regress pg18` when pgvector is installed. `vector_setup.sql` skips cleanly when pgvector is absent. `pg_ripple.store_embedding('http://example.org/aspirin', ARRAY[...])` round-trips correctly through `pg_ripple.similar_entities('anti-inflammatory')`. A SPARQL query with `BIND(pg:similar(?drug, "aspirin", 10) AS ?score) FILTER(?score < 0.5)` returns only entities with cosine distance below 0.5. `SELECT pg_ripple.similar_entities('test')` when `pg_ripple.pgvector_enabled = false` emits a WARNING and returns zero rows (no ERROR). `pg_ripple.refresh_embeddings()` after a label update returns a count of 1 and advances `updated_at`. `SELECT count(*) FROM _pg_ripple.embeddings` with `embedding_precision = 'half'` confirms the column is of type `halfvec`. Migration scripts from 0.1.0 through 0.27.0 run cleanly via `just test-migration`.
 
+</details>
+
 ---
 
 ## v0.28.0 — Advanced Hybrid Search & RAG Pipeline
@@ -2096,6 +2236,9 @@ See [plans/vector_sparql_hybrid.md](plans/vector_sparql_hybrid.md) for the full 
 > **In plain language:** This release builds on the pgvector foundation to deliver two advanced capabilities. First, *hybrid ranking*: instead of choosing between SPARQL results or vector results, pg_ripple now fuses both using Reciprocal Rank Fusion — a proven algorithm that combines ranked lists from different retrieval systems. Second, *RAG support*: a single SQL function (`pg_ripple.rag_retrieve()`) takes a natural language question, runs hybrid search, and returns structured context ready for an LLM system prompt. A background worker keeps embeddings up-to-date as new entities are added. The result is a complete knowledge-graph-grounded RAG backend running entirely inside PostgreSQL — no separate vector database, no ETL, no eventual consistency.
 >
 > **Effort estimate: 5–8 person-weeks**
+
+<details>
+<summary>Completed items (click to expand)</summary>
 
 ### Background
 
@@ -2197,6 +2340,8 @@ See [plans/vector_sparql_hybrid.md](plans/vector_sparql_hybrid.md) §5 (Advanced
 
 `vector_hybrid.sql`, `vector_rag.sql`, `vector_rag_jsonld.sql`, `vector_contextualize.sql`, `vector_worker.sql`, and `vector_federation.sql` all pass in `cargo pgrx regress pg18` when pgvector is installed. `pg_ripple.hybrid_search('SELECT ?drug WHERE { ?drug a :Drug }', 'anti-inflammatory', 10)` returns ≤ 10 rows with non-zero `rrf_score`. `pg_ripple.rag_retrieve('what treats headaches?', k := 5)` returns JSONB rows with `label`, `types`, `properties`, and `neighbors` keys. `pg_ripple.rag_retrieve('what treats headaches?', k := 5, output_format := 'jsonld')` returns rows whose `context_json` contains `@type` and `@context` keys. `POST /rag` on `pg_ripple_http` returns a `context` field suitable for use as an LLM system prompt. Inserting a new entity with `pg_ripple.auto_embed = true` and running the background worker loop populates `_pg_ripple.embeddings` for that entity. `pg_ripple.register_vector_endpoint('http://unknown/', 'qdrant')` followed by a SERVICE query returns graceful timeout with no ERROR. Migration scripts from 0.1.0 through 0.28.0 run cleanly via `just test-migration`.
 
+</details>
+
 ---
 
 ## v0.29.0 — Datalog Optimization: Magic Sets & Cost-Based Compilation
@@ -2206,6 +2351,9 @@ See [plans/vector_sparql_hybrid.md](plans/vector_sparql_hybrid.md) §5 (Advanced
 > **In plain language:** pg_ripple's Datalog engine already supports semi-naive evaluation — it only looks at *new* facts each iteration. This release makes inference dramatically smarter: instead of deriving *every possible* fact, the engine now derives only the facts needed to answer a specific question (magic sets). It also reorders rule joins by cost, eliminates redundant rules, and improves how negation and filters are compiled to SQL. The result is 10×–1000× faster inference for targeted queries and 2×–10× faster full materialization on large datasets.
 >
 > **Effort estimate: 5–7 person-weeks**
+
+<details>
+<summary>Completed items (click to expand)</summary>
 
 ### Background
 
@@ -2280,6 +2428,8 @@ See [plans/ecosystem/datalog.md §14.2](plans/ecosystem/datalog.md) for detailed
 
 `datalog_magic_sets.sql`, `datalog_cost_reorder.sql`, `datalog_antijoin.sql`, `datalog_subsumption.sql`, `datalog_filter_pushdown.sql`, and `datalog_delta_index.sql` all pass in `cargo pgrx regress pg18`. `pg_ripple.infer_goal('rdfs', '?x rdf:type foaf:Person')` returns the same triples as `pg_ripple.infer('rdfs')` filtered to `rdf:type foaf:Person`, but completes in <10% of the time on a 1M-triple dataset. Migration scripts from 0.1.0 through 0.29.0 run cleanly via `just test-migration`.
 
+</details>
+
 ---
 
 ## v0.30.0 — Datalog Aggregation & Compiled Rule Plans
@@ -2289,6 +2439,9 @@ See [plans/ecosystem/datalog.md §14.2](plans/ecosystem/datalog.md) for detailed
 > **In plain language:** This release adds two major capabilities to the Datalog engine. First, rules can now aggregate facts — for example, "count the number of friends each person has" or "find the maximum salary in each department" — unlocking graph analytics and metrics directly from inference rules. Second, the engine caches the SQL it generates for each rule set, so repeated calls to `infer()` (e.g., after each data load) no longer repeat expensive dictionary lookups and query construction. As a bonus, SPARQL queries that use on-demand Datalog rules also benefit from the plan cache: a query that triggers inference gets a faster response on every repeat execution.
 >
 > **Effort estimate: 5–7 person-weeks**
+
+<details>
+<summary>Completed items (click to expand)</summary>
 
 ### Background
 
@@ -2335,6 +2488,8 @@ See [plans/ecosystem/datalog.md §14.2](plans/ecosystem/datalog.md) for design n
 
 `datalog_agg.sql`, `datalog_plan_cache.sql`, and `datalog_sparql_cache.sql` all pass in `cargo pgrx regress pg18`. A PageRank-style degree centrality rule on a 1M-triple social graph produces correct results. Second call to `infer()` on the same rule set reports cache hits > 0 in `rule_plan_cache_stats()`. Migration scripts from 0.1.0 through 0.30.0 run cleanly via `just test-migration`.
 
+</details>
+
 ---
 
 ## v0.31.0 — Entity Resolution & Demand Transformation
@@ -2344,6 +2499,9 @@ See [plans/ecosystem/datalog.md §14.2](plans/ecosystem/datalog.md) for design n
 > **In plain language:** This release tackles two distinct but complementary problems. First, it adds proper handling for `owl:sameAs` — the RDF way of saying "these two names refer to the same thing". When the engine knows that `ex:Alice` and `ex:A.Smith` are the same person, all facts about one automatically apply to the other. Second, it introduces demand transformation — a generalisation of the magic sets technique (added in v0.29.0) that can rewrite complex rule programs to derive only the facts that a query actually needs, even for rules with many cross-referencing bodies. This also makes SPARQL on-demand mode smarter: SPARQL queries can now trigger only the Datalog inference relevant to their specific patterns.
 >
 > **Effort estimate: 5–7 person-weeks**
+
+<details>
+<summary>Completed items (click to expand)</summary>
 
 ### Background
 
@@ -2383,6 +2541,8 @@ See [plans/ecosystem/datalog.md §14.2](plans/ecosystem/datalog.md) for design n
 ### Exit Criteria
 
 `datalog_sameas.sql` and `datalog_demand.sql` pass in `cargo pgrx regress pg18`. A SPARQL on-demand query referencing two derived predicates on a 1M-triple dataset completes in <50% of the time compared to v0.30.0 (demand transform reduces combined CTE size). Migration scripts from 0.1.0 through 0.31.0 run cleanly via `just test-migration`.
+
+</details>
 
 ---
 

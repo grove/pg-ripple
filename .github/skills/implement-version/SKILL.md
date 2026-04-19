@@ -134,6 +134,43 @@ Every ROADMAP.md version section contains a `### Documentation` subsection. Trea
 
 > **v0.5.0 special case**: v0.5.0 carries the full catch-up backlog for v0.1.0–v0.4.0 (site scaffold, all released SQL API pages, playground, best practices, FAQ) in addition to its own pages. The site must be live on GitHub Pages before v0.5.0 is tagged.
 
+### 10. Wrap the released section in ROADMAP.md
+
+After tagging a version, wrap its full `## v0.X.Y` section in a `<details>` block so the roadmap stays readable as completed releases accumulate. This is the same convention used in pg_trickle.
+
+The wrapping rule:
+- **Keep outside `<details>`**: the `## v0.X.Y — Title` heading, the `**Theme**:` line, and the `> **In plain language:**` blockquote (including any nested notes and the effort estimate).
+- **Wrap inside `<details>`**: everything from the first `### ` sub-heading (usually `### Prerequisites` or `### Deliverables`) through to the line just before the `---` section separator.
+
+Template:
+
+```markdown
+## v0.X.Y — Title
+
+**Theme**: brief theme.
+
+> **In plain language:** ...
+>
+> **Effort estimate: N–M person-weeks**
+
+<details>
+<summary>Completed items (click to expand)</summary>
+
+### Deliverables
+
+- [x] ...
+
+### Exit Criteria
+
+...
+
+</details>
+
+---
+```
+
+**After tagging, apply the wrapper** — add the four lines (`<details>`, `<summary>…</summary>`, blank line, and the matching `</details>` + blank line before `---`) to the just-released section in ROADMAP.md, commit with message `"docs: wrap v0.X.Y section in details"`, and push.
+
 ## Common Pitfalls
 
 These are the mistakes most likely to produce silent bugs:
@@ -185,6 +222,7 @@ These are the mistakes most likely to produce silent bugs:
 
 ### Git
 - [ ] All ROADMAP.md deliverable checkboxes for this version are ticked (`- [x]`)
+- [ ] Released ROADMAP.md section wrapped in `<details>` (see step 10 in the Procedure above)
 - [ ] CHANGELOG.md updated
 - [ ] All commits pushed to `origin/main`
 - [ ] CI is green on the latest pushed commit (`gh run list --limit 1`)
