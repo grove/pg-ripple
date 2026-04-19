@@ -195,47 +195,47 @@ async fn main() {
         // Datalog — Phase 1: Rule management
         .route("/datalog/rules", get(datalog::list_rules))
         .route(
-            "/datalog/rules/:rule_set",
+            "/datalog/rules/{rule_set}",
             post(datalog::load_rules).delete(datalog::drop_rules),
         )
         .route(
-            "/datalog/rules/:rule_set/builtin",
+            "/datalog/rules/{rule_set}/builtin",
             post(datalog::load_builtin),
         )
-        .route("/datalog/rules/:rule_set/add", post(datalog::add_rule))
+        .route("/datalog/rules/{rule_set}/add", post(datalog::add_rule))
         .route(
-            "/datalog/rules/:rule_set/:rule_id",
+            "/datalog/rules/{rule_set}/{rule_id}",
             delete(datalog::remove_rule),
         )
         .route(
-            "/datalog/rules/:rule_set/enable",
+            "/datalog/rules/{rule_set}/enable",
             put(datalog::enable_rule_set),
         )
         .route(
-            "/datalog/rules/:rule_set/disable",
+            "/datalog/rules/{rule_set}/disable",
             put(datalog::disable_rule_set),
         )
         // Datalog — Phase 2: Inference
-        .route("/datalog/infer/:rule_set", post(datalog::infer))
+        .route("/datalog/infer/{rule_set}", post(datalog::infer))
         .route(
-            "/datalog/infer/:rule_set/stats",
+            "/datalog/infer/{rule_set}/stats",
             post(datalog::infer_with_stats),
         )
-        .route("/datalog/infer/:rule_set/agg", post(datalog::infer_agg))
-        .route("/datalog/infer/:rule_set/wfs", post(datalog::infer_wfs))
+        .route("/datalog/infer/{rule_set}/agg", post(datalog::infer_agg))
+        .route("/datalog/infer/{rule_set}/wfs", post(datalog::infer_wfs))
         .route(
-            "/datalog/infer/:rule_set/demand",
+            "/datalog/infer/{rule_set}/demand",
             post(datalog::infer_demand),
         )
         .route(
-            "/datalog/infer/:rule_set/lattice",
+            "/datalog/infer/{rule_set}/lattice",
             post(datalog::infer_lattice),
         )
         // Datalog — Phase 3: Query & constraints
-        .route("/datalog/query/:rule_set", post(datalog::query_goal))
+        .route("/datalog/query/{rule_set}", post(datalog::query_goal))
         .route("/datalog/constraints", get(datalog::check_constraints_all))
         .route(
-            "/datalog/constraints/:rule_set",
+            "/datalog/constraints/{rule_set}",
             get(datalog::check_constraints),
         )
         // Datalog — Phase 4: Admin & monitoring
@@ -249,7 +249,7 @@ async fn main() {
             "/datalog/views",
             get(datalog::list_views).post(datalog::create_view),
         )
-        .route("/datalog/views/:name", delete(datalog::drop_view))
+        .route("/datalog/views/{name}", delete(datalog::drop_view))
         .layer(cors)
         .with_state(state);
 
