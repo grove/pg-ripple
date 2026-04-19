@@ -13,6 +13,32 @@ Versions correspond to the milestones in [ROADMAP.md](ROADMAP.md).
 
 ---
 
+## [0.37.0] — 2026-04-26 — Storage Concurrency Hardening & Error Safety
+
+**Reliability release: zero hard panics, concurrent-safe merge/delete/promote, GUC validators.**
+
+### What you can do
+
+- **Trust merge + delete safety** — concurrent `DELETE` calls arriving while a merge cycle is running can no longer cause lost deletes. Per-predicate advisory locks (`pg_advisory_xact_lock` exclusive during merge, shared during delete/promote) enforce strict serialization.
+- **Get a one-call health report** — `pg_ripple.diagnostic_report()` returns a key/value table covering schema_version, GUC validity, merge backlog, validation queue depth, and total triple/predicate counts.
+- **Verify upgrade completeness** — `_pg_ripple.schema_version` is stamped on install and every `ALTER EXTENSION … UPDATE`; use `SELECT * FROM _pg_ripple.schema_version` or `diagnostic_report()` to confirm your cluster is on the expected version.
+- **Configure tombstone GC** — two new GUCs: `pg_ripple.tombstone_gc_enabled` (bool, default `on`) and `pg_ripple.tombstone_gc_threshold` (float string, default `0.05`). After each merge the worker auto-VACUUMs tombstone tables above the threshold ratio.
+- **Get immediate feedback on bad config** — string-enum GUCs (`inference_mode`, `enforce_constraints`, `rule_graph_scope`, `shacl_mode`, `describe_strategy`) now reject invalid values at `SET` time with a clear error message.
+- **Prevent session-level RLS bypass** — `pg_ripple.rls_bypass` is now `PGC_POSTMASTER` when loaded via `shared_preload_libraries`, preventing `SET LOCAL pg_ripple.rls_bypass = on` exploits.
+
+### What happens behind the scenes
+
+- `src/storage/merge.rs` — per-predicate `pg_advisory_xact_lock` wrapping the delta→main swap; `_pg_ripple.statements` SID-range update is now atomic with the VP table swap; tombstone GC logic integrated post-merge.
+- `src/storage/mod.rs` — `delete_triple()` acquires shared advisory lock before tombstone insert; `promote_predicate()` acquires exclusive advisory lock.
+- `src/shmem.rs` — all bloom filter counter decrements use `saturating_sub(1)`.
+- `src/sparql/optimizer.rs`, `src/sparql/sqlgen.rs`, `src/export.rs`, `pg_ripple_http/src/main.rs` — all `.unwrap()` / `.expect()` calls in non-test code replaced with `pgrx::error!()` or graceful `process::exit(1)` patterns.
+- `src/lib.rs` — `#![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used))]`; GUC check_hook validators for 5 string-enum GUCs; new `diagnostic_report()` pg_extern; `schema_version` bootstrap table; tombstone GC GUC statics + registrations; `rls_bypass` conditional context.
+- New migration script: `sql/pg_ripple--0.36.0--0.37.0.sql`.
+- New pg_regress tests: `storage_tombstone_gc.sql`, `diagnostic_report.sql`.
+- Documentation: troubleshooting.md "Lost deletes after merge" runbook; guc-reference.md v0.37.0 section; upgrading.md schema_version stamp guide.
+
+---
+
 ## [0.36.0] — 2026-04-25 — Worst-Case Optimal Joins & Lattice-Based Datalog
 
 **Leapfrog Triejoin for cyclic SPARQL patterns and monotone lattice aggregation for Datalog^L.**

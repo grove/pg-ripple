@@ -223,7 +223,10 @@ pub(super) fn estimate_pattern_cost(
         match fetch_table_stats(id) {
             Some(s) => {
                 stats_cache.insert(id, s);
-                stats_cache.get(&id).unwrap()
+                // SAFETY: we just inserted id above so get() must return Some.
+                stats_cache.get(&id).unwrap_or_else(|| {
+                    pgrx::error!("stats_cache: just-inserted entry for pred {id} not found")
+                })
             }
             None => return UNKNOWN_COST,
         }

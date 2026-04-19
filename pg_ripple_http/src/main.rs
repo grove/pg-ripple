@@ -100,22 +100,38 @@ struct RagResponse {
 async fn main() {
     tracing_subscriber::fmt()
         .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "pg_ripple_http=info".parse().unwrap()),
+            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
+                "pg_ripple_http=info".parse().unwrap_or_else(|e| {
+                    eprintln!("error parsing log filter: {e}");
+                    std::process::exit(1);
+                })
+            }),
         )
         .init();
 
     let pg_url = env_or("PG_RIPPLE_HTTP_PG_URL", "postgresql://localhost/postgres");
-    let port: u16 = env_or("PG_RIPPLE_HTTP_PORT", "7878")
-        .parse()
-        .expect("PG_RIPPLE_HTTP_PORT must be a valid port number");
-    let pool_size: usize = env_or("PG_RIPPLE_HTTP_POOL_SIZE", "16")
-        .parse()
-        .expect("PG_RIPPLE_HTTP_POOL_SIZE must be a positive integer");
+    let port: u16 = match env_or("PG_RIPPLE_HTTP_PORT", "7878").parse() {
+        Ok(p) => p,
+        Err(e) => {
+            tracing::error!("PG_RIPPLE_HTTP_PORT must be a valid port number: {e}");
+            std::process::exit(1);
+        }
+    };
+    let pool_size: usize = match env_or("PG_RIPPLE_HTTP_POOL_SIZE", "16").parse() {
+        Ok(n) => n,
+        Err(e) => {
+            tracing::error!("PG_RIPPLE_HTTP_POOL_SIZE must be a positive integer: {e}");
+            std::process::exit(1);
+        }
+    };
     let auth_token = std::env::var("PG_RIPPLE_HTTP_AUTH_TOKEN").ok();
-    let rate_limit: u32 = env_or("PG_RIPPLE_HTTP_RATE_LIMIT", "0")
-        .parse()
-        .expect("PG_RIPPLE_HTTP_RATE_LIMIT must be a non-negative integer");
+    let rate_limit: u32 = match env_or("PG_RIPPLE_HTTP_RATE_LIMIT", "0").parse() {
+        Ok(r) => r,
+        Err(e) => {
+            tracing::error!("PG_RIPPLE_HTTP_RATE_LIMIT must be a non-negative integer: {e}");
+            std::process::exit(1);
+        }
+    };
     let cors_origins = env_or("PG_RIPPLE_HTTP_CORS_ORIGINS", "*");
 
     // Build connection pool.
@@ -123,20 +139,35 @@ async fn main() {
     cfg.url = Some(pg_url.clone());
     cfg.pool = Some(deadpool_postgres::PoolConfig::new(pool_size));
 
-    let pool = cfg
-        .create_pool(Some(Runtime::Tokio1), NoTls)
-        .expect("failed to create PostgreSQL connection pool");
+    let pool = match cfg.create_pool(Some(Runtime::Tokio1), NoTls) {
+        Ok(p) => p,
+        Err(e) => {
+            tracing::error!("failed to create PostgreSQL connection pool: {e}");
+            std::process::exit(1);
+        }
+    };
 
     // Verify connectivity.
     {
-        let client = pool
-            .get()
-            .await
-            .expect("failed to connect to PostgreSQL — check PG_RIPPLE_HTTP_PG_URL");
-        let row = client
+        let client = match pool.get().await {
+            Ok(c) => c,
+            Err(e) => {
+                tracing::error!(
+                    "failed to connect to PostgreSQL — check PG_RIPPLE_HTTP_PG_URL: {e}"
+                );
+                std::process::exit(1);
+            }
+        };
+        let row = match client
             .query_one("SELECT pg_ripple.triple_count()", &[])
             .await
-            .expect("pg_ripple extension not available — is it installed?");
+        {
+            Ok(r) => r,
+            Err(e) => {
+                tracing::error!("pg_ripple extension not available — is it installed? ({e})");
+                std::process::exit(1);
+            }
+        };
         let count: i64 = row.get(0);
         tracing::info!(
             "connected to {pg_url} (port {port}), triple store contains {count} triples"
@@ -172,27 +203,40 @@ async fn main() {
         .with_state(state);
 
     if rate_limit > 0 {
-        let governor_conf = GovernorConfigBuilder::default()
+        let governor_conf = match GovernorConfigBuilder::default()
             .per_second(rate_limit as u64)
             .burst_size(rate_limit)
             .finish()
-            .expect("invalid governor configuration");
+        {
+            Some(c) => c,
+            None => {
+                tracing::error!("invalid governor rate-limit configuration");
+                std::process::exit(1);
+            }
+        };
         app = app.layer(GovernorLayer::new(Arc::new(governor_conf)));
     }
 
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
     tracing::info!("pg_ripple_http listening on http://{addr}");
 
-    let listener = tokio::net::TcpListener::bind(addr)
-        .await
-        .expect("failed to bind TCP listener");
+    let listener = match tokio::net::TcpListener::bind(addr).await {
+        Ok(l) => l,
+        Err(e) => {
+            tracing::error!("failed to bind TCP listener on {addr}: {e}");
+            std::process::exit(1);
+        }
+    };
     // Pass ConnectInfo for per-IP rate limiting.
-    axum::serve(
+    if let Err(e) = axum::serve(
         listener,
         app.into_make_service_with_connect_info::<SocketAddr>(),
     )
     .await
-    .expect("server error");
+    {
+        tracing::error!("server error: {e}");
+        std::process::exit(1);
+    }
 }
 
 // ─── Error redaction ─────────────────────────────────────────────────────────

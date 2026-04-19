@@ -24,6 +24,8 @@ pub type CacheEntry = (String, Vec<String>, std::collections::HashSet<String>);
 const DEFAULT_CAPACITY: usize = 256;
 
 thread_local! {
+    // SAFETY: DEFAULT_CAPACITY is a compile-time non-zero literal (256).
+    #[allow(clippy::expect_used)]
     static PLAN_CACHE: RefCell<LruCache<String, CacheEntry>> = RefCell::new(
         LruCache::new(NonZeroUsize::new(DEFAULT_CAPACITY).expect("capacity > 0"))
     );

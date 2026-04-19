@@ -197,6 +197,8 @@ pub fn format_inline(id: i64) -> String {
         }
         TYPE_DATE => {
             let days = decode_date_days(id);
+            // SAFETY: 1970-01-01 is a valid calendar date.
+            #[allow(clippy::unwrap_used)]
             let epoch = NaiveDate::from_ymd_opt(1970, 1, 1).unwrap();
             use chrono::Duration;
             let d = epoch

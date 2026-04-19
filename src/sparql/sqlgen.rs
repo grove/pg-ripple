@@ -985,7 +985,9 @@ fn translate_minus(left: &GraphPattern, right: &GraphPattern, ctx: &mut Ctx) -> 
     let left_cols: Vec<String> = shared_vars
         .iter()
         .map(|v| {
-            let col = left_frag.bindings.get(v).unwrap();
+            let col = left_frag.bindings.get(v).unwrap_or_else(|| {
+                pgrx::error!("MINUS: shared variable '{v}' missing in left bindings")
+            });
             format!("{col} AS _m_{v}")
         })
         .collect();
@@ -998,7 +1000,9 @@ fn translate_minus(left: &GraphPattern, right: &GraphPattern, ctx: &mut Ctx) -> 
     let right_cols: Vec<String> = shared_vars
         .iter()
         .map(|v| {
-            let col = right_frag.bindings.get(v).unwrap();
+            let col = right_frag.bindings.get(v).unwrap_or_else(|| {
+                pgrx::error!("MINUS: shared variable '{v}' missing in right bindings")
+            });
             format!("{col} AS _m_{v}")
         })
         .collect();

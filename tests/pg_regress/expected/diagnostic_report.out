@@ -1,0 +1,78 @@
+-- Test: diagnostic_report() function (v0.37.0)
+-- Verifies that diagnostic_report() returns a non-empty set with all expected
+-- keys and that no values are NULL.
+
+-- diagnostic_report() must return rows
+SELECT count(*) > 0 AS has_rows FROM pg_ripple.diagnostic_report();
+ has_rows 
+----------
+ t
+(1 row)
+
+-- All values must be non-null
+SELECT count(*) AS null_values
+FROM pg_ripple.diagnostic_report()
+WHERE value IS NULL;
+ null_values 
+-------------
+           0
+(1 row)
+
+-- Required keys must be present
+SELECT key FROM pg_ripple.diagnostic_report()
+WHERE key IN (
+    'schema_version',
+    'compiled_version',
+    'guc_inference_mode',
+    'guc_shacl_mode',
+    'merge_backlog_rows',
+    'validation_queue_depth',
+    'federation_endpoints_enabled',
+    'shmem_cache_ready',
+    'total_triple_count',
+    'predicate_count',
+    'dictionary_size'
+)
+ORDER BY key;
+             key              
+------------------------------
+ compiled_version
+ dictionary_size
+ federation_endpoints_enabled
+ guc_inference_mode
+ guc_shacl_mode
+ merge_backlog_rows
+ predicate_count
+ schema_version
+ shmem_cache_ready
+ total_triple_count
+ validation_queue_depth
+(11 rows)
+
+-- schema_version should match compiled version after fresh install
+SELECT
+    (SELECT value FROM pg_ripple.diagnostic_report() WHERE key = 'schema_version') AS sv,
+    (SELECT value FROM pg_ripple.diagnostic_report() WHERE key = 'compiled_version') AS cv;
+   sv    |   cv    
+---------+---------
+ 0.37.0  | 0.37.0
+(1 row)
+
+-- GUC values should be valid
+SELECT
+    value IN ('off', 'on_demand', 'materialized') AS valid_inference_mode
+FROM pg_ripple.diagnostic_report()
+WHERE key = 'guc_inference_mode';
+ valid_inference_mode 
+----------------------
+ t
+(1 row)
+
+SELECT
+    value IN ('off', 'sync', 'async') AS valid_shacl_mode
+FROM pg_ripple.diagnostic_report()
+WHERE key = 'guc_shacl_mode';
+ valid_shacl_mode 
+------------------
+ t
+(1 row)

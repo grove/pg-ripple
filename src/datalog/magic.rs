@@ -440,10 +440,10 @@ fn run_magic_seminaive(
 
     // Seeding pass: run relevant rules once.
     for rule in relevant_rules {
-        if rule.head.is_none() {
+        let Some(head_atom) = &rule.head else {
             continue;
-        }
-        let head_pred = match rule.head.as_ref().unwrap().p {
+        };
+        let head_pred = match head_atom.p {
             Term::Const(id) => id,
             _ => continue,
         };
@@ -516,10 +516,10 @@ fn run_magic_seminaive(
         let new_delta_fn = |pred_id: i64| -> String { format!("_dl_delta_new_{pred_id}") };
 
         for rule in relevant_rules {
-            if rule.head.is_none() {
+            let Some(head_atom) = &rule.head else {
                 continue;
-            }
-            let head_pred = match rule.head.as_ref().unwrap().p {
+            };
+            let head_pred = match head_atom.p {
                 Term::Const(id) => id,
                 _ => continue,
             };

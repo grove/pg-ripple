@@ -823,7 +823,7 @@ fn write_entities_parquet(
             let mut cw = rg
                 .next_column()
                 .unwrap_or_else(|e| pgrx::error!("entities id col error: {e}"))
-                .expect("expected id column");
+                .unwrap_or_else(|| pgrx::error!("expected id column in parquet schema"));
             {
                 if let ColumnWriter::ByteArrayColumnWriter(w) = cw.untyped() {
                     w.write_batch(&to_bytes(&ids), None, None)
@@ -838,7 +838,7 @@ fn write_entities_parquet(
             let mut cw = rg
                 .next_column()
                 .unwrap_or_else(|e| pgrx::error!("entities title col error: {e}"))
-                .expect("expected title column");
+                .unwrap_or_else(|| pgrx::error!("expected title column in parquet schema"));
             {
                 if let ColumnWriter::ByteArrayColumnWriter(w) = cw.untyped() {
                     w.write_batch(&to_bytes(&titles), None, None)
@@ -853,7 +853,7 @@ fn write_entities_parquet(
             let mut cw = rg
                 .next_column()
                 .unwrap_or_else(|e| pgrx::error!("entities type col error: {e}"))
-                .expect("expected type column");
+                .unwrap_or_else(|| pgrx::error!("expected type column in parquet schema"));
             {
                 if let ColumnWriter::ByteArrayColumnWriter(w) = cw.untyped() {
                     w.write_batch(&to_bytes(&entity_types), None, None)
@@ -868,7 +868,7 @@ fn write_entities_parquet(
             let mut cw = rg
                 .next_column()
                 .unwrap_or_else(|e| pgrx::error!("entities description col error: {e}"))
-                .expect("expected description column");
+                .unwrap_or_else(|| pgrx::error!("expected description column in parquet schema"));
             {
                 if let ColumnWriter::ByteArrayColumnWriter(w) = cw.untyped() {
                     w.write_batch(&to_bytes(&descriptions), None, None)
@@ -883,7 +883,7 @@ fn write_entities_parquet(
             let mut cw = rg
                 .next_column()
                 .unwrap_or_else(|e| pgrx::error!("entities text_unit_ids col error: {e}"))
-                .expect("expected text_unit_ids column");
+                .unwrap_or_else(|| pgrx::error!("expected text_unit_ids column in parquet schema"));
             {
                 if let ColumnWriter::ByteArrayColumnWriter(w) = cw.untyped() {
                     w.write_batch(&to_bytes(&text_unit_ids), None, None)
@@ -898,7 +898,7 @@ fn write_entities_parquet(
             let mut cw = rg
                 .next_column()
                 .unwrap_or_else(|e| pgrx::error!("entities frequency col error: {e}"))
-                .expect("expected frequency column");
+                .unwrap_or_else(|| pgrx::error!("expected frequency column in parquet schema"));
             {
                 if let ColumnWriter::Int64ColumnWriter(w) = cw.untyped() {
                     w.write_batch(&frequencies, None, None)
@@ -913,7 +913,7 @@ fn write_entities_parquet(
             let mut cw = rg
                 .next_column()
                 .unwrap_or_else(|e| pgrx::error!("entities degree col error: {e}"))
-                .expect("expected degree column");
+                .unwrap_or_else(|| pgrx::error!("expected degree column in parquet schema"));
             {
                 if let ColumnWriter::Int64ColumnWriter(w) = cw.untyped() {
                     w.write_batch(&degrees, None, None)
@@ -987,7 +987,7 @@ fn write_relationships_parquet(
             let mut cw = rg
                 .next_column()
                 .unwrap_or_else(|e| pgrx::error!("relationships id col: {e}"))
-                .expect("expected id column");
+                .unwrap_or_else(|| pgrx::error!("expected id column in parquet schema"));
             {
                 if let ColumnWriter::ByteArrayColumnWriter(w) = cw.untyped() {
                     w.write_batch(&to_bytes(&ids), None, None)
@@ -1002,7 +1002,7 @@ fn write_relationships_parquet(
             let mut cw = rg
                 .next_column()
                 .unwrap_or_else(|e| pgrx::error!("relationships source col: {e}"))
-                .expect("expected source column");
+                .unwrap_or_else(|| pgrx::error!("expected source column in parquet schema"));
             {
                 if let ColumnWriter::ByteArrayColumnWriter(w) = cw.untyped() {
                     w.write_batch(&to_bytes(&sources), None, None)
@@ -1017,7 +1017,7 @@ fn write_relationships_parquet(
             let mut cw = rg
                 .next_column()
                 .unwrap_or_else(|e| pgrx::error!("relationships target col: {e}"))
-                .expect("expected target column");
+                .unwrap_or_else(|| pgrx::error!("expected target column in parquet schema"));
             {
                 if let ColumnWriter::ByteArrayColumnWriter(w) = cw.untyped() {
                     w.write_batch(&to_bytes(&targets), None, None)
@@ -1032,7 +1032,7 @@ fn write_relationships_parquet(
             let mut cw = rg
                 .next_column()
                 .unwrap_or_else(|e| pgrx::error!("relationships description col: {e}"))
-                .expect("expected description column");
+                .unwrap_or_else(|| pgrx::error!("expected description column in parquet schema"));
             {
                 if let ColumnWriter::ByteArrayColumnWriter(w) = cw.untyped() {
                     w.write_batch(&to_bytes(&descriptions), None, None)
@@ -1047,7 +1047,7 @@ fn write_relationships_parquet(
             let mut cw = rg
                 .next_column()
                 .unwrap_or_else(|e| pgrx::error!("relationships weight col: {e}"))
-                .expect("expected weight column");
+                .unwrap_or_else(|| pgrx::error!("expected weight column in parquet schema"));
             {
                 if let ColumnWriter::DoubleColumnWriter(w) = cw.untyped() {
                     w.write_batch(&weights, None, None)
@@ -1062,7 +1062,9 @@ fn write_relationships_parquet(
             let mut cw = rg
                 .next_column()
                 .unwrap_or_else(|e| pgrx::error!("relationships combined_degree col: {e}"))
-                .expect("expected combined_degree column");
+                .unwrap_or_else(|| {
+                    pgrx::error!("expected combined_degree column in parquet schema")
+                });
             {
                 if let ColumnWriter::Int64ColumnWriter(w) = cw.untyped() {
                     w.write_batch(&combined_degrees, None, None)
@@ -1077,7 +1079,7 @@ fn write_relationships_parquet(
             let mut cw = rg
                 .next_column()
                 .unwrap_or_else(|e| pgrx::error!("relationships text_unit_ids col: {e}"))
-                .expect("expected text_unit_ids column");
+                .unwrap_or_else(|| pgrx::error!("expected text_unit_ids column in parquet schema"));
             {
                 if let ColumnWriter::ByteArrayColumnWriter(w) = cw.untyped() {
                     w.write_batch(&to_bytes(&text_unit_ids), None, None)
@@ -1149,7 +1151,7 @@ fn write_text_units_parquet(
             let mut cw = rg
                 .next_column()
                 .unwrap_or_else(|e| pgrx::error!("text_units id col: {e}"))
-                .expect("expected id column");
+                .unwrap_or_else(|| pgrx::error!("expected id column in parquet schema"));
             {
                 if let ColumnWriter::ByteArrayColumnWriter(w) = cw.untyped() {
                     w.write_batch(&to_bytes(&ids), None, None)
@@ -1164,7 +1166,7 @@ fn write_text_units_parquet(
             let mut cw = rg
                 .next_column()
                 .unwrap_or_else(|e| pgrx::error!("text_units text col: {e}"))
-                .expect("expected text column");
+                .unwrap_or_else(|| pgrx::error!("expected text column in parquet schema"));
             {
                 if let ColumnWriter::ByteArrayColumnWriter(w) = cw.untyped() {
                     w.write_batch(&to_bytes(&texts), None, None)
@@ -1179,7 +1181,7 @@ fn write_text_units_parquet(
             let mut cw = rg
                 .next_column()
                 .unwrap_or_else(|e| pgrx::error!("text_units n_tokens col: {e}"))
-                .expect("expected n_tokens column");
+                .unwrap_or_else(|| pgrx::error!("expected n_tokens column in parquet schema"));
             {
                 if let ColumnWriter::Int64ColumnWriter(w) = cw.untyped() {
                     w.write_batch(&n_tokens, None, None)
@@ -1194,7 +1196,7 @@ fn write_text_units_parquet(
             let mut cw = rg
                 .next_column()
                 .unwrap_or_else(|e| pgrx::error!("text_units document_id col: {e}"))
-                .expect("expected document_id column");
+                .unwrap_or_else(|| pgrx::error!("expected document_id column in parquet schema"));
             {
                 if let ColumnWriter::ByteArrayColumnWriter(w) = cw.untyped() {
                     w.write_batch(&to_bytes(&document_ids), None, None)
@@ -1209,7 +1211,7 @@ fn write_text_units_parquet(
             let mut cw = rg
                 .next_column()
                 .unwrap_or_else(|e| pgrx::error!("text_units entity_ids col: {e}"))
-                .expect("expected entity_ids column");
+                .unwrap_or_else(|| pgrx::error!("expected entity_ids column in parquet schema"));
             {
                 if let ColumnWriter::ByteArrayColumnWriter(w) = cw.untyped() {
                     w.write_batch(&to_bytes(&entity_ids), None, None)
@@ -1224,7 +1226,9 @@ fn write_text_units_parquet(
             let mut cw = rg
                 .next_column()
                 .unwrap_or_else(|e| pgrx::error!("text_units relationship_ids col: {e}"))
-                .expect("expected relationship_ids column");
+                .unwrap_or_else(|| {
+                    pgrx::error!("expected relationship_ids column in parquet schema")
+                });
             {
                 if let ColumnWriter::ByteArrayColumnWriter(w) = cw.untyped() {
                     w.write_batch(&to_bytes(&relationship_ids), None, None)

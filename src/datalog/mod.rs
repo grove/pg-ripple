@@ -454,10 +454,10 @@ pub fn run_inference_seminaive(rule_set_name: &str) -> (i64, i32) {
     // ── 5. Seeding pass: run all rules once, inserting into temp delta tables ──
     let seed_target_fn = |pred_id: i64| -> String { format!("_dl_delta_{pred_id}") };
     for rule in &active_rules {
-        if rule.head.is_none() {
+        let Some(head_atom) = &rule.head else {
             continue;
-        }
-        let head_pred = match &rule.head.as_ref().unwrap().p {
+        };
+        let head_pred = match &head_atom.p {
             Term::Const(id) => *id,
             _ => continue,
         };
@@ -532,10 +532,10 @@ pub fn run_inference_seminaive(rule_set_name: &str) -> (i64, i32) {
         let new_delta_fn = |pred_id: i64| -> String { format!("_dl_delta_new_{pred_id}") };
 
         for rule in &active_rules {
-            if rule.head.is_none() {
+            let Some(head_atom) = &rule.head else {
                 continue;
-            }
-            let head_pred = match &rule.head.as_ref().unwrap().p {
+            };
+            let head_pred = match &head_atom.p {
                 Term::Const(id) => *id,
                 _ => continue,
             };
@@ -938,10 +938,10 @@ pub fn run_inference_agg(rule_set_name: &str) -> (i64, i64, i32) {
     } else {
         let mut compiled = Vec::new();
         for rule in &agg_rules {
-            if rule.head.is_none() {
+            let Some(head_atom) = &rule.head else {
                 continue;
-            }
-            let head_pred = match &rule.head.as_ref().unwrap().p {
+            };
+            let head_pred = match &head_atom.p {
                 Term::Const(id) => *id,
                 _ => continue,
             };
@@ -1008,10 +1008,10 @@ pub(crate) fn run_seminaive_inner(rules: &[Rule], rule_set_name: &str) -> (i64, 
 
     // Seeding pass.
     for rule in rules {
-        if rule.head.is_none() {
+        let Some(head_atom) = &rule.head else {
             continue;
-        }
-        let head_pred = match &rule.head.as_ref().unwrap().p {
+        };
+        let head_pred = match &head_atom.p {
             Term::Const(id) => *id,
             _ => continue,
         };
@@ -1061,10 +1061,10 @@ pub(crate) fn run_seminaive_inner(rules: &[Rule], rule_set_name: &str) -> (i64, 
         let new_delta_fn = |pred_id: i64| -> String { format!("_dl_delta_new_{pred_id}") };
 
         for rule in rules {
-            if rule.head.is_none() {
+            let Some(head_atom) = &rule.head else {
                 continue;
-            }
-            let head_pred = match &rule.head.as_ref().unwrap().p {
+            };
+            let head_pred = match &head_atom.p {
                 Term::Const(id) => *id,
                 _ => continue,
             };

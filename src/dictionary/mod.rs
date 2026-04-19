@@ -64,10 +64,14 @@ pub const KIND_QUOTED_TRIPLE: i16 = 5;
 thread_local! {
     /// Encode cache: full XXH3-128 hash → sequence-generated id.
     static ENCODE_CACHE: RefCell<LruCache<u128, i64>> = RefCell::new(
+        // SAFETY: CACHE_CAPACITY is a compile-time non-zero literal (4096).
+        #[allow(clippy::expect_used)]
         LruCache::new(NonZeroUsize::new(CACHE_CAPACITY).expect("capacity > 0"))
     );
     /// Decode cache: sequence id → term value.
     static DECODE_CACHE: RefCell<LruCache<i64, String>> = RefCell::new(
+        // SAFETY: CACHE_CAPACITY is a compile-time non-zero literal (4096).
+        #[allow(clippy::expect_used)]
         LruCache::new(NonZeroUsize::new(CACHE_CAPACITY).expect("capacity > 0"))
     );
 }

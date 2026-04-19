@@ -2885,41 +2885,41 @@ See [plans/ecosystem/datalog.md §14.2.8 and §14.2.14](plans/ecosystem/datalog.
 
 ### Deliverables
 
-- [ ] **HTAP merge cutover race — fixed** (`src/storage/merge.rs`)
+- [x] **HTAP merge cutover race — fixed** (`src/storage/merge.rs`)
   - Wrap the delta→main swap in a per-predicate `pg_advisory_xact_lock`; concurrent `DELETE` path acquires the same lock in `share` mode
   - Ensures deletes arriving during a merge cycle are never lost regardless of timing
   - Add crash-recovery test `tests/crash_recovery/merge_concurrent_delete.sh`: 50 concurrent writers + 1-second merge interval, assert zero lost deletes after 5 minutes
-- [ ] **Tombstone GC integrated into merge worker** (`src/storage/merge.rs`, `src/worker.rs`)
+- [x] **Tombstone GC integrated into merge worker** (`src/storage/merge.rs`, `src/worker.rs`)
   - After each successful merge cycle, schedule `VACUUM` on VP tables where `tombstone_count / main_count > pg_ripple.tombstone_gc_threshold`
   - New GUCs: `pg_ripple.tombstone_gc_enabled` (bool, default `true`), `pg_ripple.tombstone_gc_threshold` (float, default `0.05`)
   - pg_regress test `storage_tombstone_gc.sql`: verify tombstones are vacuumed after threshold is crossed
-- [ ] **Rare-predicate promotion — idempotent and serialised** (`src/lib.rs`, `src/storage/mod.rs`)
+- [x] **Rare-predicate promotion — idempotent and serialised** (`src/lib.rs`, `src/storage/mod.rs`)
   - Acquire the per-predicate advisory lock before any promotion attempt
   - Use `CREATE TABLE IF NOT EXISTS`; wrap data move in `WITH moved AS (DELETE … RETURNING *) INSERT INTO vp_N SELECT * FROM moved`
   - Add crash-recovery test `tests/crash_recovery/promotion_race.sh`: two backends racing to promote the same predicate, assert exactly one succeeds
-- [ ] **Dictionary cache rollback on transaction abort** (`src/dictionary/mod.rs`, `src/shmem.rs`)
+- [x] **Dictionary cache rollback on transaction abort** (`src/dictionary/mod.rs`, `src/shmem.rs`)
   - Version-tag each shared-memory cache entry with the inserting `xid`; decode path checks `TransactionIdDidCommit` before trusting cached ID
   - pg_regress test `dictionary_rollback.sql`: `BEGIN; encode_term('novel:term'); ROLLBACK; encode_term('novel:term')` — verify the second encode succeeds without error
-- [ ] **Bloom filter saturating counter fix** (`src/shmem.rs`)
+- [x] **Bloom filter saturating counter fix** (`src/shmem.rs`)
   - Replace all reference-counter decrements with `saturating_sub(1)`; document that a counter saturated at 255 is treated conservatively (bit kept set, no false negatives)
-- [ ] **`_pg_ripple.statements` atomic update** (`src/storage/merge.rs`)
+- [x] **`_pg_ripple.statements` atomic update** (`src/storage/merge.rs`)
   - Perform SID-range catalog `DELETE + INSERT` in the same transaction as the VP table swap
   - Eliminates the race where a mid-update worker kill leaves a stale SID→OID mapping for RDF-star queries
-- [ ] **`(o, s)` index on `vp_rare`** (`src/storage/mod.rs`)
+- [x] **`(o, s)` index on `vp_rare`** (`src/storage/mod.rs`)
   - Add `CREATE INDEX IF NOT EXISTS vp_rare_os_idx ON _pg_ripple.vp_rare (o, s)` in bootstrap and migration script
   - Eliminates sequential scans on object-leading patterns over rare predicates
-- [ ] **Eliminate `.expect()` / `.unwrap()` in all library code** (`src/lib.rs`, `src/bulk_load.rs`, `src/sparql/optimizer.rs`, `src/sparql/sqlgen.rs`, `src/export.rs`, `pg_ripple_http/src/main.rs`)
+- [x] **Eliminate `.expect()` / `.unwrap()` in all library code** (`src/lib.rs`, `src/bulk_load.rs`, `src/sparql/optimizer.rs`, `src/sparql/sqlgen.rs`, `src/export.rs`, `pg_ripple_http/src/main.rs`)
   - Replace all 30+ `expect()`/`unwrap()` calls in non-test code with `Result`-propagating helpers; surface errors via `pgrx::error!()` at the pg_extern boundary
   - Add `#![deny(clippy::unwrap_used, clippy::expect_used)]` to `src/lib.rs` (test code excluded via `#[cfg(test)]`)
   - Fix `pg_ripple_http`: replace startup panics with graceful error logging and `process::exit(1)`
-- [ ] **GUC `check_hook` validators** (`src/lib.rs`)
+- [x] **GUC `check_hook` validators** (`src/lib.rs`)
   - Implement validators for all string-enum GUCs: `inference_mode` (`off` / `on_demand` / `materialized`), `enforce_constraints` (`off` / `warn` / `error`), `rule_graph_scope` (`default` / `all`), `shacl_mode` (`off` / `sync` / `async`), `describe_strategy` (`cbd` / `scbd`)
   - Implement `min_val` bounds for integer GUCs: `max_path_depth ≥ 1`, `property_path_max_depth ≥ 1`, `merge_threshold ≥ 1`, `merge_interval_secs ≥ 1`
   - Promote `pg_ripple.rls_bypass` to `PGC_POSTMASTER` so it cannot be flipped per-session
-- [ ] **`pg_ripple.diagnostic_report() RETURNS TABLE (key TEXT, value TEXT)`** (`src/lib.rs`)
+- [x] **`pg_ripple.diagnostic_report() RETURNS TABLE (key TEXT, value TEXT)`** (`src/lib.rs`)
   - Keys: GUC validity summary, shared-memory cache hit/miss rates, merge backlog (rows in all delta tables), validation queue depth, federation endpoint health, schema_version match
   - pg_regress test `diagnostic_report.sql`: exercise all fields; assert no null values
-- [ ] **`_pg_ripple.schema_version` table** (`src/lib.rs`)
+- [x] **`_pg_ripple.schema_version` table** (`src/lib.rs`)
   - Created at install time with columns `version TEXT, installed_at TIMESTAMPTZ, upgraded_from TEXT`
   - Stamped on every `ALTER EXTENSION … UPDATE`
 
@@ -2929,10 +2929,10 @@ See [plans/ecosystem/datalog.md §14.2.8 and §14.2.14](plans/ecosystem/datalog.
 
 ### Documentation
 
-- [ ] `user-guide/operations/troubleshooting.md` — new section: "Lost deletes after merge" runbook (cause, detection via `diagnostic_report()`, fix via advisory lock, upgrade to v0.37.0)
-- [ ] `reference/guc-reference.md` — document `tombstone_gc_threshold`, `tombstone_gc_enabled`; add validator-rules table for all enum GUCs; note `rls_bypass` scope change
-- [ ] `user-guide/operations/upgrade.md` — document the `schema_version` stamp and how to verify upgrade completeness
-- [ ] Release notes for v0.37.0
+- [x] `user-guide/operations/troubleshooting.md` — new section: "Lost deletes after merge" runbook (cause, detection via `diagnostic_report()`, fix via advisory lock, upgrade to v0.37.0)
+- [x] `reference/guc-reference.md` — document `tombstone_gc_threshold`, `tombstone_gc_enabled`; add validator-rules table for all enum GUCs; note `rls_bypass` scope change
+- [x] `user-guide/operations/upgrade.md` — document the `schema_version` stamp and how to verify upgrade completeness
+- [x] Release notes for v0.37.0
 
 ### Exit Criteria
 

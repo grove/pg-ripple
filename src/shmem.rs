@@ -276,13 +276,12 @@ pub fn clear_predicate_delta_bit(pred_id: i64) {
     let mut guard_counters = DELTA_BLOOM_COUNTERS.exclusive();
     let counters: &mut [u8; 1024] = &mut guard_counters;
 
-    // Decrement counters
-    if counters[p1] > 0 {
-        counters[p1] -= 1;
-    }
-    if counters[p2] > 0 {
-        counters[p2] -= 1;
-    }
+    // v0.37.0: Use saturating_sub so a counter saturated at 255 (from many
+    // hash-colliding predicates) is decremented safely. A saturated counter
+    // stays conservatively high — the bit is never cleared until the counter
+    // reaches zero, preventing false negatives.
+    counters[p1] = counters[p1].saturating_sub(1);
+    counters[p2] = counters[p2].saturating_sub(1);
 
     let mut guard_bits = DELTA_BLOOM.exclusive();
     let bits: &mut [u64; 16] = &mut guard_bits;

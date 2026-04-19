@@ -11,6 +11,10 @@
 //! In v0.6.0 (HTAP Architecture), VP tables are split into delta + main
 //! partitions for non-blocking concurrent reads and writes.
 
+// v0.37.0: Deny hard panics in library code; test modules exempt via #[allow].
+#![cfg_attr(not(any(test, feature = "pg_test")), deny(clippy::unwrap_used))]
+#![cfg_attr(not(any(test, feature = "pg_test")), deny(clippy::expect_used))]
+
 use pgrx::guc::{GucContext, GucFlags};
 use pgrx::prelude::*;
 
@@ -92,6 +96,8 @@ CREATE TABLE IF NOT EXISTS _pg_ripple.vp_rare (
 CREATE INDEX IF NOT EXISTS idx_vp_rare_p_s_o   ON _pg_ripple.vp_rare (p, s, o);
 CREATE INDEX IF NOT EXISTS idx_vp_rare_s_p     ON _pg_ripple.vp_rare (s, p);
 CREATE INDEX IF NOT EXISTS idx_vp_rare_g_p_s_o ON _pg_ripple.vp_rare (g, p, s, o);
+-- v0.37.0: (o, s) index eliminates seq-scans on object-leading patterns
+CREATE INDEX IF NOT EXISTS vp_rare_os_idx      ON _pg_ripple.vp_rare (o, s);
 
 -- Statements range-mapping catalog (v0.2.0)
 CREATE TABLE IF NOT EXISTS _pg_ripple.statements (
@@ -635,6 +641,26 @@ ON CONFLICT (name) DO NOTHING;
     requires = ["datalog_schema_setup"]
 );
 
+// v0.37.0: Schema version tracking table.
+pgrx::extension_sql!(
+    r#"
+-- Schema version tracking (v0.37.0)
+-- Stamped at CREATE EXTENSION time and on every ALTER EXTENSION ... UPDATE.
+CREATE TABLE IF NOT EXISTS _pg_ripple.schema_version (
+    version       TEXT        NOT NULL,
+    installed_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    upgraded_from TEXT
+);
+
+-- Stamp initial install version.
+INSERT INTO _pg_ripple.schema_version (version, upgraded_from)
+VALUES ('0.37.0', NULL)
+ON CONFLICT DO NOTHING;
+"#,
+    name = "v037_schema_version",
+    requires = ["v036_lattice_types"]
+);
+
 // Create the predicate_stats view after the base tables exist.
 pgrx::extension_sql!(
     r#"
@@ -1058,6 +1084,15 @@ pub static WCOJ_MIN_TABLES: pgrx::GucSetting<i32> = pgrx::GucSetting::<i32>::new
 /// Default: `1000`.  Set higher for very large lattice computations.
 pub static LATTICE_MAX_ITERATIONS: pgrx::GucSetting<i32> = pgrx::GucSetting::<i32>::new(1000);
 
+// ── v0.37.0 GUC statics ───────────────────────────────────────────────────────
+
+/// GUC: enable automatic tombstone VACUUM after merge cycles (v0.37.0).
+pub static TOMBSTONE_GC_ENABLED: pgrx::GucSetting<bool> = pgrx::GucSetting::<bool>::new(true);
+
+/// GUC: tombstone/main ratio threshold for triggering VACUUM (stored as string, v0.37.0).
+pub static TOMBSTONE_GC_THRESHOLD_STR: pgrx::GucSetting<Option<std::ffi::CString>> =
+    pgrx::GucSetting::<Option<std::ffi::CString>>::new(None);
+
 // ─── pg_trickle runtime detection (v0.6.0) ───────────────────────────────────
 
 /// The pg_trickle version that pg_ripple was tested against (A-4, v0.25.0).
@@ -1252,6 +1287,105 @@ fn register_executor_end_hook() {
 #[allow(non_snake_case)]
 #[pg_guard]
 pub extern "C-unwind" fn _PG_init() {
+    // ── v0.37.0: Register string-enum GUCs with check_hook validators ────────
+    // These validators reject invalid enum values immediately (at SET time)
+    // rather than allowing them to propagate silently to the execution path.
+
+    /// Validate `inference_mode`: `off`, `on_demand`, or `materialized`.
+    #[pg_guard]
+    unsafe extern "C-unwind" fn check_inference_mode(
+        newval: *mut *mut std::ffi::c_char,
+        _extra: *mut *mut std::ffi::c_void,
+        _source: pgrx::pg_sys::GucSource::Type,
+    ) -> bool {
+        if newval.is_null() {
+            return true;
+        }
+        let s = unsafe {
+            if (*newval).is_null() {
+                return true;
+            }
+            std::ffi::CStr::from_ptr(*newval).to_str().unwrap_or("")
+        };
+        matches!(s, "off" | "on_demand" | "materialized")
+    }
+
+    /// Validate `enforce_constraints`: `off`, `warn`, or `error`.
+    #[pg_guard]
+    unsafe extern "C-unwind" fn check_enforce_constraints(
+        newval: *mut *mut std::ffi::c_char,
+        _extra: *mut *mut std::ffi::c_void,
+        _source: pgrx::pg_sys::GucSource::Type,
+    ) -> bool {
+        if newval.is_null() {
+            return true;
+        }
+        let s = unsafe {
+            if (*newval).is_null() {
+                return true;
+            }
+            std::ffi::CStr::from_ptr(*newval).to_str().unwrap_or("")
+        };
+        matches!(s, "off" | "warn" | "error")
+    }
+
+    /// Validate `rule_graph_scope`: `default` or `all`.
+    #[pg_guard]
+    unsafe extern "C-unwind" fn check_rule_graph_scope(
+        newval: *mut *mut std::ffi::c_char,
+        _extra: *mut *mut std::ffi::c_void,
+        _source: pgrx::pg_sys::GucSource::Type,
+    ) -> bool {
+        if newval.is_null() {
+            return true;
+        }
+        let s = unsafe {
+            if (*newval).is_null() {
+                return true;
+            }
+            std::ffi::CStr::from_ptr(*newval).to_str().unwrap_or("")
+        };
+        matches!(s, "default" | "all")
+    }
+
+    /// Validate `shacl_mode`: `off`, `sync`, or `async`.
+    #[pg_guard]
+    unsafe extern "C-unwind" fn check_shacl_mode(
+        newval: *mut *mut std::ffi::c_char,
+        _extra: *mut *mut std::ffi::c_void,
+        _source: pgrx::pg_sys::GucSource::Type,
+    ) -> bool {
+        if newval.is_null() {
+            return true;
+        }
+        let s = unsafe {
+            if (*newval).is_null() {
+                return true;
+            }
+            std::ffi::CStr::from_ptr(*newval).to_str().unwrap_or("")
+        };
+        matches!(s, "off" | "sync" | "async")
+    }
+
+    /// Validate `describe_strategy`: `cbd`, `scbd`, or `simple`.
+    #[pg_guard]
+    unsafe extern "C-unwind" fn check_describe_strategy(
+        newval: *mut *mut std::ffi::c_char,
+        _extra: *mut *mut std::ffi::c_void,
+        _source: pgrx::pg_sys::GucSource::Type,
+    ) -> bool {
+        if newval.is_null() {
+            return true;
+        }
+        let s = unsafe {
+            if (*newval).is_null() {
+                return true;
+            }
+            std::ffi::CStr::from_ptr(*newval).to_str().unwrap_or("")
+        };
+        matches!(s, "cbd" | "scbd" | "simple")
+    }
+
     pgrx::GucRegistry::define_string_guc(
         c"pg_ripple.default_graph",
         c"IRI of the default named graph (empty = built-in default graph)",
@@ -1303,14 +1437,20 @@ pub extern "C-unwind" fn _PG_init() {
         GucFlags::default(),
     );
 
-    pgrx::GucRegistry::define_string_guc(
-        c"pg_ripple.describe_strategy",
-        c"DESCRIBE algorithm: 'cbd' (Concise Bounded Description), 'scbd' (Symmetric CBD), or 'simple'",
-        c"",
-        &DESCRIBE_STRATEGY,
-        GucContext::Userset,
-        GucFlags::default(),
-    );
+    // v0.37.0: validated describe_strategy
+    unsafe {
+        pgrx::GucRegistry::define_string_guc_with_hooks(
+            c"pg_ripple.describe_strategy",
+            c"DESCRIBE algorithm: 'cbd' (Concise Bounded Description), 'scbd' (Symmetric CBD), or 'simple'",
+            c"",
+            &DESCRIBE_STRATEGY,
+            GucContext::Userset,
+            GucFlags::default(),
+            Some(check_describe_strategy),
+            None,
+            None,
+        );
+    }
 
     // ── v0.6.0 GUCs ──────────────────────────────────────────────────────────
 
@@ -1380,14 +1520,20 @@ pub extern "C-unwind" fn _PG_init() {
 
     // ── v0.7.0 GUCs ──────────────────────────────────────────────────────────
 
-    pgrx::GucRegistry::define_string_guc(
-        c"pg_ripple.shacl_mode",
-        c"SHACL validation mode: 'off' (default), 'sync' (reject violations inline), 'async' (queue for background worker)",
-        c"",
-        &SHACL_MODE,
-        GucContext::Userset,
-        GucFlags::default(),
-    );
+    // v0.37.0: validated shacl_mode
+    unsafe {
+        pgrx::GucRegistry::define_string_guc_with_hooks(
+            c"pg_ripple.shacl_mode",
+            c"SHACL validation mode: 'off' (default), 'sync' (reject violations inline), 'async' (queue for background worker)",
+            c"",
+            &SHACL_MODE,
+            GucContext::Userset,
+            GucFlags::default(),
+            Some(check_shacl_mode),
+            None,
+            None,
+        );
+    }
 
     pgrx::GucRegistry::define_bool_guc(
         c"pg_ripple.dedup_on_merge",
@@ -1400,32 +1546,44 @@ pub extern "C-unwind" fn _PG_init() {
 
     // ── v0.10.0 GUCs ─────────────────────────────────────────────────────────
 
-    pgrx::GucRegistry::define_string_guc(
-        c"pg_ripple.inference_mode",
-        c"Datalog inference mode: 'off' (default), 'on_demand', 'materialized'",
-        c"",
-        &INFERENCE_MODE,
-        GucContext::Userset,
-        GucFlags::default(),
-    );
+    // v0.37.0: Use define_string_guc_with_hooks to validate enum values at SET time.
+    unsafe {
+        pgrx::GucRegistry::define_string_guc_with_hooks(
+            c"pg_ripple.inference_mode",
+            c"Datalog inference mode: 'off' (default), 'on_demand', 'materialized'",
+            c"",
+            &INFERENCE_MODE,
+            GucContext::Userset,
+            GucFlags::default(),
+            Some(check_inference_mode),
+            None,
+            None,
+        );
 
-    pgrx::GucRegistry::define_string_guc(
-        c"pg_ripple.enforce_constraints",
-        c"Constraint rule enforcement: 'off' (default), 'warn', 'error'",
-        c"",
-        &ENFORCE_CONSTRAINTS,
-        GucContext::Userset,
-        GucFlags::default(),
-    );
+        pgrx::GucRegistry::define_string_guc_with_hooks(
+            c"pg_ripple.enforce_constraints",
+            c"Constraint rule enforcement: 'off' (default), 'warn', 'error'",
+            c"",
+            &ENFORCE_CONSTRAINTS,
+            GucContext::Userset,
+            GucFlags::default(),
+            Some(check_enforce_constraints),
+            None,
+            None,
+        );
 
-    pgrx::GucRegistry::define_string_guc(
-        c"pg_ripple.rule_graph_scope",
-        c"Graph scope for unscoped Datalog atoms: 'default' (g=0 only) or 'all' (any graph)",
-        c"",
-        &RULE_GRAPH_SCOPE,
-        GucContext::Userset,
-        GucFlags::default(),
-    );
+        pgrx::GucRegistry::define_string_guc_with_hooks(
+            c"pg_ripple.rule_graph_scope",
+            c"Graph scope for unscoped Datalog atoms: 'default' (g=0 only) or 'all' (any graph)",
+            c"",
+            &RULE_GRAPH_SCOPE,
+            GucContext::Userset,
+            GucFlags::default(),
+            Some(check_rule_graph_scope),
+            None,
+            None,
+        );
+    }
 
     // ── v0.13.0 GUCs ─────────────────────────────────────────────────────────
 
@@ -1451,14 +1609,28 @@ pub extern "C-unwind" fn _PG_init() {
 
     // ── v0.14.0 GUCs ─────────────────────────────────────────────────────────
 
-    pgrx::GucRegistry::define_bool_guc(
-        c"pg_ripple.rls_bypass",
-        c"Superuser override: when on, graph-level RLS policies are bypassed for this session (default: off)",
-        c"",
-        &RLS_BYPASS,
-        GucContext::Suset,
-        GucFlags::default(),
-    );
+    // v0.37.0: rls_bypass is elevated to PGC_POSTMASTER so it cannot be
+    // flipped per-session (a user could otherwise bypass RLS with SET LOCAL).
+    // This requires the registration to happen only during shared_preload_libraries
+    // loading (where Postmaster-context GUCs are accepted).
+    // When loaded outside that context (e.g. direct CREATE EXTENSION), fall back
+    // to Suset context so the GUC is still registered.
+    {
+        let ctx = if unsafe { pgrx::pg_sys::process_shared_preload_libraries_in_progress } {
+            GucContext::Postmaster
+        } else {
+            GucContext::Suset
+        };
+        pgrx::GucRegistry::define_bool_guc(
+            c"pg_ripple.rls_bypass",
+            c"Superuser override: when on, graph-level RLS policies are bypassed; \
+              cannot be changed per-session (v0.37.0: PGC_POSTMASTER scope)",
+            c"",
+            &RLS_BYPASS,
+            ctx,
+            GucFlags::default(),
+        );
+    }
 
     // ── v0.16.0 GUCs ─────────────────────────────────────────────────────────
 
@@ -1928,6 +2100,28 @@ pub extern "C-unwind" fn _PG_init() {
         1,
         1_000_000,
         GucContext::Userset,
+        GucFlags::default(),
+    );
+
+    // ── v0.37.0 GUCs ─────────────────────────────────────────────────────────
+
+    pgrx::GucRegistry::define_bool_guc(
+        c"pg_ripple.tombstone_gc_enabled",
+        c"When on (default), automatically VACUUM VP tombstone tables after merge \
+          when the tombstone/main ratio exceeds tombstone_gc_threshold (v0.37.0)",
+        c"",
+        &TOMBSTONE_GC_ENABLED,
+        GucContext::Sighup,
+        GucFlags::default(),
+    );
+
+    pgrx::GucRegistry::define_string_guc(
+        c"pg_ripple.tombstone_gc_threshold",
+        c"Tombstone-to-main-row ratio that triggers automatic VACUUM after merge \
+          (default: '0.05' = 5%; accepts a decimal string, range: 0.0–1.0) (v0.37.0)",
+        c"",
+        &TOMBSTONE_GC_THRESHOLD_STR,
+        GucContext::Sighup,
         GucFlags::default(),
     );
 
@@ -3165,6 +3359,123 @@ mod pg_ripple {
                 .collect()
         });
         pgrx::JsonB(serde_json::Value::Array(rows))
+    }
+
+    /// Return a system health report as a set of (key, value) rows.
+    ///
+    /// Covers: GUC validity, shared-memory cache hit/miss rates, merge backlog,
+    /// SHACL validation queue depth, schema version, and federation endpoint count.
+    ///
+    /// v0.37.0: first implementation.
+    ///
+    /// ```sql
+    /// SELECT * FROM pg_ripple.diagnostic_report();
+    /// ```
+    #[pg_extern]
+    fn diagnostic_report() -> TableIterator<'static, (name!(key, String), name!(value, String))> {
+        let mut rows: Vec<(String, String)> = Vec::new();
+
+        // ── Schema version ────────────────────────────────────────────────────
+        let schema_ver: String = pgrx::Spi::get_one::<String>(
+            "SELECT version FROM _pg_ripple.schema_version \
+             ORDER BY installed_at DESC LIMIT 1",
+        )
+        .unwrap_or(None)
+        .unwrap_or_else(|| "unknown".to_string());
+        rows.push(("schema_version".to_string(), schema_ver));
+
+        // ── Cargo (compiled) version ──────────────────────────────────────────
+        rows.push((
+            "compiled_version".to_string(),
+            env!("CARGO_PKG_VERSION").to_string(),
+        ));
+
+        // ── GUC validity summary ──────────────────────────────────────────────
+        let inference_mode = crate::INFERENCE_MODE
+            .get()
+            .and_then(|c| c.to_str().ok().map(|s| s.to_owned()))
+            .unwrap_or_else(|| "off".to_string());
+        let valid_inference = matches!(
+            inference_mode.as_str(),
+            "off" | "on_demand" | "materialized"
+        );
+        rows.push((
+            "guc_inference_mode".to_string(),
+            if valid_inference {
+                inference_mode
+            } else {
+                format!("INVALID: {inference_mode}")
+            },
+        ));
+
+        let shacl_mode = crate::SHACL_MODE
+            .get()
+            .and_then(|c| c.to_str().ok().map(|s| s.to_owned()))
+            .unwrap_or_else(|| "off".to_string());
+        let valid_shacl = matches!(shacl_mode.as_str(), "off" | "sync" | "async");
+        rows.push((
+            "guc_shacl_mode".to_string(),
+            if valid_shacl {
+                shacl_mode
+            } else {
+                format!("INVALID: {shacl_mode}")
+            },
+        ));
+
+        // ── Merge backlog: total rows in all delta tables ─────────────────────
+        let delta_backlog: i64 = pgrx::Spi::get_one::<i64>(
+            "SELECT COALESCE(SUM(c.reltuples::bigint), 0) \
+             FROM pg_class c \
+             JOIN pg_namespace n ON n.oid = c.relnamespace \
+             WHERE n.nspname = '_pg_ripple' \
+               AND c.relname LIKE '%_delta' \
+               AND c.relkind = 'r'",
+        )
+        .unwrap_or(None)
+        .unwrap_or(0);
+        rows.push(("merge_backlog_rows".to_string(), delta_backlog.to_string()));
+
+        // ── SHACL validation queue depth ──────────────────────────────────────
+        let vq_depth: i64 =
+            pgrx::Spi::get_one::<i64>("SELECT count(*)::bigint FROM _pg_ripple.validation_queue")
+                .unwrap_or(None)
+                .unwrap_or(0);
+        rows.push(("validation_queue_depth".to_string(), vq_depth.to_string()));
+
+        // ── Federation endpoint count ──────────────────────────────────────────
+        let fed_count: i64 = pgrx::Spi::get_one::<i64>(
+            "SELECT count(*)::bigint FROM _pg_ripple.federation_endpoints WHERE enabled = true",
+        )
+        .unwrap_or(None)
+        .unwrap_or(0);
+        rows.push((
+            "federation_endpoints_enabled".to_string(),
+            fed_count.to_string(),
+        ));
+
+        // ── Shared-memory cache status ────────────────────────────────────────
+        let shmem_ready = crate::shmem::SHMEM_READY.load(std::sync::atomic::Ordering::Relaxed);
+        rows.push(("shmem_cache_ready".to_string(), shmem_ready.to_string()));
+
+        // ── Total triple count ────────────────────────────────────────────────
+        let triple_count = crate::storage::total_triple_count();
+        rows.push(("total_triple_count".to_string(), triple_count.to_string()));
+
+        // ── Predicate count ────────────────────────────────────────────────────
+        let pred_count: i64 =
+            pgrx::Spi::get_one::<i64>("SELECT count(*)::bigint FROM _pg_ripple.predicates")
+                .unwrap_or(None)
+                .unwrap_or(0);
+        rows.push(("predicate_count".to_string(), pred_count.to_string()));
+
+        // ── Dictionary size ────────────────────────────────────────────────────
+        let dict_count: i64 =
+            pgrx::Spi::get_one::<i64>("SELECT count(*)::bigint FROM _pg_ripple.dictionary")
+                .unwrap_or(None)
+                .unwrap_or(0);
+        rows.push(("dictionary_size".to_string(), dict_count.to_string()));
+
+        TableIterator::new(rows)
     }
 
     /// Migrate an existing flat VP table (pre-v0.6.0) to the HTAP partition split.
@@ -5370,6 +5681,7 @@ mod pg_ripple {
 
 #[cfg(any(test, feature = "pg_test"))]
 #[pg_schema]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use pgrx::prelude::*;
 

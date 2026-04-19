@@ -276,3 +276,32 @@ cargo pgrx install --pg-config $(pg_config) --release
 pg_ctl restart -D $PGDATA
 ALTER EXTENSION pg_ripple UPDATE;
 ```
+
+---
+
+## Schema Version Stamping (v0.37.0+)
+
+Starting with v0.37.0, every `ALTER EXTENSION pg_ripple UPDATE` stamps a row in `_pg_ripple.schema_version`. You can verify upgrade completeness:
+
+```sql
+SELECT version, installed_at, upgraded_from
+FROM _pg_ripple.schema_version
+ORDER BY installed_at DESC;
+```
+
+Example output after upgrading from 0.36.0 to 0.37.0:
+
+```
+  version  |          installed_at          | upgraded_from 
+-----------+--------------------------------+---------------
+ 0.37.0    | 2026-04-19 10:00:00+00         | 0.36.0
+ 0.36.0    | 2026-02-01 08:00:00+00         | 0.35.0
+```
+
+The `diagnostic_report()` function also reports the current schema version:
+
+```sql
+SELECT value FROM pg_ripple.diagnostic_report() WHERE key = 'schema_version';
+```
+
+This is useful in monitoring scripts to confirm a rolling upgrade has completed on all replicas.

@@ -485,3 +485,38 @@ FROM pg_settings
 WHERE name LIKE 'pg_ripple.%'
 ORDER BY name;
 ```
+
+---
+
+## Lost Deletes After Merge (v0.37.0+)
+
+**Symptom**: Triples that were deleted still appear in query results after a background merge cycle completes.
+
+**Cause**: Before v0.37.0, the merge worker did not hold a per-predicate advisory lock during the delta→main swap. A `DELETE` that arrived after `main_new` was built but before the truncate of the tombstones table would have its tombstone deleted in the same truncate, leaving the triple alive in the new main.
+
+**Detection**:
+
+```sql
+-- Check system health with diagnostic_report
+SELECT key, value FROM pg_ripple.diagnostic_report()
+WHERE key IN ('schema_version', 'merge_backlog_rows');
+```
+
+If `schema_version` is older than `0.37.0`, upgrade to get the fix.
+
+**Fix**:
+
+1. Upgrade to v0.37.0 or later:
+   ```sql
+   ALTER EXTENSION pg_ripple UPDATE TO '0.37.0';
+   ```
+
+2. Verify the fix is active — `diagnostic_report()` reports the correct version:
+   ```sql
+   SELECT value FROM pg_ripple.diagnostic_report() WHERE key = 'schema_version';
+   -- Should return: 0.37.0
+   ```
+
+3. After upgrade, the merge worker acquires `pg_advisory_xact_lock(pred_id)` (exclusive) before the delta→main swap, and the delete path acquires `pg_advisory_xact_lock_shared(pred_id)` before inserting tombstones. These two lock modes are incompatible, guaranteeing serialization.
+
+**Impact**: Low — requires an unlucky timing window during a merge cycle. Most deployments will not observe lost deletes in practice, but correctness-critical workloads should upgrade.

@@ -157,3 +157,46 @@ Storage precision for embedding vectors. Reduces disk/memory usage at the cost o
 | `binary` | `bit(N)` | 1-bit quantised; ~97% storage reduction, lower accuracy |
 
 > **Note:** Changing precision after data is stored requires re-running the migration or manually altering the column type and re-embedding.
+
+---
+
+## v0.37.0: Tombstone GC & Error Safety
+
+### `pg_ripple.tombstone_gc_enabled`
+
+| | |
+|---|---|
+| Type | Boolean |
+| Default | `on` |
+| Context | `sighup` (shared: requires server signal, not per-session) |
+
+When `on`, pg_ripple automatically issues `VACUUM ANALYZE` on a predicate's tombstone table after each merge cycle if the residual tombstone count exceeds `tombstone_gc_threshold × main_row_count`. Set to `off` to disable automatic tombstone cleanup (useful when managing VACUUM manually).
+
+### `pg_ripple.tombstone_gc_threshold`
+
+| | |
+|---|---|
+| Type | String (decimal) |
+| Default | `0.05` (5%) |
+| Range | `0.0` – `1.0` |
+| Context | `sighup` |
+
+Tombstone-to-main-row ratio that triggers automatic `VACUUM` after a merge cycle. When the remaining tombstone count divided by the new main table row count exceeds this value, a `VACUUM ANALYZE` is scheduled on the tombstone table.
+
+Lower values (e.g. `0.01`) trigger VACUUM more aggressively; higher values (e.g. `0.20`) allow more tombstone bloat before cleanup.
+
+---
+
+## v0.37.0: GUC Validator Rules
+
+The following string-enum GUCs now reject invalid values at `SET` time with an error. Previously, invalid values were silently ignored until the execution path checked them.
+
+| GUC | Valid values |
+|---|---|
+| `pg_ripple.inference_mode` | `off`, `on_demand`, `materialized` |
+| `pg_ripple.enforce_constraints` | `off`, `warn`, `error` |
+| `pg_ripple.rule_graph_scope` | `default`, `all` |
+| `pg_ripple.shacl_mode` | `off`, `sync`, `async` |
+| `pg_ripple.describe_strategy` | `cbd`, `scbd`, `simple` |
+
+**`pg_ripple.rls_bypass` scope change (v0.37.0)**: This GUC is now registered at `PGC_POSTMASTER` scope when pg_ripple is loaded via `shared_preload_libraries`. This prevents a session from bypassing graph-level RLS with `SET LOCAL pg_ripple.rls_bypass = on`.

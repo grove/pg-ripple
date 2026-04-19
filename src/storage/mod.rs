@@ -362,6 +362,15 @@ fn insert_into_vp_rare(p_id: i64, s_id: i64, o_id: i64, g: i64) -> i64 {
 /// has its own VP table. After the atomic move, updates triple_count to match the
 /// actual row count rather than leaving it at 0 after promotion.
 fn promote_predicate(p_id: i64) {
+    // v0.37.0: Acquire a per-predicate advisory lock before promotion to ensure
+    // exactly one backend races to promote the same predicate. CREATE TABLE IF NOT
+    // EXISTS is idempotent, but the data move must not be executed twice.
+    Spi::run_with_args(
+        "SELECT pg_advisory_xact_lock($1)",
+        &[DatumWithOid::from(p_id)],
+    )
+    .unwrap_or_else(|e| pgrx::error!("promote_predicate: advisory lock error: {e}"));
+
     // ensure_vp_table creates the HTAP split (delta + main + tombstones + view).
     ensure_vp_table(p_id);
     let delta = format!("_pg_ripple.vp_{p_id}_delta");
@@ -658,6 +667,15 @@ pub fn delete_triple(s: &str, p: &str, o: &str, g: i64) -> i64 {
             deleted += d;
         } else {
             // 2. Not in delta — add a tombstone to suppress it from main.
+            // v0.37.0: Acquire the per-predicate advisory lock in shared mode before
+            // inserting a tombstone. The merge worker acquires the exclusive form
+            // (pg_advisory_xact_lock) so a merge and a concurrent delete never race.
+            Spi::run_with_args(
+                "SELECT pg_advisory_xact_lock_shared($1)",
+                &[DatumWithOid::from(p_id)],
+            )
+            .unwrap_or_else(|e| pgrx::error!("delete_triple: advisory lock error: {e}"));
+
             Spi::run_with_args(
                 &format!(
                     "INSERT INTO {tombs} (s, o, g) VALUES ($1, $2, $3) \

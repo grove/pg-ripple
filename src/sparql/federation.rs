@@ -90,6 +90,7 @@ fn get_agent(timeout: Duration, pool_size: usize) -> ureq::Agent {
             );
         }
         // SAFETY: we just ensured opt.is_some()
+        #[allow(clippy::unwrap_used)]
         opt.as_ref().unwrap().clone()
     })
 }

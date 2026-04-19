@@ -401,7 +401,10 @@ fn compile_nonrecursive_rule(
     head_g_expr: &str,
     target: &str,
 ) -> Result<String, String> {
-    let head = rule.head.as_ref().unwrap();
+    let head = rule
+        .head
+        .as_ref()
+        .ok_or_else(|| "compile_nonrecursive_rule: rule has no head".to_string())?;
 
     // ── Step 1: Sort positive body atoms by cost (v0.29.0) ────────────────────
     let sorted_positive: Vec<&Atom> = if crate::DATALOG_COST_REORDER.get() {
@@ -661,7 +664,10 @@ fn compile_recursive_rule(
     _head_g_expr: &str,
     target: &str,
 ) -> Result<String, String> {
-    let head = rule.head.as_ref().unwrap();
+    let head = rule
+        .head
+        .as_ref()
+        .ok_or_else(|| "compile_linear_recursive_rule: rule has no head".to_string())?;
 
     // v0.34.0: bounded-depth termination — read GUC at compile time.
     let max_depth = crate::DATALOG_MAX_DEPTH.get();
@@ -933,7 +939,10 @@ fn compile_recursive_cte_fragment(
     head_pred: i64,
     cte_name: &str,
 ) -> Result<String, String> {
-    let head = rule.head.as_ref().unwrap();
+    let head = rule
+        .head
+        .as_ref()
+        .ok_or_else(|| "compile_recursive_cte_fragment: rule has no head".to_string())?;
 
     // Base case: non-recursive body atoms.
     let mut base_selects: Vec<String> = Vec::new();
@@ -1261,7 +1270,10 @@ fn compile_rule_with_one_delta_atom(
     delta_atom_pos: usize,
     delta_table_name: &dyn Fn(i64) -> String,
 ) -> Result<String, String> {
-    let head = rule.head.as_ref().unwrap();
+    let head = rule
+        .head
+        .as_ref()
+        .ok_or_else(|| "compile_rule_delta_variants_to: rule has no head".to_string())?;
 
     let mut from_clauses: Vec<String> = Vec::new();
     let mut where_clauses: Vec<String> = Vec::new();

@@ -235,6 +235,16 @@ pub fn merge_predicate(pred_id: i64) -> i64 {
         return 0;
     }
 
+    // v0.37.0: Acquire a per-predicate exclusive advisory lock for the duration
+    // of the merge transaction. The DELETE path acquires the same lock in share
+    // mode (pg_advisory_xact_lock_shared) before inserting tombstones, so a
+    // merge and a concurrent delete can never race on the delta→main swap.
+    Spi::run_with_args(
+        "SELECT pg_advisory_xact_lock($1)",
+        &[DatumWithOid::from(pred_id)],
+    )
+    .unwrap_or_else(|e| pgrx::error!("merge: advisory lock error: {e}"));
+
     let main = format!("_pg_ripple.vp_{pred_id}_main");
     let main_new = format!("_pg_ripple.vp_{pred_id}_main_new");
     let delta = format!("_pg_ripple.vp_{pred_id}_delta");
@@ -350,6 +360,44 @@ pub fn merge_predicate(pred_id: i64) -> i64 {
     )
     .unwrap_or_else(|e| pgrx::error!("merge: recreate view error: {e}"));
 
+    // v0.37.0: Atomically update _pg_ripple.statements SID-range catalog in the
+    // same transaction as the VP table swap. This prevents a race where the merge
+    // worker is killed mid-update and leaves a stale SID→OID mapping for RDF-star
+    // queries. DELETE then INSERT guarantees an atomic replacement.
+    let new_sid_min: i64 =
+        Spi::get_one_with_args::<i64>(&format!("SELECT COALESCE(MIN(i), 0) FROM {main}"), &[])
+            .unwrap_or(None)
+            .unwrap_or(0);
+    let new_sid_max: i64 =
+        Spi::get_one_with_args::<i64>(&format!("SELECT COALESCE(MAX(i), 0) FROM {main}"), &[])
+            .unwrap_or(None)
+            .unwrap_or(0);
+    if new_sid_min > 0 && new_sid_max >= new_sid_min {
+        Spi::run_with_args(
+            "DELETE FROM _pg_ripple.statements WHERE predicate_id = $1",
+            &[DatumWithOid::from(pred_id)],
+        )
+        .unwrap_or_else(|e| pgrx::warning!("merge: statements delete error: {e}"));
+        Spi::run_with_args(
+            "INSERT INTO _pg_ripple.statements (sid_min, sid_max, predicate_id, table_oid) \
+             VALUES ($1, $2, $3, \
+                 (SELECT oid FROM pg_class c \
+                  JOIN pg_namespace n ON n.oid = c.relnamespace \
+                  WHERE n.nspname = '_pg_ripple' AND c.relname = $4)) \
+             ON CONFLICT (sid_min) DO UPDATE \
+             SET sid_max = EXCLUDED.sid_max, \
+                 predicate_id = EXCLUDED.predicate_id, \
+                 table_oid = EXCLUDED.table_oid",
+            &[
+                DatumWithOid::from(new_sid_min),
+                DatumWithOid::from(new_sid_max),
+                DatumWithOid::from(pred_id),
+                DatumWithOid::from(format!("vp_{pred_id}_main").as_str()),
+            ],
+        )
+        .unwrap_or_else(|e| pgrx::warning!("merge: statements insert error: {e}"));
+    }
+
     // Step 4: truncate delta; delete only older tombstones (v0.22.0 C-4).
     // Truncate the entire delta table (all rows have been merged into main_new).
     Spi::run_with_args(&format!("TRUNCATE {delta}"), &[])
@@ -382,6 +430,27 @@ pub fn merge_predicate(pred_id: i64) -> i64 {
         &[DatumWithOid::from(row_count), DatumWithOid::from(pred_id)],
     )
     .unwrap_or_else(|e| pgrx::error!("merge: update triple_count error: {e}"));
+
+    // v0.37.0: Tombstone GC — schedule VACUUM on the tombstones table when the
+    // residual tombstone count exceeds tombstone_gc_threshold × main row count.
+    if crate::TOMBSTONE_GC_ENABLED.get() && row_count > 0 {
+        let threshold_str = crate::TOMBSTONE_GC_THRESHOLD_STR
+            .get()
+            .and_then(|c| c.to_str().ok().map(|s| s.to_owned()))
+            .unwrap_or_else(|| "0.05".to_string());
+        let threshold: f64 = threshold_str.parse().unwrap_or(0.05);
+        let tombs_remaining: i64 =
+            Spi::get_one_with_args::<i64>(&format!("SELECT count(*)::bigint FROM {tombs}"), &[])
+                .unwrap_or(None)
+                .unwrap_or(0);
+        if (tombs_remaining as f64) / (row_count as f64) > threshold {
+            // Schedule VACUUM — runs asynchronously outside our transaction.
+            // Use VACUUM (not VACUUM FULL) to avoid table locks.
+            if let Err(e) = Spi::run_with_args(&format!("VACUUM ANALYZE {tombs}"), &[]) {
+                pgrx::warning!("merge: tombstone GC VACUUM on {tombs}: {e}");
+            }
+        }
+    }
 
     row_count
 }
