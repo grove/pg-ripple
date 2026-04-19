@@ -56,7 +56,11 @@ $RULES$,
 
 -- ── Materialize inferred triples ──────────────────────────────────────────────
 SELECT pg_ripple.infer('graphrag_enrich') >= 0 AS infer_ok;
-ERROR:  relation "_pg_ripple.vp_758_delta" does not exist at character 13
+ infer_ok 
+----------
+ t
+(1 row)
+
 -- ── Verify gr:coworker triple is produced ────────────────────────────────────
 -- alice and bob should both be coworkers (alice,bob and bob,alice and self-coworker)
 SELECT count(*) >= 1 AS coworker_triple_inferred
@@ -67,7 +71,7 @@ FROM pg_ripple.find_triples(
 );
  coworker_triple_inferred 
 --------------------------
- f
+ t
 (1 row)
 
 SELECT count(*) >= 1 AS bob_coworker_inferred
@@ -78,7 +82,7 @@ FROM pg_ripple.find_triples(
 );
  bob_coworker_inferred 
 -----------------------
- f
+ t
 (1 row)
 
 -- ── Cleanup ───────────────────────────────────────────────────────────────────

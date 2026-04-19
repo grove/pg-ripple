@@ -345,7 +345,22 @@ pub fn compile_single_rule(rule: &Rule) -> Result<String, String> {
     // Determine if rule is recursive (head pred appears in body).
     let is_recursive = is_recursive_rule(rule, head_pred);
 
-    // Target table: use delta for HTAP tables, or vp_rare for rare predicates.
+    // Target table: use delta for HTAP tables.
+    // For new predicates without a dedicated VP table, create the HTAP split
+    // on-demand so the INSERT does not fail with "relation does not exist".
+    // (v0.29.0 bug fix: pre-existing infer() path used compile_single_rule
+    // which always targeted the delta table, even for new predicates.)
+    let has_dedicated = pgrx::Spi::get_one_with_args::<i64>(
+        "SELECT table_oid::bigint FROM _pg_ripple.predicates \
+         WHERE id = $1 AND table_oid IS NOT NULL",
+        &[DatumWithOid::from(head_pred)],
+    )
+    .ok()
+    .flatten()
+    .is_some();
+    if !has_dedicated {
+        crate::storage::merge::ensure_htap_tables(head_pred);
+    }
     let target = format!("{}_delta", vp_table(head_pred));
 
     if is_recursive {

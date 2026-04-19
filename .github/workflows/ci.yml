@@ -144,6 +144,17 @@ jobs:
       - name: Run pg_regress suite
         run: cargo pgrx regress pg18 --postgresql-conf "allow_system_table_mods=on"
 
+      - name: Upload regression results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pg_regress_results
+          path: |
+            tests/pg_regress/regression.diffs
+            tests/pg_regress/regression.out
+            tests/pg_regress/results/
+          if-no-files-found: ignore
+
   migration:
     name: Migration chain (pg18)
     runs-on: ubuntu-latest

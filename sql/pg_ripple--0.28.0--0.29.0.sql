@@ -2,7 +2,20 @@
 --
 -- Release: v0.29.0 — Datalog Optimization: Magic Sets & Cost-Based Compilation
 --
--- Schema changes: None.
+-- Schema changes:
+--
+--   ADD COLUMN i TO tombstone tables
+--     Each _pg_ripple.vp_{id}_tombstones table receives a new column:
+--       i  BIGINT  NOT NULL  DEFAULT nextval('_pg_ripple.statement_id_seq')
+--
+--     This column records the statement-ID (SID) at tombstone creation, enabling
+--     merge_predicate() to implement the C-4 optimization: delete only tombstones
+--     with i ≤ max_sid_at_snapshot, preventing the tombstone-resurrection race
+--     condition for concurrent deletes during a merge cycle.
+--
+--     Tombstone tables created by v0.29.0 or later already include the column.
+--     This migration adds it to all existing tombstone tables created by earlier
+--     versions (v0.6.0 – v0.28.0).
 --
 -- New SQL functions registered by this migration:
 --
@@ -39,6 +52,25 @@
 --   PT502  cost-based reordering skipped (statistics unavailable)
 --
 -- All new GUCs are registered via pgrx::GucRegistry in _PG_init.
--- No changes to VP table schema, catalog tables, or dictionary encoding.
--- The migration path from any earlier version through 0.28.0 → 0.29.0
--- via ALTER EXTENSION pg_ripple UPDATE requires no SQL DDL changes.
+
+-- ─── Add i column to all existing tombstone tables ───────────────────────────
+DO $$
+DECLARE
+    rec RECORD;
+BEGIN
+    FOR rec IN
+        SELECT id FROM _pg_ripple.predicates WHERE table_oid IS NOT NULL
+    LOOP
+        BEGIN
+            EXECUTE format(
+                'ALTER TABLE _pg_ripple.vp_%s_tombstones '
+                'ADD COLUMN IF NOT EXISTS i BIGINT NOT NULL '
+                'DEFAULT nextval(''_pg_ripple.statement_id_seq'')',
+                rec.id
+            );
+        EXCEPTION WHEN undefined_table THEN
+            NULL; -- tombstone table may not exist for some predicates
+        END;
+    END LOOP;
+END;
+$$;

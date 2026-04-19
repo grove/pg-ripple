@@ -203,7 +203,7 @@ SELECT COUNT(*) AS projection_test_count
 FROM pg_ripple.sparql(
     'SELECT ?s WHERE { SERVICE <http://127.0.0.1:19998/sparql> { ?s ?p ?o } }'
 );
-WARNING:  SERVICE http://127.0.0.1:19998/sparql failed (returning empty): federation HTTP error calling http://127.0.0.1:19998/sparql: http://127.0.0.1:19998/sparql?query=SELECT+%3Fo+%3Fp+%3Fs+WHERE+%7B+%3Fs+%3Fp+%3Fo+.+%7D: Connection Failed: Connect error: Connection refused (os error 61)
+WARNING:  SERVICE http://127.0.0.1:19998/sparql failed (returning empty): federation HTTP error calling http://127.0.0.1:19998/sparql: http://127.0.0.1:19998/sparql?query=SELECT+%3Fo+%3Fp+%3Fs+WHERE+%7B+%3Fs+%3Fp+%3Fo+.+%7D: Connection Failed: Connect error: Connection refused
  projection_test_count 
 -----------------------
                      0
@@ -219,7 +219,7 @@ SELECT COUNT(*) AS partial_use_empty_count
 FROM pg_ripple.sparql(
     'SELECT ?s WHERE { SERVICE <http://127.0.0.1:19998/sparql> { ?s ?p ?o } }'
 );
-WARNING:  SERVICE http://127.0.0.1:19998/sparql failed (returning empty): federation HTTP error calling http://127.0.0.1:19998/sparql: http://127.0.0.1:19998/sparql?query=SELECT+%3Fo+%3Fp+%3Fs+WHERE+%7B+%3Fs+%3Fp+%3Fo+.+%7D: Connection Failed: Connect error: Connection refused (os error 61)
+WARNING:  SERVICE http://127.0.0.1:19998/sparql failed (returning empty): federation HTTP error calling http://127.0.0.1:19998/sparql: http://127.0.0.1:19998/sparql?query=SELECT+%3Fo+%3Fp+%3Fs+WHERE+%7B+%3Fs+%3Fp+%3Fo+.+%7D: Connection Failed: Connect error: Connection refused
  partial_use_empty_count 
 -------------------------
                        0
@@ -237,7 +237,7 @@ SELECT COUNT(*) AS adaptive_fallback_count
 FROM pg_ripple.sparql(
     'SELECT ?s WHERE { SERVICE <http://127.0.0.1:19998/sparql> { ?s ?p ?o } }'
 );
-WARNING:  SERVICE http://127.0.0.1:19998/sparql failed (returning empty): federation HTTP error calling http://127.0.0.1:19998/sparql: http://127.0.0.1:19998/sparql?query=SELECT+%3Fo+%3Fp+%3Fs+WHERE+%7B+%3Fs+%3Fp+%3Fo+.+%7D: Connection Failed: Connect error: Connection refused (os error 61)
+WARNING:  SERVICE http://127.0.0.1:19998/sparql failed (returning empty): federation HTTP error calling http://127.0.0.1:19998/sparql: http://127.0.0.1:19998/sparql?query=SELECT+%3Fo+%3Fp+%3Fs+WHERE+%7B+%3Fs+%3Fp+%3Fo+.+%7D: Connection Failed: Connect error: Connection refused
  adaptive_fallback_count 
 -------------------------
                        0

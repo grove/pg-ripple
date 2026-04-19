@@ -153,7 +153,7 @@ SELECT COUNT(*) AS unreachable_empty_count
 FROM pg_ripple.sparql(
     'SELECT ?s WHERE { SERVICE <http://127.0.0.1:19999/sparql> { ?s ?p ?o } }'
 );
-WARNING:  SERVICE http://127.0.0.1:19999/sparql failed (returning empty): federation HTTP error calling http://127.0.0.1:19999/sparql: http://127.0.0.1:19999/sparql?query=SELECT+%3Fo+%3Fp+%3Fs+WHERE+%7B+%3Fs+%3Fp+%3Fo+.+%7D: Connection Failed: Connect error: Connection refused (os error 61)
+WARNING:  SERVICE http://127.0.0.1:19999/sparql failed (returning empty): federation HTTP error calling http://127.0.0.1:19999/sparql: http://127.0.0.1:19999/sparql?query=SELECT+%3Fo+%3Fp+%3Fs+WHERE+%7B+%3Fs+%3Fp+%3Fo+.+%7D: Connection Failed: Connect error: Connection refused
  unreachable_empty_count 
 -------------------------
                        0

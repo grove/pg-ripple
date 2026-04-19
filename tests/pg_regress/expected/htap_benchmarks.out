@@ -51,7 +51,11 @@ FROM pg_ripple.find_triples(NULL, '<http://bench.test/P1>', NULL);
 
 -- ── 3. compact() — delta promoted to main ────────────────────────────────────
 SELECT pg_ripple.compact() >= 500 AS compact_merged_sufficient;
-ERROR:  column "i" does not exist at character 47
+ compact_merged_sufficient 
+---------------------------
+ t
+(1 row)
+
 -- ── 4. Triple count unchanged after promotion ─────────────────────────────────
 SELECT count(*) AS p1_after_compact
 FROM pg_ripple.find_triples(NULL, '<http://bench.test/P1>', NULL);

@@ -131,12 +131,15 @@ pub fn ensure_htap_tables(pred_id: i64) -> String {
     .unwrap_or_else(|e| pgrx::error!("main BRIN index error: {e}"));
 
     // Tombstones table — pending deletes from main.
+    // Column `i` records the SID at insert time; used by merge_predicate to
+    // delete only tombstones older than max_sid_at_snapshot (C-4 optimization).
     Spi::run_with_args(
         &format!(
             "CREATE TABLE IF NOT EXISTS {tombs} ( \
                  s BIGINT NOT NULL, \
                  o BIGINT NOT NULL, \
-                 g BIGINT NOT NULL DEFAULT 0 \
+                 g BIGINT NOT NULL DEFAULT 0, \
+                 i BIGINT NOT NULL DEFAULT nextval('_pg_ripple.statement_id_seq') \
              )"
         ),
         &[],
@@ -324,6 +327,29 @@ pub fn merge_predicate(pred_id: i64) -> i64 {
     )
     .unwrap_or_else(|e| pgrx::error!("merge: rename main_new error: {e}"));
 
+    // Recreate the VP view — DROP TABLE ... CASCADE above dropped it along
+    // with the old main table.  The view must exist for find_triples / SPARQL
+    // queries and for rebuild_subject/object_patterns() to work correctly.
+    let view = format!("_pg_ripple.vp_{pred_id}");
+    Spi::run_with_args(
+        &format!(
+            "CREATE OR REPLACE VIEW {view} AS \
+             SELECT DISTINCT ON (s, o, g) s, o, g, i, source \
+             FROM ( \
+                 SELECT m.s, m.o, m.g, m.i, m.source \
+                 FROM {main} m \
+                 LEFT JOIN {tombs} t ON m.s = t.s AND m.o = t.o AND m.g = t.g \
+                 WHERE t.s IS NULL \
+                 UNION ALL \
+                 SELECT d.s, d.o, d.g, d.i, d.source \
+                 FROM {delta} d \
+             ) merged \
+             ORDER BY s, o, g, i ASC"
+        ),
+        &[],
+    )
+    .unwrap_or_else(|e| pgrx::error!("merge: recreate view error: {e}"));
+
     // Step 4: truncate delta; delete only older tombstones (v0.22.0 C-4).
     // Truncate the entire delta table (all rows have been merged into main_new).
     Spi::run_with_args(&format!("TRUNCATE {delta}"), &[])
@@ -341,14 +367,6 @@ pub fn merge_predicate(pred_id: i64) -> i64 {
     .unwrap_or_else(|e| pgrx::error!("merge: delete old tombstones error: {e}"));
 
     // Step 5: ANALYZE so planner has fresh stats.
-    // NOTE: Do NOT recreate the view after rename (v0.22.0 C-3).
-    // The view vp_{pred_id} is created once when the predicate is promoted
-    // to have its own VP table. After renaming vp_{pred_id}_main_new to
-    // vp_{pred_id}_main, PostgreSQL's name resolution automatically routes
-    // queries through the renamed table, closing the atomicity window.
-    // Recreating the view would introduce a gap where concurrent queries
-    // could fail with "table not found" errors.
-    //
     // AUTO_ANALYZE GUC (v0.24.0): skip ANALYZE if the user has disabled it.
     if crate::AUTO_ANALYZE.get() {
         Spi::run_with_args(&format!("ANALYZE {main}"), &[])
@@ -581,7 +599,12 @@ pub fn migrate_flat_to_htap(pred_id: i64) {
     // Create empty tombstones table.
     Spi::run_with_args(
         &format!(
-            "CREATE TABLE {tombs} (s BIGINT NOT NULL, o BIGINT NOT NULL, g BIGINT NOT NULL DEFAULT 0)"
+            "CREATE TABLE {tombs} ( \
+                 s BIGINT NOT NULL, \
+                 o BIGINT NOT NULL, \
+                 g BIGINT NOT NULL DEFAULT 0, \
+                 i BIGINT NOT NULL DEFAULT nextval('_pg_ripple.statement_id_seq') \
+             )"
         ),
         &[],
     )

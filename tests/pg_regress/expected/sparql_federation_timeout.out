@@ -79,7 +79,7 @@ SELECT COUNT(*) AS timeout_empty_count
 FROM pg_ripple.sparql(
     'SELECT ?s WHERE { SERVICE <http://127.0.0.1:19998/timeout-test> { ?s ?p ?o } }'
 );
-WARNING:  SERVICE http://127.0.0.1:19998/timeout-test failed (returning empty): federation HTTP error calling http://127.0.0.1:19998/timeout-test: http://127.0.0.1:19998/timeout-test?query=SELECT+%3Fo+%3Fp+%3Fs+WHERE+%7B+%3Fs+%3Fp+%3Fo+.+%7D: Connection Failed: Connect error: Connection refused (os error 61)
+WARNING:  SERVICE http://127.0.0.1:19998/timeout-test failed (returning empty): federation HTTP error calling http://127.0.0.1:19998/timeout-test: http://127.0.0.1:19998/timeout-test?query=SELECT+%3Fo+%3Fp+%3Fs+WHERE+%7B+%3Fs+%3Fp+%3Fo+.+%7D: Connection Failed: Connect error: Connection refused
  timeout_empty_count 
 ---------------------
                    0

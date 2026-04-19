@@ -52,6 +52,25 @@ thread_local! {
     static SHARED_AGENT: RefCell<Option<ureq::Agent>> = const { RefCell::new(None) };
 }
 
+/// Strip the platform-specific "(os error NNN)" suffix from ureq error strings.
+///
+/// macOS uses ECONNREFUSED = 61, Linux uses 111.  Normalising the message makes
+/// pg_regress expected outputs portable across operating systems.
+fn normalize_http_err(e: impl std::fmt::Display) -> String {
+    let s = format!("{e}");
+    // Locate the last "(os error " pattern and strip the parenthesised suffix.
+    if let Some(start) = s.rfind(" (os error ") {
+        let end = s[start..].find(')').map(|i| start + i + 1).unwrap_or(s.len());
+        let mut out = s[..start].to_string();
+        if end < s.len() {
+            out.push_str(&s[end..]);
+        }
+        out
+    } else {
+        s
+    }
+}
+
 /// Return the per-thread shared ureq agent, creating it on first call.
 ///
 /// If the `pool_size` has changed since the agent was created the agent is
@@ -233,11 +252,11 @@ pub(crate) fn execute_remote(
         .query("query", sparql_text)
         .set("Accept", "application/sparql-results+json")
         .call()
-        .map_err(|e| format!("federation HTTP error calling {url}: {e}"))?;
+        .map_err(|e| format!("federation HTTP error calling {url}: {}", normalize_http_err(e)))?;
 
     let body = response
         .into_string()
-        .map_err(|e| format!("federation response read error from {url}: {e}"))?;
+        .map_err(|e| format!("federation response read error from {url}: {}", normalize_http_err(e)))?;
 
     let result: Result<RemoteResult, String> =
         parse_sparql_results_json(&body, max_results as usize)
@@ -279,7 +298,7 @@ pub(crate) fn execute_remote_partial(
         .call()
     {
         Ok(r) => r,
-        Err(e) => return Err(format!("federation HTTP error calling {url}: {e}")),
+        Err(e) => return Err(format!("federation HTTP error calling {url}: {}", normalize_http_err(&e))),
     };
 
     // Read body — on truncation, attempt partial parse.
