@@ -759,8 +759,13 @@ fn translate_pattern(pattern: &GraphPattern, ctx: &mut Ctx) -> Fragment {
                 return translate_group(group_inner, variables, aggregates, Some(expr), ctx);
             }
             let mut frag = translate_pattern(inner, ctx);
-            if let Some(cond) = translate_expr(expr, &frag.bindings, ctx) {
-                frag.conditions.push(cond);
+            // SPARQL 1.1 §18.6: if a filter expression evaluates to an error
+            // (e.g., references an unbound variable), the filter result is false.
+            // When translate_expr returns None (expression not translatable), emit
+            // FALSE so no rows pass — matching SPARQL error-as-false semantics.
+            match translate_expr(expr, &frag.bindings, ctx) {
+                Some(cond) => frag.conditions.push(cond),
+                None => frag.conditions.push("FALSE".to_owned()),
             }
             frag
         }
@@ -1120,7 +1125,9 @@ fn translate_union(left: &GraphPattern, right: &GraphPattern, ctx: &mut Ctx) -> 
     let right_sql = build_union_arm(&right_frag);
 
     let alias = ctx.next_alias();
-    let union_subquery = format!("(({left_sql}) UNION ({right_sql}))");
+    // SPARQL UNION is a multiset (bag) union — duplicate solution mappings from
+    // both arms must be preserved.  Use SQL UNION ALL (not UNION, which deduplicates).
+    let union_subquery = format!("(({left_sql}) UNION ALL ({right_sql}))");
 
     let mut frag = Fragment::empty();
     frag.from_items.push((alias.clone(), union_subquery));
@@ -1134,19 +1141,28 @@ fn translate_union(left: &GraphPattern, right: &GraphPattern, ctx: &mut Ctx) -> 
 
 // ─── MINUS translator ────────────────────────────────────────────────────────
 
-/// Translate MINUS to SQL EXCEPT.
+/// Translate MINUS to SQL NOT EXISTS with SPARQL-correct null-aware compatibility.
+///
+/// SPARQL 1.1 §8.3: a left row μ is excluded iff there EXISTS a right row μ' such that:
+///   1. dom(μ) ∩ dom(μ') ≠ ∅  (at least one shared variable is bound in both)
+///   2. μ and μ' are compatible (for all v ∈ dom(μ) ∩ dom(μ'), μ(v) = μ'(v))
+///
+/// The old LEFT JOIN + NULL-check approach was wrong because SQL NULL comparisons
+/// (e.g., NULL = NULL → NULL, not TRUE) don't handle OPTIONAL-unbound right rows
+/// correctly.  NOT EXISTS with explicit null guards is correct.
 fn translate_minus(left: &GraphPattern, right: &GraphPattern, ctx: &mut Ctx) -> Fragment {
     let left_frag = translate_pattern(left, ctx);
     let right_frag = translate_pattern(right, ctx);
 
     // SPARQL MINUS excludes left rows that have a compatible match in right.
     // Shared variables determine compatibility.
-    let shared_vars: Vec<String> = left_frag
+    let mut shared_vars: Vec<String> = left_frag
         .bindings
         .keys()
         .filter(|v| right_frag.bindings.contains_key(*v))
         .cloned()
         .collect();
+    shared_vars.sort(); // deterministic SQL
 
     let alias = ctx.next_alias();
 
@@ -1155,68 +1171,70 @@ fn translate_minus(left: &GraphPattern, right: &GraphPattern, ctx: &mut Ctx) -> 
         return left_frag;
     }
 
-    // Build left SELECT with shared columns.
-    let left_cols: Vec<String> = shared_vars
-        .iter()
-        .map(|v| {
-            let col = left_frag.bindings.get(v).unwrap_or_else(|| {
-                pgrx::error!("MINUS: shared variable '{v}' missing in left bindings")
-            });
-            format!("{col} AS _m_{v}")
-        })
-        .collect();
+    // Build left SELECT: all columns + shared columns (aliased _m_<v>).
     let left_all_cols: Vec<String> = left_frag
         .bindings
         .iter()
         .map(|(v, col)| format!("{col} AS _ma_{v}"))
         .collect();
-
-    let right_cols: Vec<String> = shared_vars
+    let left_shared_cols: Vec<String> = shared_vars
         .iter()
-        .map(|v| {
-            let col = right_frag.bindings.get(v).unwrap_or_else(|| {
-                pgrx::error!("MINUS: shared variable '{v}' missing in right bindings")
-            });
-            format!("{col} AS _m_{v}")
-        })
+        .map(|v| format!("{} AS _m_{v}", left_frag.bindings[v]))
+        .collect();
+    let right_shared_cols: Vec<String> = shared_vars
+        .iter()
+        .map(|v| format!("{} AS _m_{v}", right_frag.bindings[v]))
         .collect();
 
-    // Strategy: LEFT JOIN with right, keep rows where right side is null.
     let left_sql = format!(
         "SELECT {}, {} FROM {} {}",
         left_all_cols.join(", "),
-        left_cols.join(", "),
+        left_shared_cols.join(", "),
         left_frag.build_from(),
         left_frag.build_where()
     );
     let right_sql = format!(
         "SELECT {} FROM {} {}",
-        right_cols.join(", "),
+        right_shared_cols.join(", "),
         right_frag.build_from(),
         right_frag.build_where()
     );
 
-    let on_clause: String = shared_vars
+    // Condition 1: at least one shared var is bound (non-NULL) in BOTH sides.
+    let any_bound: String = shared_vars
         .iter()
-        .map(|v| format!("_lminus._m_{v} = _rminus._m_{v}"))
+        .map(|v| {
+            format!(
+                "(_lminus._m_{v} IS NOT NULL AND _rminus._m_{v} IS NOT NULL)"
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(" OR ");
+
+    // Condition 2: for all shared vars, if both bound then values are equal.
+    let all_compatible: String = shared_vars
+        .iter()
+        .map(|v| {
+            format!(
+                "(_lminus._m_{v} IS NULL OR _rminus._m_{v} IS NULL OR _lminus._m_{v} = _rminus._m_{v})"
+            )
+        })
         .collect::<Vec<_>>()
         .join(" AND ");
 
+    let lout = left_frag
+        .bindings
+        .keys()
+        .map(|v| format!("_lminus._ma_{v} AS _mn_{v}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+
     let minus_sql = format!(
         "(SELECT {lout} FROM ({left_sql}) AS _lminus \
-         LEFT JOIN ({right_sql}) AS _rminus ON {on_clause} \
-         WHERE {null_check})",
-        lout = left_frag
-            .bindings
-            .keys()
-            .map(|v| format!("_lminus._ma_{v} AS _mn_{v}"))
-            .collect::<Vec<_>>()
-            .join(", "),
-        null_check = shared_vars
-            .iter()
-            .map(|v| format!("_rminus._m_{v} IS NULL"))
-            .collect::<Vec<_>>()
-            .join(" AND ")
+         WHERE NOT EXISTS (\
+           SELECT 1 FROM ({right_sql}) AS _rminus \
+           WHERE ({any_bound}) AND ({all_compatible})\
+         ))"
     );
 
     let mut frag = Fragment::empty();

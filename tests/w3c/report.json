@@ -19,8 +19,8 @@
       "xpass": 0
     },
     "bind": {
-      "fail": 2,
-      "pass": 8,
+      "fail": 0,
+      "pass": 10,
       "skip": 0,
       "timeout": 0,
       "total": 10,
@@ -55,8 +55,8 @@
       "xpass": 0
     },
     "negation": {
-      "fail": 2,
-      "pass": 10,
+      "fail": 0,
+      "pass": 12,
       "skip": 0,
       "timeout": 0,
       "total": 12,
@@ -109,9 +109,9 @@
       "xpass": 0
     }
   },
-  "failed": 59,
-  "pass_rate_pct": "77.5",
-  "passed": 251,
+  "failed": 55,
+  "pass_rate_pct": "78.7",
+  "passed": 255,
   "skipped": 14,
   "timeout": 0,
   "total": 324,
