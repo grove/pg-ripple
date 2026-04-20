@@ -22,7 +22,10 @@ pub fn load_default_graph(
             let content = inject_rdfxml_base(&content, file);
             tx.execute("SELECT pg_ripple.load_rdfxml($1, false)", &[&content])?
         }
-        _ => tx.execute("SELECT pg_ripple.load_turtle($1, false)", &[&content])?,
+        _ => {
+            let content = inject_turtle_base(&content, file);
+            tx.execute("SELECT pg_ripple.load_turtle($1, false)", &[&content])?
+        }
     };
     Ok(())
 }
@@ -43,10 +46,13 @@ pub fn load_named_graph(
                 &[&content, &graph_iri],
             )?
         }
-        _ => tx.execute(
-            "SELECT pg_ripple.load_turtle_into_graph($1, $2)",
-            &[&content, &graph_iri],
-        )?,
+        _ => {
+            let content = inject_turtle_base(&content, file);
+            tx.execute(
+                "SELECT pg_ripple.load_turtle_into_graph($1, $2)",
+                &[&content, &graph_iri],
+            )?
+        }
     };
     Ok(())
 }
@@ -77,6 +83,27 @@ fn inject_rdfxml_base(content: &str, file: &Path) -> String {
         }
     }
     content.to_owned()
+}
+
+/// Inject a `@base` declaration into a Turtle document if none is present.
+///
+/// Turtle test files may use relative IRIs like `<>` or `<#local>`.
+/// Without a base, the pg_ripple parser cannot resolve them.  This helper
+/// prepends `@base <file:///absolute/path/to/file.ttl>` if no `@base` or
+/// `BASE` is already present.
+fn inject_turtle_base(content: &str, file: &Path) -> String {
+    let trimmed = content.trim_start();
+    // If the file already declares a base, leave it as-is.
+    if trimmed.starts_with("@base")
+        || trimmed.to_uppercase().starts_with("BASE")
+    {
+        return content.to_owned();
+    }
+    let base = file
+        .canonicalize()
+        .unwrap_or_else(|_| file.to_path_buf());
+    let base_uri = format!("file://{}", base.display());
+    format!("@base <{base_uri}> .\n{content}")
 }
 
 /// Detect the RDF format of a file from its extension.

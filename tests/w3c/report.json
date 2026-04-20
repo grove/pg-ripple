@@ -28,8 +28,8 @@
       "xpass": 0
     },
     "exists": {
-      "fail": 1,
-      "pass": 5,
+      "fail": 0,
+      "pass": 6,
       "skip": 0,
       "timeout": 0,
       "total": 6,
@@ -109,9 +109,9 @@
       "xpass": 0
     }
   },
-  "failed": 10,
-  "pass_rate_pct": "92.6",
-  "passed": 300,
+  "failed": 9,
+  "pass_rate_pct": "92.9",
+  "passed": 301,
   "skipped": 14,
   "timeout": 0,
   "total": 324,
