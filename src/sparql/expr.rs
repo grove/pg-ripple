@@ -963,18 +963,54 @@ pub(super) fn translate_function_value(
         Function::StrBefore => {
             let str_col = translate_arg_value(args.first()?, bindings, ctx)?;
             let str_text = decode_lexical_sql(&str_col);
-            let needle = translate_arg_text(args.get(1)?, bindings, ctx)?;
-            // Build the "found" expression with lang preservation.
+            let needle_expr = args.get(1)?;
+
+            // Determine needle SQL text, compatibility check, and empty-needle result.
+            // For lang-tagged needles: input must have same lang tag, else type error (NULL).
+            // For plain/xsd:string needles: always compatible.
+            let (needle_sql, compat_sql, empty_result_sql) =
+                if let Expression::Literal(lit) = needle_expr {
+                    let val = lit.value().replace('\'', "''");
+                    let needle_sql = format!("'{val}'");
+                    if let Some(lang) = lit.language() {
+                        let lang_lower = lang.to_lowercase();
+                        // Compatible only if input is lang-tagged with same lang.
+                        let compat = format!(
+                            "{str_col} > 0 AND EXISTS(\
+                             SELECT 1 FROM _pg_ripple.dictionary _dn \
+                             WHERE _dn.id = {str_col} AND _dn.kind = 4 \
+                             AND LOWER(_dn.lang) = '{lang_lower}')"
+                        );
+                        // Empty lang-tagged needle: return ""@lang.
+                        let empty_res = format!(
+                            "(SELECT pg_ripple.encode_lang_literal('', _dl.lang) \
+                              FROM _pg_ripple.dictionary _dl WHERE _dl.id = {str_col})"
+                        );
+                        (needle_sql, compat, empty_res)
+                    } else {
+                        // Plain / xsd:string needle — always compatible.
+                        let compat = "TRUE".to_string();
+                        let empty_res = encode_preserving_lang(&str_col, "''");
+                        (needle_sql, compat, empty_res)
+                    }
+                } else {
+                    // Variable/complex needle — treat as plain (no lang check).
+                    let t = translate_arg_text(needle_expr, bindings, ctx)?;
+                    let compat = "TRUE".to_string();
+                    let empty_res = encode_preserving_lang(&str_col, "''");
+                    (t, compat, empty_res)
+                };
+
             let found_expr = encode_preserving_lang(
                 &str_col,
-                &format!("left({str_text}, strpos({str_text}, {needle}) - 1)"),
+                &format!("left({str_text}, strpos({str_text}, {needle_sql}) - 1)"),
             );
             Some(format!(
                 "CASE \
                    WHEN {str_col} < 0 THEN NULL \
-                   WHEN {needle} = '' OR strpos({str_text}, {needle}) > 0 \
-                     THEN CASE WHEN {needle} = '' THEN pg_ripple.encode_term('', 2::int2) \
-                               ELSE {found_expr} END \
+                   WHEN NOT ({compat_sql}) THEN NULL \
+                   WHEN {needle_sql} = '' THEN {empty_result_sql} \
+                   WHEN strpos({str_text}, {needle_sql}) > 0 THEN {found_expr} \
                    ELSE pg_ripple.encode_term('', 2::int2) \
                  END"
             ))
@@ -982,21 +1018,49 @@ pub(super) fn translate_function_value(
         Function::StrAfter => {
             let str_col = translate_arg_value(args.first()?, bindings, ctx)?;
             let str_text = decode_lexical_sql(&str_col);
-            let needle = translate_arg_text(args.get(1)?, bindings, ctx)?;
+            let needle_expr = args.get(1)?;
+
+            let (needle_sql, compat_sql, empty_result_sql) =
+                if let Expression::Literal(lit) = needle_expr {
+                    let val = lit.value().replace('\'', "''");
+                    let needle_sql = format!("'{val}'");
+                    if let Some(lang) = lit.language() {
+                        let lang_lower = lang.to_lowercase();
+                        let compat = format!(
+                            "{str_col} > 0 AND EXISTS(\
+                             SELECT 1 FROM _pg_ripple.dictionary _dn \
+                             WHERE _dn.id = {str_col} AND _dn.kind = 4 \
+                             AND LOWER(_dn.lang) = '{lang_lower}')"
+                        );
+                        // Empty lang-tagged needle: return full string @lang.
+                        let empty_res = encode_preserving_lang(&str_col, &str_text);
+                        (needle_sql, compat, empty_res)
+                    } else {
+                        let compat = "TRUE".to_string();
+                        let empty_res = encode_preserving_lang(&str_col, &str_text);
+                        (needle_sql, compat, empty_res)
+                    }
+                } else {
+                    let t = translate_arg_text(needle_expr, bindings, ctx)?;
+                    let compat = "TRUE".to_string();
+                    let empty_res = encode_preserving_lang(&str_col, &str_text);
+                    (t, compat, empty_res)
+                };
+
             let found_expr = encode_preserving_lang(
                 &str_col,
                 &format!(
-                    "right({str_text}, length({str_text}) - strpos({str_text}, {needle}) - length({needle}) + 1)"
+                    "right({str_text}, length({str_text}) - strpos({str_text}, {needle_sql}) - length({needle_sql}) + 1)"
                 ),
             );
             Some(format!(
                 "CASE \
                    WHEN {str_col} < 0 THEN NULL \
-                   WHEN {needle} = '' THEN {plain_str} \
-                   WHEN strpos({str_text}, {needle}) > 0 THEN {found_expr} \
+                   WHEN NOT ({compat_sql}) THEN NULL \
+                   WHEN {needle_sql} = '' THEN {empty_result_sql} \
+                   WHEN strpos({str_text}, {needle_sql}) > 0 THEN {found_expr} \
                    ELSE pg_ripple.encode_term('', 2::int2) \
-                 END",
-                plain_str = encode_preserving_lang(&str_col, &str_text)
+                 END"
             ))
         }
 
