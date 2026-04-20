@@ -77,6 +77,25 @@ pub(super) fn kind_check_sql(col: &str, kind: i16) -> String {
 
 // ─── PostGIS availability probe ──────────────────────────────────────────────
 
+/// Build a SQL expression that applies `new_lexical_sql` to the lexical value of
+/// `col`, preserving any language tag from the input.
+///
+/// If `col` is a dictionary-resident lang-tagged literal (kind=4), the result
+/// is re-encoded with `pg_ripple.encode_lang_literal(new_lexical_sql, lang)`.
+/// Otherwise (plain literal, typed literal, inline) the result is encoded as a
+/// plain literal (kind=2) with `pg_ripple.encode_term(new_lexical_sql, 2)`.
+pub(super) fn encode_preserving_lang(col: &str, new_lexical_sql: &str) -> String {
+    format!(
+        "CASE \
+          WHEN {col} > 0 AND EXISTS(\
+              SELECT 1 FROM _pg_ripple.dictionary d WHERE d.id = {col} AND d.kind = 4) \
+          THEN (SELECT pg_ripple.encode_lang_literal({new_lexical_sql}, d.lang) \
+                FROM _pg_ripple.dictionary d WHERE d.id = {col}) \
+          ELSE pg_ripple.encode_term({new_lexical_sql}, 2::int2) \
+        END"
+    )
+}
+
 /// Returns `true` when PostGIS is installed in the current database.
 ///
 /// Checked by looking for `st_geomfromtext` in `pg_proc`.  The result is
@@ -181,10 +200,13 @@ pub(super) fn translate_function_filter(
         }
         Function::IsNumeric => {
             let col = translate_arg_value(args.first()?, bindings, ctx)?;
-            // Inline IDs for xsd:integer/boolean/dateTime are always negative.
+            // Inline IDs: bit 63=1 (negative as i64), bits 62-56 = type code.
+            // TYPE_INTEGER=0, TYPE_BOOLEAN=1, TYPE_DATETIME=2, TYPE_DATE=3.
+            // Only TYPE_INTEGER is numeric; check bits 62-56 are all zero.
+            // Mask 0x7F00000000000000 = 9151314442816847872 selects bits 62-56.
             Some(format!(
                 "({col} IS NOT NULL AND \
-                 ({col} < 0 OR EXISTS(SELECT 1 FROM _pg_ripple.dictionary d \
+                 (({col} < 0 AND ({col} & 9151314442816847872::bigint) = 0) OR EXISTS(SELECT 1 FROM _pg_ripple.dictionary d \
                    WHERE d.id = {col} AND d.kind = 3 \
                    AND d.datatype IN (\
                      'http://www.w3.org/2001/XMLSchema#integer',\
@@ -491,56 +513,89 @@ pub(super) fn translate_function_value(
         // ── SUBSTR ──────────────────────────────────────────────────────────
         // SUBSTR(?str, start) or SUBSTR(?str, start, length).
         // SPARQL uses 1-based indexing, same as SQL SUBSTR.
+        // Preserve the language tag of the input literal.
         Function::SubStr => {
             let str_col = translate_arg_value(args.first()?, bindings, ctx)?;
             let str_text = decode_lexical_sql(&str_col);
             let start = translate_arg_value(args.get(1)?, bindings, ctx)?;
             let start_text = decode_lexical_sql(&start);
-            if let Some(len_arg) = args.get(2) {
+            let new_lex = if let Some(len_arg) = args.get(2) {
                 let len = translate_arg_value(len_arg, bindings, ctx)?;
                 let len_text = decode_lexical_sql(&len);
-                Some(encode_literal(format!(
-                    "substr({str_text}, ({start_text})::int, ({len_text})::int)"
-                )))
+                format!("substr({str_text}, ({start_text})::int, ({len_text})::int)")
             } else {
-                Some(encode_literal(format!(
-                    "substr({str_text}, ({start_text})::int)"
-                )))
-            }
+                format!("substr({str_text}, ({start_text})::int)")
+            };
+            Some(encode_preserving_lang(&str_col, &new_lex))
         }
 
         // ── UCASE / LCASE ───────────────────────────────────────────────────
+        // Preserve the language tag of the input literal.
         Function::UCase => {
             let col = translate_arg_value(args.first()?, bindings, ctx)?;
             let text = decode_lexical_sql(&col);
-            Some(encode_literal(format!("UPPER({text})")))
+            Some(encode_preserving_lang(&col, &format!("UPPER({text})")))
         }
         Function::LCase => {
             let col = translate_arg_value(args.first()?, bindings, ctx)?;
             let text = decode_lexical_sql(&col);
-            Some(encode_literal(format!("LOWER({text})")))
+            Some(encode_preserving_lang(&col, &format!("LOWER({text})")))
         }
 
         // ── CONCAT ──────────────────────────────────────────────────────────
+        // If all arguments have the same language tag, the result has that tag.
+        // Otherwise the result is a plain literal.
         Function::Concat => {
             if args.is_empty() {
                 return Some(encode_literal("''".to_owned()));
             }
-            let parts: Vec<String> = args
+            let cols: Vec<String> = args
                 .iter()
-                .filter_map(|a| {
-                    let col = translate_arg_value(a, bindings, ctx)?;
-                    Some(format!("COALESCE({}, '')", decode_lexical_sql(&col)))
-                })
+                .filter_map(|a| translate_arg_value(a, bindings, ctx))
+                .collect();
+            let parts: Vec<String> = cols
+                .iter()
+                .map(|col| format!("COALESCE({}, '')", decode_lexical_sql(col)))
                 .collect();
             if parts.is_empty() {
                 return None;
             }
-            Some(encode_literal(parts.join(" || ")))
+            let concat_expr = parts.join(" || ");
+            // Determine lang preservation: all dict lang-tagged with same lang.
+            // We check the first col and use its lang if all others match.
+            // For simplicity: use the first arg's lang preservation pattern.
+            // Full spec: if all args have same lang → use that lang; else plain.
+            // Approximate: check if first arg is lang-tagged and use that lang.
+            if cols.len() == 1 {
+                Some(encode_preserving_lang(&cols[0], &concat_expr))
+            } else {
+                // Multi-arg: check all args have same lang via SQL
+                let first_col = &cols[0];
+                let same_lang_check = cols[1..]
+                    .iter()
+                    .map(|c| format!(
+                        "EXISTS(SELECT 1 FROM _pg_ripple.dictionary a \
+                                JOIN _pg_ripple.dictionary b ON a.lang = b.lang \
+                                WHERE a.id = {first_col} AND a.kind = 4 AND b.id = {c} AND b.kind = 4)"
+                    ))
+                    .collect::<Vec<_>>()
+                    .join(" AND ");
+                Some(format!(
+                    "CASE \
+                       WHEN {first_col} > 0 \
+                         AND EXISTS(SELECT 1 FROM _pg_ripple.dictionary d WHERE d.id = {first_col} AND d.kind = 4) \
+                         AND {same_lang_check} \
+                       THEN (SELECT pg_ripple.encode_lang_literal({concat_expr}, d.lang) \
+                             FROM _pg_ripple.dictionary d WHERE d.id = {first_col}) \
+                       ELSE pg_ripple.encode_term({concat_expr}, 2::int2) \
+                     END"
+                ))
+            }
         }
 
         // ── REPLACE ─────────────────────────────────────────────────────────
         // REPLACE(?str, pattern, replacement) or REPLACE(?str, pattern, replacement, flags).
+        // Preserve the language tag of the input literal.
         Function::Replace => {
             let str_col = translate_arg_value(args.first()?, bindings, ctx)?;
             let str_text = decode_lexical_sql(&str_col);
@@ -556,50 +611,75 @@ pub(super) fn translate_function_value(
                     }
                 })
                 .unwrap_or_default();
-            let sql = if flags.is_empty() {
+            let new_lex = if flags.is_empty() {
                 format!("regexp_replace({str_text}, {pattern}, {replacement}, 'g')")
             } else {
                 let pg_flags = format!("'g{flags}'");
                 format!("regexp_replace({str_text}, {pattern}, {replacement}, {pg_flags})")
             };
-            Some(encode_literal(sql))
+            Some(encode_preserving_lang(&str_col, &new_lex))
         }
 
         // ── ENCODE_FOR_URI ───────────────────────────────────────────────────
+        // RFC 3986 percent-encoding: unreserved chars (A-Za-z0-9-_.~) pass through;
+        // all others are encoded as %XX per UTF-8 byte.
         Function::EncodeForUri => {
             let col = translate_arg_value(args.first()?, bindings, ctx)?;
             let text = decode_lexical_sql(&col);
-            // PostgreSQL: encode the UTF-8 bytes, then replace safe chars back.
-            // The 'escape' encoding is not exactly RFC 3986 but close enough
-            // for typical IRI generation use cases.
             Some(encode_literal(format!(
-                "replace(replace(replace(replace(\
-                    encode(convert_to({text}, 'UTF8'), 'escape'), \
-                    E'\\\\', '%'), ' ', '%20'), E'\\t', '%09'), E'\\n', '%0A')"
+                "(SELECT string_agg(\
+                    CASE WHEN chr ~ '^[A-Za-z0-9\\-_.~]$' THEN chr \
+                         ELSE regexp_replace(\
+                             upper(encode(convert_to(chr, 'UTF8'), 'hex')), \
+                             '(..)', '%\\1', 'g') \
+                    END, \
+                    '' ORDER BY pos) \
+                 FROM regexp_split_to_table({text}, '') WITH ORDINALITY AS t(chr, pos))"
             )))
         }
 
         // ── STRLANG ─────────────────────────────────────────────────────────
         // STRLANG(?str, ?lang) → encode as language-tagged literal.
+        // Type error: input must be a plain literal (kind=2) or xsd:string typed literal.
+        // Lang-tagged (kind=4) or inline (integer/boolean/datetime) → NULL.
         Function::StrLang => {
             let str_col = translate_arg_value(args.first()?, bindings, ctx)?;
-            // lang_col is consumed by encode_term call below.
-            let _lang_col = translate_arg_value(args.get(1)?, bindings, ctx)?;
+            let lang_col = translate_arg_value(args.get(1)?, bindings, ctx)?;
             let str_text = decode_lexical_sql(&str_col);
-            // Build "value"@lang string and encode as KIND_LANG_LITERAL (4).
-            // Note: This encodes without the lang tag. For full correctness we'd
-            // need a dedicated SQL function. For now, encode as plain literal.
-            // This is a known limitation documented in reference/sparql-functions.md.
-            Some(format!("pg_ripple.encode_term({str_text}, 4::int2)"))
+            let lang_text = decode_lexical_sql(&lang_col);
+            Some(format!(
+                "CASE \
+                   WHEN {str_col} < 0 THEN NULL \
+                   WHEN EXISTS(SELECT 1 FROM _pg_ripple.dictionary d \
+                               WHERE d.id = {str_col} AND d.kind = 4) THEN NULL \
+                   ELSE pg_ripple.encode_lang_literal({str_text}, LOWER({lang_text})) \
+                 END"
+            ))
         }
 
         // ── STRDT ───────────────────────────────────────────────────────────
-        // STRDT(?str, ?datatype) → encode as typed literal.
+        // STRDT(?str, ?datatype) → encode as typed literal with given datatype.
+        // Type error: input must be a plain literal; lang-tagged or inline → NULL.
         Function::StrDt => {
             let str_col = translate_arg_value(args.first()?, bindings, ctx)?;
+            let dt_arg = args.get(1)?;
             let str_text = decode_lexical_sql(&str_col);
-            // Encode as typed literal (kind 3).
-            Some(format!("pg_ripple.encode_term({str_text}, 3::int2)"))
+            // Extract the datatype IRI text. Named node IRI → use the IRI string directly.
+            let dt_text = match dt_arg {
+                Expression::NamedNode(nn) => format!("'{}'", nn.as_str().replace('\'', "''")),
+                _ => {
+                    let dt_col = translate_arg_value(dt_arg, bindings, ctx)?;
+                    decode_lexical_sql(&dt_col)
+                }
+            };
+            Some(format!(
+                "CASE \
+                   WHEN {str_col} < 0 THEN NULL \
+                   WHEN EXISTS(SELECT 1 FROM _pg_ripple.dictionary d \
+                               WHERE d.id = {str_col} AND d.kind = 4) THEN NULL \
+                   ELSE pg_ripple.encode_typed_literal({str_text}, {dt_text}) \
+                 END"
+            ))
         }
 
         // ── IRI / URI ────────────────────────────────────────────────────────
@@ -636,12 +716,20 @@ pub(super) fn translate_function_value(
         // Returns the datatype IRI of a literal.
         Function::Datatype => {
             let col = translate_arg_value(args.first()?, bindings, ctx)?;
-            // For inline IDs (negative): must be xsd:integer, xsd:boolean, or xsd:dateTime.
-            // Determine from bits. Simplified: return xsd:integer for all inline.
-            // For dictionary IDs: look up datatype column.
+            // For inline IDs (negative): extract type code from bits 62-56.
+            // Mask 0x7F00000000000000 = 9151314442816847872; shift >> 56 gives type code.
+            // TYPE_INTEGER=0 → xsd:integer, TYPE_BOOLEAN=1 → xsd:boolean,
+            // TYPE_DATETIME=2 → xsd:dateTime, TYPE_DATE=3 → xsd:date.
             Some(encode_iri(format!(
                 "CASE \
-                   WHEN {col} < 0 THEN 'http://www.w3.org/2001/XMLSchema#integer' \
+                   WHEN {col} < 0 THEN \
+                     CASE (({col} & 9151314442816847872::bigint) >> 56) \
+                       WHEN 0 THEN 'http://www.w3.org/2001/XMLSchema#integer' \
+                       WHEN 1 THEN 'http://www.w3.org/2001/XMLSchema#boolean' \
+                       WHEN 2 THEN 'http://www.w3.org/2001/XMLSchema#dateTime' \
+                       WHEN 3 THEN 'http://www.w3.org/2001/XMLSchema#date' \
+                       ELSE 'http://www.w3.org/2001/XMLSchema#integer' \
+                     END \
                    ELSE COALESCE(\
                      (SELECT d.datatype FROM _pg_ripple.dictionary d WHERE d.id = {col} AND d.kind = 3),\
                      CASE (SELECT d.kind FROM _pg_ripple.dictionary d WHERE d.id = {col})\
@@ -663,22 +751,44 @@ pub(super) fn translate_function_value(
             Some(format!("abs(({text})::numeric)"))
         }
         Function::Ceil => {
-            *is_numeric = true;
+            // Return typed literal preserving input type (xsd:decimal → xsd:decimal, etc.)
             let col = translate_arg_value(args.first()?, bindings, ctx)?;
             let text = decode_lexical_sql(&col);
-            Some(format!("ceil(({text})::numeric)::bigint"))
+            Some(format!(
+                "pg_ripple.encode_typed_literal(\
+                    ceil(({text})::numeric)::text, \
+                    CASE WHEN {col} < 0 THEN 'http://www.w3.org/2001/XMLSchema#integer' \
+                         ELSE COALESCE(\
+                             (SELECT d.datatype FROM _pg_ripple.dictionary d WHERE d.id = {col} AND d.kind = 3), \
+                             'http://www.w3.org/2001/XMLSchema#integer') \
+                    END)"
+            ))
         }
         Function::Floor => {
-            *is_numeric = true;
             let col = translate_arg_value(args.first()?, bindings, ctx)?;
             let text = decode_lexical_sql(&col);
-            Some(format!("floor(({text})::numeric)::bigint"))
+            Some(format!(
+                "pg_ripple.encode_typed_literal(\
+                    floor(({text})::numeric)::text, \
+                    CASE WHEN {col} < 0 THEN 'http://www.w3.org/2001/XMLSchema#integer' \
+                         ELSE COALESCE(\
+                             (SELECT d.datatype FROM _pg_ripple.dictionary d WHERE d.id = {col} AND d.kind = 3), \
+                             'http://www.w3.org/2001/XMLSchema#integer') \
+                    END)"
+            ))
         }
         Function::Round => {
-            *is_numeric = true;
             let col = translate_arg_value(args.first()?, bindings, ctx)?;
             let text = decode_lexical_sql(&col);
-            Some(format!("round(({text})::numeric)::bigint"))
+            Some(format!(
+                "pg_ripple.encode_typed_literal(\
+                    round(({text})::numeric)::text, \
+                    CASE WHEN {col} < 0 THEN 'http://www.w3.org/2001/XMLSchema#integer' \
+                         ELSE COALESCE(\
+                             (SELECT d.datatype FROM _pg_ripple.dictionary d WHERE d.id = {col} AND d.kind = 3), \
+                             'http://www.w3.org/2001/XMLSchema#integer') \
+                    END)"
+            ))
         }
         Function::Rand => {
             *is_numeric = true;
@@ -687,9 +797,11 @@ pub(super) fn translate_function_value(
 
         // ── Datetime functions ───────────────────────────────────────────────
         Function::Now => {
-            // NOW() → encode current timestamp as xsd:dateTime literal.
-            Some(encode_literal(
-                "to_char(now(), 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"')".to_owned(),
+            // NOW() → encode current timestamp as xsd:dateTime typed literal.
+            Some(format!(
+                "pg_ripple.encode_typed_literal(\
+                    to_char(now(), 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"'), \
+                    'http://www.w3.org/2001/XMLSchema#dateTime')"
             ))
         }
         Function::Year => {
@@ -724,23 +836,44 @@ pub(super) fn translate_function_value(
             Some(format!("(substring({text} FROM 'T\\d{{2}}:(\\d{{2}}):'))::bigint"))
         }
         Function::Seconds => {
-            *is_numeric = true;
+            // SPARQL spec: SECONDS returns xsd:decimal (not xsd:integer).
             let col = translate_arg_value(args.first()?, bindings, ctx)?;
             let text = decode_lexical_sql(&col);
-            // Extract seconds as integer (xsd:integer) to match validator output.
-            // Note: SPARQL spec says xsd:decimal; integer seconds still match
-            // when validator normalizes equal values across simple types.
-            Some(format!("(substring({text} FROM 'T\\d{{2}}:\\d{{2}}:(\\d+)'))::bigint"))
+            // Extract seconds (integer or fractional) and encode as xsd:decimal.
+            Some(format!(
+                "pg_ripple.encode_typed_literal(\
+                    COALESCE(substring({text} FROM 'T\\d{{2}}:\\d{{2}}:(\\d+(?:\\.\\d+)?)'), '0'), \
+                    'http://www.w3.org/2001/XMLSchema#decimal')"
+            ))
         }
         Function::Timezone => {
-            // Returns the timezone offset as xsd:dayTimeDuration string.
+            // Returns the timezone offset as xsd:dayTimeDuration (e.g. "PT0S", "-PT8H").
+            // Inline datetimes are stored in UTC, so timezone is always Z → "PT0S".
+            // For dict-stored datetimes with explicit timezone, extract and convert.
             let col = translate_arg_value(args.first()?, bindings, ctx)?;
             let text = decode_lexical_sql(&col);
-            Some(encode_literal(format!(
-                "CASE WHEN ({text}) LIKE '%Z' OR ({text}) LIKE '%+%' OR ({text}) LIKE '%-0%' \
-                      THEN regexp_replace({text}, '.*([+-]\\d{{2}}:\\d{{2}}|Z)$', '\\1') \
-                      ELSE '' END"
-            )))
+            // Convert timezone string to dayTimeDuration:
+            //   "Z" or "+00:00" or "-00:00" → "PT0S"
+            //   "+HH:MM" → "PTHHS" (ignoring minutes for common cases)
+            //   "-HH:MM" → "-PTHHS"
+            let tz_expr = format!(
+                "CASE \
+                   WHEN ({text}) LIKE '%Z' THEN 'PT0S' \
+                   WHEN ({text}) ~ '[+-]\\d{{2}}:\\d{{2}}$' THEN (\
+                     WITH tz AS (SELECT substring(({text}) from '[+-]\\d{{2}}:\\d{{2}}$') AS t) \
+                     SELECT CASE \
+                       WHEN t = '+00:00' OR t = '-00:00' THEN 'PT0S' \
+                       WHEN left(t,1) = '-' THEN '-PT' || ltrim(substring(t from 2 for 2),'0') || 'H' \
+                       ELSE 'PT' || ltrim(substring(t from 2 for 2),'0') || 'H' \
+                     END FROM tz) \
+                   ELSE NULL \
+                 END"
+            );
+            Some(format!(
+                "pg_ripple.encode_typed_literal(\
+                    ({tz_expr}), \
+                    'http://www.w3.org/2001/XMLSchema#dayTimeDuration')"
+            ))
         }
         Function::Tz => {
             // Returns the timezone string (e.g. "Z", "+01:00") or "".
@@ -805,25 +938,30 @@ pub(super) fn translate_function_value(
         }
 
         // ── STRBEFORE / STRAFTER ─────────────────────────────────────────────
+        // Preserve the language tag of the subject literal.
         Function::StrBefore => {
             let str_col = translate_arg_value(args.first()?, bindings, ctx)?;
             let str_text = decode_lexical_sql(&str_col);
             let needle = translate_arg_text(args.get(1)?, bindings, ctx)?;
-            Some(encode_literal(format!(
+            let new_lex = format!(
                 "CASE WHEN strpos({str_text}, {needle}) > 0 \
                       THEN left({str_text}, strpos({str_text}, {needle}) - 1) \
-                      ELSE '' END"
-            )))
+                      WHEN {needle} = '' THEN '' \
+                      ELSE NULL END"
+            );
+            Some(encode_preserving_lang(&str_col, &new_lex))
         }
         Function::StrAfter => {
             let str_col = translate_arg_value(args.first()?, bindings, ctx)?;
             let str_text = decode_lexical_sql(&str_col);
             let needle = translate_arg_text(args.get(1)?, bindings, ctx)?;
-            Some(encode_literal(format!(
+            let new_lex = format!(
                 "CASE WHEN strpos({str_text}, {needle}) > 0 \
                       THEN right({str_text}, length({str_text}) - strpos({str_text}, {needle}) - length({needle}) + 1) \
-                      ELSE '' END"
-            )))
+                      WHEN {needle} = '' THEN {str_text} \
+                      ELSE NULL END"
+            );
+            Some(encode_preserving_lang(&str_col, &new_lex))
         }
 
         // ── COALESCE ─────────────────────────────────────────────────────────

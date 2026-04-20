@@ -12,6 +12,19 @@ mod pg_ripple {
         crate::dictionary::encode(term, kind)
     }
 
+    /// Encode a language-tagged literal (value, lang) to its dictionary `i64` identifier.
+    #[pg_extern]
+    fn encode_lang_literal(value: &str, lang: &str) -> i64 {
+        crate::dictionary::encode_lang_literal(value, lang)
+    }
+
+    /// Encode a typed literal (lexical value, datatype IRI) to its dictionary `i64` identifier.
+    /// For xsd:integer and other inline-encodable types, returns a negative inline ID.
+    #[pg_extern]
+    fn encode_typed_literal(value: &str, datatype: &str) -> i64 {
+        crate::dictionary::encode_typed_literal(value, datatype)
+    }
+
     /// Decode a dictionary `i64` back to its original text value.
     #[pg_extern]
     fn decode_id(id: i64) -> Option<String> {

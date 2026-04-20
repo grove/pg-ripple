@@ -149,8 +149,8 @@ fn w3c_suite() {
         .filter(|r| r.outcome.is_unexpected_failure())
         .collect();
     if !failures.is_empty() {
-        println!("\n  UNEXPECTED FAILURES (first 20):");
-        for f in failures.iter().take(20) {
+        println!("\n  UNEXPECTED FAILURES (all):");
+        for f in failures.iter() {
             match &f.outcome {
                 w3c::TestOutcome::Fail(msg) => {
                     println!(
