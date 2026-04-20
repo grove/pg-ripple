@@ -157,6 +157,9 @@ pub(super) struct Ctx {
     /// is built, so `OPTIONAL {}` and property paths inside `GRAPH {}` work
     /// correctly without relying on post-hoc alias lookups.
     pub(super) graph_filter: Option<i64>,
+    /// Base IRI from the SPARQL BASE declaration (e.g. `BASE <http://example.org/>`).
+    /// Used by `IRI()`/`URI()` to resolve relative IRI string arguments.
+    pub(super) base_iri: Option<String>,
 }
 
 impl Ctx {
@@ -171,6 +174,7 @@ impl Ctx {
             raw_iri_vars: std::collections::HashSet::new(),
             raw_double_vars: std::collections::HashSet::new(),
             graph_filter: None,
+            base_iri: None,
         }
     }
 
@@ -2538,9 +2542,10 @@ pub struct Translation {
 }
 
 /// Translate a SPARQL SELECT query pattern to SQL.
-pub fn translate_select(pattern: &GraphPattern) -> Translation {
+pub fn translate_select(pattern: &GraphPattern, base_iri: Option<&str>) -> Translation {
     let mut mods = extract_modifiers(pattern);
     let mut ctx = Ctx::new();
+    ctx.base_iri = base_iri.map(|s| s.to_owned());
     let frag = translate_pattern(mods.pattern, &mut ctx);
 
     // Resolve ORDER BY now that we have the final bindings.

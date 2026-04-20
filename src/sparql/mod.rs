@@ -134,6 +134,7 @@ fn prepare_select(query_text: &str) -> (String, Vec<String>, std::collections::H
         .parse_query(query_text)
         .unwrap_or_else(|e| pgrx::error!("SPARQL parse error: {}", e));
 
+    let base_iri: Option<String> = query.base_iri().map(|b| b.as_str().to_owned());
     // NOTE: sparopt 0.3 uses its own algebra types (distinct from spargebra 0.4);
     // direct conversion is not yet available.  Filter-pushdown and constant-folding
     // are implemented in our own algebra pass (sqlgen.rs) as per the ROADMAP fallback.
@@ -145,7 +146,7 @@ fn prepare_select(query_text: &str) -> (String, Vec<String>, std::collections::H
         }
     };
 
-    let trans = sqlgen::translate_select(&pattern);
+    let trans = sqlgen::translate_select(&pattern, base_iri.as_deref());
     let entry = (trans.sql, trans.variables, trans.raw_numeric_vars, trans.raw_text_vars, trans.raw_iri_vars, trans.raw_double_vars);
     // Skip plan cache for queries that contain SERVICE clauses — remote results
     // are baked into the generated SQL as VALUES literals; caching would return
@@ -322,7 +323,7 @@ pub fn sparql_explain(query_text: &str, analyze: bool) -> String {
 
     let (inner_sql, vars) = match query {
         spargebra::Query::Select { pattern, .. } => {
-            let trans = sqlgen::translate_select(&pattern);
+            let trans = sqlgen::translate_select(&pattern, None);
             (trans.sql, trans.variables)
         }
         spargebra::Query::Ask { pattern, .. } => {
@@ -371,12 +372,12 @@ pub fn explain_sparql(query_text: &str, format: &str) -> String {
     // Get generated SQL.
     let inner_sql = match &query {
         Query::Select { pattern, .. } => {
-            let trans = sqlgen::translate_select(pattern);
+            let trans = sqlgen::translate_select(pattern, None);
             trans.sql
         }
         Query::Ask { pattern, .. } => sqlgen::translate_ask(pattern),
         Query::Construct { pattern, .. } => {
-            let trans = sqlgen::translate_select(pattern);
+            let trans = sqlgen::translate_select(pattern, None);
             trans.sql
         }
         Query::Describe { .. } => {
@@ -424,7 +425,7 @@ pub(crate) fn sparql_construct_rows(query_text: &str) -> Vec<(i64, i64, i64)> {
         _ => pgrx::error!("sparql_construct_rows() requires a CONSTRUCT query"),
     };
 
-    let trans = sqlgen::translate_select(&pattern);
+    let trans = sqlgen::translate_select(&pattern, None);
     let (sql, variables) = (trans.sql, trans.variables);
 
     let mut raw_rows: Vec<Vec<Option<i64>>> = Vec::new();
@@ -533,7 +534,7 @@ pub fn sparql_construct(query_text: &str) -> Vec<pgrx::JsonB> {
     };
 
     // Translate the WHERE clause as a SELECT over all template variables.
-    let trans = sqlgen::translate_select(&pattern);
+    let trans = sqlgen::translate_select(&pattern, None);
     let (sql, variables) = (trans.sql, trans.variables);
     let var_set: std::collections::HashSet<&str> = variables.iter().map(|s| s.as_str()).collect();
 
@@ -673,7 +674,7 @@ pub fn sparql_describe(query_text: &str, strategy: &str) -> Vec<pgrx::JsonB> {
         _ => pgrx::error!("sparql_describe() requires a DESCRIBE query"),
     };
 
-    let trans = sqlgen::translate_select(&pattern);
+    let trans = sqlgen::translate_select(&pattern, None);
     let (sql, variables) = (trans.sql, trans.variables);
 
     // Collect all result IDs from the projected variables.
@@ -912,7 +913,7 @@ fn execute_delete_insert(
     };
 
     // 2. Translate WHERE clause to SQL via the existing SELECT engine.
-    let trans = sqlgen::translate_select(pattern);
+    let trans = sqlgen::translate_select(pattern, None);
     let (sql, variables) = (trans.sql, trans.variables);
 
     // 2. Execute the WHERE query and collect bound result rows.

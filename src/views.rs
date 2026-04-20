@@ -66,7 +66,7 @@ fn compile_sparql_for_view(
         _ => return Err("only SELECT queries can be compiled to views".to_owned()),
     };
 
-    let trans = sqlgen::translate_select(&pattern);
+    let trans = sqlgen::translate_select(&pattern, None);
 
     // The standard translation uses `_v_{var}` column aliases.  Re-map them to
     // plain variable names so the stream table schema is readable.
@@ -741,7 +741,7 @@ fn compile_construct_for_view(query_text: &str) -> Result<(String, usize, usize)
         _ => return Err("sparql must be a CONSTRUCT query".to_owned()),
     };
 
-    let trans = sqlgen::translate_select(&pattern);
+    let trans = sqlgen::translate_select(&pattern, None);
     let where_sql = trans.sql;
     let variables = trans.variables;
     let var_set: std::collections::HashSet<&str> = variables.iter().map(|s| s.as_str()).collect();
@@ -1008,7 +1008,7 @@ fn compile_describe_for_view(query_text: &str, strategy: &str) -> Result<String,
         _ => return Err("sparql must be a DESCRIBE query".to_owned()),
     };
 
-    let trans = sqlgen::translate_select(&pattern);
+    let trans = sqlgen::translate_select(&pattern, None);
     let where_sql = trans.sql;
     let variables = trans.variables;
 

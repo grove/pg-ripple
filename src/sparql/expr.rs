@@ -774,7 +774,22 @@ pub(super) fn translate_function_value(
         Function::Iri => {
             let col = translate_arg_value(args.first()?, bindings, ctx)?;
             let text = decode_lexical_sql(&col);
-            Some(encode_iri(text))
+            // If there is a BASE IRI, resolve relative IRIs at runtime using SQL.
+            // We detect relative IRIs by checking that the value does NOT start with
+            // a scheme (i.e. no colon before the first slash or end of string).
+            if let Some(base) = &ctx.base_iri.clone() {
+                let base_escaped = base.replace('\'', "''");
+                // Emit SQL that resolves relative IRIs: if the value already contains
+                // '://' or starts with '<', use it as-is; otherwise prepend the base.
+                Some(encode_iri(format!(
+                    "(CASE WHEN ({text}) ~ '^[A-Za-z][A-Za-z0-9+\\-.]*:' \
+                          THEN ({text}) \
+                          ELSE '{base_escaped}' || ({text}) \
+                     END)"
+                )))
+            } else {
+                Some(encode_iri(text))
+            }
         }
 
         // ── BNODE ───────────────────────────────────────────────────────────

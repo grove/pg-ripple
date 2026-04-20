@@ -33,12 +33,12 @@ pub fn explain_sparql_jsonb(query_text: &str, analyze: bool) -> pgrx::JsonB {
     // the GUC pg_ripple.plan_cache_size).
     let (inner_sql, _encode_calls) = match &query {
         Query::Select { pattern, .. } => {
-            let trans = sqlgen::translate_select(pattern);
+            let trans = sqlgen::translate_select(pattern, None);
             (trans.sql, 0usize)
         }
         Query::Ask { pattern, .. } => (sqlgen::translate_ask(pattern), 0usize),
         Query::Construct { pattern, .. } => {
-            let trans = sqlgen::translate_select(pattern);
+            let trans = sqlgen::translate_select(pattern, None);
             (trans.sql, 0usize)
         }
         Query::Describe { .. } => {
