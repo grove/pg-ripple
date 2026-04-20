@@ -2215,6 +2215,11 @@ fn translate_expr_value(
             let ra = translate_expr_value(b, bindings, ctx)?;
             Some(inline_int_divide(&la, &ra))
         }
+        Expression::UnaryPlus(inner) => translate_expr_value(inner, bindings, ctx),
+        Expression::UnaryMinus(inner) => {
+            let sql = translate_expr_value(inner, bindings, ctx)?;
+            Some(inline_int_negate(&sql))
+        }
         _ => None,
     }
 }
@@ -2294,6 +2299,16 @@ fn inline_int_divide(la: &str, ra: &str) -> String {
         packed = inline_int_pack(&format!(
             "({extract_a} / NULLIF({extract_b}, 0::bigint))"
         )),
+    )
+}
+
+/// Generate SQL for unary negation of an inline-encoded integer expression.
+fn inline_int_negate(sql: &str) -> String {
+    let extract = inline_int_extract(sql);
+    format!(
+        "CASE WHEN ({sql}) >= 0 THEN NULL::bigint \
+         ELSE {packed} END",
+        packed = inline_int_pack(&format!("(-({extract}))")),
     )
 }
 

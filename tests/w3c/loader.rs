@@ -18,7 +18,10 @@ pub fn load_default_graph(
     let content =
         std::fs::read_to_string(file).map_err(|e| format!("reading {}: {e}", file.display()))?;
     match format_from_path(file) {
-        "rdfxml" => tx.execute("SELECT pg_ripple.load_rdfxml($1, false)", &[&content])?,
+        "rdfxml" => {
+            let content = inject_rdfxml_base(&content, file);
+            tx.execute("SELECT pg_ripple.load_rdfxml($1, false)", &[&content])?
+        }
         _ => tx.execute("SELECT pg_ripple.load_turtle($1, false)", &[&content])?,
     };
     Ok(())
@@ -33,16 +36,47 @@ pub fn load_named_graph(
     let content =
         std::fs::read_to_string(file).map_err(|e| format!("reading {}: {e}", file.display()))?;
     match format_from_path(file) {
-        "rdfxml" => tx.execute(
-            "SELECT pg_ripple.load_rdfxml_into_graph($1, $2)",
-            &[&content, &graph_iri],
-        )?,
+        "rdfxml" => {
+            let content = inject_rdfxml_base(&content, file);
+            tx.execute(
+                "SELECT pg_ripple.load_rdfxml_into_graph($1, $2)",
+                &[&content, &graph_iri],
+            )?
+        }
         _ => tx.execute(
             "SELECT pg_ripple.load_turtle_into_graph($1, $2)",
             &[&content, &graph_iri],
         )?,
     };
     Ok(())
+}
+
+/// Inject an `xml:base` attribute into an RDF/XML document if none is present.
+///
+/// The W3C RDF/XML test files may contain relative IRIs (e.g. `rdf:resource=""`).
+/// The `load_rdfxml` function requires an absolute base URI to resolve them.
+/// This helper injects `xml:base="file:///..."` into the root `<rdf:RDF>` element
+/// so the parser can resolve relative references correctly.
+fn inject_rdfxml_base(content: &str, file: &Path) -> String {
+    // If already has xml:base, leave as-is.
+    if content.contains("xml:base") {
+        return content.to_owned();
+    }
+    let base = file
+        .canonicalize()
+        .unwrap_or_else(|_| file.to_path_buf());
+    let base_uri = format!("file://{}", base.display());
+    // Inject xml:base before the closing '>' of the first XML element tag.
+    if let Some(rdf_pos) = content.find("<rdf:RDF") {
+        let after_tag = &content[rdf_pos..];
+        if let Some(close) = after_tag.find('>') {
+            let insert_pos = rdf_pos + close;
+            let mut result = content.to_owned();
+            result.insert_str(insert_pos, &format!(r#" xml:base="{base_uri}""#));
+            return result;
+        }
+    }
+    content.to_owned()
 }
 
 /// Detect the RDF format of a file from its extension.

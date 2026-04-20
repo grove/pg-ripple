@@ -91,8 +91,8 @@
       "xpass": 0
     },
     "subquery": {
-      "fail": 7,
-      "pass": 7,
+      "fail": 1,
+      "pass": 13,
       "skip": 0,
       "timeout": 0,
       "total": 14,
@@ -109,9 +109,9 @@
       "xpass": 0
     }
   },
-  "failed": 67,
-  "pass_rate_pct": "75.0",
-  "passed": 243,
+  "failed": 61,
+  "pass_rate_pct": "76.9",
+  "passed": 249,
   "skipped": 14,
   "timeout": 0,
   "total": 324,
