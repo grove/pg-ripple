@@ -1243,12 +1243,21 @@ fn register_xact_callback() {
 /// XACT_EVENT_PARALLEL_ABORT events.
 #[allow(non_snake_case)]
 unsafe extern "C-unwind" fn xact_callback_c(event: u32, _arg: *mut std::ffi::c_void) {
-    // XactEvent is an enum in PostgreSQL, and the event is passed as a u32.
-    // We check against the enum discriminants for ABORT events:
-    // XACT_EVENT_ABORT = 0, XACT_EVENT_PARALLEL_ABORT = 4
-    // See src/include/access/xact.h in PostgreSQL source.
-    if event == 0 || event == 4 {
+    // XactEvent enum values from PostgreSQL 18 src/include/access/xact.h:
+    //   XACT_EVENT_COMMIT          = 0
+    //   XACT_EVENT_PARALLEL_COMMIT = 1
+    //   XACT_EVENT_ABORT           = 2
+    //   XACT_EVENT_PARALLEL_ABORT  = 3
+    //   XACT_EVENT_PREPARE         = 4
+    //   XACT_EVENT_PRE_COMMIT      = 5
+    if event == 2 || event == 3 {
+        // Transaction is being rolled back: evict shmem entries inserted in
+        // this transaction so stale hash→id mappings cannot pollute later txns.
         crate::dictionary::clear_caches();
+    } else if event == 0 || event == 1 {
+        // Transaction committed successfully: dictionary rows are durable, so
+        // the shmem entries are correct — just clear the tracking list.
+        crate::dictionary::commit_cleanup();
     }
 }
 

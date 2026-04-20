@@ -214,15 +214,34 @@ fn srj_term_to_string(term: &Value) -> Option<String> {
 /// Parse a pg_ripple `sparql()` result row into a binding map.
 ///
 /// pg_ripple returns JSONB with variable names as keys and N-Triples-style
-/// term strings as values.
+/// term strings as values.  Aggregate results (COUNT, SUM, AVG) are returned
+/// as raw JSON numbers, which we convert to the corresponding xsd typed literal
+/// representation so they can be compared with SRX expected values.
 fn parse_pg_ripple_binding(json: &Value, vars: &[String]) -> HashMap<String, String> {
     let mut map = HashMap::new();
     if let Some(obj) = json.as_object() {
         for var in vars {
-            if let Some(val) = obj.get(var).and_then(|v| v.as_str()) {
-                if !val.is_empty() {
-                    map.insert(var.clone(), val.to_string());
-                }
+            if let Some(val) = obj.get(var) {
+                let term_str = match val {
+                    Value::String(s) if !s.is_empty() => s.clone(),
+                    Value::Number(n) => {
+                        if let Some(i) = n.as_i64() {
+                            format!(
+                                "\"{}\"^^<http://www.w3.org/2001/XMLSchema#integer>",
+                                i
+                            )
+                        } else if let Some(f) = n.as_f64() {
+                            format!(
+                                "\"{}\"^^<http://www.w3.org/2001/XMLSchema#decimal>",
+                                f
+                            )
+                        } else {
+                            continue;
+                        }
+                    }
+                    _ => continue,
+                };
+                map.insert(var.clone(), term_str);
             }
         }
     }

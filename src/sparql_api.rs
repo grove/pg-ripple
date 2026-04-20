@@ -260,6 +260,21 @@ mod pg_ripple {
         crate::shmem::reset_cache_stats();
     }
 
+    /// Flush the shared-memory encode cache, evicting all entries.
+    ///
+    /// Use this to clear stale hash→id mappings that may have been left by
+    /// rolled-back transactions before v0.42.0 fixed the xact callback.
+    /// After calling this, the next encode() call for each IRI/literal will
+    /// do a fresh SPI lookup — performance recovers immediately as the cache
+    /// warms up again.  Safe to call at any time (no data is lost).
+    #[pg_extern]
+    fn flush_encode_cache() {
+        crate::shmem::encode_cache_clear_all();
+        // Also clear backend-local encode/decode caches so the current
+        // session does not re-insert stale mappings from its own LRU.
+        crate::dictionary::clear_caches();
+    }
+
     // ── Full-text search ─────────────────────────────────────────────────────
 
     /// Create a GIN tsvector index on the dictionary for the given predicate IRI.

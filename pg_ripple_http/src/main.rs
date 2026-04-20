@@ -99,7 +99,15 @@ async fn main() {
         )
         .init();
 
-    let pg_url = env_or("PG_RIPPLE_HTTP_PG_URL", "postgresql://localhost/postgres");
+    // Accept database URL from command-line argument (first positional arg) or environment variable
+    let pg_url = {
+        let args: Vec<String> = std::env::args().collect();
+        if args.len() > 1 {
+            args[1].clone()
+        } else {
+            env_or("PG_RIPPLE_HTTP_PG_URL", "postgresql://localhost/postgres")
+        }
+    };
     let port: u16 = match env_or("PG_RIPPLE_HTTP_PORT", "7878").parse() {
         Ok(p) => p,
         Err(e) => {

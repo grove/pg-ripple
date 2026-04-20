@@ -22,9 +22,13 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 OUTPUT_DIR="${W3C_TEST_DIR:-${PROJECT_ROOT}/tests/w3c/data}"
 
-# Official W3C SPARQL 1.1 test suite archive.
-# The tests are published as a zip file at the W3C test repository.
-W3C_TEST_URL="${W3C_TEST_URL:-https://www.w3.org/2009/sparql/docs/tests/data-sparql11/data-sparql11.tar.gz}"
+# Official W3C SPARQL 1.1 test suite — now maintained on GitHub.
+# The old W3C URL (https://www.w3.org/2009/sparql/docs/tests/data-sparql11/...)
+# returns 404 as of 2026.  The canonical source is now:
+#   https://github.com/w3c/rdf-tests/tree/main/sparql/sparql11
+#
+# We download the full rdf-tests repo archive and extract just sparql/sparql11.
+W3C_TEST_URL="${W3C_TEST_URL:-https://github.com/w3c/rdf-tests/archive/refs/heads/main.tar.gz}"
 
 ARCHIVE="/tmp/sparql11-tests-$$.tar.gz"
 FORCE="${1:-}"
@@ -68,12 +72,28 @@ info "Extracting to ${OUTPUT_DIR}..."
 mkdir -p "${OUTPUT_DIR}"
 
 if tar -tzf "${ARCHIVE}" >/dev/null 2>&1; then
-    # tar.gz archive
-    tar -xzf "${ARCHIVE}" -C "${OUTPUT_DIR}" --strip-components=1 2>/dev/null \
-        || tar -xzf "${ARCHIVE}" -C "${OUTPUT_DIR}" 2>/dev/null \
-        || true
+    # GitHub rdf-tests archive: rdf-tests-main/sparql/sparql11/...
+    # Extract everything to a temp dir, then move sparql11/ into OUTPUT_DIR.
+    # (--wildcards is not portable across BSD tar / GNU tar.)
+    if tar -tzf "${ARCHIVE}" 2>/dev/null | grep -q "sparql/sparql11"; then
+        info "Detected GitHub rdf-tests archive — extracting sparql/sparql11 subtree..."
+        TMPDIR_EXTRACT="/tmp/sparql11-extract-$$"
+        mkdir -p "${TMPDIR_EXTRACT}"
+        tar -xzf "${ARCHIVE}" -C "${TMPDIR_EXTRACT}" 2>/dev/null || true
+        SPARQL11_DIR=$(find "${TMPDIR_EXTRACT}" -type d -name "sparql11" | head -1)
+        if [[ -n "${SPARQL11_DIR}" ]]; then
+            cp -r "${SPARQL11_DIR}/"* "${OUTPUT_DIR}/"
+        else
+            fail "Could not locate sparql11/ directory inside the extracted archive"
+        fi
+        rm -rf "${TMPDIR_EXTRACT}"
+    else
+        tar -xzf "${ARCHIVE}" -C "${OUTPUT_DIR}" --strip-components=1 2>/dev/null \
+            || tar -xzf "${ARCHIVE}" -C "${OUTPUT_DIR}" 2>/dev/null \
+            || true
+    fi
 elif unzip -t "${ARCHIVE}" >/dev/null 2>&1; then
-    # zip archive (sometimes W3C uses this format)
+    # zip archive
     unzip -q "${ARCHIVE}" -d "${OUTPUT_DIR}" 2>/dev/null || true
 else
     fail "Unrecognised archive format: ${ARCHIVE}"

@@ -68,6 +68,15 @@ thread_local! {
         #[allow(clippy::expect_used)]
         LruCache::new(NonZeroUsize::new(CACHE_CAPACITY).expect("capacity > 0"))
     );
+
+    /// Shmem inserts made in the current transaction.
+    ///
+    /// Every hash128 that is inserted into the shared-memory encode cache
+    /// during this transaction is tracked here.  On ROLLBACK, these entries
+    /// are evicted from shmem so that stale hash→id mappings cannot poison
+    /// subsequent transactions (the dictionary rows are rolled back but the
+    /// shmem entries would otherwise persist indefinitely).
+    static TX_SHMEM_INSERTS: RefCell<Vec<u128>> = RefCell::new(Vec::new());
     /// Decode cache: sequence id → term value.
     static DECODE_CACHE: RefCell<LruCache<i64, String>> = RefCell::new(
         // SAFETY: CACHE_CAPACITY is a compile-time non-zero literal (4096).
@@ -137,6 +146,7 @@ pub fn encode(term: &str, kind: i16) -> i64 {
 
     // Populate both caches.
     crate::shmem::encode_cache_insert(hash128, id);
+    TX_SHMEM_INSERTS.with(|v| v.borrow_mut().push(hash128));
     ENCODE_CACHE.with(|c| c.borrow_mut().put(hash128, id));
     DECODE_CACHE.with(|c| c.borrow_mut().put(id, term.to_owned()));
 
@@ -209,6 +219,7 @@ pub fn encode_typed_literal(value: &str, datatype: &str) -> i64 {
     .unwrap_or_else(|| pgrx::error!("dictionary encode_typed_literal: no id returned"));
 
     crate::shmem::encode_cache_insert(hash128, id);
+    TX_SHMEM_INSERTS.with(|v| v.borrow_mut().push(hash128));
     ENCODE_CACHE.with(|c| c.borrow_mut().put(hash128, id));
     DECODE_CACHE.with(|c| c.borrow_mut().put(id, canonical));
 
@@ -254,6 +265,7 @@ pub fn encode_lang_literal(value: &str, lang: &str) -> i64 {
     .unwrap_or_else(|| pgrx::error!("dictionary encode_lang_literal: no id returned"));
 
     crate::shmem::encode_cache_insert(hash128, id);
+    TX_SHMEM_INSERTS.with(|v| v.borrow_mut().push(hash128));
     ENCODE_CACHE.with(|c| c.borrow_mut().put(hash128, id));
     DECODE_CACHE.with(|c| c.borrow_mut().put(id, canonical));
 
@@ -332,6 +344,7 @@ pub fn encode_quoted_triple(s_id: i64, p_id: i64, o_id: i64) -> i64 {
     .unwrap_or_else(|| pgrx::error!("dictionary encode_quoted_triple: no id returned"));
 
     crate::shmem::encode_cache_insert(hash128, id);
+    TX_SHMEM_INSERTS.with(|v| v.borrow_mut().push(hash128));
     ENCODE_CACHE.with(|c| c.borrow_mut().put(hash128, id));
     DECODE_CACHE.with(|c| c.borrow_mut().put(id, canonical));
     id
@@ -616,11 +629,31 @@ pub fn decode(id: i64) -> Option<String> {
 /// dictionary IDs inserted during that transaction should not be served by
 /// the cache in subsequent encode calls, as the dictionary rows themselves
 /// have been rolled back (v0.22.0 critical fix C-2).
+///
+/// v0.42.0: Also evicts entries from the shared-memory encode cache so that
+/// stale hash→id mappings do not leak across transaction boundaries.  Any
+/// IRI/literal encoded during a rolled-back transaction would otherwise remain
+/// in shmem, causing subsequent transactions to skip the SPI INSERT (shmem
+/// hit) and store VP triples with non-existent dictionary IDs.
 pub(crate) fn clear_caches() {
+    // Evict shmem entries that were inserted in this (now-aborting) transaction.
+    TX_SHMEM_INSERTS.with(|v| {
+        for &hash128 in v.borrow().iter() {
+            crate::shmem::encode_cache_evict(hash128);
+        }
+        v.borrow_mut().clear();
+    });
     ENCODE_CACHE.with(|c| {
         c.borrow_mut().clear();
     });
     DECODE_CACHE.with(|c| {
         c.borrow_mut().clear();
     });
+}
+
+/// Clear the per-transaction shmem-insert tracking list after a successful
+/// commit.  The shmem entries themselves are correct (their dictionary rows
+/// were committed), so we only need to drop the tracking list — no eviction.
+pub(crate) fn commit_cleanup() {
+    TX_SHMEM_INSERTS.with(|v| v.borrow_mut().clear());
 }

@@ -197,6 +197,13 @@ pub fn parse_manifest(
                         }
                     }
                 }
+            } else {
+                // Syntax tests use `mf:action <query-file.rq>` directly — the
+                // action IRI is the query file itself, not a blank node with
+                // nested `qt:query`.
+                query_file = iri_to_path(&action, &manifest_dir);
+            }
+            if let Some(ap) = graph.get(&action) {
 
                 // Default graph data files
                 for prop in [QT_DATA, UT_DATA] {

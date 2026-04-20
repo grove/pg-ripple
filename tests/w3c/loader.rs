@@ -59,6 +59,12 @@ pub fn load_fixtures(
     data_files: &[std::path::PathBuf],
     named_graphs: &[(String, std::path::PathBuf)],
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    // Clear all graphs so pre-existing database triples don't bleed into the
+    // test.  SPARQL queries without a FROM clause see all graphs, so we must
+    // clear named graphs too — not just the default graph (g=0).  The enclosing
+    // transaction is rolled back after each test, so this clear is automatically
+    // undone — it's purely in-transaction.
+    tx.execute("SELECT pg_ripple.sparql_update('CLEAR ALL')", &[])?;
     for file in data_files {
         load_default_graph(tx, file)?;
     }

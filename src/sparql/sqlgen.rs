@@ -1239,8 +1239,11 @@ fn translate_group(
     let having_clause = if let Some(having_expr) = having {
         // Build temporary bindings that include aggregate aliases for HAVING.
         let mut having_bindings = inner_alias.clone();
-        for (vname, _) in &agg_bindings {
-            having_bindings.insert(vname.clone(), format!("_g_{vname}"));
+        for (vname, sql_agg) in &agg_bindings {
+            // Use the original aggregate SQL expression (e.g. COUNT(*)) rather
+            // than the SELECT-list alias (e.g. _g_count): PostgreSQL does not
+            // allow SELECT aliases to be referenced in HAVING.
+            having_bindings.insert(vname.clone(), sql_agg.clone());
         }
         // Mark aggregate vars as raw numeric so FILTER constants (e.g. >= 2) are
         // not encoded as inline IDs — COUNT(*) returns a raw SQL integer, not an
@@ -2074,6 +2077,34 @@ fn translate_expr_value(
             // also call is_numeric_function() directly.
             Some(result)
         }
+        // ── Inline-integer arithmetic (v0.42.0) ──────────────────────────────
+        // SPARQL arithmetic on xsd:integer values encoded as inline i64s.
+        // The encoding is: id = INLINE_FLAG | ((value + INTEGER_OFFSET) & VALUE_MASK)
+        //   INLINE_FLAG   = -9223372036854775808  (bit 63)
+        //   INTEGER_OFFSET = 36028797018963968    (1 << 55)
+        //   VALUE_MASK    = 72057594037927935     (bits 55-0)
+        // Extraction: (id & VALUE_MASK) - INTEGER_OFFSET
+        // Packing:    INLINE_FLAG | ((val + INTEGER_OFFSET) & VALUE_MASK)
+        Expression::Add(a, b) => {
+            let la = translate_expr_value(a, bindings, ctx)?;
+            let ra = translate_expr_value(b, bindings, ctx)?;
+            Some(inline_int_arith("+", &la, &ra))
+        }
+        Expression::Subtract(a, b) => {
+            let la = translate_expr_value(a, bindings, ctx)?;
+            let ra = translate_expr_value(b, bindings, ctx)?;
+            Some(inline_int_arith("-", &la, &ra))
+        }
+        Expression::Multiply(a, b) => {
+            let la = translate_expr_value(a, bindings, ctx)?;
+            let ra = translate_expr_value(b, bindings, ctx)?;
+            Some(inline_int_arith("*", &la, &ra))
+        }
+        Expression::Divide(a, b) => {
+            let la = translate_expr_value(a, bindings, ctx)?;
+            let ra = translate_expr_value(b, bindings, ctx)?;
+            Some(inline_int_arith("/", &la, &ra))
+        }
         _ => None,
     }
 }
@@ -2081,6 +2112,45 @@ fn translate_expr_value(
 /// Like `translate_expr_value`, but always returns raw numeric SQL values for
 /// numeric literals — used when the comparison context is a raw aggregate
 /// output (COUNT, SUM, etc.) rather than a stored inline-encoded triple value.
+// ─── Inline-integer arithmetic helpers ───────────────────────────────────────
+
+/// Extract the integer value from an inline-encoded i64 SQL expression.
+///
+/// Inline encoding: id = INLINE_FLAG | ((value + INTEGER_OFFSET) & VALUE_MASK)
+///   VALUE_MASK     = (1 << 56) - 1 = 72057594037927935
+///   INTEGER_OFFSET = 1 << 55       = 36028797018963968
+/// Extraction: (id & VALUE_MASK) - INTEGER_OFFSET
+fn inline_int_extract(sql: &str) -> String {
+    format!(
+        "(({sql} & 72057594037927935::bigint) - 36028797018963968::bigint)"
+    )
+}
+
+/// Re-pack an extracted SQL integer back into the inline-encoding format.
+///
+/// Packing: INLINE_FLAG | ((val + INTEGER_OFFSET) & VALUE_MASK)
+///   INLINE_FLAG = INT64_MIN = -9223372036854775808 (bit 63 set, as signed i64)
+///
+/// Note: we cannot write (-9223372036854775808::bigint) directly in PostgreSQL
+/// because the parser tries to cast the positive literal first, which overflows.
+/// Instead, `~(9223372036854775807::bigint)` = ~INT64_MAX = INT64_MIN.
+fn inline_int_pack(sql: &str) -> String {
+    format!(
+        "((~(9223372036854775807::bigint)) | \
+         (({sql} + 36028797018963968::bigint) & 72057594037927935::bigint))"
+    )
+}
+
+/// Generate SQL for binary arithmetic on two inline-encoded integer expressions.
+///
+/// Both `la` and `ra` are SQL expressions that evaluate to inline-encoded i64
+/// values. The result is also an inline-encoded i64.
+fn inline_int_arith(op: &str, la: &str, ra: &str) -> String {
+    let extract_a = inline_int_extract(la);
+    let extract_b = inline_int_extract(ra);
+    inline_int_pack(&format!("({extract_a} {op} {extract_b})"))
+}
+
 fn translate_expr_value_raw(
     expr: &Expression,
     bindings: &HashMap<String, String>,

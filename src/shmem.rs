@@ -485,6 +485,55 @@ pub fn get_cache_stats() -> (u64, u64, u64, f64) {
     (hits, misses, evictions, utilisation)
 }
 
+/// Evict a specific hash128 from the shared-memory encode cache.
+///
+/// Called on transaction rollback to remove entries for dictionary rows that
+/// were never committed. Without this, a rolled-back INSERT leaves a stale
+/// hash→id mapping in shmem. The next transaction then gets a shmem HIT for
+/// the same IRI/literal but the returned id no longer exists in the dictionary,
+/// causing VP table rows to be stored with non-existent predicate/subject/object
+/// ids — resulting in NULL values in SPARQL query results.
+///
+/// No-op when shmem is not initialised.
+pub fn encode_cache_evict(hash128: u128) {
+    if !SHMEM_READY.load(Ordering::Acquire) {
+        return;
+    }
+    let scoped = db_scoped_hash(hash128);
+    let set_idx = set_index(scoped);
+    let search_hash = scoped & 0x3FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF;
+
+    let mut guard_hashes = ENCODE_CACHE_S0.exclusive();
+    let mut guard_ids = ENCODE_CACHE_IDS.exclusive();
+    let set_hashes = &mut guard_hashes[set_idx];
+    let set_ids = &mut guard_ids[set_idx];
+    for (way_idx, way_hash) in set_hashes.iter_mut().enumerate() {
+        let stored_hash = *way_hash & 0x3FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF;
+        if stored_hash == search_hash && set_ids[way_idx] != 0 {
+            *way_hash = 0;
+            set_ids[way_idx] = 0;
+            return;
+        }
+    }
+}
+
+/// Evict all entries from the shared-memory encode cache.
+///
+/// Used to flush stale entries left by previously rolled-back transactions.
+/// After calling this, all subsequent encode() calls go to SPI for the first
+/// lookup — performance cost is temporary (cache warms up quickly).
+///
+/// No-op when shmem is not initialised.
+pub fn encode_cache_clear_all() {
+    if !SHMEM_READY.load(Ordering::Acquire) {
+        return;
+    }
+    let mut guard_hashes = ENCODE_CACHE_S0.exclusive();
+    let mut guard_ids = ENCODE_CACHE_IDS.exclusive();
+    *guard_hashes = [[0u128; 4]; ENCODE_CACHE_SETS];
+    *guard_ids = [[0i64; 4]; ENCODE_CACHE_SETS];
+}
+
 /// Reset dict cache hit/miss/eviction counters to zero (v0.40.0).
 ///
 /// Does not evict cached entries; only resets the counters.

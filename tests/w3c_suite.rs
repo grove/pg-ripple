@@ -1,8 +1,8 @@
 //! W3C SPARQL 1.1 full conformance suite — ~3 000 tests across 13 sub-suites.
 //!
 //! Sub-suites: aggregates, bind, exists, functions, grouping, negation,
-//! optional, project-expression, property-path, service, subquery,
-//! syntax-query, update.
+//! project-expression, property-path, service, subquery, syntax-query,
+//! basic-update.
 //!
 //! Runs in parallel (default: 8 threads); target: < 2 minutes on an 8-core runner.
 //! This job is informational (non-blocking) until pass rate reaches 95%.
@@ -64,13 +64,12 @@ fn w3c_suite() {
             "functions".into(),
             "grouping".into(),
             "negation".into(),
-            "optional".into(),
             "project-expression".into(),
             "property-path".into(),
             "service".into(),
             "subquery".into(),
             "syntax-query".into(),
-            "update".into(),
+            "basic-update".into(),
         ],
         max_tests: None,
         known_failures_path: Some(known_failures_path).filter(|p| p.exists()),
