@@ -69,9 +69,7 @@ pub extern "C-unwind" fn pg_ripple_merge_worker_main(arg: pg_sys::Datum) {
     // Worker 0 also handles the merge worker PID for the latch mechanism.
     // SAFETY: arg is the i32 datum we passed in set_argument(); it is valid as long
     // as this is a pgrx-managed background worker entry point.
-    let worker_idx: u32 = unsafe {
-        i32::from_datum(arg, false).unwrap_or(0).max(0) as u32
-    };
+    let worker_idx: u32 = unsafe { i32::from_datum(arg, false).unwrap_or(0).max(0) as u32 };
 
     // Record our PID in shared memory so backends can poke our latch.
     // Only worker 0 writes to the shared PID (other workers also process merges

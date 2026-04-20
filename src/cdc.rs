@@ -244,15 +244,14 @@ pub fn list_named_subscriptions() -> pgrx::iter::TableIterator<
                 let name: String = row.get(1).ok().flatten().unwrap_or_default();
                 let fs: Option<String> = row.get(2).ok().flatten();
                 let fsh: Option<String> = row.get(3).ok().flatten();
-                let ca: pgrx::datum::TimestampWithTimeZone = row
-                    .get(4)
-                    .ok()
-                    .flatten()
-                    .unwrap_or_else(|| {
+                let ca: pgrx::datum::TimestampWithTimeZone =
+                    row.get(4).ok().flatten().unwrap_or_else(|| {
                         // SAFETY: 0 is the PostgreSQL epoch (2000-01-01 00:00:00 UTC),
                         // a valid TimestampWithTimeZone value.
                         pgrx::datum::TimestampWithTimeZone::try_from(0i64 as pg_sys::TimestampTz)
-                            .unwrap_or_else(|_| pgrx::datum::TimestampWithTimeZone::positive_infinity())
+                            .unwrap_or_else(|_| {
+                                pgrx::datum::TimestampWithTimeZone::positive_infinity()
+                            })
                     });
                 rows.push((name, fs, fsh, ca));
             }
