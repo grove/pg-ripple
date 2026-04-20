@@ -758,6 +758,11 @@ pub fn sparql_update(query_text: &str) -> i64 {
 
     let mut affected: i64 = 0;
     for op in &update.operations {
+        // Advance blank-node scope for each operation so that `_:b` in two
+        // separate INSERT WHERE operations produces DISTINCT blank nodes
+        // (per SPARQL Update section 3.1.3 — "INSERTing the same bnode
+        // with two INSERT WHERE statement within one request is NOT the same bnode").
+        storage::next_load_generation();
         match op {
             GraphUpdateOperation::InsertData { data } => {
                 for quad in data {
@@ -914,7 +919,9 @@ fn execute_delete_insert(
 
     // 2. Translate WHERE clause to SQL via the existing SELECT engine.
     let trans = sqlgen::translate_select(pattern, None);
-    let (sql, variables) = (trans.sql, trans.variables);
+    let sql = trans.sql;
+    let variables = trans.variables;
+    let raw_numeric_vars = trans.raw_numeric_vars;
 
     // 2. Execute the WHERE query and collect bound result rows.
     //    We get back raw i64 dictionary IDs per variable.
@@ -931,6 +938,33 @@ fn execute_delete_insert(
             raw_rows.push(row_vals);
         }
     });
+
+    // Post-process: raw_numeric_vars (COUNT, SUM, etc.) return raw SQL integers,
+    // not dictionary IDs.  Encode them as inline xsd:integer IDs so they can be
+    // used as triple term IDs in INSERT templates.
+    let raw_num_indices: Vec<usize> = variables
+        .iter()
+        .enumerate()
+        .filter_map(|(i, v)| if raw_numeric_vars.contains(v) { Some(i) } else { None })
+        .collect();
+    if !raw_num_indices.is_empty() {
+        for row in &mut raw_rows {
+            for &idx in &raw_num_indices {
+                if let Some(Some(raw_val)) = row.get(idx).copied() {
+                    let encoded = dictionary::inline::try_encode_integer(&raw_val.to_string())
+                        .unwrap_or_else(|| {
+                            dictionary::encode_typed_literal(
+                                &raw_val.to_string(),
+                                "http://www.w3.org/2001/XMLSchema#integer",
+                            )
+                        });
+                    if let Some(slot) = row.get_mut(idx) {
+                        *slot = Some(encoded);
+                    }
+                }
+            }
+        }
+    }
 
     if raw_rows.is_empty() {
         return 0;

@@ -41,6 +41,7 @@ const RDF_TYPE: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#type";
 const RDF_FIRST: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#first";
 const RDF_REST: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#rest";
 const RDF_NIL: &str = "http://www.w3.org/1999/02/22-rdf-syntax-ns#nil";
+const RDFS_LABEL: &str = "http://www.w3.org/2000/01/rdf-schema#label";
 
 // ── Public types ──────────────────────────────────────────────────────────────
 
@@ -68,6 +69,10 @@ pub struct TestCase {
     /// The endpoint data should be loaded into a named graph whose IRI is
     /// the endpoint URL before running the query.
     pub service_data: Vec<(String, PathBuf)>,
+    /// For UPDATE evaluation tests: expected default graph files after the update.
+    pub update_result_data: Vec<PathBuf>,
+    /// For UPDATE evaluation tests: expected named graph files after the update.
+    pub update_result_graphs: Vec<(String, PathBuf)>,
 }
 
 /// The kind of a W3C SPARQL test case.
@@ -253,6 +258,7 @@ pub fn parse_manifest(
                     if let Some(ng_props) = graph.get(ng_ref) {
                         let ng_iri = ng_props
                             .get(UT_GRAPH_IRI)
+                            .or_else(|| ng_props.get(RDFS_LABEL))
                             .and_then(|v| v.first())
                             .cloned()
                             .unwrap_or_else(|| ng_ref.clone());
@@ -288,6 +294,42 @@ pub fn parse_manifest(
             }
         }
 
+        // For UPDATE tests, parse the mf:result blank node for expected post-update graph state.
+        let mut update_result_data: Vec<PathBuf> = Vec::new();
+        let mut update_result_graphs: Vec<(String, PathBuf)> = Vec::new();
+        if test_type == TestType::UpdateEvaluation {
+            let result_node = props.get(MF_RESULT).and_then(|v| v.first()).cloned();
+            if let Some(result_ref) = result_node {
+                if let Some(rp) = graph.get(&result_ref) {
+                    // ut:data → expected default graph content
+                    for d in rp.get(UT_DATA).unwrap_or(&vec![]) {
+                        if let Some(p) = iri_to_path(d, &manifest_dir) {
+                            update_result_data.push(p);
+                        }
+                    }
+                    // ut:graphData → expected named graph content
+                    for ng_ref in rp.get(UT_GRAPH_DATA).unwrap_or(&vec![]) {
+                        if let Some(ng_props) = graph.get(ng_ref) {
+                            let ng_iri = ng_props
+                                .get(UT_GRAPH_IRI)
+                                .or_else(|| ng_props.get(RDFS_LABEL))
+                                .and_then(|v| v.first())
+                                .cloned()
+                                .unwrap_or_else(|| ng_ref.clone());
+                            let ng_path = ng_props
+                                .get(UT_GRAPH)
+                                .or_else(|| ng_props.get(UT_DATA))
+                                .and_then(|v| v.first())
+                                .and_then(|p| iri_to_path(p, &manifest_dir));
+                            if let Some(path) = ng_path {
+                                update_result_graphs.push((ng_iri, path));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         test_cases.push(TestCase {
             iri: test_iri,
             name,
@@ -298,6 +340,8 @@ pub fn parse_manifest(
             named_graphs,
             result_file,
             service_data,
+            update_result_data,
+            update_result_graphs,
         });
     }
 

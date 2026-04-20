@@ -81,6 +81,8 @@ CREATE TABLE _pg_ripple.vp_rare (
     source SMALLINT NOT NULL DEFAULT 0   -- 0=explicit 1=inferred
 );
 
+ALTER TABLE _pg_ripple.vp_rare ADD CONSTRAINT vp_rare_psoq_unique UNIQUE (p, s, o, g);
+
 CREATE INDEX ON _pg_ripple.vp_rare (p, s, o);
 CREATE INDEX ON _pg_ripple.vp_rare (p, o, s);
 

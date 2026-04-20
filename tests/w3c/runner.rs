@@ -312,7 +312,7 @@ fn run_test_inner(client: &mut postgres::Client, tc: &TestCase, timeout: Duratio
         }
         TestType::QueryEvaluation => {}
         TestType::UpdateEvaluation => {
-            return TestOutcome::Skip("UPDATE evaluation tests not yet implemented".into());
+            return run_update_test(client, tc, timeout);
         }
     }
 
@@ -395,6 +395,50 @@ fn run_test_inner(client: &mut postgres::Client, tc: &TestCase, timeout: Duratio
     let _ = tx.rollback();
 
     match validation {
+        validator::ValidationResult::Pass => TestOutcome::Pass,
+        validator::ValidationResult::Fail(msg) => TestOutcome::Fail(msg),
+        validator::ValidationResult::Skip(reason) => TestOutcome::Skip(reason),
+    }
+}
+
+fn run_update_test(client: &mut postgres::Client, tc: &TestCase, _timeout: Duration) -> TestOutcome {
+    let query_file = match &tc.query_file {
+        Some(f) => f.clone(),
+        None => return TestOutcome::Skip("no update query file".into()),
+    };
+    let query_text = match std::fs::read_to_string(&query_file) {
+        Ok(s) => s,
+        Err(e) => return TestOutcome::Skip(format!("reading update query: {e}")),
+    };
+
+    // Run inside a transaction: load initial state → execute update → compare → rollback.
+    let mut tx = match client.transaction() {
+        Ok(t) => t,
+        Err(e) => return TestOutcome::Fail(format!("begin transaction: {e}")),
+    };
+
+    // Load initial fixtures.
+    if let Err(e) = loader::load_fixtures(&mut tx, &tc.data_files, &tc.named_graphs) {
+        let _ = tx.rollback();
+        return TestOutcome::Fail(format!("loading fixtures: {e}"));
+    }
+
+    // Execute the SPARQL UPDATE (inside the same transaction).
+    if let Err(e) = tx.execute("SELECT pg_ripple.sparql_update($1)", &[&query_text]) {
+        let _ = tx.rollback();
+        return TestOutcome::Fail(format!("sparql_update error: {e}"));
+    }
+
+    // Compare resulting graph state against expected.
+    let result = validator::validate_update(
+        &mut tx,
+        &tc.update_result_data,
+        &tc.update_result_graphs,
+    );
+
+    let _ = tx.rollback();
+
+    match result {
         validator::ValidationResult::Pass => TestOutcome::Pass,
         validator::ValidationResult::Fail(msg) => TestOutcome::Fail(msg),
         validator::ValidationResult::Skip(reason) => TestOutcome::Skip(reason),

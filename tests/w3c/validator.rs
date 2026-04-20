@@ -6,7 +6,7 @@
 //! - `.ttl` — Turtle RDF graph    (CONSTRUCT / DESCRIBE / UPDATE)
 
 use std::collections::{HashMap, HashSet};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use postgres::Transaction;
 use serde_json::Value;
@@ -94,6 +94,112 @@ pub fn validate_construct(
     }
 
     compare_triple_sets(&expected_triples, &actual_triples)
+}
+
+/// Validate the graph state after a SPARQL UPDATE against expected Turtle files.
+///
+/// Checks only the graphs mentioned in the expected result:
+/// - `expected_default`: expected default graph content (empty slice = don't check default graph)
+/// - `expected_named`: expected named graph content as `(graph_iri, file_path)` pairs
+pub fn validate_update(
+    tx: &mut Transaction<'_>,
+    expected_default: &[PathBuf],
+    expected_named: &[(String, PathBuf)],
+) -> ValidationResult {
+    // Compare default graph if expected files are provided.
+    for expected_file in expected_default {
+        let expected_triples = match parse_turtle_to_triple_set(expected_file) {
+            Ok(t) => t,
+            Err(e) => {
+                return ValidationResult::Skip(format!(
+                    "reading expected default graph {}: {e}",
+                    expected_file.display()
+                ))
+            }
+        };
+
+        let rows = match tx.query(
+            // Use NOT EXISTS to exclude named-graph triples: bare triple patterns in
+            // pg_ripple use union-graph semantics (all graphs). Filtering out triples
+            // that appear in any named graph (GRAPH ?g) leaves only the default graph (g=0).
+            "SELECT result FROM pg_ripple.sparql_construct('CONSTRUCT { ?s ?p ?o } WHERE { ?s ?p ?o FILTER NOT EXISTS { GRAPH ?g { ?s ?p ?o } } }')",
+            &[],
+        ) {
+            Ok(r) => r,
+            Err(e) => return ValidationResult::Fail(format!("querying default graph: {e}")),
+        };
+
+        let mut actual_triples: HashSet<String> = HashSet::new();
+        for row in &rows {
+            let json: serde_json::Value = row.get(0);
+            if let (Some(s), Some(p), Some(o)) = (
+                json.get("s").and_then(Value::as_str),
+                json.get("p").and_then(Value::as_str),
+                json.get("o").and_then(Value::as_str),
+            ) {
+                actual_triples.insert(format!("{s} {p} {o}"));
+            }
+        }
+
+        match compare_triple_sets(&expected_triples, &actual_triples) {
+            ValidationResult::Pass => {}
+            other => return other,
+        }
+    }
+
+    // Compare named graphs.
+    for (graph_iri, expected_file) in expected_named {
+        let expected_triples = match parse_turtle_to_triple_set(expected_file) {
+            Ok(t) => t,
+            Err(e) => {
+                return ValidationResult::Skip(format!(
+                    "reading expected named graph {}: {e}",
+                    expected_file.display()
+                ))
+            }
+        };
+
+        // Build the SPARQL CONSTRUCT query for this named graph.
+        // Note: graph_iri comes from trusted W3C test manifest data.
+        let construct_query = format!(
+            "CONSTRUCT {{ ?s ?p ?o }} WHERE {{ GRAPH <{graph_iri}> {{ ?s ?p ?o }} }}"
+        );
+        let rows = match tx.query(
+            "SELECT result FROM pg_ripple.sparql_construct($1)",
+            &[&construct_query],
+        ) {
+            Ok(r) => r,
+            Err(e) => {
+                return ValidationResult::Fail(format!(
+                    "querying named graph <{graph_iri}>: {e}"
+                ))
+            }
+        };
+
+        let mut actual_triples: HashSet<String> = HashSet::new();
+        for row in &rows {
+            let json: serde_json::Value = row.get(0);
+            if let (Some(s), Some(p), Some(o)) = (
+                json.get("s").and_then(Value::as_str),
+                json.get("p").and_then(Value::as_str),
+                json.get("o").and_then(Value::as_str),
+            ) {
+                actual_triples.insert(format!("{s} {p} {o}"));
+            }
+        }
+
+        match compare_triple_sets(&expected_triples, &actual_triples) {
+            ValidationResult::Pass => {}
+            ValidationResult::Fail(msg) => {
+                return ValidationResult::Fail(format!("named graph <{graph_iri}>: {msg}"))
+            }
+            ValidationResult::Skip(msg) => {
+                return ValidationResult::Skip(format!("named graph <{graph_iri}>: {msg}"))
+            }
+        }
+    }
+
+    ValidationResult::Pass
 }
 
 /// Validate that a SPARQL syntax test passes or fails as expected.

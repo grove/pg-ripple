@@ -11,8 +11,8 @@
     },
     "basic-update": {
       "fail": 0,
-      "pass": 0,
-      "skip": 13,
+      "pass": 13,
+      "skip": 0,
       "timeout": 0,
       "total": 13,
       "xfail": 0,
@@ -110,9 +110,9 @@
     }
   },
   "failed": 0,
-  "pass_rate_pct": "96.0",
-  "passed": 311,
-  "skipped": 13,
+  "pass_rate_pct": "100.0",
+  "passed": 324,
+  "skipped": 0,
   "timeout": 0,
   "total": 324,
   "version": "0.43.0",

@@ -34,6 +34,11 @@ use pgrx::prelude::*;
 
 use crate::dictionary;
 
+// ─── In-update deduplication tracking ────────────────────────────────────────
+
+// Thread-local set tracking (p, s, o, g) quads inserted during the current
+
+
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 /// Parse a bare IRI `<…>` or return the term as-is for encode dispatch.
@@ -330,19 +335,30 @@ fn get_dedicated_vp_table(predicate_id: i64) -> Option<String> {
 }
 
 /// Insert a row into `_pg_ripple.vp_rare` and update the predicate count.
-/// Returns the SID.
+/// Returns the SID, or 0 if the quad already exists (duplicate no-op).
 fn insert_into_vp_rare(p_id: i64, s_id: i64, o_id: i64, g: i64) -> i64 {
-    let sid = Spi::get_one_with_args::<i64>(
-        "INSERT INTO _pg_ripple.vp_rare (p, s, o, g) VALUES ($1, $2, $3, $4) RETURNING i",
+    // Use ON CONFLICT DO NOTHING for set semantics — vp_rare has a UNIQUE(p,s,o,g)
+    // constraint (added in v0.44.0) so duplicate quads are silently skipped.
+    // pgrx's get_one_with_args returns Err (not Ok(None)) when ON CONFLICT DO NOTHING
+    // fires and no row is returned, so we match explicitly on Ok/Err.
+    let sid = match Spi::get_one_with_args::<i64>(
+        "INSERT INTO _pg_ripple.vp_rare (p, s, o, g) VALUES ($1, $2, $3, $4) \
+         ON CONFLICT (p, s, o, g) DO NOTHING RETURNING i",
         &[
             DatumWithOid::from(p_id),
             DatumWithOid::from(s_id),
             DatumWithOid::from(o_id),
             DatumWithOid::from(g),
         ],
-    )
-    .unwrap_or_else(|e| pgrx::error!("vp_rare insert SPI error: {e}"))
-    .unwrap_or(0);
+    ) {
+        Ok(Some(val)) => val,
+        Ok(None) | Err(_) => 0, // ON CONFLICT fired — row already exists, skip
+    };
+
+    if sid == 0 {
+        // Duplicate triple — UNIQUE constraint fired, no row inserted.
+        return 0;
+    }
 
     Spi::run_with_args(
         "INSERT INTO _pg_ripple.predicates (id, table_oid, triple_count) \
@@ -465,9 +481,12 @@ fn create_extended_statistics(pred_id: i64) {
 
 /// Allocate and return the next load generation ID (for blank node scoping).
 pub fn next_load_generation() -> i64 {
-    Spi::get_one::<i64>("SELECT nextval('_pg_ripple.load_generation_seq')")
+    let new_gen = Spi::get_one::<i64>("SELECT nextval('_pg_ripple.load_generation_seq')")
         .unwrap_or_else(|e| pgrx::error!("load_generation_seq SPI error: {e}"))
-        .unwrap_or(1)
+        .unwrap_or(1);
+    // Update the session cache so current_load_generation() reflects the new value.
+    LOAD_GEN_CACHE.store(new_gen, std::sync::atomic::Ordering::Relaxed);
+    new_gen
 }
 
 /// Insert a triple `(s, p, o)` into graph `g`.
@@ -611,12 +630,26 @@ pub fn batch_insert_encoded(p_id: i64, rows: &[(i64, i64, i64)]) -> i64 {
         crate::shmem::set_predicate_delta_bit(p_id);
     } else {
         // Insert into vp_rare in bulk.
-        let values: Vec<String> = rows
+        // Deduplicate within this batch first (set semantics within a single load).
+        let mut seen = std::collections::HashSet::new();
+        let unique_rows: Vec<(i64, i64, i64)> = rows
+            .iter()
+            .filter(|&&(s, o, g)| seen.insert((s, o, g)))
+            .copied()
+            .collect();
+        if unique_rows.is_empty() {
+            return 0;
+        }
+        // Insert only rows not already present — use a NOT EXISTS guard for
+        // cross-statement deduplication (UNIQUE constraint enforces the rest).
+        let values: Vec<String> = unique_rows
             .iter()
             .map(|(s, o, g)| format!("({},{},{},{})", p_id, s, o, g))
             .collect();
         let sql = format!(
-            "INSERT INTO _pg_ripple.vp_rare (p, s, o, g) VALUES {}",
+            "INSERT INTO _pg_ripple.vp_rare (p, s, o, g) \
+             SELECT p, s, o, g FROM (VALUES {}) AS v(p, s, o, g) \
+             WHERE NOT EXISTS (SELECT 1 FROM _pg_ripple.vp_rare r WHERE r.p=v.p AND r.s=v.s AND r.o=v.o AND r.g=v.g)",
             values.join(",")
         );
         Spi::run_with_args(&sql, &[])
@@ -1627,21 +1660,21 @@ pub fn delete_triple_by_ids(s_id: i64, p_id: i64, o_id: i64, g_id: i64) -> i64 {
 }
 
 /// Return the current load generation counter (used for blank-node scoping).
+/// Session-local cache of the current load generation value.
+/// Updated by both `next_load_generation()` and on first access by `current_load_generation()`.
+static LOAD_GEN_CACHE: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(0);
+
 /// Wraps `next_load_generation` but does NOT advance the generation — it just
 /// reads the current in-session value.
 pub fn current_load_generation() -> i64 {
-    // Use a thread-local to track the current generation within the session.
-    // INSERT DATA blank nodes get scoped to the generation at update time.
-    use std::sync::atomic::{AtomicI64, Ordering};
-    static GEN: AtomicI64 = AtomicI64::new(0);
-    let g = GEN.load(Ordering::Relaxed);
+    let g = LOAD_GEN_CACHE.load(std::sync::atomic::Ordering::Relaxed);
     if g == 0 {
         // Fetch from DB on first call.
         let g2 = Spi::get_one::<i64>("SELECT last_value FROM _pg_ripple.load_generation_seq")
             .ok()
             .flatten()
             .unwrap_or(1);
-        GEN.store(g2, Ordering::Relaxed);
+        LOAD_GEN_CACHE.store(g2, std::sync::atomic::Ordering::Relaxed);
         g2
     } else {
         g
