@@ -122,8 +122,37 @@ pub fn try_encode_boolean(lexical: &str) -> Option<i64> {
 /// Encode an `xsd:dateTime` lexical form ("YYYY-MM-DDTHH:MM:SSZ") to an inline ID.
 ///
 /// Returns `None` if the value is outside the representable range or unparseable.
+/// Datetimes with a non-UTC timezone offset (e.g. "-08:00") are NOT inlined so
+/// that the original lexical form (including offset) is preserved in the dictionary.
+/// This is required for HOURS(), TIMEZONE(), TZ() to return local-time components.
 pub fn try_encode_datetime(lexical: &str) -> Option<i64> {
-    let dt: DateTime<Utc> = lexical.trim().parse().ok()?;
+    let trimmed = lexical.trim();
+    // Only inline UTC datetimes (ending in "Z", "+00:00", or no timezone at all).
+    // Datetimes with a non-zero offset must be stored in the dictionary to preserve
+    // the timezone for SPARQL accessor functions.
+    let has_nonzero_offset = {
+        // Check for a non-UTC offset like "+HH:MM" or "-HH:MM" (not "+00:00")
+        if let Some(pos) = trimmed.rfind(|c| c == '+' || c == '-') {
+            // Only consider it an offset if it's after the 'T' separator
+            if let Some(t_pos) = trimmed.find('T') {
+                if pos > t_pos + 3 {
+                    // It's an offset, not a negative time component
+                    let offset = &trimmed[pos..];
+                    offset != "+00:00" && offset != "-00:00"
+                } else {
+                    false
+                }
+            } else {
+                false
+            }
+        } else {
+            false
+        }
+    };
+    if has_nonzero_offset {
+        return None; // force dictionary storage to preserve timezone
+    }
+    let dt: DateTime<Utc> = trimmed.parse().ok()?;
     let micros = dt.timestamp_micros();
     if !(-INTEGER_OFFSET..=INTEGER_OFFSET - 1).contains(&micros) {
         return None;
