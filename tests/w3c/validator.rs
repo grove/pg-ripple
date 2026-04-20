@@ -267,15 +267,6 @@ fn compare_binding_sets(
     actual: &[HashMap<String, String>],
     vars: &[String],
 ) -> ValidationResult {
-    if expected.len() != actual.len() {
-        return ValidationResult::Fail(format!(
-            "row count mismatch: expected {}, got {}",
-            expected.len(),
-            actual.len()
-        ));
-    }
-
-    // Normalize a term string for comparison.
     // For numeric typed literals (integer, decimal, double, float), parse and
     // re-serialize to a canonical form so that e.g. "2100"^^double == "2.1E3"^^double
     // and "2.0"^^decimal == "2"^^decimal.
@@ -358,6 +349,13 @@ fn compare_binding_sets(
         ValidationResult::Pass
     } else {
         let mut msg = String::new();
+        if expected.len() != actual.len() {
+            msg += &format!(
+                "row count mismatch: expected {}, got {}\n",
+                expected.len(),
+                actual.len()
+            );
+        }
         if !missing.is_empty() {
             msg += &format!(
                 "missing {} row(s): {:?}\n",

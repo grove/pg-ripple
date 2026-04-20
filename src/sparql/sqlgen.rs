@@ -427,6 +427,29 @@ fn ground_term_id(term: &TermPattern, ctx: &mut Ctx) -> Option<i64> {
     }
 }
 
+/// Like `ground_term_id` but for property path endpoints — returns a SQL expression string.
+/// When the IRI is not in the dictionary (e.g. empty dataset), falls back to
+/// `pg_ripple.encode_term(iri, 0::int2)` so that zero-length paths can still match.
+fn ground_term_sql_for_path(term: &TermPattern, ctx: &mut Ctx) -> Option<String> {
+    match term {
+        TermPattern::NamedNode(nn) => {
+            if let Some(id) = ctx.encode_iri(nn.as_str()) {
+                Some(id.to_string())
+            } else {
+                // IRI not in dictionary yet — encode dynamically.
+                let iri = nn.as_str().replace('\'', "''");
+                Some(format!("pg_ripple.encode_term('{iri}', 0::int2)"))
+            }
+        }
+        TermPattern::Literal(lit) => Some(ctx.encode_literal(lit).to_string()),
+        TermPattern::Triple(inner) => {
+            // Quoted triples: try static encoding only.
+            ground_term_id(term, ctx).map(|id| id.to_string())
+        }
+        TermPattern::Variable(_) | TermPattern::BlankNode(_) => None,
+    }
+}
+
 /// Bind one end of a triple (subject or object) to the translation context.
 /// Returns an optional SQL equality condition if the term is a constant.
 fn bind_term(
@@ -975,8 +998,11 @@ fn translate_pattern(pattern: &GraphPattern, ctx: &mut Ctx) -> Fragment {
             let mut path_ctx = PathCtx::new(ctx.path_counter);
 
             // Determine bound constants for subject / object to push into the CTE.
-            let s_const: Option<String> = ground_term_id(subject, ctx).map(|id| id.to_string());
-            let o_const: Option<String> = ground_term_id(object, ctx).map(|id| id.to_string());
+            // For zero-length paths (p*, p?), the constant may not be in the dictionary yet
+            // (e.g. empty dataset). Use encode_term SQL expression as fallback so that
+            // reflexive zero-hop rows can still be generated.
+            let s_const: Option<String> = ground_term_sql_for_path(subject, ctx);
+            let o_const: Option<String> = ground_term_sql_for_path(object, ctx);
 
             let path_sql = compile_path(
                 path,
@@ -1003,14 +1029,9 @@ fn translate_pattern(pattern: &GraphPattern, ctx: &mut Ctx) -> Fragment {
                         frag.bindings.insert(vname, col);
                     }
                 }
-                TermPattern::NamedNode(nn) => {
-                    if s_const.is_none() {
-                        // Predicate not in dictionary → no rows
-                        frag.conditions.push("FALSE".to_owned());
-                    } else {
-                        // Already filtered inside path SQL
-                        let _ = nn;
-                    }
+                TermPattern::NamedNode(_nn) => {
+                    // Filter was already pushed into path SQL via s_const.
+                    // s_const=None only happens for variables/blank nodes, not NamedNodes.
                 }
                 _ => {}
             }
@@ -1026,12 +1047,8 @@ fn translate_pattern(pattern: &GraphPattern, ctx: &mut Ctx) -> Fragment {
                         frag.bindings.insert(vname, col);
                     }
                 }
-                TermPattern::NamedNode(nn) => {
-                    if o_const.is_none() {
-                        frag.conditions.push("FALSE".to_owned());
-                    } else {
-                        let _ = nn;
-                    }
+                TermPattern::NamedNode(_nn) => {
+                    // Filter was already pushed into path SQL via o_const.
                 }
                 _ => {}
             }

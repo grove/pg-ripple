@@ -73,8 +73,8 @@
       "xpass": 0
     },
     "property-path": {
-      "fail": 10,
-      "pass": 23,
+      "fail": 4,
+      "pass": 29,
       "skip": 0,
       "timeout": 0,
       "total": 33,
@@ -91,8 +91,8 @@
       "xpass": 0
     },
     "subquery": {
-      "fail": 1,
-      "pass": 13,
+      "fail": 0,
+      "pass": 14,
       "skip": 0,
       "timeout": 0,
       "total": 14,
@@ -109,9 +109,9 @@
       "xpass": 0
     }
   },
-  "failed": 29,
-  "pass_rate_pct": "86.7",
-  "passed": 281,
+  "failed": 22,
+  "pass_rate_pct": "88.9",
+  "passed": 288,
   "skipped": 14,
   "timeout": 0,
   "total": 324,

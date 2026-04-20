@@ -201,19 +201,52 @@ pub fn compile_path(
             let cte_name = format!("_zom{n}");
             let base_sql = compile_path(inner, None, None, ctx, max_depth, graph_filter);
             let depth_guard = depth_guard_clause(max_depth, &cte_name);
-            let sf_cond = s_filter
+
+            // One-hop anchor: start from s_filter if given, otherwise from all.
+            let one_hop_where = s_filter
                 .map(|sf| format!(" WHERE s = {sf}"))
                 .unwrap_or_default();
-            let final_where = o_filter
-                .map(|of| format!(" AND o = {of}"))
-                .unwrap_or_default();
+
+            // Zero-hop (reflexive) anchor:
+            // - If s_filter is a constant: only emit (sf, sf).
+            // - Otherwise: all nodes in the active graph, plus any constant o endpoint.
+            let zero_hop = if let Some(sf) = s_filter {
+                format!("SELECT {sf} AS s, {sf} AS o, 0 AS _depth")
+            } else {
+                let all_nodes = build_all_nodes_sql(graph_filter);
+                let mut parts = vec![format!(
+                    "SELECT DISTINCT node AS s, node AS o, 0 AS _depth \
+                     FROM ({all_nodes}) AS _all0{n}"
+                )];
+                // Constant object endpoint: always include it as a reflexive row
+                // (needed when the node does not appear in the active graph, e.g. empty dataset).
+                if let Some(of) = o_filter {
+                    parts.push(format!("SELECT {of} AS s, {of} AS o, 0 AS _depth"));
+                }
+                parts.join(" UNION ALL ")
+            };
+
+            // Final filter: restrict to the given endpoint constants.
+            let mut final_parts = Vec::new();
+            if let Some(of) = o_filter {
+                final_parts.push(format!("o = {of}"));
+            }
+            if let Some(sf) = s_filter {
+                final_parts.push(format!("s = {sf}"));
+            }
+            let final_where = if final_parts.is_empty() {
+                String::new()
+            } else {
+                format!(" AND {}", final_parts.join(" AND "))
+            };
+
             format!(
                 "(WITH RECURSIVE {cte_name}(s, o, _depth) AS (\
                  SELECT _anc{n}.s, _anc{n}.o, _anc{n}._depth \
                  FROM (\
-                   SELECT s, o, 1 AS _depth FROM {base_sql} AS _b1{n}{sf_cond} \
+                   SELECT s, o, 1 AS _depth FROM {base_sql} AS _b1{n}{one_hop_where} \
                    UNION ALL \
-                   SELECT DISTINCT s, s AS o, 0 AS _depth FROM {base_sql} AS _b0{n}{sf_cond} \
+                   {zero_hop} \
                  ) AS _anc{n} \
                  UNION ALL \
                  SELECT {cte_name}.s, _step{n}.o, {cte_name}._depth + 1 \
@@ -230,6 +263,23 @@ pub fn compile_path(
         PropertyPathExpression::ZeroOrOne(inner) => {
             let n = ctx.next();
             let base_sql = compile_path(inner, s_filter, o_filter, ctx, max_depth, graph_filter);
+
+            // Zero-hop (reflexive) part:
+            // - Constant start (s_filter): emit (sf, sf).
+            // - Constant end (o_filter): emit (of, of).
+            // - Both variable: all nodes in the active graph.
+            let zero_hop = match (s_filter, o_filter) {
+                (Some(sf), _) => format!("SELECT {sf} AS s, {sf} AS o"),
+                (None, Some(of)) => format!("SELECT {of} AS s, {of} AS o"),
+                (None, None) => {
+                    let all_nodes = build_all_nodes_sql(graph_filter);
+                    format!(
+                        "SELECT DISTINCT node AS s, node AS o \
+                         FROM ({all_nodes}) AS _all1{n}"
+                    )
+                }
+            };
+
             let mut conditions = Vec::new();
             if let Some(sf) = s_filter {
                 conditions.push(format!("s = {sf}"));
@@ -243,9 +293,11 @@ pub fn compile_path(
                 format!(" WHERE {}", conditions.join(" AND "))
             };
             format!(
-                "(SELECT s, o FROM {base_sql} AS _onepart{n} \
+                "(SELECT s, o FROM (\
+                 SELECT s, o FROM {base_sql} AS _onepart{n} \
                  UNION \
-                 SELECT s, s AS o FROM ({base_sql}) AS _zeropart{n}{where_clause})"
+                 {zero_hop}\
+                 ) AS _zo{n}{where_clause})"
             )
         }
 
@@ -282,6 +334,53 @@ pub fn compile_path(
 
             format!("(SELECT s, o FROM ({all_preds_union}) _neg{n} {where_clause})")
         }
+    }
+}
+
+/// Build a SQL expression that returns all distinct nodes (subjects and objects)
+/// from the active graph. Used for zero-hop (reflexive) rows in `p*` and `p?`.
+/// The result is `SELECT node FROM (...)` — a single column.
+fn build_all_nodes_sql(graph_filter: Option<i64>) -> String {
+    use pgrx::prelude::*;
+    let mut parts: Vec<String> = Vec::new();
+
+    let g_cond = graph_filter
+        .map(|gid| format!(" WHERE g = {gid}"))
+        .unwrap_or_default();
+
+    Spi::connect(|client| {
+        let rows = client
+            .select(
+                "SELECT id FROM _pg_ripple.predicates WHERE table_oid IS NOT NULL",
+                None,
+                &[],
+            )
+            .unwrap_or_else(|e| pgrx::error!("all-nodes SPI error: {e}"));
+        for row in rows {
+            if let Ok(Some(pred_id)) = row.get::<i64>(1) {
+                parts.push(format!(
+                    "SELECT s AS node FROM _pg_ripple.vp_{pred_id}{g_cond}"
+                ));
+                parts.push(format!(
+                    "SELECT o AS node FROM _pg_ripple.vp_{pred_id}{g_cond}"
+                ));
+            }
+        }
+    });
+
+    // Always include vp_rare.
+    let rare_g = if g_cond.is_empty() {
+        String::new()
+    } else {
+        g_cond.clone()
+    };
+    parts.push(format!("SELECT s AS node FROM _pg_ripple.vp_rare{rare_g}"));
+    parts.push(format!("SELECT o AS node FROM _pg_ripple.vp_rare{rare_g}"));
+
+    if parts.is_empty() {
+        "SELECT NULL::bigint AS node LIMIT 0".to_owned()
+    } else {
+        parts.join(" UNION ALL ")
     }
 }
 
