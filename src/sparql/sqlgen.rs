@@ -2292,13 +2292,20 @@ fn inline_int_arith(op: &str, la: &str, ra: &str) -> String {
 fn inline_int_divide(la: &str, ra: &str) -> String {
     let extract_a = inline_int_extract(la);
     let extract_b = inline_int_extract(ra);
-    // Guard: dict IDs (positive) → NULL; denominator zero → NULL (NULLIF).
+    // SPARQL 1.1: integer / integer = xsd:decimal (not integer).
+    // Guard: dict IDs (positive, bit63=0) → NULL (type error).
+    // Denominator zero → NULLIF → NULL propagated through encode_typed_literal (STRICT).
+    // Format: strip trailing zeros, always keep at least one decimal digit (e.g. '2.0').
+    let xsd_decimal = "http://www.w3.org/2001/XMLSchema#decimal";
+    // Pre-compute division as a named intermediate to avoid triple repetition.
+    let div = format!("({extract_a}::numeric / NULLIF({extract_b}, 0)::numeric)");
     format!(
         "CASE WHEN ({la}) >= 0 OR ({ra}) >= 0 THEN NULL::bigint \
-         ELSE {packed} END",
-        packed = inline_int_pack(&format!(
-            "({extract_a} / NULLIF({extract_b}, 0::bigint))"
-        )),
+         ELSE (SELECT pg_ripple.encode_typed_literal( \
+                   CASE WHEN _dv LIKE '%.%' THEN _dv ELSE _dv || '.0' END, \
+                   '{xsd_decimal}' \
+               ) FROM (SELECT trim_scale({div})::text AS _dv) _divtmp) \
+         END",
     )
 }
 
