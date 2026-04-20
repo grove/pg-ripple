@@ -124,8 +124,8 @@ pub(crate) fn batch_decode(ids: &[i64]) -> HashMap<i64, String> {
 // ─── Query execution helpers ──────────────────────────────────────────────────
 
 /// Parse the query, optimize, translate to SQL, and cache the result.
-/// Returns `(sql, variables, raw_numeric_vars)`.
-fn prepare_select(query_text: &str) -> (String, Vec<String>, std::collections::HashSet<String>) {
+/// Returns `(sql, variables, raw_numeric_vars, raw_text_vars)`.
+fn prepare_select(query_text: &str) -> (String, Vec<String>, std::collections::HashSet<String>, std::collections::HashSet<String>) {
     if let Some(cached) = plan_cache::get(query_text) {
         return cached;
     }
@@ -146,7 +146,7 @@ fn prepare_select(query_text: &str) -> (String, Vec<String>, std::collections::H
     };
 
     let trans = sqlgen::translate_select(&pattern);
-    let entry = (trans.sql, trans.variables, trans.raw_numeric_vars);
+    let entry = (trans.sql, trans.variables, trans.raw_numeric_vars, trans.raw_text_vars);
     // Skip plan cache for queries that contain SERVICE clauses — remote results
     // are baked into the generated SQL as VALUES literals; caching would return
     // stale data from a previous execution.
@@ -164,10 +164,13 @@ fn execute_select(
     sql: &str,
     variables: &[String],
     raw_numeric_vars: &std::collections::HashSet<String>,
+    raw_text_vars: &std::collections::HashSet<String>,
 ) -> Vec<pgrx::JsonB> {
     let mut all_ids: Vec<i64> = Vec::new();
-    // First pass: collect result rows of i64s.
-    let mut raw_rows: Vec<Vec<Option<i64>>> = Vec::new();
+    // First pass: collect result rows.
+    // Each column is either an i64 (for normal/numeric vars) or a String (for text vars).
+    // We store i64 columns as `Ok(id)` and text columns as `Err(text)`.
+    let mut raw_rows: Vec<Vec<Option<Result<i64, String>>>> = Vec::new();
 
     Spi::connect_mut(|client| {
         // v0.13.0: When BGP reordering is active, lock the planner into our
@@ -192,13 +195,21 @@ fn execute_select(
             .select(sql, None, &[])
             .unwrap_or_else(|e| pgrx::error!("SPARQL execute SPI error: {e}"));
         for row in rows {
-            let mut row_vals: Vec<Option<i64>> = Vec::with_capacity(variables.len());
-            for i in 1..=(variables.len() as i64) {
-                let val = row.get::<i64>(i as _).ok().flatten();
-                if let Some(id) = val {
-                    all_ids.push(id);
+            let mut row_vals: Vec<Option<Result<i64, String>>> = Vec::with_capacity(variables.len());
+            for (col_idx, var) in variables.iter().enumerate() {
+                let i = col_idx + 1;
+                if raw_text_vars.contains(var) {
+                    // Read as text (GROUP_CONCAT result)
+                    let text_val = row.get::<String>(i).ok().flatten().map(Err);
+                    row_vals.push(text_val);
+                } else {
+                    // Read as i64 (dictionary ID or numeric aggregate)
+                    let val = row.get::<i64>(i).ok().flatten();
+                    if let Some(id) = val {
+                        all_ids.push(id);
+                    }
+                    row_vals.push(val.map(Ok));
                 }
-                row_vals.push(val);
             }
             raw_rows.push(row_vals);
         }
@@ -215,18 +226,24 @@ fn execute_select(
         .map(|row_vals| {
             let mut obj = Map::new();
             for (i, var) in variables.iter().enumerate() {
-                let raw_val = row_vals.get(i).copied().flatten();
-                let v = if raw_numeric_vars.contains(var) {
-                    // Aggregate output: emit raw integer as JSON number.
-                    raw_val
-                        .map(|n| Json::Number(serde_json::Number::from(n)))
-                        .unwrap_or(Json::Null)
-                } else {
-                    // Dictionary-encoded variable: decode to N-Triples string.
-                    raw_val
-                        .and_then(|id| decode_map.get(&id))
-                        .map(|s| Json::String(s.clone()))
-                        .unwrap_or(Json::Null)
+                let raw_val = row_vals.get(i).and_then(|v| v.as_ref());
+                let v = match raw_val {
+                    None => Json::Null,
+                    Some(Err(text)) => {
+                        // Raw text variable (GROUP_CONCAT): emit as JSON string literal.
+                        Json::String(format!("\"{}\"", text.replace('"', "\\\"")))
+                    }
+                    Some(Ok(id)) => {
+                        if raw_numeric_vars.contains(var) {
+                            // Aggregate output: emit raw integer as JSON number.
+                            Json::Number(serde_json::Number::from(*id))
+                        } else {
+                            // Dictionary-encoded variable: decode to N-Triples string.
+                            decode_map.get(id)
+                                .map(|s| Json::String(s.clone()))
+                                .unwrap_or(Json::Null)
+                        }
+                    }
                 };
                 obj.insert(var.clone(), v);
             }
@@ -249,8 +266,8 @@ pub fn sparql(query_text: &str) -> Vec<pgrx::JsonB> {
 
     match query {
         spargebra::Query::Select { .. } => {
-            let (sql, vars, raw_numeric) = prepare_select(query_text);
-            execute_select(&sql, &vars, &raw_numeric)
+            let (sql, vars, raw_numeric, raw_text) = prepare_select(query_text);
+            execute_select(&sql, &vars, &raw_numeric, &raw_text)
         }
         spargebra::Query::Ask { pattern, .. } => {
             let sql = sqlgen::translate_ask(&pattern);

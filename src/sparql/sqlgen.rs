@@ -138,6 +138,10 @@ pub(super) struct Ctx {
     /// FILTER constants compared against these must stay as raw SQL values,
     /// not be re-encoded as inline IDs.
     raw_numeric_vars: std::collections::HashSet<String>,
+    /// Variables that hold raw SQL text (GROUP_CONCAT outputs).
+    /// FILTER comparisons on these must use the literal's lexical value as
+    /// SQL text, not its dictionary-encoded i64 ID.
+    raw_text_vars: std::collections::HashSet<String>,
     /// Graph filter propagated by `GRAPH <G> { ... }` context (v0.40.0).
     ///
     /// When `Some(gid)`, every VP table scan emitted by `translate_bgp`,
@@ -157,6 +161,7 @@ impl Ctx {
             path_counter: 0,
             per_query: HashMap::new(),
             raw_numeric_vars: std::collections::HashSet::new(),
+            raw_text_vars: std::collections::HashSet::new(),
             graph_filter: None,
         }
     }
@@ -990,6 +995,15 @@ fn translate_pattern(pattern: &GraphPattern, ctx: &mut Ctx) -> Fragment {
             if is_from_numeric_var || is_from_numeric_fn {
                 ctx.raw_numeric_vars.insert(variable.as_str().to_owned());
             }
+            // Propagate raw_text status from GROUP_CONCAT internal aggregate variables.
+            let is_from_text_var = if let Expression::Variable(src_var) = expression {
+                ctx.raw_text_vars.contains(src_var.as_str())
+            } else {
+                false
+            };
+            if is_from_text_var {
+                ctx.raw_text_vars.insert(variable.as_str().to_owned());
+            }
             frag
         }
 
@@ -1178,7 +1192,7 @@ fn translate_group(
     let inner_select_parts: Vec<String> = inner_frag
         .bindings
         .iter()
-        .map(|(v, col)| format!("{col} AS _gi_{v}"))
+        .map(|(v, col)| format!("{col} AS _gi_{}", sanitize_sql_ident(v)))
         .collect();
     let inner_select = if inner_select_parts.is_empty() {
         "1 AS _gi_dummy".to_owned()
@@ -1195,7 +1209,7 @@ fn translate_group(
     let inner_alias: HashMap<String, String> = inner_frag
         .bindings
         .keys()
-        .map(|v| (v.clone(), format!("_gi_{v}")))
+        .map(|v| (v.clone(), format!("_gi_{}", sanitize_sql_ident(v))))
         .collect();
 
     // Map group variables to their safe aliases.
@@ -1211,14 +1225,26 @@ fn translate_group(
     // Build SELECT list: group-by columns + aggregate expressions.
     let mut select_parts: Vec<String> = group_cols
         .iter()
-        .map(|(v, alias)| format!("{alias} AS _g_{v}"))
+        .map(|(v, alias)| format!("{alias} AS _g_{}", sanitize_sql_ident(v)))
         .collect();
 
     let mut agg_bindings: Vec<(String, String)> = Vec::new();
+    // Track which aggregate output variables produce text (GROUP_CONCAT) vs
+    // numeric (COUNT/SUM/AVG/MIN/MAX) results so FILTER comparisons use the
+    // correct type.
+    let mut text_agg_vars: std::collections::HashSet<String> = std::collections::HashSet::new();
     for (agg_var, agg_expr) in aggregates {
         let sql_agg = translate_aggregate(agg_expr, &inner_alias);
         let vname = agg_var.as_str().to_owned();
-        select_parts.push(format!("{sql_agg} AS _g_{vname}"));
+        // GROUP_CONCAT produces SQL text; all others produce SQL integers.
+        let is_group_concat = matches!(
+            agg_expr,
+            AggregateExpression::FunctionCall { name: AggregateFunction::GroupConcat { .. }, .. }
+        );
+        if is_group_concat {
+            text_agg_vars.insert(vname.clone());
+        }
+        select_parts.push(format!("{sql_agg} AS _g_{}", sanitize_sql_ident(&vname)));
         agg_bindings.push((vname, sql_agg));
     }
 
@@ -1280,15 +1306,21 @@ fn translate_group(
 
     // Bind group-by variables.
     for (v, _) in &group_cols {
-        frag.bindings.insert(v.clone(), format!("{alias}._g_{v}"));
+        frag.bindings.insert(v.clone(), format!("{alias}._g_{}", sanitize_sql_ident(v)));
     }
-    // Bind aggregate output variables and mark them as raw numeric.
+    // Bind aggregate output variables and mark them as raw numeric or raw text.
     // This ensures that FILTER(?cnt >= 2) in an outer pattern (e.g. a subquery
     // wrapping a GROUP BY) uses raw integer comparison rather than inline IDs.
+    // GROUP_CONCAT output variables are marked as raw_text so FILTER comparisons
+    // use the literal's lexical value (text) rather than its dictionary ID.
     for (vname, _) in &agg_bindings {
         frag.bindings
-            .insert(vname.clone(), format!("{alias}._g_{vname}"));
-        ctx.raw_numeric_vars.insert(vname.clone());
+            .insert(vname.clone(), format!("{alias}._g_{}", sanitize_sql_ident(vname)));
+        if text_agg_vars.contains(vname) {
+            ctx.raw_text_vars.insert(vname.clone());
+        } else {
+            ctx.raw_numeric_vars.insert(vname.clone());
+        }
     }
 
     frag
@@ -1320,15 +1352,23 @@ fn translate_aggregate(agg: &AggregateExpression, bindings: &HashMap<String, Str
                 AggregateFunction::Max => format!("MAX({arg})"),
                 AggregateFunction::GroupConcat { separator } => {
                     let sep = separator.as_deref().unwrap_or(" ");
-                    // v0.21.0: honour the DISTINCT flag per SPARQL 1.1 §18.5.
+                    // Decode each term ID to its lexical string value before
+                    // concatenating.  Inline integers (id < 0) are decoded via
+                    // bit arithmetic; dictionary-encoded terms are looked up.
+                    let decode_expr = format!(
+                        "CASE WHEN {arg} < 0 THEN \
+                         (({arg} & 72057594037927935::bigint) - 36028797018963968::bigint)::text \
+                         ELSE (SELECT d.value FROM _pg_ripple.dictionary d WHERE d.id = {arg} LIMIT 1) \
+                         END"
+                    );
                     if *distinct {
                         format!(
-                            "STRING_AGG(DISTINCT {arg}::text, {sep_lit} ORDER BY {arg})",
+                            "STRING_AGG(DISTINCT ({decode_expr})::text, {sep_lit} ORDER BY ({decode_expr}))",
                             sep_lit = quote_sql_string(sep)
                         )
                     } else {
                         format!(
-                            "STRING_AGG({arg}::text, {sep_lit} ORDER BY {arg})",
+                            "STRING_AGG(({decode_expr})::text, {sep_lit} ORDER BY {arg})",
                             sep_lit = quote_sql_string(sep)
                         )
                     }
@@ -2114,6 +2154,17 @@ fn translate_expr_value(
 /// output (COUNT, SUM, etc.) rather than a stored inline-encoded triple value.
 // ─── Inline-integer arithmetic helpers ───────────────────────────────────────
 
+/// Sanitize a SPARQL variable name for use as a SQL column alias.
+///
+/// SPARQL blank-node variables can contain colons (e.g. `_bn__:f6891676...`)
+/// which are not valid in unquoted SQL identifiers. Replace every character
+/// that is not alphanumeric or underscore with an underscore.
+fn sanitize_sql_ident(v: &str) -> String {
+    v.chars()
+        .map(|c| if c.is_alphanumeric() || c == '_' { c } else { '_' })
+        .collect()
+}
+
 /// Extract the integer value from an inline-encoded i64 SQL expression.
 ///
 /// Inline encoding: id = INLINE_FLAG | ((value + INTEGER_OFFSET) & VALUE_MASK)
@@ -2193,6 +2244,22 @@ fn expr_is_raw_numeric(expr: &Expression, ctx: &Ctx) -> bool {
     }
 }
 
+/// Determine whether an expression is a raw-text variable (GROUP_CONCAT output).
+fn expr_is_raw_text(expr: &Expression, ctx: &Ctx) -> bool {
+    if let Expression::Variable(v) = expr {
+        ctx.raw_text_vars.contains(v.as_str())
+    } else {
+        false
+    }
+}
+
+/// Return the lexical string form of a literal for text comparisons.
+fn literal_lexical_value(lit: &Literal) -> String {
+    // Return as a SQL quoted string literal using the lexical value.
+    let val = lit.value().replace('\'', "''");
+    format!("'{val}'")
+}
+
 /// Translate both sides of a comparison, using raw encoding for numeric
 /// literals when either side is a raw-numeric aggregate variable.
 fn translate_comparison_sides(
@@ -2201,6 +2268,24 @@ fn translate_comparison_sides(
     bindings: &HashMap<String, String>,
     ctx: &mut Ctx,
 ) -> Option<(String, String)> {
+    // Case 1: one side is a raw-text variable (GROUP_CONCAT result).
+    // Compare the other side using its lexical string value.
+    if expr_is_raw_text(a, ctx) {
+        let la = translate_expr_value(a, bindings, ctx)?;
+        let ra = match b {
+            Expression::Literal(lit) => literal_lexical_value(lit),
+            _ => return None,  // unsupported: text var vs non-literal
+        };
+        return Some((la, ra));
+    }
+    if expr_is_raw_text(b, ctx) {
+        let la = match a {
+            Expression::Literal(lit) => literal_lexical_value(lit),
+            _ => return None,
+        };
+        let ra = translate_expr_value(b, bindings, ctx)?;
+        return Some((la, ra));
+    }
     if expr_is_raw_numeric(a, ctx) || expr_is_raw_numeric(b, ctx) {
         let la = translate_expr_value_raw(a, bindings, ctx)?;
         let ra = translate_expr_value_raw(b, bindings, ctx)?;
@@ -2312,6 +2397,9 @@ pub struct Translation {
     /// These must NOT be dictionary-decoded; they should be emitted as JSON
     /// numbers directly.
     pub raw_numeric_vars: std::collections::HashSet<String>,
+    /// Variables that hold raw SQL text (GROUP_CONCAT outputs).
+    /// These must be read as TEXT columns (not i64) and emitted as JSON strings.
+    pub raw_text_vars: std::collections::HashSet<String>,
 }
 
 /// Translate a SPARQL SELECT query pattern to SQL.
@@ -2378,6 +2466,7 @@ pub fn translate_select(pattern: &GraphPattern) -> Translation {
         sql,
         variables,
         raw_numeric_vars: ctx.raw_numeric_vars,
+        raw_text_vars: ctx.raw_text_vars,
     }
 }
 

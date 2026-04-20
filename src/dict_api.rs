@@ -18,7 +18,48 @@ mod pg_ripple {
         crate::dictionary::decode(id)
     }
 
-    // ── RDF-star: quoted triple encoding (v0.4.0) ──────────────────────────
+    /// Decode a dictionary `i64` to the lexical string value for use in
+    /// GROUP_CONCAT aggregates.
+    ///
+    /// Unlike `decode_id()` (which returns N-Triples format), this function
+    /// returns the raw lexical value:
+    /// - For inline integers: the decimal integer as a string
+    /// - For plain/typed literals: the lexical value (without datatype suffix)
+    /// - For IRIs: the IRI without angle brackets
+    /// - For blank nodes: the blank-node label
+    ///
+    /// Returns NULL if the id is not found in the dictionary.
+    #[pg_extern]
+    fn group_concat_decode(id: i64) -> Option<String> {
+        use crate::dictionary::inline;
+        if inline::is_inline(id) {
+            // Extract lexical value from inline encoding.
+            let type_code = inline::inline_type(id);
+            if type_code == inline::TYPE_INTEGER {
+                // Extract the integer value and return as decimal string.
+                let val = (id & 0x00FFFFFFFFFFFFFF_i64) - 0x0080000000000000_i64;
+                return Some(val.to_string());
+            }
+            // For other inline types, fall back to full N-Triples decode.
+            return crate::dictionary::decode(id);
+        }
+        // Dictionary-encoded: return the raw `value` column.
+        Spi::connect(|client| {
+            let tbl = client
+                .select(
+                    "SELECT value FROM _pg_ripple.dictionary WHERE id = $1",
+                    Some(1),
+                    &[pgrx::datum::DatumWithOid::from(id)],
+                )
+                .ok()?;
+            if tbl.is_empty() {
+                None
+            } else {
+                tbl.first().get_one::<String>().ok().flatten()
+            }
+        })
+    }
+
 
     /// Encode a quoted triple `(s, p, o)` into the dictionary.
     ///
