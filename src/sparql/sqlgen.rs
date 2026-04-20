@@ -1943,13 +1943,22 @@ fn translate_expr(
 
         // ── IF / COALESCE (v0.21.0) ──────────────────────────────────────────
         Expression::If(cond, then_expr, else_expr) => {
-            let cond_sql = translate_expr(cond, bindings, ctx)?;
-            let then_sql = translate_expr_value(then_expr, bindings, ctx)?;
-            let else_sql = translate_expr_value(else_expr, bindings, ctx)
-                .unwrap_or_else(|| "NULL::bigint".to_owned());
-            Some(format!(
-                "CASE WHEN {cond_sql} THEN {then_sql} ELSE {else_sql} END"
-            ))
+            let then_sql = translate_expr(then_expr, bindings, ctx)
+                .unwrap_or_else(|| "FALSE".to_owned());
+            let else_sql = translate_expr(else_expr, bindings, ctx)
+                .unwrap_or_else(|| "FALSE".to_owned());
+            // Try value context for condition to handle NULL/error propagation (e.g. 1/0 → NULL).
+            // EBV: NULL → false (error in filter); inline_false or inline_int_zero → ELSE; else → THEN
+            if let Some(cond_val) = translate_expr_value(cond, bindings, ctx) {
+                Some(format!(
+                    "CASE WHEN ({cond_val}) IS NULL \
+                          OR ({cond_val}) IN (-9151314442816847872::bigint, -9187343239835811840::bigint) \
+                     THEN ({else_sql}) ELSE ({then_sql}) END"
+                ))
+            } else {
+                let cond_sql = translate_expr(cond, bindings, ctx)?;
+                Some(format!("CASE WHEN {cond_sql} THEN ({then_sql}) ELSE ({else_sql}) END"))
+            }
         }
         Expression::Coalesce(exprs) => {
             let parts: Vec<String> = exprs
@@ -1983,7 +1992,8 @@ fn translate_expr(
         Expression::Divide(a, b) => {
             let la = translate_expr_value(a, bindings, ctx)?;
             let ra = translate_expr_value(b, bindings, ctx)?;
-            Some(format!("(({la}) / ({ra}))"))
+            // Use inline_int_divide which adds NULLIF for zero denominator.
+            Some(inline_int_divide(&la, &ra))
         }
         Expression::UnaryPlus(inner) => translate_expr_value(inner, bindings, ctx),
         Expression::UnaryMinus(inner) => {
@@ -2137,13 +2147,24 @@ fn translate_expr_value(
         }
         // ── IF / COALESCE (v0.21.0) ──────────────────────────────────────────
         Expression::If(cond, then_expr, else_expr) => {
-            let cond_sql = translate_expr(cond, bindings, ctx)?;
             let then_sql = translate_expr_value(then_expr, bindings, ctx)?;
             let else_sql = translate_expr_value(else_expr, bindings, ctx)
                 .unwrap_or_else(|| "NULL::bigint".to_owned());
-            Some(format!(
-                "CASE WHEN {cond_sql} THEN {then_sql} ELSE {else_sql} END"
-            ))
+            // Try value context first for condition (handles NULL/error propagation from e.g. 1/0).
+            // EBV constants: inline_false = -9151314442816847872, inline_int_zero = -9187343239835811840
+            if let Some(cond_val) = translate_expr_value(cond, bindings, ctx) {
+                Some(format!(
+                    "CASE WHEN ({cond_val}) IS NULL THEN NULL::bigint \
+                     WHEN ({cond_val}) IN (-9151314442816847872::bigint, -9187343239835811840::bigint) THEN ({else_sql}) \
+                     ELSE ({then_sql}) END"
+                ))
+            } else {
+                // Condition is a boolean expression (comparison, EXISTS, etc.)
+                let cond_sql = translate_expr(cond, bindings, ctx)?;
+                Some(format!(
+                    "CASE WHEN ({cond_sql}) THEN ({then_sql}) ELSE ({else_sql}) END"
+                ))
+            }
         }
         Expression::Coalesce(exprs) => {
             let parts: Vec<String> = exprs
@@ -2192,7 +2213,7 @@ fn translate_expr_value(
         Expression::Divide(a, b) => {
             let la = translate_expr_value(a, bindings, ctx)?;
             let ra = translate_expr_value(b, bindings, ctx)?;
-            Some(inline_int_arith("/", &la, &ra))
+            Some(inline_int_divide(&la, &ra))
         }
         _ => None,
     }
@@ -2245,10 +2266,35 @@ fn inline_int_pack(sql: &str) -> String {
 ///
 /// Both `la` and `ra` are SQL expressions that evaluate to inline-encoded i64
 /// values. The result is also an inline-encoded i64.
+///
+/// If either operand is a dictionary ID (non-negative, bit 63 = 0), the result
+/// is NULL — propagating a SPARQL type error as an unbound value.
 fn inline_int_arith(op: &str, la: &str, ra: &str) -> String {
     let extract_a = inline_int_extract(la);
     let extract_b = inline_int_extract(ra);
-    inline_int_pack(&format!("({extract_a} {op} {extract_b})"))
+    // Guard: dict IDs (positive bigint) are not inline integers; return NULL (type error).
+    format!(
+        "CASE WHEN ({la}) >= 0 OR ({ra}) >= 0 THEN NULL::bigint \
+         ELSE {packed} END",
+        packed = inline_int_pack(&format!("({extract_a} {op} {extract_b})")),
+    )
+}
+
+/// Generate SQL for division on two inline-encoded integer expressions.
+///
+/// Returns NULL when the denominator is zero (SPARQL div-by-zero error semantics)
+/// or when either operand is not an inline-encoded integer (dict ID, type error).
+fn inline_int_divide(la: &str, ra: &str) -> String {
+    let extract_a = inline_int_extract(la);
+    let extract_b = inline_int_extract(ra);
+    // Guard: dict IDs (positive) → NULL; denominator zero → NULL (NULLIF).
+    format!(
+        "CASE WHEN ({la}) >= 0 OR ({ra}) >= 0 THEN NULL::bigint \
+         ELSE {packed} END",
+        packed = inline_int_pack(&format!(
+            "({extract_a} / NULLIF({extract_b}, 0::bigint))"
+        )),
+    )
 }
 
 fn translate_expr_value_raw(

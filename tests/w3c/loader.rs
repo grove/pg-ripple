@@ -7,22 +7,24 @@ use std::path::Path;
 
 use postgres::Transaction;
 
-/// Load a Turtle file into the pg_ripple default graph (graph ID 0).
+/// Load an RDF file into the pg_ripple default graph (graph ID 0).
 ///
 /// The file content is read by the test process and passed as a TEXT parameter
-/// to `pg_ripple.load_turtle()`.  This works even when the PostgreSQL server
-/// process cannot access the file directly.
+/// to the appropriate loader function based on file extension.
 pub fn load_default_graph(
     tx: &mut Transaction<'_>,
     file: &Path,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let content =
         std::fs::read_to_string(file).map_err(|e| format!("reading {}: {e}", file.display()))?;
-    tx.execute("SELECT pg_ripple.load_turtle($1, false)", &[&content])?;
+    match format_from_path(file) {
+        "rdfxml" => tx.execute("SELECT pg_ripple.load_rdfxml($1, false)", &[&content])?,
+        _ => tx.execute("SELECT pg_ripple.load_turtle($1, false)", &[&content])?,
+    };
     Ok(())
 }
 
-/// Load a Turtle file into a specific named graph in pg_ripple.
+/// Load an RDF file into a specific named graph in pg_ripple.
 pub fn load_named_graph(
     tx: &mut Transaction<'_>,
     graph_iri: &str,
@@ -30,10 +32,16 @@ pub fn load_named_graph(
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let content =
         std::fs::read_to_string(file).map_err(|e| format!("reading {}: {e}", file.display()))?;
-    tx.execute(
-        "SELECT pg_ripple.load_turtle_into_graph($1, $2)",
-        &[&content, &graph_iri],
-    )?;
+    match format_from_path(file) {
+        "rdfxml" => tx.execute(
+            "SELECT pg_ripple.load_rdfxml_into_graph($1, $2)",
+            &[&content, &graph_iri],
+        )?,
+        _ => tx.execute(
+            "SELECT pg_ripple.load_turtle_into_graph($1, $2)",
+            &[&content, &graph_iri],
+        )?,
+    };
     Ok(())
 }
 
