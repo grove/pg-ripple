@@ -138,10 +138,16 @@ pub(super) struct Ctx {
     /// FILTER constants compared against these must stay as raw SQL values,
     /// not be re-encoded as inline IDs.
     raw_numeric_vars: std::collections::HashSet<String>,
-    /// Variables that hold raw SQL text (GROUP_CONCAT outputs).
+    /// Variables that hold raw SQL text (GROUP_CONCAT outputs, STRUUID results).
     /// FILTER comparisons on these must use the literal's lexical value as
     /// SQL text, not its dictionary-encoded i64 ID.
     raw_text_vars: std::collections::HashSet<String>,
+    /// Variables that hold raw IRI text (UUID() results).
+    /// Not encoded as dictionary IDs; ISIRI always true, string ops use text directly.
+    raw_iri_vars: std::collections::HashSet<String>,
+    /// Variables that hold raw SQL double (RAND() results).
+    /// Needed so DATATYPE() can return xsd:double without a dict lookup.
+    raw_double_vars: std::collections::HashSet<String>,
     /// Graph filter propagated by `GRAPH <G> { ... }` context (v0.40.0).
     ///
     /// When `Some(gid)`, every VP table scan emitted by `translate_bgp`,
@@ -162,6 +168,8 @@ impl Ctx {
             per_query: HashMap::new(),
             raw_numeric_vars: std::collections::HashSet::new(),
             raw_text_vars: std::collections::HashSet::new(),
+            raw_iri_vars: std::collections::HashSet::new(),
+            raw_double_vars: std::collections::HashSet::new(),
             graph_filter: None,
         }
     }
@@ -227,6 +235,21 @@ impl Ctx {
         bindings: &HashMap<String, String>,
     ) -> Option<String> {
         translate_expr(expr, bindings, self)
+    }
+
+    /// Check whether a variable holds a raw IRI text (UUID() result).
+    pub(super) fn is_raw_iri_var(&self, v: &str) -> bool {
+        self.raw_iri_vars.contains(v)
+    }
+
+    /// Check whether a variable holds a raw double (RAND() result).
+    pub(super) fn is_raw_double_var(&self, v: &str) -> bool {
+        self.raw_double_vars.contains(v)
+    }
+
+    /// Check whether a variable holds raw text (GROUP_CONCAT / STRUUID result).
+    pub(super) fn is_raw_text_var(&self, v: &str) -> bool {
+        self.raw_text_vars.contains(v)
     }
 }
 
@@ -1003,6 +1026,32 @@ fn translate_pattern(pattern: &GraphPattern, ctx: &mut Ctx) -> Fragment {
             };
             if is_from_text_var {
                 ctx.raw_text_vars.insert(variable.as_str().to_owned());
+            }
+            // STRUUID() → raw text literal (gen_random_uuid()::text, not encoded as dict ID).
+            if matches!(expression, Expression::FunctionCall(Function::StrUuid, _)) {
+                ctx.raw_text_vars.insert(variable.as_str().to_owned());
+            }
+            // UUID() → raw IRI text ('urn:uuid:' || gen_random_uuid()::text, not encoded).
+            let is_from_iri_var = if let Expression::Variable(src_var) = expression {
+                ctx.raw_iri_vars.contains(src_var.as_str())
+            } else {
+                false
+            };
+            if is_from_iri_var
+                || matches!(expression, Expression::FunctionCall(Function::Uuid, _))
+            {
+                ctx.raw_iri_vars.insert(variable.as_str().to_owned());
+            }
+            // RAND() → raw double (random()), tracked for DATATYPE() returns xsd:double.
+            let is_from_double_var = if let Expression::Variable(src_var) = expression {
+                ctx.raw_double_vars.contains(src_var.as_str())
+            } else {
+                false
+            };
+            if is_from_double_var
+                || matches!(expression, Expression::FunctionCall(Function::Rand, _))
+            {
+                ctx.raw_double_vars.insert(variable.as_str().to_owned());
             }
             frag
         }
@@ -2245,7 +2294,10 @@ fn translate_expr_value_raw(
 /// Determine whether an expression is a raw-numeric variable (aggregate output).
 fn expr_is_raw_numeric(expr: &Expression, ctx: &Ctx) -> bool {
     match expr {
-        Expression::Variable(v) => ctx.raw_numeric_vars.contains(v.as_str()),
+        Expression::Variable(v) => {
+            ctx.raw_numeric_vars.contains(v.as_str())
+                || ctx.raw_double_vars.contains(v.as_str())
+        }
         // Function calls that produce raw SQL numeric output (ABS, CEIL, FLOOR, etc.)
         // are never inline-encoded, so comparisons must use raw numeric values.
         Expression::FunctionCall(func, _) => expr::is_numeric_function(func),
@@ -2406,9 +2458,15 @@ pub struct Translation {
     /// These must NOT be dictionary-decoded; they should be emitted as JSON
     /// numbers directly.
     pub raw_numeric_vars: std::collections::HashSet<String>,
-    /// Variables that hold raw SQL text (GROUP_CONCAT outputs).
+    /// Variables that hold raw SQL text (GROUP_CONCAT / STRUUID outputs).
     /// These must be read as TEXT columns (not i64) and emitted as JSON strings.
     pub raw_text_vars: std::collections::HashSet<String>,
+    /// Variables that hold raw IRI text (UUID() outputs).
+    /// Must be read as TEXT columns and emitted as `<iri>` IRI format.
+    pub raw_iri_vars: std::collections::HashSet<String>,
+    /// Variables that hold raw double (RAND() outputs).
+    /// Must be read as FLOAT8 columns and emitted as `"val"^^xsd:double` format.
+    pub raw_double_vars: std::collections::HashSet<String>,
 }
 
 /// Translate a SPARQL SELECT query pattern to SQL.
@@ -2476,6 +2534,8 @@ pub fn translate_select(pattern: &GraphPattern) -> Translation {
         variables,
         raw_numeric_vars: ctx.raw_numeric_vars,
         raw_text_vars: ctx.raw_text_vars,
+        raw_iri_vars: ctx.raw_iri_vars,
+        raw_double_vars: ctx.raw_double_vars,
     }
 }
 

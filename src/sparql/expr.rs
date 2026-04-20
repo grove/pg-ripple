@@ -181,6 +181,13 @@ pub(super) fn translate_function_filter(
     match func {
         // ── Type-testing predicates ─────────────────────────────────────────
         Function::IsIri => {
+            // raw_iri_vars (UUID results) are always IRIs — shortcut without dict lookup.
+            if let Some(Expression::Variable(v)) = args.first() {
+                if ctx.is_raw_iri_var(v.as_str()) {
+                    let col = bindings.get(v.as_str())?;
+                    return Some(format!("({col} IS NOT NULL)"));
+                }
+            }
             let col = translate_arg_value(args.first()?, bindings, ctx)?;
             Some(kind_check_sql(&col, 0))
         }
@@ -189,6 +196,14 @@ pub(super) fn translate_function_filter(
             Some(kind_check_sql(&col, 1))
         }
         Function::IsLiteral => {
+            // raw_text_vars (STRUUID, GROUP_CONCAT) are always literals — shortcut.
+            // raw_iri_vars (UUID) are NOT literals; skip them.
+            if let Some(Expression::Variable(v)) = args.first() {
+                if ctx.is_raw_text_var(v.as_str()) && !ctx.is_raw_iri_var(v.as_str()) {
+                    let col = bindings.get(v.as_str())?;
+                    return Some(format!("({col} IS NOT NULL)"));
+                }
+            }
             let col = translate_arg_value(args.first()?, bindings, ctx)?;
             // Inline IDs (< 0) are always literals.
             // Kind 2 = plain literal, 3 = typed literal, 4 = lang literal.
@@ -353,6 +368,11 @@ fn translate_arg_text(
     match expr {
         Expression::Variable(v) => {
             let col = bindings.get(v.as_str())?;
+            // raw_text_vars (STRUUID, GROUP_CONCAT) and raw_iri_vars (UUID) hold plain
+            // text/IRI strings — return directly without dict-decode roundtrip.
+            if ctx.is_raw_text_var(v.as_str()) || ctx.is_raw_iri_var(v.as_str()) {
+                return Some(col.clone());
+            }
             Some(decode_lexical_sql(col))
         }
         Expression::Literal(lit) => {
@@ -363,7 +383,14 @@ fn translate_arg_text(
         // STR(?x) in text context = lexical form of ?x = decode_lexical_sql(x_col).
         // This also avoids the PostgreSQL snapshot isolation issue where encode_term
         // inserts a new dict row that the subsequent SELECT can't see in the same stmt.
+        // Special case: STR(raw_iri_var) → the IRI text itself (no dict lookup needed).
         Expression::FunctionCall(Function::Str, str_args) => {
+            if let Some(Expression::Variable(v)) = str_args.first() {
+                if ctx.is_raw_iri_var(v.as_str()) {
+                    let col = bindings.get(v.as_str())?;
+                    return Some(col.clone());
+                }
+            }
             let inner_col = translate_arg_value(str_args.first()?, bindings, ctx)?;
             Some(decode_lexical_sql(&inner_col))
         }
@@ -513,6 +540,22 @@ pub(super) fn translate_function_value(
         // Returns integer length of the string. Mark as raw_numeric.
         Function::StrLen => {
             *is_numeric = true;
+            // Optimization: STRLEN(raw_text_var) → length directly (no dict lookup).
+            if let Some(Expression::Variable(v)) = args.first() {
+                if ctx.is_raw_text_var(v.as_str()) {
+                    let col = bindings.get(v.as_str())?;
+                    return Some(format!("length({col})"));
+                }
+            }
+            // Optimization: STRLEN(STR(raw_iri_var)) → length of the IRI text directly.
+            if let Some(Expression::FunctionCall(Function::Str, str_inner)) = args.first() {
+                if let Some(Expression::Variable(v)) = str_inner.first() {
+                    if ctx.is_raw_iri_var(v.as_str()) {
+                        let col = bindings.get(v.as_str())?;
+                        return Some(format!("length({col})"));
+                    }
+                }
+            }
             let col = translate_arg_value(args.first()?, bindings, ctx)?;
             let text = decode_lexical_sql(&col);
             Some(format!("length({text})"))
@@ -760,6 +803,15 @@ pub(super) fn translate_function_value(
         // ── DATATYPE ─────────────────────────────────────────────────────────
         // Returns the datatype IRI of a literal.
         Function::Datatype => {
+            // raw_double_vars (RAND() results) are always xsd:double — shortcut without
+            // dict lookup (which would fail for raw floats and snapshot isolation).
+            if let Some(Expression::Variable(v)) = args.first() {
+                if ctx.is_raw_double_var(v.as_str()) {
+                    return Some(encode_iri(
+                        "'http://www.w3.org/2001/XMLSchema#double'".to_owned(),
+                    ));
+                }
+            }
             let col = translate_arg_value(args.first()?, bindings, ctx)?;
             // For inline IDs (negative): extract type code from bits 62-56.
             // Mask 0x7F00000000000000 = 9151314442816847872; shift >> 56 gives type code.
@@ -836,8 +888,11 @@ pub(super) fn translate_function_value(
             ))
         }
         Function::Rand => {
+            // RAND() → raw double in [0, 1). Raw float, not dict-encoded.
+            // Marked is_numeric so comparisons (>= 0.0, < 1.0) work directly.
+            // DATATYPE() is handled via raw_double_vars tracking (returns xsd:double).
             *is_numeric = true;
-            Some("(random() * 1000000)::bigint".to_owned())
+            Some("random()".to_owned())
         }
 
         // ── Datetime functions ───────────────────────────────────────────────
@@ -973,15 +1028,17 @@ pub(super) fn translate_function_value(
         }
 
         // ── UUID / STRUUID ────────────────────────────────────────────────────
+        // UUID() / STRUUID() are volatile: encode_term inserts a new dict row but
+        // the same-statement snapshot can't see it, so ISIRI/ISLITERAL/REGEX all
+        // fail via the normal dict-lookup path.  Instead, return raw text and track
+        // the variable via raw_iri_vars / raw_text_vars so callers shortcut checks.
         Function::Uuid => {
-            // UUID() → returns a fresh IRI like <urn:uuid:550e8400-...>
-            Some(encode_iri(
-                "('urn:uuid:' || gen_random_uuid()::text)".to_owned(),
-            ))
+            // UUID() → raw IRI text; caller marks variable in raw_iri_vars.
+            Some("('urn:uuid:' || gen_random_uuid()::text)".to_owned())
         }
         Function::StrUuid => {
-            // STRUUID() → returns a UUID string as a plain literal.
-            Some(encode_literal("gen_random_uuid()::text".to_owned()))
+            // STRUUID() → raw UUID text; caller marks variable in raw_text_vars.
+            Some("gen_random_uuid()::text".to_owned())
         }
 
         // ── STRBEFORE / STRAFTER ─────────────────────────────────────────────

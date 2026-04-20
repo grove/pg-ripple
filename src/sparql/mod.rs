@@ -124,8 +124,8 @@ pub(crate) fn batch_decode(ids: &[i64]) -> HashMap<i64, String> {
 // ─── Query execution helpers ──────────────────────────────────────────────────
 
 /// Parse the query, optimize, translate to SQL, and cache the result.
-/// Returns `(sql, variables, raw_numeric_vars, raw_text_vars)`.
-fn prepare_select(query_text: &str) -> (String, Vec<String>, std::collections::HashSet<String>, std::collections::HashSet<String>) {
+/// Returns `(sql, variables, raw_numeric_vars, raw_text_vars, raw_iri_vars, raw_double_vars)`.
+fn prepare_select(query_text: &str) -> (String, Vec<String>, std::collections::HashSet<String>, std::collections::HashSet<String>, std::collections::HashSet<String>, std::collections::HashSet<String>) {
     if let Some(cached) = plan_cache::get(query_text) {
         return cached;
     }
@@ -146,7 +146,7 @@ fn prepare_select(query_text: &str) -> (String, Vec<String>, std::collections::H
     };
 
     let trans = sqlgen::translate_select(&pattern);
-    let entry = (trans.sql, trans.variables, trans.raw_numeric_vars, trans.raw_text_vars);
+    let entry = (trans.sql, trans.variables, trans.raw_numeric_vars, trans.raw_text_vars, trans.raw_iri_vars, trans.raw_double_vars);
     // Skip plan cache for queries that contain SERVICE clauses — remote results
     // are baked into the generated SQL as VALUES literals; caching would return
     // stale data from a previous execution.
@@ -165,11 +165,12 @@ fn execute_select(
     variables: &[String],
     raw_numeric_vars: &std::collections::HashSet<String>,
     raw_text_vars: &std::collections::HashSet<String>,
+    raw_iri_vars: &std::collections::HashSet<String>,
+    raw_double_vars: &std::collections::HashSet<String>,
 ) -> Vec<pgrx::JsonB> {
     let mut all_ids: Vec<i64> = Vec::new();
     // First pass: collect result rows.
-    // Each column is either an i64 (for normal/numeric vars) or a String (for text vars).
-    // We store i64 columns as `Ok(id)` and text columns as `Err(text)`.
+    // Columns that are raw text/IRI/double are stored as Err(String), others as Ok(i64).
     let mut raw_rows: Vec<Vec<Option<Result<i64, String>>>> = Vec::new();
 
     Spi::connect_mut(|client| {
@@ -198,8 +199,8 @@ fn execute_select(
             let mut row_vals: Vec<Option<Result<i64, String>>> = Vec::with_capacity(variables.len());
             for (col_idx, var) in variables.iter().enumerate() {
                 let i = col_idx + 1;
-                if raw_text_vars.contains(var) {
-                    // Read as text (GROUP_CONCAT result)
+                if raw_text_vars.contains(var) || raw_iri_vars.contains(var) || raw_double_vars.contains(var) {
+                    // Read as text (GROUP_CONCAT / STRUUID / UUID / RAND result)
                     let text_val = row.get::<String>(i).ok().flatten().map(Err);
                     row_vals.push(text_val);
                 } else {
@@ -230,8 +231,18 @@ fn execute_select(
                 let v = match raw_val {
                     None => Json::Null,
                     Some(Err(text)) => {
-                        // Raw text variable (GROUP_CONCAT): emit as JSON string literal.
-                        Json::String(format!("\"{}\"", text.replace('"', "\\\"")))
+                        if raw_iri_vars.contains(var) {
+                            // UUID() result: emit as `<iri>` IRI format.
+                            Json::String(format!("<{}>", text))
+                        } else if raw_double_vars.contains(var) {
+                            // RAND() result: emit as `"val"^^xsd:double` format.
+                            Json::String(format!(
+                                "\"{}\"^^<http://www.w3.org/2001/XMLSchema#double>", text
+                            ))
+                        } else {
+                            // Raw text variable (GROUP_CONCAT / STRUUID): emit as JSON string literal.
+                            Json::String(format!("\"{}\"", text.replace('"', "\\\"")))
+                        }
                     }
                     Some(Ok(id)) => {
                         if raw_numeric_vars.contains(var) {
@@ -266,8 +277,8 @@ pub fn sparql(query_text: &str) -> Vec<pgrx::JsonB> {
 
     match query {
         spargebra::Query::Select { .. } => {
-            let (sql, vars, raw_numeric, raw_text) = prepare_select(query_text);
-            execute_select(&sql, &vars, &raw_numeric, &raw_text)
+            let (sql, vars, raw_numeric, raw_text, raw_iri, raw_double) = prepare_select(query_text);
+            execute_select(&sql, &vars, &raw_numeric, &raw_text, &raw_iri, &raw_double)
         }
         spargebra::Query::Ask { pattern, .. } => {
             let sql = sqlgen::translate_ask(&pattern);
