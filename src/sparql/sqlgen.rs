@@ -888,11 +888,15 @@ fn translate_pattern(pattern: &GraphPattern, ctx: &mut Ctx) -> Fragment {
                     let vname = v.as_str().to_owned();
                     let mut frag = translate_pattern(inner, ctx);
                     if let Some((alias, _)) = frag.from_items.first() {
-                        let col = format!("{alias}.g");
+                        let gcol = format!("{alias}.g");
+                        // Exclude default graph (g = 0) from GRAPH ?g patterns.
+                        // Per SPARQL semantics, GRAPH ?g only iterates named graphs.
+                        frag.conditions.push(format!("{gcol} <> 0"));
                         if let Some(existing) = frag.bindings.get(&vname) {
-                            frag.conditions.push(format!("{col} = {existing}"));
+                            let existing = existing.clone();
+                            frag.conditions.push(format!("{gcol} = {existing}"));
                         } else {
-                            frag.bindings.insert(vname, col);
+                            frag.bindings.insert(vname, gcol);
                         }
                     }
                     frag
@@ -1083,6 +1087,31 @@ fn translate_pattern(pattern: &GraphPattern, ctx: &mut Ctx) -> Fragment {
             let sql_expr = translate_expr_value(expression, &frag.bindings, ctx);
             if let Some(expr_sql) = sql_expr {
                 frag.bindings.insert(variable.as_str().to_owned(), expr_sql);
+            } else if matches!(
+                expression,
+                Expression::Equal(_, _)
+                    | Expression::Greater(_, _)
+                    | Expression::GreaterOrEqual(_, _)
+                    | Expression::Less(_, _)
+                    | Expression::LessOrEqual(_, _)
+                    | Expression::SameTerm(_, _)
+                    | Expression::And(_, _)
+                    | Expression::Or(_, _)
+                    | Expression::Not(_)
+                    | Expression::Bound(_)
+            ) {
+                if let Some(bool_sql) = translate_expr(expression, &frag.bindings, ctx) {
+                    // Comparison/logical operators return SQL booleans.
+                    // Encode as inline xsd:boolean literal IDs.
+                    // inline_true  = -9151314442816847871
+                    // inline_false = -9151314442816847872
+                    let encoded = format!(
+                        "CASE WHEN ({bool_sql}) IS NULL THEN NULL::bigint \
+                         WHEN ({bool_sql}) THEN -9151314442816847871::bigint \
+                         ELSE -9151314442816847872::bigint END"
+                    );
+                    frag.bindings.insert(variable.as_str().to_owned(), encoded);
+                }
             }
             // Propagate raw_numeric status from:
             // 1. Simple variable references to already-raw_numeric variables.
@@ -1643,8 +1672,11 @@ fn rdf_numeric_agg(agg_fn: &str, distinct_kw: &str, arg: &str, is_avg: bool) -> 
     if is_avg {
         // AVG: result is always decimal or double (never integer per SPARQL 1.1 §17.4.3.4).
         // Exception: empty bag → 0^^xsd:integer (SPARQL 1.1 §17.4.3.4).
+        // Error propagation: if any bound value is non-numeric, AVG raises a type error
+        // (SPARQL 1.1 §18.5.1) and should produce an unbound result.
         format!(
-            "CASE WHEN {agg_fn}({distinct_kw}{decode}) IS NULL \
+            "CASE WHEN BOOL_OR(({arg}) IS NOT NULL AND ({decode}) IS NULL) THEN NULL \
+               WHEN {agg_fn}({distinct_kw}{decode}) IS NULL \
                THEN pg_ripple.encode_typed_literal('0', 'http://www.w3.org/2001/XMLSchema#integer') \
                ELSE pg_ripple.encode_typed_literal(\
                  CASE COALESCE(MAX({tc}), 0) \
@@ -1658,8 +1690,10 @@ fn rdf_numeric_agg(agg_fn: &str, distinct_kw: &str, arg: &str, is_avg: bool) -> 
         )
     } else {
         // SUM: integer+integer→integer, any decimal→decimal, any double→double.
+        // Error propagation: if any bound value is non-numeric, return unbound.
         format!(
-            "pg_ripple.encode_typed_literal(\
+            "CASE WHEN BOOL_OR(({arg}) IS NOT NULL AND ({decode}) IS NULL) THEN NULL \
+               ELSE pg_ripple.encode_typed_literal(\
                CASE COALESCE(MAX({tc}), 0) \
                WHEN 2 THEN pg_ripple.xsd_double_fmt(SUM({distinct_kw}{decode})::text) \
                WHEN 1 THEN trim_scale(SUM({distinct_kw}{decode}))::text \
@@ -1669,7 +1703,7 @@ fn rdf_numeric_agg(agg_fn: &str, distinct_kw: &str, arg: &str, is_avg: bool) -> 
                WHEN 2 THEN 'http://www.w3.org/2001/XMLSchema#double' \
                WHEN 1 THEN 'http://www.w3.org/2001/XMLSchema#decimal' \
                ELSE 'http://www.w3.org/2001/XMLSchema#integer' \
-               END)"
+               END) END"
         )
     }
 }
@@ -1679,6 +1713,9 @@ fn rdf_numeric_agg(agg_fn: &str, distinct_kw: &str, arg: &str, is_avg: bool) -> 
 /// Returns the original pg_ripple-encoded bigint of the row with the
 /// minimum (ASC) or maximum (DESC) decoded numeric value.  Preserves the
 /// original lexical form (e.g. "1.0"^^decimal stays "1.0", not "1").
+///
+/// If any bound value in the group is non-numeric (e.g. a blank node), the
+/// aggregate propagates the type error and returns NULL (SPARQL 1.1 §18.5.1).
 fn rdf_minmax_agg(arg: &str, order: &str) -> String {
     let decode = format!(
         "CASE WHEN ({arg}) < 0 THEN \
@@ -1692,8 +1729,10 @@ fn rdf_minmax_agg(arg: &str, order: &str) -> String {
            FROM _pg_ripple.dictionary d WHERE d.id = ({arg}) LIMIT 1) END"
     );
     format!(
-        "(array_agg(({arg}) ORDER BY ({decode}) {order} NULLS LAST) \
-          FILTER (WHERE ({arg}) IS NOT NULL AND ({decode}) IS NOT NULL))[1]"
+        "CASE WHEN BOOL_OR(({arg}) IS NOT NULL AND ({decode}) IS NULL) THEN NULL \
+         ELSE (array_agg(({arg}) ORDER BY ({decode}) {order} NULLS LAST) \
+          FILTER (WHERE ({arg}) IS NOT NULL AND ({decode}) IS NOT NULL))[1] \
+         END"
     )
 }
 
@@ -2661,28 +2700,17 @@ fn rdf_numeric_arith(op: &str, la: &str, ra: &str) -> String {
     let extract_a = inline_int_extract(la);
     let extract_b = inline_int_extract(ra);
 
-    // Decode helper: inline int → numeric; dict numeric → numeric; else → NULL.
+    // Decode helper: inline int → numeric; dict numeric → numeric (via SPI to
+    // see freshly inserted rows from encode_typed_literal); else → NULL.
     let decode_a = format!(
         "CASE WHEN ({la}) IS NULL THEN NULL \
          WHEN ({la}) < 0 THEN ({extract_a})::numeric \
-         ELSE (SELECT CASE WHEN d.datatype IN (\
-           'http://www.w3.org/2001/XMLSchema#decimal',\
-           'http://www.w3.org/2001/XMLSchema#double',\
-           'http://www.w3.org/2001/XMLSchema#float',\
-           'http://www.w3.org/2001/XMLSchema#integer') \
-           THEN d.value::numeric ELSE NULL END \
-           FROM _pg_ripple.dictionary d WHERE d.id = ({la}) LIMIT 1) END"
+         ELSE pg_ripple.decode_numeric_spi(({la})) END"
     );
     let decode_b = format!(
         "CASE WHEN ({ra}) IS NULL THEN NULL \
          WHEN ({ra}) < 0 THEN ({extract_b})::numeric \
-         ELSE (SELECT CASE WHEN d.datatype IN (\
-           'http://www.w3.org/2001/XMLSchema#decimal',\
-           'http://www.w3.org/2001/XMLSchema#double',\
-           'http://www.w3.org/2001/XMLSchema#float',\
-           'http://www.w3.org/2001/XMLSchema#integer') \
-           THEN d.value::numeric ELSE NULL END \
-           FROM _pg_ripple.dictionary d WHERE d.id = ({ra}) LIMIT 1) END"
+         ELSE pg_ripple.decode_numeric_spi(({ra})) END"
     );
 
     // Type code: 0=integer (inline), 1=decimal, 2=double.
@@ -2750,24 +2778,12 @@ fn rdf_numeric_divide(la: &str, ra: &str) -> String {
     let decode_a = format!(
         "CASE WHEN ({la}) IS NULL THEN NULL \
          WHEN ({la}) < 0 THEN ({extract_a})::numeric \
-         ELSE (SELECT CASE WHEN d.datatype IN (\
-           'http://www.w3.org/2001/XMLSchema#decimal',\
-           'http://www.w3.org/2001/XMLSchema#double',\
-           'http://www.w3.org/2001/XMLSchema#float',\
-           'http://www.w3.org/2001/XMLSchema#integer') \
-           THEN d.value::numeric ELSE NULL END \
-           FROM _pg_ripple.dictionary d WHERE d.id = ({la}) LIMIT 1) END"
+         ELSE pg_ripple.decode_numeric_spi(({la})) END"
     );
     let decode_b = format!(
         "CASE WHEN ({ra}) IS NULL THEN NULL \
          WHEN ({ra}) < 0 THEN ({extract_b})::numeric \
-         ELSE (SELECT CASE WHEN d.datatype IN (\
-           'http://www.w3.org/2001/XMLSchema#decimal',\
-           'http://www.w3.org/2001/XMLSchema#double',\
-           'http://www.w3.org/2001/XMLSchema#float',\
-           'http://www.w3.org/2001/XMLSchema#integer') \
-           THEN d.value::numeric ELSE NULL END \
-           FROM _pg_ripple.dictionary d WHERE d.id = ({ra}) LIMIT 1) END"
+         ELSE pg_ripple.decode_numeric_spi(({ra})) END"
     );
 
     let tc_a = format!(

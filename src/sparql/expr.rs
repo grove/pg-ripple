@@ -868,8 +868,11 @@ pub(super) fn translate_function_value(
             // Mask 0x7F00000000000000 = 9151314442816847872; shift >> 56 gives type code.
             // TYPE_INTEGER=0 → xsd:integer, TYPE_BOOLEAN=1 → xsd:boolean,
             // TYPE_DATETIME=2 → xsd:dateTime, TYPE_DATE=3 → xsd:date.
+            // For dictionary-resident IDs: only literals (kind 2,3,4) have a datatype;
+            // IRIs (kind=0) and blank nodes (kind=1) produce a type error (NULL).
             Some(encode_iri(format!(
                 "CASE \
+                   WHEN {col} IS NULL THEN NULL \
                    WHEN {col} < 0 THEN \
                      CASE (({col} & 9151314442816847872::bigint) >> 56) \
                        WHEN 0 THEN 'http://www.w3.org/2001/XMLSchema#integer' \
@@ -878,12 +881,14 @@ pub(super) fn translate_function_value(
                        WHEN 3 THEN 'http://www.w3.org/2001/XMLSchema#date' \
                        ELSE 'http://www.w3.org/2001/XMLSchema#integer' \
                      END \
-                   ELSE COALESCE(\
-                     (SELECT d.datatype FROM _pg_ripple.dictionary d WHERE d.id = {col} AND d.kind = 3),\
-                     CASE (SELECT d.kind FROM _pg_ripple.dictionary d WHERE d.id = {col})\
-                       WHEN 4 THEN 'http://www.w3.org/1999/02/22-rdf-syntax-ns#langString'\
-                       ELSE 'http://www.w3.org/2001/XMLSchema#string'\
-                     END\
+                   ELSE (\
+                     SELECT CASE d.kind \
+                       WHEN 3 THEN d.datatype \
+                       WHEN 2 THEN 'http://www.w3.org/2001/XMLSchema#string' \
+                       WHEN 4 THEN 'http://www.w3.org/1999/02/22-rdf-syntax-ns#langString' \
+                       ELSE NULL \
+                     END \
+                     FROM _pg_ripple.dictionary d WHERE d.id = {col}\
                    )\
                  END"
             )))

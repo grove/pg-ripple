@@ -508,13 +508,22 @@ fn validate_select_ask_srx(
         };
     }
 
-    // Parse variable names from <variable name="..."/>
+    // Parse variable names from <variable name="..."/> or <variable name='...'/>
     let vars: Vec<String> = {
         let mut vs = Vec::new();
         let mut search = content.as_str();
-        while let Some(pos) = search.find("<variable name=\"") {
-            let rest = &search[pos + "<variable name=\"".len()..];
-            if let Some(end) = rest.find('"') {
+        while let Some(pos) = search.find("<variable name=") {
+            let rest = &search[pos + "<variable name=".len()..];
+            // Accept both quote styles
+            let (quote, rest) = if rest.starts_with('"') {
+                ('"', &rest[1..])
+            } else if rest.starts_with('\'') {
+                ('\'', &rest[1..])
+            } else {
+                search = &search[pos + 1..];
+                continue;
+            };
+            if let Some(end) = rest.find(quote) {
                 vs.push(rest[..end].to_string());
             }
             search = &search[pos + 1..];
@@ -560,9 +569,18 @@ fn validate_select_ask_srx(
 fn parse_srx_result_block(block: &str) -> HashMap<String, String> {
     let mut map = HashMap::new();
     let mut search = block;
-    while let Some(start) = search.find("<binding name=\"") {
-        let rest = &search[start + "<binding name=\"".len()..];
-        let var_end = match rest.find('"') {
+    while let Some(start) = search.find("<binding name=") {
+        let rest = &search[start + "<binding name=".len()..];
+        // Accept both quote styles
+        let (quote, rest) = if rest.starts_with('"') {
+            ('"', &rest[1..])
+        } else if rest.starts_with('\'') {
+            ('\'', &rest[1..])
+        } else {
+            search = &search[start + 1..];
+            continue;
+        };
+        let var_end = match rest.find(quote) {
             Some(p) => p,
             None => break,
         };
@@ -626,18 +644,27 @@ fn parse_srx_term(xml: &str) -> Option<String> {
         let after_tag = xml.find('>')? + 1;
         let end = xml.rfind("</literal>")?;
         let value = &xml[after_tag..end];
-        // Check for lang and datatype attributes
+        // Check for lang and datatype attributes (both quote styles)
         let tag_part = &xml[..xml.find('>')?];
-        if let Some(lang_pos) = tag_part.find("xml:lang=\"") {
-            let lang_rest = &tag_part[lang_pos + "xml:lang=\"".len()..];
-            let lang_end = lang_rest.find('"')?;
-            let lang = lang_rest[..lang_end].to_lowercase();
+        // Helper: find attribute value for key, handles both "..." and '...' quoting
+        fn find_attr<'a>(tag: &'a str, key: &str) -> Option<&'a str> {
+            let dq = format!("{key}=\"");
+            let sq = format!("{key}='");
+            if let Some(pos) = tag.find(&dq) {
+                let rest = &tag[pos + dq.len()..];
+                rest.find('"').map(|e| &rest[..e])
+            } else if let Some(pos) = tag.find(&sq) {
+                let rest = &tag[pos + sq.len()..];
+                rest.find('\'').map(|e| &rest[..e])
+            } else {
+                None
+            }
+        }
+        if let Some(lang) = find_attr(tag_part, "xml:lang") {
+            let lang = lang.to_lowercase();
             return Some(format!("\"{value}\"@{lang}"));
         }
-        if let Some(dt_pos) = tag_part.find("datatype=\"") {
-            let dt_rest = &tag_part[dt_pos + "datatype=\"".len()..];
-            let dt_end = dt_rest.find('"')?;
-            let dt = &dt_rest[..dt_end];
+        if let Some(dt) = find_attr(tag_part, "datatype") {
             // Normalize xsd:string typed literals to plain literal form (RDF 1.1 equivalence).
             if dt == "http://www.w3.org/2001/XMLSchema#string" {
                 return Some(format!("\"{value}\""));

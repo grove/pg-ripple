@@ -31,6 +31,51 @@ mod pg_ripple {
         crate::dictionary::decode(id)
     }
 
+    /// Decode a dictionary `i64` to its numeric value using SPI.
+    ///
+    /// Unlike the inline `(SELECT d.value::numeric FROM dictionary WHERE id = …)`
+    /// expression used in generated SQL, this function uses SPI internally so it
+    /// can see rows inserted by `encode_typed_literal` earlier in the same SQL
+    /// statement (SPI advances the CommandId, bypassing the statement-level
+    /// snapshot).
+    ///
+    /// Returns NULL for non-numeric types or unknown IDs.
+    #[pg_extern]
+    fn decode_numeric_spi(id: i64) -> Option<pgrx::AnyNumeric> {
+        use crate::dictionary::inline;
+        if inline::is_inline(id) {
+            if inline::inline_type(id) == inline::TYPE_INTEGER {
+                // Extract integer value: (id & MASK) - OFFSET
+                let val: i64 = (id & 0x00FFFFFFFFFFFFFF_i64) - 0x0080000000000000_i64;
+                return pgrx::AnyNumeric::try_from(val).ok();
+            }
+            return None;
+        }
+        if id == 0 {
+            return None;
+        }
+        Spi::connect(|client| {
+            let tbl = client
+                .select(
+                    "SELECT CASE WHEN d.datatype IN (\
+                       'http://www.w3.org/2001/XMLSchema#decimal',\
+                       'http://www.w3.org/2001/XMLSchema#double',\
+                       'http://www.w3.org/2001/XMLSchema#float',\
+                       'http://www.w3.org/2001/XMLSchema#integer') \
+                       THEN d.value::numeric ELSE NULL END \
+                     FROM _pg_ripple.dictionary d WHERE d.id = $1 LIMIT 1",
+                    Some(1),
+                    &[pgrx::datum::DatumWithOid::from(id)],
+                )
+                .ok()?;
+            if tbl.is_empty() {
+                None
+            } else {
+                tbl.first().get_one::<pgrx::AnyNumeric>().ok().flatten()
+            }
+        })
+    }
+
     /// Decode a dictionary `i64` to the lexical string value for use in
     /// GROUP_CONCAT aggregates.
     ///
