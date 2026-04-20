@@ -2226,23 +2226,22 @@ fn translate_expr(
         Expression::Add(a, b) => {
             let la = translate_expr_value(a, bindings, ctx)?;
             let ra = translate_expr_value(b, bindings, ctx)?;
-            Some(format!("(({la}) + ({ra}))"))
+            Some(rdf_numeric_arith("+", &la, &ra))
         }
         Expression::Subtract(a, b) => {
             let la = translate_expr_value(a, bindings, ctx)?;
             let ra = translate_expr_value(b, bindings, ctx)?;
-            Some(format!("(({la}) - ({ra}))"))
+            Some(rdf_numeric_arith("-", &la, &ra))
         }
         Expression::Multiply(a, b) => {
             let la = translate_expr_value(a, bindings, ctx)?;
             let ra = translate_expr_value(b, bindings, ctx)?;
-            Some(format!("(({la}) * ({ra}))"))
+            Some(rdf_numeric_arith("*", &la, &ra))
         }
         Expression::Divide(a, b) => {
             let la = translate_expr_value(a, bindings, ctx)?;
             let ra = translate_expr_value(b, bindings, ctx)?;
-            // Use inline_int_divide which adds NULLIF for zero denominator.
-            Some(inline_int_divide(&la, &ra))
+            Some(rdf_numeric_divide(&la, &ra))
         }
         Expression::UnaryPlus(inner) => translate_expr_value(inner, bindings, ctx),
         Expression::UnaryMinus(inner) => {
@@ -2493,22 +2492,22 @@ fn translate_expr_value(
         Expression::Add(a, b) => {
             let la = translate_expr_value(a, bindings, ctx)?;
             let ra = translate_expr_value(b, bindings, ctx)?;
-            Some(inline_int_arith("+", &la, &ra))
+            Some(rdf_numeric_arith("+", &la, &ra))
         }
         Expression::Subtract(a, b) => {
             let la = translate_expr_value(a, bindings, ctx)?;
             let ra = translate_expr_value(b, bindings, ctx)?;
-            Some(inline_int_arith("-", &la, &ra))
+            Some(rdf_numeric_arith("-", &la, &ra))
         }
         Expression::Multiply(a, b) => {
             let la = translate_expr_value(a, bindings, ctx)?;
             let ra = translate_expr_value(b, bindings, ctx)?;
-            Some(inline_int_arith("*", &la, &ra))
+            Some(rdf_numeric_arith("*", &la, &ra))
         }
         Expression::Divide(a, b) => {
             let la = translate_expr_value(a, bindings, ctx)?;
             let ra = translate_expr_value(b, bindings, ctx)?;
-            Some(inline_int_divide(&la, &ra))
+            Some(rdf_numeric_divide(&la, &ra))
         }
         Expression::UnaryPlus(inner) => translate_expr_value(inner, bindings, ctx),
         Expression::UnaryMinus(inner) => {
@@ -2611,6 +2610,175 @@ fn inline_int_negate(sql: &str) -> String {
         "CASE WHEN ({sql}) >= 0 THEN NULL::bigint \
          ELSE {packed} END",
         packed = inline_int_pack(&format!("(-({extract}))")),
+    )
+}
+
+/// RDF-aware binary arithmetic for +, -, * on numeric values.
+///
+/// Handles all SPARQL numeric type combinations:
+/// - integer OP integer → integer (inline)
+/// - integer OP decimal / decimal OP anything → decimal (dict-encoded)
+/// - anything OP double / double OP anything → double (dict-encoded)
+/// Non-numeric operands → NULL (type error).
+fn rdf_numeric_arith(op: &str, la: &str, ra: &str) -> String {
+    let extract_a = inline_int_extract(la);
+    let extract_b = inline_int_extract(ra);
+
+    // Decode helper: inline int → numeric; dict numeric → numeric; else → NULL.
+    let decode_a = format!(
+        "CASE WHEN ({la}) IS NULL THEN NULL \
+         WHEN ({la}) < 0 THEN ({extract_a})::numeric \
+         ELSE (SELECT CASE WHEN d.datatype IN (\
+           'http://www.w3.org/2001/XMLSchema#decimal',\
+           'http://www.w3.org/2001/XMLSchema#double',\
+           'http://www.w3.org/2001/XMLSchema#float',\
+           'http://www.w3.org/2001/XMLSchema#integer') \
+           THEN d.value::numeric ELSE NULL END \
+           FROM _pg_ripple.dictionary d WHERE d.id = ({la}) LIMIT 1) END"
+    );
+    let decode_b = format!(
+        "CASE WHEN ({ra}) IS NULL THEN NULL \
+         WHEN ({ra}) < 0 THEN ({extract_b})::numeric \
+         ELSE (SELECT CASE WHEN d.datatype IN (\
+           'http://www.w3.org/2001/XMLSchema#decimal',\
+           'http://www.w3.org/2001/XMLSchema#double',\
+           'http://www.w3.org/2001/XMLSchema#float',\
+           'http://www.w3.org/2001/XMLSchema#integer') \
+           THEN d.value::numeric ELSE NULL END \
+           FROM _pg_ripple.dictionary d WHERE d.id = ({ra}) LIMIT 1) END"
+    );
+
+    // Type code: 0=integer (inline), 1=decimal, 2=double.
+    let tc_a = format!(
+        "CASE WHEN ({la}) < 0 THEN 0 \
+         ELSE COALESCE((SELECT CASE \
+           WHEN d.datatype IN ('http://www.w3.org/2001/XMLSchema#double',\
+                               'http://www.w3.org/2001/XMLSchema#float') THEN 2 \
+           WHEN d.datatype = 'http://www.w3.org/2001/XMLSchema#integer' THEN 0 \
+           WHEN d.datatype = 'http://www.w3.org/2001/XMLSchema#decimal' THEN 1 \
+           ELSE -1 END FROM _pg_ripple.dictionary d WHERE d.id = ({la}) LIMIT 1), -1) END"
+    );
+    let tc_b = format!(
+        "CASE WHEN ({ra}) < 0 THEN 0 \
+         ELSE COALESCE((SELECT CASE \
+           WHEN d.datatype IN ('http://www.w3.org/2001/XMLSchema#double',\
+                               'http://www.w3.org/2001/XMLSchema#float') THEN 2 \
+           WHEN d.datatype = 'http://www.w3.org/2001/XMLSchema#integer' THEN 0 \
+           WHEN d.datatype = 'http://www.w3.org/2001/XMLSchema#decimal' THEN 1 \
+           ELSE -1 END FROM _pg_ripple.dictionary d WHERE d.id = ({ra}) LIMIT 1), -1) END"
+    );
+
+    let xsd_int = "http://www.w3.org/2001/XMLSchema#integer";
+    let xsd_dec = "http://www.w3.org/2001/XMLSchema#decimal";
+    let xsd_dbl = "http://www.w3.org/2001/XMLSchema#double";
+
+    // Fast path: both inline integers → stay inline.
+    let fast_int = format!(
+        "CASE WHEN ({la}) >= 0 OR ({ra}) >= 0 THEN NULL::bigint \
+         ELSE {packed} END",
+        packed = inline_int_pack(&format!("(({extract_a}) {op} ({extract_b}))")),
+    );
+
+    format!(
+        "CASE WHEN ({la}) IS NULL OR ({ra}) IS NULL THEN NULL::bigint \
+         WHEN ({la}) < 0 AND ({ra}) < 0 THEN ({fast_int}) \
+         ELSE (SELECT pg_ripple.encode_typed_literal( \
+                   CASE \
+                     WHEN _tc < 0 THEN NULL \
+                     WHEN _tc >= 2 THEN pg_ripple.xsd_double_fmt(_result::float8::text) \
+                     WHEN _tc = 1 THEN CASE WHEN _result LIKE '%.%' THEN trim_scale(_result::numeric)::text ELSE _result || '.0' END \
+                     ELSE _result \
+                   END, \
+                   CASE \
+                     WHEN _tc < 0 THEN 'http://www.w3.org/2001/XMLSchema#error' \
+                     WHEN _tc >= 2 THEN '{xsd_dbl}' \
+                     WHEN _tc = 1 THEN '{xsd_dec}' \
+                     ELSE '{xsd_int}' \
+                   END \
+               ) \
+               FROM (SELECT \
+                   GREATEST(({tc_a}), ({tc_b})) AS _tc, \
+                   (({decode_a}) {op} ({decode_b}))::text AS _result \
+               ) _arith \
+               WHERE _tc >= 0 AND _result IS NOT NULL) \
+         END"
+    )
+}
+
+/// RDF-aware division for SPARQL integer/integer → decimal.
+fn rdf_numeric_divide(la: &str, ra: &str) -> String {
+    let extract_a = inline_int_extract(la);
+    let extract_b = inline_int_extract(ra);
+
+    let decode_a = format!(
+        "CASE WHEN ({la}) IS NULL THEN NULL \
+         WHEN ({la}) < 0 THEN ({extract_a})::numeric \
+         ELSE (SELECT CASE WHEN d.datatype IN (\
+           'http://www.w3.org/2001/XMLSchema#decimal',\
+           'http://www.w3.org/2001/XMLSchema#double',\
+           'http://www.w3.org/2001/XMLSchema#float',\
+           'http://www.w3.org/2001/XMLSchema#integer') \
+           THEN d.value::numeric ELSE NULL END \
+           FROM _pg_ripple.dictionary d WHERE d.id = ({la}) LIMIT 1) END"
+    );
+    let decode_b = format!(
+        "CASE WHEN ({ra}) IS NULL THEN NULL \
+         WHEN ({ra}) < 0 THEN ({extract_b})::numeric \
+         ELSE (SELECT CASE WHEN d.datatype IN (\
+           'http://www.w3.org/2001/XMLSchema#decimal',\
+           'http://www.w3.org/2001/XMLSchema#double',\
+           'http://www.w3.org/2001/XMLSchema#float',\
+           'http://www.w3.org/2001/XMLSchema#integer') \
+           THEN d.value::numeric ELSE NULL END \
+           FROM _pg_ripple.dictionary d WHERE d.id = ({ra}) LIMIT 1) END"
+    );
+
+    let tc_a = format!(
+        "CASE WHEN ({la}) < 0 THEN 0 \
+         ELSE COALESCE((SELECT CASE \
+           WHEN d.datatype IN ('http://www.w3.org/2001/XMLSchema#double',\
+                               'http://www.w3.org/2001/XMLSchema#float') THEN 2 \
+           WHEN d.datatype = 'http://www.w3.org/2001/XMLSchema#integer' THEN 0 \
+           WHEN d.datatype = 'http://www.w3.org/2001/XMLSchema#decimal' THEN 1 \
+           ELSE -1 END FROM _pg_ripple.dictionary d WHERE d.id = ({la}) LIMIT 1), -1) END"
+    );
+    let tc_b = format!(
+        "CASE WHEN ({ra}) < 0 THEN 0 \
+         ELSE COALESCE((SELECT CASE \
+           WHEN d.datatype IN ('http://www.w3.org/2001/XMLSchema#double',\
+                               'http://www.w3.org/2001/XMLSchema#float') THEN 2 \
+           WHEN d.datatype = 'http://www.w3.org/2001/XMLSchema#integer' THEN 0 \
+           WHEN d.datatype = 'http://www.w3.org/2001/XMLSchema#decimal' THEN 1 \
+           ELSE -1 END FROM _pg_ripple.dictionary d WHERE d.id = ({ra}) LIMIT 1), -1) END"
+    );
+
+    let xsd_dec = "http://www.w3.org/2001/XMLSchema#decimal";
+    let xsd_dbl = "http://www.w3.org/2001/XMLSchema#double";
+
+    format!(
+        "CASE WHEN ({la}) IS NULL OR ({ra}) IS NULL THEN NULL::bigint \
+         ELSE (SELECT pg_ripple.encode_typed_literal( \
+                   CASE \
+                     WHEN _tc < 0 OR _denominator IS NULL OR _denominator = 0 THEN NULL \
+                     WHEN _tc >= 2 THEN pg_ripple.xsd_double_fmt((_numerator / _denominator)::float8::text) \
+                     ELSE CASE WHEN _result LIKE '%.%' THEN trim_scale(_result::numeric)::text \
+                               ELSE _result || '.0' END \
+                   END, \
+                   CASE \
+                     WHEN _tc >= 2 THEN '{xsd_dbl}' \
+                     ELSE '{xsd_dec}' \
+                   END \
+               ) \
+               FROM (SELECT \
+                   GREATEST(({tc_a}), ({tc_b}), 1) AS _tc, \
+                   ({decode_a}) AS _numerator, \
+                   ({decode_b}) AS _denominator, \
+                   CASE WHEN ({decode_b}) != 0 \
+                        THEN trim_scale(({decode_a}) / NULLIF({decode_b}, 0))::text \
+                        ELSE NULL END AS _result \
+               ) _div \
+               WHERE _tc >= 0) \
+         END"
     )
 }
 

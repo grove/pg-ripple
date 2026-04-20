@@ -596,6 +596,8 @@ pub(super) fn translate_function_value(
         // ── CONCAT ──────────────────────────────────────────────────────────
         // If all arguments have the same language tag, the result has that tag.
         // Otherwise the result is a plain literal.
+        // SPARQL 1.1: arguments must be plain literals, xsd:string, or lang-tagged.
+        // Non-string typed literals (integers, doubles, etc.) cause a type error.
         Function::Concat => {
             if args.is_empty() {
                 return Some(encode_literal("''".to_owned()));
@@ -604,21 +606,43 @@ pub(super) fn translate_function_value(
                 .iter()
                 .filter_map(|a| translate_arg_value(a, bindings, ctx))
                 .collect();
+
+            // Build a type guard: each column must be a string-compatible type.
+            // Returns NULL for inline integers (< 0) or non-string dict entries.
+            fn string_guard_sql(col: &str) -> String {
+                format!(
+                    "CASE WHEN ({col}) IS NULL THEN NULL \
+                     WHEN ({col}) < 0 THEN NULL \
+                     WHEN EXISTS(SELECT 1 FROM _pg_ripple.dictionary d WHERE d.id = ({col}) AND d.kind IN (2, 4)) THEN ({col}) \
+                     WHEN EXISTS(SELECT 1 FROM _pg_ripple.dictionary d WHERE d.id = ({col}) AND d.kind = 3 AND d.datatype = 'http://www.w3.org/2001/XMLSchema#string') THEN ({col}) \
+                     ELSE NULL END"
+                )
+            }
+
+            // Apply type guard to each arg.
+            let guarded_cols: Vec<String> = cols.iter().map(|c| string_guard_sql(c)).collect();
+
+            // All must be non-NULL for CONCAT to succeed.
+            let all_valid = guarded_cols
+                .iter()
+                .map(|g| format!("({g}) IS NOT NULL"))
+                .collect::<Vec<_>>()
+                .join(" AND ");
+
             let parts: Vec<String> = cols
                 .iter()
-                .map(|col| format!("COALESCE({}, '')", decode_lexical_sql(col)))
+                .map(|col| decode_lexical_sql(col))
                 .collect();
             if parts.is_empty() {
                 return None;
             }
             let concat_expr = parts.join(" || ");
+
             // Determine lang preservation: all dict lang-tagged with same lang.
-            // We check the first col and use its lang if all others match.
-            // For simplicity: use the first arg's lang preservation pattern.
-            // Full spec: if all args have same lang → use that lang; else plain.
-            // Approximate: check if first arg is lang-tagged and use that lang.
             if cols.len() == 1 {
-                Some(encode_preserving_lang(&cols[0], &concat_expr))
+                let g = string_guard_sql(&cols[0]);
+                Some(format!("CASE WHEN ({g}) IS NULL THEN NULL ELSE {} END",
+                    encode_preserving_lang(&cols[0], &concat_expr)))
             } else {
                 // Multi-arg: check all args have same lang via SQL
                 let first_col = &cols[0];
@@ -632,7 +656,7 @@ pub(super) fn translate_function_value(
                     .collect::<Vec<_>>()
                     .join(" AND ");
                 Some(format!(
-                    "CASE \
+                    "CASE WHEN NOT ({all_valid}) THEN NULL \
                        WHEN {first_col} > 0 \
                          AND EXISTS(SELECT 1 FROM _pg_ripple.dictionary d WHERE d.id = {first_col} AND d.kind = 4) \
                          AND {same_lang_check} \
