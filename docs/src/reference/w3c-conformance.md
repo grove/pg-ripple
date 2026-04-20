@@ -1,10 +1,26 @@
 # W3C Conformance
 
-This page summarises pg_ripple's conformance status against the W3C SPARQL 1.1 and SHACL Core test suites.
+This page summarises pg_ripple's conformance status against the W3C SPARQL 1.1, Apache Jena, and SHACL Core test suites.
 
-As of v0.41.0, conformance is measured by the integrated W3C SPARQL 1.1 test harness that runs in CI on every push to `main`. Pass rates are published as the `w3c_report` artifact on the [Actions page](https://github.com/grove/pg-ripple/actions).
+As of v0.41.0, conformance is measured by integrated test harnesses that run in CI on every push to `main`. Pass rates are published as the `conformance_report` artifact on the [Actions page](https://github.com/grove/pg-ripple/actions).
 
-## Automated test harness (v0.41.0+)
+## Test suites
+
+pg_ripple runs three complementary conformance suites:
+
+| Suite | Tests | What it validates |
+|---|---|---|
+| **W3C SPARQL 1.1** | ~3 000 | Standard conformance on small, well-defined fixtures |
+| **Apache Jena** | ~1 000 | Implementation edge cases (type coercion, date-time, blank-node scoping) |
+| **WatDiv** | 100 templates | Correctness and performance at 10M-triple scale |
+
+All three suites write per-suite results into a unified `tests/conformance/report.json` artifact.
+
+See [Running Conformance Tests](running-conformance-tests.md) for local setup instructions and the [WatDiv Results](watdiv-results.md) page for benchmark metrics.
+
+---
+
+## W3C SPARQL 1.1 test harness (v0.41.0+)
 
 The test harness (`tests/w3c/`) runs the official [W3C SPARQL 1.1 test suite](https://www.w3.org/2009/sparql/docs/tests/) (~3 000 tests across 13 sub-suites) against a live pg_ripple installation.
 
@@ -30,16 +46,50 @@ The test harness (`tests/w3c/`) runs the official [W3C SPARQL 1.1 test suite](ht
 
 ```sh
 # Download test data first (one-time setup):
-bash scripts/fetch_w3c_tests.sh
+bash scripts/fetch_conformance_tests.sh --w3c
 
 # Run smoke subset (180 tests, ~30s):
 cargo test --test w3c_smoke
 
-# Run full suite (3000+ tests, ~2min with 8 threads):
+# Run full W3C suite (3000+ tests, ~2min with 8 threads):
 cargo test --test w3c_suite -- --test-threads 8
 ```
 
-See [Running W3C Tests](../../contributing/running-w3c-tests.md) for full instructions.
+---
+
+## Apache Jena test suite (v0.43.0+)
+
+The Jena adapter (`tests/jena/`) runs ~1 000 tests from Apache Jena's `sparql-query`, `sparql-update`, `sparql-syntax`, and `algebra` sub-suites.  Jena tests cover implementation edge cases that the W3C suite leaves underspecified.
+
+### Jena-specific coverage areas
+
+| Area | Tests |
+|---|---|
+| XSD numeric promotions (`xsd:integer` → `xsd:decimal` → `xsd:double`) | sparql-query |
+| Mixed-type arithmetic and comparisons | sparql-query |
+| Timezone-aware `xsd:dateTime` comparisons | sparql-query |
+| Date/time built-ins: `NOW()`, `YEAR()`, `MONTH()`, `DAY()`, `HOURS()`, `MINUTES()`, `SECONDS()`, `TZ()` | sparql-query |
+| `xsd:decimal` arithmetic: `ROUND()`, `CEIL()`, `FLOOR()`, `ABS()` | sparql-query |
+| Blank nodes in CONSTRUCT templates | sparql-query |
+| Blank-node identity across OPTIONAL and GRAPH boundaries | sparql-query |
+| String functions: `STRLEN()`, `SUBSTR()`, `UCASE()`, `LCASE()`, `STRSTARTS()`, `STRENDS()`, `CONTAINS()`, `ENCODE_FOR_URI()`, `CONCAT()` | sparql-query |
+| SPARQL UPDATE edge cases | sparql-update |
+| Syntax acceptance / rejection (positive/negative syntax tests) | sparql-syntax |
+| Algebra normalisation equivalences | algebra |
+
+### CI status
+
+The `jena-suite` CI job is **non-blocking** until pass rate ≥ 95%, then promoted to required.  Known failures for type-coercion and date-time edge cases are tracked in `tests/conformance/known_failures.txt` with the `jena:` prefix.
+
+### Running locally
+
+```sh
+# Download Jena test data:
+bash scripts/fetch_conformance_tests.sh --jena
+
+# Run the full Jena suite:
+cargo test --test jena_suite
+```
 
 ---
 

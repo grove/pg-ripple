@@ -1,0 +1,29 @@
+# Unified conformance known-failures list
+#
+# Format: <suite>:<test-key>  <optional reason>
+#
+# Suite prefixes:
+#   w3c:     W3C SPARQL 1.1 test suite (test IRI)
+#   jena:    Apache Jena test suite (test IRI)
+#   watdiv:  WatDiv benchmark template (template ID, e.g. S1, B7)
+#
+# A test listed here is reported as XFAIL (expected failure).
+# An XFAIL that unexpectedly passes is reported as XPASS — a CI notice
+# to remove the stale entry.
+#
+# Guidelines:
+#   - Only add entries for confirmed bugs, not framework issues.
+#   - Add a short explanation or ticket link.
+#   - Remove entries as soon as the underlying bug is fixed.
+#
+# ─────────────────────────────────────────────────────────────────────────────
+# W3C entries (v0.41.0+): 0 known failures as of v0.43.0
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Jena entries (v0.43.0+): ≤ 30 entries expected for type-coercion edge cases
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ─────────────────────────────────────────────────────────────────────────────
+# WatDiv entries (v0.43.0+): none expected for correctness failures
+# ─────────────────────────────────────────────────────────────────────────────

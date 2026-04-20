@@ -6,6 +6,7 @@
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![PostgreSQL 18](https://img.shields.io/badge/PostgreSQL-18-blue?logo=postgresql&logoColor=white)](https://www.postgresql.org/)
 [![pgrx 0.17](https://img.shields.io/badge/pgrx-0.17-orange)](https://github.com/pgcentralfoundation/pgrx)
+[![WatDiv correctness](https://img.shields.io/badge/WatDiv-100%25%20correct-brightgreen)](docs/src/reference/watdiv-results.md)
 
 **A knowledge graph engine built into PostgreSQL.**
 

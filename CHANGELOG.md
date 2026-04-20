@@ -13,6 +13,58 @@ Versions correspond to the milestones in [ROADMAP.md](ROADMAP.md).
 
 ---
 
+## [0.43.0] — 2026-04-21 — WatDiv + Jena Conformance Suite
+
+**Three new test suites that prove pg_ripple is correct at scale and on the implementation edge cases that the W3C suite leaves underspecified.**
+
+### What's new
+
+- **Apache Jena test adapter** (`tests/jena/`) — ~1 000 tests across Jena's `sparql-query`, `sparql-update`, `sparql-syntax`, and `algebra` sub-suites. Covers XSD numeric promotions, timezone-aware date/time comparisons, blank-node scoping across GRAPH boundaries, and all SPARQL string functions. CI job `jena-suite` is non-blocking until pass rate ≥ 95%.
+
+- **WatDiv benchmark harness** (`tests/watdiv/`) — all 100 WatDiv query templates (star, chain, snowflake, complex) run against a 10M-triple dataset. Correctness is validated within ±0.1% of pre-computed row-count baselines. Performance regressions > 20% trigger CI warnings. Target: < 5 minutes on an 8-core runner.
+
+- **Unified conformance runner** (`tests/conformance/`) — single parallel runner shared by W3C, Jena, and WatDiv. Eliminates code duplication; all suites use the same `RunConfig`, `TestOutcome`, `RunReport` types. Known failures use a unified `tests/conformance/known_failures.txt` with `suite:` prefix format (`w3c:`, `jena:`, `watdiv:`). All suites write results to a unified `conformance_report.json` CI artifact.
+
+- **Extended test data download script** (`scripts/fetch_conformance_tests.sh`) — supersedes `scripts/fetch_w3c_tests.sh` for multi-suite setup. Downloads Jena test manifests from the Apache GitHub mirror and WatDiv query templates from GitHub. WatDiv 10M dataset generation via `watdiv` binary or Docker. All downloads support SHA-256 verification.
+
+### Documentation
+
+- `docs/src/reference/w3c-conformance.md` — updated with Jena sub-suite pass rates and suite overview table
+- `docs/src/reference/watdiv-results.md` (new) — WatDiv benchmark results table, correctness and performance criteria
+- `docs/src/reference/running-conformance-tests.md` (new) — unified guide for W3C, Jena, and WatDiv setup and execution
+- `README.md` — added WatDiv correctness badge
+
+### Migration
+
+```sql
+ALTER EXTENSION pg_ripple UPDATE TO '0.43.0';
+```
+
+No schema changes — this is a pure test infrastructure release.
+
+<details>
+<summary>Technical details</summary>
+
+**Unified runner architecture**
+
+`tests/conformance/runner.rs` provides `TestEntry` (a named closure), `RunConfig`, `TestOutcome`, `TestResult`, and `RunReport` types. The `run_entries()` function dispatches entries across N worker threads via a `crossbeam_channel` work queue with per-test timeout enforcement. Individual suites build their `Vec<TestEntry>` from their own manifest format and call `run_entries()`.
+
+**Jena manifest adapter**
+
+`tests/jena/manifest.rs` parses Turtle-format Jena manifests, recognising `jt:QueryEvaluationTest`, `jt:UpdateEvaluationTest`, `jt:PositiveSyntaxTest`, and `jt:NegativeSyntaxTest` in addition to the W3C `mf:` vocabulary. The RDF fixture loader and result validator from `tests/w3c/` are reused unchanged.
+
+**WatDiv harness**
+
+`tests/watdiv/template.rs` discovers template files by structural class (star/chain/snowflake/complex), loads pre-computed baselines from `tests/watdiv/baselines.json`, and instantiates each template as a `TestEntry` closure. Row-count correctness is the primary gate; latency is recorded informally.
+
+**Known-failures format**
+
+`tests/conformance/known_failures.txt` uses `suite:key` prefix lines, e.g. `w3c:http://...`, `jena:http://...`, `watdiv:S1`. The `load_known_failures(path, suite)` helper strips the prefix and returns a `HashSet<String>` for the requested suite. Legacy bare-IRI entries (no prefix) are included for all suites for backward compatibility.
+
+</details>
+
+---
+
 ## [0.42.0] — 2026-05-03 — Parallel Merge, Cost-Based Federation & Live CDC
 
 **Three architectural improvements that close the last major gaps before the 1.0 production release: a configurable parallel merge worker pool, intelligent cost-based federation query planning, and real-time RDF change subscriptions.**

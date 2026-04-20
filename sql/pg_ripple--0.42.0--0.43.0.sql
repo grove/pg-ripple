@@ -1,14 +1,11 @@
--- Migration 0.42.0 → 0.43.0: Named-graph registry for empty-graph enumeration
+-- Migration 0.42.0 → 0.43.0: WatDiv + Jena Conformance Suite
 --
--- Adds _pg_ripple.named_graphs table that tracks named graph IRIs that have
--- been explicitly loaded, even if the graph has zero triples. This is needed
--- for GRAPH ?var { COUNT(*) } queries to enumerate empty named graphs and
--- return count=0 (per SPARQL semantics) rather than omitting those graphs.
+-- No schema changes in this release.  v0.43.0 is a test infrastructure
+-- release that adds:
+--   • Apache Jena test adapter (tests/jena/)
+--   • WatDiv benchmark harness (tests/watdiv/)
+--   • Unified conformance runner (tests/conformance/)
+--   • Extended test data download script (scripts/fetch_conformance_tests.sh)
 --
--- All graph-aware bulk loaders (load_turtle_into_graph, load_rdfxml_into_graph,
--- load_ntriples_into_graph, etc.) now register the graph IRI in this table.
-
-CREATE TABLE IF NOT EXISTS _pg_ripple.named_graphs (
-    graph_id BIGINT NOT NULL PRIMARY KEY
-);
-CREATE INDEX IF NOT EXISTS idx_named_graphs_id ON _pg_ripple.named_graphs (graph_id);
+-- All new functionality is in the test layer; the pg_ripple SQL/Rust API
+-- is unchanged from v0.42.0.

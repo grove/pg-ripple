@@ -3349,7 +3349,7 @@ Parallel merge stress test passes (100 writers, 4 workers, no lost deletes). VoI
 
 ### Deliverables
 
-- [ ] **Apache Jena adapter** (`tests/jena/` new module)
+- [x] **Apache Jena adapter** (`tests/jena/` new module)
   - Adapt v0.41.0 manifest parser to handle Jena-specific manifest fields (`jt:QueryEvaluationTest`, `jt:UpdateEvaluationTest`) and Jena result extensions (e.g. `rdf:XMLLiteral`, extended numeric types)
   - ~1,000 tests across Jena's `sparql-query`, `sparql-update`, `sparql-syntax`, and `algebra` sub-suites
   - Reuse v0.41.0 RDF fixture loader, result validator, parallel runner, and known-failures manifest format
@@ -3361,7 +3361,7 @@ Parallel merge stress test passes (100 writers, 4 workers, no lost deletes). VoI
     - **String functions**: `STRLEN()`, `SUBSTR()`, `UCASE()`, `LCASE()`, `STRSTARTS()`, `STRENDS()`, `CONTAINS()`, `ENCODE_FOR_URI()`, `CONCAT()`
   - Target: full Jena suite completes in **< 3 minutes** alongside W3C suite on CI
   - New CI job `jena-suite` — non-blocking until pass rate ≥ 95%; then promoted to required
-- [ ] **WatDiv harness** (`tests/watdiv/` new module)
+- [x] **WatDiv harness** (`tests/watdiv/` new module)
   - Data generation: integrate `watdiv` Rust port or call the upstream C++ binary via `std::process::Command`; generate 10M-triple dataset once and cache in CI artifact storage
   - Query templates: all 100 WatDiv query templates across four structural classes:
     - **Star** (S1–S7): all predicates share a single subject; tests VP table scan and star-join optimisation
@@ -3373,11 +3373,11 @@ Parallel merge stress test passes (100 writers, 4 workers, no lost deletes). VoI
   - Separate `cargo bench --bench watdiv` target using `criterion` — feeds into `benchmarks/` results
   - Target: full 100-template suite at 10M triples completes in **< 5 minutes** on an 8-core CI runner
   - New CI job `watdiv-suite` — non-blocking (performance regressions are warnings, not failures)
-- [ ] **Shared harness improvements** (backport to `tests/w3c/`)
+- [x] **Shared harness improvements** (backport to `tests/w3c/`)
   - Unified `tests/conformance/runner.rs` — single parallel runner used by W3C, Jena, and WatDiv; eliminates code duplication
   - Unified `known_failures.txt` format with `suite:` prefix (e.g. `w3c:`, `jena:`, `watdiv:`)
   - Unified CI report artifact: per-suite pass/fail/skip/timeout counts in one `conformance_report.json`
-- [ ] **Test data download script** (`scripts/fetch_conformance_tests.sh`)
+- [x] **Test data download script** (`scripts/fetch_conformance_tests.sh`)
   - Extends `scripts/fetch_w3c_tests.sh` to also download Jena test suite from Apache mirror and WatDiv query templates from GitHub
   - All downloads verified against SHA-256 checksums
   - WatDiv 10M dataset generated once and stored as a CI artifact (not re-generated on every run)
@@ -3388,11 +3388,11 @@ Parallel merge stress test passes (100 writers, 4 workers, no lost deletes). VoI
 
 ### Documentation
 
-- [ ] `reference/w3c-conformance.md` — updated to include Jena sub-suite pass rates alongside W3C categories
-- [ ] `reference/watdiv-results.md` (new) — WatDiv benchmark results table: query class, template ID, median latency at 10M triples, pass/fail status; updated on each release
-- [ ] `contributing/running-conformance-tests.md` — updated to cover Jena and WatDiv; how to regenerate WatDiv dataset; how to update performance baselines
-- [ ] `README.md` — add WatDiv correctness badge alongside W3C conformance badge
-- [ ] Release notes for v0.43.0
+- [x] `reference/w3c-conformance.md` — updated to include Jena sub-suite pass rates alongside W3C categories
+- [x] `reference/watdiv-results.md` (new) — WatDiv benchmark results table: query class, template ID, median latency at 10M triples, pass/fail status; updated on each release
+- [x] `contributing/running-conformance-tests.md` — updated to cover Jena and WatDiv; how to regenerate WatDiv dataset; how to update performance baselines
+- [x] `README.md` — add WatDiv correctness badge alongside W3C conformance badge
+- [x] Release notes for v0.43.0
 
 ### Exit Criteria
 
