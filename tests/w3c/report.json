@@ -73,8 +73,8 @@
       "xpass": 0
     },
     "property-path": {
-      "fail": 2,
-      "pass": 31,
+      "fail": 0,
+      "pass": 33,
       "skip": 0,
       "timeout": 0,
       "total": 33,
@@ -109,9 +109,9 @@
       "xpass": 0
     }
   },
-  "failed": 9,
-  "pass_rate_pct": "92.9",
-  "passed": 301,
+  "failed": 7,
+  "pass_rate_pct": "93.5",
+  "passed": 303,
   "skipped": 14,
   "timeout": 0,
   "total": 324,

@@ -28,11 +28,13 @@ use spargebra::term::NamedNode;
 
 use crate::dictionary;
 
-/// Resolve a NamedNode IRI to its VP table expression returning `(s, o)`.
+/// Resolve a NamedNode IRI to its VP table expression returning `(s, o[, g])`.
 /// When `graph_filter` is `Some(gid)`, the expression filters to triples in
 /// graph `gid` — baked into the leaf so WITH RECURSIVE paths work correctly
 /// inside `GRAPH <G> { }` (v0.40.0 fix).
-fn pred_table_expr(nn: &NamedNode, graph_filter: Option<i64>) -> Option<String> {
+/// When `include_g` is true, the graph column is included in the output so
+/// that `GRAPH ?g { path }` can bind the graph variable (v0.41.x fix).
+fn pred_table_expr(nn: &NamedNode, graph_filter: Option<i64>, include_g: bool) -> Option<String> {
     use pgrx::datum::DatumWithOid;
     use pgrx::prelude::*;
 
@@ -40,6 +42,7 @@ fn pred_table_expr(nn: &NamedNode, graph_filter: Option<i64>) -> Option<String> 
     let g_cond = graph_filter
         .map(|gid| format!(" AND g = {gid}"))
         .unwrap_or_default();
+    let g_sel = if include_g { ", g" } else { "" };
 
     // Check whether the predicate has a dedicated VP table.
     match Spi::get_one_with_args::<i64>(
@@ -48,15 +51,15 @@ fn pred_table_expr(nn: &NamedNode, graph_filter: Option<i64>) -> Option<String> 
     ) {
         Ok(Some(_oid)) => {
             if g_cond.is_empty() {
-                Some(format!("SELECT s, o FROM _pg_ripple.vp_{pred_id}"))
+                Some(format!("SELECT s, o{g_sel} FROM _pg_ripple.vp_{pred_id}"))
             } else {
                 Some(format!(
-                    "SELECT s, o FROM _pg_ripple.vp_{pred_id} WHERE TRUE{g_cond}"
+                    "SELECT s, o{g_sel} FROM _pg_ripple.vp_{pred_id} WHERE TRUE{g_cond}"
                 ))
             }
         }
         Ok(None) => Some(format!(
-            "SELECT s, o FROM _pg_ripple.vp_rare WHERE p = {pred_id}{g_cond}"
+            "SELECT s, o{g_sel} FROM _pg_ripple.vp_rare WHERE p = {pred_id}{g_cond}"
         )),
         Err(_) => None,
     }
@@ -79,7 +82,7 @@ impl PathCtx {
     }
 }
 
-/// Compile a `PropertyPathExpression` to a SQL subquery that returns `(s, o)`.
+/// Compile a `PropertyPathExpression` to a SQL subquery that returns `(s, o[, g])`.
 ///
 /// `s_filter` / `o_filter` are optional SQL integer expressions that, when
 /// provided, are pushed into the anchor (for start node) or final filter
@@ -88,7 +91,12 @@ impl PathCtx {
 /// `graph_filter` — when `Some(gid)`, every leaf VP scan filters to `g = gid`
 /// so that property paths inside `GRAPH <G> { }` stay within that named graph.
 ///
-/// Returns a SQL string representing an inline subquery `(SELECT s, o FROM ...)`.
+/// `include_g` — when `true`, includes a `g` column in the output (graph ID).
+/// Required when translating `GRAPH ?g { path }` so that the graph variable
+/// can be bound and sequence paths correctly restrict both hops to the same
+/// named graph (v0.41.x).
+///
+/// Returns a SQL string representing an inline subquery `(SELECT s, o[, g] FROM ...)`.
 pub fn compile_path(
     path: &PropertyPathExpression,
     s_filter: Option<&str>,
@@ -96,13 +104,16 @@ pub fn compile_path(
     ctx: &mut PathCtx,
     max_depth: i32,
     graph_filter: Option<i64>,
+    include_g: bool,
 ) -> String {
+    let g_sel = if include_g { ", g" } else { "" };
     match path {
         // ── Simple predicate (degenerate case) ──────────────────────────────
         PropertyPathExpression::NamedNode(nn) => {
-            let base = match pred_table_expr(nn, graph_filter) {
+            let null_g = if include_g { ", NULL::bigint AS g" } else { "" };
+            let base = match pred_table_expr(nn, graph_filter, include_g) {
                 Some(e) => e,
-                None => "SELECT NULL::bigint AS s, NULL::bigint AS o LIMIT 0".to_owned(),
+                None => format!("SELECT NULL::bigint AS s, NULL::bigint AS o{null_g} LIMIT 0"),
             };
             let mut conditions = Vec::new();
             if let Some(sf) = s_filter {
@@ -116,15 +127,15 @@ pub fn compile_path(
             } else {
                 format!(" WHERE {}", conditions.join(" AND "))
             };
-            format!("(SELECT s, o FROM ({base}) _pbase{where_clause})")
+            format!("(SELECT s, o{g_sel} FROM ({base}) _pbase{where_clause})")
         }
 
         // ── Reverse: swap s and o ────────────────────────────────────────────
         PropertyPathExpression::Reverse(inner) => {
             // Swap s_filter and o_filter when descending.
-            let inner_sql = compile_path(inner, o_filter, s_filter, ctx, max_depth, graph_filter);
+            let inner_sql = compile_path(inner, o_filter, s_filter, ctx, max_depth, graph_filter, include_g);
             format!(
-                "(SELECT o AS s, s AS o FROM {inner_sql} _prev{})",
+                "(SELECT o AS s, s AS o{g_sel} FROM {inner_sql} _prev{})",
                 ctx.next()
             )
         }
@@ -132,20 +143,29 @@ pub fn compile_path(
         // ── Sequence: a/b → join on intermediate node ────────────────────────
         PropertyPathExpression::Sequence(left, right) => {
             let n = ctx.next();
-            // left returns (?x, ?mid); right returns (?mid, ?y)
-            let left_sql = compile_path(left, s_filter, None, ctx, max_depth, graph_filter);
-            let right_sql = compile_path(right, None, o_filter, ctx, max_depth, graph_filter);
-            format!(
-                "(SELECT _lseq{n}.s, _rseq{n}.o \
-                 FROM {left_sql} AS _lseq{n} \
-                 JOIN {right_sql} AS _rseq{n} ON _lseq{n}.o = _rseq{n}.s)"
-            )
+            // left returns (?x, ?mid[, ?g]); right returns (?mid, ?y[, ?g])
+            let left_sql = compile_path(left, s_filter, None, ctx, max_depth, graph_filter, include_g);
+            let right_sql = compile_path(right, None, o_filter, ctx, max_depth, graph_filter, include_g);
+            if include_g {
+                // Both hops must be in the SAME named graph.
+                format!(
+                    "(SELECT _lseq{n}.s, _rseq{n}.o, _lseq{n}.g AS g \
+                     FROM {left_sql} AS _lseq{n} \
+                     JOIN {right_sql} AS _rseq{n} ON _lseq{n}.o = _rseq{n}.s AND _lseq{n}.g = _rseq{n}.g)"
+                )
+            } else {
+                format!(
+                    "(SELECT _lseq{n}.s, _rseq{n}.o \
+                     FROM {left_sql} AS _lseq{n} \
+                     JOIN {right_sql} AS _rseq{n} ON _lseq{n}.o = _rseq{n}.s)"
+                )
+            }
         }
 
         // ── Alternative: a|b → UNION ALL ────────────────────────────────────
         PropertyPathExpression::Alternative(left, right) => {
-            let left_sql = compile_path(left, s_filter, o_filter, ctx, max_depth, graph_filter);
-            let right_sql = compile_path(right, s_filter, o_filter, ctx, max_depth, graph_filter);
+            let left_sql = compile_path(left, s_filter, o_filter, ctx, max_depth, graph_filter, include_g);
+            let right_sql = compile_path(right, s_filter, o_filter, ctx, max_depth, graph_filter, include_g);
             let n = ctx.next();
             let mut conditions = Vec::new();
             if let Some(sf) = s_filter {
@@ -160,10 +180,10 @@ pub fn compile_path(
                 format!(" WHERE {}", conditions.join(" AND "))
             };
             format!(
-                "(SELECT s, o FROM (\
-                 SELECT s, o FROM {left_sql} _altL{n} \
+                "(SELECT s, o{g_sel} FROM (\
+                 SELECT s, o{g_sel} FROM {left_sql} _altL{n} \
                  UNION ALL \
-                 SELECT s, o FROM {right_sql} _altR{n}\
+                 SELECT s, o{g_sel} FROM {right_sql} _altR{n}\
                  ) _alt{n}{where_clause})"
             )
         }
@@ -172,7 +192,7 @@ pub fn compile_path(
         PropertyPathExpression::OneOrMore(inner) => {
             let n = ctx.next();
             let cte_name = format!("_opm{n}");
-            let base_sql = compile_path(inner, None, None, ctx, max_depth, graph_filter);
+            let base_sql = compile_path(inner, None, None, ctx, max_depth, graph_filter, include_g);
             let depth_guard = depth_guard_clause(max_depth, &cte_name);
             let anchor_where = s_filter
                 .map(|sf| format!(" WHERE _anchor{n}.s = {sf}"))
@@ -180,26 +200,42 @@ pub fn compile_path(
             let final_where = o_filter
                 .map(|of| format!(" AND o = {of}"))
                 .unwrap_or_default();
-            format!(
-                "(WITH RECURSIVE {cte_name}(s, o, _depth) AS (\
-                 SELECT _anchor{n}.s, _anchor{n}.o, 1 \
-                 FROM {base_sql} AS _anchor{n}{anchor_where} \
-                 UNION ALL \
-                 SELECT {cte_name}.s, _step{n}.o, {cte_name}._depth + 1 \
-                 FROM {cte_name} \
-                 JOIN {base_sql} AS _step{n} ON {cte_name}.o = _step{n}.s \
-                 {depth_guard}\
-                 ) CYCLE s, o SET _is_cycle USING _cycle_path \
-                 SELECT DISTINCT s, o FROM {cte_name} \
-                 WHERE NOT _is_cycle{final_where})"
-            )
+            if include_g {
+                format!(
+                    "(WITH RECURSIVE {cte_name}(s, o, g, _depth) AS (\
+                     SELECT _anchor{n}.s, _anchor{n}.o, _anchor{n}.g, 1 \
+                     FROM {base_sql} AS _anchor{n}{anchor_where} \
+                     UNION ALL \
+                     SELECT {cte_name}.s, _step{n}.o, {cte_name}.g, {cte_name}._depth + 1 \
+                     FROM {cte_name} \
+                     JOIN {base_sql} AS _step{n} ON {cte_name}.o = _step{n}.s AND {cte_name}.g = _step{n}.g \
+                     {depth_guard}\
+                     ) CYCLE s, o SET _is_cycle USING _cycle_path \
+                     SELECT DISTINCT s, o, g FROM {cte_name} \
+                     WHERE NOT _is_cycle{final_where})"
+                )
+            } else {
+                format!(
+                    "(WITH RECURSIVE {cte_name}(s, o, _depth) AS (\
+                     SELECT _anchor{n}.s, _anchor{n}.o, 1 \
+                     FROM {base_sql} AS _anchor{n}{anchor_where} \
+                     UNION ALL \
+                     SELECT {cte_name}.s, _step{n}.o, {cte_name}._depth + 1 \
+                     FROM {cte_name} \
+                     JOIN {base_sql} AS _step{n} ON {cte_name}.o = _step{n}.s \
+                     {depth_guard}\
+                     ) CYCLE s, o SET _is_cycle USING _cycle_path \
+                     SELECT DISTINCT s, o FROM {cte_name} \
+                     WHERE NOT _is_cycle{final_where})"
+                )
+            }
         }
 
         // ── ZeroOrMore (p*) ──────────────────────────────────────────────────
         PropertyPathExpression::ZeroOrMore(inner) => {
             let n = ctx.next();
             let cte_name = format!("_zom{n}");
-            let base_sql = compile_path(inner, None, None, ctx, max_depth, graph_filter);
+            let base_sql = compile_path(inner, None, None, ctx, max_depth, graph_filter, include_g);
             let depth_guard = depth_guard_clause(max_depth, &cte_name);
 
             // One-hop anchor: start from s_filter if given, otherwise from all.
@@ -207,76 +243,133 @@ pub fn compile_path(
                 .map(|sf| format!(" WHERE s = {sf}"))
                 .unwrap_or_default();
 
-            // Zero-hop (reflexive) anchor:
-            // - If s_filter is a constant: only emit (sf, sf).
-            // - Otherwise: all nodes in the active graph, plus any constant o endpoint.
-            let zero_hop = if let Some(sf) = s_filter {
-                format!("SELECT {sf} AS s, {sf} AS o, 0 AS _depth")
-            } else {
-                let all_nodes = build_all_nodes_sql(graph_filter);
-                let mut parts = vec![format!(
-                    "SELECT DISTINCT node AS s, node AS o, 0 AS _depth \
-                     FROM ({all_nodes}) AS _all0{n}"
-                )];
-                // Constant object endpoint: always include it as a reflexive row
-                // (needed when the node does not appear in the active graph, e.g. empty dataset).
+            if include_g {
+                // With graph tracking: zero-hop rows carry their graph ID.
+                let zero_hop = if let Some(sf) = s_filter {
+                    // Constant start: emit (sf, sf, g) for each graph containing sf.
+                    let all_nodes_g = build_all_nodes_sql(graph_filter, true);
+                    format!("SELECT DISTINCT {sf} AS s, {sf} AS o, g, 0 AS _depth \
+                             FROM ({all_nodes_g}) _sfg{n} WHERE node = {sf}")
+                } else {
+                    let all_nodes_g = build_all_nodes_sql(graph_filter, true);
+                    let mut parts = vec![format!(
+                        "SELECT DISTINCT node AS s, node AS o, g, 0 AS _depth \
+                         FROM ({all_nodes_g}) AS _all0{n}"
+                    )];
+                    if let Some(of) = o_filter {
+                        parts.push(format!("SELECT {of} AS s, {of} AS o, NULL::bigint AS g, 0 AS _depth"));
+                    }
+                    parts.join(" UNION ALL ")
+                };
+
+                let mut final_parts = Vec::new();
                 if let Some(of) = o_filter {
-                    parts.push(format!("SELECT {of} AS s, {of} AS o, 0 AS _depth"));
+                    final_parts.push(format!("o = {of}"));
                 }
-                parts.join(" UNION ALL ")
-            };
+                if let Some(sf) = s_filter {
+                    final_parts.push(format!("s = {sf}"));
+                }
+                let final_where = if final_parts.is_empty() {
+                    String::new()
+                } else {
+                    format!(" AND {}", final_parts.join(" AND "))
+                };
 
-            // Final filter: restrict to the given endpoint constants.
-            let mut final_parts = Vec::new();
-            if let Some(of) = o_filter {
-                final_parts.push(format!("o = {of}"));
-            }
-            if let Some(sf) = s_filter {
-                final_parts.push(format!("s = {sf}"));
-            }
-            let final_where = if final_parts.is_empty() {
-                String::new()
+                format!(
+                    "(WITH RECURSIVE {cte_name}(s, o, g, _depth) AS (\
+                     SELECT _anc{n}.s, _anc{n}.o, _anc{n}.g, _anc{n}._depth \
+                     FROM (\
+                       SELECT s, o, g, 1 AS _depth FROM {base_sql} AS _b1{n}{one_hop_where} \
+                       UNION ALL \
+                       {zero_hop} \
+                     ) AS _anc{n} \
+                     UNION ALL \
+                     SELECT {cte_name}.s, _step{n}.o, {cte_name}.g, {cte_name}._depth + 1 \
+                     FROM {cte_name} \
+                     JOIN {base_sql} AS _step{n} ON {cte_name}.o = _step{n}.s AND {cte_name}.g = _step{n}.g \
+                     {depth_guard}\
+                     ) CYCLE s, o SET _is_cycle USING _cycle_path \
+                     SELECT DISTINCT s, o, g FROM {cte_name} \
+                     WHERE NOT _is_cycle{final_where})"
+                )
             } else {
-                format!(" AND {}", final_parts.join(" AND "))
-            };
+                // Without graph tracking: existing behavior.
+                // Zero-hop (reflexive) anchor:
+                // - If s_filter is a constant: only emit (sf, sf).
+                // - Otherwise: all nodes in the active graph, plus any constant o endpoint.
+                let zero_hop = if let Some(sf) = s_filter {
+                    format!("SELECT {sf} AS s, {sf} AS o, 0 AS _depth")
+                } else {
+                    let all_nodes = build_all_nodes_sql(graph_filter, false);
+                    let mut parts = vec![format!(
+                        "SELECT DISTINCT node AS s, node AS o, 0 AS _depth \
+                         FROM ({all_nodes}) AS _all0{n}"
+                    )];
+                    if let Some(of) = o_filter {
+                        parts.push(format!("SELECT {of} AS s, {of} AS o, 0 AS _depth"));
+                    }
+                    parts.join(" UNION ALL ")
+                };
 
-            format!(
-                "(WITH RECURSIVE {cte_name}(s, o, _depth) AS (\
-                 SELECT _anc{n}.s, _anc{n}.o, _anc{n}._depth \
-                 FROM (\
-                   SELECT s, o, 1 AS _depth FROM {base_sql} AS _b1{n}{one_hop_where} \
-                   UNION ALL \
-                   {zero_hop} \
-                 ) AS _anc{n} \
-                 UNION ALL \
-                 SELECT {cte_name}.s, _step{n}.o, {cte_name}._depth + 1 \
-                 FROM {cte_name} \
-                 JOIN {base_sql} AS _step{n} ON {cte_name}.o = _step{n}.s \
-                 {depth_guard}\
-                 ) CYCLE s, o SET _is_cycle USING _cycle_path \
-                 SELECT DISTINCT s, o FROM {cte_name} \
-                 WHERE NOT _is_cycle{final_where})"
-            )
+                let mut final_parts = Vec::new();
+                if let Some(of) = o_filter {
+                    final_parts.push(format!("o = {of}"));
+                }
+                if let Some(sf) = s_filter {
+                    final_parts.push(format!("s = {sf}"));
+                }
+                let final_where = if final_parts.is_empty() {
+                    String::new()
+                } else {
+                    format!(" AND {}", final_parts.join(" AND "))
+                };
+
+                format!(
+                    "(WITH RECURSIVE {cte_name}(s, o, _depth) AS (\
+                     SELECT _anc{n}.s, _anc{n}.o, _anc{n}._depth \
+                     FROM (\
+                       SELECT s, o, 1 AS _depth FROM {base_sql} AS _b1{n}{one_hop_where} \
+                       UNION ALL \
+                       {zero_hop} \
+                     ) AS _anc{n} \
+                     UNION ALL \
+                     SELECT {cte_name}.s, _step{n}.o, {cte_name}._depth + 1 \
+                     FROM {cte_name} \
+                     JOIN {base_sql} AS _step{n} ON {cte_name}.o = _step{n}.s \
+                     {depth_guard}\
+                     ) CYCLE s, o SET _is_cycle USING _cycle_path \
+                     SELECT DISTINCT s, o FROM {cte_name} \
+                     WHERE NOT _is_cycle{final_where})"
+                )
+            }
         }
 
         // ── ZeroOrOne (p?) ───────────────────────────────────────────────────
         PropertyPathExpression::ZeroOrOne(inner) => {
             let n = ctx.next();
-            let base_sql = compile_path(inner, s_filter, o_filter, ctx, max_depth, graph_filter);
+            let base_sql = compile_path(inner, s_filter, o_filter, ctx, max_depth, graph_filter, include_g);
 
             // Zero-hop (reflexive) part:
-            // - Constant start (s_filter): emit (sf, sf).
-            // - Constant end (o_filter): emit (of, of).
+            // - Constant start (s_filter): emit (sf, sf[, g]).
+            // - Constant end (o_filter): emit (of, of[, g]).
             // - Both variable: all nodes in the active graph.
+            let g_null = if include_g { ", NULL::bigint AS g" } else { "" };
             let zero_hop = match (s_filter, o_filter) {
-                (Some(sf), _) => format!("SELECT {sf} AS s, {sf} AS o"),
-                (None, Some(of)) => format!("SELECT {of} AS s, {of} AS o"),
+                (Some(sf), _) => format!("SELECT {sf} AS s, {sf} AS o{g_null}"),
+                (None, Some(of)) => format!("SELECT {of} AS s, {of} AS o{g_null}"),
                 (None, None) => {
-                    let all_nodes = build_all_nodes_sql(graph_filter);
-                    format!(
-                        "SELECT DISTINCT node AS s, node AS o \
-                         FROM ({all_nodes}) AS _all1{n}"
-                    )
+                    let all_nodes = build_all_nodes_sql(graph_filter, include_g);
+                    if include_g {
+                        format!(
+                            "SELECT DISTINCT node AS s, node AS o, g \
+                             FROM ({all_nodes}) AS _all1{n}"
+                        )
+                    } else {
+                        format!(
+                            "SELECT DISTINCT node AS s, node AS o \
+                             FROM ({all_nodes}) AS _all1{n}"
+                        )
+                    }
                 }
             };
 
@@ -293,8 +386,8 @@ pub fn compile_path(
                 format!(" WHERE {}", conditions.join(" AND "))
             };
             format!(
-                "(SELECT s, o FROM (\
-                 SELECT s, o FROM {base_sql} AS _onepart{n} \
+                "(SELECT s, o{g_sel} FROM (\
+                 SELECT s, o{g_sel} FROM {base_sql} AS _onepart{n} \
                  UNION \
                  {zero_hop}\
                  ) AS _zo{n}{where_clause})"
@@ -332,21 +425,22 @@ pub fn compile_path(
 
             let all_preds_union = build_all_predicates_with_p();
 
-            format!("(SELECT s, o FROM ({all_preds_union}) _neg{n} {where_clause})")
+            format!("(SELECT s, o{g_sel} FROM ({all_preds_union}) _neg{n} {where_clause})")
         }
     }
 }
 
 /// Build a SQL expression that returns all distinct nodes (subjects and objects)
 /// from the active graph. Used for zero-hop (reflexive) rows in `p*` and `p?`.
-/// The result is `SELECT node FROM (...)` — a single column.
-fn build_all_nodes_sql(graph_filter: Option<i64>) -> String {
+/// When `include_g` is true, returns `(node, g)` pairs; otherwise just `node`.
+fn build_all_nodes_sql(graph_filter: Option<i64>, include_g: bool) -> String {
     use pgrx::prelude::*;
     let mut parts: Vec<String> = Vec::new();
 
     let g_cond = graph_filter
         .map(|gid| format!(" WHERE g = {gid}"))
         .unwrap_or_default();
+    let g_sel = if include_g { ", g" } else { "" };
 
     Spi::connect(|client| {
         let rows = client
@@ -359,10 +453,10 @@ fn build_all_nodes_sql(graph_filter: Option<i64>) -> String {
         for row in rows {
             if let Ok(Some(pred_id)) = row.get::<i64>(1) {
                 parts.push(format!(
-                    "SELECT s AS node FROM _pg_ripple.vp_{pred_id}{g_cond}"
+                    "SELECT s AS node{g_sel} FROM _pg_ripple.vp_{pred_id}{g_cond}"
                 ));
                 parts.push(format!(
-                    "SELECT o AS node FROM _pg_ripple.vp_{pred_id}{g_cond}"
+                    "SELECT o AS node{g_sel} FROM _pg_ripple.vp_{pred_id}{g_cond}"
                 ));
             }
         }
@@ -374,11 +468,15 @@ fn build_all_nodes_sql(graph_filter: Option<i64>) -> String {
     } else {
         g_cond.clone()
     };
-    parts.push(format!("SELECT s AS node FROM _pg_ripple.vp_rare{rare_g}"));
-    parts.push(format!("SELECT o AS node FROM _pg_ripple.vp_rare{rare_g}"));
+    parts.push(format!("SELECT s AS node{g_sel} FROM _pg_ripple.vp_rare{rare_g}"));
+    parts.push(format!("SELECT o AS node{g_sel} FROM _pg_ripple.vp_rare{rare_g}"));
 
     if parts.is_empty() {
-        "SELECT NULL::bigint AS node LIMIT 0".to_owned()
+        if include_g {
+            "SELECT NULL::bigint AS node, NULL::bigint AS g LIMIT 0".to_owned()
+        } else {
+            "SELECT NULL::bigint AS node LIMIT 0".to_owned()
+        }
     } else {
         parts.join(" UNION ALL ")
     }

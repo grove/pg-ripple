@@ -214,6 +214,11 @@ pub(super) struct Ctx {
     /// is built, so `OPTIONAL {}` and property paths inside `GRAPH {}` work
     /// correctly without relying on post-hoc alias lookups.
     pub(super) graph_filter: Option<i64>,
+    /// Set to `true` when translating inside `GRAPH ?g { ... }` (variable
+    /// graph).  Property path compilation uses this flag to include a `g`
+    /// column in CTE output so the GRAPH ?g handler can bind the variable and
+    /// so sequence paths correctly restrict both hops to the same named graph.
+    pub(super) variable_graph: bool,
     /// Base IRI from the SPARQL BASE declaration (e.g. `BASE <http://example.org/>`).
     /// Used by `IRI()`/`URI()` to resolve relative IRI string arguments.
     pub(super) base_iri: Option<String>,
@@ -231,6 +236,7 @@ impl Ctx {
             raw_iri_vars: std::collections::HashSet::new(),
             raw_double_vars: std::collections::HashSet::new(),
             graph_filter: None,
+            variable_graph: false,
             base_iri: None,
         }
     }
@@ -883,15 +889,35 @@ fn translate_pattern(pattern: &GraphPattern, ctx: &mut Ctx) -> Fragment {
                     }
                 }
                 NamedNodePattern::Variable(v) => {
-                    // Variable graph: translate inner normally, then bind the g
-                    // column of the first from_item to the variable.
+                    // Variable graph: translate inner with variable_graph=true
+                    // so property path CTEs include a `g` column.
                     let vname = v.as_str().to_owned();
+                    let saved_vg = ctx.variable_graph;
+                    ctx.variable_graph = true;
                     let mut frag = translate_pattern(inner, ctx);
+                    ctx.variable_graph = saved_vg;
                     if let Some((alias, _)) = frag.from_items.first() {
                         let gcol = format!("{alias}.g");
                         // Exclude default graph (g = 0) from GRAPH ?g patterns.
                         // Per SPARQL semantics, GRAPH ?g only iterates named graphs.
                         frag.conditions.push(format!("{gcol} <> 0"));
+                        // Ensure ALL other from_items join on the same named graph.
+                        // Without this, a BGP join like { :a :p1 ?mid . ?mid :p2 ?x }
+                        // would allow triples from different named graphs (pp06 bug).
+                        // spargebra normalizes sequence paths like :p1/:p2 into a
+                        // BGP join of two separate triple patterns.
+                        let other_g_conditions: Vec<String> = frag
+                            .from_items
+                            .iter()
+                            .skip(1)
+                            .filter(|(_, sql)| {
+                                // Only constrain from_items that are VP table scans
+                                // (contain "_pg_ripple.vp_"). Skip VALUES/subquery etc.
+                                sql.contains("_pg_ripple.vp_")
+                            })
+                            .map(|(a, _)| format!("{a}.g = {gcol}"))
+                            .collect();
+                        frag.conditions.extend(other_g_conditions);
                         if let Some(existing) = frag.bindings.get(&vname) {
                             let existing = existing.clone();
                             frag.conditions.push(format!("{gcol} = {existing}"));
@@ -1008,6 +1034,7 @@ fn translate_pattern(pattern: &GraphPattern, ctx: &mut Ctx) -> Fragment {
             let s_const: Option<String> = ground_term_sql_for_path(subject, ctx);
             let o_const: Option<String> = ground_term_sql_for_path(object, ctx);
 
+            let include_g = ctx.variable_graph;
             let path_sql = compile_path(
                 path,
                 s_const.as_deref(),
@@ -1015,6 +1042,7 @@ fn translate_pattern(pattern: &GraphPattern, ctx: &mut Ctx) -> Fragment {
                 &mut path_ctx,
                 max_depth,
                 ctx.graph_filter,
+                include_g,
             );
             ctx.path_counter = path_ctx.counter;
 
