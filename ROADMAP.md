@@ -3113,6 +3113,9 @@ All 24 Datalog endpoints respond correctly in integration tests. `GET /datalog/r
 >
 > **Effort estimate: 9–11 person-weeks**
 
+<details>
+<summary>Completed items (click to expand)</summary>
+
 ### Deliverables
 
 - [x] **Streaming SPARQL cursor API** (`src/sparql/cursor.rs` new module)
@@ -3182,6 +3185,8 @@ All 24 Datalog endpoints respond correctly in integration tests. `GET /datalog/r
 ### Exit Criteria
 
 `sparql_cursor.sql` passes with 500K triples. `explain_sparql()` returns IRI-decoded algebra and SQL. OpenTelemetry spans emitted for a sample query when `tracing_enabled = on`. All resource governor tests pass. `stat_statements_decoded` returns decoded query text. `sparql_optional_in_graph.sql`, `sparql_optional_in_graph_rare.sql`, and `sparql_optional_group_by_in_graph.sql` all pass (OPTIONAL inside GRAPH). `sparql_path_in_graph.sql` passes (property path inside GRAPH). Migration chain test passes.
+
+</details>
 
 ---
 
