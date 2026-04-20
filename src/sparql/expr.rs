@@ -359,6 +359,14 @@ fn translate_arg_text(
             let val = lit.value().replace('\'', "''");
             Some(format!("'{val}'"))
         }
+        // STR(?x) shortcut: avoid encode_term → decode roundtrip.
+        // STR(?x) in text context = lexical form of ?x = decode_lexical_sql(x_col).
+        // This also avoids the PostgreSQL snapshot isolation issue where encode_term
+        // inserts a new dict row that the subsequent SELECT can't see in the same stmt.
+        Expression::FunctionCall(Function::Str, str_args) => {
+            let inner_col = translate_arg_value(str_args.first()?, bindings, ctx)?;
+            Some(decode_lexical_sql(&inner_col))
+        }
         Expression::FunctionCall(func, args) => {
             let mut is_numeric = false;
             let val_sql = translate_function_value(func, args, bindings, ctx, &mut is_numeric)?;
@@ -600,7 +608,22 @@ pub(super) fn translate_function_value(
             let str_col = translate_arg_value(args.first()?, bindings, ctx)?;
             let str_text = decode_lexical_sql(&str_col);
             let pattern = translate_arg_text(args.get(1)?, bindings, ctx)?;
-            let replacement = translate_arg_text(args.get(2)?, bindings, ctx)?;
+            // Convert SPARQL $N backreferences (XQuery semantics) to PostgreSQL \N.
+            // $0 → \& (full match), $1-$9 → \1-\9.
+            let replacement = {
+                let repl_arg = args.get(2)?;
+                if let Expression::Literal(lit) = repl_arg {
+                    let raw = lit.value();
+                    // Replace $0 with \& then $1-$9 with \1-\9
+                    let pg_raw = raw.replace("$0", "\\&");
+                    let pg_raw = (1..=9usize).fold(pg_raw, |s, n| {
+                        s.replace(&format!("${n}"), &format!("\\{n}"))
+                    });
+                    format!("'{}'", pg_raw.replace('\'', "''"))
+                } else {
+                    translate_arg_text(repl_arg, bindings, ctx)?
+                }
+            };
             let flags = args
                 .get(3)
                 .and_then(|f| {
@@ -617,7 +640,9 @@ pub(super) fn translate_function_value(
                 let pg_flags = format!("'g{flags}'");
                 format!("regexp_replace({str_text}, {pattern}, {replacement}, {pg_flags})")
             };
-            Some(encode_preserving_lang(&str_col, &new_lex))
+            // Type check: REPLACE is a type error for non-string literals (inline → NULL).
+            let result = encode_preserving_lang(&str_col, &new_lex);
+            Some(format!("CASE WHEN {str_col} < 0 THEN NULL ELSE {result} END"))
         }
 
         // ── ENCODE_FOR_URI ───────────────────────────────────────────────────
@@ -649,8 +674,9 @@ pub(super) fn translate_function_value(
             if let Some(Expression::FunctionCall(Function::Str, str_args)) = args.first() {
                 let inner_col = translate_arg_value(str_args.first()?, bindings, ctx)?;
                 let str_text = decode_lexical_sql(&inner_col);
+                // Preserve lang tag case as-is (SPARQL spec does not normalize lang tags).
                 return Some(format!(
-                    "pg_ripple.encode_lang_literal({str_text}, LOWER({lang_text}))"
+                    "pg_ripple.encode_lang_literal({str_text}, {lang_text})"
                 ));
             }
             let str_col = translate_arg_value(args.first()?, bindings, ctx)?;
@@ -661,7 +687,7 @@ pub(super) fn translate_function_value(
                    WHEN NOT EXISTS(SELECT 1 FROM _pg_ripple.dictionary _dc WHERE _dc.id = {str_col} \
                        AND (_dc.kind = 2 OR (_dc.kind = 3 AND _dc.datatype = \
                            'http://www.w3.org/2001/XMLSchema#string'))) THEN NULL \
-                   ELSE pg_ripple.encode_lang_literal({str_text}, LOWER({lang_text})) \
+                   ELSE pg_ripple.encode_lang_literal({str_text}, {lang_text}) \
                  END"
             ))
         }
@@ -859,9 +885,10 @@ pub(super) fn translate_function_value(
             let col = translate_arg_value(args.first()?, bindings, ctx)?;
             let text = decode_lexical_sql(&col);
             // Extract seconds (integer or fractional) and encode as xsd:decimal.
+            // Cast through numeric to strip leading zeros (e.g. "01" → "1").
             Some(format!(
                 "pg_ripple.encode_typed_literal(\
-                    COALESCE(substring({text} FROM 'T\\d{{2}}:\\d{{2}}:(\\d+(?:\\.\\d+)?)'), '0'), \
+                    (COALESCE(substring({text} FROM 'T\\d{{2}}:\\d{{2}}:(\\d+(?:\\.\\d+)?)'), '0'))::numeric::text, \
                     'http://www.w3.org/2001/XMLSchema#decimal')"
             ))
         }

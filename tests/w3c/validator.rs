@@ -200,7 +200,7 @@ fn srj_term_to_string(term: &Value) -> Option<String> {
             let lang = term.get("xml:lang").and_then(|v| v.as_str());
             let dt = term.get("datatype").and_then(|v| v.as_str());
             if let Some(l) = lang {
-                Some(format!("\"{value}\"@{l}"))
+                Some(format!("\"{value}\"@{}", l.to_lowercase()))
             } else if let Some(d) = dt {
                 Some(format!("\"{value}\"^^<{d}>"))
             } else {
@@ -219,6 +219,7 @@ fn srj_term_to_string(term: &Value) -> Option<String> {
 /// representation so they can be compared with SRX expected values.
 ///
 /// Normalizes `"x"^^<xsd:string>` to `"x"` (RDF 1.1 equivalence).
+/// Normalizes lang tags to lowercase (lang tags are case-insensitive per RFC 4647).
 fn parse_pg_ripple_binding(json: &Value, vars: &[String]) -> HashMap<String, String> {
     const XSD_STRING: &str = "\"^^<http://www.w3.org/2001/XMLSchema#string>";
     let mut map = HashMap::new();
@@ -228,11 +229,13 @@ fn parse_pg_ripple_binding(json: &Value, vars: &[String]) -> HashMap<String, Str
                 let term_str = match val {
                     Value::String(s) if !s.is_empty() => {
                         // Normalize "x"^^xsd:string → "x" (plain literal)
-                        if s.ends_with(XSD_STRING) && s.starts_with('"') {
+                        let s = if s.ends_with(XSD_STRING) && s.starts_with('"') {
                             s[..s.len() - XSD_STRING.len() + 1].to_string()
                         } else {
                             s.clone()
-                        }
+                        };
+                        // Normalize lang tag to lowercase (case-insensitive comparison)
+                        normalize_lang_tag_case(&s)
                     }
                     Value::Number(n) => {
                         if let Some(i) = n.as_i64() {
@@ -430,6 +433,28 @@ fn parse_srx_result_block(block: &str) -> HashMap<String, String> {
     map
 }
 
+/// Normalize the lang tag in a term string to lowercase.
+/// Lang tags are case-insensitive per RFC 4647, so "en-US" == "en-us".
+fn normalize_lang_tag_case(s: &str) -> String {
+    if !s.starts_with('"') {
+        return s.to_string();
+    }
+    // Find the last '@' in the string; everything after it is the lang tag
+    // if it consists only of alphanumeric chars and hyphens.
+    if let Some(at_pos) = s.rfind('@') {
+        let after = &s[at_pos + 1..];
+        if !after.is_empty()
+            && after
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '-')
+        {
+            let before = &s[..at_pos + 1];
+            return format!("{}{}", before, after.to_lowercase());
+        }
+    }
+    s.to_string()
+}
+
 /// Convert a SPARQL Results XML term element to a canonical string.
 ///
 /// In RDF 1.1, `"x"^^xsd:string` is semantically identical to the plain literal `"x"`.
@@ -452,7 +477,7 @@ fn parse_srx_term(xml: &str) -> Option<String> {
         if let Some(lang_pos) = tag_part.find("xml:lang=\"") {
             let lang_rest = &tag_part[lang_pos + "xml:lang=\"".len()..];
             let lang_end = lang_rest.find('"')?;
-            let lang = &lang_rest[..lang_end];
+            let lang = lang_rest[..lang_end].to_lowercase();
             return Some(format!("\"{value}\"@{lang}"));
         }
         if let Some(dt_pos) = tag_part.find("datatype=\"") {
@@ -497,7 +522,7 @@ fn parse_turtle_to_triple_set(
             Term::Literal(l) => match l {
                 rio_api::model::Literal::Simple { value } => format!("\"{value}\""),
                 rio_api::model::Literal::LanguageTaggedString { value, language } => {
-                    format!("\"{value}\"@{language}")
+                    format!("\"{value}\"@{}", language.to_lowercase())
                 }
                 rio_api::model::Literal::Typed { value, datatype } => {
                     // Normalize xsd:string typed literals to plain literal form (RDF 1.1).
