@@ -72,22 +72,21 @@ fn vp_source(pred_id: i64) -> VpSource {
 /// Called from `pg_ripple.xsd_double_fmt()` pgrx wrapper in dict_api.rs.
 pub fn xsd_double_fmt_impl(s: &str) -> String {
     let s = s.trim();
-    let (neg, s) = if s.starts_with('-') {
-        (true, &s[1..])
+    let (neg, s) = if let Some(rest) = s.strip_prefix('-') {
+        (true, rest)
     } else {
         (false, s)
     };
     let s = s.trim_start_matches('+');
 
     // Parse scientific notation if present (e.g. "1.0E2", "3.21E4", "2E-1")
-    let (mantissa_str, exp_offset): (&str, i32) =
-        if let Some(e_pos) = s.find(|c| c == 'E' || c == 'e') {
-            let exp_part = &s[e_pos + 1..];
-            let exp_val: i32 = exp_part.parse().unwrap_or(0);
-            (&s[..e_pos], exp_val)
-        } else {
-            (s, 0)
-        };
+    let (mantissa_str, exp_offset): (&str, i32) = if let Some(e_pos) = s.find(['E', 'e']) {
+        let exp_part = &s[e_pos + 1..];
+        let exp_val: i32 = exp_part.parse().unwrap_or(0);
+        (&s[..e_pos], exp_val)
+    } else {
+        (s, 0)
+    };
 
     // Find/split integer and fractional parts of mantissa
     let (int_part, frac_part) = if let Some(dot) = mantissa_str.find('.') {
@@ -1194,19 +1193,18 @@ fn translate_pattern(pattern: &GraphPattern, ctx: &mut Ctx) -> Fragment {
                     | Expression::Or(_, _)
                     | Expression::Not(_)
                     | Expression::Bound(_)
-            ) {
-                if let Some(bool_sql) = translate_expr(expression, &frag.bindings, ctx) {
-                    // Comparison/logical operators return SQL booleans.
-                    // Encode as inline xsd:boolean literal IDs.
-                    // inline_true  = -9151314442816847871
-                    // inline_false = -9151314442816847872
-                    let encoded = format!(
-                        "CASE WHEN ({bool_sql}) IS NULL THEN NULL::bigint \
+            ) && let Some(bool_sql) = translate_expr(expression, &frag.bindings, ctx)
+            {
+                // Comparison/logical operators return SQL booleans.
+                // Encode as inline xsd:boolean literal IDs.
+                // inline_true  = -9151314442816847871
+                // inline_false = -9151314442816847872
+                let encoded = format!(
+                    "CASE WHEN ({bool_sql}) IS NULL THEN NULL::bigint \
                          WHEN ({bool_sql}) THEN -9151314442816847871::bigint \
                          ELSE -9151314442816847872::bigint END"
-                    );
-                    frag.bindings.insert(variable.as_str().to_owned(), encoded);
-                }
+                );
+                frag.bindings.insert(variable.as_str().to_owned(), encoded);
             }
             // Propagate raw_numeric status from:
             // 1. Simple variable references to already-raw_numeric variables.
@@ -2161,8 +2159,10 @@ fn translate_service(
                 frag.conditions.push("FALSE".to_owned());
                 return frag;
             }
-            if arms.len() == 1 {
-                return arms.pop().unwrap();
+            if arms.len() == 1
+                && let Some(arm) = arms.pop()
+            {
+                return arm;
             }
 
             // Collect all variables across all arms for the UNION projection.
@@ -2864,12 +2864,10 @@ fn translate_expr_value(
                     _
                 )
             );
-            if is_bool_pred {
-                if let Some(cond_sql) = translate_expr(cond, bindings, ctx) {
-                    return Some(format!(
-                        "CASE WHEN ({cond_sql}) THEN ({then_sql}) ELSE ({else_sql}) END"
-                    ));
-                }
+            if is_bool_pred && let Some(cond_sql) = translate_expr(cond, bindings, ctx) {
+                return Some(format!(
+                    "CASE WHEN ({cond_sql}) THEN ({then_sql}) ELSE ({else_sql}) END"
+                ));
             }
 
             // For comparison operators (Less, LessOrEqual, etc.) and other boolean ops,
@@ -2884,15 +2882,11 @@ fn translate_expr_value(
                 | Expression::UnaryMinus(_)
                 | Expression::UnaryPlus(_) => {
                     // These return encoded bigints — use EBV check.
-                    if let Some(cond_val) = translate_expr_value(cond, bindings, ctx) {
-                        Some(format!(
+                    translate_expr_value(cond, bindings, ctx).map(|cond_val| format!(
                             "CASE WHEN ({cond_val}) IS NULL THEN NULL::bigint \
                              WHEN ({cond_val}) IN (-9151314442816847872::bigint, -9187343239835811840::bigint) THEN ({else_sql}) \
                              ELSE ({then_sql}) END"
                         ))
-                    } else {
-                        None
-                    }
                 }
                 _ => {
                     // Comparisons, logical ops, etc. return SQL booleans.
@@ -2900,14 +2894,12 @@ fn translate_expr_value(
                         Some(format!(
                             "CASE WHEN ({cond_sql}) THEN ({then_sql}) ELSE ({else_sql}) END"
                         ))
-                    } else if let Some(cond_val) = translate_expr_value(cond, bindings, ctx) {
-                        Some(format!(
+                    } else {
+                        translate_expr_value(cond, bindings, ctx).map(|cond_val| format!(
                             "CASE WHEN ({cond_val}) IS NULL THEN NULL::bigint \
                              WHEN ({cond_val}) IN (-9151314442816847872::bigint, -9187343239835811840::bigint) THEN ({else_sql}) \
                              ELSE ({then_sql}) END"
                         ))
-                    } else {
-                        None
                     }
                 }
             }
@@ -2970,9 +2962,9 @@ fn translate_expr_value(
     }
 }
 
-/// Like `translate_expr_value`, but always returns raw numeric SQL values for
-/// numeric literals — used when the comparison context is a raw aggregate
-/// output (COUNT, SUM, etc.) rather than a stored inline-encoded triple value.
+// Like `translate_expr_value`, but always returns raw numeric SQL values for
+// numeric literals — used when the comparison context is a raw aggregate
+// output (COUNT, SUM, etc.) rather than a stored inline-encoded triple value.
 // ─── Inline-integer arithmetic helpers ───────────────────────────────────────
 
 /// Sanitize a SPARQL variable name for use as a SQL column alias.
@@ -3024,6 +3016,7 @@ fn inline_int_pack(sql: &str) -> String {
 ///
 /// If either operand is a dictionary ID (non-negative, bit 63 = 0), the result
 /// is NULL — propagating a SPARQL type error as an unbound value.
+#[allow(dead_code)]
 fn inline_int_arith(op: &str, la: &str, ra: &str) -> String {
     let extract_a = inline_int_extract(la);
     let extract_b = inline_int_extract(ra);
@@ -3039,6 +3032,7 @@ fn inline_int_arith(op: &str, la: &str, ra: &str) -> String {
 ///
 /// Returns NULL when the denominator is zero (SPARQL div-by-zero error semantics)
 /// or when either operand is not an inline-encoded integer (dict ID, type error).
+#[allow(dead_code)]
 fn inline_int_divide(la: &str, ra: &str) -> String {
     let extract_a = inline_int_extract(la);
     let extract_b = inline_int_extract(ra);
@@ -3075,7 +3069,7 @@ fn inline_int_negate(sql: &str) -> String {
 /// - integer OP integer → integer (inline)
 /// - integer OP decimal / decimal OP anything → decimal (dict-encoded)
 /// - anything OP double / double OP anything → double (dict-encoded)
-/// Non-numeric operands → NULL (type error).
+/// - Non-numeric operands → NULL (type error).
 fn rdf_numeric_arith(op: &str, la: &str, ra: &str) -> String {
     let extract_a = inline_int_extract(la);
     let extract_b = inline_int_extract(ra);

@@ -20,7 +20,6 @@
 
 use pgrx::datum::DatumWithOid;
 use pgrx::prelude::*;
-use serde_json;
 
 // ─── Schema initialisation ─────────────────────────────────────────────────────
 

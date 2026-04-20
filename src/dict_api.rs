@@ -47,7 +47,7 @@ mod pg_ripple {
             if inline::inline_type(id) == inline::TYPE_INTEGER {
                 // Extract integer value: (id & MASK) - OFFSET
                 let val: i64 = (id & 0x00FFFFFFFFFFFFFF_i64) - 0x0080000000000000_i64;
-                return pgrx::AnyNumeric::try_from(val).ok();
+                return Some(pgrx::AnyNumeric::from(val));
             }
             return None;
         }

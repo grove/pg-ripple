@@ -132,7 +132,7 @@ pub fn try_encode_datetime(lexical: &str) -> Option<i64> {
     // the timezone for SPARQL accessor functions.
     let has_nonzero_offset = {
         // Check for a non-UTC offset like "+HH:MM" or "-HH:MM" (not "+00:00")
-        if let Some(pos) = trimmed.rfind(|c| c == '+' || c == '-') {
+        if let Some(pos) = trimmed.rfind(['+', '-']) {
             // Only consider it an offset if it's after the 'T' separator
             if let Some(t_pos) = trimmed.find('T') {
                 if pos > t_pos + 3 {

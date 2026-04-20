@@ -182,11 +182,11 @@ pub(super) fn translate_function_filter(
         // ── Type-testing predicates ─────────────────────────────────────────
         Function::IsIri => {
             // raw_iri_vars (UUID results) are always IRIs — shortcut without dict lookup.
-            if let Some(Expression::Variable(v)) = args.first() {
-                if ctx.is_raw_iri_var(v.as_str()) {
-                    let col = bindings.get(v.as_str())?;
-                    return Some(format!("({col} IS NOT NULL)"));
-                }
+            if let Some(Expression::Variable(v)) = args.first()
+                && ctx.is_raw_iri_var(v.as_str())
+            {
+                let col = bindings.get(v.as_str())?;
+                return Some(format!("({col} IS NOT NULL)"));
             }
             let col = translate_arg_value(args.first()?, bindings, ctx)?;
             Some(kind_check_sql(&col, 0))
@@ -198,11 +198,12 @@ pub(super) fn translate_function_filter(
         Function::IsLiteral => {
             // raw_text_vars (STRUUID, GROUP_CONCAT) are always literals — shortcut.
             // raw_iri_vars (UUID) are NOT literals; skip them.
-            if let Some(Expression::Variable(v)) = args.first() {
-                if ctx.is_raw_text_var(v.as_str()) && !ctx.is_raw_iri_var(v.as_str()) {
-                    let col = bindings.get(v.as_str())?;
-                    return Some(format!("({col} IS NOT NULL)"));
-                }
+            if let Some(Expression::Variable(v)) = args.first()
+                && ctx.is_raw_text_var(v.as_str())
+                && !ctx.is_raw_iri_var(v.as_str())
+            {
+                let col = bindings.get(v.as_str())?;
+                return Some(format!("({col} IS NOT NULL)"));
             }
             let col = translate_arg_value(args.first()?, bindings, ctx)?;
             // Inline IDs (< 0) are always literals.
@@ -385,11 +386,11 @@ fn translate_arg_text(
         // inserts a new dict row that the subsequent SELECT can't see in the same stmt.
         // Special case: STR(raw_iri_var) → the IRI text itself (no dict lookup needed).
         Expression::FunctionCall(Function::Str, str_args) => {
-            if let Some(Expression::Variable(v)) = str_args.first() {
-                if ctx.is_raw_iri_var(v.as_str()) {
-                    let col = bindings.get(v.as_str())?;
-                    return Some(col.clone());
-                }
+            if let Some(Expression::Variable(v)) = str_args.first()
+                && ctx.is_raw_iri_var(v.as_str())
+            {
+                let col = bindings.get(v.as_str())?;
+                return Some(col.clone());
             }
             let inner_col = translate_arg_value(str_args.first()?, bindings, ctx)?;
             Some(decode_lexical_sql(&inner_col))
@@ -541,20 +542,19 @@ pub(super) fn translate_function_value(
         Function::StrLen => {
             *is_numeric = true;
             // Optimization: STRLEN(raw_text_var) → length directly (no dict lookup).
-            if let Some(Expression::Variable(v)) = args.first() {
-                if ctx.is_raw_text_var(v.as_str()) {
-                    let col = bindings.get(v.as_str())?;
-                    return Some(format!("length({col})"));
-                }
+            if let Some(Expression::Variable(v)) = args.first()
+                && ctx.is_raw_text_var(v.as_str())
+            {
+                let col = bindings.get(v.as_str())?;
+                return Some(format!("length({col})"));
             }
             // Optimization: STRLEN(STR(raw_iri_var)) → length of the IRI text directly.
-            if let Some(Expression::FunctionCall(Function::Str, str_inner)) = args.first() {
-                if let Some(Expression::Variable(v)) = str_inner.first() {
-                    if ctx.is_raw_iri_var(v.as_str()) {
-                        let col = bindings.get(v.as_str())?;
-                        return Some(format!("length({col})"));
-                    }
-                }
+            if let Some(Expression::FunctionCall(Function::Str, str_inner)) = args.first()
+                && let Some(Expression::Variable(v)) = str_inner.first()
+                && ctx.is_raw_iri_var(v.as_str())
+            {
+                let col = bindings.get(v.as_str())?;
+                return Some(format!("length({col})"));
             }
             let col = translate_arg_value(args.first()?, bindings, ctx)?;
             let text = decode_lexical_sql(&col);
@@ -857,12 +857,12 @@ pub(super) fn translate_function_value(
         Function::Datatype => {
             // raw_double_vars (RAND() results) are always xsd:double — shortcut without
             // dict lookup (which would fail for raw floats and snapshot isolation).
-            if let Some(Expression::Variable(v)) = args.first() {
-                if ctx.is_raw_double_var(v.as_str()) {
-                    return Some(encode_iri(
-                        "'http://www.w3.org/2001/XMLSchema#double'".to_owned(),
-                    ));
-                }
+            if let Some(Expression::Variable(v)) = args.first()
+                && ctx.is_raw_double_var(v.as_str())
+            {
+                return Some(encode_iri(
+                    "'http://www.w3.org/2001/XMLSchema#double'".to_owned(),
+                ));
             }
             let col = translate_arg_value(args.first()?, bindings, ctx)?;
             // For inline IDs (negative): extract type code from bits 62-56.
@@ -955,11 +955,12 @@ pub(super) fn translate_function_value(
         // ── Datetime functions ───────────────────────────────────────────────
         Function::Now => {
             // NOW() → encode current timestamp as xsd:dateTime typed literal.
-            Some(format!(
+            Some(
                 "pg_ripple.encode_typed_literal(\
                     to_char(now(), 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"'), \
                     'http://www.w3.org/2001/XMLSchema#dateTime')"
-            ))
+                    .to_string(),
+            )
         }
         Function::Year => {
             *is_numeric = true;

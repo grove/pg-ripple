@@ -120,10 +120,10 @@ fn fetch_void_stats(url: &str) -> EndpointStats {
 
     // Query for total triple count.
     let count_query = "SELECT (COUNT(*) AS ?c) WHERE { ?s ?p ?o }";
-    if let Ok(rows) = execute_count_query(url, count_query) {
-        if let Some(count) = rows.first() {
-            stats.total_triples = *count;
-        }
+    if let Ok(rows) = execute_count_query(url, count_query)
+        && let Some(count) = rows.first()
+    {
+        stats.total_triples = *count;
     }
 
     // Query for per-predicate counts (limit to top 100 predicates to avoid timeouts).
@@ -168,11 +168,11 @@ fn execute_count_query(url: &str, sparql: &str) -> Result<Vec<i64>, String> {
     if let Some(bindings) = json["results"]["bindings"].as_array() {
         for binding in bindings {
             for key in ["c", "count", "total"] {
-                if let Some(val) = binding[key]["value"].as_str() {
-                    if let Ok(n) = val.parse::<i64>() {
-                        results.push(n);
-                        break;
-                    }
+                if let Some(val) = binding[key]["value"].as_str()
+                    && let Ok(n) = val.parse::<i64>()
+                {
+                    results.push(n);
+                    break;
                 }
             }
         }
@@ -228,18 +228,18 @@ pub fn load_endpoint_stats(url: &str) -> EndpointStats {
             None,
             &[DatumWithOid::from(url)],
         );
-        if let Ok(mut rows) = result {
-            if let Some(row) = rows.next() {
-                stats.total_triples = row.get::<i64>(1).ok().flatten().unwrap_or(0);
-                let pred_json: String = row.get::<String>(2).ok().flatten().unwrap_or_default();
-                if !pred_json.is_empty() {
-                    if let Ok(map) = serde_json::from_str::<HashMap<String, i64>>(&pred_json) {
-                        stats.predicate_triples = map;
-                    }
-                }
-                stats.distinct_subjects = row.get::<i64>(3).ok().flatten().unwrap_or(0);
-                stats.distinct_objects = row.get::<i64>(4).ok().flatten().unwrap_or(0);
+        if let Ok(mut rows) = result
+            && let Some(row) = rows.next()
+        {
+            stats.total_triples = row.get::<i64>(1).ok().flatten().unwrap_or(0);
+            let pred_json: String = row.get::<String>(2).ok().flatten().unwrap_or_default();
+            if !pred_json.is_empty()
+                && let Ok(map) = serde_json::from_str::<HashMap<String, i64>>(&pred_json)
+            {
+                stats.predicate_triples = map;
             }
+            stats.distinct_subjects = row.get::<i64>(3).ok().flatten().unwrap_or(0);
+            stats.distinct_objects = row.get::<i64>(4).ok().flatten().unwrap_or(0);
         }
     });
 

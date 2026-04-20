@@ -76,7 +76,7 @@ thread_local! {
     /// are evicted from shmem so that stale hash→id mappings cannot poison
     /// subsequent transactions (the dictionary rows are rolled back but the
     /// shmem entries would otherwise persist indefinitely).
-    static TX_SHMEM_INSERTS: RefCell<Vec<u128>> = RefCell::new(Vec::new());
+    static TX_SHMEM_INSERTS: RefCell<Vec<u128>> = const { RefCell::new(Vec::new()) };
     /// Decode cache: sequence id → term value.
     static DECODE_CACHE: RefCell<LruCache<i64, String>> = RefCell::new(
         // SAFETY: CACHE_CAPACITY is a compile-time non-zero literal (4096).
