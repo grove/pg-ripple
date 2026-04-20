@@ -772,6 +772,18 @@ pub(super) fn translate_function_value(
 
         // ── IRI / URI ────────────────────────────────────────────────────────
         Function::Iri => {
+            // When the argument is a NamedNode (IRI), return it directly.
+            // For string literals, decode and re-encode (with optional BASE resolution).
+            if let Some(Expression::NamedNode(nn)) = args.first() {
+                // The argument is already a resolved IRI. Encode it directly.
+                let iri = nn.as_str();
+                if let Some(id) = ctx.encode_iri(iri) {
+                    return Some(id.to_string());
+                }
+                // IRI not yet in dictionary — use runtime insert/lookup.
+                let iri_esc = iri.replace('\'', "''");
+                return Some(format!("pg_ripple.encode_term('{iri_esc}', 0::int2)"));
+            }
             let col = translate_arg_value(args.first()?, bindings, ctx)?;
             let text = decode_lexical_sql(&col);
             // If there is a BASE IRI, resolve relative IRIs at runtime using SQL.
@@ -1177,6 +1189,15 @@ pub(super) fn translate_function_value(
         // absent, NULL is emitted without any PostGIS function reference.
         Function::Custom(name) => {
             let iri = name.as_str();
+
+            // ── XSD type cast functions ─────────────────────────────────────
+            // xsd:integer(?v), xsd:decimal(?v), xsd:double(?v), etc.
+            // These are SPARQL 1.1 §17.1 constructor functions.
+            if let Some(dt) = xsd_cast_datatype(iri) {
+                let arg_col = translate_arg_value(args.first()?, bindings, ctx)?;
+                return Some(xsd_cast_sql(&arg_col, dt));
+            }
+
             match iri {
                 "http://www.opengis.net/def/function/geosparql/distance" => {
                     // geof:distance(?a, ?b, unit) → numeric distance (metres for unit-of-measure)
@@ -1274,4 +1295,88 @@ pub(super) fn is_numeric_function(func: &Function) -> bool {
             | Function::Minutes
         // CEIL, FLOOR, ROUND, SECONDS now return typed literal dict IDs, not raw numerics.
     )
+}
+
+// ─── XSD type cast helpers ─────────────────────────────────────────────────────
+
+/// Return the full XSD datatype IRI if `iri` is a SPARQL 1.1 constructor
+/// (e.g. `xsd:integer`) that we support, otherwise `None`.
+fn xsd_cast_datatype(iri: &str) -> Option<&'static str> {
+    match iri {
+        "http://www.w3.org/2001/XMLSchema#integer" => Some("http://www.w3.org/2001/XMLSchema#integer"),
+        "http://www.w3.org/2001/XMLSchema#decimal" => Some("http://www.w3.org/2001/XMLSchema#decimal"),
+        "http://www.w3.org/2001/XMLSchema#double"  => Some("http://www.w3.org/2001/XMLSchema#double"),
+        "http://www.w3.org/2001/XMLSchema#float"   => Some("http://www.w3.org/2001/XMLSchema#float"),
+        "http://www.w3.org/2001/XMLSchema#string"  => Some("http://www.w3.org/2001/XMLSchema#string"),
+        "http://www.w3.org/2001/XMLSchema#boolean" => Some("http://www.w3.org/2001/XMLSchema#boolean"),
+        "http://www.w3.org/2001/XMLSchema#dateTime"=> Some("http://www.w3.org/2001/XMLSchema#dateTime"),
+        _ => None,
+    }
+}
+
+/// Build SQL that casts the encoded bigint `col` to `dt` and re-encodes.
+/// Returns NULL on cast failure.
+fn xsd_cast_sql(col: &str, dt: &str) -> String {
+    // Decode column to its lexical string form.
+    let lex = format!(
+        "CASE WHEN ({col}) IS NULL THEN NULL \
+         WHEN ({col}) < 0 THEN \
+           ((({col}) & 72057594037927935::bigint) - 36028797018963968::bigint)::text \
+         ELSE (SELECT d.value FROM _pg_ripple.dictionary d WHERE d.id = ({col}) LIMIT 1) \
+         END"
+    );
+    // Numeric pattern: optional sign, digits with optional decimal point, optional exponent.
+    let num_re = r"^[+\-]?(\d+\.?\d*|\d*\.\d+)([eE][+\-]?\d+)?$";
+    match dt {
+        "http://www.w3.org/2001/XMLSchema#integer" => {
+            // Truncate to integer (floor toward zero). Use regex to guard against bad input.
+            format!(
+                "CASE WHEN ({lex}) IS NULL OR ({lex}) !~ '{num_re}' THEN NULL \
+                 ELSE pg_ripple.encode_typed_literal(\
+                   trunc(({lex})::numeric)::bigint::text, \
+                   'http://www.w3.org/2001/XMLSchema#integer') END"
+            )
+        }
+        "http://www.w3.org/2001/XMLSchema#decimal" => {
+            format!(
+                "CASE WHEN ({lex}) IS NULL OR ({lex}) !~ '{num_re}' THEN NULL \
+                 ELSE pg_ripple.encode_typed_literal(\
+                   trim_scale(({lex})::numeric)::text, \
+                   'http://www.w3.org/2001/XMLSchema#decimal') END"
+            )
+        }
+        "http://www.w3.org/2001/XMLSchema#double" | "http://www.w3.org/2001/XMLSchema#float" => {
+            format!(
+                "CASE WHEN ({lex}) IS NULL OR ({lex}) !~ '{num_re}' THEN NULL \
+                 ELSE pg_ripple.encode_typed_literal(\
+                   pg_ripple.xsd_double_fmt(({lex})::float8::text), \
+                   'http://www.w3.org/2001/XMLSchema#double') END"
+            )
+        }
+        "http://www.w3.org/2001/XMLSchema#string" => {
+            // Re-encode the lexical value as xsd:string (= plain literal in RDF 1.1).
+            format!(
+                "pg_ripple.encode_typed_literal(\
+                   {lex}, \
+                   'http://www.w3.org/2001/XMLSchema#string')"
+            )
+        }
+        "http://www.w3.org/2001/XMLSchema#boolean" => {
+            format!(
+                "pg_ripple.encode_typed_literal(\
+                   CASE WHEN lower({lex}) IN ('true','1') THEN 'true' \
+                        WHEN lower({lex}) IN ('false','0') THEN 'false' \
+                        ELSE NULL END, \
+                   'http://www.w3.org/2001/XMLSchema#boolean')"
+            )
+        }
+        "http://www.w3.org/2001/XMLSchema#dateTime" => {
+            format!(
+                "pg_ripple.encode_typed_literal(\
+                   ({lex})::timestamptz::text, \
+                   'http://www.w3.org/2001/XMLSchema#dateTime')"
+            )
+        }
+        _ => "NULL".to_string(),
+    }
 }

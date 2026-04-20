@@ -1,8 +1,8 @@
 {
   "categories": {
     "aggregates": {
-      "fail": 10,
-      "pass": 36,
+      "fail": 0,
+      "pass": 46,
       "skip": 1,
       "timeout": 0,
       "total": 47,
@@ -37,8 +37,8 @@
       "xpass": 0
     },
     "functions": {
-      "fail": 12,
-      "pass": 63,
+      "fail": 11,
+      "pass": 64,
       "skip": 0,
       "timeout": 0,
       "total": 75,
@@ -46,8 +46,8 @@
       "xpass": 0
     },
     "grouping": {
-      "fail": 2,
-      "pass": 4,
+      "fail": 0,
+      "pass": 6,
       "skip": 0,
       "timeout": 0,
       "total": 6,
@@ -109,9 +109,9 @@
       "xpass": 0
     }
   },
-  "failed": 47,
-  "pass_rate_pct": "81.2",
-  "passed": 263,
+  "failed": 34,
+  "pass_rate_pct": "85.2",
+  "passed": 276,
   "skipped": 14,
   "timeout": 0,
   "total": 324,

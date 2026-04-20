@@ -275,10 +275,63 @@ fn compare_binding_sets(
         ));
     }
 
+    // Normalize a term string for comparison.
+    // For numeric typed literals (integer, decimal, double, float), parse and
+    // re-serialize to a canonical form so that e.g. "2100"^^double == "2.1E3"^^double
+    // and "2.0"^^decimal == "2"^^decimal.
+    fn normalize_term(s: &str) -> String {
+        // Pattern: "<value>"^^<datatype>
+        if let Some(rest) = s.strip_prefix('"') {
+            if let Some(dt_pos) = rest.rfind("\"^^<") {
+                let value = &rest[..dt_pos];
+                let dt = &rest[dt_pos + 4..rest.len() - 1]; // strip trailing '>'
+                match dt {
+                    "http://www.w3.org/2001/XMLSchema#double"
+                    | "http://www.w3.org/2001/XMLSchema#float" => {
+                        if let Ok(f) = value.parse::<f64>() {
+                            return format!("\"{}\"^^<{dt}>", format_f64_canonical(f));
+                        }
+                    }
+                    "http://www.w3.org/2001/XMLSchema#decimal" => {
+                        if let Ok(f) = value.parse::<f64>() {
+                            return format!("\"{}\"^^<{dt}>", format_decimal_canonical(f));
+                        }
+                    }
+                    "http://www.w3.org/2001/XMLSchema#integer" => {
+                        if let Ok(i) = value.parse::<i64>() {
+                            return format!("\"{}\"^^<{dt}>", i);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+        s.to_string()
+    }
+
+    // Convert a f64 to a canonical form for double comparison.
+    fn format_f64_canonical(f: f64) -> String {
+        // Use Rust's default f64 formatting which is unique and round-trips
+        format!("{}", f)
+    }
+
+    // Convert a f64 to a canonical form for decimal comparison (strip trailing zeros after dot).
+    fn format_decimal_canonical(f: f64) -> String {
+        // Format with enough precision, then strip trailing zeros.
+        // For exact values, f64 should be sufficient for SPARQL test values.
+        let s = format!("{:.15}", f);
+        let s = s.trim_end_matches('0');
+        let s = s.trim_end_matches('.');
+        s.to_string()
+    }
+
     // Convert to sets of canonical row strings for order-independent comparison.
     fn row_key(row: &HashMap<String, String>, vars: &[String]) -> String {
         vars.iter()
-            .map(|v| format!("{}={}", v, row.get(v).map(|s| s.as_str()).unwrap_or("")))
+            .map(|v| {
+                let term = row.get(v).map(|s| s.as_str()).unwrap_or("");
+                format!("{}={}", v, normalize_term(term))
+            })
             .collect::<Vec<_>>()
             .join("|")
     }

@@ -1366,7 +1366,7 @@ fn translate_group(
     // Store raw aggregate SQL for HAVING comparisons (separate from encoded output).
     let mut raw_agg_for_having: Vec<(String, String)> = Vec::new();
     for (agg_var, agg_expr) in aggregates {
-        let (encoded_sql, raw_sql) = translate_aggregate(agg_expr, &inner_alias);
+        let (encoded_sql, raw_sql) = translate_aggregate(agg_expr, &inner_alias, ctx);
         let vname = agg_var.as_str().to_owned();
         // GROUP_CONCAT produces SQL text; all others produce SQL integers.
         let is_group_concat = matches!(
@@ -1379,7 +1379,8 @@ fn translate_group(
                 name: AggregateFunction::Sum
                     | AggregateFunction::Avg
                     | AggregateFunction::Min
-                    | AggregateFunction::Max,
+                    | AggregateFunction::Max
+                    | AggregateFunction::Sample,
                 ..
             }
         );
@@ -1482,11 +1483,27 @@ fn translate_group(
 fn translate_aggregate(
     agg: &AggregateExpression,
     bindings: &HashMap<String, String>,
+    ctx: &mut Ctx,
 ) -> (String, String) {
     match agg {
         AggregateExpression::CountSolutions { distinct } => {
             let s = if *distinct {
-                "COUNT(DISTINCT *)".to_owned()
+                // COUNT(DISTINCT *) — count distinct solution rows.
+                // PostgreSQL doesn't support COUNT(DISTINCT *), so we hash all
+                // inner columns into a single text key.
+                if bindings.is_empty() {
+                    "COUNT(*)".to_owned()
+                } else {
+                    // Concatenate all column values (bigint::text, safe from null bytes).
+                    // NULLs are represented as empty string with | delimiters ensuring
+                    // distinct separation: "1||3" ≠ "12|" ≠ "1|2|3" since values are integers.
+                    let cols: Vec<String> = bindings
+                        .values()
+                        .map(|col| format!("COALESCE({col}::text, '')"))
+                        .collect();
+                    let concat = cols.join(" || '|' || ");
+                    format!("COUNT(DISTINCT ({concat}))")
+                }
             } else {
                 "COUNT(*)".to_owned()
             };
@@ -1498,7 +1515,7 @@ fn translate_aggregate(
             distinct,
         } => {
             let distinct_kw = if *distinct { "DISTINCT " } else { "" };
-            let arg = translate_agg_expr(expr, bindings).unwrap_or_else(|| "NULL".to_owned());
+            let arg = translate_agg_expr(expr, bindings, ctx).unwrap_or_else(|| "NULL".to_owned());
 
             match name {
                 AggregateFunction::Count => {
@@ -1506,24 +1523,24 @@ fn translate_aggregate(
                     (s.clone(), s)
                 }
                 AggregateFunction::Sum => {
-                    let raw = format!("SUM({distinct_kw}{arg})");
+                    let raw_having = rdf_decoded_agg("SUM", distinct_kw, &arg);
                     let enc = rdf_numeric_agg("SUM", distinct_kw, &arg, false);
-                    (enc, raw)
+                    (enc, raw_having)
                 }
                 AggregateFunction::Avg => {
-                    let raw = format!("AVG({distinct_kw}{arg})");
+                    let raw_having = rdf_decoded_agg("AVG", distinct_kw, &arg);
                     let enc = rdf_numeric_agg("AVG", distinct_kw, &arg, true);
-                    (enc, raw)
+                    (enc, raw_having)
                 }
                 AggregateFunction::Min => {
-                    let raw = format!("MIN({arg})");
+                    let raw_having = rdf_decoded_agg("MIN", "", &arg);
                     let enc = rdf_minmax_agg(&arg, "ASC");
-                    (enc, raw)
+                    (enc, raw_having)
                 }
                 AggregateFunction::Max => {
-                    let raw = format!("MAX({arg})");
+                    let raw_having = rdf_decoded_agg("MAX", "", &arg);
                     let enc = rdf_minmax_agg(&arg, "DESC");
-                    (enc, raw)
+                    (enc, raw_having)
                 }
                 AggregateFunction::GroupConcat { separator } => {
                     let sep = separator.as_deref().unwrap_or(" ");
@@ -1553,6 +1570,26 @@ fn translate_aggregate(
             }
         }
     }
+}
+
+/// Build a decoded numeric aggregate for HAVING comparisons.
+///
+/// Returns `{agg_fn}({distinct_kw}decoded(arg))` as a plain PostgreSQL numeric,
+/// suitable for use in HAVING expressions with raw numeric constants (2.0 etc.).
+fn rdf_decoded_agg(agg_fn: &str, distinct_kw: &str, arg: &str) -> String {
+    let decode = format!(
+        "CASE WHEN ({arg}) IS NULL THEN NULL \
+         WHEN ({arg}) < 0 THEN \
+           ((({arg}) & 72057594037927935::bigint) - 36028797018963968::bigint)::numeric \
+         ELSE (SELECT CASE WHEN d.datatype IN (\
+           'http://www.w3.org/2001/XMLSchema#decimal',\
+           'http://www.w3.org/2001/XMLSchema#double',\
+           'http://www.w3.org/2001/XMLSchema#float',\
+           'http://www.w3.org/2001/XMLSchema#integer') \
+           THEN d.value::numeric ELSE NULL END \
+           FROM _pg_ripple.dictionary d WHERE d.id = ({arg}) LIMIT 1) END"
+    );
+    format!("{agg_fn}({distinct_kw}{decode})")
 }
 
 /// Build the RDF-aware numeric aggregate SQL for SUM/AVG.
@@ -1587,17 +1624,20 @@ fn rdf_numeric_agg(agg_fn: &str, distinct_kw: &str, arg: &str, is_avg: bool) -> 
     // For AVG: integer → decimal result; for SUM: integer stays integer.
     // The result is always decimal when any decimal/double input is present.
     if is_avg {
-        // AVG: result is always decimal or double (never integer per SPARQL 1.1 §17.4.3.4)
+        // AVG: result is always decimal or double (never integer per SPARQL 1.1 §17.4.3.4).
+        // Exception: empty bag → 0^^xsd:integer (SPARQL 1.1 §17.4.3.4).
         format!(
-            "pg_ripple.encode_typed_literal(\
-               CASE COALESCE(MAX({tc}), 0) \
-               WHEN 2 THEN pg_ripple.xsd_double_fmt(COALESCE({agg_fn}({distinct_kw}{decode}), 0)::text) \
-               ELSE trim_scale(COALESCE({agg_fn}({distinct_kw}{decode}), 0))::text \
-               END, \
-               CASE COALESCE(MAX({tc}), 0) \
-               WHEN 2 THEN 'http://www.w3.org/2001/XMLSchema#double' \
-               ELSE 'http://www.w3.org/2001/XMLSchema#decimal' \
-               END)"
+            "CASE WHEN {agg_fn}({distinct_kw}{decode}) IS NULL \
+               THEN pg_ripple.encode_typed_literal('0', 'http://www.w3.org/2001/XMLSchema#integer') \
+               ELSE pg_ripple.encode_typed_literal(\
+                 CASE COALESCE(MAX({tc}), 0) \
+                 WHEN 2 THEN pg_ripple.xsd_double_fmt({agg_fn}({distinct_kw}{decode})::text) \
+                 ELSE trim_scale({agg_fn}({distinct_kw}{decode}))::text \
+                 END, \
+                 CASE COALESCE(MAX({tc}), 0) \
+                 WHEN 2 THEN 'http://www.w3.org/2001/XMLSchema#double' \
+                 ELSE 'http://www.w3.org/2001/XMLSchema#decimal' \
+                 END) END"
         )
     } else {
         // SUM: integer+integer→integer, any decimal→decimal, any double→double.
@@ -1641,11 +1681,9 @@ fn rdf_minmax_agg(arg: &str, order: &str) -> String {
 }
 
 /// Obtain a SQL column reference for an expression used inside an aggregate.
-fn translate_agg_expr(expr: &Expression, bindings: &HashMap<String, String>) -> Option<String> {
-    match expr {
-        Expression::Variable(v) => bindings.get(v.as_str()).cloned(),
-        _ => None,
-    }
+fn translate_agg_expr(expr: &Expression, bindings: &HashMap<String, String>, ctx: &mut Ctx) -> Option<String> {
+    // Use value context so that variables return their raw SQL column (not a boolean IS NOT NULL).
+    translate_expr_value(expr, bindings, ctx)
 }
 
 /// Quote a string as a SQL string literal (single quotes, escaping internal
@@ -2361,20 +2399,66 @@ fn translate_expr_value(
             let then_sql = translate_expr_value(then_expr, bindings, ctx)?;
             let else_sql = translate_expr_value(else_expr, bindings, ctx)
                 .unwrap_or_else(|| "NULL::bigint".to_owned());
-            // Try value context first for condition (handles NULL/error propagation from e.g. 1/0).
             // EBV constants: inline_false = -9151314442816847872, inline_int_zero = -9187343239835811840
-            if let Some(cond_val) = translate_expr_value(cond, bindings, ctx) {
-                Some(format!(
-                    "CASE WHEN ({cond_val}) IS NULL THEN NULL::bigint \
-                     WHEN ({cond_val}) IN (-9151314442816847872::bigint, -9187343239835811840::bigint) THEN ({else_sql}) \
-                     ELSE ({then_sql}) END"
-                ))
-            } else {
-                // Condition is a boolean expression (comparison, EXISTS, etc.)
-                let cond_sql = translate_expr(cond, bindings, ctx)?;
-                Some(format!(
-                    "CASE WHEN ({cond_sql}) THEN ({then_sql}) ELSE ({else_sql}) END"
-                ))
+
+            // Boolean predicate functions (isNumeric, isBlank, isIri, etc.) return SQL
+            // booleans from translate_expr, not encoded bigints. Use them directly.
+            let is_bool_pred = matches!(
+                cond.as_ref(),
+                Expression::FunctionCall(
+                    spargebra::algebra::Function::IsBlank
+                    | spargebra::algebra::Function::IsIri
+                    | spargebra::algebra::Function::IsLiteral
+                    | spargebra::algebra::Function::IsNumeric,
+                    _
+                )
+            );
+            if is_bool_pred {
+                if let Some(cond_sql) = translate_expr(cond, bindings, ctx) {
+                    return Some(format!(
+                        "CASE WHEN ({cond_sql}) THEN ({then_sql}) ELSE ({else_sql}) END"
+                    ));
+                }
+            }
+
+            // For comparison operators (Less, LessOrEqual, etc.) and other boolean ops,
+            // translate_expr returns a SQL boolean. Use it directly if it succeeds.
+            // For variables and arithmetic, fall through to EBV check.
+            match cond.as_ref() {
+                Expression::Variable(_)
+                | Expression::Add(_, _)
+                | Expression::Subtract(_, _)
+                | Expression::Multiply(_, _)
+                | Expression::Divide(_, _)
+                | Expression::UnaryMinus(_)
+                | Expression::UnaryPlus(_) => {
+                    // These return encoded bigints — use EBV check.
+                    if let Some(cond_val) = translate_expr_value(cond, bindings, ctx) {
+                        Some(format!(
+                            "CASE WHEN ({cond_val}) IS NULL THEN NULL::bigint \
+                             WHEN ({cond_val}) IN (-9151314442816847872::bigint, -9187343239835811840::bigint) THEN ({else_sql}) \
+                             ELSE ({then_sql}) END"
+                        ))
+                    } else {
+                        None
+                    }
+                }
+                _ => {
+                    // Comparisons, logical ops, etc. return SQL booleans.
+                    if let Some(cond_sql) = translate_expr(cond, bindings, ctx) {
+                        Some(format!(
+                            "CASE WHEN ({cond_sql}) THEN ({then_sql}) ELSE ({else_sql}) END"
+                        ))
+                    } else if let Some(cond_val) = translate_expr_value(cond, bindings, ctx) {
+                        Some(format!(
+                            "CASE WHEN ({cond_val}) IS NULL THEN NULL::bigint \
+                             WHEN ({cond_val}) IN (-9151314442816847872::bigint, -9187343239835811840::bigint) THEN ({else_sql}) \
+                             ELSE ({then_sql}) END"
+                        ))
+                    } else {
+                        None
+                    }
+                }
             }
         }
         Expression::Coalesce(exprs) => {
