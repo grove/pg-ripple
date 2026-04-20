@@ -57,7 +57,8 @@ CREATE TABLE IF NOT EXISTS _pg_ripple.vp_rare (
     o      BIGINT   NOT NULL,
     g      BIGINT   NOT NULL DEFAULT 0,
     i      BIGINT   NOT NULL DEFAULT nextval('_pg_ripple.statement_id_seq'),
-    source SMALLINT NOT NULL DEFAULT 0
+    source SMALLINT NOT NULL DEFAULT 0,
+    CONSTRAINT vp_rare_psog_unique UNIQUE (p, s, o, g)
 );
 CREATE INDEX IF NOT EXISTS idx_vp_rare_p_s_o   ON _pg_ripple.vp_rare (p, s, o);
 CREATE INDEX IF NOT EXISTS idx_vp_rare_s_p     ON _pg_ripple.vp_rare (s, p);
