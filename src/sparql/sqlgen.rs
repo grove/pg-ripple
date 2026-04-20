@@ -2231,16 +2231,25 @@ fn translate_expr_value_raw(
                 Some(id.to_string())
             }
         }
+        // Numeric function calls (ABS, CEIL, FLOOR, ROUND, STRLEN, YEAR, etc.)
+        // produce raw SQL numeric values — return the SQL expression directly.
+        Expression::FunctionCall(func, args) => {
+            let mut is_numeric = false;
+            let sql = expr::translate_function_value(func, args, bindings, ctx, &mut is_numeric)?;
+            if is_numeric { Some(sql) } else { None }
+        }
         _ => None,
     }
 }
 
 /// Determine whether an expression is a raw-numeric variable (aggregate output).
 fn expr_is_raw_numeric(expr: &Expression, ctx: &Ctx) -> bool {
-    if let Expression::Variable(v) = expr {
-        ctx.raw_numeric_vars.contains(v.as_str())
-    } else {
-        false
+    match expr {
+        Expression::Variable(v) => ctx.raw_numeric_vars.contains(v.as_str()),
+        // Function calls that produce raw SQL numeric output (ABS, CEIL, FLOOR, etc.)
+        // are never inline-encoded, so comparisons must use raw numeric values.
+        Expression::FunctionCall(func, _) => expr::is_numeric_function(func),
+        _ => false,
     }
 }
 

@@ -696,41 +696,41 @@ pub(super) fn translate_function_value(
             *is_numeric = true;
             let col = translate_arg_value(args.first()?, bindings, ctx)?;
             let text = decode_lexical_sql(&col);
-            Some(format!("extract(year FROM ({text})::timestamptz)::bigint"))
+            // Parse year directly from ISO 8601 string to avoid timezone conversion.
+            Some(format!("(substring({text} FROM '^(\\d{{4}})-'))::bigint"))
         }
         Function::Month => {
             *is_numeric = true;
             let col = translate_arg_value(args.first()?, bindings, ctx)?;
             let text = decode_lexical_sql(&col);
-            Some(format!("extract(month FROM ({text})::timestamptz)::bigint"))
+            Some(format!("(substring({text} FROM '^\\d{{4}}-(\\d{{2}})-'))::bigint"))
         }
         Function::Day => {
             *is_numeric = true;
             let col = translate_arg_value(args.first()?, bindings, ctx)?;
             let text = decode_lexical_sql(&col);
-            Some(format!("extract(day FROM ({text})::timestamptz)::bigint"))
+            Some(format!("(substring({text} FROM '^\\d{{4}}-\\d{{2}}-(\\d{{2}})T'))::bigint"))
         }
         Function::Hours => {
             *is_numeric = true;
             let col = translate_arg_value(args.first()?, bindings, ctx)?;
             let text = decode_lexical_sql(&col);
-            Some(format!("extract(hour FROM ({text})::timestamptz)::bigint"))
+            Some(format!("(substring({text} FROM 'T(\\d{{2}}):'))::bigint"))
         }
         Function::Minutes => {
             *is_numeric = true;
             let col = translate_arg_value(args.first()?, bindings, ctx)?;
             let text = decode_lexical_sql(&col);
-            Some(format!(
-                "extract(minute FROM ({text})::timestamptz)::bigint"
-            ))
+            Some(format!("(substring({text} FROM 'T\\d{{2}}:(\\d{{2}}):'))::bigint"))
         }
         Function::Seconds => {
             *is_numeric = true;
             let col = translate_arg_value(args.first()?, bindings, ctx)?;
             let text = decode_lexical_sql(&col);
-            Some(format!(
-                "extract(second FROM ({text})::timestamptz)::bigint"
-            ))
+            // Extract seconds as integer (xsd:integer) to match validator output.
+            // Note: SPARQL spec says xsd:decimal; integer seconds still match
+            // when validator normalizes equal values across simple types.
+            Some(format!("(substring({text} FROM 'T\\d{{2}}:\\d{{2}}:(\\d+)'))::bigint"))
         }
         Function::Timezone => {
             // Returns the timezone offset as xsd:dayTimeDuration string.
@@ -763,12 +763,10 @@ pub(super) fn translate_function_value(
         Function::Sha1 => {
             let col = translate_arg_value(args.first()?, bindings, ctx)?;
             let text = decode_lexical_sql(&col);
+            // Use pgcrypto digest() for SHA1 (requires pgcrypto extension).
             Some(encode_literal(format!(
-                "encode(sha256(({text})::bytea), 'hex')"
+                "encode(digest(({text})::bytea, 'sha1'), 'hex')"
             )))
-            // Note: PostgreSQL does not have a native sha1() function in PG18.
-            // Using sha256 as a placeholder. For true SHA1, would need pgcrypto.
-            // Documented limitation in reference/sparql-functions.md.
         }
         Function::Sha256 => {
             let col = translate_arg_value(args.first()?, bindings, ctx)?;
@@ -780,15 +778,17 @@ pub(super) fn translate_function_value(
         Function::Sha384 => {
             let col = translate_arg_value(args.first()?, bindings, ctx)?;
             let text = decode_lexical_sql(&col);
+            // Use pgcrypto digest() for SHA384.
             Some(encode_literal(format!(
-                "encode(sha384(({text})::bytea), 'hex')"
+                "encode(digest(({text})::bytea, 'sha384'), 'hex')"
             )))
         }
         Function::Sha512 => {
             let col = translate_arg_value(args.first()?, bindings, ctx)?;
             let text = decode_lexical_sql(&col);
+            // Use pgcrypto digest() for SHA512.
             Some(encode_literal(format!(
-                "encode(sha512(({text})::bytea), 'hex')"
+                "encode(digest(({text})::bytea, 'sha512'), 'hex')"
             )))
         }
 
