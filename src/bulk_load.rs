@@ -15,6 +15,7 @@
 //! PostgreSQL built-in) and then delegate to the inline TEXT variants.
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU8, Ordering};
 
 use pgrx::datum::DatumWithOid;
 use pgrx::prelude::*;
@@ -28,6 +29,9 @@ use crate::storage;
 
 /// Number of triples to collect before flushing a batch insert.
 const BATCH_SIZE: usize = 10_000;
+
+/// Last cache-full percentage we warned about (per-process; avoids warning storms).
+static LAST_WARNED_CACHE_PCT: AtomicU8 = AtomicU8::new(0);
 
 // ─── rio_api term encoding ───────────────────────────────────────────────────
 
@@ -100,11 +104,19 @@ fn flush_batch(by_predicate: &mut PredicateBatch) {
         let (_, _, _, utilisation) = crate::shmem::get_cache_stats();
         let util_pct = (utilisation * 100.0) as u8;
         if util_pct > 90 {
-            pgrx::warning!(
-                "pg_ripple: shared-memory encode cache is {}% full (budget: {} MB); consider running pg_ripple.compact() to reduce delta growth",
-                util_pct,
-                budget_mb
-            );
+            // Only warn once per percentage point to avoid flooding the client.
+            let prev = LAST_WARNED_CACHE_PCT.load(Ordering::Relaxed);
+            if util_pct > prev {
+                LAST_WARNED_CACHE_PCT.store(util_pct, Ordering::Relaxed);
+                pgrx::warning!(
+                    "pg_ripple: shared-memory encode cache is {}% full (budget: {} MB); consider running pg_ripple.compact() to reduce delta growth",
+                    util_pct,
+                    budget_mb
+                );
+            }
+        } else {
+            // Reset threshold when utilization drops back below 90%.
+            LAST_WARNED_CACHE_PCT.store(0, Ordering::Relaxed);
         }
     }
 
