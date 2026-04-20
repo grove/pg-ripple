@@ -355,4 +355,18 @@ mod pg_ripple {
         let pfxs = crate::storage::list_prefixes();
         TableIterator::new(pfxs)
     }
+
+    // ── XSD numeric formatting ─────────────────────────────────────────────────
+
+    /// Format a PostgreSQL numeric value as an XSD canonical double string.
+    ///
+    /// XSD 1.1 canonical form: `["-"]m.nE["-"]e` where the mantissa has exactly
+    /// one digit before the decimal point and at least one after, and the exponent
+    /// is the minimal integer.  E.g. 32100 → "3.21E4", 0.4 → "4.0E-1", 100 → "1.0E2".
+    ///
+    /// Used by aggregate functions (SUM, AVG) when the result type is xsd:double.
+    #[pg_extern]
+    fn xsd_double_fmt(s: &str) -> String {
+        crate::sparql::sqlgen::xsd_double_fmt_impl(s)
+    }
 }

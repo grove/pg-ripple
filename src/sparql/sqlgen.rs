@@ -60,6 +60,63 @@ fn vp_source(pred_id: i64) -> VpSource {
     }
 }
 
+// ─── XSD canonical double format ──────────────────────────────────────────────
+
+/// Convert a PostgreSQL numeric string to XSD 1.1 canonical double lexical form.
+///
+/// XSD canonical double: `["-"]m.nE["-"]e` where the mantissa has exactly one
+/// digit before the decimal point and at least one digit after, and the exponent
+/// is the minimal decimal integer.
+/// Examples: "32100" → "3.21E4", "0.4" → "4.0E-1", "100" → "1.0E2".
+///
+/// Called from `pg_ripple.xsd_double_fmt()` pgrx wrapper in dict_api.rs.
+pub fn xsd_double_fmt_impl(s: &str) -> String {
+    let s = s.trim();
+    let (neg, s) = if s.starts_with('-') { (true, &s[1..]) } else { (false, s) };
+    let s = s.trim_start_matches('+');
+
+    // Parse scientific notation if present (e.g. "1.0E2", "3.21E4", "2E-1")
+    let (mantissa_str, exp_offset): (&str, i32) =
+        if let Some(e_pos) = s.find(|c| c == 'E' || c == 'e') {
+            let exp_part = &s[e_pos + 1..];
+            let exp_val: i32 = exp_part.parse().unwrap_or(0);
+            (&s[..e_pos], exp_val)
+        } else {
+            (s, 0)
+        };
+
+    // Find/split integer and fractional parts of mantissa
+    let (int_part, frac_part) = if let Some(dot) = mantissa_str.find('.') {
+        (&mantissa_str[..dot], &mantissa_str[dot + 1..])
+    } else {
+        (mantissa_str, "")
+    };
+
+    // Combine all digits (strip decimal point)
+    let combined: String = format!("{int_part}{frac_part}");
+    // decimal_pos = number of integer digits + exp_offset
+    let decimal_pos = int_part.len() as i32 + exp_offset;
+
+    // Find first non-zero digit
+    let Some(first_nz) = combined.chars().position(|c| c != '0') else {
+        return "0.0E0".to_string();
+    };
+
+    let exp = decimal_pos - (first_nz as i32) - 1;
+    let significant = &combined[first_nz..];
+    let trimmed = significant.trim_end_matches('0');
+    let trimmed = if trimmed.is_empty() { "0" } else { trimmed };
+
+    let mantissa = if trimmed.len() == 1 {
+        format!("{trimmed}.0")
+    } else {
+        format!("{}.{}", &trimmed[..1], &trimmed[1..])
+    };
+
+    let sign = if neg { "-" } else { "" };
+    format!("{sign}{mantissa}E{exp}")
+}
+
 /// Build a SQL table expression for one triple pattern (exposing `s`, `o`, `g`).
 /// When `graph_filter` is `Some(gid)`, injects `WHERE g = {gid}` so that the
 /// filter is baked into the leaf scan before any `LEFT JOIN` or CTE wrapper is built.
@@ -1304,19 +1361,37 @@ fn translate_group(
     // numeric (COUNT/SUM/AVG/MIN/MAX) results so FILTER comparisons use the
     // correct type.
     let mut text_agg_vars: std::collections::HashSet<String> = std::collections::HashSet::new();
+    // Track which aggregates produce raw numeric (COUNT, old-style) vs encoded bigint.
+    let mut encoded_agg_vars: std::collections::HashSet<String> = std::collections::HashSet::new();
+    // Store raw aggregate SQL for HAVING comparisons (separate from encoded output).
+    let mut raw_agg_for_having: Vec<(String, String)> = Vec::new();
     for (agg_var, agg_expr) in aggregates {
-        let sql_agg = translate_aggregate(agg_expr, &inner_alias);
+        let (encoded_sql, raw_sql) = translate_aggregate(agg_expr, &inner_alias);
         let vname = agg_var.as_str().to_owned();
         // GROUP_CONCAT produces SQL text; all others produce SQL integers.
         let is_group_concat = matches!(
             agg_expr,
             AggregateExpression::FunctionCall { name: AggregateFunction::GroupConcat { .. }, .. }
         );
+        let is_encoded = matches!(
+            agg_expr,
+            AggregateExpression::FunctionCall {
+                name: AggregateFunction::Sum
+                    | AggregateFunction::Avg
+                    | AggregateFunction::Min
+                    | AggregateFunction::Max,
+                ..
+            }
+        );
         if is_group_concat {
             text_agg_vars.insert(vname.clone());
         }
-        select_parts.push(format!("{sql_agg} AS _g_{}", sanitize_sql_ident(&vname)));
-        agg_bindings.push((vname, sql_agg));
+        if is_encoded {
+            encoded_agg_vars.insert(vname.clone());
+        }
+        select_parts.push(format!("{encoded_sql} AS _g_{}", sanitize_sql_ident(&vname)));
+        agg_bindings.push((vname.clone(), encoded_sql));
+        raw_agg_for_having.push((vname, raw_sql));
     }
 
     let group_by_clause = if group_cols.is_empty() {
@@ -1335,24 +1410,26 @@ fn translate_group(
     // HAVING clause (from Filter wrapping Group in the caller).
     let having_clause = if let Some(having_expr) = having {
         // Build temporary bindings that include aggregate aliases for HAVING.
+        // Use the RAW aggregate expressions (not the encoded ones) so that
+        // HAVING comparisons work correctly with numeric types.
         let mut having_bindings = inner_alias.clone();
-        for (vname, sql_agg) in &agg_bindings {
+        for (vname, raw_sql) in &raw_agg_for_having {
             // Use the original aggregate SQL expression (e.g. COUNT(*)) rather
             // than the SELECT-list alias (e.g. _g_count): PostgreSQL does not
             // allow SELECT aliases to be referenced in HAVING.
-            having_bindings.insert(vname.clone(), sql_agg.clone());
+            having_bindings.insert(vname.clone(), raw_sql.clone());
         }
         // Mark aggregate vars as raw numeric so FILTER constants (e.g. >= 2) are
         // not encoded as inline IDs — COUNT(*) returns a raw SQL integer, not an
         // inline-encoded value.
-        for (vname, _) in &agg_bindings {
+        for (vname, _) in &raw_agg_for_having {
             ctx.raw_numeric_vars.insert(vname.clone());
         }
         let result = translate_expr(having_expr, &having_bindings, ctx)
             .map(|c| format!("HAVING {c}"))
             .unwrap_or_default();
         // Remove them again — only raw in HAVING scope of this group fragment.
-        for (vname, _) in &agg_bindings {
+        for (vname, _) in &raw_agg_for_having {
             ctx.raw_numeric_vars.remove(vname.as_str());
         }
         result
@@ -1384,12 +1461,14 @@ fn translate_group(
     // wrapping a GROUP BY) uses raw integer comparison rather than inline IDs.
     // GROUP_CONCAT output variables are marked as raw_text so FILTER comparisons
     // use the literal's lexical value (text) rather than its dictionary ID.
+    // SUM/AVG/MIN/MAX now produce encoded bigints — do NOT mark them as raw_numeric.
     for (vname, _) in &agg_bindings {
         frag.bindings
             .insert(vname.clone(), format!("{alias}._g_{}", sanitize_sql_ident(vname)));
         if text_agg_vars.contains(vname) {
             ctx.raw_text_vars.insert(vname.clone());
-        } else {
+        } else if !encoded_agg_vars.contains(vname) {
+            // Only COUNT and similar produce raw integers; SUM/AVG/MIN/MAX produce encoded bigints.
             ctx.raw_numeric_vars.insert(vname.clone());
         }
     }
@@ -1397,15 +1476,21 @@ fn translate_group(
     frag
 }
 
-/// Translate an AggregateExpression to a SQL aggregate expression string.
-fn translate_aggregate(agg: &AggregateExpression, bindings: &HashMap<String, String>) -> String {
+/// Translate an AggregateExpression to `(encoded_sql, raw_sql)` where:
+/// - `encoded_sql`: full pg_ripple-encoded bigint result (for SELECT output)
+/// - `raw_sql`: raw SQL aggregate on the dict-id column (for HAVING comparisons)
+fn translate_aggregate(
+    agg: &AggregateExpression,
+    bindings: &HashMap<String, String>,
+) -> (String, String) {
     match agg {
         AggregateExpression::CountSolutions { distinct } => {
-            if *distinct {
+            let s = if *distinct {
                 "COUNT(DISTINCT *)".to_owned()
             } else {
                 "COUNT(*)".to_owned()
-            }
+            };
+            (s.clone(), s)
         }
         AggregateExpression::FunctionCall {
             name,
@@ -1413,26 +1498,42 @@ fn translate_aggregate(agg: &AggregateExpression, bindings: &HashMap<String, Str
             distinct,
         } => {
             let distinct_kw = if *distinct { "DISTINCT " } else { "" };
-            // Try to obtain the SQL column expression for the argument.
             let arg = translate_agg_expr(expr, bindings).unwrap_or_else(|| "NULL".to_owned());
+
             match name {
-                AggregateFunction::Count => format!("COUNT({distinct_kw}{arg})"),
-                AggregateFunction::Sum => format!("SUM({distinct_kw}{arg})"),
-                AggregateFunction::Avg => format!("AVG({distinct_kw}{arg})"),
-                AggregateFunction::Min => format!("MIN({arg})"),
-                AggregateFunction::Max => format!("MAX({arg})"),
+                AggregateFunction::Count => {
+                    let s = format!("COUNT({distinct_kw}{arg})");
+                    (s.clone(), s)
+                }
+                AggregateFunction::Sum => {
+                    let raw = format!("SUM({distinct_kw}{arg})");
+                    let enc = rdf_numeric_agg("SUM", distinct_kw, &arg, false);
+                    (enc, raw)
+                }
+                AggregateFunction::Avg => {
+                    let raw = format!("AVG({distinct_kw}{arg})");
+                    let enc = rdf_numeric_agg("AVG", distinct_kw, &arg, true);
+                    (enc, raw)
+                }
+                AggregateFunction::Min => {
+                    let raw = format!("MIN({arg})");
+                    let enc = rdf_minmax_agg(&arg, "ASC");
+                    (enc, raw)
+                }
+                AggregateFunction::Max => {
+                    let raw = format!("MAX({arg})");
+                    let enc = rdf_minmax_agg(&arg, "DESC");
+                    (enc, raw)
+                }
                 AggregateFunction::GroupConcat { separator } => {
                     let sep = separator.as_deref().unwrap_or(" ");
-                    // Decode each term ID to its lexical string value before
-                    // concatenating.  Inline integers (id < 0) are decoded via
-                    // bit arithmetic; dictionary-encoded terms are looked up.
                     let decode_expr = format!(
                         "CASE WHEN {arg} < 0 THEN \
                          (({arg} & 72057594037927935::bigint) - 36028797018963968::bigint)::text \
                          ELSE (SELECT d.value FROM _pg_ripple.dictionary d WHERE d.id = {arg} LIMIT 1) \
                          END"
                     );
-                    if *distinct {
+                    let s = if *distinct {
                         format!(
                             "STRING_AGG(DISTINCT ({decode_expr})::text, {sep_lit} ORDER BY ({decode_expr}))",
                             sep_lit = quote_sql_string(sep)
@@ -1442,13 +1543,101 @@ fn translate_aggregate(agg: &AggregateExpression, bindings: &HashMap<String, Str
                             "STRING_AGG(({decode_expr})::text, {sep_lit} ORDER BY {arg})",
                             sep_lit = quote_sql_string(sep)
                         )
-                    }
+                    };
+                    (s.clone(), s)
                 }
-                AggregateFunction::Sample => format!("MIN({arg})"),
-                AggregateFunction::Custom(_) => format!("MIN({arg})"),
+                AggregateFunction::Sample | AggregateFunction::Custom(_) => {
+                    let s = format!("MIN({arg})");
+                    (s.clone(), s)
+                }
             }
         }
     }
+}
+
+/// Build the RDF-aware numeric aggregate SQL for SUM/AVG.
+///
+/// Decodes each input value (inline integer or dict-encoded decimal/double) to
+/// PostgreSQL numeric, applies the SQL aggregate, determines the result XSD type,
+/// and re-encodes via pg_ripple.encode_typed_literal().
+fn rdf_numeric_agg(agg_fn: &str, distinct_kw: &str, arg: &str, is_avg: bool) -> String {
+    // Decode expression: inline integer → numeric; dict decimal/double → numeric.
+    let decode = format!(
+        "CASE WHEN ({arg}) IS NULL THEN NULL \
+         WHEN ({arg}) < 0 THEN \
+           ((({arg}) & 72057594037927935::bigint) - 36028797018963968::bigint)::numeric \
+         ELSE (SELECT CASE WHEN d.datatype IN (\
+           'http://www.w3.org/2001/XMLSchema#decimal',\
+           'http://www.w3.org/2001/XMLSchema#double',\
+           'http://www.w3.org/2001/XMLSchema#float',\
+           'http://www.w3.org/2001/XMLSchema#integer') \
+           THEN d.value::numeric ELSE NULL END \
+           FROM _pg_ripple.dictionary d WHERE d.id = ({arg}) LIMIT 1) END"
+    );
+    // Type-code expression: 0=integer, 1=decimal, 2=double.
+    let tc = format!(
+        "CASE WHEN ({arg}) IS NULL OR ({arg}) < 0 THEN 0 \
+         ELSE COALESCE((SELECT CASE \
+           WHEN d.datatype IN ('http://www.w3.org/2001/XMLSchema#double',\
+                               'http://www.w3.org/2001/XMLSchema#float') THEN 2 \
+           WHEN d.datatype = 'http://www.w3.org/2001/XMLSchema#integer' THEN 0 \
+           ELSE 1 END FROM _pg_ripple.dictionary d WHERE d.id = ({arg}) LIMIT 1), 0) END"
+    );
+
+    // For AVG: integer → decimal result; for SUM: integer stays integer.
+    // The result is always decimal when any decimal/double input is present.
+    if is_avg {
+        // AVG: result is always decimal or double (never integer per SPARQL 1.1 §17.4.3.4)
+        format!(
+            "pg_ripple.encode_typed_literal(\
+               CASE COALESCE(MAX({tc}), 0) \
+               WHEN 2 THEN pg_ripple.xsd_double_fmt(COALESCE({agg_fn}({distinct_kw}{decode}), 0)::text) \
+               ELSE trim_scale(COALESCE({agg_fn}({distinct_kw}{decode}), 0))::text \
+               END, \
+               CASE COALESCE(MAX({tc}), 0) \
+               WHEN 2 THEN 'http://www.w3.org/2001/XMLSchema#double' \
+               ELSE 'http://www.w3.org/2001/XMLSchema#decimal' \
+               END)"
+        )
+    } else {
+        // SUM: integer+integer→integer, any decimal→decimal, any double→double.
+        format!(
+            "pg_ripple.encode_typed_literal(\
+               CASE COALESCE(MAX({tc}), 0) \
+               WHEN 2 THEN pg_ripple.xsd_double_fmt(SUM({distinct_kw}{decode})::text) \
+               WHEN 1 THEN trim_scale(SUM({distinct_kw}{decode}))::text \
+               ELSE SUM({distinct_kw}{decode})::bigint::text \
+               END, \
+               CASE COALESCE(MAX({tc}), 0) \
+               WHEN 2 THEN 'http://www.w3.org/2001/XMLSchema#double' \
+               WHEN 1 THEN 'http://www.w3.org/2001/XMLSchema#decimal' \
+               ELSE 'http://www.w3.org/2001/XMLSchema#integer' \
+               END)"
+        )
+    }
+}
+
+/// Build the RDF-aware MIN or MAX aggregate SQL.
+///
+/// Returns the original pg_ripple-encoded bigint of the row with the
+/// minimum (ASC) or maximum (DESC) decoded numeric value.  Preserves the
+/// original lexical form (e.g. "1.0"^^decimal stays "1.0", not "1").
+fn rdf_minmax_agg(arg: &str, order: &str) -> String {
+    let decode = format!(
+        "CASE WHEN ({arg}) < 0 THEN \
+           ((({arg}) & 72057594037927935::bigint) - 36028797018963968::bigint)::numeric \
+         ELSE (SELECT CASE WHEN d.datatype IN (\
+           'http://www.w3.org/2001/XMLSchema#decimal',\
+           'http://www.w3.org/2001/XMLSchema#double',\
+           'http://www.w3.org/2001/XMLSchema#float',\
+           'http://www.w3.org/2001/XMLSchema#integer') \
+           THEN d.value::numeric ELSE NULL END \
+           FROM _pg_ripple.dictionary d WHERE d.id = ({arg}) LIMIT 1) END"
+    );
+    format!(
+        "(array_agg(({arg}) ORDER BY ({decode}) {order} NULLS LAST) \
+          FILTER (WHERE ({arg}) IS NOT NULL AND ({decode}) IS NOT NULL))[1]"
+    )
 }
 
 /// Obtain a SQL column reference for an expression used inside an aggregate.

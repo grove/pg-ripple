@@ -1,8 +1,8 @@
 {
   "categories": {
     "aggregates": {
-      "fail": 18,
-      "pass": 28,
+      "fail": 10,
+      "pass": 36,
       "skip": 1,
       "timeout": 0,
       "total": 47,
@@ -109,9 +109,9 @@
       "xpass": 0
     }
   },
-  "failed": 55,
-  "pass_rate_pct": "78.7",
-  "passed": 255,
+  "failed": 47,
+  "pass_rate_pct": "81.2",
+  "passed": 263,
   "skipped": 14,
   "timeout": 0,
   "total": 324,
