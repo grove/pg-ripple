@@ -641,7 +641,7 @@ pub(super) fn translate_function_value(
         // ── STRLANG ─────────────────────────────────────────────────────────
         // STRLANG(?str, ?lang) → encode as language-tagged literal.
         // Type error: input must be a plain literal (kind=2) or xsd:string typed literal.
-        // Lang-tagged (kind=4) or inline (integer/boolean/datetime) → NULL.
+        // Lang-tagged (kind=4), IRI (kind=0), other typed literals, or inline → NULL.
         Function::StrLang => {
             let str_col = translate_arg_value(args.first()?, bindings, ctx)?;
             let lang_col = translate_arg_value(args.get(1)?, bindings, ctx)?;
@@ -650,8 +650,9 @@ pub(super) fn translate_function_value(
             Some(format!(
                 "CASE \
                    WHEN {str_col} < 0 THEN NULL \
-                   WHEN EXISTS(SELECT 1 FROM _pg_ripple.dictionary d \
-                               WHERE d.id = {str_col} AND d.kind = 4) THEN NULL \
+                   WHEN NOT EXISTS(SELECT 1 FROM _pg_ripple.dictionary d WHERE d.id = {str_col} \
+                       AND (d.kind = 2 OR (d.kind = 3 AND d.datatype = \
+                           'http://www.w3.org/2001/XMLSchema#string'))) THEN NULL \
                    ELSE pg_ripple.encode_lang_literal({str_text}, LOWER({lang_text})) \
                  END"
             ))
@@ -659,7 +660,8 @@ pub(super) fn translate_function_value(
 
         // ── STRDT ───────────────────────────────────────────────────────────
         // STRDT(?str, ?datatype) → encode as typed literal with given datatype.
-        // Type error: input must be a plain literal; lang-tagged or inline → NULL.
+        // Type error: input must be a plain literal (kind=2) or xsd:string typed literal.
+        // Lang-tagged, IRI, other typed literals, or inline → NULL.
         Function::StrDt => {
             let str_col = translate_arg_value(args.first()?, bindings, ctx)?;
             let dt_arg = args.get(1)?;
@@ -675,8 +677,9 @@ pub(super) fn translate_function_value(
             Some(format!(
                 "CASE \
                    WHEN {str_col} < 0 THEN NULL \
-                   WHEN EXISTS(SELECT 1 FROM _pg_ripple.dictionary d \
-                               WHERE d.id = {str_col} AND d.kind = 4) THEN NULL \
+                   WHEN NOT EXISTS(SELECT 1 FROM _pg_ripple.dictionary d WHERE d.id = {str_col} \
+                       AND (d.kind = 2 OR (d.kind = 3 AND d.datatype = \
+                           'http://www.w3.org/2001/XMLSchema#string'))) THEN NULL \
                    ELSE pg_ripple.encode_typed_literal({str_text}, {dt_text}) \
                  END"
             ))
@@ -938,30 +941,47 @@ pub(super) fn translate_function_value(
         }
 
         // ── STRBEFORE / STRAFTER ─────────────────────────────────────────────
-        // Preserve the language tag of the subject literal.
+        // Preserve the language tag of the subject literal when needle is found.
+        // When needle is not found: return "" (plain literal).
+        // When input is inline (integer/boolean/datetime): return NULL (type error).
         Function::StrBefore => {
             let str_col = translate_arg_value(args.first()?, bindings, ctx)?;
             let str_text = decode_lexical_sql(&str_col);
             let needle = translate_arg_text(args.get(1)?, bindings, ctx)?;
-            let new_lex = format!(
-                "CASE WHEN strpos({str_text}, {needle}) > 0 \
-                      THEN left({str_text}, strpos({str_text}, {needle}) - 1) \
-                      WHEN {needle} = '' THEN '' \
-                      ELSE NULL END"
+            // Build the "found" expression with lang preservation.
+            let found_expr = encode_preserving_lang(
+                &str_col,
+                &format!("left({str_text}, strpos({str_text}, {needle}) - 1)"),
             );
-            Some(encode_preserving_lang(&str_col, &new_lex))
+            Some(format!(
+                "CASE \
+                   WHEN {str_col} < 0 THEN NULL \
+                   WHEN {needle} = '' OR strpos({str_text}, {needle}) > 0 \
+                     THEN CASE WHEN {needle} = '' THEN pg_ripple.encode_term('', 2::int2) \
+                               ELSE {found_expr} END \
+                   ELSE pg_ripple.encode_term('', 2::int2) \
+                 END"
+            ))
         }
         Function::StrAfter => {
             let str_col = translate_arg_value(args.first()?, bindings, ctx)?;
             let str_text = decode_lexical_sql(&str_col);
             let needle = translate_arg_text(args.get(1)?, bindings, ctx)?;
-            let new_lex = format!(
-                "CASE WHEN strpos({str_text}, {needle}) > 0 \
-                      THEN right({str_text}, length({str_text}) - strpos({str_text}, {needle}) - length({needle}) + 1) \
-                      WHEN {needle} = '' THEN {str_text} \
-                      ELSE NULL END"
+            let found_expr = encode_preserving_lang(
+                &str_col,
+                &format!(
+                    "right({str_text}, length({str_text}) - strpos({str_text}, {needle}) - length({needle}) + 1)"
+                ),
             );
-            Some(encode_preserving_lang(&str_col, &new_lex))
+            Some(format!(
+                "CASE \
+                   WHEN {str_col} < 0 THEN NULL \
+                   WHEN {needle} = '' THEN {plain_str} \
+                   WHEN strpos({str_text}, {needle}) > 0 THEN {found_expr} \
+                   ELSE pg_ripple.encode_term('', 2::int2) \
+                 END",
+                plain_str = encode_preserving_lang(&str_col, &str_text)
+            ))
         }
 
         // ── COALESCE ─────────────────────────────────────────────────────────
@@ -1066,15 +1086,12 @@ pub(super) fn is_numeric_function(func: &Function) -> bool {
         func,
         Function::StrLen
             | Function::Abs
-            | Function::Ceil
-            | Function::Floor
-            | Function::Round
             | Function::Rand
             | Function::Year
             | Function::Month
             | Function::Day
             | Function::Hours
             | Function::Minutes
-            | Function::Seconds
+        // CEIL, FLOOR, ROUND, SECONDS now return typed literal dict IDs, not raw numerics.
     )
 }
