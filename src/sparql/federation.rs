@@ -95,6 +95,11 @@ fn get_agent(timeout: Duration, pool_size: usize) -> ureq::Agent {
     })
 }
 
+/// Public wrapper around `get_agent` for use by `federation_planner` (v0.42.0).
+pub(crate) fn get_agent_pub(timeout: Duration, pool_size: usize) -> ureq::Agent {
+    get_agent(timeout, pool_size)
+}
+
 // ─── Allowlist check ─────────────────────────────────────────────────────────
 
 /// Returns `true` when `url` is registered in `_pg_ripple.federation_endpoints`
@@ -132,16 +137,15 @@ pub(crate) fn get_local_view(url: &str) -> Option<String> {
 pub(crate) fn get_service_graph_ids() -> Vec<i64> {
     let mut result = Vec::new();
     Spi::connect(|client| {
-        let rows = client
-            .select(
-                "SELECT d.id
+        let rows = client.select(
+            "SELECT d.id
                    FROM _pg_ripple.federation_endpoints fe
                    JOIN _pg_ripple.dictionary d
                      ON d.value = fe.graph_iri AND d.kind = 0
                   WHERE fe.graph_iri IS NOT NULL AND fe.enabled = true",
-                None,
-                &[],
-            );
+            None,
+            &[],
+        );
         if let Ok(rows) = rows {
             for row in rows {
                 if let Ok(Some(id)) = row.get::<i64>(1) {
@@ -185,9 +189,7 @@ pub(crate) fn get_all_graph_endpoints() -> Vec<(String, String)> {
             )
             .unwrap_or_else(|e| pgrx::error!("get_all_graph_endpoints SPI error: {e}"));
         for row in rows {
-            if let (Ok(Some(url)), Ok(Some(giri))) =
-                (row.get::<String>(1), row.get::<String>(2))
-            {
+            if let (Ok(Some(url)), Ok(Some(giri))) = (row.get::<String>(1), row.get::<String>(2)) {
                 result.push((url, giri));
             }
         }

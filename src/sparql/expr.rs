@@ -629,10 +629,7 @@ pub(super) fn translate_function_value(
                 .collect::<Vec<_>>()
                 .join(" AND ");
 
-            let parts: Vec<String> = cols
-                .iter()
-                .map(|col| decode_lexical_sql(col))
-                .collect();
+            let parts: Vec<String> = cols.iter().map(|col| decode_lexical_sql(col)).collect();
             if parts.is_empty() {
                 return None;
             }
@@ -641,8 +638,10 @@ pub(super) fn translate_function_value(
             // Determine lang preservation: all dict lang-tagged with same lang.
             if cols.len() == 1 {
                 let g = string_guard_sql(&cols[0]);
-                Some(format!("CASE WHEN ({g}) IS NULL THEN NULL ELSE {} END",
-                    encode_preserving_lang(&cols[0], &concat_expr)))
+                Some(format!(
+                    "CASE WHEN ({g}) IS NULL THEN NULL ELSE {} END",
+                    encode_preserving_lang(&cols[0], &concat_expr)
+                ))
             } else {
                 // Multi-arg: check all args have same lang via SQL
                 let first_col = &cols[0];
@@ -709,7 +708,9 @@ pub(super) fn translate_function_value(
             };
             // Type check: REPLACE is a type error for non-string literals (inline → NULL).
             let result = encode_preserving_lang(&str_col, &new_lex);
-            Some(format!("CASE WHEN {str_col} < 0 THEN NULL ELSE {result} END"))
+            Some(format!(
+                "CASE WHEN {str_col} < 0 THEN NULL ELSE {result} END"
+            ))
         }
 
         // ── ENCODE_FOR_URI ───────────────────────────────────────────────────
@@ -971,13 +972,17 @@ pub(super) fn translate_function_value(
             *is_numeric = true;
             let col = translate_arg_value(args.first()?, bindings, ctx)?;
             let text = decode_lexical_sql(&col);
-            Some(format!("(substring({text} FROM '^\\d{{4}}-(\\d{{2}})-'))::bigint"))
+            Some(format!(
+                "(substring({text} FROM '^\\d{{4}}-(\\d{{2}})-'))::bigint"
+            ))
         }
         Function::Day => {
             *is_numeric = true;
             let col = translate_arg_value(args.first()?, bindings, ctx)?;
             let text = decode_lexical_sql(&col);
-            Some(format!("(substring({text} FROM '^\\d{{4}}-\\d{{2}}-(\\d{{2}})T'))::bigint"))
+            Some(format!(
+                "(substring({text} FROM '^\\d{{4}}-\\d{{2}}-(\\d{{2}})T'))::bigint"
+            ))
         }
         Function::Hours => {
             *is_numeric = true;
@@ -989,7 +994,9 @@ pub(super) fn translate_function_value(
             *is_numeric = true;
             let col = translate_arg_value(args.first()?, bindings, ctx)?;
             let text = decode_lexical_sql(&col);
-            Some(format!("(substring({text} FROM 'T\\d{{2}}:(\\d{{2}}):'))::bigint"))
+            Some(format!(
+                "(substring({text} FROM 'T\\d{{2}}:(\\d{{2}}):'))::bigint"
+            ))
         }
         Function::Seconds => {
             // SPARQL spec: SECONDS returns xsd:decimal (not xsd:integer).
@@ -1321,8 +1328,7 @@ pub(super) fn is_numeric_function(func: &Function) -> bool {
             | Function::Month
             | Function::Day
             | Function::Hours
-            | Function::Minutes
-        // CEIL, FLOOR, ROUND, SECONDS now return typed literal dict IDs, not raw numerics.
+            | Function::Minutes // CEIL, FLOOR, ROUND, SECONDS now return typed literal dict IDs, not raw numerics.
     )
 }
 
@@ -1332,13 +1338,25 @@ pub(super) fn is_numeric_function(func: &Function) -> bool {
 /// (e.g. `xsd:integer`) that we support, otherwise `None`.
 fn xsd_cast_datatype(iri: &str) -> Option<&'static str> {
     match iri {
-        "http://www.w3.org/2001/XMLSchema#integer" => Some("http://www.w3.org/2001/XMLSchema#integer"),
-        "http://www.w3.org/2001/XMLSchema#decimal" => Some("http://www.w3.org/2001/XMLSchema#decimal"),
-        "http://www.w3.org/2001/XMLSchema#double"  => Some("http://www.w3.org/2001/XMLSchema#double"),
-        "http://www.w3.org/2001/XMLSchema#float"   => Some("http://www.w3.org/2001/XMLSchema#float"),
-        "http://www.w3.org/2001/XMLSchema#string"  => Some("http://www.w3.org/2001/XMLSchema#string"),
-        "http://www.w3.org/2001/XMLSchema#boolean" => Some("http://www.w3.org/2001/XMLSchema#boolean"),
-        "http://www.w3.org/2001/XMLSchema#dateTime"=> Some("http://www.w3.org/2001/XMLSchema#dateTime"),
+        "http://www.w3.org/2001/XMLSchema#integer" => {
+            Some("http://www.w3.org/2001/XMLSchema#integer")
+        }
+        "http://www.w3.org/2001/XMLSchema#decimal" => {
+            Some("http://www.w3.org/2001/XMLSchema#decimal")
+        }
+        "http://www.w3.org/2001/XMLSchema#double" => {
+            Some("http://www.w3.org/2001/XMLSchema#double")
+        }
+        "http://www.w3.org/2001/XMLSchema#float" => Some("http://www.w3.org/2001/XMLSchema#float"),
+        "http://www.w3.org/2001/XMLSchema#string" => {
+            Some("http://www.w3.org/2001/XMLSchema#string")
+        }
+        "http://www.w3.org/2001/XMLSchema#boolean" => {
+            Some("http://www.w3.org/2001/XMLSchema#boolean")
+        }
+        "http://www.w3.org/2001/XMLSchema#dateTime" => {
+            Some("http://www.w3.org/2001/XMLSchema#dateTime")
+        }
         _ => None,
     }
 }

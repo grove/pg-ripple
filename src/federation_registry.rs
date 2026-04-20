@@ -1,5 +1,111 @@
 //! pg_ripple SQL API — SPARQL Federation endpoint registry (v0.16.0)
 
+/// Check whether a URL's hostname resolves to a private/loopback/link-local address.
+///
+/// When `pg_ripple.federation_allow_private` is `false` (default), this function
+/// returns `Err` with a PT621 message if the resolved IP is in RFC 1918,
+/// loopback (127.x), link-local (169.254.x), or IPv6 link-local ranges (v0.42.0).
+fn check_private_ip(url: &str) -> Result<(), String> {
+    if crate::FEDERATION_ALLOW_PRIVATE.get() {
+        return Ok(());
+    }
+
+    // Extract hostname from the URL.
+    let host = extract_host(url);
+    if host.is_empty() {
+        return Ok(()); // Cannot extract host — let the HTTP call fail later.
+    }
+
+    // Try to resolve the host to IP addresses.
+    use std::net::ToSocketAddrs;
+    let addrs_result = format!("{host}:80").to_socket_addrs();
+    let addrs = match addrs_result {
+        Ok(a) => a,
+        Err(_) => return Ok(()), // DNS failure — let the HTTP call fail later.
+    };
+
+    for addr in addrs {
+        let ip = addr.ip();
+        if is_private_ip(ip) {
+            return Err(format!(
+                "PT621: register_endpoint: endpoint URL '{url}' resolves to a \
+                 private/loopback/link-local address ({ip}); \
+                 set pg_ripple.federation_allow_private = true to override"
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Extract the hostname from an HTTP/HTTPS URL.
+fn extract_host(url: &str) -> String {
+    // Simple extraction: strip scheme, take up to first '/' or ':' (port).
+    let without_scheme = url
+        .strip_prefix("https://")
+        .or_else(|| url.strip_prefix("http://"))
+        .unwrap_or("");
+    // Strip path.
+    let host_and_port = without_scheme.split('/').next().unwrap_or(without_scheme);
+    // Strip port.
+    if let Some(bracket_end) = host_and_port.rfind(']') {
+        // IPv6 literal like [::1]:8080
+        return host_and_port[..=bracket_end]
+            .trim_matches(['[', ']'])
+            .to_owned();
+    }
+    host_and_port
+        .split(':')
+        .next()
+        .unwrap_or(host_and_port)
+        .to_owned()
+}
+
+/// Returns true if the given IP address is private, loopback, or link-local.
+fn is_private_ip(ip: std::net::IpAddr) -> bool {
+    match ip {
+        std::net::IpAddr::V4(v4) => {
+            let octets = v4.octets();
+            // Loopback: 127.0.0.0/8
+            if octets[0] == 127 {
+                return true;
+            }
+            // RFC 1918: 10.0.0.0/8
+            if octets[0] == 10 {
+                return true;
+            }
+            // RFC 1918: 172.16.0.0/12
+            if octets[0] == 172 && (octets[1] >= 16 && octets[1] <= 31) {
+                return true;
+            }
+            // RFC 1918: 192.168.0.0/16
+            if octets[0] == 192 && octets[1] == 168 {
+                return true;
+            }
+            // Link-local: 169.254.0.0/16
+            if octets[0] == 169 && octets[1] == 254 {
+                return true;
+            }
+            false
+        }
+        std::net::IpAddr::V6(v6) => {
+            // Loopback: ::1
+            if v6.is_loopback() {
+                return true;
+            }
+            // IPv6 link-local: fe80::/10
+            let segs = v6.segments();
+            if (segs[0] & 0xffc0) == 0xfe80 {
+                return true;
+            }
+            // Unique local: fc00::/7
+            if (segs[0] & 0xfe00) == 0xfc00 {
+                return true;
+            }
+            false
+        }
+    }
+}
+
 #[pgrx::pg_schema]
 mod pg_ripple {
     use pgrx::prelude::*;
@@ -36,6 +142,12 @@ mod pg_ripple {
                 url
             );
         }
+
+        // v0.42.0: Reject private/loopback/link-local IPs unless allowed by GUC.
+        if let Err(msg) = super::check_private_ip(url) {
+            pgrx::error!("{}", msg);
+        }
+
         let local_view = local_view_name.unwrap_or("");
         let cx = complexity.unwrap_or("normal");
         if local_view.is_empty() {
@@ -63,6 +175,15 @@ mod pg_ripple {
                 ],
             )
             .unwrap_or_else(|e| pgrx::error!("register_endpoint failed: {e}"));
+        }
+
+        // v0.42.0: Attempt to fetch VoID statistics for the newly registered endpoint.
+        // This is best-effort — failures are logged but do not abort the registration.
+        // Only attempt for real HTTP endpoints (not mock graph_iri endpoints).
+        if graph_iri.is_none() {
+            let _ = std::panic::catch_unwind(|| {
+                crate::sparql::federation_planner::refresh_endpoint_stats(url);
+            });
         }
     }
 

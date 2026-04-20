@@ -3273,45 +3273,45 @@ Smoke subset (180 tests) passes with 0 unexpected failures on `main`. Full suite
 
 ### Deliverables
 
-- [ ] **Parallel merge worker pool** (`src/worker.rs`, `src/storage/merge.rs`)
+- [x] **Parallel merge worker pool** (`src/worker.rs`, `src/storage/merge.rs`)
   - New GUC `pg_ripple.merge_workers` (integer, default `1`, max `16`) — spawns N `BackgroundWorker` processes each managing a disjoint round-robin subset of predicates
   - Per-predicate `pg_advisory_lock` (from v0.37.0) ensures no two workers race on the same VP table
   - Work-stealing: idle workers check the global queue for any predicate above `pg_ripple.merge_threshold` not yet claimed
   - Stress test `tests/stress/parallel_merge.sh`: 100 concurrent writers × 100 predicates × 4 workers; assert correctness and no deadlocks after 10 minutes
   - Benchmark: 4 merge workers on a workload with 100 distinct predicates shows ≥3× throughput vs. single worker
-- [ ] **`owl:sameAs` cluster size bound** (`src/datalog/builtins.rs`)
+- [x] **`owl:sameAs` cluster size bound** (`src/datalog/builtins.rs`)
   - New GUC `pg_ripple.sameas_max_cluster_size` (integer, default `100_000`)
   - Detect over-large equivalence classes during canonicalization; emit `PT550` WARNING and short-circuit with Tarjan-SCC sampling approximation
   - pg_regress test `sameas_large_cluster.sql`
-- [ ] **VoID statistics catalog per federation endpoint** (`src/sparql/federation.rs`, `_pg_ripple.endpoint_stats` table)
+- [x] **VoID statistics catalog per federation endpoint** (`src/sparql/federation.rs`, `_pg_ripple.endpoint_stats` table)
   - On endpoint registration, fetch and cache the endpoint's VoID description
   - Refresh driven by new GUC `pg_ripple.federation_stats_ttl_secs` (integer, default `3600`)
   - Statistics used by the planner: triple count per predicate, distinct subjects/objects
-- [ ] **Cost-based federation source selection** (`src/sparql/federation_planner.rs` new module)
+- [x] **Cost-based federation source selection** (`src/sparql/federation_planner.rs` new module)
   - FedX-style planner: for each BGP atom rank endpoints by estimated selectivity using VoID stats; assign each atom to its best source
   - Independent atoms (no shared variables) scheduled for parallel execution
   - GUC `pg_ripple.federation_planner_enabled` (bool, default `true`)
   - GUC `pg_ripple.federation_parallel_max` (integer, default `4`)
   - GUC `pg_ripple.federation_parallel_timeout` (integer, default `60` seconds)
   - pg_regress test `federation_planner.sql`: two registered mock endpoints; verify atom routing and timeout behaviour
-- [ ] **Parallel SERVICE execution** (`src/sparql/federation.rs`)
+- [x] **Parallel SERVICE execution** (`src/sparql/federation.rs`)
   - Independent SERVICE clauses dispatched concurrently via background workers; results reassembled before outer join
   - Bounded by `pg_ripple.federation_parallel_max`
-- [ ] **Federation result streaming** (`src/sparql/federation.rs`)
+- [x] **Federation result streaming** (`src/sparql/federation.rs`)
   - SERVICE responses exceeding `pg_ripple.federation_inline_max_rows` (new GUC, default `10_000`) are spooled into a temporary table rather than inlined as `VALUES`
   - Error code `PT620` INFO when spooling is triggered
-- [ ] **IP/CIDR allowlist for federation endpoints** (`src/sparql/federation.rs`)
+- [x] **IP/CIDR allowlist for federation endpoints** (`src/sparql/federation.rs`)
   - Resolve hostname on endpoint registration; deny RFC 1918, link-local (`169.254.x.x`), loopback, and IPv6 link-local by default
   - New GUC `pg_ripple.federation_allow_private` (bool, default `false`) to override
   - Error code `PT621` when a private-IP endpoint is rejected
-- [ ] **HTTPS certificate validation for HTTP companion** (`pg_ripple_http/src/main.rs`)
+- [x] **HTTPS certificate validation for HTTP companion** (`pg_ripple_http/src/main.rs`)
   - Default to system trust store via `rustls-native-certs`
   - Env var `PG_RIPPLE_HTTP_CA_BUNDLE` — path to a custom CA PEM for private-PKI federation targets
   - Reject self-signed certificates unless `PG_RIPPLE_HTTP_ALLOW_SELF_SIGNED=true`
   - Fix CORS defaults: explicit origin allowlist via `PG_RIPPLE_HTTP_CORS_ORIGINS`; `*` requires opt-in
   - Fix X-Forwarded-For: trust only when `PG_RIPPLE_HTTP_TRUST_PROXY` env lists upstream IP/CIDR
   - Body limit configurable via `PG_RIPPLE_HTTP_MAX_BODY_BYTES` (default `10_485_760`)
-- [ ] **Live RDF CDC subscriptions** (`src/cdc.rs`, `pg_ripple_http/src/ws.rs` new module)
+- [x] **Live RDF CDC subscriptions** (`src/cdc.rs`, `pg_ripple_http/src/ws.rs` new module)
   - `pg_ripple.create_subscription(name TEXT, filter_sparql TEXT DEFAULT NULL, filter_shape TEXT DEFAULT NULL) RETURNS BOOLEAN`
   - Publishes via `NOTIFY pg_ripple_cdc_{name}` with JSON payload: `{"op": "add"|"remove", "s": "…", "p": "…", "o": "…", "g": "…"}`
   - WebSocket endpoint `/ws/subscriptions/{name}` in `pg_ripple_http`; supports `text/turtle`, `application/ld+json`, `application/json` via `Accept`
@@ -3326,12 +3326,12 @@ Smoke subset (180 tests) passes with 0 unexpected failures on `main`. Full suite
 
 ### Documentation
 
-- [ ] `user-guide/operations/merge-workers.md` (new) — tuning `merge_workers` for predicate-rich workloads; monitoring via `diagnostic_report()`
-- [ ] `user-guide/features/cdc-subscriptions.md` (new) — complete tutorial: subscribe, filter, consume via SQL LISTEN and WebSocket; integration patterns with GraphRAG, ML feature stores, and live dashboards
+- [x] `user-guide/operations/merge-workers.md` (new) — tuning `merge_workers` for predicate-rich workloads; monitoring via `diagnostic_report()`
+- [x] `user-guide/features/cdc-subscriptions.md` (new) — complete tutorial: subscribe, filter, consume via SQL LISTEN and WebSocket; integration patterns with GraphRAG, ML feature stores, and live dashboards
 - [ ] `user-guide/features/federation.md` — updated: VoID stats, cost-based planner, parallel SERVICE, result streaming, IP restrictions
-- [ ] `reference/guc-reference.md` — all new GUCs documented; security guidance on `federation_allow_private`
-- [ ] `reference/error-reference.md` — PT550, PT620, PT621 documented
-- [ ] Release notes for v0.42.0
+- [x] `reference/guc-reference.md` — all new GUCs documented; security guidance on `federation_allow_private`
+- [x] `reference/error-reference.md` — PT550, PT620, PT621 documented
+- [x] Release notes for v0.42.0
 
 ### Exit Criteria
 

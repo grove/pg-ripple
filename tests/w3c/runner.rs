@@ -401,7 +401,11 @@ fn run_test_inner(client: &mut postgres::Client, tc: &TestCase, timeout: Duratio
     }
 }
 
-fn run_update_test(client: &mut postgres::Client, tc: &TestCase, _timeout: Duration) -> TestOutcome {
+fn run_update_test(
+    client: &mut postgres::Client,
+    tc: &TestCase,
+    _timeout: Duration,
+) -> TestOutcome {
     let query_file = match &tc.query_file {
         Some(f) => f.clone(),
         None => return TestOutcome::Skip("no update query file".into()),
@@ -430,11 +434,8 @@ fn run_update_test(client: &mut postgres::Client, tc: &TestCase, _timeout: Durat
     }
 
     // Compare resulting graph state against expected.
-    let result = validator::validate_update(
-        &mut tx,
-        &tc.update_result_data,
-        &tc.update_result_graphs,
-    );
+    let result =
+        validator::validate_update(&mut tx, &tc.update_result_data, &tc.update_result_graphs);
 
     let _ = tx.rollback();
 

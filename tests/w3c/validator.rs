@@ -114,7 +114,7 @@ pub fn validate_update(
                 return ValidationResult::Skip(format!(
                     "reading expected default graph {}: {e}",
                     expected_file.display()
-                ))
+                ));
             }
         };
 
@@ -155,24 +155,21 @@ pub fn validate_update(
                 return ValidationResult::Skip(format!(
                     "reading expected named graph {}: {e}",
                     expected_file.display()
-                ))
+                ));
             }
         };
 
         // Build the SPARQL CONSTRUCT query for this named graph.
         // Note: graph_iri comes from trusted W3C test manifest data.
-        let construct_query = format!(
-            "CONSTRUCT {{ ?s ?p ?o }} WHERE {{ GRAPH <{graph_iri}> {{ ?s ?p ?o }} }}"
-        );
+        let construct_query =
+            format!("CONSTRUCT {{ ?s ?p ?o }} WHERE {{ GRAPH <{graph_iri}> {{ ?s ?p ?o }} }}");
         let rows = match tx.query(
             "SELECT result FROM pg_ripple.sparql_construct($1)",
             &[&construct_query],
         ) {
             Ok(r) => r,
             Err(e) => {
-                return ValidationResult::Fail(format!(
-                    "querying named graph <{graph_iri}>: {e}"
-                ))
+                return ValidationResult::Fail(format!("querying named graph <{graph_iri}>: {e}"));
             }
         };
 
@@ -191,10 +188,10 @@ pub fn validate_update(
         match compare_triple_sets(&expected_triples, &actual_triples) {
             ValidationResult::Pass => {}
             ValidationResult::Fail(msg) => {
-                return ValidationResult::Fail(format!("named graph <{graph_iri}>: {msg}"))
+                return ValidationResult::Fail(format!("named graph <{graph_iri}>: {msg}"));
             }
             ValidationResult::Skip(msg) => {
-                return ValidationResult::Skip(format!("named graph <{graph_iri}>: {msg}"))
+                return ValidationResult::Skip(format!("named graph <{graph_iri}>: {msg}"));
             }
         }
     }
@@ -359,15 +356,9 @@ fn parse_pg_ripple_binding(json: &Value, vars: &[String]) -> HashMap<String, Str
                     }
                     Value::Number(n) => {
                         if let Some(i) = n.as_i64() {
-                            format!(
-                                "\"{}\"^^<http://www.w3.org/2001/XMLSchema#integer>",
-                                i
-                            )
+                            format!("\"{}\"^^<http://www.w3.org/2001/XMLSchema#integer>", i)
                         } else if let Some(f) = n.as_f64() {
-                            format!(
-                                "\"{}\"^^<http://www.w3.org/2001/XMLSchema#decimal>",
-                                f
-                            )
+                            format!("\"{}\"^^<http://www.w3.org/2001/XMLSchema#decimal>", f)
                         } else {
                             continue;
                         }
@@ -506,10 +497,10 @@ fn try_bnode_row_match(
     normalize: &impl Fn(&str) -> String,
 ) -> bool {
     // Check if any row contains a blank node.
-    let has_bnode = expected
-        .iter()
-        .chain(actual.iter())
-        .any(|row| vars.iter().any(|v| row.get(v).map_or(false, |t| t.starts_with("_:"))));
+    let has_bnode = expected.iter().chain(actual.iter()).any(|row| {
+        vars.iter()
+            .any(|v| row.get(v).map_or(false, |t| t.starts_with("_:")))
+    });
     if !has_bnode {
         return false;
     }
@@ -735,11 +726,7 @@ fn normalize_lang_tag_case(s: &str) -> String {
     // if it consists only of alphanumeric chars and hyphens.
     if let Some(at_pos) = s.rfind('@') {
         let after = &s[at_pos + 1..];
-        if !after.is_empty()
-            && after
-                .chars()
-                .all(|c| c.is_ascii_alphanumeric() || c == '-')
-        {
+        if !after.is_empty() && after.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
             let before = &s[..at_pos + 1];
             return format!("{}{}", before, after.to_lowercase());
         }
@@ -816,7 +803,8 @@ fn validate_select_rs_ttl(
     };
 
     // RS vocabulary IRIs
-    const RS_RESULT_VAR: &str = "<http://www.w3.org/2001/sw/DataAccess/tests/result-set#resultVariable>";
+    const RS_RESULT_VAR: &str =
+        "<http://www.w3.org/2001/sw/DataAccess/tests/result-set#resultVariable>";
     const RS_SOLUTION: &str = "<http://www.w3.org/2001/sw/DataAccess/tests/result-set#solution>";
     const RS_BINDING: &str = "<http://www.w3.org/2001/sw/DataAccess/tests/result-set#binding>";
     const RS_VARIABLE: &str = "<http://www.w3.org/2001/sw/DataAccess/tests/result-set#variable>";
@@ -855,9 +843,7 @@ fn validate_select_rs_ttl(
     let solution_nodes: Vec<String> = triples
         .iter()
         .filter(|t| t.contains(RS_SOLUTION))
-        .filter_map(|t| {
-            t.split(RS_SOLUTION).nth(1).map(|s| s.trim().to_string())
-        })
+        .filter_map(|t| t.split(RS_SOLUTION).nth(1).map(|s| s.trim().to_string()))
         .collect();
 
     // For each solution, collect bindings.
@@ -905,7 +891,6 @@ fn validate_select_rs_ttl(
     compare_binding_sets(&expected_bindings, &actual_bindings, &vars)
 }
 
-
 /// Parse a Turtle file into a set of canonical "s p o" strings.
 fn parse_turtle_to_triple_set(
     path: &Path,
@@ -931,7 +916,9 @@ fn parse_turtle_to_triple_set_with_base(
         format!("file://{}", path.display())
     };
     // Prepend @base if the file doesn't already declare one.
-    let has_base = content.split_whitespace().next()
+    let has_base = content
+        .split_whitespace()
+        .next()
         .map(|w| w.eq_ignore_ascii_case("@base") || w.eq_ignore_ascii_case("BASE"))
         .unwrap_or(false);
     let with_base;

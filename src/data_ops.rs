@@ -27,6 +27,55 @@ mod pg_ripple {
         crate::cdc::unsubscribe(channel)
     }
 
+    // ── Named CDC subscriptions (v0.42.0) ────────────────────────────────────
+
+    /// Create a named CDC subscription (v0.42.0).
+    ///
+    /// After creation, any triple change (INSERT/DELETE) that matches the
+    /// optional `filter_sparql` SPARQL pattern or `filter_shape` SHACL shape
+    /// will emit a `NOTIFY pg_ripple_cdc_{name}` with a JSON payload:
+    ///
+    /// ```json
+    /// {"op": "add"|"remove", "s": "...", "p": "...", "o": "...", "g": "..."}
+    /// ```
+    ///
+    /// When `filter_sparql` is NULL, all triple changes are published.
+    /// When `filter_shape` is NULL, shape-based filtering is disabled.
+    ///
+    /// Returns TRUE if the subscription was created, FALSE if it already exists.
+    #[pg_extern]
+    fn create_subscription(
+        name: &str,
+        filter_sparql: default!(Option<&str>, "NULL"),
+        filter_shape: default!(Option<&str>, "NULL"),
+    ) -> bool {
+        crate::cdc::create_named_subscription(name, filter_sparql, filter_shape)
+    }
+
+    /// Drop a named CDC subscription (v0.42.0).
+    ///
+    /// Returns TRUE if the subscription was found and removed, FALSE if it did not exist.
+    #[pg_extern]
+    fn drop_subscription(name: &str) -> bool {
+        crate::cdc::drop_named_subscription(name)
+    }
+
+    /// List all named CDC subscriptions (v0.42.0).
+    ///
+    /// Returns `(name, filter_sparql, filter_shape, created_at)` for each subscription.
+    #[pg_extern]
+    fn list_subscriptions() -> pgrx::iter::TableIterator<
+        'static,
+        (
+            pgrx::name!(name, String),
+            pgrx::name!(filter_sparql, Option<String>),
+            pgrx::name!(filter_shape, Option<String>),
+            pgrx::name!(created_at, pgrx::datum::TimestampWithTimeZone),
+        ),
+    > {
+        crate::cdc::list_named_subscriptions()
+    }
+
     // ── Subject / Object pattern index (v0.6.0) ───────────────────────────────
 
     /// Return the sorted array of predicate IDs for a given subject ID.

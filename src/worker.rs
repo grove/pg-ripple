@@ -22,19 +22,34 @@ use pgrx::prelude::*;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 
-/// Register the background merge worker with the postmaster.
+/// Register background merge worker(s) with the postmaster.
 ///
-/// Called once from `_PG_init` when PostgreSQL loads the extension library
-/// at startup (requires `shared_preload_libraries = 'pg_ripple'`).
+/// When `pg_ripple.merge_workers > 1`, multiple workers are spawned, each
+/// assigned a round-robin subset of predicates by worker index.  `pg_advisory_lock`
+/// ensures no two workers race on the same VP table (v0.42.0).
+///
+/// Called once from `_PG_init` during shared_preload_libraries phase.
+pub fn register_merge_workers() {
+    let n_workers = crate::MERGE_WORKERS.get().clamp(1, 16) as u32;
+    for worker_idx in 0..n_workers {
+        // Encode the worker index into the bgworker argument datum so the
+        // entry-point function knows which predicate subset to own.
+        BackgroundWorkerBuilder::new(&format!("pg_ripple merge worker {worker_idx}"))
+            .set_function("pg_ripple_merge_worker_main")
+            .set_library("pg_ripple")
+            .enable_shmem_access(None)
+            .set_argument((worker_idx as i32).into_datum())
+            .enable_spi_access()
+            .set_start_time(BgWorkerStartTime::RecoveryFinished)
+            .set_restart_time(Some(Duration::from_secs(10)))
+            .load();
+    }
+}
+
+/// Legacy single-worker shim kept for backward compatibility.
+#[allow(dead_code)]
 pub fn register_merge_worker() {
-    BackgroundWorkerBuilder::new("pg_ripple merge worker")
-        .set_function("pg_ripple_merge_worker_main")
-        .set_library("pg_ripple")
-        .enable_shmem_access(None)
-        .enable_spi_access()
-        .set_start_time(BgWorkerStartTime::RecoveryFinished)
-        .set_restart_time(Some(Duration::from_secs(10)))
-        .load();
+    register_merge_workers();
 }
 
 /// Entry point for the background merge worker process.
@@ -46,21 +61,33 @@ pub fn register_merge_worker() {
 /// proper PostgreSQL error handling and symbol visibility.
 #[pg_guard]
 #[unsafe(no_mangle)]
-pub extern "C-unwind" fn pg_ripple_merge_worker_main(_arg: pg_sys::Datum) {
+pub extern "C-unwind" fn pg_ripple_merge_worker_main(arg: pg_sys::Datum) {
     // Attach signal handlers: wake on SIGHUP, stop on SIGTERM.
     BackgroundWorker::attach_signal_handlers(SignalWakeFlags::SIGHUP | SignalWakeFlags::SIGTERM);
 
+    // Decode worker index from bgworker argument (v0.42.0 parallel merge pool).
+    // Worker 0 also handles the merge worker PID for the latch mechanism.
+    // SAFETY: arg is the i32 datum we passed in set_argument(); it is valid as long
+    // as this is a pgrx-managed background worker entry point.
+    let worker_idx: u32 = unsafe {
+        i32::from_datum(arg, false).unwrap_or(0).max(0) as u32
+    };
+
     // Record our PID in shared memory so backends can poke our latch.
-    let my_pid = unsafe { pg_sys::MyProcPid };
-    crate::shmem::MERGE_WORKER_PID
-        .get()
-        .store(my_pid, Ordering::Release);
+    // Only worker 0 writes to the shared PID (other workers also process merges
+    // but backends always wake worker 0 as the primary latch target).
+    if worker_idx == 0 {
+        let my_pid = unsafe { pg_sys::MyProcPid };
+        crate::shmem::MERGE_WORKER_PID
+            .get()
+            .store(my_pid, Ordering::Release);
+    }
 
     // Connect to SPI in the target database.
     let db_name = get_worker_database();
     BackgroundWorker::connect_worker_to_spi(Some(&db_name), None);
 
-    pgrx::log!("pg_ripple merge worker started (database: {db_name})");
+    pgrx::log!("pg_ripple merge worker {worker_idx} started (database: {db_name})");
 
     // Main loop: wait for latch or timeout, then run a merge cycle.
     let interval_secs = get_merge_interval();
@@ -68,17 +95,24 @@ pub extern "C-unwind" fn pg_ripple_merge_worker_main(_arg: pg_sys::Datum) {
     while BackgroundWorker::wait_latch(Some(Duration::from_secs(interval_secs))) {
         if BackgroundWorker::sighup_received() {
             // SIGHUP: reload configuration.  The GUC system handles this.
-            pgrx::log!("pg_ripple merge worker: SIGHUP received — configuration reloaded");
+            pgrx::log!(
+                "pg_ripple merge worker {worker_idx}: SIGHUP received — configuration reloaded"
+            );
         }
+
+        let n_workers = crate::MERGE_WORKERS.get().clamp(1, 16) as u32;
 
         // Run merge cycle followed by async validation batch.
         let run_result = std::panic::catch_unwind(|| {
             BackgroundWorker::transaction(|| {
-                run_merge_cycle();
+                run_merge_cycle_for_worker(worker_idx, n_workers);
             });
-            BackgroundWorker::transaction(|| {
-                run_validation_cycle();
-            });
+            // Only worker 0 runs validation and embedding queue drain.
+            if worker_idx == 0 {
+                BackgroundWorker::transaction(|| {
+                    run_validation_cycle();
+                });
+            }
         });
 
         if let Err(e) = run_result {
@@ -114,12 +148,14 @@ pub extern "C-unwind" fn pg_ripple_merge_worker_main(_arg: pg_sys::Datum) {
         consecutive_errors = 0;
     }
 
-    // Worker is terminating.  Clear our PID from shared memory.
-    crate::shmem::MERGE_WORKER_PID
-        .get()
-        .store(0, Ordering::Release);
+    // Worker is terminating.  Only worker 0 clears the shared PID.
+    if worker_idx == 0 {
+        crate::shmem::MERGE_WORKER_PID
+            .get()
+            .store(0, Ordering::Release);
+    }
 
-    pgrx::log!("pg_ripple merge worker stopped");
+    pgrx::log!("pg_ripple merge worker {worker_idx} stopped");
 }
 
 /// Run one async validation batch inside an open SPI transaction.
@@ -143,7 +179,21 @@ fn run_validation_cycle() {
 }
 
 /// Run one merge cycle inside an open SPI transaction.
+/// Delegates to `run_merge_cycle_for_worker(0, 1)` for backward compatibility.
+#[allow(dead_code)]
 fn run_merge_cycle() {
+    run_merge_cycle_for_worker(0, 1);
+}
+
+/// Run one merge cycle for the given worker in a parallel pool (v0.42.0).
+///
+/// `worker_idx`: zero-based index of this worker.
+/// `n_workers`: total number of workers in the pool.
+///
+/// Each worker owns predicates where `(pred_id % n_workers) == worker_idx`.
+/// Before merging each predicate, the worker acquires `pg_advisory_lock(pred_id)`
+/// to prevent races when `n_workers > 1`.
+fn run_merge_cycle_for_worker(worker_idx: u32, n_workers: u32) {
     // Check whether any deltas need merging.
     if crate::shmem::delta_is_empty() {
         // Nothing to merge.
@@ -152,7 +202,7 @@ fn run_merge_cycle() {
 
     let threshold = get_merge_threshold();
 
-    // Find predicates whose delta table has >= threshold rows.
+    // Find predicates assigned to this worker (round-robin by pred_id % n_workers).
     let pred_ids: Vec<i64> = Spi::connect(|c| {
         c.select(
             "SELECT id FROM _pg_ripple.predicates WHERE htap = true",
@@ -161,11 +211,45 @@ fn run_merge_cycle() {
         )
         .unwrap_or_else(|e| pgrx::error!("merge worker: predicates scan error: {e}"))
         .filter_map(|row| row.get::<i64>(1).ok().flatten())
+        .filter(|&id| {
+            // Round-robin partition: this worker handles predicates where
+            // (id % n_workers) == worker_idx.  When n_workers == 1 all predicates
+            // are assigned to worker 0.
+            if n_workers <= 1 {
+                true
+            } else {
+                // Use abs to handle negative IDs correctly.
+                let bucket = (id.unsigned_abs() % (n_workers as u64)) as u32;
+                bucket == worker_idx
+            }
+        })
         .collect()
     });
 
+    // Also check for work-stealing: if any predicate above threshold is not
+    // claimed by another worker (advisory lock available), process it too.
+    let all_pred_ids: Vec<i64> = if n_workers > 1 {
+        Spi::connect(|c| {
+            c.select(
+                "SELECT id FROM _pg_ripple.predicates WHERE htap = true",
+                None,
+                &[],
+            )
+            .unwrap_or_else(|e| pgrx::error!("merge worker: predicates scan error: {e}"))
+            .filter_map(|row| row.get::<i64>(1).ok().flatten())
+            .filter(|&id| {
+                let bucket = (id.unsigned_abs() % (n_workers as u64)) as u32;
+                bucket != worker_idx // only "foreign" predicates
+            })
+            .collect()
+        })
+    } else {
+        Vec::new()
+    };
+
     let mut merged_any = false;
 
+    // Process this worker's assigned predicates.
     for p_id in pred_ids {
         let delta_rows: i64 = Spi::get_one_with_args::<i64>(
             &format!("SELECT count(*)::bigint FROM _pg_ripple.vp_{p_id}_delta"),
@@ -175,8 +259,56 @@ fn run_merge_cycle() {
         .unwrap_or(0);
 
         if delta_rows >= threshold {
+            // Acquire advisory lock to prevent races with other workers.
+            if n_workers > 1 {
+                let locked: bool = Spi::get_one_with_args::<bool>(
+                    "SELECT pg_try_advisory_lock($1)",
+                    &[pgrx::datum::DatumWithOid::from(p_id)],
+                )
+                .unwrap_or(None)
+                .unwrap_or(false);
+                if !locked {
+                    continue; // Another worker is processing this predicate.
+                }
+            }
             crate::storage::merge::merge_predicate(p_id);
+            if n_workers > 1 {
+                let _ = Spi::run_with_args(
+                    "SELECT pg_advisory_unlock($1)",
+                    &[pgrx::datum::DatumWithOid::from(p_id)],
+                );
+            }
             merged_any = true;
+        }
+    }
+
+    // Work-stealing: check foreign predicates above threshold with no owner.
+    if n_workers > 1 {
+        for p_id in all_pred_ids {
+            let delta_rows: i64 = Spi::get_one_with_args::<i64>(
+                &format!("SELECT count(*)::bigint FROM _pg_ripple.vp_{p_id}_delta"),
+                &[],
+            )
+            .unwrap_or(None)
+            .unwrap_or(0);
+
+            if delta_rows >= threshold {
+                // Try to steal — only proceed if we can acquire the lock.
+                let locked: bool = Spi::get_one_with_args::<bool>(
+                    "SELECT pg_try_advisory_lock($1)",
+                    &[pgrx::datum::DatumWithOid::from(p_id)],
+                )
+                .unwrap_or(None)
+                .unwrap_or(false);
+                if locked {
+                    crate::storage::merge::merge_predicate(p_id);
+                    let _ = Spi::run_with_args(
+                        "SELECT pg_advisory_unlock($1)",
+                        &[pgrx::datum::DatumWithOid::from(p_id)],
+                    );
+                    merged_any = true;
+                }
+            }
         }
     }
 
@@ -194,11 +326,14 @@ fn run_merge_cycle() {
         pgrx::log!("pg_ripple merge worker: merge cycle complete");
     }
 
-    // Evict expired federation cache entries on each polling cycle (v0.19.0).
-    crate::sparql::federation::evict_expired_cache();
+    // Only worker 0 runs housekeeping tasks to avoid duplicate work.
+    if worker_idx == 0 {
+        // Evict expired federation cache entries on each polling cycle (v0.19.0).
+        crate::sparql::federation::evict_expired_cache();
 
-    // v0.28.0: drain embedding queue if auto_embed is on.
-    drain_embedding_queue();
+        // v0.28.0: drain embedding queue if auto_embed is on.
+        drain_embedding_queue();
+    }
 
     // A-3: clear backend-local LRU cache at end of merge transaction to prevent
     // stale IDs from being used if dictionary rows are rewritten by a future migration.

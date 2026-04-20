@@ -20,6 +20,9 @@ pub struct AppState {
     /// (`POST /datalog/rules/*`, `PUT`, `DELETE`). When `None`, the main
     /// `auth_token` governs all requests.
     pub datalog_write_token: Option<String>,
+    /// Comma-separated list of upstream IP/CIDR values that are trusted to set
+    /// `X-Forwarded-For`. `None` means X-Forwarded-For is not trusted.
+    pub trust_proxy: Option<String>,
     pub metrics: Metrics,
 }
 

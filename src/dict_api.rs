@@ -118,7 +118,6 @@ mod pg_ripple {
         })
     }
 
-
     /// Encode a quoted triple `(s, p, o)` into the dictionary.
     ///
     /// All three arguments must be N-Triples–formatted terms (IRIs, literals,

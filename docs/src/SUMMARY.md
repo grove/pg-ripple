@@ -29,6 +29,7 @@
 - [Exporting and Sharing](features/exporting-and-sharing.md)
 - [AI Retrieval & Graph RAG](features/ai-retrieval-graph-rag.md)
 - [APIs and Integration](features/apis-and-integration.md)
+- [CDC Subscriptions](features/cdc-subscriptions.md)
 
 ---
 
@@ -39,6 +40,7 @@
 - [Configuration and Tuning](operations/configuration.md)
 - [Monitoring and Observability](operations/monitoring.md)
 - [Performance Tuning](operations/performance.md)
+- [Parallel Merge Workers](operations/merge-workers.md)
 - [Backup and Disaster Recovery](operations/backup-recovery.md)
 - [Upgrading Safely](operations/upgrading.md)
 - [Scaling](operations/scaling.md)

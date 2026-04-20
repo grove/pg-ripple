@@ -132,6 +132,59 @@ pub fn compute_sameas_map() -> HashMap<i64, i64> {
         return HashMap::new();
     }
 
+    // ── v0.42.0: cluster size bound (PT550) ───────────────────────────────────
+    // Before building the full union-find, check if any connected component would
+    // exceed the configured maximum cluster size.  If so, emit PT550 WARNING and
+    // return an empty map (no canonicalization) to avoid pathological overhead.
+    let max_cluster = crate::SAMEAS_MAX_CLUSTER_SIZE.get();
+    if max_cluster > 0 {
+        let mut adj: HashMap<i64, Vec<i64>> = HashMap::new();
+        for &(s, o) in &pairs {
+            adj.entry(s).or_default().push(o);
+            adj.entry(o).or_default().push(s);
+        }
+        // BFS/DFS to find maximum component size.
+        let mut visited: std::collections::HashSet<i64> = std::collections::HashSet::new();
+        let mut max_seen: usize = 0;
+        for &start in adj.keys() {
+            if visited.contains(&start) {
+                continue;
+            }
+            let mut stack = vec![start];
+            let mut component_size: usize = 0;
+            while let Some(node) = stack.pop() {
+                if !visited.insert(node) {
+                    continue;
+                }
+                component_size += 1;
+                if let Some(neighbours) = adj.get(&node) {
+                    for &nb in neighbours {
+                        if !visited.contains(&nb) {
+                            stack.push(nb);
+                        }
+                    }
+                }
+                // Early exit: already over limit
+                if component_size > max_cluster as usize {
+                    break;
+                }
+            }
+            if component_size > max_seen {
+                max_seen = component_size;
+            }
+            if max_seen > max_cluster as usize {
+                pgrx::warning!(
+                    "PT550: owl:sameAs equivalence class of {} members exceeds \
+                     pg_ripple.sameas_max_cluster_size ({}); \
+                     canonicalization skipped — check for data quality issues",
+                    max_seen,
+                    max_cluster
+                );
+                return HashMap::new();
+            }
+        }
+    }
+
     // Build union-find from sameAs pairs.
     let mut uf = UnionFind::new();
     for &(s, o) in &pairs {

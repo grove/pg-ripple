@@ -72,7 +72,11 @@ fn vp_source(pred_id: i64) -> VpSource {
 /// Called from `pg_ripple.xsd_double_fmt()` pgrx wrapper in dict_api.rs.
 pub fn xsd_double_fmt_impl(s: &str) -> String {
     let s = s.trim();
-    let (neg, s) = if s.starts_with('-') { (true, &s[1..]) } else { (false, s) };
+    let (neg, s) = if s.starts_with('-') {
+        (true, &s[1..])
+    } else {
+        (false, s)
+    };
     let s = s.trim_start_matches('+');
 
     // Parse scientific notation if present (e.g. "1.0E2", "3.21E4", "2E-1")
@@ -196,7 +200,9 @@ fn build_all_predicates_union(graph_filter: Option<i64>, svc_excl: &str) -> Stri
             if svc_excl.is_empty() {
                 branches.push("SELECT p, s, o, g FROM _pg_ripple.vp_rare".to_owned())
             } else {
-                branches.push(format!("SELECT p, s, o, g FROM _pg_ripple.vp_rare WHERE 1=1{svc_excl}"))
+                branches.push(format!(
+                    "SELECT p, s, o, g FROM _pg_ripple.vp_rare WHERE 1=1{svc_excl}"
+                ))
             }
         }
         Some(gid) => branches.push(format!(
@@ -416,11 +422,11 @@ impl Fragment {
                 // NULL (unbound from an OPTIONAL), the other side's value fills in.
                 // This matches SPARQL semantics: unbound variables are compatible
                 // with any binding from the other side (e.g. VALUES after OPTIONAL).
-                self.conditions.push(format!(
-                    "({existing} IS NULL OR {existing} = {col})"
-                ));
+                self.conditions
+                    .push(format!("({existing} IS NULL OR {existing} = {col})"));
                 // Update binding to prefer the non-NULL value.
-                self.bindings.insert(var, format!("COALESCE({existing}, {col})"));
+                self.bindings
+                    .insert(var, format!("COALESCE({existing}, {col})"));
             } else {
                 self.bindings.insert(var, col);
             }
@@ -507,7 +513,7 @@ fn ground_term_sql_for_path(term: &TermPattern, ctx: &mut Ctx) -> Option<String>
             }
         }
         TermPattern::Literal(lit) => Some(ctx.encode_literal(lit).to_string()),
-        TermPattern::Triple(inner) => {
+        TermPattern::Triple(_inner) => {
             // Quoted triples: try static encoding only.
             ground_term_id(term, ctx).map(|id| id.to_string())
         }
@@ -619,7 +625,8 @@ fn translate_bgp(patterns: &[spargebra::term::TriplePattern], ctx: &mut Ctx) -> 
                 // v0.40.0: pass graph_filter so the union branches include WHERE g = gid.
                 let vname = v.as_str().to_owned();
                 let a = alias.clone();
-                let union_subquery = build_all_predicates_union(ctx.graph_filter, &ctx.service_excl());
+                let union_subquery =
+                    build_all_predicates_union(ctx.graph_filter, &ctx.service_excl());
                 frag.from_items
                     .push((a.clone(), format!("({union_subquery})")));
                 if let Some(existing) = frag.bindings.get(&vname) {
@@ -1237,8 +1244,7 @@ fn translate_pattern(pattern: &GraphPattern, ctx: &mut Ctx) -> Fragment {
             } else {
                 false
             };
-            if is_from_iri_var
-                || matches!(expression, Expression::FunctionCall(Function::Uuid, _))
+            if is_from_iri_var || matches!(expression, Expression::FunctionCall(Function::Uuid, _))
             {
                 ctx.raw_iri_vars.insert(variable.as_str().to_owned());
             }
@@ -1394,11 +1400,7 @@ fn translate_minus(left: &GraphPattern, right: &GraphPattern, ctx: &mut Ctx) -> 
     // Condition 1: at least one shared var is bound (non-NULL) in BOTH sides.
     let any_bound: String = shared_vars
         .iter()
-        .map(|v| {
-            format!(
-                "(_lminus._m_{v} IS NOT NULL AND _rminus._m_{v} IS NOT NULL)"
-            )
-        })
+        .map(|v| format!("(_lminus._m_{v} IS NOT NULL AND _rminus._m_{v} IS NOT NULL)"))
         .collect::<Vec<_>>()
         .join(" OR ");
 
@@ -1525,7 +1527,10 @@ fn translate_group(
         // GROUP_CONCAT produces SQL text; all others produce SQL integers.
         let is_group_concat = matches!(
             agg_expr,
-            AggregateExpression::FunctionCall { name: AggregateFunction::GroupConcat { .. }, .. }
+            AggregateExpression::FunctionCall {
+                name: AggregateFunction::GroupConcat { .. },
+                ..
+            }
         );
         let is_encoded = matches!(
             agg_expr,
@@ -1544,7 +1549,10 @@ fn translate_group(
         if is_encoded {
             encoded_agg_vars.insert(vname.clone());
         }
-        select_parts.push(format!("{encoded_sql} AS _g_{}", sanitize_sql_ident(&vname)));
+        select_parts.push(format!(
+            "{encoded_sql} AS _g_{}",
+            sanitize_sql_ident(&vname)
+        ));
         agg_bindings.push((vname.clone(), encoded_sql));
         raw_agg_for_having.push((vname, raw_sql));
     }
@@ -1651,7 +1659,8 @@ fn translate_group(
 
     // Bind group-by variables.
     for (v, _) in &group_cols {
-        frag.bindings.insert(v.clone(), format!("{alias}._g_{}", sanitize_sql_ident(v)));
+        frag.bindings
+            .insert(v.clone(), format!("{alias}._g_{}", sanitize_sql_ident(v)));
     }
     // Bind aggregate output variables and mark them as raw numeric or raw text.
     // This ensures that FILTER(?cnt >= 2) in an outer pattern (e.g. a subquery
@@ -1660,8 +1669,10 @@ fn translate_group(
     // use the literal's lexical value (text) rather than its dictionary ID.
     // SUM/AVG/MIN/MAX now produce encoded bigints — do NOT mark them as raw_numeric.
     for (vname, _) in &agg_bindings {
-        frag.bindings
-            .insert(vname.clone(), format!("{alias}._g_{}", sanitize_sql_ident(vname)));
+        frag.bindings.insert(
+            vname.clone(),
+            format!("{alias}._g_{}", sanitize_sql_ident(vname)),
+        );
         if text_agg_vars.contains(vname) {
             ctx.raw_text_vars.insert(vname.clone());
         } else if !encoded_agg_vars.contains(vname) {
@@ -1887,7 +1898,11 @@ fn rdf_minmax_agg(arg: &str, order: &str) -> String {
 }
 
 /// Obtain a SQL column reference for an expression used inside an aggregate.
-fn translate_agg_expr(expr: &Expression, bindings: &HashMap<String, String>, ctx: &mut Ctx) -> Option<String> {
+fn translate_agg_expr(
+    expr: &Expression,
+    bindings: &HashMap<String, String>,
+    ctx: &mut Ctx,
+) -> Option<String> {
     // Use value context so that variables return their raw SQL column (not a boolean IS NOT NULL).
     translate_expr_value(expr, bindings, ctx)
 }
@@ -2152,8 +2167,7 @@ fn translate_service(
 
             // Collect all variables across all arms for the UNION projection.
             let all_vars: Vec<String> = {
-                let mut vars: std::collections::HashSet<String> =
-                    std::collections::HashSet::new();
+                let mut vars: std::collections::HashSet<String> = std::collections::HashSet::new();
                 for arm in &arms {
                     vars.extend(arm.bindings.keys().cloned());
                 }
@@ -2192,7 +2206,8 @@ fn translate_service(
             let mut frag = Fragment::empty();
             frag.from_items.push((alias.clone(), union_subq));
             for var in &all_vars {
-                frag.bindings.insert(var.clone(), format!("{alias}._sv_{var}"));
+                frag.bindings
+                    .insert(var.clone(), format!("{alias}._sv_{var}"));
             }
             return frag;
         }
@@ -2353,6 +2368,10 @@ fn translate_service_local(stream_table: &str, ctx: &mut Ctx) -> Fragment {
 }
 
 /// Build a VALUES fragment from pre-encoded (i64) remote results.
+///
+/// When the row count exceeds `pg_ripple.federation_inline_max_rows`, the rows
+/// are spooled into a temporary table and a `SELECT` from that table is used
+/// instead of a VALUES clause.  Emits PT620 INFO when spooling is triggered (v0.42.0).
 fn translate_service_values(
     variables: &[String],
     encoded_rows: &[Vec<Option<i64>>],
@@ -2362,6 +2381,20 @@ fn translate_service_values(
         return Fragment::empty();
     }
 
+    let inline_max = crate::FEDERATION_INLINE_MAX_ROWS.get() as usize;
+    let row_count = encoded_rows.len();
+
+    // ── Spooling path: large result sets ─────────────────────────────────────
+    if inline_max > 0 && row_count > inline_max {
+        pgrx::info!(
+            "PT620: SERVICE result set ({row_count} rows) exceeds \
+             pg_ripple.federation_inline_max_rows ({inline_max}); \
+             spooling to temporary table"
+        );
+        return translate_service_values_spool(variables, encoded_rows, ctx);
+    }
+
+    // ── Inline VALUES path ────────────────────────────────────────────────────
     let col_names: Vec<String> = variables.iter().map(|v| format!("_svc_{v}")).collect();
 
     let col_names_str = col_names.join(", ");
@@ -2390,6 +2423,78 @@ fn translate_service_values(
     let alias = ctx.next_alias();
     let mut frag = Fragment::empty();
     frag.from_items.push((alias.clone(), values_expr));
+
+    for v in variables {
+        frag.bindings.insert(v.clone(), format!("{alias}._svc_{v}"));
+    }
+
+    frag
+}
+
+/// Spool federation results into a temporary table and return a SELECT fragment (v0.42.0).
+///
+/// Used when the row count exceeds `pg_ripple.federation_inline_max_rows`.
+fn translate_service_values_spool(
+    variables: &[String],
+    encoded_rows: &[Vec<Option<i64>>],
+    ctx: &mut Ctx,
+) -> Fragment {
+    let n = ctx.alias_counter;
+    ctx.alias_counter += 1;
+    let temp_table = format!("_pg_ripple_svc_spool_{n}");
+
+    let col_defs: Vec<String> = variables
+        .iter()
+        .map(|v| format!("_svc_{v} bigint"))
+        .collect();
+
+    // Create a temporary table.
+    let create_sql = format!(
+        "CREATE TEMP TABLE IF NOT EXISTS {temp_table} ({}) \
+         ON COMMIT DROP",
+        col_defs.join(", ")
+    );
+
+    if let Err(e) = pgrx::Spi::run(&create_sql) {
+        pgrx::log!("SERVICE spool: failed to create temp table {temp_table}: {e}");
+        // Fall back to inline — truncate to inline_max rows.
+        let max = crate::FEDERATION_INLINE_MAX_ROWS.get() as usize;
+        let truncated = &encoded_rows[..max.min(encoded_rows.len())];
+        return translate_service_values(variables, truncated, ctx);
+    }
+
+    // Batch-insert using COPY-style multi-row INSERT.
+    let batch_size = 1000usize;
+    let col_names: Vec<String> = variables.iter().map(|v| format!("_svc_{v}")).collect();
+    let col_names_str = col_names.join(", ");
+
+    for chunk in encoded_rows.chunks(batch_size) {
+        let rows_sql: Vec<String> = chunk
+            .iter()
+            .map(|row| {
+                let cells: Vec<String> = row
+                    .iter()
+                    .map(|cell| match cell {
+                        None => "NULL::bigint".to_owned(),
+                        Some(id) => id.to_string(),
+                    })
+                    .collect();
+                format!("({})", cells.join(", "))
+            })
+            .collect();
+
+        let insert_sql = format!(
+            "INSERT INTO {temp_table} ({col_names_str}) VALUES {}",
+            rows_sql.join(", ")
+        );
+        if let Err(e) = pgrx::Spi::run(&insert_sql) {
+            pgrx::log!("SERVICE spool: INSERT error for {temp_table}: {e}");
+        }
+    }
+
+    let alias = ctx.next_alias();
+    let mut frag = Fragment::empty();
+    frag.from_items.push((alias.clone(), temp_table));
 
     for v in variables {
         frag.bindings.insert(v.clone(), format!("{alias}._svc_{v}"));
@@ -2537,10 +2642,10 @@ fn translate_expr(
 
         // ── IF / COALESCE (v0.21.0) ──────────────────────────────────────────
         Expression::If(cond, then_expr, else_expr) => {
-            let then_sql = translate_expr(then_expr, bindings, ctx)
-                .unwrap_or_else(|| "FALSE".to_owned());
-            let else_sql = translate_expr(else_expr, bindings, ctx)
-                .unwrap_or_else(|| "FALSE".to_owned());
+            let then_sql =
+                translate_expr(then_expr, bindings, ctx).unwrap_or_else(|| "FALSE".to_owned());
+            let else_sql =
+                translate_expr(else_expr, bindings, ctx).unwrap_or_else(|| "FALSE".to_owned());
             // Try value context for condition to handle NULL/error propagation (e.g. 1/0 → NULL).
             // EBV: NULL → false (error in filter); inline_false or inline_int_zero → ELSE; else → THEN
             if let Some(cond_val) = translate_expr_value(cond, bindings, ctx) {
@@ -2551,7 +2656,9 @@ fn translate_expr(
                 ))
             } else {
                 let cond_sql = translate_expr(cond, bindings, ctx)?;
-                Some(format!("CASE WHEN {cond_sql} THEN ({then_sql}) ELSE ({else_sql}) END"))
+                Some(format!(
+                    "CASE WHEN {cond_sql} THEN ({then_sql}) ELSE ({else_sql}) END"
+                ))
             }
         }
         Expression::Coalesce(exprs) => {
@@ -2751,9 +2858,9 @@ fn translate_expr_value(
                 cond.as_ref(),
                 Expression::FunctionCall(
                     spargebra::algebra::Function::IsBlank
-                    | spargebra::algebra::Function::IsIri
-                    | spargebra::algebra::Function::IsLiteral
-                    | spargebra::algebra::Function::IsNumeric,
+                        | spargebra::algebra::Function::IsIri
+                        | spargebra::algebra::Function::IsLiteral
+                        | spargebra::algebra::Function::IsNumeric,
                     _
                 )
             );
@@ -2875,7 +2982,13 @@ fn translate_expr_value(
 /// that is not alphanumeric or underscore with an underscore.
 fn sanitize_sql_ident(v: &str) -> String {
     v.chars()
-        .map(|c| if c.is_alphanumeric() || c == '_' { c } else { '_' })
+        .map(|c| {
+            if c.is_alphanumeric() || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect()
 }
 
@@ -2886,9 +2999,7 @@ fn sanitize_sql_ident(v: &str) -> String {
 ///   INTEGER_OFFSET = 1 << 55       = 36028797018963968
 /// Extraction: (id & VALUE_MASK) - INTEGER_OFFSET
 fn inline_int_extract(sql: &str) -> String {
-    format!(
-        "(({sql} & 72057594037927935::bigint) - 36028797018963968::bigint)"
-    )
+    format!("(({sql} & 72057594037927935::bigint) - 36028797018963968::bigint)")
 }
 
 /// Re-pack an extracted SQL integer back into the inline-encoding format.
@@ -3148,8 +3259,7 @@ fn translate_expr_value_raw(
 fn expr_is_raw_numeric(expr: &Expression, ctx: &Ctx) -> bool {
     match expr {
         Expression::Variable(v) => {
-            ctx.raw_numeric_vars.contains(v.as_str())
-                || ctx.raw_double_vars.contains(v.as_str())
+            ctx.raw_numeric_vars.contains(v.as_str()) || ctx.raw_double_vars.contains(v.as_str())
         }
         // Function calls that produce raw SQL numeric output (ABS, CEIL, FLOOR, etc.)
         // are never inline-encoded, so comparisons must use raw numeric values.
@@ -3188,7 +3298,7 @@ fn translate_comparison_sides(
         let la = translate_expr_value(a, bindings, ctx)?;
         let ra = match b {
             Expression::Literal(lit) => literal_lexical_value(lit),
-            _ => return None,  // unsupported: text var vs non-literal
+            _ => return None, // unsupported: text var vs non-literal
         };
         return Some((la, ra));
     }

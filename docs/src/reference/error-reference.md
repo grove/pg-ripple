@@ -74,6 +74,7 @@ pg_ripple uses a structured error code system with codes in the range PT001–PT
 | PT502 | rule set not found: `<name>` | Load the rule set with `load_rules()` before enabling it |
 | PT503 | inference: maximum iteration depth exceeded | Simplify the rule set or increase statement_timeout |
 | PT504 | constraint violation detected: `<rule>` | A constraint rule fired; check the data or adjust `enforce_constraints` |
+| PT550 | owl:sameAs equivalence class of N members exceeds pg_ripple.sameas_max_cluster_size (M); canonicalization skipped | Check for erroneous `owl:sameAs` assertions (e.g., accidentally linking common entities); increase the GUC if the large cluster is intentional |
 
 ---
 
@@ -86,6 +87,8 @@ pg_ripple uses a structured error code system with codes in the range PT001–PT
 | PT602 | enable_graph_rls: RLS policy creation failed | Check superuser privileges and `_pg_ripple.graph_access` table existence |
 | PT603 | grant_graph: invalid permission | Permission must be `'read'`, `'write'`, or `'admin'` |
 | PT604 | enable_schema_summary: pg_trickle not installed | Install pg_trickle or use `schema_summary()` for a one-shot scan |
+| PT620 | SERVICE VALUES binding table exceeds federation_inline_max_rows (N); spooling to temp table | Informational only; reduce `pg_ripple.federation_inline_max_rows` if batching causes issues, or increase it to avoid the spool |
+| PT621 | register_endpoint: endpoint URL resolves to a private/loopback address — set pg_ripple.federation_allow_private = on to allow | Check that the endpoint URL is a public SPARQL endpoint; if the private address is intentional, set the GUC as superuser |
 | PT640 | SPARQL result set exceeded sparql_max_rows limit | Raise `pg_ripple.sparql_max_rows` or set `pg_ripple.sparql_overflow_action = 'warn'` to truncate instead of error |
 | PT641 | Datalog derived facts exceeded datalog_max_derived | Raise `pg_ripple.datalog_max_derived` or 0 (unlimited) |
 | PT642 | Export rows exceeded export_max_rows | Raise `pg_ripple.export_max_rows` or 0 (unlimited) |

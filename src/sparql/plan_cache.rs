@@ -19,7 +19,14 @@ use std::num::NonZeroUsize;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 /// Cached translation: generated SQL + projected variable names + raw numeric variable names + raw text variable names + raw IRI variable names + raw double variable names.
-pub type CacheEntry = (String, Vec<String>, std::collections::HashSet<String>, std::collections::HashSet<String>, std::collections::HashSet<String>, std::collections::HashSet<String>);
+pub type CacheEntry = (
+    String,
+    Vec<String>,
+    std::collections::HashSet<String>,
+    std::collections::HashSet<String>,
+    std::collections::HashSet<String>,
+    std::collections::HashSet<String>,
+);
 
 const DEFAULT_CAPACITY: usize = 256;
 

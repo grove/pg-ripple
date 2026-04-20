@@ -1165,6 +1165,88 @@ pub extern "C-unwind" fn _PG_init() {
         GucFlags::default(),
     );
 
+    // ── v0.42.0 GUCs ─────────────────────────────────────────────────────────
+
+    pgrx::GucRegistry::define_int_guc(
+        c"pg_ripple.sameas_max_cluster_size",
+        c"Maximum owl:sameAs equivalence-class size before emitting PT550 WARNING and \
+          switching to sampling approximation. 0 = disabled (v0.42.0)",
+        c"",
+        &SAMEAS_MAX_CLUSTER_SIZE,
+        0,
+        i32::MAX,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+
+    pgrx::GucRegistry::define_int_guc(
+        c"pg_ripple.federation_stats_ttl_secs",
+        c"TTL in seconds for cached VoID statistics per federation endpoint. \
+          0 = disabled (v0.42.0)",
+        c"",
+        &FEDERATION_STATS_TTL_SECS,
+        0,
+        i32::MAX,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+
+    pgrx::GucRegistry::define_bool_guc(
+        c"pg_ripple.federation_planner_enabled",
+        c"Enable cost-based FedX-style federation source selection using VoID statistics. \
+          On by default (v0.42.0)",
+        c"",
+        &FEDERATION_PLANNER_ENABLED,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+
+    pgrx::GucRegistry::define_int_guc(
+        c"pg_ripple.federation_parallel_max",
+        c"Maximum number of parallel SERVICE clause workers for independent atoms. \
+          Default: 4 (v0.42.0)",
+        c"",
+        &FEDERATION_PARALLEL_MAX,
+        1,
+        32,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+
+    pgrx::GucRegistry::define_int_guc(
+        c"pg_ripple.federation_parallel_timeout",
+        c"Wall-clock timeout in seconds for parallel federation workers. \
+          Default: 60 (v0.42.0)",
+        c"",
+        &FEDERATION_PARALLEL_TIMEOUT,
+        1,
+        3600,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+
+    pgrx::GucRegistry::define_int_guc(
+        c"pg_ripple.federation_inline_max_rows",
+        c"SERVICE responses exceeding this row count are spooled to a temp table \
+          instead of VALUES clause inline. Emits PT620 INFO. Default: 10000 (v0.42.0)",
+        c"",
+        &FEDERATION_INLINE_MAX_ROWS,
+        0,
+        i32::MAX,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+
+    pgrx::GucRegistry::define_bool_guc(
+        c"pg_ripple.federation_allow_private",
+        c"Allow federation endpoints with RFC-1918/loopback/link-local IP addresses. \
+          Off by default (PT621 emitted when rejected). (v0.42.0)",
+        c"",
+        &FEDERATION_ALLOW_PRIVATE,
+        GucContext::Suset,
+        GucFlags::default(),
+    );
+
     // PGC_POSTMASTER GUCs can only be registered during shared_preload_libraries
     // loading.  `process_shared_preload_libraries_in_progress` is the correct
     // flag — `IsPostmasterEnvironment` is true in every server process and
@@ -1191,6 +1273,18 @@ pub extern "C-unwind" fn _PG_init() {
             GucContext::Postmaster,
             GucFlags::default(),
         );
+
+        pgrx::GucRegistry::define_int_guc(
+            c"pg_ripple.merge_workers",
+            c"Number of parallel background merge worker processes (default: 1, max: 16; startup only). \
+              Each worker handles a round-robin subset of VP table predicates (v0.42.0)",
+            c"",
+            &MERGE_WORKERS,
+            1,
+            16,
+            GucContext::Postmaster,
+            GucFlags::default(),
+        );
     }
 
     // ── Shared memory initialisation (v0.6.0) ────────────────────────────────
@@ -1200,7 +1294,7 @@ pub extern "C-unwind" fn _PG_init() {
     // initialized" panic.
     if unsafe { pg_sys::process_shared_preload_libraries_in_progress } {
         shmem::init();
-        worker::register_merge_worker();
+        worker::register_merge_workers();
         // Register ExecutorEnd hook to poke the merge worker latch when the
         // accumulated unmerged delta row count crosses the trigger threshold.
         register_executor_end_hook();

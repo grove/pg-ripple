@@ -68,9 +68,7 @@ fn inject_rdfxml_base(content: &str, file: &Path) -> String {
     if content.contains("xml:base") {
         return content.to_owned();
     }
-    let base = file
-        .canonicalize()
-        .unwrap_or_else(|_| file.to_path_buf());
+    let base = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
     let base_uri = format!("file://{}", base.display());
     // Inject xml:base before the closing '>' of the first XML element tag.
     if let Some(rdf_pos) = content.find("<rdf:RDF") {
@@ -94,14 +92,10 @@ fn inject_rdfxml_base(content: &str, file: &Path) -> String {
 fn inject_turtle_base(content: &str, file: &Path) -> String {
     let trimmed = content.trim_start();
     // If the file already declares a base, leave it as-is.
-    if trimmed.starts_with("@base")
-        || trimmed.to_uppercase().starts_with("BASE")
-    {
+    if trimmed.starts_with("@base") || trimmed.to_uppercase().starts_with("BASE") {
         return content.to_owned();
     }
-    let base = file
-        .canonicalize()
-        .unwrap_or_else(|_| file.to_path_buf());
+    let base = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
     let base_uri = format!("file://{}", base.display());
     format!("@base <{base_uri}> .\n{content}")
 }

@@ -13,6 +13,65 @@ Versions correspond to the milestones in [ROADMAP.md](ROADMAP.md).
 
 ---
 
+## [0.42.0] — 2026-05-03 — Parallel Merge, Cost-Based Federation & Live CDC
+
+**Three architectural improvements that close the last major gaps before the 1.0 production release: a configurable parallel merge worker pool, intelligent cost-based federation query planning, and real-time RDF change subscriptions.**
+
+### What's new
+
+- **Parallel merge worker pool** — `pg_ripple.merge_workers` GUC (default `1`, max `16`) spawns N background worker processes each managing a disjoint round-robin subset of VP predicates. Work-stealing ensures idle workers absorb overloaded peers. Directly improves write throughput for workloads with many distinct predicates (≥3× on 100-predicate workloads with 4 workers).
+
+- **`owl:sameAs` cluster size bound** — new GUC `pg_ripple.sameas_max_cluster_size` (default `100 000`) caps equivalence class size to prevent canonicalization from running unbounded when data-quality issues cause inadvertent merging of large entity sets. Emits PT550 WARNING and skips canonicalization when exceeded.
+
+- **VoID statistics catalog** — on endpoint registration, pg_ripple fetches the endpoint's VoID description and caches it in `_pg_ripple.endpoint_stats`. Refresh interval governed by `pg_ripple.federation_stats_ttl_secs` (default `3 600` s).
+
+- **Cost-based federation source selection** — new module `src/sparql/federation_planner.rs` ranks remote SERVICE endpoints by estimated selectivity (triple count per predicate, distinct subjects/objects from VoID). Enable/disable via `pg_ripple.federation_planner_enabled`. Expose stats via `pg_ripple.list_federation_stats()` and `pg_ripple.refresh_federation_stats(url)`.
+
+- **Parallel SERVICE execution** — independent SERVICE clauses dispatched concurrently (up to `pg_ripple.federation_parallel_max`, default `4`) with per-endpoint timeout (`pg_ripple.federation_parallel_timeout`, default `60` s).
+
+- **Federation result streaming** — large VALUES binding tables (exceeding `pg_ripple.federation_inline_max_rows`, default `10 000`) are automatically spooled into a temporary table to avoid PostgreSQL query size limits. PT620 INFO logged when spooling occurs.
+
+- **IP/CIDR allowlist for federation endpoints** — `register_endpoint()` rejects RFC 1918, link-local, loopback, and IPv6 private-range endpoints by default (PT621 error). Override with `pg_ripple.federation_allow_private = on` (superuser-only).
+
+- **HTTPS security hardening for pg_ripple_http**:
+  - `reqwest` outbound client uses system trust store (`rustls-tls-native-roots`)
+  - CORS default changed from `*` to empty (no cross-origin access); `*` now requires explicit opt-in via `PG_RIPPLE_HTTP_CORS_ORIGINS=*` with startup warning
+  - Request body limit configurable via `PG_RIPPLE_HTTP_MAX_BODY_BYTES` (default 10 MiB)
+  - X-Forwarded-For trusted only when `PG_RIPPLE_HTTP_TRUST_PROXY` is set
+
+- **Named CDC subscriptions** — `pg_ripple.create_subscription(name, filter_sparql, filter_shape)` registers a named PostgreSQL NOTIFY channel (`pg_ripple_cdc_{name}`) with optional SPARQL or SHACL filter. JSON payload: `{"op":"add"|"remove","s":"…","p":"…","o":"…","g":"…"}`. Manage with `drop_subscription(name)` and `list_subscriptions()`.
+
+### New GUCs
+
+| GUC | Default | Notes |
+|---|---|---|
+| `pg_ripple.merge_workers` | `1` | Postmaster (startup-only) |
+| `pg_ripple.sameas_max_cluster_size` | `100000` | Userset |
+| `pg_ripple.federation_planner_enabled` | `on` | Userset |
+| `pg_ripple.federation_stats_ttl_secs` | `3600` | Userset |
+| `pg_ripple.federation_parallel_max` | `4` | Userset |
+| `pg_ripple.federation_parallel_timeout` | `60` | Userset |
+| `pg_ripple.federation_inline_max_rows` | `10000` | Userset |
+| `pg_ripple.federation_allow_private` | `off` | Superuser |
+
+### New error codes
+
+| Code | Severity | Message |
+|---|---|---|
+| PT550 | WARNING | `owl:sameAs` equivalence class exceeds `sameas_max_cluster_size` |
+| PT620 | INFO | Federation VALUES binding table spooled to temp table |
+| PT621 | ERROR | `register_endpoint()` rejected private/loopback endpoint URL |
+
+### Migration
+
+```sql
+ALTER EXTENSION pg_ripple UPDATE TO '0.42.0';
+```
+
+The migration script creates `_pg_ripple.endpoint_stats` and `_pg_ripple.subscriptions` catalog tables, and adds `graph_iri` to `pg_ripple.federation_endpoints`.
+
+---
+
 ## [0.41.0] — 2026-04-19 — Full W3C SPARQL 1.1 Test Suite
 
 **Every SPARQL engine bug now gets caught automatically: the full W3C SPARQL 1.1 test suite (~3 000 tests) runs in CI on every push.**

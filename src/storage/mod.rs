@@ -38,7 +38,6 @@ use crate::dictionary;
 
 // Thread-local set tracking (p, s, o, g) quads inserted during the current
 
-
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 /// Parse a bare IRI `<…>` or return the term as-is for encode dispatch.

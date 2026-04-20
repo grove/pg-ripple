@@ -21,6 +21,7 @@ use tokio_postgres::NoTls;
 use tower_governor::GovernorLayer;
 use tower_governor::governor::GovernorConfigBuilder;
 use tower_http::cors::{AllowOrigin, CorsLayer};
+use tower_http::limit::RequestBodyLimitLayer;
 
 pub mod common;
 pub mod datalog;
@@ -131,7 +132,18 @@ async fn main() {
             std::process::exit(1);
         }
     };
-    let cors_origins = env_or("PG_RIPPLE_HTTP_CORS_ORIGINS", "*");
+    // CORS origins — empty string means no cross-origin access; "*" requires explicit opt-in.
+    let cors_origins = env_or("PG_RIPPLE_HTTP_CORS_ORIGINS", "");
+    // Body limit — default 10 MiB.
+    let max_body_bytes: usize = match env_or("PG_RIPPLE_HTTP_MAX_BODY_BYTES", "10485760").parse() {
+        Ok(n) => n,
+        Err(e) => {
+            tracing::error!("PG_RIPPLE_HTTP_MAX_BODY_BYTES must be a positive integer: {e}");
+            std::process::exit(1);
+        }
+    };
+    // Trust proxy: comma-separated list of upstream IP/CIDR values trusted for X-Forwarded-For.
+    let trust_proxy = std::env::var("PG_RIPPLE_HTTP_TRUST_PROXY").ok();
 
     // Build connection pool.
     let mut cfg = Config::new();
@@ -178,12 +190,19 @@ async fn main() {
         pool,
         auth_token,
         datalog_write_token,
+        trust_proxy,
         metrics: metrics::Metrics::new(),
     });
 
-    // CORS layer.
+    // CORS layer — wildcard "*" requires explicit opt-in; empty means deny all cross-origin.
     let cors = if cors_origins == "*" {
+        tracing::warn!(
+            "CORS is permissive (*). Set PG_RIPPLE_HTTP_CORS_ORIGINS to a comma-separated list of allowed origins for production use."
+        );
         CorsLayer::permissive()
+    } else if cors_origins.is_empty() {
+        // No cross-origin access.
+        CorsLayer::new()
     } else {
         let origins: Vec<HeaderValue> = cors_origins
             .split(',')
@@ -258,6 +277,7 @@ async fn main() {
             get(datalog::list_views).post(datalog::create_view),
         )
         .route("/datalog/views/{name}", delete(datalog::drop_view))
+        .layer(RequestBodyLimitLayer::new(max_body_bytes))
         .layer(cors)
         .with_state(state);
 

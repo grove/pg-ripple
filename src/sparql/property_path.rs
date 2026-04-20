@@ -133,7 +133,15 @@ pub fn compile_path(
         // ── Reverse: swap s and o ────────────────────────────────────────────
         PropertyPathExpression::Reverse(inner) => {
             // Swap s_filter and o_filter when descending.
-            let inner_sql = compile_path(inner, o_filter, s_filter, ctx, max_depth, graph_filter, include_g);
+            let inner_sql = compile_path(
+                inner,
+                o_filter,
+                s_filter,
+                ctx,
+                max_depth,
+                graph_filter,
+                include_g,
+            );
             format!(
                 "(SELECT o AS s, s AS o{g_sel} FROM {inner_sql} _prev{})",
                 ctx.next()
@@ -144,8 +152,24 @@ pub fn compile_path(
         PropertyPathExpression::Sequence(left, right) => {
             let n = ctx.next();
             // left returns (?x, ?mid[, ?g]); right returns (?mid, ?y[, ?g])
-            let left_sql = compile_path(left, s_filter, None, ctx, max_depth, graph_filter, include_g);
-            let right_sql = compile_path(right, None, o_filter, ctx, max_depth, graph_filter, include_g);
+            let left_sql = compile_path(
+                left,
+                s_filter,
+                None,
+                ctx,
+                max_depth,
+                graph_filter,
+                include_g,
+            );
+            let right_sql = compile_path(
+                right,
+                None,
+                o_filter,
+                ctx,
+                max_depth,
+                graph_filter,
+                include_g,
+            );
             if include_g {
                 // Both hops must be in the SAME named graph.
                 format!(
@@ -164,8 +188,24 @@ pub fn compile_path(
 
         // ── Alternative: a|b → UNION ALL ────────────────────────────────────
         PropertyPathExpression::Alternative(left, right) => {
-            let left_sql = compile_path(left, s_filter, o_filter, ctx, max_depth, graph_filter, include_g);
-            let right_sql = compile_path(right, s_filter, o_filter, ctx, max_depth, graph_filter, include_g);
+            let left_sql = compile_path(
+                left,
+                s_filter,
+                o_filter,
+                ctx,
+                max_depth,
+                graph_filter,
+                include_g,
+            );
+            let right_sql = compile_path(
+                right,
+                s_filter,
+                o_filter,
+                ctx,
+                max_depth,
+                graph_filter,
+                include_g,
+            );
             let n = ctx.next();
             let mut conditions = Vec::new();
             if let Some(sf) = s_filter {
@@ -248,8 +288,10 @@ pub fn compile_path(
                 let zero_hop = if let Some(sf) = s_filter {
                     // Constant start: emit (sf, sf, g) for each graph containing sf.
                     let all_nodes_g = build_all_nodes_sql(graph_filter, true);
-                    format!("SELECT DISTINCT {sf} AS s, {sf} AS o, g, 0 AS _depth \
-                             FROM ({all_nodes_g}) _sfg{n} WHERE node = {sf}")
+                    format!(
+                        "SELECT DISTINCT {sf} AS s, {sf} AS o, g, 0 AS _depth \
+                             FROM ({all_nodes_g}) _sfg{n} WHERE node = {sf}"
+                    )
                 } else {
                     let all_nodes_g = build_all_nodes_sql(graph_filter, true);
                     let mut parts = vec![format!(
@@ -257,7 +299,9 @@ pub fn compile_path(
                          FROM ({all_nodes_g}) AS _all0{n}"
                     )];
                     if let Some(of) = o_filter {
-                        parts.push(format!("SELECT {of} AS s, {of} AS o, NULL::bigint AS g, 0 AS _depth"));
+                        parts.push(format!(
+                            "SELECT {of} AS s, {of} AS o, NULL::bigint AS g, 0 AS _depth"
+                        ));
                     }
                     parts.join(" UNION ALL ")
                 };
@@ -347,7 +391,15 @@ pub fn compile_path(
         // ── ZeroOrOne (p?) ───────────────────────────────────────────────────
         PropertyPathExpression::ZeroOrOne(inner) => {
             let n = ctx.next();
-            let base_sql = compile_path(inner, s_filter, o_filter, ctx, max_depth, graph_filter, include_g);
+            let base_sql = compile_path(
+                inner,
+                s_filter,
+                o_filter,
+                ctx,
+                max_depth,
+                graph_filter,
+                include_g,
+            );
 
             // Zero-hop (reflexive) part:
             // - Constant start (s_filter): emit (sf, sf[, g]).
@@ -468,8 +520,12 @@ fn build_all_nodes_sql(graph_filter: Option<i64>, include_g: bool) -> String {
     } else {
         g_cond.clone()
     };
-    parts.push(format!("SELECT s AS node{g_sel} FROM _pg_ripple.vp_rare{rare_g}"));
-    parts.push(format!("SELECT o AS node{g_sel} FROM _pg_ripple.vp_rare{rare_g}"));
+    parts.push(format!(
+        "SELECT s AS node{g_sel} FROM _pg_ripple.vp_rare{rare_g}"
+    ));
+    parts.push(format!(
+        "SELECT o AS node{g_sel} FROM _pg_ripple.vp_rare{rare_g}"
+    ));
 
     if parts.is_empty() {
         if include_g {

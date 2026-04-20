@@ -214,3 +214,105 @@ The following string-enum GUCs now reject invalid values at `SET` time with an e
 | `pg_ripple.describe_strategy` | `cbd`, `scbd`, `simple` |
 
 **`pg_ripple.rls_bypass` scope change (v0.37.0)**: This GUC is now registered at `PGC_POSTMASTER` scope when pg_ripple is loaded via `shared_preload_libraries`. This prevents a session from bypassing graph-level RLS with `SET LOCAL pg_ripple.rls_bypass = on`.
+
+---
+
+## v0.42.0: Parallel Merge Workers
+
+### `pg_ripple.merge_workers`
+
+| | |
+|---|---|
+| Type | Integer |
+| Default | `1` |
+| Range | `1` – `16` |
+| Context | `postmaster` (startup-only; set in `postgresql.conf`) |
+
+Number of background merge worker processes. Each worker owns a disjoint round-robin slice of VP predicates. Workers use `pg_advisory_lock` to prevent conflicts; idle workers steal work from overloaded peers. Increasing this value helps workloads with many distinct predicates (> 50).
+
+---
+
+## v0.42.0: Cost-Based Federation Planner
+
+### `pg_ripple.federation_planner_enabled`
+
+| | |
+|---|---|
+| Type | Boolean |
+| Default | `on` |
+| Context | `userset` |
+
+When `on`, pg_ripple uses VoID statistics collected from remote SPARQL endpoints to sort the SERVICE execution order by ascending estimated cost. When `off`, SERVICE clauses are executed in document order.
+
+### `pg_ripple.federation_stats_ttl_secs`
+
+| | |
+|---|---|
+| Type | Integer |
+| Default | `3600` (1 hour) |
+| Range | `0` – `86400` |
+| Context | `userset` |
+
+Seconds until cached VoID statistics for a remote endpoint are considered stale. Setting `0` disables caching (re-fetches on every query).
+
+### `pg_ripple.federation_parallel_max`
+
+| | |
+|---|---|
+| Type | Integer |
+| Default | `4` |
+| Range | `1` – `64` |
+| Context | `userset` |
+
+Maximum number of remote SERVICE clauses that pg_ripple will execute concurrently within a single query. Set to `1` to disable parallel SERVICE execution.
+
+### `pg_ripple.federation_parallel_timeout`
+
+| | |
+|---|---|
+| Type | Integer |
+| Default | `60` (seconds) |
+| Range | `1` – `3600` |
+| Context | `userset` |
+
+Per-endpoint timeout when executing parallel SERVICE clauses. Endpoints that do not respond within this limit return an empty result set (with a WARNING). Does not affect sequential SERVICE execution.
+
+### `pg_ripple.federation_inline_max_rows`
+
+| | |
+|---|---|
+| Type | Integer |
+| Default | `10000` |
+| Range | `1` – `1000000` |
+| Context | `userset` |
+
+Maximum number of rows in the VALUES binding table passed to a remote SERVICE clause. When the result set from the local graph exceeds this limit, pg_ripple automatically spools the bindings into a temporary table (PT620 INFO logged) and issues multiple smaller requests to the remote endpoint in batches. Set to a lower value if remote endpoints enforce query complexity limits.
+
+### `pg_ripple.federation_allow_private`
+
+| | |
+|---|---|
+| Type | Boolean |
+| Default | `off` |
+| Context | `superuser` |
+
+> **Security-critical GUC** — only superusers can set this.
+
+When `off` (the default), `register_endpoint()` rejects endpoints whose hostname resolves to a loopback address (`127.0.0.0/8`), a link-local address (`169.254.0.0/16`), any RFC-1918 private range (`10/8`, `172.16/12`, `192.168/16`), or an IPv6 equivalent. This prevents server-side request forgery (SSRF) via malicious SPARQL SERVICE calls.
+
+Set to `on` only in controlled environments where the remote endpoint is a trusted internal service (e.g., a local Fuseki instance in a Docker network).
+
+---
+
+## v0.42.0: owl:sameAs Safety
+
+### `pg_ripple.sameas_max_cluster_size`
+
+| | |
+|---|---|
+| Type | Integer |
+| Default | `100000` |
+| Range | `0` – `2147483647` |
+| Context | `userset` |
+
+Maximum number of entities in a single `owl:sameAs` equivalence cluster before canonicalization is skipped with a PT550 WARNING. A single cluster larger than this limit is usually a data quality problem (e.g., a mistakenly asserted `owl:sameAs owl:Thing`). Set to `0` to disable the check (no limit).

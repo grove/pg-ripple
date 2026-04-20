@@ -469,3 +469,60 @@ pub static TRACING_ENABLED: pgrx::GucSetting<bool> = pgrx::GucSetting::<bool>::n
 /// environment variable for the collector address.
 pub static TRACING_EXPORTER: pgrx::GucSetting<Option<std::ffi::CString>> =
     pgrx::GucSetting::<Option<std::ffi::CString>>::new(None);
+
+// ── v0.42.0 GUCs ─────────────────────────────────────────────────────────────
+
+/// GUC: number of background merge worker processes (v0.42.0).
+///
+/// Each worker manages a disjoint round-robin subset of VP table predicates.
+/// `pg_advisory_lock` ensures no two workers race on the same VP table.
+/// Default: `1` (single worker, original behaviour). Range: 1–16.
+/// Startup-only GUC — requires PostgreSQL restart to take effect.
+pub static MERGE_WORKERS: pgrx::GucSetting<i32> = pgrx::GucSetting::<i32>::new(1);
+
+/// GUC: maximum `owl:sameAs` equivalence-class size before emitting PT550 WARNING (v0.42.0).
+///
+/// When canonicalization detects a cluster with more members than this threshold
+/// the full Tarjan-SCC traversal is replaced by a sampling approximation and a
+/// PT550 WARNING is emitted.  Default: `100_000`.  Set `0` to disable the check.
+pub static SAMEAS_MAX_CLUSTER_SIZE: pgrx::GucSetting<i32> = pgrx::GucSetting::<i32>::new(100_000);
+
+/// GUC: TTL in seconds for cached VoID statistics per federation endpoint (v0.42.0).
+///
+/// When > 0, the endpoint's VoID description is re-fetched at most every N seconds.
+/// Default: `3600` (1 hour).  Set `0` to disable caching (fetch on every registration).
+pub static FEDERATION_STATS_TTL_SECS: pgrx::GucSetting<i32> = pgrx::GucSetting::<i32>::new(3600);
+
+/// GUC: enable cost-based federation source selection (v0.42.0).
+///
+/// When `true` (default), the FedX-style planner uses VoID statistics to rank
+/// endpoints by estimated selectivity and assigns each BGP atom to its best source.
+/// Independent atoms with no shared variables are scheduled for parallel execution.
+pub static FEDERATION_PLANNER_ENABLED: pgrx::GucSetting<bool> = pgrx::GucSetting::<bool>::new(true);
+
+/// GUC: maximum number of parallel SERVICE clause workers (v0.42.0).
+///
+/// Independent SERVICE clauses (no shared variables) are dispatched concurrently
+/// up to this limit.  Default: `4`.
+pub static FEDERATION_PARALLEL_MAX: pgrx::GucSetting<i32> = pgrx::GucSetting::<i32>::new(4);
+
+/// GUC: wall-clock timeout in seconds for parallel federation workers (v0.42.0).
+///
+/// If a parallel SERVICE worker does not complete within this window its result
+/// is dropped and an empty set is used.  Default: `60` seconds.
+pub static FEDERATION_PARALLEL_TIMEOUT: pgrx::GucSetting<i32> = pgrx::GucSetting::<i32>::new(60);
+
+/// GUC: maximum inline rows for federation results (v0.42.0).
+///
+/// SERVICE responses with more rows than this threshold are spooled into a
+/// temporary table instead of being inlined as a `VALUES` clause.  Emits PT620
+/// INFO when spooling is triggered.  Default: `10_000`.
+pub static FEDERATION_INLINE_MAX_ROWS: pgrx::GucSetting<i32> = pgrx::GucSetting::<i32>::new(10_000);
+
+/// GUC: allow federation endpoints with private/loopback IP addresses (v0.42.0).
+///
+/// When `false` (default), `register_endpoint()` resolves the hostname and rejects
+/// addresses in RFC 1918 (10.x, 172.16–31.x, 192.168.x), link-local (169.254.x.x),
+/// loopback (127.x.x.x), and IPv6 link-local ranges.  Emits PT621 when a private-IP
+/// endpoint is rejected.  Set `true` in trusted internal deployments.
+pub static FEDERATION_ALLOW_PRIVATE: pgrx::GucSetting<bool> = pgrx::GucSetting::<bool>::new(false);

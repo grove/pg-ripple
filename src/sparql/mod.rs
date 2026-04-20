@@ -26,6 +26,7 @@ pub(crate) mod embedding;
 pub(crate) mod explain;
 mod expr;
 pub(crate) mod federation;
+pub(crate) mod federation_planner;
 mod optimizer;
 mod plan_cache;
 mod property_path;
@@ -125,7 +126,16 @@ pub(crate) fn batch_decode(ids: &[i64]) -> HashMap<i64, String> {
 
 /// Parse the query, optimize, translate to SQL, and cache the result.
 /// Returns `(sql, variables, raw_numeric_vars, raw_text_vars, raw_iri_vars, raw_double_vars)`.
-fn prepare_select(query_text: &str) -> (String, Vec<String>, std::collections::HashSet<String>, std::collections::HashSet<String>, std::collections::HashSet<String>, std::collections::HashSet<String>) {
+fn prepare_select(
+    query_text: &str,
+) -> (
+    String,
+    Vec<String>,
+    std::collections::HashSet<String>,
+    std::collections::HashSet<String>,
+    std::collections::HashSet<String>,
+    std::collections::HashSet<String>,
+) {
     if let Some(cached) = plan_cache::get(query_text) {
         return cached;
     }
@@ -147,7 +157,14 @@ fn prepare_select(query_text: &str) -> (String, Vec<String>, std::collections::H
     };
 
     let trans = sqlgen::translate_select(&pattern, base_iri.as_deref());
-    let entry = (trans.sql, trans.variables, trans.raw_numeric_vars, trans.raw_text_vars, trans.raw_iri_vars, trans.raw_double_vars);
+    let entry = (
+        trans.sql,
+        trans.variables,
+        trans.raw_numeric_vars,
+        trans.raw_text_vars,
+        trans.raw_iri_vars,
+        trans.raw_double_vars,
+    );
     // Skip plan cache for queries that contain SERVICE clauses — remote results
     // are baked into the generated SQL as VALUES literals; caching would return
     // stale data from a previous execution.
@@ -197,10 +214,14 @@ fn execute_select(
             .select(sql, None, &[])
             .unwrap_or_else(|e| pgrx::error!("SPARQL execute SPI error: {e}"));
         for row in rows {
-            let mut row_vals: Vec<Option<Result<i64, String>>> = Vec::with_capacity(variables.len());
+            let mut row_vals: Vec<Option<Result<i64, String>>> =
+                Vec::with_capacity(variables.len());
             for (col_idx, var) in variables.iter().enumerate() {
                 let i = col_idx + 1;
-                if raw_text_vars.contains(var) || raw_iri_vars.contains(var) || raw_double_vars.contains(var) {
+                if raw_text_vars.contains(var)
+                    || raw_iri_vars.contains(var)
+                    || raw_double_vars.contains(var)
+                {
                     // Read as text (GROUP_CONCAT / STRUUID / UUID / RAND result)
                     let text_val = row.get::<String>(i).ok().flatten().map(Err);
                     row_vals.push(text_val);
@@ -238,7 +259,8 @@ fn execute_select(
                         } else if raw_double_vars.contains(var) {
                             // RAND() result: emit as `"val"^^xsd:double` format.
                             Json::String(format!(
-                                "\"{}\"^^<http://www.w3.org/2001/XMLSchema#double>", text
+                                "\"{}\"^^<http://www.w3.org/2001/XMLSchema#double>",
+                                text
                             ))
                         } else {
                             // Raw text variable (GROUP_CONCAT / STRUUID): emit as JSON string literal.
@@ -251,7 +273,8 @@ fn execute_select(
                             Json::Number(serde_json::Number::from(*id))
                         } else {
                             // Dictionary-encoded variable: decode to N-Triples string.
-                            decode_map.get(id)
+                            decode_map
+                                .get(id)
                                 .map(|s| Json::String(s.clone()))
                                 .unwrap_or(Json::Null)
                         }
@@ -278,7 +301,8 @@ pub fn sparql(query_text: &str) -> Vec<pgrx::JsonB> {
 
     match query {
         spargebra::Query::Select { .. } => {
-            let (sql, vars, raw_numeric, raw_text, raw_iri, raw_double) = prepare_select(query_text);
+            let (sql, vars, raw_numeric, raw_text, raw_iri, raw_double) =
+                prepare_select(query_text);
             execute_select(&sql, &vars, &raw_numeric, &raw_text, &raw_iri, &raw_double)
         }
         spargebra::Query::Ask { pattern, .. } => {
@@ -945,7 +969,13 @@ fn execute_delete_insert(
     let raw_num_indices: Vec<usize> = variables
         .iter()
         .enumerate()
-        .filter_map(|(i, v)| if raw_numeric_vars.contains(v) { Some(i) } else { None })
+        .filter_map(|(i, v)| {
+            if raw_numeric_vars.contains(v) {
+                Some(i)
+            } else {
+                None
+            }
+        })
         .collect();
     if !raw_num_indices.is_empty() {
         for row in &mut raw_rows {

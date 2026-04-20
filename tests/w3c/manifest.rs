@@ -220,7 +220,6 @@ pub fn parse_manifest(
                 query_file = iri_to_path(&action, &manifest_dir);
             }
             if let Some(ap) = graph.get(&action) {
-
                 // Default graph data files
                 for prop in [QT_DATA, UT_DATA] {
                     for d in ap.get(prop).unwrap_or(&vec![]) {
@@ -278,10 +277,8 @@ pub fn parse_manifest(
                 // qt:data (the RDF file to load into that named graph).
                 for sd_ref in ap.get(QT_SERVICE_DATA).unwrap_or(&vec![]) {
                     if let Some(sd_props) = graph.get(sd_ref) {
-                        let endpoint_url = sd_props
-                            .get(QT_ENDPOINT)
-                            .and_then(|v| v.first())
-                            .cloned();
+                        let endpoint_url =
+                            sd_props.get(QT_ENDPOINT).and_then(|v| v.first()).cloned();
                         let data_file = sd_props
                             .get(QT_DATA_PROP)
                             .and_then(|v| v.first())

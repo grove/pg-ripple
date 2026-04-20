@@ -152,7 +152,10 @@ fn w3c_suite() {
         println!("\n  SKIPPED:");
         for s in &skips {
             if let w3c::TestOutcome::Skip(reason) = &s.outcome {
-                println!("  SKIP  [{}] {} — {}", s.test_case.category, s.test_case.name, reason);
+                println!(
+                    "  SKIP  [{}] {} — {}",
+                    s.test_case.category, s.test_case.name, reason
+                );
             }
         }
     }

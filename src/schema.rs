@@ -328,6 +328,33 @@ CREATE INDEX IF NOT EXISTS idx_federation_cache_expires
     requires = ["federation_schema_setup"]
 );
 
+// v0.42.0: VoID statistics catalog and CDC subscription registry.
+pgrx::extension_sql!(
+    r#"
+-- VoID statistics catalog (v0.42.0)
+-- Caches per-endpoint VoID statistics used by the cost-based federation planner.
+CREATE TABLE IF NOT EXISTS _pg_ripple.endpoint_stats (
+    endpoint_url         TEXT        NOT NULL PRIMARY KEY,
+    total_triples        BIGINT      NOT NULL DEFAULT 0,
+    predicate_stats_json TEXT        NOT NULL DEFAULT '{}',
+    distinct_subjects    BIGINT      NOT NULL DEFAULT 0,
+    distinct_objects     BIGINT      NOT NULL DEFAULT 0,
+    fetched_at           TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Named subscription registry (v0.42.0)
+-- Stores named CDC subscriptions created via pg_ripple.create_subscription().
+CREATE TABLE IF NOT EXISTS _pg_ripple.subscriptions (
+    name            TEXT        NOT NULL PRIMARY KEY,
+    filter_sparql   TEXT,
+    filter_shape    TEXT,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+"#,
+    name = "v042_endpoint_stats_subscriptions",
+    requires = ["v019_federation_cache_setup"]
+);
+
 // v0.25.0: Custom aggregate registry.
 pgrx::extension_sql!(
     r#"
@@ -339,7 +366,7 @@ CREATE TABLE IF NOT EXISTS _pg_ripple.custom_aggregates (
 );
 "#,
     name = "v025_custom_aggregates",
-    requires = ["v019_federation_cache_setup"]
+    requires = ["v042_endpoint_stats_subscriptions"]
 );
 
 // v0.27.0: Embeddings table for vector / pgvector hybrid search.
