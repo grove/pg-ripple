@@ -47,13 +47,27 @@ pub fn validate_select_ask(
 
 /// Validate a CONSTRUCT query result against an expected Turtle file.
 ///
-/// Uses a simple triple-set comparison (not full graph isomorphism).
+/// Also handles SELECT results encoded as Turtle using the W3C RS vocabulary
+/// (`rs:ResultSet`, `rs:solution`, `rs:binding`, `rs:value`, `rs:variable`).
+/// Uses a simple triple-set comparison for CONSTRUCT (not full graph isomorphism).
 pub fn validate_construct(
     tx: &mut Transaction<'_>,
     query_text: &str,
     result_file: &Path,
 ) -> ValidationResult {
-    let expected_triples = match parse_turtle_to_triple_set(result_file) {
+    // Check if the result file uses the W3C RS Turtle vocabulary (SELECT results stored as Turtle).
+    let content = match std::fs::read_to_string(result_file) {
+        Ok(s) => s,
+        Err(e) => return ValidationResult::Skip(format!("reading expected result: {e}")),
+    };
+    let is_rs_format = content.contains("rs:ResultSet")
+        || content.contains("result-set#ResultSet")
+        || content.contains("rs:solution");
+    if is_rs_format {
+        return validate_select_rs_ttl(tx, query_text, result_file, &content);
+    }
+
+    let expected_triples = match parse_turtle_to_triple_set_with_base(result_file, &content) {
         Ok(t) => t,
         Err(e) => return ValidationResult::Skip(format!("reading expected result: {e}")),
     };
@@ -678,18 +692,153 @@ fn parse_srx_term(xml: &str) -> Option<String> {
 
 // ── CONSTRUCT / DESCRIBE via Turtle (.ttl) ────────────────────────────────────
 
+/// Validate a SELECT query result against an expected result encoded as Turtle
+/// using the W3C SPARQL Result Set vocabulary (rs:ResultSet, rs:solution, etc.).
+///
+/// This format is used by some W3C tests (e.g. agg-empty-group-count-graph)
+/// where a SELECT query's expected results are stored as a Turtle graph.
+fn validate_select_rs_ttl(
+    tx: &mut Transaction<'_>,
+    query_text: &str,
+    result_file: &Path,
+    content: &str,
+) -> ValidationResult {
+    // Parse the RS Turtle file into a triple graph (with base IRI for relative IRIs).
+    let triples = match parse_turtle_to_triple_set_with_base(result_file, content) {
+        Ok(t) => t,
+        Err(e) => return ValidationResult::Skip(format!("parsing RS result: {e}")),
+    };
+
+    // RS vocabulary IRIs
+    const RS_RESULT_VAR: &str = "<http://www.w3.org/2001/sw/DataAccess/tests/result-set#resultVariable>";
+    const RS_SOLUTION: &str = "<http://www.w3.org/2001/sw/DataAccess/tests/result-set#solution>";
+    const RS_BINDING: &str = "<http://www.w3.org/2001/sw/DataAccess/tests/result-set#binding>";
+    const RS_VARIABLE: &str = "<http://www.w3.org/2001/sw/DataAccess/tests/result-set#variable>";
+    const RS_VALUE: &str = "<http://www.w3.org/2001/sw/DataAccess/tests/result-set#value>";
+
+    // Collect variable names from rs:resultVariable triples.
+    let mut vars: Vec<String> = triples
+        .iter()
+        .filter(|t| t.contains(RS_RESULT_VAR))
+        .filter_map(|t| {
+            // t = "s <rs:resultVariable> \"varname\""
+            let after_pred = t.split(RS_RESULT_VAR).nth(1)?.trim();
+            let v = after_pred.trim_matches('"').to_string();
+            Some(v)
+        })
+        .collect();
+    vars.sort();
+    vars.dedup();
+
+    // Build a simple graph map: subject → predicate → Vec<object>
+    let mut graph: HashMap<String, HashMap<String, Vec<String>>> = HashMap::new();
+    for triple in &triples {
+        // Format: "s p o" — split at first two spaces (object may contain spaces in literals)
+        let parts: Vec<&str> = triple.splitn(3, ' ').collect();
+        if parts.len() == 3 {
+            graph
+                .entry(parts[0].to_string())
+                .or_default()
+                .entry(parts[1].to_string())
+                .or_default()
+                .push(parts[2].to_string());
+        }
+    }
+
+    // Find solution blank nodes (subjects that appear as objects of rs:solution).
+    let solution_nodes: Vec<String> = triples
+        .iter()
+        .filter(|t| t.contains(RS_SOLUTION))
+        .filter_map(|t| {
+            t.split(RS_SOLUTION).nth(1).map(|s| s.trim().to_string())
+        })
+        .collect();
+
+    // For each solution, collect bindings.
+    let mut expected_bindings: Vec<HashMap<String, String>> = Vec::new();
+    for sol_node in &solution_nodes {
+        let mut binding_map: HashMap<String, String> = HashMap::new();
+        // Find rs:binding objects for this solution node.
+        let binding_nodes: Vec<String> = graph
+            .get(sol_node)
+            .and_then(|p| p.get(RS_BINDING))
+            .cloned()
+            .unwrap_or_default();
+        for binding_node in &binding_nodes {
+            let b_props = match graph.get(binding_node) {
+                Some(p) => p,
+                None => continue,
+            };
+            let var_name = b_props
+                .get(RS_VARIABLE)
+                .and_then(|v| v.first())
+                .map(|s| s.trim_matches('"').to_string());
+            let value = b_props.get(RS_VALUE).and_then(|v| v.first()).cloned();
+            if let (Some(var), Some(val)) = (var_name, value) {
+                // Normalize the value: strip outer <> for IRIs, keep as-is for literals.
+                binding_map.insert(var, val);
+            }
+        }
+        expected_bindings.push(binding_map);
+    }
+
+    // Execute the query and collect actual results.
+    let rows = match tx.query("SELECT result FROM pg_ripple.sparql($1)", &[&query_text]) {
+        Ok(r) => r,
+        Err(e) => return ValidationResult::Fail(format!("query error: {e}")),
+    };
+
+    let actual_bindings: Vec<HashMap<String, String>> = rows
+        .iter()
+        .map(|row| {
+            let json: serde_json::Value = row.get(0);
+            parse_pg_ripple_binding(&json, &vars)
+        })
+        .collect();
+
+    compare_binding_sets(&expected_bindings, &actual_bindings, &vars)
+}
+
+
 /// Parse a Turtle file into a set of canonical "s p o" strings.
 fn parse_turtle_to_triple_set(
     path: &Path,
+) -> Result<HashSet<String>, Box<dyn std::error::Error + Send + Sync>> {
+    let content = std::fs::read_to_string(path)?;
+    parse_turtle_to_triple_set_with_base(path, &content)
+}
+
+/// Parse Turtle content into a set of canonical "s p o" strings,
+/// injecting a base IRI from the file path to resolve relative IRIs.
+fn parse_turtle_to_triple_set_with_base(
+    path: &Path,
+    content: &str,
 ) -> Result<HashSet<String>, Box<dyn std::error::Error + Send + Sync>> {
     use rio_api::model::{Subject, Term};
     use rio_api::parser::TriplesParser;
     use rio_turtle::TurtleParser;
 
-    let content = std::fs::read_to_string(path)?;
+    // Build a base IRI from the file path so relative IRIs (e.g. <empty.ttl>) resolve correctly.
+    let base_iri = if let Ok(abs) = path.canonicalize() {
+        format!("file://{}", abs.display())
+    } else {
+        format!("file://{}", path.display())
+    };
+    // Prepend @base if the file doesn't already declare one.
+    let has_base = content.split_whitespace().next()
+        .map(|w| w.eq_ignore_ascii_case("@base") || w.eq_ignore_ascii_case("BASE"))
+        .unwrap_or(false);
+    let with_base;
+    let parse_content: &str = if has_base {
+        content
+    } else {
+        with_base = format!("@base <{base_iri}> .\n{content}");
+        &with_base
+    };
+
     let mut triples = HashSet::new();
 
-    let mut parser = TurtleParser::new(content.as_bytes(), None);
+    let mut parser = TurtleParser::new(parse_content.as_bytes(), None);
     parser.parse_all(&mut |t| -> Result<(), rio_turtle::TurtleError> {
         let s = match &t.subject {
             Subject::NamedNode(n) => format!("<{}>", n.iri),

@@ -4,6 +4,17 @@
 mod pg_ripple {
     use pgrx::prelude::*;
 
+    /// Register a named graph IRI (by encoded ID) in `_pg_ripple.named_graphs`.
+    ///
+    /// Called whenever a named graph is loaded, even if zero triples are inserted.
+    /// This allows `GRAPH ?var { }` queries to enumerate empty named graphs.
+    fn register_named_graph(graph_id: i64) {
+        let _ = Spi::run_with_args(
+            "INSERT INTO _pg_ripple.named_graphs (graph_id) VALUES ($1) ON CONFLICT DO NOTHING",
+            &[pgrx::datum::DatumWithOid::from(graph_id)],
+        );
+    }
+
     // ── v0.11.0: SPARQL Views, Datalog Views, ExtVP ───────────────────────────
 
     /// Return `true` when the pg_trickle extension is installed in the current database.
@@ -277,6 +288,7 @@ mod pg_ripple {
     #[pg_extern]
     fn load_ntriples_into_graph(data: &str, graph_iri: &str) -> i64 {
         let g_id = crate::dictionary::encode(graph_iri, crate::dictionary::KIND_IRI);
+        register_named_graph(g_id);
         crate::bulk_load::load_ntriples_into_graph(data, g_id)
     }
 
@@ -284,6 +296,7 @@ mod pg_ripple {
     #[pg_extern]
     fn load_turtle_into_graph(data: &str, graph_iri: &str) -> i64 {
         let g_id = crate::dictionary::encode(graph_iri, crate::dictionary::KIND_IRI);
+        register_named_graph(g_id);
         crate::bulk_load::load_turtle_into_graph(data, g_id)
     }
 
@@ -291,6 +304,7 @@ mod pg_ripple {
     #[pg_extern]
     fn load_rdfxml_into_graph(data: &str, graph_iri: &str) -> i64 {
         let g_id = crate::dictionary::encode(graph_iri, crate::dictionary::KIND_IRI);
+        register_named_graph(g_id);
         crate::bulk_load::load_rdfxml_into_graph(data, g_id)
     }
 
@@ -298,6 +312,7 @@ mod pg_ripple {
     #[pg_extern]
     fn load_ntriples_file_into_graph(path: &str, graph_iri: &str) -> i64 {
         let g_id = crate::dictionary::encode(graph_iri, crate::dictionary::KIND_IRI);
+        register_named_graph(g_id);
         crate::bulk_load::load_ntriples_file_into_graph(path, g_id)
     }
 
@@ -305,6 +320,7 @@ mod pg_ripple {
     #[pg_extern]
     fn load_turtle_file_into_graph(path: &str, graph_iri: &str) -> i64 {
         let g_id = crate::dictionary::encode(graph_iri, crate::dictionary::KIND_IRI);
+        register_named_graph(g_id);
         crate::bulk_load::load_turtle_file_into_graph(path, g_id)
     }
 

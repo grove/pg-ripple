@@ -80,6 +80,15 @@ CREATE TABLE IF NOT EXISTS _pg_ripple.prefixes (
     expansion TEXT NOT NULL
 );
 
+-- Named-graph registry (v0.43.0)
+-- Tracks named graph IRIs that have been explicitly loaded, even if the
+-- graph has zero triples (needed for GRAPH ?var { COUNT(*) } queries).
+CREATE TABLE IF NOT EXISTS _pg_ripple.named_graphs (
+    graph_id BIGINT NOT NULL PRIMARY KEY
+);
+CREATE INDEX IF NOT EXISTS idx_named_graphs_id ON _pg_ripple.named_graphs (graph_id);
+
+
 -- HTAP star-pattern caches (v0.6.0)
 CREATE TABLE IF NOT EXISTS _pg_ripple.subject_patterns (
     s       BIGINT   NOT NULL PRIMARY KEY,

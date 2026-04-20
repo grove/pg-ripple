@@ -1448,14 +1448,30 @@ fn translate_group(
 ) -> Fragment {
     let inner_frag = translate_pattern(inner, ctx);
 
+    // v0.42.0: When inside GRAPH ?var { aggregation }, we must propagate the
+    // `g` (graph-id) column through the aggregation so the outer GRAPH handler
+    // can bind the graph variable.  Capture the g column from the first VP scan.
+    let variable_graph_g: Option<String> = if ctx.variable_graph {
+        inner_frag
+            .from_items
+            .first()
+            .map(|(alias, _)| format!("{alias}.g"))
+    } else {
+        None
+    };
+
     // Build inner SQL with safe unqualified column aliases (_gi_<v>) so the
     // outer GROUP BY and aggregate expressions can reference them without
     // table-qualified names that become invalid inside a subquery wrapper.
-    let inner_select_parts: Vec<String> = inner_frag
+    let mut inner_select_parts: Vec<String> = inner_frag
         .bindings
         .iter()
         .map(|(v, col)| format!("{col} AS _gi_{}", sanitize_sql_ident(v)))
         .collect();
+    // Include g column when in variable-graph context.
+    if let Some(ref gcol) = variable_graph_g {
+        inner_select_parts.push(format!("{gcol} AS _gi__g"));
+    }
     let inner_select = if inner_select_parts.is_empty() {
         "1 AS _gi_dummy".to_owned()
     } else {
@@ -1489,6 +1505,10 @@ fn translate_group(
         .iter()
         .map(|(v, alias)| format!("{alias} AS _g_{}", sanitize_sql_ident(v)))
         .collect();
+    // Include g in outer SELECT for variable-graph context.
+    if variable_graph_g.is_some() {
+        select_parts.push("_gi__g AS g".to_string());
+    }
 
     let mut agg_bindings: Vec<(String, String)> = Vec::new();
     // Track which aggregate output variables produce text (GROUP_CONCAT) vs
@@ -1529,17 +1549,19 @@ fn translate_group(
         raw_agg_for_having.push((vname, raw_sql));
     }
 
-    let group_by_clause = if group_cols.is_empty() {
+    let group_by_clause = if group_cols.is_empty() && variable_graph_g.is_none() {
         String::new()
     } else {
-        format!(
-            "GROUP BY {}",
-            group_cols
-                .iter()
-                .map(|(_, alias)| alias.as_str())
-                .collect::<Vec<_>>()
-                .join(", ")
-        )
+        let mut gb_cols: Vec<String> = group_cols
+            .iter()
+            .map(|(_, alias)| alias.to_string())
+            .collect();
+        // When in variable-graph context, group by the g column too so each
+        // named graph gets its own result row.
+        if variable_graph_g.is_some() {
+            gb_cols.push("_gi__g".to_string());
+        }
+        format!("GROUP BY {}", gb_cols.join(", "))
     };
 
     // HAVING clause (from Filter wrapping Group in the caller).
@@ -1578,10 +1600,50 @@ fn translate_group(
         select_parts.join(", ")
     };
 
-    let group_sql = format!(
-        "(SELECT {select_list} FROM ({inner_sql}) AS _grp_inner \
-         {group_by_clause} {having_clause})"
-    );
+    // v0.43.0: When inside GRAPH ?var { aggregate } with no explicit GROUP BY
+    // variables, wrap the aggregation in a LEFT JOIN with _pg_ripple.named_graphs
+    // so that empty named graphs (zero matching triples) also appear in results
+    // with default aggregate values (COUNT=0, etc.).
+    let group_sql = if variable_graph_g.is_some() && group_cols.is_empty() {
+        // Inner aggregation SQL (grouped by g).
+        let inner_agg = format!(
+            "SELECT {select_list} FROM ({inner_sql}) AS _grp_inner \
+             {group_by_clause} {having_clause}"
+        );
+        let inner_agg_alias = ctx.next_alias();
+        // Outer SELECT: COALESCE each aggregate column to its empty-group default.
+        // COUNT → 0; SUM → 0; encoded aggregates (MIN/MAX/AVG/SAMPLE) → NULL.
+        let outer_cols: Vec<String> = agg_bindings
+            .iter()
+            .map(|(vname, _)| {
+                let col = format!("{inner_agg_alias}._g_{}", sanitize_sql_ident(vname));
+                if encoded_agg_vars.contains(vname) {
+                    // These produce encoded bigints (MIN/MAX/AVG/SAMPLE) — NULL is correct.
+                    format!("{col} AS _g_{}", sanitize_sql_ident(vname))
+                } else {
+                    // COUNT and raw-numeric aggregates → default 0 for empty groups.
+                    format!("COALESCE({col}, 0) AS _g_{}", sanitize_sql_ident(vname))
+                }
+            })
+            .collect();
+        let outer_select = if outer_cols.is_empty() {
+            "0 AS _g__count".to_owned()
+        } else {
+            outer_cols.join(", ")
+        };
+        format!(
+            "(SELECT ng.graph_id AS g, {outer_select} \
+             FROM _pg_ripple.named_graphs ng \
+             LEFT JOIN ({inner_agg}) AS {inner_agg_alias} \
+             ON {inner_agg_alias}.g = ng.graph_id \
+             WHERE ng.graph_id <> 0)"
+        )
+    } else {
+        format!(
+            "(SELECT {select_list} FROM ({inner_sql}) AS _grp_inner \
+             {group_by_clause} {having_clause})"
+        )
+    };
 
     let alias = ctx.next_alias();
     let mut frag = Fragment::empty();

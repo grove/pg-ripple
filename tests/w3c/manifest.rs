@@ -23,6 +23,8 @@ const MF_POS_SYNTAX: &str =
     "http://www.w3.org/2001/sw/DataAccess/tests/test-manifest#PositiveSyntaxTest11";
 const MF_NEG_SYNTAX: &str =
     "http://www.w3.org/2001/sw/DataAccess/tests/test-manifest#NegativeSyntaxTest11";
+const MF_UPDATE_EVAL: &str =
+    "http://www.w3.org/2001/sw/DataAccess/tests/test-manifest#UpdateEvaluationTest";
 const UT_UPDATE_EVAL: &str = "http://www.w3.org/2009/sparql/tests/test-update#UpdateEvaluationTest";
 const QT_QUERY: &str = "http://www.w3.org/2001/sw/DataAccess/tests/test-query#query";
 const QT_DATA: &str = "http://www.w3.org/2001/sw/DataAccess/tests/test-query#data";
@@ -308,7 +310,7 @@ fn detect_test_type(types: &[String]) -> TestType {
     for t in types {
         match t.as_str() {
             MF_QUERY_EVAL => return TestType::QueryEvaluation,
-            UT_UPDATE_EVAL => return TestType::UpdateEvaluation,
+            UT_UPDATE_EVAL | MF_UPDATE_EVAL => return TestType::UpdateEvaluation,
             MF_POS_SYNTAX => return TestType::PositiveSyntax,
             MF_NEG_SYNTAX => return TestType::NegativeSyntax,
             _ => {}

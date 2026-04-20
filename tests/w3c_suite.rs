@@ -142,6 +142,21 @@ fn w3c_suite() {
     // Write report.json artifact.
     write_report_json(&report, &config);
 
+    // Print skipped tests for debugging.
+    let skips: Vec<_> = report
+        .results
+        .iter()
+        .filter(|r| matches!(r.outcome, w3c::TestOutcome::Skip(_)))
+        .collect();
+    if !skips.is_empty() {
+        println!("\n  SKIPPED:");
+        for s in &skips {
+            if let w3c::TestOutcome::Skip(reason) = &s.outcome {
+                println!("  SKIP  [{}] {} — {}", s.test_case.category, s.test_case.name, reason);
+            }
+        }
+    }
+
     // Print unexpected failures (cap at 20 for readability).
     let failures: Vec<_> = report
         .results
@@ -218,7 +233,7 @@ fn write_report_json(report: &w3c::RunReport, config: &RunConfig) {
     };
 
     let doc = json!({
-        "version": "0.41.0",
+        "version": "0.43.0",
         "total":   report.total,
         "passed":  report.passed,
         "failed":  report.failed,
