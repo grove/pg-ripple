@@ -643,15 +643,23 @@ pub(super) fn translate_function_value(
         // Type error: input must be a plain literal (kind=2) or xsd:string typed literal.
         // Lang-tagged (kind=4), IRI (kind=0), other typed literals, or inline → NULL.
         Function::StrLang => {
-            let str_col = translate_arg_value(args.first()?, bindings, ctx)?;
             let lang_col = translate_arg_value(args.get(1)?, bindings, ctx)?;
-            let str_text = decode_lexical_sql(&str_col);
             let lang_text = decode_lexical_sql(&lang_col);
+            // Fast path: STR(?x) always returns a plain literal, no type check needed.
+            if let Some(Expression::FunctionCall(Function::Str, str_args)) = args.first() {
+                let inner_col = translate_arg_value(str_args.first()?, bindings, ctx)?;
+                let str_text = decode_lexical_sql(&inner_col);
+                return Some(format!(
+                    "pg_ripple.encode_lang_literal({str_text}, LOWER({lang_text}))"
+                ));
+            }
+            let str_col = translate_arg_value(args.first()?, bindings, ctx)?;
+            let str_text = decode_lexical_sql(&str_col);
             Some(format!(
                 "CASE \
                    WHEN {str_col} < 0 THEN NULL \
-                   WHEN NOT EXISTS(SELECT 1 FROM _pg_ripple.dictionary d WHERE d.id = {str_col} \
-                       AND (d.kind = 2 OR (d.kind = 3 AND d.datatype = \
+                   WHEN NOT EXISTS(SELECT 1 FROM _pg_ripple.dictionary _dc WHERE _dc.id = {str_col} \
+                       AND (_dc.kind = 2 OR (_dc.kind = 3 AND _dc.datatype = \
                            'http://www.w3.org/2001/XMLSchema#string'))) THEN NULL \
                    ELSE pg_ripple.encode_lang_literal({str_text}, LOWER({lang_text})) \
                  END"
@@ -663,9 +671,7 @@ pub(super) fn translate_function_value(
         // Type error: input must be a plain literal (kind=2) or xsd:string typed literal.
         // Lang-tagged, IRI, other typed literals, or inline → NULL.
         Function::StrDt => {
-            let str_col = translate_arg_value(args.first()?, bindings, ctx)?;
             let dt_arg = args.get(1)?;
-            let str_text = decode_lexical_sql(&str_col);
             // Extract the datatype IRI text. Named node IRI → use the IRI string directly.
             let dt_text = match dt_arg {
                 Expression::NamedNode(nn) => format!("'{}'", nn.as_str().replace('\'', "''")),
@@ -674,11 +680,21 @@ pub(super) fn translate_function_value(
                     decode_lexical_sql(&dt_col)
                 }
             };
+            // Fast path: STR(?x) always returns a plain literal, no type check needed.
+            if let Some(Expression::FunctionCall(Function::Str, str_args)) = args.first() {
+                let inner_col = translate_arg_value(str_args.first()?, bindings, ctx)?;
+                let str_text = decode_lexical_sql(&inner_col);
+                return Some(format!(
+                    "pg_ripple.encode_typed_literal({str_text}, {dt_text})"
+                ));
+            }
+            let str_col = translate_arg_value(args.first()?, bindings, ctx)?;
+            let str_text = decode_lexical_sql(&str_col);
             Some(format!(
                 "CASE \
                    WHEN {str_col} < 0 THEN NULL \
-                   WHEN NOT EXISTS(SELECT 1 FROM _pg_ripple.dictionary d WHERE d.id = {str_col} \
-                       AND (d.kind = 2 OR (d.kind = 3 AND d.datatype = \
+                   WHEN NOT EXISTS(SELECT 1 FROM _pg_ripple.dictionary _dc WHERE _dc.id = {str_col} \
+                       AND (_dc.kind = 2 OR (_dc.kind = 3 AND _dc.datatype = \
                            'http://www.w3.org/2001/XMLSchema#string'))) THEN NULL \
                    ELSE pg_ripple.encode_typed_literal({str_text}, {dt_text}) \
                  END"
