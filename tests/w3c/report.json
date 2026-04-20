@@ -37,8 +37,8 @@
       "xpass": 0
     },
     "functions": {
-      "fail": 50,
-      "pass": 25,
+      "fail": 46,
+      "pass": 29,
       "skip": 0,
       "timeout": 0,
       "total": 75,
@@ -109,9 +109,9 @@
       "xpass": 0
     }
   },
-  "failed": 108,
-  "pass_rate_pct": "62.3",
-  "passed": 202,
+  "failed": 104,
+  "pass_rate_pct": "63.6",
+  "passed": 206,
   "skipped": 14,
   "timeout": 0,
   "total": 324,

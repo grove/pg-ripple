@@ -217,13 +217,23 @@ fn srj_term_to_string(term: &Value) -> Option<String> {
 /// term strings as values.  Aggregate results (COUNT, SUM, AVG) are returned
 /// as raw JSON numbers, which we convert to the corresponding xsd typed literal
 /// representation so they can be compared with SRX expected values.
+///
+/// Normalizes `"x"^^<xsd:string>` to `"x"` (RDF 1.1 equivalence).
 fn parse_pg_ripple_binding(json: &Value, vars: &[String]) -> HashMap<String, String> {
+    const XSD_STRING: &str = "\"^^<http://www.w3.org/2001/XMLSchema#string>";
     let mut map = HashMap::new();
     if let Some(obj) = json.as_object() {
         for var in vars {
             if let Some(val) = obj.get(var) {
                 let term_str = match val {
-                    Value::String(s) if !s.is_empty() => s.clone(),
+                    Value::String(s) if !s.is_empty() => {
+                        // Normalize "x"^^xsd:string → "x" (plain literal)
+                        if s.ends_with(XSD_STRING) && s.starts_with('"') {
+                            s[..s.len() - XSD_STRING.len() + 1].to_string()
+                        } else {
+                            s.clone()
+                        }
+                    }
                     Value::Number(n) => {
                         if let Some(i) = n.as_i64() {
                             format!(
@@ -421,6 +431,9 @@ fn parse_srx_result_block(block: &str) -> HashMap<String, String> {
 }
 
 /// Convert a SPARQL Results XML term element to a canonical string.
+///
+/// In RDF 1.1, `"x"^^xsd:string` is semantically identical to the plain literal `"x"`.
+/// We normalize both to the plain form `"x"` for comparison purposes.
 fn parse_srx_term(xml: &str) -> Option<String> {
     if xml.starts_with("<uri>") {
         let inner = xml.strip_prefix("<uri>")?.trim_end_matches("</uri>");
@@ -446,6 +459,10 @@ fn parse_srx_term(xml: &str) -> Option<String> {
             let dt_rest = &tag_part[dt_pos + "datatype=\"".len()..];
             let dt_end = dt_rest.find('"')?;
             let dt = &dt_rest[..dt_end];
+            // Normalize xsd:string typed literals to plain literal form (RDF 1.1 equivalence).
+            if dt == "http://www.w3.org/2001/XMLSchema#string" {
+                return Some(format!("\"{value}\""));
+            }
             return Some(format!("\"{value}\"^^<{dt}>"));
         }
         return Some(format!("\"{value}\""));
@@ -483,7 +500,12 @@ fn parse_turtle_to_triple_set(
                     format!("\"{value}\"@{language}")
                 }
                 rio_api::model::Literal::Typed { value, datatype } => {
-                    format!("\"{value}\"^^<{}>", datatype.iri)
+                    // Normalize xsd:string typed literals to plain literal form (RDF 1.1).
+                    if datatype.iri == "http://www.w3.org/2001/XMLSchema#string" {
+                        format!("\"{value}\"")
+                    } else {
+                        format!("\"{value}\"^^<{}>", datatype.iri)
+                    }
                 }
             },
             Term::Triple(_) => "_:quoted".to_string(),
