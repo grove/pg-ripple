@@ -132,8 +132,6 @@ Every ROADMAP.md version section contains a `### Documentation` subsection. Trea
 5. Run `mdbook build docs` locally to confirm the site builds without errors.
 6. **Tick each documentation checkbox in ROADMAP.md** — same discipline as code checkboxes.
 
-> **v0.5.0 special case**: v0.5.0 carries the full catch-up backlog for v0.1.0–v0.4.0 (site scaffold, all released SQL API pages, playground, best practices, FAQ) in addition to its own pages. The site must be live on GitHub Pages before v0.5.0 is tagged.
-
 ### 10. Wrap the released section in ROADMAP.md
 
 After tagging a version, wrap its full `## v0.X.Y` section in a `<details>` block so the roadmap stays readable as completed releases accumulate. This is the same convention used in pg_trickle.
@@ -258,54 +256,4 @@ When the implementation checklist is complete and all tests pass, generate a com
 5. **Code TODOs**: Run `grep -rn "TODO\|FIXME\|XXX" src/ --include="*.rs" | head -20` to surface code-level concerns.
 6. **Git stats**: Run `git log vX.(Y-1).Z..HEAD --oneline | wc -l` and `git diff vX.(Y-1).Z HEAD --stat --summary | tail -3` for diff stats.
 
-### Example Report
-
-```
-## Completion Report — v0.4.0 (SPARQL Intermediate)
-
-### Version Summary
-Delivered:
-- ✓ FILTER algebra and SQL codegen (12+ data types, 20+ SPARQL functions)
-- ✓ UNION, OPTIONAL, property paths, aggregates, ORDER BY, LIMIT
-- ✓ Query plan caching via LRU (25K plan limit)
-- ✓ Full regression test suite (28 new tests)
-
-Commits: 34 | Files: 16 | +3,847 −1,292 lines
-
-### Remaining Work
-
-**Blocked by v0.4.0 (Prerequisites for v0.5.0)**
-- Discovery of blank-node scope in SPARQL (needed for CONSTRUCT)
-- Bulk-load triples (load_generation prefix for blank-node scoping)
-- RDF-star support in dictionary (qt_s, qt_p, qt_o columns)
-
-**Deferred to v0.6.0+**
-- SPARQL CONSTRUCT (requires blank-node scoping from v0.5.0)
-- Graph metrics (EXPLAIN for VP table cardinality)
-- Datalog ← Pushed to v0.7.0 to sequence SHACL first
-
-**Outstanding & Non-Blocking**
-- PR #45: Optimize filter constants (draft, can land anytime)
-- Issue #102: Case-insensitive string comparison (backlog)
-
-**Code-Level Concerns**
-- TODO in sqlgen.rs line 421: "Optimize self-join elimination for star patterns"
-- XXX in property_path.rs: "CYCLE clause cycles detection may panic on large graphs; add timeout"
-
-### Next Up: v0.5.0 (SPARQL Advanced)
-**Must unblock first:**
-- Blank-node scoping design doc (RFC in plans/)
-- Decision: load_generation vs. document-local blank nodes
-
-**Success metrics:**
-- 100% SPARQL 1.1 query feature coverage (minus FEDERATED SPARQL)
-- Bulk load 1M+ triples in <30 seconds
-- All 8 SHACL shapes in test suite validate correctly
-
-**See also:**
-- [ROADMAP.md § v0.5.0](../ROADMAP.md#v050-sparql-advanced-storage-serialization--write)
-- [plans/implementation_plan.md § 4.4 Blank Nodes](../plans/implementation_plan.md#44-blank-node-scoping)
-```
-
 **Generate this report at version completion as a summary message to the user.** It provides visibility into progress, highlights what depends on this version, and frames the next milestone clearly.
-```
