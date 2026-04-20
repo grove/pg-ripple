@@ -355,6 +355,18 @@ fn run_test_inner(client: &mut postgres::Client, tc: &TestCase, timeout: Duratio
         return TestOutcome::Fail(format!("loading fixtures: {e}"));
     }
 
+    // Load SERVICE mock data into named graphs and register mock endpoints (v0.42.0).
+    // Each qt:serviceData entry specifies an endpoint URL and a data file.
+    // We load the data into a named graph whose IRI is the endpoint URL,
+    // then register the endpoint with graph_iri = endpoint URL so that
+    // SERVICE clauses are rewritten to query the local named graph.
+    if !tc.service_data.is_empty() {
+        if let Err(e) = loader::load_service_data(&mut tx, &tc.service_data) {
+            let _ = tx.rollback();
+            return TestOutcome::Fail(format!("loading service data: {e}"));
+        }
+    }
+
     let ext = result_file
         .extension()
         .and_then(|e| e.to_str())

@@ -17,11 +17,16 @@ mod pg_ripple {
     ///
     /// `complexity` (v0.19.0) — optional hint for query planning: `'fast'`, `'normal'`
     /// (default), or `'slow'`.  Fast endpoints execute first in multi-endpoint queries.
+    ///
+    /// `graph_iri` (v0.42.0) — optional named-graph IRI.  When set, SERVICE clauses
+    /// targeting this URL are satisfied by querying the local named graph with that IRI
+    /// instead of making an HTTP call.  Useful for mock endpoints and offline testing.
     #[pg_extern]
     fn register_endpoint(
         url: &str,
         local_view_name: default!(Option<&str>, "NULL"),
         complexity: default!(Option<&str>, "NULL"),
+        graph_iri: default!(Option<&str>, "NULL"),
     ) {
         // v0.22.0 M-13: Reject non-http/https URL schemes to prevent file://, gopher://, etc.
         let scheme_ok = url.starts_with("http://") || url.starts_with("https://");
@@ -35,24 +40,26 @@ mod pg_ripple {
         let cx = complexity.unwrap_or("normal");
         if local_view.is_empty() {
             Spi::run_with_args(
-                "INSERT INTO _pg_ripple.federation_endpoints (url, enabled, complexity)
-                 VALUES ($1, true, $2)
-                 ON CONFLICT (url) DO UPDATE SET enabled = true, complexity = $2",
+                "INSERT INTO _pg_ripple.federation_endpoints (url, enabled, complexity, graph_iri)
+                 VALUES ($1, true, $2, $3)
+                 ON CONFLICT (url) DO UPDATE SET enabled = true, complexity = $2, graph_iri = $3",
                 &[
                     pgrx::datum::DatumWithOid::from(url),
                     pgrx::datum::DatumWithOid::from(cx),
+                    pgrx::datum::DatumWithOid::from(graph_iri),
                 ],
             )
             .unwrap_or_else(|e| pgrx::error!("register_endpoint failed: {e}"));
         } else {
             Spi::run_with_args(
-                "INSERT INTO _pg_ripple.federation_endpoints (url, enabled, local_view_name, complexity)
-                 VALUES ($1, true, $2, $3)
-                 ON CONFLICT (url) DO UPDATE SET enabled = true, local_view_name = $2, complexity = $3",
+                "INSERT INTO _pg_ripple.federation_endpoints (url, enabled, local_view_name, complexity, graph_iri)
+                 VALUES ($1, true, $2, $3, $4)
+                 ON CONFLICT (url) DO UPDATE SET enabled = true, local_view_name = $2, complexity = $3, graph_iri = $4",
                 &[
                     pgrx::datum::DatumWithOid::from(url),
                     pgrx::datum::DatumWithOid::from(local_view_name),
                     pgrx::datum::DatumWithOid::from(cx),
+                    pgrx::datum::DatumWithOid::from(graph_iri),
                 ],
             )
             .unwrap_or_else(|e| pgrx::error!("register_endpoint failed: {e}"));

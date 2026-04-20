@@ -120,14 +120,26 @@ pub fn xsd_double_fmt_impl(s: &str) -> String {
 /// Build a SQL table expression for one triple pattern (exposing `s`, `o`, `g`).
 /// When `graph_filter` is `Some(gid)`, injects `WHERE g = {gid}` so that the
 /// filter is baked into the leaf scan before any `LEFT JOIN` or CTE wrapper is built.
-fn table_expr(src: &VpSource, graph_filter: Option<i64>) -> String {
+fn table_expr(src: &VpSource, graph_filter: Option<i64>, svc_excl: &str) -> String {
     match src {
         VpSource::Dedicated(name) => match graph_filter {
-            None => name.clone(),
+            None => {
+                if svc_excl.is_empty() {
+                    name.clone()
+                } else {
+                    format!("(SELECT s, o, g FROM {name} WHERE 1=1{svc_excl})")
+                }
+            }
             Some(gid) => format!("(SELECT s, o, g FROM {name} WHERE g = {gid})"),
         },
         VpSource::Rare(p) => match graph_filter {
-            None => format!("(SELECT s, o, g FROM _pg_ripple.vp_rare WHERE p = {p})"),
+            None => {
+                if svc_excl.is_empty() {
+                    format!("(SELECT s, o, g FROM _pg_ripple.vp_rare WHERE p = {p})")
+                } else {
+                    format!("(SELECT s, o, g FROM _pg_ripple.vp_rare WHERE p = {p}{svc_excl})")
+                }
+            }
             Some(gid) => {
                 format!("(SELECT s, o, g FROM _pg_ripple.vp_rare WHERE p = {p} AND g = {gid})")
             }
@@ -144,7 +156,7 @@ fn table_expr(src: &VpSource, graph_filter: Option<i64>) -> String {
 ///
 /// When `graph_filter` is `Some(gid)`, injects `WHERE g = {gid}` into every
 /// branch so the filter is baked in before any outer `LEFT JOIN` wrapper.
-fn build_all_predicates_union(graph_filter: Option<i64>) -> String {
+fn build_all_predicates_union(graph_filter: Option<i64>, svc_excl: &str) -> String {
     let mut branches: Vec<String> = Vec::new();
 
     // Collect dedicated VP table predicate IDs.
@@ -159,9 +171,17 @@ fn build_all_predicates_union(graph_filter: Option<i64>) -> String {
         for row in rows {
             if let Ok(Some(pred_id)) = row.get::<i64>(1) {
                 match graph_filter {
-                    None => branches.push(format!(
-                        "SELECT {pred_id}::bigint AS p, s, o, g FROM _pg_ripple.vp_{pred_id}"
-                    )),
+                    None => {
+                        if svc_excl.is_empty() {
+                            branches.push(format!(
+                                "SELECT {pred_id}::bigint AS p, s, o, g FROM _pg_ripple.vp_{pred_id}"
+                            ))
+                        } else {
+                            branches.push(format!(
+                                "SELECT {pred_id}::bigint AS p, s, o, g FROM _pg_ripple.vp_{pred_id} WHERE 1=1{svc_excl}"
+                            ))
+                        }
+                    }
                     Some(gid) => branches.push(format!(
                         "SELECT {pred_id}::bigint AS p, s, o, g FROM _pg_ripple.vp_{pred_id} WHERE g = {gid}"
                     )),
@@ -172,7 +192,13 @@ fn build_all_predicates_union(graph_filter: Option<i64>) -> String {
 
     // Always include vp_rare (it already has a `p` column).
     match graph_filter {
-        None => branches.push("SELECT p, s, o, g FROM _pg_ripple.vp_rare".to_owned()),
+        None => {
+            if svc_excl.is_empty() {
+                branches.push("SELECT p, s, o, g FROM _pg_ripple.vp_rare".to_owned())
+            } else {
+                branches.push(format!("SELECT p, s, o, g FROM _pg_ripple.vp_rare WHERE 1=1{svc_excl}"))
+            }
+        }
         Some(gid) => branches.push(format!(
             "SELECT p, s, o, g FROM _pg_ripple.vp_rare WHERE g = {gid}"
         )),
@@ -222,6 +248,12 @@ pub(super) struct Ctx {
     /// Base IRI from the SPARQL BASE declaration (e.g. `BASE <http://example.org/>`).
     /// Used by `IRI()`/`URI()` to resolve relative IRI string arguments.
     pub(super) base_iri: Option<String>,
+    /// Dictionary IDs of named graphs used as SERVICE mock endpoints (v0.42.0).
+    /// When non-empty, outer BGP scans (without a GRAPH clause) exclude these
+    /// graphs so that endpoint data loaded into named graphs does not leak into
+    /// the outer query.  The SERVICE inner patterns still scope to their graph
+    /// via `ctx.graph_filter = Some(gid)`.
+    service_graph_exclude: Vec<i64>,
 }
 
 impl Ctx {
@@ -238,7 +270,26 @@ impl Ctx {
             graph_filter: None,
             variable_graph: false,
             base_iri: None,
+            service_graph_exclude: federation::get_service_graph_ids(),
         }
+    }
+
+    /// Returns a SQL fragment like `" AND g NOT IN (gid1, gid2)"` to exclude
+    /// service endpoint named graphs from outer BGP scans.  Returns an empty
+    /// string when there are no service graphs registered or when the context
+    /// already has an explicit graph filter (in which case `table_expr` applies
+    /// `WHERE g = gid` and the exclude list is irrelevant).
+    fn service_excl(&self) -> String {
+        if self.service_graph_exclude.is_empty() || self.graph_filter.is_some() {
+            return String::new();
+        }
+        let ids = self
+            .service_graph_exclude
+            .iter()
+            .map(|id| id.to_string())
+            .collect::<Vec<_>>()
+            .join(", ");
+        format!(" AND g NOT IN ({ids})")
     }
 
     fn next_alias(&mut self) -> String {
@@ -359,9 +410,17 @@ impl Fragment {
             self.conditions.push(cond);
         }
         for (var, col) in other.bindings {
-            if let Some(existing) = self.bindings.get(&var) {
-                // Variable already bound — equijoin.
-                self.conditions.push(format!("{} = {}", col, existing));
+            if let Some(existing) = self.bindings.get(&var).cloned() {
+                // Variable already bound in both sides.
+                // Use SPARQL-compatible null-safe join: if the existing binding is
+                // NULL (unbound from an OPTIONAL), the other side's value fills in.
+                // This matches SPARQL semantics: unbound variables are compatible
+                // with any binding from the other side (e.g. VALUES after OPTIONAL).
+                self.conditions.push(format!(
+                    "({existing} IS NULL OR {existing} = {col})"
+                ));
+                // Update binding to prefer the non-NULL value.
+                self.bindings.insert(var, format!("COALESCE({existing}, {col})"));
             } else {
                 self.bindings.insert(var, col);
             }
@@ -560,7 +619,7 @@ fn translate_bgp(patterns: &[spargebra::term::TriplePattern], ctx: &mut Ctx) -> 
                 // v0.40.0: pass graph_filter so the union branches include WHERE g = gid.
                 let vname = v.as_str().to_owned();
                 let a = alias.clone();
-                let union_subquery = build_all_predicates_union(ctx.graph_filter);
+                let union_subquery = build_all_predicates_union(ctx.graph_filter, &ctx.service_excl());
                 frag.from_items
                     .push((a.clone(), format!("({union_subquery})")));
                 if let Some(existing) = frag.bindings.get(&vname) {
@@ -589,7 +648,8 @@ fn translate_bgp(patterns: &[spargebra::term::TriplePattern], ctx: &mut Ctx) -> 
         };
 
         // v0.40.0: pass ctx.graph_filter so graph filters are baked into leaf scans.
-        let tbl = table_expr(&source, ctx.graph_filter);
+        // v0.42.0: also pass service_excl to exclude service-endpoint named graphs from outer scans.
+        let tbl = table_expr(&source, ctx.graph_filter, &ctx.service_excl());
         frag.from_items.push((alias.clone(), tbl));
         for c in pred_conditions {
             frag.conditions.push(c);
@@ -1979,15 +2039,99 @@ fn translate_service(
     let url = match name {
         NamedNodePattern::NamedNode(nn) => nn.as_str().to_string(),
         NamedNodePattern::Variable(v) => {
-            // Variable endpoint: look up bound value in per-query cache.
-            // If not bound at translation time, error (runtime binding not
-            // supported in this version).
-            pgrx::warning!(
-                "SERVICE with variable endpoint ?{} is not yet supported; returning empty results",
-                v.as_str()
-            );
+            // Variable endpoint (v0.42.0): expand via all registered graph endpoints.
+            // Each registered endpoint with a graph_iri becomes one UNION arm,
+            // binding the variable to the endpoint URL and executing the inner
+            // pattern against the named graph.
+            let vname = v.as_str().to_owned();
+            let endpoints = federation::get_all_graph_endpoints();
+            if endpoints.is_empty() {
+                pgrx::warning!(
+                    "SERVICE with variable endpoint ?{} — no registered graph endpoints; returning empty",
+                    v.as_str()
+                );
+                let mut frag = Fragment::empty();
+                frag.conditions.push("FALSE".to_owned());
+                return frag;
+            }
+
+            // Build one arm per registered endpoint; UNION all arms.
+            let mut arms: Vec<Fragment> = Vec::new();
+            for (ep_url, graph_iri) in &endpoints {
+                let url_id = match ctx.encode_iri(ep_url) {
+                    Some(id) => id,
+                    None => continue, // URL not in dictionary → skip
+                };
+                let gid = match ctx.encode_iri(graph_iri) {
+                    Some(id) => id,
+                    None => continue, // graph IRI not in dictionary → skip
+                };
+                let saved = ctx.graph_filter;
+                ctx.graph_filter = Some(gid);
+                let mut arm_frag = translate_pattern(inner, ctx);
+                ctx.graph_filter = saved;
+                // Bind ?service to the endpoint URL id (constant).
+                if let Some(existing) = arm_frag.bindings.get(&vname).cloned() {
+                    arm_frag.conditions.push(format!("{existing} = {url_id}"));
+                } else {
+                    arm_frag.bindings.insert(vname.clone(), url_id.to_string());
+                }
+                arms.push(arm_frag);
+            }
+
+            if arms.is_empty() {
+                let mut frag = Fragment::empty();
+                frag.conditions.push("FALSE".to_owned());
+                return frag;
+            }
+            if arms.len() == 1 {
+                return arms.pop().unwrap();
+            }
+
+            // Collect all variables across all arms for the UNION projection.
+            let all_vars: Vec<String> = {
+                let mut vars: std::collections::HashSet<String> =
+                    std::collections::HashSet::new();
+                for arm in &arms {
+                    vars.extend(arm.bindings.keys().cloned());
+                }
+                let mut v: Vec<String> = vars.into_iter().collect();
+                v.sort();
+                v
+            };
+
+            let union_arms: Vec<String> = arms
+                .iter()
+                .map(|arm| {
+                    let cols: Vec<String> = all_vars
+                        .iter()
+                        .map(|var| {
+                            arm.bindings
+                                .get(var)
+                                .map(|col| format!("{col} AS _sv_{var}"))
+                                .unwrap_or_else(|| format!("NULL::bigint AS _sv_{var}"))
+                        })
+                        .collect();
+                    let cols_str = if cols.is_empty() {
+                        "1 AS _dummy".to_owned()
+                    } else {
+                        cols.join(", ")
+                    };
+                    format!(
+                        "SELECT {cols_str} FROM {} {}",
+                        arm.build_from(),
+                        arm.build_where()
+                    )
+                })
+                .collect();
+
+            let union_subq = format!("({})", union_arms.join(" UNION ALL "));
+            let alias = ctx.next_alias();
             let mut frag = Fragment::empty();
-            frag.conditions.push("FALSE".to_owned());
+            frag.from_items.push((alias.clone(), union_subq));
+            for var in &all_vars {
+                frag.bindings.insert(var.clone(), format!("{alias}._sv_{var}"));
+            }
             return frag;
         }
     };
@@ -2016,6 +2160,24 @@ fn translate_service(
     // ── 3. Local SPARQL view rewrite ──────────────────────────────────────────
     if let Some(stream_table) = federation::get_local_view(&url) {
         return translate_service_local(&stream_table, ctx);
+    }
+
+    // ── 3b. Named-graph local execution (v0.42.0) ─────────────────────────────
+    // When a `graph_iri` is registered for this endpoint, translate the inner
+    // pattern against the local named graph instead of making an HTTP call.
+    // This is used for mock endpoints in the W3C federation test suite.
+    if let Some(graph_iri) = federation::get_graph_iri(&url) {
+        if let Some(gid) = ctx.encode_iri(&graph_iri) {
+            let saved = ctx.graph_filter;
+            ctx.graph_filter = Some(gid);
+            let frag = translate_pattern(inner, ctx);
+            ctx.graph_filter = saved;
+            return frag;
+        }
+        // graph IRI not in dictionary → no results
+        let mut frag = Fragment::empty();
+        frag.conditions.push("FALSE".to_owned());
+        return frag;
     }
 
     // ── 4. Variable projection rewrite (v0.19.0) ─────────────────────────────

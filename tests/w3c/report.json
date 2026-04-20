@@ -82,8 +82,8 @@
       "xpass": 0
     },
     "service": {
-      "fail": 6,
-      "pass": 1,
+      "fail": 0,
+      "pass": 7,
       "skip": 0,
       "timeout": 0,
       "total": 7,
@@ -109,9 +109,9 @@
       "xpass": 0
     }
   },
-  "failed": 6,
-  "pass_rate_pct": "93.8",
-  "passed": 304,
+  "failed": 0,
+  "pass_rate_pct": "95.7",
+  "passed": 310,
   "skipped": 14,
   "timeout": 0,
   "total": 324,

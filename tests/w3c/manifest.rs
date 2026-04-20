@@ -27,6 +27,9 @@ const UT_UPDATE_EVAL: &str = "http://www.w3.org/2009/sparql/tests/test-update#Up
 const QT_QUERY: &str = "http://www.w3.org/2001/sw/DataAccess/tests/test-query#query";
 const QT_DATA: &str = "http://www.w3.org/2001/sw/DataAccess/tests/test-query#data";
 const QT_GRAPH_DATA: &str = "http://www.w3.org/2001/sw/DataAccess/tests/test-query#graphData";
+const QT_SERVICE_DATA: &str = "http://www.w3.org/2001/sw/DataAccess/tests/test-query#serviceData";
+const QT_ENDPOINT: &str = "http://www.w3.org/2001/sw/DataAccess/tests/test-query#endpoint";
+const QT_DATA_PROP: &str = "http://www.w3.org/2001/sw/DataAccess/tests/test-query#data";
 const UT_REQUEST: &str = "http://www.w3.org/2009/sparql/tests/test-update#request";
 const UT_DATA: &str = "http://www.w3.org/2009/sparql/tests/test-update#data";
 const UT_GRAPH_DATA: &str = "http://www.w3.org/2009/sparql/tests/test-update#graphData";
@@ -58,6 +61,11 @@ pub struct TestCase {
     pub named_graphs: Vec<(String, PathBuf)>,
     /// Expected result file (`.srx`, `.srj`, or `.ttl`).
     pub result_file: Option<PathBuf>,
+    /// SERVICE mock data: `(endpoint URL, data file path)`.
+    /// Each entry represents a `qt:serviceData` block in the manifest.
+    /// The endpoint data should be loaded into a named graph whose IRI is
+    /// the endpoint URL before running the query.
+    pub service_data: Vec<(String, PathBuf)>,
 }
 
 /// The kind of a W3C SPARQL test case.
@@ -186,6 +194,7 @@ pub fn parse_manifest(
         let mut query_file = None;
         let mut data_files: Vec<PathBuf> = Vec::new();
         let mut named_graphs: Vec<(String, PathBuf)> = Vec::new();
+        let mut service_data: Vec<(String, PathBuf)> = Vec::new();
 
         if let Some(action) = action_node {
             if let Some(ap) = graph.get(&action) {
@@ -255,6 +264,25 @@ pub fn parse_manifest(
                         }
                     }
                 }
+
+                // SERVICE mock data (qt:serviceData), v0.42.0.
+                // Each qt:serviceData blank node has qt:endpoint (the URL) and
+                // qt:data (the RDF file to load into that named graph).
+                for sd_ref in ap.get(QT_SERVICE_DATA).unwrap_or(&vec![]) {
+                    if let Some(sd_props) = graph.get(sd_ref) {
+                        let endpoint_url = sd_props
+                            .get(QT_ENDPOINT)
+                            .and_then(|v| v.first())
+                            .cloned();
+                        let data_file = sd_props
+                            .get(QT_DATA_PROP)
+                            .and_then(|v| v.first())
+                            .and_then(|p| iri_to_path(p, &manifest_dir));
+                        if let (Some(url), Some(path)) = (endpoint_url, data_file) {
+                            service_data.push((url, path));
+                        }
+                    }
+                }
             }
         }
 
@@ -267,6 +295,7 @@ pub fn parse_manifest(
             data_files,
             named_graphs,
             result_file,
+            service_data,
         });
     }
 

@@ -125,6 +125,76 @@ pub(crate) fn get_local_view(url: &str) -> Option<String> {
     .flatten()
 }
 
+/// Returns the named-graph dictionary IDs of all registered graph endpoints (v0.42.0).
+///
+/// Used to exclude service-data named graphs from outer BGP scans so that
+/// endpoint data loaded into named graphs does not leak into outer patterns.
+pub(crate) fn get_service_graph_ids() -> Vec<i64> {
+    let mut result = Vec::new();
+    Spi::connect(|client| {
+        let rows = client
+            .select(
+                "SELECT d.id
+                   FROM _pg_ripple.federation_endpoints fe
+                   JOIN _pg_ripple.dictionary d
+                     ON d.value = fe.graph_iri AND d.kind = 0
+                  WHERE fe.graph_iri IS NOT NULL AND fe.enabled = true",
+                None,
+                &[],
+            );
+        if let Ok(rows) = rows {
+            for row in rows {
+                if let Ok(Some(id)) = row.get::<i64>(1) {
+                    result.push(id);
+                }
+            }
+        }
+    });
+    result
+}
+
+/// Returns the `graph_iri` for an endpoint if set and not NULL (v0.42.0).
+///
+/// When non-NULL, the SERVICE clause is satisfied by querying the local named
+/// graph with that IRI instead of making an HTTP call.  This enables mock
+/// endpoints for the W3C SPARQL federation test suite and offline testing.
+pub(crate) fn get_graph_iri(url: &str) -> Option<String> {
+    Spi::get_one_with_args::<String>(
+        "SELECT graph_iri FROM _pg_ripple.federation_endpoints
+          WHERE url = $1 AND enabled = true AND graph_iri IS NOT NULL",
+        &[DatumWithOid::from(url)],
+    )
+    .ok()
+    .flatten()
+}
+
+/// Returns all registered endpoints that have a `graph_iri` set (v0.42.0).
+///
+/// Used to expand `SERVICE ?variable` clauses: each registered graph endpoint
+/// becomes one arm of a UNION, binding the variable to the endpoint URL.
+pub(crate) fn get_all_graph_endpoints() -> Vec<(String, String)> {
+    let mut result = Vec::new();
+    Spi::connect(|client| {
+        let rows = client
+            .select(
+                "SELECT url, graph_iri FROM _pg_ripple.federation_endpoints
+                  WHERE enabled = true AND graph_iri IS NOT NULL
+                  ORDER BY url",
+                None,
+                &[],
+            )
+            .unwrap_or_else(|e| pgrx::error!("get_all_graph_endpoints SPI error: {e}"));
+        for row in rows {
+            if let (Ok(Some(url)), Ok(Some(giri))) =
+                (row.get::<String>(1), row.get::<String>(2))
+            {
+                result.push((url, giri));
+            }
+        }
+    });
+    result
+}
+
 // ─── Adaptive timeout (v0.19.0) ──────────────────────────────────────────────
 
 /// Derive the effective timeout for a given endpoint.

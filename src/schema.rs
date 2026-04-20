@@ -265,16 +265,19 @@ CREATE TABLE IF NOT EXISTS _pg_ripple.inferred_schema (
 // v0.16.0: SPARQL federation endpoint allowlist and health monitoring.
 pgrx::extension_sql!(
     r#"
--- Federation endpoint allowlist (v0.16.0, extended v0.19.0)
+-- Federation endpoint allowlist (v0.16.0, extended v0.19.0, v0.42.0)
 -- Only endpoints with enabled = true are contacted via SERVICE clauses.
 -- local_view_name: when set, SERVICE is rewritten to scan the named stream table.
 -- complexity (v0.19.0): 'fast', 'normal', or 'slow' — used to order multi-endpoint queries.
+-- graph_iri (v0.42.0): when set, SERVICE is satisfied locally by querying that named graph
+--   instead of making an HTTP call.  Enables mock/local endpoint support for testing.
 CREATE TABLE IF NOT EXISTS _pg_ripple.federation_endpoints (
     url             TEXT    NOT NULL PRIMARY KEY,
     enabled         BOOLEAN NOT NULL DEFAULT true,
     local_view_name TEXT,
     complexity      TEXT    NOT NULL DEFAULT 'normal'
-                    CHECK (complexity IN ('fast', 'normal', 'slow'))
+                    CHECK (complexity IN ('fast', 'normal', 'slow')),
+    graph_iri       TEXT
 );
 
 -- Federation health log (v0.16.0, used when pg_trickle is installed)

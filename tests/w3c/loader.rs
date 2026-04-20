@@ -150,3 +150,31 @@ pub fn load_fixtures(
     }
     Ok(())
 }
+
+/// Load SERVICE mock data for federation tests (v0.42.0).
+///
+/// For each `(endpoint_url, data_file)` pair:
+/// 1. Load the RDF data file into a named graph whose IRI is the endpoint URL.
+/// 2. Register the endpoint URL in `_pg_ripple.federation_endpoints` with
+///    `graph_iri = endpoint_url`, so SERVICE clauses are rewritten to query
+///    the local named graph instead of making HTTP calls.
+///
+/// All changes occur within the caller's transaction and are rolled back
+/// automatically at the end of each test case.
+pub fn load_service_data(
+    tx: &mut Transaction<'_>,
+    service_data: &[(String, std::path::PathBuf)],
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    for (endpoint_url, data_file) in service_data {
+        // Load the endpoint's data into a named graph identified by the endpoint URL.
+        load_named_graph(tx, endpoint_url, data_file)?;
+        // Register the endpoint with graph_iri pointing to the named graph.
+        tx.execute(
+            "INSERT INTO _pg_ripple.federation_endpoints (url, enabled, graph_iri)
+             VALUES ($1, true, $1)
+             ON CONFLICT (url) DO UPDATE SET enabled = true, graph_iri = $1",
+            &[endpoint_url],
+        )?;
+    }
+    Ok(())
+}
