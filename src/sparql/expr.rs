@@ -885,10 +885,11 @@ pub(super) fn translate_function_value(
             let col = translate_arg_value(args.first()?, bindings, ctx)?;
             let text = decode_lexical_sql(&col);
             // Extract seconds (integer or fractional) and encode as xsd:decimal.
-            // Cast through numeric to strip leading zeros (e.g. "01" → "1").
+            // Inline datetimes store UTC with microseconds (e.g. "01.000000"), so
+            // strip leading zeros via ::numeric and trailing fractional zeros via RTRIM.
             Some(format!(
                 "pg_ripple.encode_typed_literal(\
-                    (COALESCE(substring({text} FROM 'T\\d{{2}}:\\d{{2}}:(\\d+(?:\\.\\d+)?)'), '0'))::numeric::text, \
+                    RTRIM(RTRIM((COALESCE(substring({text} FROM 'T\\d{{2}}:\\d{{2}}:(\\d+(?:\\.\\d+)?)'), '0'))::numeric::text, '0'), '.'), \
                     'http://www.w3.org/2001/XMLSchema#decimal')"
             ))
         }
