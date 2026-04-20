@@ -1961,6 +1961,20 @@ fn translate_service(
     silent: bool,
     ctx: &mut Ctx,
 ) -> Fragment {
+    // Helper: when SERVICE SILENT fails, return one empty mapping so outer
+    // pattern variables are preserved with service variables unbound.
+    // Per SPARQL 1.1 semantics, SERVICE SILENT failure → the service evaluates
+    // to a single empty solution mapping {}, making it behave like a cross-join
+    // with one empty row. Service-exclusive variables end up unbound (NULL);
+    // shared variables are contributed by the outer pattern.
+    let service_silent_fallback = |ctx: &mut Ctx| -> Fragment {
+        let alias = ctx.next_alias();
+        let mut frag = Fragment::empty();
+        frag.from_items
+            .push((alias, "(SELECT 1 AS _dummy)".to_owned()));
+        frag // No bindings — service vars are absent (unbound) in the output
+    };
+
     // ── 1. Resolve URL ────────────────────────────────────────────────────────
     let url = match name {
         NamedNodePattern::NamedNode(nn) => nn.as_str().to_string(),
@@ -1982,7 +1996,7 @@ fn translate_service(
     if !federation::is_endpoint_allowed(&url) {
         if silent {
             pgrx::warning!("SERVICE endpoint not registered (SILENT skipping): {url}");
-            return Fragment::zero_rows();
+            return service_silent_fallback(ctx);
         }
         pgrx::error!(
             "federation endpoint not registered: {}; use pg_ripple.register_endpoint() to allow it",
@@ -1994,7 +2008,7 @@ fn translate_service(
     if !federation::is_endpoint_healthy(&url) {
         if silent {
             pgrx::warning!("SERVICE endpoint {url} is unhealthy (success_rate < 10%); skipping");
-            return Fragment::zero_rows();
+            return service_silent_fallback(ctx);
         }
         pgrx::warning!("SERVICE endpoint {url} is unhealthy; proceeding anyway");
     }
@@ -2062,6 +2076,9 @@ fn translate_service(
                 .unwrap_or("warning");
             if silent || on_error_str == "empty" {
                 pgrx::warning!("SERVICE {url} failed (returning empty): {e}");
+                if silent {
+                    return service_silent_fallback(ctx);
+                }
                 return Fragment::zero_rows();
             } else if on_error_str == "error" {
                 pgrx::error!("SERVICE {url} failed: {e}");
