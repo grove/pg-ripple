@@ -107,6 +107,14 @@ pub fn load_fixtures(
     // transaction is rolled back after each test, so this clear is automatically
     // undone — it's purely in-transaction.
     tx.execute("SELECT pg_ripple.sparql_update('CLEAR ALL')", &[])?;
+    // Flush the in-memory encode cache so that stale term→id mappings from
+    // previous rolled-back test transactions do not bleed into this test.
+    // (The xact-callback fix for this is in v0.42.0; this is the workaround.)
+    tx.execute("SELECT pg_ripple.flush_encode_cache()", &[])?;
+    // Reset the SPARQL plan cache so that compiled SQL (which embeds dictionary
+    // IDs) from a previous test is not reused for a different test where the
+    // same query text maps to different predicate IDs after encode cache flush.
+    tx.execute("SELECT pg_ripple.plan_cache_reset()", &[])?;
     for file in data_files {
         load_default_graph(tx, file)?;
     }

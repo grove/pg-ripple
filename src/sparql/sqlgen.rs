@@ -2162,6 +2162,26 @@ fn translate_expr(
             Some(format!("({col} IS NOT NULL)"))
         }
 
+        // Boolean literals (`true` / `false` in FILTER expressions).
+        Expression::Literal(lit) => {
+            let dt = lit.datatype();
+            if dt.as_str() == "http://www.w3.org/2001/XMLSchema#boolean" {
+                match lit.value() {
+                    "true" | "1" => Some("TRUE".to_owned()),
+                    _ => Some("FALSE".to_owned()),
+                }
+            } else {
+                // Non-boolean literals in boolean context: compute EBV.
+                // Numeric zero / empty string → FALSE; anything else → TRUE.
+                let val_sql = translate_expr_value(expr, bindings, ctx)?;
+                // inline_false = -9151314442816847872, inline_int_zero = -9187343239835811840
+                Some(format!(
+                    "({val_sql} IS NOT NULL AND {val_sql} NOT IN \
+                     (-9151314442816847872, -9187343239835811840))"
+                ))
+            }
+        }
+
         Expression::Equal(a, b) => {
             let (la, ra) = translate_comparison_sides(a, b, bindings, ctx)?;
             Some(format!("({la} = {ra})"))

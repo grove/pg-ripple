@@ -327,6 +327,11 @@ fn run_test_inner(client: &mut postgres::Client, tc: &TestCase, timeout: Duratio
         Err(e) => return TestOutcome::Skip(format!("reading query: {e}")),
     };
 
+    // Inject a BASE declaration so relative IRIs in GRAPH <file> clauses
+    // resolve to the test data directory (matching how the W3C manifest parser
+    // resolves qt:graphData IRIs relative to the manifest base URI).
+    let query_text = prepend_base_if_needed(&query_file, query_text);
+
     let result_file = match &tc.result_file {
         Some(f) => f.clone(),
         None => return TestOutcome::Skip("no result file".into()),
@@ -393,6 +398,7 @@ fn run_syntax_test(client: &mut postgres::Client, tc: &TestCase) -> TestOutcome 
         Ok(s) => s,
         Err(e) => return TestOutcome::Skip(format!("reading query: {e}")),
     };
+    let query_text = prepend_base_if_needed(&query_file, query_text);
 
     let mut tx = match client.transaction() {
         Ok(t) => t,
@@ -408,4 +414,29 @@ fn run_syntax_test(client: &mut postgres::Client, tc: &TestCase) -> TestOutcome 
         validator::ValidationResult::Fail(msg) => TestOutcome::Fail(msg),
         validator::ValidationResult::Skip(reason) => TestOutcome::Skip(reason),
     }
+}
+
+/// Prepend `BASE <file:///path/to/dir/>` to a SPARQL query if it does not
+/// already have a BASE declaration.  This allows relative IRIs in GRAPH clauses
+/// (e.g. `GRAPH <ng-01.ttl>`) to be resolved against the test data directory,
+/// matching how the W3C manifest parser resolves `qt:graphData` references.
+fn prepend_base_if_needed(query_file: &std::path::Path, query_text: String) -> String {
+    // Only inject if the query doesn't already declare a BASE.
+    let has_base = query_text
+        .split_whitespace()
+        .next()
+        .map(|w| w.eq_ignore_ascii_case("BASE"))
+        .unwrap_or(false);
+    if has_base {
+        return query_text;
+    }
+    if let Some(parent) = query_file.parent() {
+        if let Ok(abs) = parent.canonicalize() {
+            if let Some(dir) = abs.to_str() {
+                let base = format!("file://{}/", dir.trim_end_matches('/'));
+                return format!("BASE <{base}>\n{query_text}");
+            }
+        }
+    }
+    query_text
 }
