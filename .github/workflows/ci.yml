@@ -464,10 +464,10 @@ jobs:
 
       - name: Run Jena conformance suite (4 threads)
         env:
-          PGHOST: ${{ github.workspace }}/.pgrx
+          PGHOST: localhost
           PGPORT: "28818"
           PGDATABASE: postgres
-          PGUSER: ${{ env.USER }}
+          PGUSER: runner
           JENA_THREADS: "4"
         run: cargo test --test jena_suite -- --nocapture
 
@@ -545,10 +545,10 @@ jobs:
 
       - name: Run WatDiv benchmark suite (8 threads)
         env:
-          PGHOST: ${{ github.workspace }}/.pgrx
+          PGHOST: localhost
           PGPORT: "28818"
           PGDATABASE: postgres
-          PGUSER: ${{ env.USER }}
+          PGUSER: runner
           WATDIV_THREADS: "8"
         run: cargo test --test watdiv_suite -- --nocapture
 
