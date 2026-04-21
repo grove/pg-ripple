@@ -24,6 +24,9 @@
 # Jena entries (v0.43.0+): ≤ 30 entries expected for type-coercion edge cases
 # ─────────────────────────────────────────────────────────────────────────────
 
+# spargebra limitation: median() is a Jena ARQ extension aggregate not in SPARQL 1.1
+jena:syntax-median-01.arq
+
 # spargebra limitation: longest-token rule for <?a&&?b> not enforced by the parser
 jena:syn-bad-28.rq
 
