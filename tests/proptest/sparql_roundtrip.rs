@@ -11,7 +11,6 @@
 //! ```
 
 use proptest::prelude::*;
-use spargebra::Query;
 
 use crate::sqlgen_bridge::{normalize_whitespace, translate_select_str};
 

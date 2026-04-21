@@ -43,7 +43,7 @@ proptest! {
     fn encode_stable(iri in arb_iri()) {
         let id1 = xxh3_encode(&iri);
         let id2 = xxh3_encode(&iri);
-        prop_assert_eq!(id1, id2, "encode must be deterministic for {iri}");
+        prop_assert_eq!(id1, id2, "encode must be deterministic for {}", iri);
     }
 
     /// Literal encode is stable.
@@ -51,7 +51,7 @@ proptest! {
     fn literal_encode_stable(lit in arb_literal()) {
         let id1 = xxh3_encode(&lit);
         let id2 = xxh3_encode(&lit);
-        prop_assert_eq!(id1, id2, "literal encode must be deterministic for {lit}");
+        prop_assert_eq!(id1, id2, "literal encode must be deterministic for {}", lit);
     }
 
     /// Blank-node encode is stable.
@@ -59,7 +59,7 @@ proptest! {
     fn blank_node_encode_stable(bnode in arb_blank_node()) {
         let id1 = xxh3_encode(&bnode);
         let id2 = xxh3_encode(&bnode);
-        prop_assert_eq!(id1, id2, "blank-node encode must be deterministic for {bnode}");
+        prop_assert_eq!(id1, id2, "blank-node encode must be deterministic for {}", bnode);
     }
 
     /// Different terms yield different hash IDs (collision resistance check on random pairs).
@@ -73,7 +73,7 @@ proptest! {
         let id_b = xxh3_encode(&b);
         // Collision is astronomically unlikely with XXH3-128 truncated to i64;
         // if it fires, it's a genuine bug worth investigating.
-        prop_assert_ne!(id_a, id_b, "hash collision between {a} and {b}");
+        prop_assert_ne!(id_a, id_b, "hash collision between {} and {}", a, b);
     }
 }
 

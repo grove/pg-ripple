@@ -19,8 +19,8 @@ pub fn xxh3_encode(term: &str) -> i64 {
 ///
 /// Returns an empty string if the query fails to parse.
 pub fn translate_select_str(query: &str) -> String {
-    use spargebra::Query;
-    let Ok(q) = Query::parse(query, None) else {
+    use spargebra::{Query, SparqlParser};
+    let Ok(q) = SparqlParser::new().parse_query(query) else {
         return String::new();
     };
     let Query::Select { pattern, .. } = q else {
