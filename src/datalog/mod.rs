@@ -705,22 +705,20 @@ pub fn run_inference_seminaive_full(rule_set_name: &str) -> (i64, i32, Vec<Strin
 /// a rule (head.p or any body atom's .p field).
 fn collect_pred_vars(rule: &Rule) -> Vec<String> {
     let mut vars: Vec<String> = Vec::new();
-    if let Some(h) = &rule.head {
-        if let Term::Var(v) = &h.p {
-            if !vars.contains(v) {
-                vars.push(v.clone());
-            }
-        }
+    if let Some(Term::Var(v)) = rule.head.as_ref().map(|h| &h.p)
+        && !vars.contains(v)
+    {
+        vars.push(v.clone());
     }
     for lit in &rule.body {
         let atom = match lit {
             BodyLiteral::Positive(a) | BodyLiteral::Negated(a) => a,
             _ => continue,
         };
-        if let Term::Var(v) = &atom.p {
-            if !vars.contains(v) {
-                vars.push(v.clone());
-            }
+        if let Term::Var(v) = &atom.p
+            && !vars.contains(v)
+        {
+            vars.push(v.clone());
         }
     }
     vars
@@ -743,7 +741,7 @@ fn substitute_pred_var(rule: &Rule, var_name: &str, pred_id: i64) -> Rule {
             g: sub(&a.g),
         }
     };
-    let new_head = rule.head.as_ref().map(|h| sub_atom(h));
+    let new_head = rule.head.as_ref().map(sub_atom);
     let new_body = rule
         .body
         .iter()
@@ -865,7 +863,7 @@ fn compute_pred_var_bindings(rule: &Rule, pred_vars: &[String]) -> Vec<Vec<(Stri
             _ => None,
         };
 
-        if subj_var.is_some() && obj_var.is_some() {
+        if let (Some(sv), Some(ov)) = (subj_var, obj_var) {
             // Enumerate (s, o) pairs from this VP table — both vars bound together.
             let sql = format!(
                 "SELECT DISTINCT s, o FROM {}",
@@ -884,8 +882,6 @@ fn compute_pred_var_bindings(rule: &Rule, pred_vars: &[String]) -> Vec<Vec<(Stri
                     })
                     .unwrap_or_default()
             });
-            let sv = subj_var.unwrap();
-            let ov = obj_var.unwrap();
             return pairs
                 .into_iter()
                 .map(|(s, o)| vec![(sv.clone(), s), (ov.clone(), o)])

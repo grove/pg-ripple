@@ -104,10 +104,12 @@ fn vp_read_expr(pred_id: i64) -> String {
 /// Return `true` if the rule has any variable predicate (in head or body).
 /// Used to detect rules that need runtime predicate variable instantiation.
 pub fn has_variable_pred(rule: &Rule) -> bool {
-    if let Some(head) = &rule.head {
-        if matches!(&head.p, Term::Var(_)) {
-            return true;
-        }
+    if rule
+        .head
+        .as_ref()
+        .is_some_and(|h| matches!(&h.p, Term::Var(_)))
+    {
+        return true;
     }
     for lit in &rule.body {
         let atom = match lit {
