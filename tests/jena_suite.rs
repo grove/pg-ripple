@@ -67,6 +67,17 @@ fn find_manifests(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
 #[test]
 fn jena_suite() {
     // ── Pre-conditions ──────────────────────────────────────────────────────
+    // Require an explicit opt-in so that `cargo pgrx test pg18` (which runs
+    // ALL integration tests) does not accidentally trigger the full Jena suite.
+    // Set JENA_THREADS=N (or JENA_SUITE=1) to enable.
+    let explicitly_enabled = std::env::var("JENA_THREADS").is_ok()
+        || std::env::var("JENA_SUITE").is_ok();
+    if !explicitly_enabled {
+        println!("SKIP: Jena suite requires explicit opt-in.");
+        println!("      Set JENA_THREADS=N or JENA_SUITE=1 to run.");
+        return;
+    }
+
     let data_dir = match jena::test_data_dir() {
         Some(d) => d,
         None => {
