@@ -184,36 +184,48 @@ pub fn ensure_lattice_catalog() {
 ///
 /// - `name` — lattice identifier; must be unique in the catalog.
 /// - `join_fn` — PostgreSQL aggregate function name for the join operation.
-///   Must be commutative and associative.
+///   Must be commutative and associative.  The name is resolved via
+///   `::regprocedure` to prevent search-path injection and to verify the
+///   function exists at registration time.  Use a schema-qualified name such
+///   as `'myschema.myfunc(bigint, bigint)'` to be unambiguous.
 /// - `bottom` — bottom element as a text string.
 ///
 /// # Returns
 ///
 /// `true` if the lattice was newly registered; `false` if it already existed.
+///
+/// # Errors
+///
+/// Raises a PostgreSQL ERROR (PT541) if `join_fn` cannot be resolved as a
+/// `regprocedure`.
 pub fn register_lattice(name: &str, join_fn: &str, bottom: &str) -> bool {
     ensure_lattice_catalog();
 
-    // Validate that join_fn is a known PostgreSQL aggregate.
-    let fn_exists = Spi::get_one_with_args::<bool>(
-        "SELECT EXISTS( \
-             SELECT 1 FROM pg_proc p \
-             JOIN pg_namespace n ON n.oid = p.pronamespace \
-             WHERE p.proname = $1 \
-               AND p.prokind = 'a' \
-         )",
+    // Validate join_fn via regprocedure: round-trip through PG's proc resolver.
+    // This prevents search-path injection via ambiguous unqualified names and
+    // verifies the function exists at registration time.
+    let qualified_fn: String = match Spi::get_one_with_args::<String>(
+        "SELECT $1::regprocedure::text",
         &[DatumWithOid::from(join_fn)],
-    )
-    .unwrap_or(None)
-    .unwrap_or(false);
-
-    if !fn_exists {
-        // Not a registered aggregate — warn but allow registration for
-        // user-defined aggregates that may be created later.
-        pgrx::warning!(
-            "create_lattice: '{join_fn}' is not a registered PostgreSQL aggregate; \
-             lattice will fail at inference time if the function does not exist"
-        );
-    }
+    ) {
+        Ok(Some(q)) => q,
+        Ok(None) => {
+            pgrx::error!(
+                "lattice join function '{}' could not be resolved as a PostgreSQL \
+                 procedure reference (PT541); use a schema-qualified name such as \
+                 'myschema.myfunc(bigint, bigint)'",
+                join_fn
+            );
+        }
+        Err(_) => {
+            pgrx::error!(
+                "lattice join function '{}' could not be resolved as a PostgreSQL \
+                 procedure reference (PT541); use a schema-qualified name such as \
+                 'myschema.myfunc(bigint, bigint)'",
+                join_fn
+            );
+        }
+    };
 
     let rows_inserted = Spi::get_one_with_args::<i64>(
         "INSERT INTO _pg_ripple.lattice_types (name, join_fn, bottom, builtin) \
@@ -222,7 +234,7 @@ pub fn register_lattice(name: &str, join_fn: &str, bottom: &str) -> bool {
          RETURNING 1",
         &[
             DatumWithOid::from(name),
-            DatumWithOid::from(join_fn),
+            DatumWithOid::from(qualified_fn.as_str()),
             DatumWithOid::from(bottom),
         ],
     )

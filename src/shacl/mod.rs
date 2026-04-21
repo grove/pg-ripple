@@ -95,6 +95,14 @@ pub enum ShapeConstraint {
     GreaterThan(String),
     /// `sh:closed true` — reject triples whose predicate is not in the shape's declared property set.
     Closed { ignored_properties: Vec<String> },
+    // ── v0.45.0 relational constraints ────────────────────────────────────────
+    /// `sh:equals <path-IRI>` — the set of values for the focus node's path must
+    /// equal the set of values for the given other path.  Both direction NOT EXISTS
+    /// subqueries must return no rows.
+    Equals(String),
+    /// `sh:disjoint <path-IRI>` — the value sets of the focus node's path and the
+    /// given other path must be disjoint (no common value IDs).
+    Disjoint(String),
 }
 
 /// A SHACL PropertyShape (associated with a path via `sh:path`).
@@ -516,6 +524,15 @@ fn parse_shape_statement(
             "http://www.w3.org/ns/shacl#ignoredProperties" => {
                 ignored_properties = parse_list_values(obj_rest.trim(), prefixes)?;
             }
+            // ── v0.45.0 relational constraints ────────────────────────────────
+            "http://www.w3.org/ns/shacl#equals" => {
+                let iri = expand_iri(obj_rest.trim(), prefixes)?;
+                constraints.push(ShapeConstraint::Equals(iri));
+            }
+            "http://www.w3.org/ns/shacl#disjoint" => {
+                let iri = expand_iri(obj_rest.trim(), prefixes)?;
+                constraints.push(ShapeConstraint::Disjoint(iri));
+            }
             _ => {
                 // Unknown predicate — ignore (forward-compatible).
             }
@@ -679,6 +696,15 @@ fn parse_property_shape(
             "http://www.w3.org/ns/shacl#greaterThan" => {
                 let other_path = expand_iri(obj_rest.trim(), prefixes)?;
                 constraints.push(ShapeConstraint::GreaterThan(other_path));
+            }
+            // ── v0.45.0 relational constraints ────────────────────────────────
+            "http://www.w3.org/ns/shacl#equals" => {
+                let iri = expand_iri(obj_rest.trim(), prefixes)?;
+                constraints.push(ShapeConstraint::Equals(iri));
+            }
+            "http://www.w3.org/ns/shacl#disjoint" => {
+                let iri = expand_iri(obj_rest.trim(), prefixes)?;
+                constraints.push(ShapeConstraint::Disjoint(iri));
             }
             _ => {}
         }
@@ -1111,7 +1137,17 @@ fn dispatch_constraint(
             constraints::shape_based::check_greater_than(p, args, violations)
         }
         ShapeConstraint::Closed { .. } => constraints::shape_based::check_closed(args, violations),
+        ShapeConstraint::Equals(p) => constraints::relational::check_equals(p, args, violations),
+        ShapeConstraint::Disjoint(p) => {
+            constraints::relational::check_disjoint(p, args, violations)
+        }
     }
+}
+
+/// Safe decode helper: returns the decoded IRI string for an id, or a
+/// `"<decoded-id:{id}>"` fallback if the dictionary lookup fails.
+pub fn decode_id_safe(id: i64) -> String {
+    crate::dictionary::decode(id).unwrap_or_else(|| format!("<decoded-id:{id}>"))
 }
 
 /// Collect all focus nodes for a shape in the given graph.
@@ -1954,7 +1990,10 @@ pub fn validate_sync(s_id: i64, p_id: i64, o_id: i64, g_id: i64) -> Result<(), S
                     ShapeConstraint::UniqueLang
                     | ShapeConstraint::LessThan(_)
                     | ShapeConstraint::GreaterThan(_)
-                    | ShapeConstraint::Closed { .. } => {}
+                    | ShapeConstraint::Closed { .. }
+                    // v0.45.0: relational constraints require full value sets — skip for single insert.
+                    | ShapeConstraint::Equals(_)
+                    | ShapeConstraint::Disjoint(_) => {}
                 }
             }
         }

@@ -61,6 +61,8 @@ Parse `data` (Turtle-formatted SHACL shapes) and store every shape in `_pg_rippl
 | `sh:and (...)` | Value/focus node must conform to all listed shapes (v0.8.0) |
 | `sh:not` | Value/focus node must NOT conform to the referenced shape (v0.8.0) |
 | `sh:qualifiedValueShape` | Combined with `sh:qualifiedMinCount`/`sh:qualifiedMaxCount` (v0.8.0) |
+| `sh:equals <path>` | The value set for the declared path must equal the value set for `<path>` (v0.45.0) |
+| `sh:disjoint <path>` | The value set for the declared path must be disjoint from the value set for `<path>` (v0.45.0) |
 
 **Supported target declarations:**
 

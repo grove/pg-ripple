@@ -1,0 +1,22 @@
+{
+  "jena": {
+    "failed": 1,
+    "passed": 1087,
+    "skipped": 0,
+    "suite": "jena",
+    "timeout": 0,
+    "total": 1088,
+    "xfail": 0,
+    "xpass": 0
+  },
+  "watdiv": {
+    "failed": 0,
+    "passed": 32,
+    "skipped": 0,
+    "suite": "watdiv",
+    "timeout": 0,
+    "total": 32,
+    "xfail": 0,
+    "xpass": 0
+  }
+}

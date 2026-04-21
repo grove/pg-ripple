@@ -136,6 +136,9 @@ Errors from the materialization engine, magic sets optimizer, WFS evaluator, and
 | PT507 | infer_agg: aggregation cycle detected | An aggregation rule depends on its own aggregate result | Rewrite to break the cycle |
 | PT508 | infer_goal: predicate not in any rule set | The goal predicate is not defined by any loaded rule | Load a rule set that defines the predicate |
 | PT509 | owl:sameAs canonicalization: cycle limit exceeded | The `owl:sameAs` equivalence class merging exceeded the iteration limit | Check for very large `owl:sameAs` clusters |
+| PT520 | infer_wfs: iteration cap reached (`<N>` iterations) | The WFS alternating fixpoint did not converge within `pg_ripple.wfs_max_iterations` | Emitted as WARNING; partial result is returned with `"stratifiable": false`; increase the cap or simplify the rule set |
+| PT540 | lattice: fixpoint did not converge after `<N>` iterations | The lattice fixpoint did not stabilise within `pg_ripple.lattice_max_iterations` | Increase `pg_ripple.lattice_max_iterations` or verify that the join function is monotone |
+| PT541 | lattice: join_fn `<name>` could not be resolved | The user-supplied join function name could not be resolved via `regprocedure` | Check the function name, schema, and argument types; use a fully-qualified name |
 
 ---
 

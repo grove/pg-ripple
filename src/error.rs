@@ -160,3 +160,32 @@ pub enum WfsError {
     )]
     FixpointNotConverged { rule_set: String, max_iter: i32 },
 }
+
+/// Lattice errors (PT540–PT541) — v0.36.0 / v0.45.0.
+#[allow(dead_code)]
+#[derive(Debug, Error)]
+pub enum LatticeError {
+    /// PT540 — lattice fixpoint did not converge within the iteration limit.
+    ///
+    /// Emitted when the `ON CONFLICT DO UPDATE` cycle count exceeds
+    /// `pg_ripple.lattice_max_iterations`.  Partial results are returned.
+    #[error(
+        "lattice fixpoint did not converge within the iteration limit for \
+         lattice '{lattice}'; partial results returned (PT540)"
+    )]
+    FixpointNotConverged { lattice: String },
+
+    /// PT541 — user-supplied `join_fn` for `create_lattice()` could not be
+    /// resolved as a PostgreSQL procedure reference.
+    ///
+    /// Raised at `create_lattice()` time when the supplied `join_fn` string
+    /// does not parse as a valid `regprocedure` (i.e., PG cannot resolve it to
+    /// a unique, existing function).  This prevents search-path injection via
+    /// ambiguous function names.
+    #[error(
+        "lattice join function '{join_fn}' could not be resolved as a PostgreSQL \
+         procedure reference (PT541); use a schema-qualified name such as \
+         'myschema.myfunc(bigint, bigint)'"
+    )]
+    LatticeJoinFnInvalid { join_fn: String },
+}

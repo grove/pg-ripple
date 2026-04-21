@@ -410,3 +410,54 @@ SELECT pg_ripple.register_vector_endpoint('https://new-url/', 'qdrant');
 UPDATE _pg_ripple.vector_endpoints SET enabled = true WHERE url = 'https://my-endpoint/';
 ```
 
+
+---
+
+## Rare-Predicate Promotion Stuck or Inconsistent (v0.45.0)
+
+**Symptom**: After a PostgreSQL crash during a large batch insert that crossed the rare-predicate promotion threshold, `_pg_ripple.vp_rare` contains rows for a predicate that also has a promoted VP table — or vice versa.
+
+**Diagnosis**:
+
+```sql
+SELECT * FROM pg_ripple.diagnostic_report();
+-- Look for predicates with 'promotion_state' != 'complete' or 'none'
+```
+
+A valid state is either:
+- **Promoted**: VP table exists, `_pg_ripple.vp_rare` has zero rows for that predicate, `predicates.derived = true`
+- **Not promoted**: No VP table, `_pg_ripple.vp_rare` has rows, `predicates.derived = false`
+
+**Fix**: If the state is hybrid (partial promotion), the safest recovery is to roll back the promotion manually:
+
+```sql
+-- 1. Drop the partial VP table (if it exists and is empty or inconsistent)
+DROP TABLE IF EXISTS _pg_ripple."vp_<predicate_id>";
+
+-- 2. Ensure vp_rare still has the rows (they should not have been deleted)
+SELECT count(*) FROM _pg_ripple.vp_rare WHERE p = <predicate_id>;
+
+-- 3. Reset promotion flag
+UPDATE _pg_ripple.predicates SET derived = false WHERE id = <predicate_id>;
+```
+
+Then re-run the insert batch. The promotion will be re-attempted cleanly.
+
+---
+
+## Inference Aborted Mid-Fixpoint (v0.45.0)
+
+**Symptom**: A call to `infer()` or `infer_wfs()` was killed (e.g., `pg_cancel_backend()`, `pg_terminate_backend()`, or server crash) while the fixpoint was running. You suspect partially-derived facts may remain.
+
+**Diagnosis**:
+
+```sql
+-- Check for any inferred triples from your rule set:
+SELECT count(*) FROM _pg_ripple.vp_rare WHERE p IN (
+    SELECT id FROM _pg_ripple.predicates WHERE rule_set = 'your_rule_set'
+);
+```
+
+**Expected outcome**: pg_ripple's inference engine accumulates derived facts in PostgreSQL TEMP tables during the fixpoint. TEMP tables are automatically dropped (and all writes rolled back) when the session ends abnormally. Therefore, a killed inference session leaves **zero partial facts** in persistent storage.
+
+If you find facts that appear to be from a failed inference run, they are more likely from a previously-completed run. Use `drop_rules('rule_set')` to remove the rule set and all its derived facts, then re-run `load_rules()` and `infer()` from scratch.

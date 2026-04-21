@@ -3470,48 +3470,48 @@ All 14 LUBM queries return exact reference cardinalities at `--univ 1`. Ontology
 
 ### Deliverables
 
-- [ ] **`sh:equals` and `sh:disjoint` constraints** (`src/shacl/constraints/`)
+- [x] **`sh:equals` and `sh:disjoint` constraints** (`src/shacl/constraints/`)
   - `sh:equals p` — for every focus node, the set of values for `p` must equal the set of values for the predicate declared by `sh:equals`; implemented as two NOT EXISTS subqueries (one per direction); compiled into a SHACL constraint helper in `src/shacl/constraints/relational.rs`
   - `sh:disjoint p` — the value sets must be disjoint; implemented symmetrically
   - pg_regress test `shacl_equals_disjoint.sql` — covers passing shapes, failing shapes, blank-node identity, and named-graph scoping
   - Migration: no schema changes; constraints are pure SQL inside the validation query
 
-- [ ] **Decoded focus-node IRIs in SHACL violation messages** (`src/shacl/mod.rs`)
+- [x] **Decoded focus-node IRIs in SHACL violation messages** (`src/shacl/mod.rs`)
   - All paths that emit a SHACL violation (`ereport!(Error, …)` or write to `_pg_ripple.validation_results`) must include the decoded IRI of the focus node alongside its integer ID
   - Add a `decode_id_safe(id: i64)` helper that falls back to `"<decoded-id:{id}>"` if the dictionary lookup fails
   - Regression test: load a shape with a violation; assert the violation message text contains the focus-node IRI string
 
-- [ ] **SHACL async pipeline load test** (`benchmarks/shacl_async_load.sql`)
+- [x] **SHACL async pipeline load test** (`benchmarks/shacl_async_load.sql`)
   - `pgbench`-driven harness that inserts triples at 10,000/min for 5 continuous minutes while the async SHACL validation pipeline is active
   - Asserts: (a) `_pg_ripple.validation_queue` depth stays bounded (does not grow unboundedly); (b) drain rate ≥ arrival rate ± 5%; (c) dead-letter queue receives any persistent violators; (d) no backend crashes
   - CI job `shacl-async-load` is informational (non-blocking) but results are logged as a CI artifact
 
-- [ ] **Coordinated parallel-strata rollback** (`src/datalog/parallel.rs`)
+- [x] **Coordinated parallel-strata rollback** (`src/datalog/parallel.rs`)
   - Wrap all independent-group SQL execution inside a single PostgreSQL transaction with one `SAVEPOINT strata_eval` per group
   - On failure in any group, issue `ROLLBACK TO SAVEPOINT` for all already-applied groups and re-raise the error; on success, `RELEASE SAVEPOINT` to commit the whole stratum
   - pg_regress test `datalog_parallel_rollback.sql`: inject a deliberate failure in one group; assert no partial facts survive
 
-- [ ] **`lattice.join_fn` validation via `regprocedure`** (`src/datalog/lattice.rs`)
+- [x] **`lattice.join_fn` validation via `regprocedure`** (`src/datalog/lattice.rs`)
   - Before storing a user-supplied `join_fn` name, resolve it via `SELECT '{name}'::regprocedure::text` inside an SPI transaction
   - If the round-trip succeeds, store the qualified name returned by PG (avoids search-path injection); if it fails, raise `PT541 LatticeJoinFnInvalid` with a clear message naming the rejected identifier
   - New error code PT541 added to `src/error.rs` and `docs/src/reference/error-catalog.md`
 
-- [ ] **WFS iteration-cap test and documentation** (`tests/pg_regress/sql/datalog_wfs_cap.sql`)
+- [x] **WFS iteration-cap test and documentation** (`tests/pg_regress/sql/datalog_wfs_cap.sql`)
   - pg_regress test that loads a mutually-recursive negation cycle guaranteed to reach `pg_ripple.wfs_max_iterations`; asserts: (a) function returns without error; (b) `"stratifiable": false` in result; (c) PostgreSQL WARNING with code PT520 is emitted; (d) `"certain"` and `"unknown"` fact counts are non-zero (partial result)
   - `docs/src/user-guide/sql-reference/datalog.md` — add a "Well-Founded Semantics limits" subsection documenting the cap behaviour and how to detect it via `RETURNING`
 
-- [ ] **Crash-recovery: rare-predicate promotion kill** (`tests/crash_recovery/test_promote_kill.sh`)
+- [x] **Crash-recovery: rare-predicate promotion kill** (`tests/crash_recovery/test_promote_kill.sh`)
   - Script that starts a large-batch insert designed to cross the promotion threshold, sends `kill -9` to the promoting backend mid-transaction, restarts PostgreSQL, calls `pg_ripple.diagnostic_report()`, and asserts `vp_rare` is consistent (no orphaned rows, predicate catalog matches actual tables)
   - Outcome must be either: promotion completed (VP table exists, `vp_rare` rows moved) or promotion rolled back (VP table absent, `vp_rare` rows intact) — no hybrid state permitted
 
-- [ ] **Crash-recovery: Datalog inference kill mid-fixpoint** (`tests/crash_recovery/test_inference_kill.sh`)
+- [x] **Crash-recovery: Datalog inference kill mid-fixpoint** (`tests/crash_recovery/test_inference_kill.sh`)
   - Script that starts a large-ruleset inference run, kills the backend during the second fixpoint iteration, restarts, and asserts: (a) no partially-derived facts remain in any VP table (i.e., no inferred triples from an aborted inference); (b) `pg_ripple.infer()` can be re-run successfully to completion
 
-- [ ] **Standardised migration script headers**
+- [x] **Standardised migration script headers**
   - Backfill `sql/pg_ripple--*.sql` with the standard header block (schema changes, data-rewrite cost estimate, downgrade strategy, test reference) for any script that currently lacks one — starting with `0.5.1→0.6.0` (the HTAP split) and the five most structurally significant migrations
   - Add the header template to `AGENTS.md` "Extension Versioning & Migration Scripts" section so all future scripts include it from creation
 
-- [ ] **Recovery procedure runbook in `RELEASE.md`**
+- [x] **Recovery procedure runbook in `RELEASE.md`**
   - Add a "Rollback & Recovery" section documenting: (a) how to roll back each class of migration (comment-only vs. schema-change vs. data-rewrite); (b) the `pg_dump`/`pg_restore` path as the universal fallback; (c) how to diagnose a partial upgrade using `_pg_ripple.schema_version` and `pg_ripple.diagnostic_report()`
 
 ### Migration Script
@@ -3520,11 +3520,11 @@ All 14 LUBM queries return exact reference cardinalities at `--univ 1`. Ontology
 
 ### Documentation
 
-- [ ] `reference/shacl-constraints.md` — add `sh:equals` and `sh:disjoint` to the constraint table with examples
-- [ ] `reference/error-catalog.md` — add PT541 (`LatticeJoinFnInvalid`)
-- [ ] `user-guide/sql-reference/datalog.md` — "Well-Founded Semantics limits" subsection
-- [ ] `reference/troubleshooting.md` — add entries for "rare-predicate promotion stuck" and "inference aborted mid-fixpoint"
-- [ ] Release notes for v0.45.0
+- [x] `reference/shacl-constraints.md` — add `sh:equals` and `sh:disjoint` to the constraint table with examples
+- [x] `reference/error-catalog.md` — add PT541 (`LatticeJoinFnInvalid`)
+- [x] `user-guide/sql-reference/datalog.md` — "Well-Founded Semantics limits" subsection
+- [x] `reference/troubleshooting.md` — add entries for "rare-predicate promotion stuck" and "inference aborted mid-fixpoint"
+- [x] Release notes for v0.45.0
 
 ### Exit Criteria
 

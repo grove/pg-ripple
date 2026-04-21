@@ -13,6 +13,45 @@ Versions correspond to the milestones in [ROADMAP.md](ROADMAP.md).
 
 ---
 
+## [0.45.0] — 2026-04-21 — SHACL Completion, Datalog Robustness & Crash Recovery
+
+**Closes the last SHACL Core constraint gaps (`sh:equals`, `sh:disjoint`), adds decoded focus-node IRIs to violation messages, hardens Datalog evaluation with lattice join-function validation (PT541), and adds crash-recovery test scripts for two previously-untested kill scenarios.**
+
+### What's new
+
+- **`sh:equals` and `sh:disjoint` SHACL constraints** (`src/shacl/constraints/relational.rs`) — implements both relational constraints per SHACL Core §4.4. For each focus node, `sh:equals` asserts the value sets are identical; `sh:disjoint` asserts they are disjoint. Violations include the decoded focus-node IRI and the `"constraint"` field (`"sh:equals"` / `"sh:disjoint"`). pg_regress test `shacl_equals_disjoint.sql` covers passing shapes, failing shapes, and named-graph scoping.
+
+- **Decoded focus-node IRIs in SHACL violations** (`src/shacl/mod.rs`) — added `decode_id_safe(id: i64) -> String` helper that falls back to `"<decoded-id:{id}>"` if the dictionary lookup fails. All new constraint violations include the decoded IRI.
+
+- **`lattice.join_fn` validation via `regprocedure`** (`src/datalog/lattice.rs`) — `register_lattice()` now resolves the user-supplied join function name via `SELECT $1::regprocedure::text` in an SPI call. Unresolvable names raise **PT541 `LatticeJoinFnInvalid`** with a clear diagnostic; resolvable names are stored as the PG-qualified form to prevent search-path injection.
+
+- **PT541 `LatticeJoinFnInvalid`** (`src/error.rs`) — new error code for invalid lattice join functions.
+
+- **WFS iteration-cap test** (`tests/pg_regress/sql/datalog_wfs_cap.sql`) — pg_regress test that loads a mutually-recursive negation cycle guaranteed to reach `pg_ripple.wfs_max_iterations = 3`. Asserts: engine returns without crash, `stratifiable = false`, `certain` and `unknown` counts are non-negative, and the accounting identity `derived = certain + unknown` holds.
+
+- **Parallel-strata inference consistency test** (`tests/pg_regress/sql/datalog_parallel_rollback.sql`) — validates that a valid multi-rule inference run produces consistent results, re-running does not duplicate facts, and `drop_rules()` cleans up completely.
+
+- **SAVEPOINT utility** (`src/datalog/parallel.rs`) — `execute_with_savepoint(savepoint_name, sqls)` exported for future use; inference engine continues to use TEMP table delta accumulation for atomicity.
+
+- **Crash-recovery scripts** (`tests/crash_recovery/`) — two new bash scripts covering: (a) `test_promote_kill.sh` — kill mid rare-predicate promotion, assert no hybrid state; (b) `test_inference_kill.sh` — kill mid fixpoint, assert no partial derived facts.
+
+- **SHACL async pipeline load benchmark** (`benchmarks/shacl_async_load.sql`) — pgbench harness for sustained write load with async SHACL validation active.
+
+- **Migration script** (`sql/pg_ripple--0.44.0--0.45.0.sql`) — comment-only; no schema changes.
+
+### Bug fixes
+
+None.
+
+### Documentation
+
+- `docs/src/reference/shacl-constraints.md` — `sh:equals` and `sh:disjoint` added to constraint table
+- `docs/src/reference/error-catalog.md` — PT541 `LatticeJoinFnInvalid` added
+- `docs/src/user-guide/sql-reference/datalog.md` — "Well-Founded Semantics limits" subsection
+- `docs/src/reference/troubleshooting.md` — rare-predicate promotion and inference-aborted entries
+
+---
+
 ## [0.44.0] — 2026-04-21 — LUBM Conformance Suite
 
 **Adds the LUBM (Lehigh University Benchmark) conformance suite: 14 canonical SPARQL queries over a university-domain OWL ontology, validating OWL RL inference correctness end-to-end. All 14 queries pass with 0 known failures. The Datalog validation sub-suite separately confirms that `pg_ripple.infer('owl-rl')` produces identical results from implicit-type data.**

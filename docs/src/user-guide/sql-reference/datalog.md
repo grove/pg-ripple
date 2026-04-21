@@ -602,6 +602,21 @@ SELECT * FROM pg_ripple.tabling_stats();
 | `pg_ripple.tabling_ttl` | integer | `300` | Cache TTL in seconds; `0` = never expire |
 | `pg_ripple.wfs_max_iterations` | integer | `100` | Safety cap on WFS fixpoint rounds; emits WARNING PT520 if exceeded |
 
+### Well-Founded Semantics limits (v0.45.0)
+
+When a program contains cyclic negation that prevents the alternating fixpoint from converging, `infer_wfs()` stops after `pg_ripple.wfs_max_iterations` rounds and returns a **partial result** with `"stratifiable": false`. A PostgreSQL WARNING with code **PT520** is emitted to the client.
+
+```sql
+SET pg_ripple.wfs_max_iterations = 10;
+SELECT pg_ripple.infer_wfs('cyclic_rules');
+-- Returns: {"certain": 3, "unknown": 6, "derived": 9, "iterations": 10, "stratifiable": false}
+-- WARNING:  PT520: WFS fixpoint cap reached (10 iterations)
+```
+
+**Detecting the cap**: check `"stratifiable": false` in the result and `"iterations" = pg_ripple.wfs_max_iterations`.
+
+**Recovering**: increase the cap, or restructure the program to break the negation cycle. For programs where some atoms are genuinely indeterminate, the partial result is valid — atoms in the `"unknown"` bucket are three-valued `unknown`.
+
 ---
 
 ## Bounded-Depth Termination & Incremental Retraction (v0.34.0)

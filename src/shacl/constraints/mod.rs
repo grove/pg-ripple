@@ -6,6 +6,7 @@
 pub mod count;
 pub mod logical;
 pub mod property_path;
+pub mod relational;
 pub mod shape_based;
 pub mod string_based;
 pub mod value_type;

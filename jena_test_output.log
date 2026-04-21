@@ -1,0 +1,152 @@
+   Compiling pg_ripple v0.43.0 (/Users/geir.gronmo/projects/pg-ripple2)
+warning: unused imports: `RunConfig`, `RunReport`, `TestOutcome`, and `TestResult`
+  --> tests/conformance/mod.rs:16:18
+   |
+16 | pub use runner::{RunConfig, RunReport, TestOutcome, TestResult};
+   |                  ^^^^^^^^^  ^^^^^^^^^  ^^^^^^^^^^^  ^^^^^^^^^^
+   |
+   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `total_expected`
+   --> tests/jena_suite.rs:132:9
+    |
+132 |     let total_expected = entries.len();
+    |         ^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_total_expected`
+    |
+    = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `ws_after_caret_start`
+   --> tests/jena_suite.rs:927:13
+    |
+927 |         let ws_after_caret_start = i;
+    |             ^^^^^^^^^^^^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_ws_after_caret_start`
+
+warning: value assigned to `i` is never read
+    --> tests/jena_suite.rs:2035:21
+     |
+2035 |                     i = j;
+     |                     ^^^^^
+     |
+     = help: maybe it is overwritten before being read?
+     = note: `#[warn(unused_assignments)]` (part of `#[warn(unused)]`) on by default
+
+warning: value assigned to `i` is never read
+    --> tests/jena_suite.rs:2027:21
+     |
+2027 |                     i = j;
+     |                     ^^^^^
+     |
+     = help: maybe it is overwritten before being read?
+
+warning: function `try_connect` is never used
+  --> tests/jena/mod.rs:52:8
+   |
+52 | pub fn try_connect() -> Option<postgres::Client> {
+   |        ^^^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: function `file_iri_to_path` is never used
+  --> tests/jena/mod.rs:78:8
+   |
+78 | pub fn file_iri_to_path(iri: &str) -> Option<PathBuf> {
+   |        ^^^^^^^^^^^^^^^^
+
+warning: fields `category`, `result_file`, `update_result_data`, and `update_result_graphs` are never read
+   --> tests/jena/manifest.rs:102:9
+    |
+ 94 | pub struct JenaTestCase {
+    |            ------------ fields in this struct
+...
+102 |     pub category: String,
+    |         ^^^^^^^^
+...
+110 |     pub result_file: Option<PathBuf>,
+    |         ^^^^^^^^^^^
+111 |     /// Expected result data files for UPDATE tests.
+112 |     pub update_result_data: Vec<PathBuf>,
+    |         ^^^^^^^^^^^^^^^^^^
+113 |     /// Expected named graph result files for UPDATE tests.
+114 |     pub update_result_graphs: Vec<(String, PathBuf)>,
+    |         ^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: `JenaTestCase` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
+
+warning: function `load_fixtures` is never used
+   --> tests/w3c/loader.rs:134:8
+    |
+134 | pub fn load_fixtures(
+    |        ^^^^^^^^^^^^^
+
+warning: function `load_service_data` is never used
+   --> tests/w3c/loader.rs:172:8
+    |
+172 | pub fn load_service_data(
+    |        ^^^^^^^^^^^^^^^^^
+
+warning: field `0` is never read
+  --> tests/conformance/runner.rs:53:10
+   |
+53 |     Skip(String),
+   |     ---- ^^^^^^
+   |     |
+   |     field in this variant
+   |
+   = note: `TestOutcome` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
+help: consider changing the field to be of unit type to suppress this warning while preserving the field numbering, or remove the field
+   |
+53 -     Skip(String),
+53 +     Skip(()),
+   |
+
+warning: field `0` is never read
+  --> tests/conformance/runner.rs:57:11
+   |
+57 |     XFail(String),
+   |     ----- ^^^^^^
+   |     |
+   |     field in this variant
+   |
+   = note: `TestOutcome` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
+help: consider changing the field to be of unit type to suppress this warning while preserving the field numbering, or remove the field
+   |
+57 -     XFail(String),
+57 +     XFail(()),
+   |
+
+warning: field `key` is never read
+  --> tests/conformance/runner.rs:76:9
+   |
+74 | pub struct TestResult {
+   |            ---------- field in this struct
+75 |     /// Unique key for this test (IRI or template ID).
+76 |     pub key: String,
+   |         ^^^
+   |
+   = note: `TestResult` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
+
+warning: `pg_ripple` (test "jena_suite") generated 13 warnings (run `cargo fix --test "jena_suite" -p pg_ripple` to apply 3 suggestions)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 3.44s
+     Running tests/jena_suite.rs (target/debug/deps/jena_suite-28eaa8c33f40400e)
+
+running 1 test
+test jena_suite ... 
+[jena] 1087 passed, 1 failed, 0 skipped, 0 timeout, 0 xfail, 0 xpass / 1088 total
+  elapsed: 5.9s
+  FAIL  [0ms]  syn-bad-28.rq
+        expected parse error but query parsed successfully
+
+thread 'jena_suite' (22747865) panicked at tests/jena_suite.rs:182:9:
+Jena suite: unexpected test failures.
+[jena] 1087 passed, 1 failed, 0 skipped, 0 timeout, 0 xfail, 0 xpass / 1088 total
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+FAILED
+
+failures:
+
+failures:
+    jena_suite
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 5.98s
+
+error: test failed, to rerun pass `--test jena_suite`

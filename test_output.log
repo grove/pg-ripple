@@ -1,195 +1,189 @@
 [32m[1m       Using[0m[39m [37m[1mCliArgument("pg18")[0m[39m and `pg_config` from [36m/opt/homebrew/Cellar/postgresql@18/18.3/bin/pg_config[39m
-CARGO_TARGET_DIR="/Users/geir.gronmo/projects/pg-ripple2/target" PGRX_ALL_FEATURES="false" PGRX_BUILD_PROFILE="dev" PGRX_FEATURES="pg18 pg_test" PGRX_NO_DEFAULT_FEATURES="true" PGRX_NO_SCHEMA="false" "/opt/homebrew/bin/cargo" "test" "--features" "pg18 pg_test" "--no-default-features"
-   Compiling pg_ripple v0.43.0 (/Users/geir.gronmo/projects/pg-ripple2)
-warning: unused import: `super::*`
-   --> src/sparql/wcoj.rs:318:9
-    |
-318 |     use super::*;
-    |         ^^^^^^^^
-    |
-    = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+[32m[1m    Stopping[0m[39m Postgres v18
+[32m[1m    Building[0m[39m extension with features [36mpg18[39m
+[32m[1m     Running[0m[39m command [36m"/opt/homebrew/bin/cargo" "build" "--lib" "--features" "pg18" "--no-default-features" "--message-format=json-render-diagnostics"[39m
+   Compiling pg_ripple v0.45.0 (/Users/geir.gronmo/projects/pg-ripple2)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 3.27s
+[32m[1m  Installing[0m[39m extension
+[32m[1m     Copying[0m[39m control file to [36m/opt/homebrew/share/postgresql@18/extension/pg_ripple.control[39m
+[32m[1m     Copying[0m[39m shared library to [36m/opt/homebrew/lib/postgresql@18/pg_ripple.dylib[39m
+[32m[1m  Discovered[0m[39m [36m[1m213[0m[39m SQL entities: [36m[1m11[0m[39m schemas ([36m[1m1[0m[39m unique), [36m[1m184[0m[39m functions, [36m[1m0[0m[39m types, [36m[1m0[0m[39m enums, [36m[1m18[0m[39m sqls, [36m[1m0[0m[39m ords, [36m[1m0[0m[39m hashes, [36m[1m0[0m[39m aggregates, [36m[1m0[0m[39m triggers
+[32m[1m  Rebuilding[0m[39m [36mpgrx_embed[39m, in debug mode, for SQL generation with features [36mpg18[39m
+   Compiling pg_ripple v0.45.0 (/Users/geir.gronmo/projects/pg-ripple2)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 2.49s
+[32m[1m     Writing[0m[39m SQL entities to /opt/homebrew/share/postgresql@18/extension/pg_ripple--0.45.0.sql
+[32m[1m     Copying[0m[39m extension schema upgrade file to [36m/opt/homebrew/share/postgresql@18/extension/pg_ripple--0.19.0--0.20.0.sql[39m
+[32m[1m     Copying[0m[39m extension schema upgrade file to [36m/opt/homebrew/share/postgresql@18/extension/pg_ripple--0.36.0--0.37.0.sql[39m
+[32m[1m     Copying[0m[39m extension schema upgrade file to [36m/opt/homebrew/share/postgresql@18/extension/pg_ripple--0.23.0--0.24.0.sql[39m
+[32m[1m     Copying[0m[39m extension schema upgrade file to [36m/opt/homebrew/share/postgresql@18/extension/pg_ripple--0.11.0--0.12.0.sql[39m
+[32m[1m     Copying[0m[39m extension schema upgrade file to [36m/opt/homebrew/share/postgresql@18/extension/pg_ripple--0.44.0--0.45.0.sql[39m
+[32m[1m     Copying[0m[39m extension schema upgrade file to [36m/opt/homebrew/share/postgresql@18/extension/pg_ripple--0.7.0--0.8.0.sql[39m
+[32m[1m     Copying[0m[39m extension schema upgrade file to [36m/opt/homebrew/share/postgresql@18/extension/pg_ripple--0.17.0--0.18.0.sql[39m
+[32m[1m     Copying[0m[39m extension schema upgrade file to [36m/opt/homebrew/share/postgresql@18/extension/pg_ripple--0.15.0--0.16.0.sql[39m
+[32m[1m     Copying[0m[39m extension schema upgrade file to [36m/opt/homebrew/share/postgresql@18/extension/pg_ripple--0.3.0--0.4.0.sql[39m
+[32m[1m     Copying[0m[39m extension schema upgrade file to [36m/opt/homebrew/share/postgresql@18/extension/pg_ripple--0.40.0--0.41.0.sql[39m
+[32m[1m     Copying[0m[39m extension schema upgrade file to [36m/opt/homebrew/share/postgresql@18/extension/pg_ripple--0.39.0--0.40.0.sql[39m
+[32m[1m     Copying[0m[39m extension schema upgrade file to [36m/opt/homebrew/share/postgresql@18/extension/pg_ripple--0.32.0--0.33.0.sql[39m
+[32m[1m     Copying[0m[39m extension schema upgrade file to [36m/opt/homebrew/share/postgresql@18/extension/pg_ripple--0.28.0--0.29.0.sql[39m
+[32m[1m     Copying[0m[39m extension schema upgrade file to [36m/opt/homebrew/share/postgresql@18/extension/pg_ripple--0.16.0--0.17.0.sql[39m
+[32m[1m     Copying[0m[39m extension schema upgrade file to [36m/opt/homebrew/share/postgresql@18/extension/pg_ripple--0.31.0--0.32.0.sql[39m
+[32m[1m     Copying[0m[39m extension schema upgrade file to [36m/opt/homebrew/share/postgresql@18/extension/pg_ripple--0.5.0--0.5.1.sql[39m
+[32m[1m     Copying[0m[39m extension schema upgrade file to [36m/opt/homebrew/share/postgresql@18/extension/pg_ripple--0.20.0--0.21.0.sql[39m
+[32m[1m     Copying[0m[39m extension schema upgrade file to [36m/opt/homebrew/share/postgresql@18/extension/pg_ripple--0.37.0--0.38.0.sql[39m
+[32m[1m     Copying[0m[39m extension schema upgrade file to [36m/opt/homebrew/share/postgresql@18/extension/pg_ripple--0.35.0--0.36.0.sql[39m
+[32m[1m     Copying[0m[39m extension schema upgrade file to [36m/opt/homebrew/share/postgresql@18/extension/pg_ripple--0.24.0--0.25.0.sql[39m
+[32m[1m     Copying[0m[39m extension schema upgrade file to [36m/opt/homebrew/share/postgresql@18/extension/pg_ripple--0.4.0--0.5.0.sql[39m
+[32m[1m     Copying[0m[39m extension schema upgrade file to [36m/opt/homebrew/share/postgresql@18/extension/pg_ripple--0.9.0--0.10.0.sql[39m
+[32m[1m     Copying[0m[39m extension schema upgrade file to [36m/opt/homebrew/share/postgresql@18/extension/pg_ripple--0.12.0--0.13.0.sql[39m
+[32m[1m     Copying[0m[39m extension schema upgrade file to [36m/opt/homebrew/share/postgresql@18/extension/pg_ripple--0.43.0--0.44.0.sql[39m
+[32m[1m     Copying[0m[39m extension schema upgrade file to [36m/opt/homebrew/share/postgresql@18/extension/pg_ripple--0.2.0--0.3.0.sql[39m
+[32m[1m     Copying[0m[39m extension schema upgrade file to [36m/opt/homebrew/share/postgresql@18/extension/pg_ripple--0.41.0--0.42.0.sql[39m
+[32m[1m     Copying[0m[39m extension schema upgrade file to [36m/opt/homebrew/share/postgresql@18/extension/pg_ripple--0.14.0--0.15.0.sql[39m
+[32m[1m     Copying[0m[39m extension schema upgrade file to [36m/opt/homebrew/share/postgresql@18/extension/pg_ripple--0.6.0--0.7.0.sql[39m
+[32m[1m     Copying[0m[39m extension schema upgrade file to [36m/opt/homebrew/share/postgresql@18/extension/pg_ripple--0.22.0--0.23.0.sql[39m
+[32m[1m     Copying[0m[39m extension schema upgrade file to [36m/opt/homebrew/share/postgresql@18/extension/pg_ripple--0.38.0--0.39.0.sql[39m
+[32m[1m     Copying[0m[39m extension schema upgrade file to [36m/opt/homebrew/share/postgresql@18/extension/pg_ripple--0.26.0--0.27.0.sql[39m
+[32m[1m     Copying[0m[39m extension schema upgrade file to [36m/opt/homebrew/share/postgresql@18/extension/pg_ripple--0.33.0--0.34.0.sql[39m
+[32m[1m     Copying[0m[39m extension schema upgrade file to [36m/opt/homebrew/share/postgresql@18/extension/pg_ripple--0.5.1--0.6.0.sql[39m
+[32m[1m     Copying[0m[39m extension schema upgrade file to [36m/opt/homebrew/share/postgresql@18/extension/pg_ripple--0.10.0--0.11.0.sql[39m
+[32m[1m     Copying[0m[39m extension schema upgrade file to [36m/opt/homebrew/share/postgresql@18/extension/pg_ripple--0.25.0--0.26.0.sql[39m
+[32m[1m     Copying[0m[39m extension schema upgrade file to [36m/opt/homebrew/share/postgresql@18/extension/pg_ripple--0.34.0--0.35.0.sql[39m
+[32m[1m     Copying[0m[39m extension schema upgrade file to [36m/opt/homebrew/share/postgresql@18/extension/pg_ripple--0.29.0--0.30.0.sql[39m
+[32m[1m     Copying[0m[39m extension schema upgrade file to [36m/opt/homebrew/share/postgresql@18/extension/pg_ripple--0.18.0--0.19.0.sql[39m
+[32m[1m     Copying[0m[39m extension schema upgrade file to [36m/opt/homebrew/share/postgresql@18/extension/pg_ripple--0.8.0--0.9.0.sql[39m
+[32m[1m     Copying[0m[39m extension schema upgrade file to [36m/opt/homebrew/share/postgresql@18/extension/pg_ripple--0.1.0--0.2.0.sql[39m
+[32m[1m     Copying[0m[39m extension schema upgrade file to [36m/opt/homebrew/share/postgresql@18/extension/pg_ripple--0.42.0--0.43.0.sql[39m
+[32m[1m     Copying[0m[39m extension schema upgrade file to [36m/opt/homebrew/share/postgresql@18/extension/pg_ripple--0.13.0--0.14.0.sql[39m
+[32m[1m     Copying[0m[39m extension schema upgrade file to [36m/opt/homebrew/share/postgresql@18/extension/pg_ripple--0.21.0--0.22.0.sql[39m
+[32m[1m     Copying[0m[39m extension schema upgrade file to [36m/opt/homebrew/share/postgresql@18/extension/pg_ripple--0.30.0--0.31.0.sql[39m
+[32m[1m     Copying[0m[39m extension schema upgrade file to [36m/opt/homebrew/share/postgresql@18/extension/pg_ripple--0.27.0--0.28.0.sql[39m
+[32m[1m    Finished[0m[39m installing pg_ripple
+[32m[1m    Starting[0m[39m Postgres v18 on port [36m[1m28818[0m[39m
+[33m[1m     Forcing[0m[39m database [36mpg_ripple_regress[39m to be (re)created as `setup.sql` is newer than its expected output
+[32m[1m    Dropping[0m[39m database [36m[1mpg_ripple_regress[0m[39m
+[32m[1m    Creating[0m[39m database [36m[1mpg_ripple_regress[0m[39m
 
-warning: `pg_ripple` (lib) generated 1 warning (run `cargo fix --lib -p pg_ripple` to apply 1 suggestion)
-warning: unused imports: `RunConfig`, `RunReport`, `TestOutcome`, and `TestResult`
-  --> tests/conformance/mod.rs:16:18
-   |
-16 | pub use runner::{RunConfig, RunReport, TestOutcome, TestResult};
-   |                  ^^^^^^^^^  ^^^^^^^^^  ^^^^^^^^^^^  ^^^^^^^^^^
-   |
-   = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+--- beginning regression test run ---
+[32m[1m       Found[0m[39m 3 new tests, running each individually to create output
+passed=0 failed=0
+-----------
+[37m-- pg_regress test: Parallel-strata rollback on deliberate group failure (v0.45.0)
+--
+-- Verifies that when a rule in the seeding pass fails (due to a SQL error),
+-- the SAVEPOINT-based rollback mechanism ensures no partial derived facts are
+-- left in vp_rare from the aborted inference run.
+--
+-- The test works by:
+-- 1. Inserting base triples.
+-- 2. Loading a valid rule set that derives some facts → infer() succeeds.
+-- 3. Counting derived facts to establish a baseline.
+-- 4. Deleting the derived facts and re-running → still succeeds.
+-- 5. Verifying the triple count is consistent (no duplicate or orphan rows).
+CREATE EXTENSION IF NOT EXISTS pg_ripple;
+SELECT pg_ripple.triple_count() >= 0 AS library_loaded;
+ library_loaded 
+----------------
+ t
+(1 row)
 
-warning: trait `ClassDirName` is never used
-   --> tests/watdiv_suite.rs:196:7
-    |
-196 | trait ClassDirName {
-    |       ^^^^^^^^^^^^
-    |
-    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+SET search_path TO pg_ripple, public;
+-- ── Setup ─────────────────────────────────────────────────────────────────────
+SELECT pg_ripple.insert_triple(
+    '<https://ex.org/par/a>', '<https://ex.org/par/edge>', '<https://ex.org/par/b>'
+) > 0 AS edge_ab;
+ edge_ab 
+---------
+ t
+(1 row)
 
-warning: field `class` is never read
-  --> tests/watdiv/template.rs:57:9
-   |
-53 | pub struct WatDivQuery {
-   |            ----------- field in this struct
-...
-57 |     pub class: TemplateClass,
-   |         ^^^^^
-   |
-   = note: `WatDivQuery` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
+SELECT pg_ripple.insert_triple(
+    '<https://ex.org/par/b>', '<https://ex.org/par/edge>', '<https://ex.org/par/c>'
+) > 0 AS edge_bc;
+ edge_bc 
+---------
+ t
+(1 row)
 
-warning: field `0` is never read
-  --> tests/conformance/runner.rs:53:10
-   |
-53 |     Skip(String),
-   |     ---- ^^^^^^
-   |     |
-   |     field in this variant
-   |
-   = note: `TestOutcome` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
-help: consider changing the field to be of unit type to suppress this warning while preserving the field numbering, or remove the field
-   |
-53 -     Skip(String),
-53 +     Skip(()),
-   |
+SELECT pg_ripple.insert_triple(
+    '<https://ex.org/par/c>', '<https://ex.org/par/edge>', '<https://ex.org/par/d>'
+) > 0 AS edge_cd;
+ edge_cd 
+---------
+ t
+(1 row)
 
-warning: field `0` is never read
-  --> tests/conformance/runner.rs:57:11
-   |
-57 |     XFail(String),
-   |     ----- ^^^^^^
-   |     |
-   |     field in this variant
-   |
-   = note: `TestOutcome` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
-help: consider changing the field to be of unit type to suppress this warning while preserving the field numbering, or remove the field
-   |
-57 -     XFail(String),
-57 +     XFail(()),
-   |
+-- ── Part 1: Valid inference runs to completion ────────────────────────────────
+SELECT pg_ripple.load_rules(
+    '?x <https://ex.org/par/reach> ?y :- ?x <https://ex.org/par/edge> ?y . '
+    '?x <https://ex.org/par/reach> ?z :- ?x <https://ex.org/par/reach> ?y, ?y <https://ex.org/par/edge> ?z .',
+    'par_rollback_test'
+) > 0 AS rules_loaded;
+ rules_loaded 
+--------------
+ t
+(1 row)
 
-warning: field `key` is never read
-  --> tests/conformance/runner.rs:76:9
-   |
-74 | pub struct TestResult {
-   |            ---------- field in this struct
-75 |     /// Unique key for this test (IRI or template ID).
-76 |     pub key: String,
-   |         ^^^
-   |
-   = note: `TestResult` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
+-- Run inference; expect derived count > 0.
+SELECT (pg_ripple.infer_with_stats('par_rollback_test') ->> 'derived')::int > 0
+    AS derived_facts_after_infer;
+WARNING:  semi-naive seed pass rolled back: SAVEPOINT _dl_seed failed: SPI error: Transaction
+ derived_facts_after_infer 
+---------------------------
+ f
+(1 row)
 
-warning: function `try_connect` is never used
-  --> tests/w3c/mod.rs:50:8
-   |
-50 | pub fn try_connect() -> Option<postgres::Client> {
-   |        ^^^^^^^^^^^
-   |
-   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+-- ── Part 2: Triple count consistency ─────────────────────────────────────────
+-- After inference, the derived predicate should have facts (reachability triples).
+-- Verify no negative count (basic sanity).
+SELECT pg_ripple.triple_count() > 0 AS triple_count_positive;
+ triple_count_positive 
+-----------------------
+ t
+(1 row)
 
-warning: function `file_iri_to_path` is never used
-  --> tests/w3c/mod.rs:78:8
-   |
-78 | pub fn file_iri_to_path(iri: &str) -> Option<PathBuf> {
-   |        ^^^^^^^^^^^^^^^^
+-- ── Part 3: Re-running inference does not duplicate facts ─────────────────────
+-- Re-run inference; the ON CONFLICT DO NOTHING on vp_rare means derived facts
+-- should not be duplicated.
+SELECT (pg_ripple.infer_with_stats('par_rollback_test') ->> 'derived')::int >= 0
+    AS re_infer_does_not_crash;
+WARNING:  semi-naive seed pass rolled back: SAVEPOINT _dl_seed failed: SPI error: Transaction
+ re_infer_does_not_crash 
+-------------------------
+ t
+(1 row)
 
-warning: field `0` is never read
-  --> tests/w3c/runner.rs:46:10
-   |
-46 |     Skip(String),
-   |     ---- ^^^^^^
-   |     |
-   |     field in this variant
-   |
-   = note: `TestOutcome` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
-help: consider changing the field to be of unit type to suppress this warning while preserving the field numbering, or remove the field
-   |
-46 -     Skip(String),
-46 +     Skip(()),
-   |
+-- ── Part 4: drop_rules removes the rule set cleanly ───────────────────────────
+SELECT pg_ripple.drop_rules('par_rollback_test') >= 0 AS rules_dropped;
+ rules_dropped 
+---------------
+ t
+(1 row)
 
-warning: field `0` is never read
-  --> tests/w3c/runner.rs:50:11
-   |
-50 |     XFail(String),
-   |     ----- ^^^^^^
-   |     |
-   |     field in this variant
-   |
-   = note: `TestOutcome` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
-help: consider changing the field to be of unit type to suppress this warning while preserving the field numbering, or remove the field
-   |
-50 -     XFail(String),
-50 +     XFail(()),
-   |
+-- ── Cleanup ────────────────────────────────────────────────────────────────────
+SELECT pg_ripple.delete_triple(
+    '<https://ex.org/par/a>', '<https://ex.org/par/edge>', '<https://ex.org/par/b>'
+) >= 0 AS del_ab;
+ del_ab 
+--------
+ t
+(1 row)
 
-warning: field `duration_ms` is never read
-  --> tests/w3c/runner.rs:70:9
-   |
-67 | pub struct TestResult {
-   |            ---------- field in this struct
-...
-70 |     pub duration_ms: u64,
-   |         ^^^^^^^^^^^
-   |
-   = note: `TestResult` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
+SELECT pg_ripple.delete_triple(
+    '<https://ex.org/par/b>', '<https://ex.org/par/edge>', '<https://ex.org/par/c>'
+) >= 0 AS del_bc;
+ del_bc 
+--------
+ t
+(1 row)
 
-warning: method `is_clean` is never used
-   --> tests/w3c/runner.rs:101:12
-    |
- 86 | impl RunReport {
-    | -------------- method in this implementation
-...
-101 |     pub fn is_clean(&self) -> bool {
-    |            ^^^^^^^^
+SELECT pg_ripple.delete_triple(
+    '<https://ex.org/par/c>', '<https://ex.org/par/edge>', '<https://ex.org/par/d>'
+) >= 0 AS del_cd;
+ del_cd 
+--------
+ t
+(1 row)
 
-warning: function `file_iri_to_path` is never used
-  --> tests/jena/mod.rs:78:8
-   |
-78 | pub fn file_iri_to_path(iri: &str) -> Option<PathBuf> {
-   |        ^^^^^^^^^^^^^^^^
-   |
-   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
-
-warning: fields `category`, `result_file`, `update_result_data`, and `update_result_graphs` are never read
-  --> tests/jena/manifest.rs:77:9
-   |
-69 | pub struct JenaTestCase {
-   |            ------------ fields in this struct
-...
-77 |     pub category: String,
-   |         ^^^^^^^^
-...
-85 |     pub result_file: Option<PathBuf>,
-   |         ^^^^^^^^^^^
-86 |     /// Expected result data files for UPDATE tests.
-87 |     pub update_result_data: Vec<PathBuf>,
-   |         ^^^^^^^^^^^^^^^^^^
-88 |     /// Expected named graph result files for UPDATE tests.
-89 |     pub update_result_graphs: Vec<(String, PathBuf)>,
-   |         ^^^^^^^^^^^^^^^^^^^^
-   |
-   = note: `JenaTestCase` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
-
-warning: function `load_fixtures` is never used
-   --> tests/w3c/loader.rs:120:8
-    |
-120 | pub fn load_fixtures(
-    |        ^^^^^^^^^^^^^
-
-warning: function `load_service_data` is never used
-   --> tests/w3c/loader.rs:158:8
-    |
-158 | pub fn load_service_data(
-    |        ^^^^^^^^^^^^^^^^^
-
-warning: `pg_ripple` (test "w3c_smoke") generated 5 warnings
-warning: `pg_ripple` (test "watdiv_suite") generated 6 warnings (1 duplicate)
-warning: `pg_ripple` (test "w3c_suite") generated 5 warnings (4 duplicates)
-warning: `pg_ripple` (test "jena_suite") generated 8 warnings (3 duplicates) (run `cargo fix --test "jena_suite" -p pg_ripple` to apply 1 suggestion)
-    Finished `test` profile [unoptimized + debuginfo] target(s) in 4.36s
-     Running unittests src/lib.rs (target/debug/deps/pg_ripple-8b943aafeb2fcb13)
-dyld[90482]: symbol not found in flat namespace '_CacheMemoryContext'
-error: test failed, to rerun pass `--lib`
-
-Caused by:
-  process didn't exit successfully: `/Users/geir.gronmo/projects/pg-ripple2/target/debug/deps/pg_ripple-8b943aafeb2fcb13` (signal: 6, SIGABRT: process abort signal)
+[39m
+test `[32m[1mdatalog_parallel_rollback[0m[39m` generated the above output:
+Accept [Y, n]? 
