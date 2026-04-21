@@ -70,6 +70,10 @@ fn vp_table(pred_id: i64) -> String {
 /// For rare predicates (no dedicated table), returns a filtered `vp_rare` subquery.
 ///
 /// This function uses SPI and must be called from within a PostgreSQL backend context.
+pub fn vp_read_expr_pub(pred_id: i64) -> String {
+    vp_read_expr(pred_id)
+}
+
 fn vp_read_expr(pred_id: i64) -> String {
     let has_dedicated = pgrx::Spi::get_one_with_args::<i64>(
         "SELECT table_oid::bigint FROM _pg_ripple.predicates \
@@ -96,6 +100,26 @@ fn vp_read_expr(pred_id: i64) -> String {
 }
 
 // ─── v0.29.0: Cost-based reordering & anti-join helpers ──────────────────────
+
+/// Return `true` if the rule has any variable predicate (in head or body).
+/// Used to detect rules that need runtime predicate variable instantiation.
+pub fn has_variable_pred(rule: &Rule) -> bool {
+    if let Some(head) = &rule.head {
+        if matches!(&head.p, Term::Var(_)) {
+            return true;
+        }
+    }
+    for lit in &rule.body {
+        let atom = match lit {
+            BodyLiteral::Positive(a) | BodyLiteral::Negated(a) => a,
+            _ => continue,
+        };
+        if matches!(&atom.p, Term::Var(_)) {
+            return true;
+        }
+    }
+    false
+}
 
 /// Estimate the cardinality of a predicate's VP table.
 ///
@@ -681,14 +705,23 @@ fn compile_recursive_rule(
 
     for lit in &rule.body {
         if let BodyLiteral::Positive(atom) = lit {
-            if let Term::Const(p) = &atom.p {
-                if *p == head_pred {
+            match &atom.p {
+                Term::Var(_) => {
+                    // Variable predicate in recursive rule body — not supported.
+                    // Return Err so the caller can try the variable-predicate runtime path.
+                    return Err(
+                        "variable predicate in recursive rule body not supported".to_owned(),
+                    );
+                }
+                Term::Const(p) if *p == head_pred => {
                     rec_atom = Some(atom);
-                } else {
+                }
+                Term::Const(_) => {
                     base_atoms.push(atom);
                 }
-            } else {
-                base_atoms.push(atom);
+                _ => {
+                    base_atoms.push(atom);
+                }
             }
         }
     }
@@ -715,10 +748,24 @@ fn compile_recursive_rule(
         }
     }
 
+    // Build base SQL.  When there are multiple base predicates we must NOT
+    // join them with a bare UNION at the top level, because PostgreSQL's
+    // CYCLE clause requires the left side of the outer UNION to be a plain
+    // SELECT — a SetOperationStmt on the left triggers "the left side of the
+    // UNION must be a SELECT".  Wrap in a subquery instead.
     let base_sql = if base_selects.is_empty() {
-        format!("SELECT s, o, g FROM {}", vp_read_expr(head_pred))
+        // Seed from the current VP table.  Use alias _vp so PostgreSQL
+        // accepts the derived-table expression.
+        format!("SELECT s, o, g FROM {} _vp", vp_read_expr(head_pred))
+    } else if base_selects.len() == 1 {
+        base_selects[0].clone()
     } else {
-        base_selects.join("\nUNION\n")
+        // Wrap multiple base predicates in a single derived table so the
+        // left side of the outer UNION remains a plain SELECT.
+        format!(
+            "SELECT s, o, g FROM (\n  {}\n) _base",
+            base_selects.join("\n  UNION ALL\n  ")
+        )
     };
 
     // Recursive step.
@@ -956,9 +1003,14 @@ fn compile_recursive_cte_fragment(
     }
 
     let base_sql = if base_selects.is_empty() {
-        format!("SELECT s, o, g FROM {}", vp_read_expr(head_pred))
+        format!("SELECT s, o, g FROM {} _vp", vp_read_expr(head_pred))
+    } else if base_selects.len() == 1 {
+        base_selects[0].clone()
     } else {
-        base_selects.join("\nUNION\n")
+        format!(
+            "SELECT s, o, g FROM (\n  {}\n) _base",
+            base_selects.join("\n  UNION ALL\n  ")
+        )
     };
 
     // Find the base source predicate for recursive step.

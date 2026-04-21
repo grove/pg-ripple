@@ -242,16 +242,9 @@ fn run_datalog_validation(client: &mut postgres::Client, out: &mut impl Write) {
         Err(ref e) => {
             writeln!(
                 out,
-                "  [datalog] WARNING: infer('owl-rl') returned an error (known limitation — \
-                 OWL RL rules with variable predicates produce partial SQL): {e}"
+                "  [datalog] FAIL: infer('owl-rl') returned an error: {e}"
             )
             .ok();
-            writeln!(
-                out,
-                "  [datalog] SKIP: skipping post-inference checks (rule engine limitation)"
-            )
-            .ok();
-            // Skip custom-rule validation too since the connection may be in error state.
             // Reset the connection by clearing any outstanding transaction.
             let _ = client.batch_execute("ROLLBACK");
             run_custom_rule_validation(client, out);

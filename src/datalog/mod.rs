@@ -53,6 +53,8 @@ pub use compiler::compile_aggregate_rule;
 pub use compiler::compile_rule_delta_variants_to;
 pub use compiler::compile_rule_set;
 pub use compiler::compile_single_rule_to;
+pub use compiler::has_variable_pred;
+pub use compiler::vp_read_expr_pub;
 pub use demand::parse_demands_json;
 pub use demand::run_infer_demand;
 pub use dred::{check_dred_safety, run_dred_on_delete};
@@ -697,6 +699,281 @@ pub fn run_inference_seminaive_full(rule_set_name: &str) -> (i64, i32, Vec<Strin
     (derived, iters, eliminated, parallel_groups, max_concurrent)
 }
 
+// ─── Variable-predicate rule instantiation (v0.44.0) ─────────────────────────
+
+/// Collect the names of all variables that appear in predicate position within
+/// a rule (head.p or any body atom's .p field).
+fn collect_pred_vars(rule: &Rule) -> Vec<String> {
+    let mut vars: Vec<String> = Vec::new();
+    if let Some(h) = &rule.head {
+        if let Term::Var(v) = &h.p {
+            if !vars.contains(v) {
+                vars.push(v.clone());
+            }
+        }
+    }
+    for lit in &rule.body {
+        let atom = match lit {
+            BodyLiteral::Positive(a) | BodyLiteral::Negated(a) => a,
+            _ => continue,
+        };
+        if let Term::Var(v) = &atom.p {
+            if !vars.contains(v) {
+                vars.push(v.clone());
+            }
+        }
+    }
+    vars
+}
+
+/// Substitute every occurrence of a predicate variable with a concrete
+/// dictionary ID throughout a rule (head and body).
+fn substitute_pred_var(rule: &Rule, var_name: &str, pred_id: i64) -> Rule {
+    let sub = |t: &Term| -> Term {
+        match t {
+            Term::Var(v) if v == var_name => Term::Const(pred_id),
+            other => other.clone(),
+        }
+    };
+    let sub_atom = |a: &Atom| -> Atom {
+        Atom {
+            s: sub(&a.s),
+            p: sub(&a.p),
+            o: sub(&a.o),
+            g: sub(&a.g),
+        }
+    };
+    let new_head = rule.head.as_ref().map(|h| sub_atom(h));
+    let new_body = rule
+        .body
+        .iter()
+        .map(|lit| match lit {
+            BodyLiteral::Positive(a) => BodyLiteral::Positive(sub_atom(a)),
+            BodyLiteral::Negated(a) => BodyLiteral::Negated(sub_atom(a)),
+            other => other.clone(),
+        })
+        .collect();
+    Rule {
+        head: new_head,
+        body: new_body,
+        rule_text: format!("/* {var_name}={pred_id} */ {}", rule.rule_text),
+    }
+}
+
+/// Find all concrete dictionary IDs for a predicate variable by scanning
+/// body atoms where the variable appears as the subject or object of a
+/// fixed-predicate atom.
+///
+/// For example, for `?p rdf:type owl:SymmetricProperty`:
+/// - var_name = "p", the atom's pred = rdf:type (Const), atom.s = Var("p")
+/// - Returns: all subjects of (_, rdf:type, owl:SymmetricProperty) triples
+///
+/// For `?p owl:inverseOf ?q` (where we want q):
+/// - var_name = "q", the atom's pred = owl:inverseOf (Const), atom.o = Var("q")
+/// - Returns: all objects of (_, owl:inverseOf, _) triples
+fn enumerate_pred_var_values(rule: &Rule, var_name: &str) -> Vec<i64> {
+    let mut values: std::collections::HashSet<i64> = std::collections::HashSet::new();
+
+    for lit in &rule.body {
+        let atom = match lit {
+            BodyLiteral::Positive(a) => a,
+            _ => continue,
+        };
+        // The atom must have a fixed (Const) predicate itself.
+        let atom_pred_id = match &atom.p {
+            Term::Const(id) => *id,
+            _ => continue,
+        };
+
+        let is_subj = matches!(&atom.s, Term::Var(v) if v == var_name);
+        let is_obj = matches!(&atom.o, Term::Var(v) if v == var_name);
+
+        if is_subj {
+            // Enumerate subjects of this VP table, optionally filtered by object.
+            let sql = match &atom.o {
+                Term::Const(o_id) => format!(
+                    "SELECT DISTINCT s FROM {} WHERE o = {o_id}",
+                    vp_read_expr_pub(atom_pred_id)
+                ),
+                _ => format!(
+                    "SELECT DISTINCT s FROM {}",
+                    vp_read_expr_pub(atom_pred_id)
+                ),
+            };
+            let ids: Vec<i64> = Spi::connect(|c| {
+                c.select(&sql, None, &[])
+                    .ok()
+                    .map(|rows| {
+                        rows.filter_map(|row| row.get::<i64>(1).ok().flatten())
+                            .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_default()
+            });
+            values.extend(ids);
+        } else if is_obj {
+            // Enumerate objects of this VP table, optionally filtered by subject.
+            let sql = match &atom.s {
+                Term::Const(s_id) => format!(
+                    "SELECT DISTINCT o FROM {} WHERE s = {s_id}",
+                    vp_read_expr_pub(atom_pred_id)
+                ),
+                _ => format!(
+                    "SELECT DISTINCT o FROM {}",
+                    vp_read_expr_pub(atom_pred_id)
+                ),
+            };
+            let ids: Vec<i64> = Spi::connect(|c| {
+                c.select(&sql, None, &[])
+                    .ok()
+                    .map(|rows| {
+                        rows.filter_map(|row| row.get::<i64>(1).ok().flatten())
+                            .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_default()
+            });
+            values.extend(ids);
+        }
+    }
+
+    values.into_iter().collect()
+}
+
+/// Compute concrete bindings for all predicate variables in a rule.
+///
+/// Returns a list of "substitution maps" — each map assigns a concrete i64 ID
+/// to each predicate variable name.  If a body atom binds two predicate
+/// variables simultaneously (e.g. `?p owl:inverseOf ?q`) we enumerate correlated
+/// pairs rather than the cartesian product of independent enumerations.
+///
+/// Returns an empty Vec if any predicate variable has no binding constraints
+/// (would require enumerating all predicates — too expensive).
+fn compute_pred_var_bindings(rule: &Rule, pred_vars: &[String]) -> Vec<Vec<(String, i64)>> {
+    if pred_vars.is_empty() {
+        return vec![vec![]];
+    }
+
+    // Check if a single body atom binds two pred vars simultaneously (correlated).
+    for lit in &rule.body {
+        let atom = match lit {
+            BodyLiteral::Positive(a) => a,
+            _ => continue,
+        };
+        let atom_pred_id = match &atom.p {
+            Term::Const(id) => *id,
+            _ => continue,
+        };
+        let subj_var = match &atom.s {
+            Term::Var(v) if pred_vars.contains(v) => Some(v.clone()),
+            _ => None,
+        };
+        let obj_var = match &atom.o {
+            Term::Var(v) if pred_vars.contains(v) => Some(v.clone()),
+            _ => None,
+        };
+
+        if subj_var.is_some() && obj_var.is_some() {
+            // Enumerate (s, o) pairs from this VP table — both vars bound together.
+            let sql = format!(
+                "SELECT DISTINCT s, o FROM {}",
+                vp_read_expr_pub(atom_pred_id)
+            );
+            let pairs: Vec<(i64, i64)> = Spi::connect(|c| {
+                c.select(&sql, None, &[])
+                    .ok()
+                    .map(|rows| {
+                        rows.filter_map(|row| {
+                            let s = row.get::<i64>(1).ok().flatten()?;
+                            let o = row.get::<i64>(2).ok().flatten()?;
+                            Some((s, o))
+                        })
+                        .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_default()
+            });
+            let sv = subj_var.unwrap();
+            let ov = obj_var.unwrap();
+            return pairs
+                .into_iter()
+                .map(|(s, o)| vec![(sv.clone(), s), (ov.clone(), o)])
+                .collect();
+        }
+    }
+
+    // Independent enumeration: enumerate each pred var separately, then
+    // compute the cartesian product.
+    let mut per_var: Vec<(String, Vec<i64>)> = Vec::new();
+    for var_name in pred_vars {
+        let vals = enumerate_pred_var_values(rule, var_name);
+        if vals.is_empty() {
+            // No binding found — refuse to enumerate all predicates.
+            return vec![];
+        }
+        per_var.push((var_name.clone(), vals));
+    }
+
+    // Cartesian product.
+    let mut result: Vec<Vec<(String, i64)>> = vec![vec![]];
+    for (var_name, values) in &per_var {
+        let mut new_result = Vec::new();
+        for partial in &result {
+            for &val in values {
+                let mut extended = partial.clone();
+                extended.push((var_name.clone(), val));
+                new_result.push(extended);
+            }
+        }
+        result = new_result;
+    }
+    result
+}
+
+/// Handle a rule that has one or more variable predicates by instantiating them
+/// at runtime.
+///
+/// For each concrete binding of the predicate variables (found by scanning the
+/// VP tables for constraints expressed in the body), the rule is specialized to
+/// a fully-constant rule and compiled normally.
+///
+/// Returns the total number of SQL INSERT statements executed successfully
+/// (a proxy for derived triples; the actual count may differ for recursive rules).
+pub fn run_var_pred_rule(rule: &Rule) -> i64 {
+    let pred_vars = collect_pred_vars(rule);
+    if pred_vars.is_empty() {
+        return 0;
+    }
+
+    let bindings = compute_pred_var_bindings(rule, &pred_vars);
+    if bindings.is_empty() {
+        return 0;
+    }
+
+    let mut total = 0i64;
+    for binding in bindings {
+        // Apply all substitutions for this binding set.
+        let mut specialized = rule.clone();
+        for (var_name, pred_id) in &binding {
+            specialized = substitute_pred_var(&specialized, var_name, *pred_id);
+        }
+
+        // After substitution the rule should have no variable predicates.
+        // Compile and run it.
+        match compile_rule_set(std::slice::from_ref(&specialized)) {
+            Ok(sqls) => {
+                for sql in &sqls {
+                    match Spi::run_with_args(sql, &[]) {
+                        Ok(()) => total += 1,
+                        Err(e) => {
+                            pgrx::warning!("var_pred_rule SQL error: {e}")
+                        }
+                    }
+                }
+            }
+            Err(e) => pgrx::warning!("var_pred_rule compile error after instantiation: {e}"),
+        }
+    }
+    total
+}
+
 /// Execute on-demand materialization for a rule set: run all rules in stratum
 /// order and insert derived triples.  Returns the number of triples derived.
 pub fn run_inference(rule_set_name: &str) -> i64 {
@@ -737,16 +1014,23 @@ pub fn run_inference(rule_set_name: &str) -> i64 {
         };
 
         for rule in &rules {
-            match compile_rule_set(std::slice::from_ref(rule)) {
-                Ok(sqls) => {
-                    for sql in sqls {
-                        match Spi::run_with_args(&sql, &[]) {
-                            Ok(()) => total_derived += 1,
-                            Err(e) => pgrx::warning!("inference SQL error: {e}: SQL={sql}"),
+            if has_variable_pred(rule) {
+                // Route through the variable-predicate instantiation path.
+                // Enumerates concrete predicate values from body constraints
+                // and runs a specialized version of the rule for each binding.
+                total_derived += run_var_pred_rule(rule);
+            } else {
+                match compile_rule_set(std::slice::from_ref(rule)) {
+                    Ok(sqls) => {
+                        for sql in sqls {
+                            match Spi::run_with_args(&sql, &[]) {
+                                Ok(()) => total_derived += 1,
+                                Err(e) => pgrx::warning!("inference SQL error: {e}: SQL={sql}"),
+                            }
                         }
                     }
+                    Err(e) => pgrx::warning!("rule compile error: {e}"),
                 }
-                Err(e) => pgrx::warning!("rule compile error: {e}"),
             }
         }
     }
