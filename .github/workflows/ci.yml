@@ -289,10 +289,10 @@ jobs:
 
       - name: Run W3C smoke subset
         env:
-          PGHOST: ${{ github.workspace }}/.pgrx
+          PGHOST: localhost
           PGPORT: "28818"
           PGDATABASE: postgres
-          PGUSER: ${{ env.USER }}
+          PGUSER: runner
         run: cargo test --test w3c_smoke -- --nocapture
 
       - name: Stop pgrx PostgreSQL 18
@@ -372,10 +372,10 @@ jobs:
 
       - name: Run W3C full suite (8 threads)
         env:
-          PGHOST: ${{ github.workspace }}/.pgrx
+          PGHOST: localhost
           PGPORT: "28818"
           PGDATABASE: postgres
-          PGUSER: ${{ env.USER }}
+          PGUSER: runner
           W3C_THREADS: "8"
         run: cargo test --test w3c_suite -- --nocapture
 
@@ -625,10 +625,10 @@ jobs:
 
       - name: Run LUBM conformance suite
         env:
-          PGHOST: ${{ github.workspace }}/.pgrx
+          PGHOST: localhost
           PGPORT: "28818"
           PGDATABASE: postgres
-          PGUSER: ${{ env.USER }}
+          PGUSER: runner
           LUBM_REQUIRE_DB: "1"
         run: cargo test --test lubm_suite -- --nocapture
 
