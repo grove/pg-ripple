@@ -18,9 +18,9 @@ No separate graph database. No data pipelines. No extra infrastructure.
 
 ---
 
-## What works today (v0.31.0)
+## What works today (v0.43.0)
 
-pg_ripple passes **100% of the W3C SPARQL 1.1 and SHACL Core conformance test suites** — the industry benchmarks for correctness in knowledge graph systems. After 31 releases it covers the full feature set described below.
+pg_ripple passes **100% of the W3C SPARQL 1.1 and SHACL Core conformance test suites** — the industry benchmarks for correctness in knowledge graph systems. After 43 releases it covers the full feature set described below.
 
 | What you can do | How it works |
 |---|---|
@@ -29,7 +29,9 @@ pg_ripple passes **100% of the W3C SPARQL 1.1 and SHACL Core conformance test su
 | **AI and LLM integration** | Store vector embeddings alongside graph facts. Combine semantic similarity search (*"find things similar to X"*) with SPARQL graph traversal in one query. Built-in RAG pipeline retrieves graph-contextualized context for language model prompts. Use `sparql_construct_jsonld()` with a JSON-LD frame to generate structured, token-efficient system prompts directly from a SPARQL CONSTRUCT query. |
 | **Microsoft GraphRAG** | Export entities and relationships in GraphRAG's BYOG (Bring Your Own Graph) Parquet format. Enrich the graph with Datalog rules. Validate export quality with SHACL. Connect your knowledge graph to Microsoft's GraphRAG pipeline with a single SQL call. |
 | **Validate data quality** | Define quality rules with SHACL: *"every Person must have exactly one name"*, *"age must be a positive integer"*. Violations are caught on insert (immediate feedback) or checked in the background. Fully W3C conformant. |
-| **Infer new facts automatically** | Write Datalog rules to derive conclusions from what you already know — *"if Alice manages Bob and Bob manages Carol, then Alice indirectly manages Carol"*. Includes built-in support for standard RDFS and OWL reasoning. Goal-directed mode (`infer_goal()`) and demand-filtered mode (`infer_demand()`) derive only the facts relevant to your query, reducing inference work by 50–90% on large programs. `owl:sameAs` entity canonicalization is applied automatically before inference, so equivalent entities are treated as one. |
+| **Infer new facts automatically** | Write Datalog rules to derive conclusions from what you already know — *"if Alice manages Bob and Bob manages Carol, then Alice indirectly manages Carol"*. Includes built-in support for standard RDFS and OWL reasoning. Goal-directed mode (`infer_goal()`) and demand-filtered mode (`infer_demand()`) derive only the facts relevant to your query, reducing inference work by 50–90% on large programs. `owl:sameAs` entity canonicalization is applied automatically before inference, so equivalent entities are treated as one. Well-founded semantics (`infer_wfs()`) handles non-stratifiable programs with mutual negation. Tabling caches repeated inference sub-goals (2–5× speedup). Parallel stratum evaluation runs independent rule groups concurrently. Worst-case optimal joins accelerate cyclic graph queries. Incremental retraction (DRed) keeps derived predicates consistent after deletions without full recomputation. |
+| **Stream and inspect queries** | Use `sparql_cursor()` to stream large result sets batch-by-batch without materializing them in memory. Use `explain_sparql()` and `explain_datalog()` to introspect query plans and rule compilation. OpenTelemetry span tracing is available when `pg_ripple.tracing_enabled = on`. |
+| **Live change notifications** | Subscribe to graph changes with `pg_ripple.create_subscription(name, filter_sparql)`. pg_ripple notifies your application via a PostgreSQL NOTIFY channel (`pg_ripple_cdc_{name}`) whenever matching triples are added or removed — no polling required. |
 | **Export and share** | Export your graph as Turtle, N-Triples, JSON-LD, or RDF/XML. Use JSON-LD framing to produce nested documents shaped for REST APIs or LLM prompts. |
 | **Standard HTTP endpoint** | The companion `pg_ripple_http` service exposes a W3C SPARQL Protocol endpoint over HTTP/HTTPS. Supports JSON, XML, CSV, Turtle, and JSON-LD responses; authentication; Prometheus metrics; and Docker Compose for easy deployment. |
 | **Query remote graph services** | Use the SPARQL `SERVICE` keyword to query external SPARQL endpoints as part of a single query — your local data and a remote public dataset in one request. Includes connection pooling, result caching, and safe timeouts. |
@@ -143,15 +145,23 @@ Token budgets matter. `sparql_construct_jsonld()` takes a SPARQL CONSTRUCT query
 
 ## Where we're headed
 
-Two releases remain on the path to v1.0.0.
+Four releases remain on the path to v1.0.0.
 
-### v0.32.0 — Well-Founded Semantics & Tabling
+### v0.44.0 — LUBM Conformance Suite
 
-The next release extends pg_ripple's Datalog engine to handle programs with mutual negation — the edge cases that stratified Datalog cannot resolve — using well-founded semantics (three-valued logic: true / false / unknown). It also adds tabling: a session-scoped cache that stores derived sub-goals so repeated sub-queries (in Datalog or SPARQL) are computed once and reused. For analytical workloads with repeated sub-query patterns, tabling delivers a 2–5× speedup.
+The Lehigh University Benchmark (LUBM) validates OWL RL inference correctness across 14 canonical queries on datasets from 1 K to 8 M triples. This release also adds a Datalog API validation sub-suite that verifies rule compilation, iteration tracking, inferred triple counts, goal queries, and performance baselines — providing end-to-end automated regression coverage for the reasoning engine.
+
+### v0.45.0 — SHACL Completion, Datalog Robustness & Crash Recovery
+
+This release closes the remaining SHACL Core gaps (`sh:equals` / `sh:disjoint`, decoded violation IRIs, async load tests), hardens parallel Datalog strata rollback on failure, adds missing crash-recovery test scenarios, and standardises migration documentation across all prior versions.
+
+### v0.46.0 — Property-Based Testing, Fuzz Hardening & OWL 2 RL Conformance
+
+Adds `proptest`-driven property-based testing for SPARQL algebra and dictionary invariants, fuzzes the federation result decoder, runs the W3C OWL 2 RL test suite in CI, and completes a set of performance improvements: TopN push-down, BSBM regression gate, sequence pre-allocation for Datalog workers, and HTTP certificate pinning.
 
 ### v1.0.0 — Production Release
 
-With 100% W3C conformance achieved, GraphRAG integration complete, vector + SPARQL hybrid search in place, entity resolution, and demand-filtered Datalog reasoning delivered, the final release focuses on production hardening: a full 72-hour continuous load test, final security audit sign-off, stress testing at 100 M+ triple scale, and a hardened upgrade path from every prior version. This is the version intended for production deployments.
+With 100% W3C conformance achieved, GraphRAG integration complete, vector + SPARQL hybrid search in place, entity resolution, demand-filtered Datalog, parallel merge, cost-based federation, and live CDC subscriptions all delivered, the final release focuses on production hardening: a full 72-hour continuous load test, final security audit sign-off, stress testing at 100 M+ triple scale, and a hardened upgrade path from every prior version. This is the version intended for production deployments.
 
 ---
 
@@ -168,7 +178,7 @@ This means you get:
 
 ### How it compares
 
-> **Note**: pg_ripple features marked "Yes" in the table below are implemented across v0.1.0–v0.31.0. W3C SPARQL 1.1 Query, Update, and SHACL Core conformance is 100% (achieved in v0.20.0). Competitor capabilities reflect publicly documented feature sets.
+> **Note**: pg_ripple features marked "Yes" in the table below are implemented across v0.1.0–v0.43.0. W3C SPARQL 1.1 Query, Update, and SHACL Core conformance is 100% (achieved in v0.20.0). Competitor capabilities reflect publicly documented feature sets.
 
 | Capability | pg_ripple | Blazegraph | Virtuoso | Apache Fuseki |
 |---|---|---|---|---|
@@ -312,7 +322,9 @@ CREATE EXTENSION pg_ripple;
 
 pg_ripple is built to production-grade standards:
 
-- **W3C conformance** — 100% pass rate on the official SPARQL 1.1 Query, SPARQL 1.1 Update, and SHACL Core test suites
+- **W3C conformance** — 100% pass rate on the official SPARQL 1.1 Query, SPARQL 1.1 Update, and SHACL Core test suites (~3 000 tests, parallelized, complete in under 2 minutes)
+- **Apache Jena test suite** — ~1 000 additional tests covering XSD numeric promotions, timezone-aware date/time, blank-node scoping, and all SPARQL string functions
+- **WatDiv benchmark** — all 100 WatDiv query templates (star, chain, snowflake, complex) validated for correctness against a 10 M-triple dataset with ±0.1% row-count baselines
 - **Extensive test suite** — automated tests cover every SQL-exposed function, every feature, and every edge case
 - **Security testing** — resistance to injection attacks, malformed inputs, and resource exhaustion
 - **Fuzz testing** — the query pipeline is continuously fuzz-tested for robustness

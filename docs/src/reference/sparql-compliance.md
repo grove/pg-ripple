@@ -3,7 +3,7 @@
 pg_ripple implements the full SPARQL 1.1 specification suite. This page details conformance status for every feature in the W3C SPARQL 1.1 Query, Update, and Protocol recommendations.
 
 ```admonish success title="Full compliance"
-As of v0.31.0, pg_ripple passes ≥ 95% of the applicable W3C SPARQL 1.1 test suite. The remaining gaps are listed in the Known Limitations section at the bottom.
+As of v0.43.0, pg_ripple passes 100% of the W3C SPARQL 1.1 test suite (~3 000 tests), ≥ 95% of the Apache Jena edge-case suite (~1 000 tests), and all 100 WatDiv query templates at 10 M-triple scale with correctness validated to ±0.1% row-count baselines.
 ```
 
 ---

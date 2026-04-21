@@ -13,7 +13,7 @@ pg_ripple--0.1.0--0.2.0.sql
 pg_ripple--0.2.0--0.3.0.sql
 pg_ripple--0.3.0--0.4.0.sql
 ...
-pg_ripple--0.31.0--0.32.0.sql
+pg_ripple--0.42.0--0.43.0.sql
 ```
 
 When you run `ALTER EXTENSION pg_ripple UPDATE`, PostgreSQL finds the shortest path from your current version to the latest and executes each script in sequence.
@@ -107,14 +107,14 @@ pg_ctl restart -D $PGDATA
 ALTER EXTENSION pg_ripple UPDATE;
 
 -- Or upgrade to a specific version
-ALTER EXTENSION pg_ripple UPDATE TO '0.32.0';
+ALTER EXTENSION pg_ripple UPDATE TO '0.43.0';
 ```
 
 PostgreSQL will execute each intermediate migration script in order:
 
 ```
-NOTICE:  updating extension "pg_ripple" from version "0.30.0" to "0.31.0"
-NOTICE:  updating extension "pg_ripple" from version "0.31.0" to "0.32.0"
+NOTICE:  updating extension "pg_ripple" from version "0.41.0" to "0.42.0"
+NOTICE:  updating extension "pg_ripple" from version "0.42.0" to "0.43.0"
 ```
 
 ### Step 5: Verify
@@ -169,11 +169,11 @@ Add these verification queries to a script that runs immediately after `ALTER EX
 
 ## Multi-Version Hop Upgrades
 
-PostgreSQL walks the entire migration chain automatically. Upgrading from v0.5.0 directly to v0.32.0 executes all intermediate scripts:
+PostgreSQL walks the entire migration chain automatically. Upgrading from v0.5.0 directly to v0.43.0 executes all intermediate scripts:
 
 ```sql
--- This works — PG finds the path 0.5.0 → 0.5.1 → 0.6.0 → ... → 0.32.0
-ALTER EXTENSION pg_ripple UPDATE TO '0.32.0';
+-- This works — PG finds the path 0.5.0 → 0.5.1 → 0.6.0 → ... → 0.43.0
+ALTER EXTENSION pg_ripple UPDATE TO '0.43.0';
 ```
 
 ```admonish note title="Long upgrade chains"
@@ -238,7 +238,7 @@ After a PostgreSQL major version upgrade, the `pg_ripple.so` shared library must
 
 | pg_ripple Version | PostgreSQL Version | Notes |
 |---|---|---|
-| 0.1.0 – 0.32.0 | 18.x | Only supported version |
+| 0.1.0 – 0.43.0 | 18.x | Only supported version |
 | Any | < 18 | Not supported |
 | Any | 19+ | Not yet tested |
 
