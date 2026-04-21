@@ -108,6 +108,15 @@ fn jena_suite() {
 
     let total_expected = entries.len();
 
+    // Pre-test setup: ensure pg_ripple is at the current version.
+    // DROP + CREATE is used instead of ALTER EXTENSION UPDATE to guarantee a
+    // clean schema regardless of what was previously installed in this DB.
+    if let Ok(mut setup) = postgres::Client::connect(&db_url, postgres::NoTls) {
+        let _ = setup.batch_execute(
+            "DROP EXTENSION IF EXISTS pg_ripple CASCADE; CREATE EXTENSION pg_ripple CASCADE",
+        );
+    }
+
     // ── Run the suite ───────────────────────────────────────────────────────
     let config = RunConfig {
         threads,
@@ -220,12 +229,9 @@ fn build_entry(case: JenaTestCase, db_url: String, _data_dir: std::path::PathBuf
 }
 
 /// Run a single query/update evaluation test against pg_ripple.
+/// Extension setup (DROP + CREATE) is handled once in `jena_suite()` before
+/// any parallel test closures execute.
 fn run_evaluation_test(client: &mut postgres::Client, case: &JenaTestCase) -> Result<(), String> {
-    // Ensure pg_ripple is installed in this database session.
-    client
-        .execute("CREATE EXTENSION IF NOT EXISTS pg_ripple CASCADE", &[])
-        .map_err(|e| format!("SKIP: cannot install pg_ripple extension: {e}"))?;
-
     let query_path = case
         .query_file
         .as_ref()
@@ -248,11 +254,31 @@ fn run_evaluation_test(client: &mut postgres::Client, case: &JenaTestCase) -> Re
             .map_err(|e| format!("loading named graph {}: {e}", data_file.display()))?;
     }
 
-    // Execute query and check it doesn't error.
-    // Full result validation against Jena expected files is handled by the
-    // Jena-specific result format adapters (future work for post-1.0).
-    tx.execute("SELECT pg_ripple.sparql_query($1)", &[&query_src])
-        .map_err(|e| format!("sparql_query error: {e}"))?;
+    // Dispatch to the right pg_ripple function based on query type.
+    // pg_ripple.sparql()        → TABLE(result jsonb)  — SELECT/CONSTRUCT/DESCRIBE
+    // pg_ripple.sparql_ask()   → boolean              — ASK
+    // pg_ripple.sparql_update() → bigint              — UPDATE
+    let is_ask = spargebra::SparqlParser::new()
+        .parse_query(&query_src)
+        .map(|q| matches!(q, spargebra::Query::Ask { .. }))
+        .unwrap_or(false);
+    let is_update = spargebra::SparqlParser::new()
+        .parse_update(&query_src)
+        .is_ok()
+        && spargebra::SparqlParser::new()
+            .parse_query(&query_src)
+            .is_err();
+
+    if is_update {
+        tx.execute("SELECT pg_ripple.sparql_update($1)", &[&query_src])
+            .map_err(|e| format!("sparql_update error: {e}"))?;
+    } else if is_ask {
+        tx.query("SELECT pg_ripple.sparql_ask($1)", &[&query_src])
+            .map_err(|e| format!("sparql_ask error: {e}"))?;
+    } else {
+        tx.query("SELECT * FROM pg_ripple.sparql($1)", &[&query_src])
+            .map_err(|e| format!("sparql error: {e}"))?;
+    }
 
     tx.rollback().map_err(|e| format!("rollback error: {e}"))?;
     Ok(())

@@ -69,6 +69,15 @@ fn watdiv_suite() {
         return;
     }
 
+    // Pre-test setup: ensure pg_ripple is at the current version.
+    // DROP + CREATE guarantees a clean schema regardless of what migration
+    // path was previously applied in this database.
+    if let Ok(mut setup) = postgres::Client::connect(&db_url, postgres::NoTls) {
+        let _ = setup.batch_execute(
+            "DROP EXTENSION IF EXISTS pg_ripple CASCADE; CREATE EXTENSION pg_ripple CASCADE",
+        );
+    }
+
     // ── Build test entries ──────────────────────────────────────────────────
     let threads: usize = std::env::var("WATDIV_THREADS")
         .ok()
@@ -92,17 +101,13 @@ fn watdiv_suite() {
         let name = format!("WatDiv/{} ({})", query.id, class.dir_name());
 
         let run: Box<dyn FnOnce() -> Result<(), String> + Send + 'static> = Box::new(move || {
+            // Ensure pg_ripple is available (setup done once before test launch).
             let mut client = postgres::Client::connect(&db_url, postgres::NoTls)
                 .map_err(|e| format!("SKIP: DB connect: {e}"))?;
 
-            // Ensure pg_ripple is installed in this session.
-            client
-                .execute("CREATE EXTENSION IF NOT EXISTS pg_ripple CASCADE", &[])
-                .map_err(|e| format!("SKIP: cannot install pg_ripple extension: {e}"))?;
-
             let t0 = Instant::now();
             let rows = client
-                .query("SELECT pg_ripple.sparql_query($1)", &[&query.sparql])
+                .query("SELECT * FROM pg_ripple.sparql($1)", &[&query.sparql])
                 .map_err(|e| format!("query error: {e}"))?;
             let _elapsed = t0.elapsed();
 
