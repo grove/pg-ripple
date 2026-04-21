@@ -1,0 +1,13 @@
+PREFIX wsdbm: <http://db.uwaterloo.ca/~galuc/wsdbm/>
+PREFIX sorg:  <http://schema.org/>
+PREFIX gr:    <http://purl.org/goodrelations/v1#>
+PREFIX rdf:   <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+
+# WatDiv F2 — snowflake-2: hub + 3 branches
+SELECT ?v0 ?v1 ?v2 ?v3 ?v4 WHERE {
+    ?v0 rdf:type              wsdbm:User ;
+        wsdbm:makesPurchase   ?v1 ;
+        wsdbm:follows         ?v2 ;
+        sorg:nationality      ?v4 .
+    ?v1 wsdbm:purchaseFor     ?v3 .
+}

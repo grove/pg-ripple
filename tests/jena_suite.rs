@@ -58,11 +58,10 @@ fn jena_suite() {
     };
 
     let db_url = jena::db_connect_string();
-    if jena::try_connect().is_none() {
-        println!("SKIP: Cannot connect to pg_ripple database ({db_url}).");
-        println!("      Run `cargo pgrx start pg18` to start a local instance.");
-        return;
-    }
+    // Note: we do NOT skip the whole suite when DB is unavailable.
+    // Syntax tests (PositiveSyntax / NegativeSyntax) run purely in-process via
+    // spargebra and do not need a database.  Evaluation tests skip gracefully
+    // per-test when the connection fails.
 
     // ── Build known failures set ────────────────────────────────────────────
     let project_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -146,29 +145,13 @@ fn jena_suite() {
     conformance::report::write_report(&[&report], &report_path).ok();
 
     // ── Exit criteria ───────────────────────────────────────────────────────
-    // Non-blocking until pass rate ≥ 95%.
-    let pass_rate = if total_expected > 0 {
-        report.passed as f64 / total_expected as f64
-    } else {
-        1.0
-    };
-
-    writeln!(
-        out,
-        "  pass rate: {:.1}% ({}/{})",
-        pass_rate * 100.0,
-        report.passed,
-        total_expected,
-    )
-    .ok();
-
-    if pass_rate >= 0.95 && !report.is_clean() {
+    // All embedded fixtures must pass; unexpected failures are a hard error.
+    if !report.is_clean() {
         panic!(
-            "Jena suite: unexpected failures above 95% pass-rate threshold.\n{}",
+            "Jena suite: unexpected test failures.\n{}",
             report.summary()
         );
     }
-    // Below 95% — informational only (non-blocking CI job).
 }
 
 // ── Helper ────────────────────────────────────────────────────────────────────
@@ -238,6 +221,11 @@ fn build_entry(case: JenaTestCase, db_url: String, _data_dir: std::path::PathBuf
 
 /// Run a single query/update evaluation test against pg_ripple.
 fn run_evaluation_test(client: &mut postgres::Client, case: &JenaTestCase) -> Result<(), String> {
+    // Ensure pg_ripple is installed in this database session.
+    client
+        .execute("CREATE EXTENSION IF NOT EXISTS pg_ripple CASCADE", &[])
+        .map_err(|e| format!("SKIP: cannot install pg_ripple extension: {e}"))?;
+
     let query_path = case
         .query_file
         .as_ref()

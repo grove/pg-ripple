@@ -1,0 +1,16 @@
+PREFIX wsdbm: <http://db.uwaterloo.ca/~galuc/wsdbm/>
+PREFIX sorg:  <http://schema.org/>
+PREFIX gr:    <http://purl.org/goodrelations/v1#>
+PREFIX rdf:   <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+PREFIX foaf:  <http://xmlns.com/foaf/0.1/>
+
+# WatDiv B12 — complex: 5-way star + OPTIONAL + aggregate
+SELECT ?v0 ?name ?nationality (COUNT(?purchase) AS ?n) WHERE {
+    ?v0 rdf:type           wsdbm:User ;
+        foaf:givenName     ?name ;
+        sorg:nationality   ?nationality .
+    OPTIONAL { ?v0 wsdbm:makesPurchase ?purchase }
+}
+GROUP BY ?v0 ?name ?nationality
+ORDER BY DESC(?n)
+LIMIT 10

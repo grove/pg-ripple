@@ -1,0 +1,10 @@
+PREFIX wsdbm: <http://db.uwaterloo.ca/~galuc/wsdbm/>
+PREFIX sorg:  <http://schema.org/>
+PREFIX gr:    <http://purl.org/goodrelations/v1#>
+PREFIX rdf:   <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+
+# WatDiv S2 — star-2: 2-predicate star on a product
+SELECT ?v0 ?v1 WHERE {
+    ?v0 rdf:type              wsdbm:ProductCategory ;
+        gr:name               ?v1 .
+}

@@ -1,0 +1,16 @@
+PREFIX wsdbm: <http://db.uwaterloo.ca/~galuc/wsdbm/>
+PREFIX sorg:  <http://schema.org/>
+PREFIX gr:    <http://purl.org/goodrelations/v1#>
+PREFIX rdf:   <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+PREFIX foaf:  <http://xmlns.com/foaf/0.1/>
+
+# WatDiv F3 — snowflake-3: hub (product) + 2 branches (offer, category)
+SELECT ?v0 ?v1 ?v2 ?v3 ?v4 WHERE {
+    ?v0 rdf:type                wsdbm:ProductCategory .
+    ?v1 rdf:type                wsdbm:Offer ;
+        gr:includes             ?v0 ;
+        gr:price                ?v2 .
+    ?v3 rdf:type                wsdbm:Product ;
+        wsdbm:hasProductCategory ?v0 ;
+        gr:name                 ?v4 .
+}

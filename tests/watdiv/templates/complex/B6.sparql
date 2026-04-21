@@ -1,0 +1,12 @@
+PREFIX wsdbm: <http://db.uwaterloo.ca/~galuc/wsdbm/>
+PREFIX sorg:  <http://schema.org/>
+PREFIX gr:    <http://purl.org/goodrelations/v1#>
+PREFIX rdf:   <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+
+# WatDiv B6 — complex: VALUES + star join
+SELECT ?v0 ?v1 WHERE {
+    VALUES ?type { wsdbm:User wsdbm:Customer }
+    ?v0 rdf:type ?type ;
+        wsdbm:makesPurchase ?v1 .
+}
+LIMIT 30

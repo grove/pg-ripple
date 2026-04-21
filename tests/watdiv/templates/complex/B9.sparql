@@ -1,0 +1,13 @@
+PREFIX wsdbm: <http://db.uwaterloo.ca/~galuc/wsdbm/>
+PREFIX sorg:  <http://schema.org/>
+PREFIX gr:    <http://purl.org/goodrelations/v1#>
+PREFIX rdf:   <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+
+# WatDiv B9 — complex: HAVING filter on aggregate
+SELECT ?nationality (COUNT(?v0) AS ?userCount) WHERE {
+    ?v0 rdf:type           wsdbm:User ;
+        sorg:nationality   ?nationality .
+}
+GROUP BY ?nationality
+HAVING (COUNT(?v0) >= 0)
+ORDER BY DESC(?userCount)

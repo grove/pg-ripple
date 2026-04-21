@@ -1,0 +1,19 @@
+PREFIX wsdbm: <http://db.uwaterloo.ca/~galuc/wsdbm/>
+PREFIX sorg:  <http://schema.org/>
+PREFIX gr:    <http://purl.org/goodrelations/v1#>
+PREFIX rdf:   <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+PREFIX foaf:  <http://xmlns.com/foaf/0.1/>
+
+# WatDiv B5 — complex: subquery + outer join
+SELECT ?v0 ?v1 ?count WHERE {
+    ?v0 rdf:type wsdbm:User ;
+        foaf:givenName ?v1 .
+    {
+        SELECT ?v0 (COUNT(?p) AS ?count) WHERE {
+            ?v0 wsdbm:makesPurchase ?p .
+        }
+        GROUP BY ?v0
+    }
+}
+ORDER BY DESC(?count)
+LIMIT 10

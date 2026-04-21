@@ -120,9 +120,13 @@ pub fn parse_manifest(
             .display()
     );
 
+    // Prepend @base so relative IRIs (e.g. <pos01.sparql>, <#test01>) resolve
+    // against the manifest file's directory — same pattern as the W3C manifest parser.
+    let src_with_base = format!("@base <{base}> .\n{src}");
+
     // Collect all triples.
     let mut triples: Vec<(String, String, String)> = Vec::new();
-    let mut parser = TurtleParser::new(src.as_bytes(), None);
+    let mut parser = TurtleParser::new(src_with_base.as_bytes(), None);
 
     parser
         .parse_all(&mut |t| -> Result<(), TurtleError> {
@@ -235,6 +239,16 @@ pub fn parse_manifest(
                         }
                         _ => {}
                     }
+                }
+            }
+        }
+
+        // Fallback: syntax tests use `mf:action <file.sparql>` directly as a file IRI
+        // rather than a blank node with `qt:query` sub-properties.
+        if query_file.is_none() {
+            if let Some(ref action) = action_node {
+                if action.starts_with("file://") {
+                    query_file = file_iri_to_path(action);
                 }
             }
         }

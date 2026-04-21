@@ -1,0 +1,7 @@
+CONSTRUCT {
+    ?s <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://xmlns.com/foaf/0.1/Thing> .
+}
+WHERE {
+    ?s ?p ?o .
+}
+LIMIT 10

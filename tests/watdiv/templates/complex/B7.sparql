@@ -1,0 +1,13 @@
+PREFIX wsdbm: <http://db.uwaterloo.ca/~galuc/wsdbm/>
+PREFIX sorg:  <http://schema.org/>
+PREFIX gr:    <http://purl.org/goodrelations/v1#>
+PREFIX rdf:   <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+
+# WatDiv B7 — complex: OPTIONAL + FILTER isLiteral
+SELECT ?v0 ?v1 ?v2 WHERE {
+    ?v0 rdf:type wsdbm:Product .
+    OPTIONAL { ?v0 gr:name ?v1 }
+    OPTIONAL { ?v0 wsdbm:hasProductCategory ?v2 }
+    FILTER(!BOUND(?v1) || isLiteral(?v1))
+}
+LIMIT 40

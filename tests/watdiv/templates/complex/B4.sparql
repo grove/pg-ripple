@@ -1,0 +1,13 @@
+PREFIX wsdbm: <http://db.uwaterloo.ca/~galuc/wsdbm/>
+PREFIX sorg:  <http://schema.org/>
+PREFIX gr:    <http://purl.org/goodrelations/v1#>
+PREFIX rdf:   <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+
+# WatDiv B4 — complex: OPTIONAL chain + FILTER regex
+SELECT ?v0 ?v1 ?v2 WHERE {
+    ?v0 rdf:type wsdbm:Offer .
+    OPTIONAL { ?v0 gr:price ?v1 }
+    OPTIONAL { ?v0 sorg:seller ?v2 }
+    FILTER(!BOUND(?v1) || ?v1 > 0)
+}
+LIMIT 50

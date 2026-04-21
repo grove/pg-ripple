@@ -42,16 +42,9 @@ fn watdiv_suite() {
         }
     };
 
-    let _data_dir = match watdiv::data_dir() {
-        Some(d) => d,
-        None => {
-            println!("SKIP: WatDiv data directory not found.");
-            println!(
-                "      Run scripts/fetch_conformance_tests.sh --watdiv to generate the 10M-triple dataset."
-            );
-            return;
-        }
-    };
+    let _data_dir = watdiv::data_dir(); // Optional — queries run against whatever is in the DB.
+    // If no data was loaded (empty DB), queries return 0 rows which is correct
+    // when there is no baseline to compare against.
 
     let db_url = watdiv::db_connect_string();
     if watdiv::try_connect().is_none() {
@@ -101,6 +94,11 @@ fn watdiv_suite() {
         let run: Box<dyn FnOnce() -> Result<(), String> + Send + 'static> = Box::new(move || {
             let mut client = postgres::Client::connect(&db_url, postgres::NoTls)
                 .map_err(|e| format!("SKIP: DB connect: {e}"))?;
+
+            // Ensure pg_ripple is installed in this session.
+            client
+                .execute("CREATE EXTENSION IF NOT EXISTS pg_ripple CASCADE", &[])
+                .map_err(|e| format!("SKIP: cannot install pg_ripple extension: {e}"))?;
 
             let t0 = Instant::now();
             let rows = client
@@ -176,13 +174,14 @@ fn watdiv_suite() {
         .join("report.json");
     conformance::report::write_report(&[&report], &report_path).ok();
 
-    // WatDiv is always non-blocking (performance suite).
-    // Correctness failures are logged but do not fail CI.
+    // WatDiv is always non-blocking for performance regressions, but
+    // query-execution errors (not row-count mismatches) are hard failures.
     if !report.is_clean() {
         eprintln!(
-            "[watdiv] WARNING: {} unexpected failures — see above for details",
+            "[watdiv] FAIL: {} unexpected failures — see above for details",
             report.failed
         );
+        panic!("WatDiv suite: unexpected failures.\n{}", report.summary());
     }
 }
 

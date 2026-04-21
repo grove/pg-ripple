@@ -1,0 +1,42 @@
+# Embedded Jena-style SPARQL query evaluation fixtures for pg_ripple CI.
+#
+# These tests exercise the full query evaluation path (requires a running
+# pg_ripple database).  All queries run against an empty database, returning
+# 0 rows or false, which is correct behaviour.  No result validation files
+# are provided — the test simply checks that the query executes without error.
+
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix mf:  <http://www.w3.org/2001/sw/DataAccess/tests/test-manifest#> .
+@prefix qt:  <http://www.w3.org/2001/sw/DataAccess/tests/test-query#> .
+@prefix jt:  <http://jena.hpl.hp.com/2005/05/test-manifest-extra#> .
+
+<>
+    rdf:type mf:Manifest ;
+    mf:entries (
+        <#eval01> <#eval02> <#eval03> <#eval04> <#eval05>
+    ) .
+
+<#eval01>
+    rdf:type  jt:QueryEvaluationTest ;
+    mf:name   "eval01: SELECT * LIMIT 10 against empty graph" ;
+    mf:action [ qt:query <eval01.sparql> ] .
+
+<#eval02>
+    rdf:type  jt:QueryEvaluationTest ;
+    mf:name   "eval02: COUNT aggregate on empty graph" ;
+    mf:action [ qt:query <eval02.sparql> ] .
+
+<#eval03>
+    rdf:type  jt:QueryEvaluationTest ;
+    mf:name   "eval03: ASK on empty graph returns false" ;
+    mf:action [ qt:query <eval03.sparql> ] .
+
+<#eval04>
+    rdf:type  jt:QueryEvaluationTest ;
+    mf:name   "eval04: OPTIONAL on empty graph" ;
+    mf:action [ qt:query <eval04.sparql> ] .
+
+<#eval05>
+    rdf:type  jt:QueryEvaluationTest ;
+    mf:name   "eval05: DISTINCT SELECT on empty graph" ;
+    mf:action [ qt:query <eval05.sparql> ] .

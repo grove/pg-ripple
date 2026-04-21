@@ -1,0 +1,16 @@
+PREFIX wsdbm: <http://db.uwaterloo.ca/~galuc/wsdbm/>
+PREFIX sorg:  <http://schema.org/>
+PREFIX gr:    <http://purl.org/goodrelations/v1#>
+PREFIX rdf:   <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+
+# WatDiv B11 — complex: OPTIONAL + UNION + FILTER
+SELECT ?v0 ?v1 WHERE {
+    ?v0 rdf:type wsdbm:User .
+    {
+        ?v0 wsdbm:makesPurchase ?v1 .
+    } UNION {
+        OPTIONAL { ?v0 wsdbm:follows ?v1 }
+        FILTER(BOUND(?v1))
+    }
+}
+LIMIT 20

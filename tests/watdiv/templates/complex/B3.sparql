@@ -1,0 +1,13 @@
+PREFIX wsdbm: <http://db.uwaterloo.ca/~galuc/wsdbm/>
+PREFIX sorg:  <http://schema.org/>
+PREFIX gr:    <http://purl.org/goodrelations/v1#>
+PREFIX rdf:   <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+
+# WatDiv B3 — complex: aggregate (COUNT) over joined pattern
+SELECT ?v0 (COUNT(?v1) AS ?purchases) WHERE {
+    ?v0 rdf:type              wsdbm:User ;
+        wsdbm:makesPurchase   ?v1 .
+}
+GROUP BY ?v0
+ORDER BY DESC(?purchases)
+LIMIT 20

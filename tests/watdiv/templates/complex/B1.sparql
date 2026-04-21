@@ -1,0 +1,11 @@
+PREFIX wsdbm: <http://db.uwaterloo.ca/~galuc/wsdbm/>
+PREFIX sorg:  <http://schema.org/>
+PREFIX rdf:   <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+
+# WatDiv B1 — complex query with OPTIONAL and FILTER
+SELECT ?v0 ?v1 ?v2 WHERE {
+    ?v0 rdf:type            wsdbm:User .
+    ?v0 wsdbm:makesPurchase ?v1 .
+    OPTIONAL { ?v1 wsdbm:purchaseFor ?v2 }
+    FILTER(isIRI(?v0))
+}

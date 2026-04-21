@@ -1,0 +1,1 @@
+FROBNICATE ?s WHERE { ?s ?p ?o }
