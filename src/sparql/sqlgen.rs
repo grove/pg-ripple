@@ -554,7 +554,9 @@ fn bind_term(
             // property path sequences (e.g. `p/q` → two BGP patterns sharing a
             // blank-node object/subject).  Treat them just like SPARQL variables:
             // bind on first occurrence, equijoin on subsequent occurrences.
-            let vname = format!("_bn_{}", bnode);
+            // Blank node IDs may contain ':' (e.g. `_:f6891...`) which is invalid
+            // in unquoted SQL identifiers.  Sanitize to alphanumeric + '_' only.
+            let vname = sanitize_sql_ident(&format!("_bn_{}", bnode));
             if let Some(existing) = bindings.get(&vname) {
                 conditions.push(format!("{col_expr} = {existing}"));
             } else {
@@ -806,7 +808,7 @@ fn translate_pattern(pattern: &GraphPattern, ctx: &mut Ctx) -> Fragment {
             let left_select_parts: Vec<String> = left_frag
                 .bindings
                 .iter()
-                .map(|(v, col)| format!("{col} AS _lc_{v}"))
+                .map(|(v, col)| format!("{col} AS _lc_{}", sanitize_sql_ident(v)))
                 .collect();
             let left_select = if left_select_parts.is_empty() {
                 "1 AS _lc_dummy".to_owned()
@@ -824,7 +826,7 @@ fn translate_pattern(pattern: &GraphPattern, ctx: &mut Ctx) -> Fragment {
             let right_select_parts: Vec<String> = right_frag
                 .bindings
                 .iter()
-                .map(|(v, col)| format!("{col} AS _rc_{v}"))
+                .map(|(v, col)| format!("{col} AS _rc_{}", sanitize_sql_ident(v)))
                 .collect();
             let right_select = if right_select_parts.is_empty() {
                 "1 AS _rc_dummy".to_owned()
@@ -845,7 +847,10 @@ fn translate_pattern(pattern: &GraphPattern, ctx: &mut Ctx) -> Fragment {
                     "ON {}",
                     shared_vars
                         .iter()
-                        .map(|v| format!("{lft}._lc_{v} = {rgt}._rc_{v}"))
+                        .map(|v| {
+                            let sv = sanitize_sql_ident(v);
+                            format!("{lft}._lc_{sv} = {rgt}._rc_{sv}")
+                        })
                         .collect::<Vec<_>>()
                         .join(" AND ")
                 )
@@ -855,11 +860,15 @@ fn translate_pattern(pattern: &GraphPattern, ctx: &mut Ctx) -> Fragment {
             let mut combined_cols: Vec<String> = left_frag
                 .bindings
                 .keys()
-                .map(|v| format!("{lft}._lc_{v} AS _lj_{v}"))
+                .map(|v| {
+                    let sv = sanitize_sql_ident(v);
+                    format!("{lft}._lc_{sv} AS _lj_{sv}")
+                })
                 .collect();
             for v in right_frag.bindings.keys() {
                 if !left_frag.bindings.contains_key(v) {
-                    combined_cols.push(format!("{rgt}._rc_{v} AS _lj_{v}"));
+                    let sv = sanitize_sql_ident(v);
+                    combined_cols.push(format!("{rgt}._rc_{sv} AS _lj_{sv}"));
                 }
             }
             let combined_select = if combined_cols.is_empty() {
@@ -889,11 +898,13 @@ fn translate_pattern(pattern: &GraphPattern, ctx: &mut Ctx) -> Fragment {
             frag.from_items.push((lj.clone(), lj_sql));
 
             for v in left_frag.bindings.keys() {
-                frag.bindings.insert(v.clone(), format!("{lj}._lj_{v}"));
+                let sv = sanitize_sql_ident(v);
+                frag.bindings.insert(v.clone(), format!("{lj}._lj_{sv}"));
             }
             for v in right_frag.bindings.keys() {
                 if !left_frag.bindings.contains_key(v) {
-                    frag.bindings.insert(v.clone(), format!("{lj}._lj_{v}"));
+                    let sv = sanitize_sql_ident(v);
+                    frag.bindings.insert(v.clone(), format!("{lj}._lj_{sv}"));
                 }
             }
 
@@ -1283,6 +1294,12 @@ fn translate_union(left: &GraphPattern, right: &GraphPattern, ctx: &mut Ctx) -> 
     let left_frag = translate_pattern(left, ctx);
     let right_frag = translate_pattern(right, ctx);
 
+    // When inside a GRAPH ?g { ... UNION ... } context, the graph variable
+    // must be available in the UNION output.  Each arm's from_items carries
+    // VP-table rows with a `g` column — expose it so the outer GRAPH handler
+    // can bind `?g = alias.g`.
+    let include_g = ctx.variable_graph;
+
     // Union of variable sets — each side may have different variables.
     let mut all_vars: Vec<String> = left_frag
         .bindings
@@ -1295,7 +1312,7 @@ fn translate_union(left: &GraphPattern, right: &GraphPattern, ctx: &mut Ctx) -> 
     all_vars.sort();
 
     let build_union_arm = |frag: &Fragment| -> String {
-        let cols: Vec<String> = all_vars
+        let mut cols: Vec<String> = all_vars
             .iter()
             .map(|v| {
                 frag.bindings
@@ -1304,6 +1321,15 @@ fn translate_union(left: &GraphPattern, right: &GraphPattern, ctx: &mut Ctx) -> 
                     .unwrap_or_else(|| format!("NULL::bigint AS _u_{v}"))
             })
             .collect();
+        // Propagate the named-graph column when needed.
+        if include_g {
+            let gcol = frag
+                .from_items
+                .first()
+                .map(|(a, _)| format!("{a}.g"))
+                .unwrap_or_else(|| "NULL::bigint".to_owned());
+            cols.push(format!("{gcol} AS g"));
+        }
         let select_list = if cols.is_empty() {
             "1 AS _dummy".to_owned()
         } else {
@@ -3470,7 +3496,43 @@ pub fn translate_select(pattern: &GraphPattern, base_iri: Option<&str>) -> Trans
     let distinct_kw = if mods.distinct { "DISTINCT " } else { "" };
     let from = frag.build_from();
     let where_clause = frag.build_where();
-    let order_clause = mods.order_by.unwrap_or_default();
+
+    // When SELECT DISTINCT is combined with ORDER BY on a non-projected variable,
+    // PostgreSQL rejects the query ("ORDER BY expressions must appear in select list").
+    // Per SPARQL 1.1 §15, such ordering is implementation-defined.
+    // Drop any ORDER BY expressions that reference non-projected variables so the
+    // query remains valid SQL.
+    let order_clause = if mods.distinct && !mods.order_exprs.is_empty() {
+        let projected: std::collections::HashSet<&str> =
+            variables.iter().map(|v| v.as_str()).collect();
+        let safe_exprs: Vec<_> = mods
+            .order_exprs
+            .iter()
+            .filter(|oe| {
+                let var = match oe {
+                    OrderExpression::Asc(Expression::Variable(v))
+                    | OrderExpression::Desc(Expression::Variable(v)) => Some(v.as_str()),
+                    _ => None,
+                };
+                // Keep the expression only if it refers to a projected variable (or
+                // is not a simple variable reference, e.g. a complex expression).
+                var.map_or(true, |v| projected.contains(v))
+            })
+            .cloned()
+            .collect();
+        if safe_exprs.is_empty() {
+            String::new()
+        } else {
+            let s = translate_order_by(&safe_exprs, &frag.bindings);
+            if s.is_empty() {
+                String::new()
+            } else {
+                format!("ORDER BY {s}")
+            }
+        }
+    } else {
+        mods.order_by.unwrap_or_default()
+    };
     let limit_clause = mods.limit.map(|l| format!("LIMIT {l}")).unwrap_or_default();
     let offset_clause = if mods.offset > 0 {
         format!("OFFSET {}", mods.offset)
