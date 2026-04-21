@@ -75,29 +75,29 @@ fn datalog_convergence_suite() {
     }
 
     if load_ok {
-    let start = Instant::now();
-    let result = client.query_one(
-        "SELECT (infer_result->>'iterations')::int, (infer_result->>'derived')::bigint \
+        let start = Instant::now();
+        let result = client.query_one(
+            "SELECT (infer_result->>'iterations')::int, (infer_result->>'derived')::bigint \
          FROM (SELECT pg_ripple.infer_with_stats('convergence_test') AS infer_result) t",
-        &[],
-    );
+            &[],
+        );
 
-    match result {
-        Ok(row) => {
-            let iterations: i32 = row.get(0);
-            let derived: i64 = row.get(1);
-            let elapsed = start.elapsed().as_secs_f64();
-            println!("  iterations={iterations}, derived={derived}, elapsed={elapsed:.1}s");
-            assert!(
-                iterations <= MAX_ITERATIONS_CUSTOM as i32,
-                "custom rule set did not converge in {MAX_ITERATIONS_CUSTOM} iterations \
+        match result {
+            Ok(row) => {
+                let iterations: i32 = row.get(0);
+                let derived: i64 = row.get(1);
+                let elapsed = start.elapsed().as_secs_f64();
+                println!("  iterations={iterations}, derived={derived}, elapsed={elapsed:.1}s");
+                assert!(
+                    iterations <= MAX_ITERATIONS_CUSTOM as i32,
+                    "custom rule set did not converge in {MAX_ITERATIONS_CUSTOM} iterations \
                  (took {iterations})"
-            );
+                );
+            }
+            Err(e) => {
+                println!("SKIP sub-test 1 inference: {e}");
+            }
         }
-        Err(e) => {
-            println!("SKIP sub-test 1 inference: {e}");
-        }
-    }
     } // end if load_ok
 
     // ── Sub-test 2: built-in RDFS + OWL RL on the loaded data ───────────────
