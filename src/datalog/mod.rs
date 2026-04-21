@@ -795,10 +795,7 @@ fn enumerate_pred_var_values(rule: &Rule, var_name: &str) -> Vec<i64> {
                     "SELECT DISTINCT s FROM {} WHERE o = {o_id}",
                     vp_read_expr_pub(atom_pred_id)
                 ),
-                _ => format!(
-                    "SELECT DISTINCT s FROM {}",
-                    vp_read_expr_pub(atom_pred_id)
-                ),
+                _ => format!("SELECT DISTINCT s FROM {}", vp_read_expr_pub(atom_pred_id)),
             };
             let ids: Vec<i64> = Spi::connect(|c| {
                 c.select(&sql, None, &[])
@@ -817,10 +814,7 @@ fn enumerate_pred_var_values(rule: &Rule, var_name: &str) -> Vec<i64> {
                     "SELECT DISTINCT o FROM {} WHERE s = {s_id}",
                     vp_read_expr_pub(atom_pred_id)
                 ),
-                _ => format!(
-                    "SELECT DISTINCT o FROM {}",
-                    vp_read_expr_pub(atom_pred_id)
-                ),
+                _ => format!("SELECT DISTINCT o FROM {}", vp_read_expr_pub(atom_pred_id)),
             };
             let ids: Vec<i64> = Spi::connect(|c| {
                 c.select(&sql, None, &[])

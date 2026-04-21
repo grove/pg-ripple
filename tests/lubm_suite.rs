@@ -358,11 +358,7 @@ fn run_custom_rule_validation(client: &mut postgres::Client, out: &mut impl Writ
             }
             Err(e) => {
                 let _ = client.batch_execute("ROLLBACK");
-                writeln!(
-                    out,
-                    "  [datalog] WARN  custom rule infer() error: {e}"
-                )
-                .ok();
+                writeln!(out, "  [datalog] WARN  custom rule infer() error: {e}").ok();
             }
         }
     } else {

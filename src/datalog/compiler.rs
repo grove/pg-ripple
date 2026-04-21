@@ -710,7 +710,7 @@ fn compile_recursive_rule(
                     // Variable predicate in recursive rule body — not supported.
                     // Return Err so the caller can try the variable-predicate runtime path.
                     return Err(
-                        "variable predicate in recursive rule body not supported".to_owned(),
+                        "variable predicate in recursive rule body not supported".to_owned()
                     );
                 }
                 Term::Const(p) if *p == head_pred => {
