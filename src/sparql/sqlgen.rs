@@ -3560,7 +3560,7 @@ pub fn translate_select(pattern: &GraphPattern, base_iri: Option<&str>) -> Trans
                 };
                 // Keep the expression only if it refers to a projected variable (or
                 // is not a simple variable reference, e.g. a complex expression).
-                var.map_or(true, |v| projected.contains(v))
+                var.is_none_or(|v| projected.contains(v))
             })
             .cloned()
             .collect();
