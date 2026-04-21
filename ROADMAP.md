@@ -66,6 +66,8 @@ Each release below has two layers:
 | [0.42.0](#v0420--parallel-merge-cost-based-federation--live-cdc) | Parallel Merge, Cost-Based Federation & Live CDC | Multi-worker HTAP merge, FedX-style federation planner, parallel SERVICE, live RDF change subscriptions | 10–12 pw |
 | [0.43.0](#v0430--watdiv--jena-conformance-suite) | WatDiv + Jena Conformance Suite | Apache Jena edge-case tests (~1,000) and WatDiv scale-correctness benchmark (10M+ triples, star/chain/snowflake/complex patterns); 90% harness reuse from v0.41.0 | 5–7 pw |
 | [0.44.0](#v0440--lubm-conformance-suite) | LUBM Conformance Suite | Lehigh University Benchmark — OWL RL inference correctness across 14 canonical queries on 1K–8M triple datasets; includes Datalog API validation sub-suite for rule compilation, iteration tracking, inferred triples, goal queries, and performance baseline | 3–5 pw |
+| [0.45.0](#v0450--shacl-completion-datalog-robustness--crash-recovery) | SHACL Completion, Datalog Robustness & Crash Recovery | Close remaining SHACL Core gaps (`sh:equals`/`sh:disjoint`, decoded violation IRIs, async load test), harden parallel Datalog strata rollback, add missing crash-recovery scenarios, and standardise migration documentation | 4–6 pw |
+| [0.46.0](#v0460--property-based-testing-fuzz-hardening--owl-2-rl-conformance) | Property-Based Testing, Fuzz Hardening & OWL 2 RL Conformance | `proptest` for SPARQL and dictionary invariants, fuzz the federation result decoder, W3C OWL 2 RL test suite in CI, TopN push-down, BSBM regression gate, sequence pre-allocation for Datalog workers, rustdoc coverage enforcement, and HTTP certificate pinning | 5–7 pw |
 | [1.0.0](#v100--production-release) | Production Release | Standards conformance, stress testing, security audit | 6–8 pw |
 | | | **Total estimated effort** | **252–344 pw** |
 
@@ -3458,6 +3460,176 @@ All 14 LUBM queries return exact reference cardinalities at `--univ 1`. Ontology
 
 ---
 
+## v0.45.0 — SHACL Completion, Datalog Robustness & Crash Recovery
+
+**Theme**: Close the last SHACL Core constraint gaps, harden parallel Datalog evaluation against worker failures, and add the missing crash-recovery scenarios and migration-documentation standards.
+
+> **In plain language:** This release finishes the SHACL implementation by adding the two remaining Core constraints (`sh:equals` and `sh:disjoint`), makes violation messages readable by always including the decoded focus-node IRI, and proves the async validation queue can sustain a sustained burst of 10,000 writes per second. On the Datalog side it ensures that a crash in one parallel evaluation worker rolls back all other workers cleanly, and that user-supplied lattice join functions are validated before the engine tries to call them. A new set of crash-recovery tests covers the two scenarios that were never tested: killing PostgreSQL mid-promotion of a rare predicate and killing it mid-inference. Finally, every migration script from this release onward carries a standardised header documenting the schema changes, data-rewrite cost, downgrade strategy, and the test file that covers it.
+>
+> **Effort estimate: 4–6 person-weeks**
+
+### Deliverables
+
+- [ ] **`sh:equals` and `sh:disjoint` constraints** (`src/shacl/constraints/`)
+  - `sh:equals p` — for every focus node, the set of values for `p` must equal the set of values for the predicate declared by `sh:equals`; implemented as two NOT EXISTS subqueries (one per direction); compiled into a SHACL constraint helper in `src/shacl/constraints/relational.rs`
+  - `sh:disjoint p` — the value sets must be disjoint; implemented symmetrically
+  - pg_regress test `shacl_equals_disjoint.sql` — covers passing shapes, failing shapes, blank-node identity, and named-graph scoping
+  - Migration: no schema changes; constraints are pure SQL inside the validation query
+
+- [ ] **Decoded focus-node IRIs in SHACL violation messages** (`src/shacl/mod.rs`)
+  - All paths that emit a SHACL violation (`ereport!(Error, …)` or write to `_pg_ripple.validation_results`) must include the decoded IRI of the focus node alongside its integer ID
+  - Add a `decode_id_safe(id: i64)` helper that falls back to `"<decoded-id:{id}>"` if the dictionary lookup fails
+  - Regression test: load a shape with a violation; assert the violation message text contains the focus-node IRI string
+
+- [ ] **SHACL async pipeline load test** (`benchmarks/shacl_async_load.sql`)
+  - `pgbench`-driven harness that inserts triples at 10,000/min for 5 continuous minutes while the async SHACL validation pipeline is active
+  - Asserts: (a) `_pg_ripple.validation_queue` depth stays bounded (does not grow unboundedly); (b) drain rate ≥ arrival rate ± 5%; (c) dead-letter queue receives any persistent violators; (d) no backend crashes
+  - CI job `shacl-async-load` is informational (non-blocking) but results are logged as a CI artifact
+
+- [ ] **Coordinated parallel-strata rollback** (`src/datalog/parallel.rs`)
+  - Wrap all independent-group SQL execution inside a single PostgreSQL transaction with one `SAVEPOINT strata_eval` per group
+  - On failure in any group, issue `ROLLBACK TO SAVEPOINT` for all already-applied groups and re-raise the error; on success, `RELEASE SAVEPOINT` to commit the whole stratum
+  - pg_regress test `datalog_parallel_rollback.sql`: inject a deliberate failure in one group; assert no partial facts survive
+
+- [ ] **`lattice.join_fn` validation via `regprocedure`** (`src/datalog/lattice.rs`)
+  - Before storing a user-supplied `join_fn` name, resolve it via `SELECT '{name}'::regprocedure::text` inside an SPI transaction
+  - If the round-trip succeeds, store the qualified name returned by PG (avoids search-path injection); if it fails, raise `PT541 LatticeJoinFnInvalid` with a clear message naming the rejected identifier
+  - New error code PT541 added to `src/error.rs` and `docs/src/reference/error-catalog.md`
+
+- [ ] **WFS iteration-cap test and documentation** (`tests/pg_regress/sql/datalog_wfs_cap.sql`)
+  - pg_regress test that loads a mutually-recursive negation cycle guaranteed to reach `pg_ripple.wfs_max_iterations`; asserts: (a) function returns without error; (b) `"stratifiable": false` in result; (c) PostgreSQL WARNING with code PT520 is emitted; (d) `"certain"` and `"unknown"` fact counts are non-zero (partial result)
+  - `docs/src/user-guide/sql-reference/datalog.md` — add a "Well-Founded Semantics limits" subsection documenting the cap behaviour and how to detect it via `RETURNING`
+
+- [ ] **Crash-recovery: rare-predicate promotion kill** (`tests/crash_recovery/test_promote_kill.sh`)
+  - Script that starts a large-batch insert designed to cross the promotion threshold, sends `kill -9` to the promoting backend mid-transaction, restarts PostgreSQL, calls `pg_ripple.diagnostic_report()`, and asserts `vp_rare` is consistent (no orphaned rows, predicate catalog matches actual tables)
+  - Outcome must be either: promotion completed (VP table exists, `vp_rare` rows moved) or promotion rolled back (VP table absent, `vp_rare` rows intact) — no hybrid state permitted
+
+- [ ] **Crash-recovery: Datalog inference kill mid-fixpoint** (`tests/crash_recovery/test_inference_kill.sh`)
+  - Script that starts a large-ruleset inference run, kills the backend during the second fixpoint iteration, restarts, and asserts: (a) no partially-derived facts remain in any VP table (i.e., no inferred triples from an aborted inference); (b) `pg_ripple.infer()` can be re-run successfully to completion
+
+- [ ] **Standardised migration script headers**
+  - Backfill `sql/pg_ripple--*.sql` with the standard header block (schema changes, data-rewrite cost estimate, downgrade strategy, test reference) for any script that currently lacks one — starting with `0.5.1→0.6.0` (the HTAP split) and the five most structurally significant migrations
+  - Add the header template to `AGENTS.md` "Extension Versioning & Migration Scripts" section so all future scripts include it from creation
+
+- [ ] **Recovery procedure runbook in `RELEASE.md`**
+  - Add a "Rollback & Recovery" section documenting: (a) how to roll back each class of migration (comment-only vs. schema-change vs. data-rewrite); (b) the `pg_dump`/`pg_restore` path as the universal fallback; (c) how to diagnose a partial upgrade using `_pg_ripple.schema_version` and `pg_ripple.diagnostic_report()`
+
+### Migration Script
+
+`sql/pg_ripple--0.44.0--0.45.0.sql` — no VP table schema changes. Comment-only header. Installs PT541 error code registration (compiled from Rust).
+
+### Documentation
+
+- [ ] `reference/shacl-constraints.md` — add `sh:equals` and `sh:disjoint` to the constraint table with examples
+- [ ] `reference/error-catalog.md` — add PT541 (`LatticeJoinFnInvalid`)
+- [ ] `user-guide/sql-reference/datalog.md` — "Well-Founded Semantics limits" subsection
+- [ ] `reference/troubleshooting.md` — add entries for "rare-predicate promotion stuck" and "inference aborted mid-fixpoint"
+- [ ] Release notes for v0.45.0
+
+### Exit Criteria
+
+`sh:equals` and `sh:disjoint` pg_regress tests pass. SHACL violation messages include decoded focus-node IRIs. Parallel-strata rollback test demonstrates no partial facts on deliberate failure. `lattice.join_fn` injection via search-path ambiguous name is rejected at `create_lattice()` time with PT541. WFS cap test passes: PT520 WARNING emitted, partial result returned. Both new crash-recovery scripts exit 0. Migration chain test passes through 0.45.0.
+
+---
+
+## v0.46.0 — Property-Based Testing, Fuzz Hardening & OWL 2 RL Conformance
+
+**Theme**: Property-based and fuzz testing for the remaining untested trust surfaces, the W3C OWL 2 RL conformance suite, and targeted performance improvements from the deep-analysis recommendations.
+
+> **In plain language:** Three gaps that can hide subtle bugs: (1) randomised property-based tests that assert algebraic invariants about the SPARQL translator and dictionary encoder — if encoding the same term twice ever yields different IDs, or if a query changes semantics when extra whitespace is added, these tests catch it; (2) fuzz tests for the federation result parser, which accepts untrusted network data; and (3) the W3C OWL 2 RL test manifests, which verify that pg_ripple's Datalog engine handles the full range of ontological reasoning that OWL 2 RL demands. On the performance side, a LIMIT push-down eliminates redundant decoding rows for paginated queries, sequence range pre-allocation removes a contention point in parallel Datalog, and BSBM joins the CI suite as a regression gate. The rustdoc lint ensures no public function ships without a doc comment.
+>
+> **Effort estimate: 5–7 person-weeks**
+
+### Deliverables
+
+- [ ] **`proptest` integration** (`tests/proptest/`)
+  - **SPARQL algebra round-trip** (`tests/proptest/sparql_roundtrip.rs`): generate random `spargebra::Query` values using `proptest` strategies; assert that (a) encoding the same SPARQL query twice produces byte-identical SQL; (b) queries that differ only in whitespace or prefix aliases produce the same generated SQL (plan-cache key stability); (c) star-pattern self-join elimination never changes the result set (check against a reference without elimination)
+  - **Dictionary encode/decode** (`tests/proptest/dictionary.rs`): for any arbitrary IRI, blank node, or literal string, `decode_id(encode_term(t)) == t`; assert no collisions for 10,000 random distinct terms; assert encode is stable across pg_ripple restarts (same term → same ID given the same dictionary)
+  - **JSON-LD framing round-trip** (`tests/proptest/jsonld_framing.rs`): generate random flat JSON-LD input graphs and random `@context` frames; assert that `frame_jsonld(input, frame)` returns valid JSON-LD and that any IRI present in the input that matches the frame appears in the output
+  - Dev-dependency: `proptest = "1"` added to `Cargo.toml` under `[dev-dependencies]`
+
+- [ ] **`cargo-fuzz` federation result decoder target** (`fuzz/fuzz_targets/federation_result.rs`)
+  - Fuzz target that feeds arbitrary byte sequences through the SPARQL XML results parser (`src/sparql/federation.rs` result-decoding path) — the path that processes `application/sparql-results+xml` responses from remote SERVICE endpoints
+  - Assert: no panic, no `unwrap` abort; invalid XML must produce a `PT6xx`-range error, never a crash
+  - CI nightly job `fuzz-federation` runs the target for 10 minutes; any new corpus entries that trigger panics are reported as blocking failures
+
+- [ ] **Datalog convergence regression suite** (`tests/datalog_convergence/`)
+  - Download a 1M-triple DBpedia-en subset (persons, organisations, relations) via `scripts/fetch_conformance_tests.sh` extension; load into pg_ripple
+  - Apply the built-in RDFS + OWL RL rule set via `pg_ripple.materialize_owl_rl()`
+  - Assert: fixpoint reached in ≤ 20 iterations; total wall-clock time < 5 minutes on CI; derived triple count falls within ±1% of a pre-computed baseline stored in `tests/datalog_convergence/baselines.json`
+  - Repeat for a 200-rule custom rule set (100 forward-chaining + 100 OWL RL rules) on a 100K-triple schema.org snippet; assert convergence in ≤ 15 iterations
+
+- [ ] **W3C OWL 2 RL conformance suite** (`tests/owl2rl/`)
+  - Download the W3C OWL 2 RL test manifests from `https://github.com/w3c/owl2-profiles-tests`
+  - Adapter `tests/owl2rl/manifest.rs` parses the `owl2:DatatypeEntailmentTest`, `owl2:ConsistencyTest`, and `owl2:InconsistencyTest` manifest types
+  - Each test loads a premise ontology, runs `pg_ripple.materialize_owl_rl()`, then evaluates a conclusion ontology via ASK/entailment check
+  - CI job `owl2rl-suite` is informational (non-blocking) until pass rate ≥ 95%; known failures tracked in `tests/owl2rl/known_failures.txt` with `owl2rl:` prefix
+  - Reuse unified conformance runner from v0.43.0
+
+- [ ] **TopN push-down** (`src/sparql/sqlgen.rs`)
+  - When a SPARQL query has both `ORDER BY` and `LIMIT N` (and no `OFFSET > 0`), emit the SQL as `… ORDER BY … LIMIT N` rather than fetching all rows and discarding after decoding
+  - The optimisation applies to SELECT queries; skipped when `DISTINCT` is in scope (PostgreSQL cannot push LIMIT through DISTINCT without a subquery)
+  - New GUC `pg_ripple.topn_pushdown` (bool, default `on`) guards the rewrite; `pg_ripple.sparql_explain()` output includes a `"topn_applied": true/false` key
+  - pg_regress test `sparql_topn.sql`: assert result correctness and `EXPLAIN` shows a `Limit` node directly over the VP scan
+
+- [ ] **Sequence range pre-allocation for parallel Datalog workers** (`src/datalog/parallel.rs`)
+  - Before launching N parallel strata workers, call `SELECT setval(seq, currval(seq) + N * batch_size)` once to reserve a contiguous SID range; each worker uses its slice without touching the sequence
+  - `batch_size` defaults to 10,000 and is configurable via `pg_ripple.datalog_sequence_batch` (integer GUC, default 10000, min 100)
+  - pg_regress test `datalog_sequence_batch.sql`: assert that after parallel inference the global SID sequence has no gaps within the reserved range
+
+- [ ] **BSBM regression gate in CI** (`.github/workflows/ci.yml`, `benchmarks/bsbm/`)
+  - Integrate the Berlin SPARQL Benchmark (BSBM) at 1M triple scale as a nightly regression check
+  - `scripts/fetch_conformance_tests.sh` extended to download and install the BSBM data generator
+  - CI job `bsbm-regression`: generates a 1M-triple product dataset, runs the 12 BSBM explore queries, compares query latency against a baseline stored in `benchmarks/bsbm/baselines.json`; any query regressing by > 10% emits a CI warning (non-blocking but visible in the PR summary)
+  - Complement to v1.0.0's full-scale BSBM-at-100M-triples published benchmark
+
+- [ ] **Rustdoc lint gate** (`src/lib.rs`, `Cargo.toml`, `.github/workflows/ci.yml`)
+  - Add `#![warn(missing_docs)]` to `src/lib.rs` (scoped to public items only; internal `pub(crate)` items excluded)
+  - CI job `cargo doc --no-deps --document-private-items` gated to fail on any `missing_docs` warning for public `#[pg_extern]` functions
+  - Backfill doc comments for the 20 most-called public functions (as identified by `pg_stat_statements` in the test suite run); leave a `FIXME(docs):` comment on the remaining stubs to track progress
+
+- [ ] **HTTP companion: CA-bundle env var** (`pg_ripple_http/src/main.rs`)
+  - Add `PG_RIPPLE_HTTP_CA_BUNDLE` environment variable: if set, load the PEM file at the given path as the trust anchor for all outbound TLS connections (SERVICE federation and SPARQL endpoint queries)
+  - If the path does not exist or is not a valid PEM bundle, log an error at startup and fall back to the system trust store (never silently ignore)
+  - This complements the v0.42.0 `rustls-tls-native-roots` hardening by allowing operators to pin a specific CA or internal PKI certificate
+  - Integration test: start a mock TLS server with a self-signed CA; assert that `pg_ripple_http` rejects it by default and accepts it when `PG_RIPPLE_HTTP_CA_BUNDLE` points to the CA cert
+
+- [ ] **Expanded worked examples** (`examples/`)
+  - `examples/shacl_datalog_quality.sql` — end-to-end: load a bibliographic graph, define SHACL shapes, run SPARQL to list violations, apply Datalog RDFS rules, re-check shapes; documents the SHACL + Datalog interaction pattern
+  - `examples/hybrid_vector_search.sql` — end-to-end: embed entities, run vector similarity search, combine with SPARQL property-path constraints; documents the `pg:similar()` + SPARQL pattern
+  - `examples/graphrag_round_trip.sql` — end-to-end: load a knowledge graph, run GraphRAG export, annotate with Datalog-derived community summaries, re-import enriched triples; documents the full GraphRAG round-trip
+
+### New GUC Parameters
+
+| GUC | Type | Default | Description |
+|-----|------|---------|-------------|
+| `pg_ripple.topn_pushdown` | bool | `on` | Push `LIMIT N` into the SQL plan for `ORDER BY + LIMIT` queries |
+| `pg_ripple.datalog_sequence_batch` | integer | `10000` | SID range reserved per parallel Datalog worker per batch |
+
+### New Error Codes
+
+| Code | Severity | Message |
+|------|----------|---------|
+| PT542 | ERROR | Federation result decoder received unparseable XML/JSON |
+
+### Migration Script
+
+`sql/pg_ripple--0.45.0--0.46.0.sql` — no schema changes. Registers `topn_pushdown` and `datalog_sequence_batch` GUCs (compiled from Rust). Comment-only header.
+
+### Documentation
+
+- [ ] `user-guide/best-practices/sparql-performance.md` — "TopN push-down" section with `EXPLAIN` example
+- [ ] `reference/guc-reference.md` — v0.46.0 section with two new GUC parameters
+- [ ] `reference/error-catalog.md` — PT542 added
+- [ ] `contributing/testing.md` — `proptest` and `cargo-fuzz` sections covering how to run and extend the harnesses
+- [ ] Release notes for v0.46.0
+
+### Exit Criteria
+
+All three `proptest` suites run 10,000 cases each with no failures. Federation result decoder fuzz target runs 10 minutes without panics. Datalog convergence suite: fixpoint on 1M DBpedia triples in ≤ 20 iterations, wall-clock < 5 minutes. OWL 2 RL suite: ≥ 80% pass rate at release (target 95% for v1.0.0). TopN push-down `EXPLAIN` shows `Limit` node for ORDER BY + LIMIT queries; result set unchanged. BSBM-at-1M-triples baseline stored and regression gate active. No missing-docs warnings for public `#[pg_extern]` functions. HTTP companion starts cleanly with `PG_RIPPLE_HTTP_CA_BUNDLE` set to a valid PEM file. Migration chain test passes through 0.46.0.
+
+---
+
 ## v1.0.0 — Production Release
 
 **Theme**: Stability, conformance, and production certification.
@@ -3560,7 +3732,9 @@ Stable, tested, documented, and published. Ready for production workloads up to 
 | 0.16.0 | +3 weeks | 4–6 pw | 92–123 pw |
 | 0.19.0 | +3 weeks | 3–5 pw | 95–128 pw |
 | 0.20.0 | +3 weeks | 5–7 pw | 100–135 pw |
-| 1.0.0 | +4 weeks | 6–8 pw | **106–143 pw** |
+| 0.45.0 | +3 weeks | 4–6 pw | 104–141 pw |
+| 0.46.0 | +4 weeks | 5–7 pw | 109–148 pw |
+| 1.0.0 | +4 weeks | 6–8 pw | **115–156 pw** |
 | 1.1–1.9 | Post-1.0 | Community-driven | — |
 
 *Estimates assume a pair of focused developers with Rust and PostgreSQL experience. "pw" = person-weeks. Calendar durations assume pair programming; a solo developer should expect roughly double the calendar time. Actual pace depends on contributor availability and scope adjustments discovered during implementation.*
