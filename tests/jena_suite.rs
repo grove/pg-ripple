@@ -302,8 +302,7 @@ fn build_entry(case: JenaTestCase, db_url: String, _data_dir: std::path::PathBuf
                 };
                 let parser = spargebra::SparqlParser::new();
                 let query_result = parser.parse_query(&src_for_parse);
-                let update_result = spargebra::SparqlParser::new()
-                    .parse_update(&src_for_parse);
+                let update_result = spargebra::SparqlParser::new().parse_update(&src_for_parse);
                 let ok = query_result.is_ok() || update_result.is_ok();
                 if !ok {
                     // spargebra correctly rejected
@@ -501,15 +500,15 @@ fn sparql_has_semantic_violation(pattern: &spargebra::algebra::GraphPattern) -> 
             }
             sparql_has_semantic_violation(inner)
         }
-        GraphPattern::Group { inner, aggregates, .. } => {
+        GraphPattern::Group {
+            inner, aggregates, ..
+        } => {
             // Check for nested aggregates: an aggregate's expression variable
             // is also an aggregate output in the same Group.
             let agg_output_vars: Vec<&spargebra::term::Variable> =
                 aggregates.iter().map(|(v, _)| v).collect();
             for (var, agg_expr) in aggregates {
-                if let spargebra::algebra::AggregateExpression::FunctionCall {
-                    expr, ..
-                } = agg_expr
+                if let spargebra::algebra::AggregateExpression::FunctionCall { expr, .. } = agg_expr
                 {
                     for out_var in &agg_output_vars {
                         if *out_var != var && expr_uses_variable(expr, out_var) {
@@ -637,9 +636,7 @@ fn expr_uses_variable(
         | Expression::Add(a, b)
         | Expression::Subtract(a, b)
         | Expression::Multiply(a, b)
-        | Expression::Divide(a, b) => {
-            expr_uses_variable(a, var) || expr_uses_variable(b, var)
-        }
+        | Expression::Divide(a, b) => expr_uses_variable(a, var) || expr_uses_variable(b, var),
         Expression::In(a, bs) => {
             expr_uses_variable(a, var) || bs.iter().any(|b| expr_uses_variable(b, var))
         }
@@ -647,9 +644,7 @@ fn expr_uses_variable(
             expr_uses_variable(a, var)
         }
         Expression::If(a, b, c) => {
-            expr_uses_variable(a, var)
-                || expr_uses_variable(b, var)
-                || expr_uses_variable(c, var)
+            expr_uses_variable(a, var) || expr_uses_variable(b, var) || expr_uses_variable(c, var)
         }
         Expression::Coalesce(exprs) | Expression::FunctionCall(_, exprs) => {
             exprs.iter().any(|e| expr_uses_variable(e, var))
