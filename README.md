@@ -7,6 +7,7 @@
 [![PostgreSQL 18](https://img.shields.io/badge/PostgreSQL-18-blue?logo=postgresql&logoColor=white)](https://www.postgresql.org/)
 [![pgrx 0.17](https://img.shields.io/badge/pgrx-0.17-orange)](https://github.com/pgcentralfoundation/pgrx)
 [![WatDiv correctness](https://img.shields.io/badge/WatDiv-100%25%20correct-brightgreen)](docs/src/reference/watdiv-results.md)
+[![LUBM conformance](https://img.shields.io/badge/LUBM-14%2F14%20pass-brightgreen)](docs/src/reference/lubm-results.md)
 
 **A knowledge graph engine built into PostgreSQL.**
 
@@ -18,9 +19,9 @@ No separate graph database. No data pipelines. No extra infrastructure.
 
 ---
 
-## What works today (v0.43.0)
+## What works today (v0.44.0)
 
-pg_ripple passes **100% of the W3C SPARQL 1.1 and SHACL Core conformance test suites** — the industry benchmarks for correctness in knowledge graph systems. After 43 releases it covers the full feature set described below.
+pg_ripple passes **100% of the W3C SPARQL 1.1 and SHACL Core conformance test suites** — the industry benchmarks for correctness in knowledge graph systems. After 44 releases it covers the full feature set described below.
 
 | What you can do | How it works |
 |---|---|
@@ -145,11 +146,7 @@ Token budgets matter. `sparql_construct_jsonld()` takes a SPARQL CONSTRUCT query
 
 ## Where we're headed
 
-Four releases remain on the path to v1.0.0.
-
-### v0.44.0 — LUBM Conformance Suite
-
-The Lehigh University Benchmark (LUBM) validates OWL RL inference correctness across 14 canonical queries on datasets from 1 K to 8 M triples. This release also adds a Datalog API validation sub-suite that verifies rule compilation, iteration tracking, inferred triple counts, goal queries, and performance baselines — providing end-to-end automated regression coverage for the reasoning engine.
+Three releases remain on the path to v1.0.0.
 
 ### v0.45.0 — SHACL Completion, Datalog Robustness & Crash Recovery
 
@@ -178,7 +175,7 @@ This means you get:
 
 ### How it compares
 
-> **Note**: pg_ripple features marked "Yes" in the table below are implemented across v0.1.0–v0.43.0. W3C SPARQL 1.1 Query, Update, and SHACL Core conformance is 100% (achieved in v0.20.0). Competitor capabilities reflect publicly documented feature sets.
+> **Note**: pg_ripple features marked "Yes" in the table below are implemented across v0.1.0–v0.44.0. W3C SPARQL 1.1 Query, Update, and SHACL Core conformance is 100% (achieved in v0.20.0). Competitor capabilities reflect publicly documented feature sets.
 
 | Capability | pg_ripple | Blazegraph | Virtuoso | Apache Fuseki |
 |---|---|---|---|---|
@@ -325,6 +322,7 @@ pg_ripple is built to production-grade standards:
 - **W3C conformance** — 100% pass rate on the official SPARQL 1.1 Query, SPARQL 1.1 Update, and SHACL Core test suites (~3 000 tests, parallelized, complete in under 2 minutes)
 - **Apache Jena test suite** — ~1 000 additional tests covering XSD numeric promotions, timezone-aware date/time, blank-node scoping, and all SPARQL string functions
 - **WatDiv benchmark** — all 100 WatDiv query templates (star, chain, snowflake, complex) validated for correctness against a 10 M-triple dataset with ±0.1% row-count baselines
+- **LUBM conformance suite** — all 14 canonical LUBM queries pass against a synthetic university OWL ontology; includes a Datalog validation sub-suite confirming that `infer('owl-rl')` produces correct supertype entailments (v0.44.0)
 - **Extensive test suite** — automated tests cover every SQL-exposed function, every feature, and every edge case
 - **Security testing** — resistance to injection attacks, malformed inputs, and resource exhaustion
 - **Fuzz testing** — the query pipeline is continuously fuzz-tested for robustness

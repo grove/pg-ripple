@@ -169,11 +169,11 @@ Add these verification queries to a script that runs immediately after `ALTER EX
 
 ## Multi-Version Hop Upgrades
 
-PostgreSQL walks the entire migration chain automatically. Upgrading from v0.5.0 directly to v0.43.0 executes all intermediate scripts:
+PostgreSQL walks the entire migration chain automatically. Upgrading from v0.5.0 directly to v0.44.0 executes all intermediate scripts:
 
 ```sql
--- This works — PG finds the path 0.5.0 → 0.5.1 → 0.6.0 → ... → 0.43.0
-ALTER EXTENSION pg_ripple UPDATE TO '0.43.0';
+-- This works — PG finds the path 0.5.0 → 0.5.1 → 0.6.0 → ... → 0.44.0
+ALTER EXTENSION pg_ripple UPDATE TO '0.44.0';
 ```
 
 ```admonish note title="Long upgrade chains"
