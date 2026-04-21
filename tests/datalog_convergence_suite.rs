@@ -72,7 +72,7 @@ fn datalog_convergence_suite() {
         .unwrap_or_else(|e| {
             // load_rules may not exist yet — skip gracefully.
             println!("SKIP sub-test 1: load_rules not available ({e})");
-            0i64
+            0u64
         });
 
     let start = Instant::now();
