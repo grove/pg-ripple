@@ -462,13 +462,13 @@ jobs:
       - name: Install pg_ripple
         run: cargo pgrx install --pg-config $(ls ~/.pgrx/18.*/pgrx-install/bin/pg_config | head -1)
 
-      - name: Run Jena conformance suite (4 threads)
+      - name: Run Jena conformance suite (1 thread)
         env:
           PGHOST: localhost
           PGPORT: "28818"
           PGDATABASE: postgres
           PGUSER: runner
-          JENA_THREADS: "4"
+          JENA_THREADS: "1"
         run: cargo test --test jena_suite -- --nocapture
 
       - name: Upload Jena conformance report
