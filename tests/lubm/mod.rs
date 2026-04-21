@@ -33,8 +33,10 @@ pub fn db_connect_string() -> String {
     let port = std::env::var("PGPORT").unwrap_or_else(|_| "28818".into());
     let dbname = std::env::var("PGDATABASE").unwrap_or_else(|_| "postgres".into());
     let user = std::env::var("PGUSER")
-        .or_else(|_| std::env::var("USER"))
-        .unwrap_or_else(|_| "postgres".into());
+        .ok()
+        .filter(|s| !s.is_empty())
+        .or_else(|| std::env::var("USER").ok().filter(|s| !s.is_empty()))
+        .unwrap_or_else(|| "postgres".into());
     format!("host={host} port={port} dbname={dbname} user={user}")
 }
 
