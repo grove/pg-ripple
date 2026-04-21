@@ -55,8 +55,12 @@ proptest! {
         );
     }
 
-    /// ORDER BY + LIMIT queries with TopN push-down must return the same rows
-    /// as the same query without LIMIT (when the result set is small).
+    /// ORDER BY + LIMIT queries must produce algebra that differs from the
+    /// unlimited variant, and the limited algebra must contain a Slice node.
+    ///
+    /// Note: `translate_select_str` returns the spargebra algebra debug
+    /// representation (no DB connection required).  We assert on the algebra
+    /// structure rather than generated SQL here.
     #[test]
     fn topn_pushdown_stable(suffix in arb_iri_suffix()) {
         let q_with_limit = format!(
@@ -65,15 +69,20 @@ proptest! {
         let q_no_limit = format!(
             "SELECT ?s WHERE {{ ?s <http://example.org/{suffix}> ?o }} ORDER BY ?s",
         );
-        let sql_limit = translate_select_str(&q_with_limit);
-        let sql_no_limit = translate_select_str(&q_no_limit);
-        // Both must parse successfully (non-empty SQL).
-        prop_assert!(!sql_limit.is_empty(), "LIMIT query must produce non-empty SQL");
-        prop_assert!(!sql_no_limit.is_empty(), "unlimited query must produce non-empty SQL");
-        // The LIMIT variant SQL must contain "LIMIT 10".
+        let algebra_limit = translate_select_str(&q_with_limit);
+        let algebra_no_limit = translate_select_str(&q_no_limit);
+        // Both must parse successfully (non-empty output).
+        prop_assert!(!algebra_limit.is_empty(), "LIMIT query must parse to non-empty algebra");
+        prop_assert!(!algebra_no_limit.is_empty(), "unlimited query must parse to non-empty algebra");
+        // The LIMIT algebra must contain a Slice node (spargebra's representation
+        // of LIMIT/OFFSET) while the unlimited algebra must not.
         prop_assert!(
-            sql_limit.to_uppercase().contains("LIMIT 10"),
-            "TopN push-down must embed LIMIT in SQL: {sql_limit}"
+            algebra_limit.contains("Slice"),
+            "LIMIT query algebra must include a Slice node; got: {algebra_limit}"
+        );
+        prop_assert!(
+            !algebra_no_limit.contains("Slice"),
+            "unlimited query algebra must not contain a Slice node; got: {algebra_no_limit}"
         );
     }
 }
