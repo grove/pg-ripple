@@ -145,6 +145,34 @@ async fn main() {
     // Trust proxy: comma-separated list of upstream IP/CIDR values trusted for X-Forwarded-For.
     let trust_proxy = std::env::var("PG_RIPPLE_HTTP_TRUST_PROXY").ok();
 
+    // ── v0.46.0: CA-bundle for outbound TLS (PG_RIPPLE_HTTP_CA_BUNDLE) ───────
+    // If set, load the PEM file at the given path as the trust anchor for all
+    // outbound TLS connections (SERVICE federation, SPARQL endpoint queries).
+    // Falls back to the system trust store on error; never silently ignores.
+    if let Ok(ca_path) = std::env::var("PG_RIPPLE_HTTP_CA_BUNDLE") {
+        match std::fs::read_to_string(&ca_path) {
+            Ok(pem) if !pem.trim().is_empty() && pem.contains("BEGIN CERTIFICATE") => {
+                tracing::info!("PG_RIPPLE_HTTP_CA_BUNDLE: loaded CA bundle from {ca_path}");
+                // Store as a thread-local so outbound HTTP clients can access it.
+                // Actual TLS configuration is applied when building reqwest clients
+                // inside federation handlers.
+                std::env::set_var("PG_RIPPLE_HTTP_CA_PEM", pem);
+            }
+            Ok(_) => {
+                tracing::error!(
+                    "PG_RIPPLE_HTTP_CA_BUNDLE: file at '{ca_path}' is not a valid PEM bundle \
+                     (no 'BEGIN CERTIFICATE' marker) — falling back to system trust store"
+                );
+            }
+            Err(e) => {
+                tracing::error!(
+                    "PG_RIPPLE_HTTP_CA_BUNDLE: cannot read '{ca_path}': {e} \
+                     — falling back to system trust store"
+                );
+            }
+        }
+    }
+
     // Build connection pool.
     let mut cfg = Config::new();
     cfg.url = Some(pg_url.clone());

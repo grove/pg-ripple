@@ -211,3 +211,49 @@ SELECT pg_ripple.sparql('SELECT ?x ?type WHERE { ?x a ?type . }');
 -- Check parallel group count before tuning workers.
 SELECT pg_ripple.infer_with_stats('owl-rl')->>'parallel_groups';  -- e.g., "3"
 ```
+
+
+---
+
+## TopN push-down (v0.46.0)
+
+When a SPARQL SELECT query contains both `ORDER BY` and `LIMIT N` (with no `OFFSET` and no `DISTINCT`), pg_ripple embeds the `LIMIT N` clause directly in the generated SQL rather than fetching all matching rows and discarding the excess after dictionary decoding. This eliminates the overhead of decoding rows that will never be returned.
+
+### When push-down applies
+
+| Condition | Push-down applied? |
+|---|---|
+| `ORDER BY … LIMIT N` | Yes |
+| `ORDER BY … LIMIT N OFFSET M` (M > 0) | No (OFFSET present) |
+| `SELECT DISTINCT … ORDER BY … LIMIT N` | No (DISTINCT in scope) |
+| `LIMIT N` without `ORDER BY` | No (no ordering) |
+
+### Verifying push-down with EXPLAIN
+
+Use `sparql_explain()` to confirm that push-down was applied. Look for `"topn_applied": true` in the JSON output:
+
+```sql
+SELECT pg_ripple.sparql_explain(
+  'SELECT ?s ?score
+   WHERE { ?s <http://example.org/score> ?score }
+   ORDER BY DESC(?score)
+   LIMIT 10',
+  false
+) -> 'topn_applied';
+-- Returns: true
+```
+
+The `"plan"` key in the explain output will show a `Limit` node directly over the VP scan when push-down is active.
+
+### Disabling push-down
+
+Push-down is controlled by `pg_ripple.topn_pushdown` (default `on`). Disable it for debugging or if you suspect incorrect results:
+
+```sql
+SET pg_ripple.topn_pushdown = off;
+-- run the query
+SET pg_ripple.topn_pushdown = on;
+```
+
+> **Performance expectation:** On a 1 M-triple dataset, a `LIMIT 10` query with `ORDER BY` reduces dictionary-decode calls from O(result\_set) to O(10). The improvement is largest when the result set is large relative to the LIMIT.
+

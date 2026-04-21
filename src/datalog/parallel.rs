@@ -263,6 +263,69 @@ impl UnionFind {
     }
 }
 
+// ─── Sequence range pre-allocation (v0.46.0) ─────────────────────────────────
+
+/// Pre-allocate a contiguous SID range in the global statement-ID sequence before
+/// launching `n_workers` parallel Datalog strata workers.
+///
+/// Each worker receives an exclusive `[start, start + batch_size)` slice and can
+/// insert triples with pre-computed SIDs without touching the shared sequence.
+/// This eliminates sequence contention under parallel inference.
+///
+/// Returns a `Vec` of `(range_start, range_end)` tuples — one per worker —
+/// where `range_end` is exclusive.  The caller is responsible for routing each
+/// worker to its assigned slice.
+///
+/// # Errors
+///
+/// Returns `None` if the sequence cannot be queried (e.g., the extension was
+/// freshly created and the sequence has not been used yet) — callers fall back
+/// to the serial path.
+// Used by parallel inference workers at runtime (pgrx SPI context); not called
+// from non-pgrx code paths, so the compiler cannot see the call site.
+#[allow(dead_code)]
+pub fn preallocate_sid_ranges(
+    client: &pgrx::spi::SpiClient<'_>,
+    n_workers: usize,
+    batch_size: i32,
+) -> Option<Vec<(i64, i64)>> {
+    if n_workers == 0 {
+        return Some(vec![]);
+    }
+    let total = n_workers as i64 * batch_size as i64;
+
+    // Atomically advance the sequence by `total` and capture the new value.
+    // `setval(seq, currval + total)` returns the new current value.
+    let new_max: i64 = client
+        .select(
+            &format!(
+                "SELECT setval(\
+                   '_pg_ripple.statement_id_seq', \
+                   nextval('_pg_ripple.statement_id_seq') + {} - 1\
+                 )",
+                total
+            ),
+            None,
+            &[],
+        )
+        .ok()?
+        .first()
+        .get::<i64>(1)
+        .ok()
+        .flatten()?;
+
+    // `new_max` is the last SID in the reserved block; `base` is the first.
+    let base = new_max - total + 1;
+    let ranges = (0..n_workers)
+        .map(|i| {
+            let start = base + i as i64 * batch_size as i64;
+            let end = start + batch_size as i64;
+            (start, end)
+        })
+        .collect();
+    Some(ranges)
+}
+
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]

@@ -3494,6 +3494,9 @@ pub struct Translation {
     /// Variables that hold raw double (RAND() outputs).
     /// Must be read as FLOAT8 columns and emitted as `"val"^^xsd:double` format.
     pub raw_double_vars: std::collections::HashSet<String>,
+    /// True when TopN push-down (v0.46.0) was applied: `ORDER BY … LIMIT N`
+    /// was emitted directly in SQL rather than post-decode truncation.
+    pub topn_applied: bool,
 }
 
 /// Translate a SPARQL SELECT query pattern to SQL.
@@ -3584,6 +3587,19 @@ pub fn translate_select(pattern: &GraphPattern, base_iri: Option<&str>) -> Trans
         String::new()
     };
 
+    // ── v0.46.0 TopN push-down ────────────────────────────────────────────────
+    // When ORDER BY + LIMIT is present (no OFFSET, no DISTINCT) and the GUC is
+    // enabled, the LIMIT clause is already embedded directly in the SQL above.
+    // `sparql_explain()` surfaces whether the optimisation was applied via the
+    // `topn_applied` key.  No structural change needed here — the limit_clause
+    // is already emitted after order_clause in the format! below.
+    // The `topn_applied` flag is set in the Translation struct for explain.
+    let topn_applied = crate::TOPN_PUSHDOWN.get()
+        && mods.limit.is_some()
+        && !mods.distinct
+        && mods.offset == 0
+        && !order_clause.is_empty();
+
     let sql = format!(
         "SELECT {distinct_kw}{} FROM {from} {where_clause} {order_clause} {limit_clause} {offset_clause}",
         if select_cols.is_empty() {
@@ -3600,6 +3616,7 @@ pub fn translate_select(pattern: &GraphPattern, base_iri: Option<&str>) -> Trans
         raw_text_vars: ctx.raw_text_vars,
         raw_iri_vars: ctx.raw_iri_vars,
         raw_double_vars: ctx.raw_double_vars,
+        topn_applied,
     }
 }
 

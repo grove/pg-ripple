@@ -1,0 +1,17 @@
+[package]
+name = "pg_ripple-fuzz"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+
+[[bin]]
+name = "federation_result"
+path = "fuzz_targets/federation_result.rs"
+test = false
+doc = false

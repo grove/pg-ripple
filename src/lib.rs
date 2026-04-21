@@ -14,6 +14,8 @@
 // v0.37.0: Deny hard panics in library code; test modules exempt via #[allow].
 #![cfg_attr(not(any(test, feature = "pg_test")), deny(clippy::unwrap_used))]
 #![cfg_attr(not(any(test, feature = "pg_test")), deny(clippy::expect_used))]
+// v0.46.0: Warn on missing doc comments for public items (rustdoc lint gate).
+#![warn(missing_docs)]
 
 use pgrx::guc::{GucContext, GucFlags};
 use pgrx::prelude::*;
@@ -1244,6 +1246,29 @@ pub extern "C-unwind" fn _PG_init() {
         c"",
         &FEDERATION_ALLOW_PRIVATE,
         GucContext::Suset,
+        GucFlags::default(),
+    );
+
+    // ── v0.46.0 GUCs ─────────────────────────────────────────────────────────
+    pgrx::GucRegistry::define_bool_guc(
+        c"pg_ripple.topn_pushdown",
+        c"Push LIMIT N into the SQL plan for ORDER BY + LIMIT queries (default: on). \
+          Disabled when DISTINCT is in scope. (v0.46.0)",
+        c"",
+        &TOPN_PUSHDOWN,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+
+    pgrx::GucRegistry::define_int_guc(
+        c"pg_ripple.datalog_sequence_batch",
+        c"SID range reserved per parallel Datalog worker per batch (default: 10000, min: 100). \
+          Each worker uses its pre-allocated slice without touching the global sequence. (v0.46.0)",
+        c"",
+        &DATALOG_SEQUENCE_BATCH,
+        100,
+        1_000_000,
+        GucContext::Userset,
         GucFlags::default(),
     );
 

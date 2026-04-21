@@ -1,0 +1,11 @@
+   Compiling pg_ripple v0.46.0 (/Users/geir.gronmo/projects/pg-ripple2)
+warning: function `preallocate_sid_ranges` is never used
+   --> src/datalog/parallel.rs:284:8
+    |
+284 | pub fn preallocate_sid_ranges(
+    |        ^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `pg_ripple` (lib) generated 1 warning
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.41s

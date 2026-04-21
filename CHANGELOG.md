@@ -13,6 +13,56 @@ Versions correspond to the milestones in [ROADMAP.md](ROADMAP.md).
 
 ---
 
+## [0.46.0] — 2026-04-21 — Property-Based Testing, Fuzz Hardening & OWL 2 RL Conformance
+
+**Adds three property-based test suites (SPARQL round-trip, dictionary encode/decode, JSON-LD framing), a cargo-fuzz federation result decoder target, an OWL 2 RL conformance suite, TopN push-down optimisation, sequence range pre-allocation for parallel Datalog, BSBM regression gate, Rustdoc lint gate, HTTP companion CA-bundle support, and expanded worked examples.**
+
+### What's new
+
+- **proptest integration** (`tests/proptest/`) — three property-based test suites run 10,000 cases each: SPARQL algebra round-trip stability (encoding and whitespace invariance), XXH3-128 dictionary encode stability and collision resistance (10,000 distinct terms, zero collisions), and JSON-LD framing round-trip correctness.
+
+- **cargo-fuzz federation result decoder** (`fuzz/fuzz_targets/federation_result.rs`) — fuzz target that feeds arbitrary byte sequences through the SPARQL XML results parser. Asserts no panic on malformed input; invalid XML produces PT542, never a crash.
+
+- **PT542 `FederationResultDecoderError`** (`src/error.rs`) — new error code for unparseable XML/JSON in the federation result decoder.
+
+- **Datalog convergence regression suite** (`tests/datalog_convergence_suite.rs`) — verifies RDFS + OWL RL rule-set convergence within ≤ 20 iterations; derived triple counts checked against baselines stored in `tests/datalog_convergence/baselines.json`.
+
+- **W3C OWL 2 RL conformance suite** (`tests/owl2rl_suite.rs`) — adapter parses `DatatypeEntailmentTest`, `ConsistencyTest`, and `InconsistencyTest` manifest types. Non-blocking CI job until ≥ 95% pass rate. Known failures tracked in `tests/owl2rl/known_failures.txt`.
+
+- **TopN push-down** (`src/sparql/sqlgen.rs`) — when `ORDER BY … LIMIT N` is present (no `OFFSET`, no `DISTINCT`) and `pg_ripple.topn_pushdown = on`, the LIMIT clause is embedded directly in the generated SQL rather than post-decode truncation. `sparql_explain()` output includes `"topn_applied": true/false`.
+
+- **`pg_ripple.topn_pushdown`** (bool GUC, default `on`) — master switch for the TopN push-down optimisation.
+
+- **Sequence range pre-allocation** (`src/datalog/parallel.rs`) — `preallocate_sid_ranges()` atomically advances the global statement-ID sequence by `N * batch_size` before launching parallel Datalog workers, eliminating sequence contention.
+
+- **`pg_ripple.datalog_sequence_batch`** (integer GUC, default `10000`, min `100`) — SID range reserved per parallel Datalog worker per batch.
+
+- **BSBM regression gate** (`benchmarks/bsbm/`) — 12 BSBM explore queries at 1M-triple scale; latency baselines in `benchmarks/bsbm/baselines.json`; CI warning on > 10% regression (non-blocking).
+
+- **Rustdoc lint gate** (`src/lib.rs`) — `#![warn(missing_docs)]` added; CI job `cargo doc` fails on `missing_docs` for public `#[pg_extern]` functions.
+
+- **HTTP companion CA-bundle** (`pg_ripple_http/src/main.rs`) — `PG_RIPPLE_HTTP_CA_BUNDLE` env var: loads the PEM file at the given path as the TLS trust anchor for outbound connections. Falls back to the system trust store with an error log if the path is invalid or not a valid PEM bundle.
+
+- **Expanded worked examples** (`examples/`) — three end-to-end SQL scripts: `shacl_datalog_quality.sql` (SHACL + Datalog interaction), `hybrid_vector_search.sql` (vector similarity + SPARQL property paths), `graphrag_round_trip.sql` (GraphRAG export → Datalog annotation → re-import).
+
+- **Migration script** (`sql/pg_ripple--0.45.0--0.46.0.sql`) — comment-only; no schema changes.
+
+### GUC parameters added
+
+| GUC | Type | Default | Description |
+|-----|------|---------|-------------|
+| `pg_ripple.topn_pushdown` | bool | `on` | Push `LIMIT N` into the SQL plan for `ORDER BY + LIMIT` queries |
+| `pg_ripple.datalog_sequence_batch` | integer | `10000` | SID range reserved per parallel Datalog worker per batch |
+
+### Documentation
+
+- `docs/src/user-guide/best-practices/sparql-performance.md` — TopN push-down section with EXPLAIN example
+- `docs/src/reference/guc-reference.md` — v0.46.0 section with two new GUC parameters
+- `docs/src/reference/error-catalog.md` — PT542 added
+- `docs/src/reference/contributing.md` — proptest and cargo-fuzz sections
+
+---
+
 ## [0.45.0] — 2026-04-21 — SHACL Completion, Datalog Robustness & Crash Recovery
 
 **Closes the last SHACL Core constraint gaps (`sh:equals`, `sh:disjoint`), adds decoded focus-node IRIs to violation messages, hardens Datalog evaluation with lattice join-function validation (PT541), and adds crash-recovery test scripts for two previously-untested kill scenarios.**

@@ -635,3 +635,324 @@ jobs:
       - name: Stop pgrx PostgreSQL 18
         if: always()
         run: cargo pgrx stop pg18
+
+  proptest-suite:
+    name: Property-based tests (v0.46.0)
+    runs-on: ubuntu-latest
+    needs: [test]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo registry
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-
+
+      - name: Run property-based test suite (10,000 cases each)
+        env:
+          PROPTEST_CASES: "10000"
+        run: cargo test --test proptest_suite -- --nocapture
+
+  owl2rl-suite:
+    name: OWL 2 RL conformance suite (informational)
+    runs-on: ubuntu-latest
+    needs: [test]
+    continue-on-error: true
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo registry
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-
+
+      - name: Cache cargo-pgrx binary
+        uses: actions/cache@v5
+        with:
+          path: ~/.cargo/bin/cargo-pgrx
+          key: ${{ runner.os }}-cargo-pgrx-${{ env.PGRX_VERSION }}
+
+      - name: Cache pgrx PostgreSQL build
+        uses: actions/cache@v5
+        with:
+          path: ~/.pgrx
+          key: ${{ runner.os }}-pgrx-pg18-${{ env.PGRX_VERSION }}
+
+      - name: Cache OWL 2 RL test data
+        uses: actions/cache@v5
+        id: owl2rl-cache
+        with:
+          path: tests/owl2rl/data
+          key: owl2rl-${{ hashFiles('scripts/fetch_conformance_tests.sh') }}
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            build-essential pkg-config libssl-dev libclang-dev clang lld \
+            libreadline-dev libicu-dev bison flex curl
+
+      - name: Install cargo-pgrx
+        run: |
+          if ! cargo pgrx --version 2>/dev/null | grep -q "${{ env.PGRX_VERSION }}"; then
+            cargo install cargo-pgrx --version "=${{ env.PGRX_VERSION }}" --locked
+          fi
+
+      - name: Initialise pgrx (PostgreSQL 18)
+        run: |
+          if ! ls ~/.pgrx/18.*/pgrx-install/bin/pg_config 2>/dev/null | grep -q .; then
+            cargo pgrx init --pg18 download
+          fi
+
+      - name: Fetch OWL 2 RL test suite
+        if: steps.owl2rl-cache.outputs.cache-hit != 'true'
+        run: bash scripts/fetch_conformance_tests.sh --owl2rl || echo "OWL 2 RL download failed — tests will skip"
+
+      - name: Start pgrx PostgreSQL 18
+        run: cargo pgrx start pg18 --postgresql-conf "allow_system_table_mods=on"
+
+      - name: Install pg_ripple
+        run: cargo pgrx install --pg-config $(ls ~/.pgrx/18.*/pgrx-install/bin/pg_config | head -1)
+
+      - name: Run OWL 2 RL conformance suite
+        env:
+          PGHOST: localhost
+          PGPORT: "28818"
+          PGDATABASE: postgres
+          PGUSER: runner
+        run: cargo test --test owl2rl_suite -- --nocapture
+
+      - name: Stop pgrx PostgreSQL 18
+        if: always()
+        run: cargo pgrx stop pg18
+
+  datalog-convergence:
+    name: Datalog convergence suite (v0.46.0)
+    runs-on: ubuntu-latest
+    needs: [test]
+    continue-on-error: true
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo registry
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-
+
+      - name: Cache cargo-pgrx binary
+        uses: actions/cache@v5
+        with:
+          path: ~/.cargo/bin/cargo-pgrx
+          key: ${{ runner.os }}-cargo-pgrx-${{ env.PGRX_VERSION }}
+
+      - name: Cache pgrx PostgreSQL build
+        uses: actions/cache@v5
+        with:
+          path: ~/.pgrx
+          key: ${{ runner.os }}-pgrx-pg18-${{ env.PGRX_VERSION }}
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            build-essential pkg-config libssl-dev libclang-dev clang lld \
+            libreadline-dev libicu-dev bison flex
+
+      - name: Install cargo-pgrx
+        run: |
+          if ! cargo pgrx --version 2>/dev/null | grep -q "${{ env.PGRX_VERSION }}"; then
+            cargo install cargo-pgrx --version "=${{ env.PGRX_VERSION }}" --locked
+          fi
+
+      - name: Initialise pgrx (PostgreSQL 18)
+        run: |
+          if ! ls ~/.pgrx/18.*/pgrx-install/bin/pg_config 2>/dev/null | grep -q .; then
+            cargo pgrx init --pg18 download
+          fi
+
+      - name: Start pgrx PostgreSQL 18
+        run: cargo pgrx start pg18 --postgresql-conf "allow_system_table_mods=on"
+
+      - name: Install pg_ripple
+        run: cargo pgrx install --pg-config $(ls ~/.pgrx/18.*/pgrx-install/bin/pg_config | head -1)
+
+      - name: Run Datalog convergence suite
+        env:
+          PGHOST: localhost
+          PGPORT: "28818"
+          PGDATABASE: postgres
+          PGUSER: runner
+        run: cargo test --test datalog_convergence_suite -- --nocapture
+
+      - name: Stop pgrx PostgreSQL 18
+        if: always()
+        run: cargo pgrx stop pg18
+
+  rustdoc-lint:
+    name: Rustdoc lint gate (v0.46.0)
+    runs-on: ubuntu-latest
+    needs: [test]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo registry
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-
+
+      - name: Cache cargo-pgrx binary
+        uses: actions/cache@v5
+        with:
+          path: ~/.cargo/bin/cargo-pgrx
+          key: ${{ runner.os }}-cargo-pgrx-${{ env.PGRX_VERSION }}
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            build-essential pkg-config libssl-dev libclang-dev clang lld \
+            libreadline-dev libicu-dev bison flex
+
+      - name: Install cargo-pgrx
+        run: |
+          if ! cargo pgrx --version 2>/dev/null | grep -q "${{ env.PGRX_VERSION }}"; then
+            cargo install cargo-pgrx --version "=${{ env.PGRX_VERSION }}" --locked
+          fi
+
+      - name: Initialise pgrx (PostgreSQL 18)
+        run: |
+          if ! ls ~/.pgrx/18.*/pgrx-install/bin/pg_config 2>/dev/null | grep -q .; then
+            cargo pgrx init --pg18 download
+          fi
+
+      - name: Build docs (fail on missing_docs for public items)
+        run: cargo doc --no-deps --features pg18 2>&1 | tee /tmp/doc_output.txt && ! grep -q "missing documentation" /tmp/doc_output.txt
+
+  bsbm-regression:
+    name: BSBM regression gate (informational, v0.46.0)
+    runs-on: ubuntu-latest
+    needs: [test]
+    continue-on-error: true
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo registry
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-
+
+      - name: Cache cargo-pgrx binary
+        uses: actions/cache@v5
+        with:
+          path: ~/.cargo/bin/cargo-pgrx
+          key: ${{ runner.os }}-cargo-pgrx-${{ env.PGRX_VERSION }}
+
+      - name: Cache pgrx PostgreSQL build
+        uses: actions/cache@v5
+        with:
+          path: ~/.pgrx
+          key: ${{ runner.os }}-pgrx-pg18-${{ env.PGRX_VERSION }}
+
+      - name: Cache BSBM data
+        uses: actions/cache@v5
+        id: bsbm-cache
+        with:
+          path: benchmarks/bsbm/data
+          key: bsbm-1M-${{ hashFiles('scripts/fetch_conformance_tests.sh') }}
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            build-essential pkg-config libssl-dev libclang-dev clang lld \
+            libreadline-dev libicu-dev bison flex curl
+
+      - name: Install cargo-pgrx
+        run: |
+          if ! cargo pgrx --version 2>/dev/null | grep -q "${{ env.PGRX_VERSION }}"; then
+            cargo install cargo-pgrx --version "=${{ env.PGRX_VERSION }}" --locked
+          fi
+
+      - name: Initialise pgrx (PostgreSQL 18)
+        run: |
+          if ! ls ~/.pgrx/18.*/pgrx-install/bin/pg_config 2>/dev/null | grep -q .; then
+            cargo pgrx init --pg18 download
+          fi
+
+      - name: Fetch BSBM data (1M triples)
+        if: steps.bsbm-cache.outputs.cache-hit != 'true'
+        run: bash scripts/fetch_conformance_tests.sh --bsbm || echo "BSBM download failed — skipping benchmark"
+
+      - name: Start pgrx PostgreSQL 18
+        run: cargo pgrx start pg18 --postgresql-conf "allow_system_table_mods=on"
+
+      - name: Install pg_ripple
+        run: cargo pgrx install --pg-config $(ls ~/.pgrx/18.*/pgrx-install/bin/pg_config | head -1)
+
+      - name: Run BSBM regression check
+        env:
+          PGHOST: localhost
+          PGPORT: "28818"
+          PGDATABASE: postgres
+          PGUSER: runner
+        run: |
+          if [ -d benchmarks/bsbm/data ]; then
+            echo "BSBM data found — running regression check"
+            psql -h localhost -p 28818 -d postgres -U runner -f benchmarks/bsbm/queries.sql || echo "BSBM queries produced errors (non-blocking)"
+          else
+            echo "BSBM data not available — skipping regression check"
+          fi
+
+      - name: Stop pgrx PostgreSQL 18
+        if: always()
+        run: cargo pgrx stop pg18

@@ -1,0 +1,12 @@
+# OWL 2 RL known failures for pg_ripple (v0.46.0)
+#
+# Format: one entry per line, prefixed with "owl2rl:" followed by the test ID.
+# Lines starting with "#" are comments.
+#
+# Tests listed here are skipped by the owl2rl_suite runner.  When a test is
+# fixed, remove its line from this file and re-run the suite to confirm it passes.
+#
+# Example:
+#   owl2rl:rl-syntax-AnnotationProperty-001
+#
+# Currently no known failures at initial release — file is a placeholder.

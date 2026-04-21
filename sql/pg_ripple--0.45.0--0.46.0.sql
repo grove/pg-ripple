@@ -1,0 +1,61 @@
+-- Migration 0.45.0 → 0.46.0
+--
+-- v0.46.0: Property-Based Testing, Fuzz Hardening & OWL 2 RL Conformance
+--
+-- Schema changes: None.
+--
+-- New features (compiled from Rust — no SQL schema changes required):
+--
+--   • proptest integration (tests/proptest/) — 3 property-based test suites:
+--       - sparql_roundtrip: encoding stability and whitespace invariance
+--       - dictionary: XXH3-128 encode stability and collision resistance
+--       - jsonld_framing: JSON-LD frame round-trip correctness
+--
+--   • cargo-fuzz federation result decoder target (fuzz/fuzz_targets/):
+--       - federation_result.rs: feeds arbitrary bytes through the SPARQL XML
+--         results parser; asserts no panic on malformed input (PT542 on error)
+--
+--   • Datalog convergence regression suite (tests/datalog_convergence/):
+--       - Fixpoint on synthetic data in ≤ 20 iterations
+--       - Baseline tracking via tests/datalog_convergence/baselines.json
+--
+--   • W3C OWL 2 RL conformance suite (tests/owl2rl/):
+--       - manifest.rs adapter for DatatypeEntailmentTest, ConsistencyTest,
+--         InconsistencyTest
+--       - Non-blocking CI job until ≥ 95% pass rate
+--
+--   • TopN push-down (src/sparql/sqlgen.rs):
+--       - ORDER BY + LIMIT N queries emit LIMIT in SQL (not post-decode truncation)
+--       - Skipped when DISTINCT is in scope
+--       - New GUC: pg_ripple.topn_pushdown (bool, default on)
+--       - sparql_explain() output includes "topn_applied" key
+--
+--   • Sequence range pre-allocation (src/datalog/parallel.rs):
+--       - Pre-allocates SID ranges before parallel Datalog workers launch
+--       - Eliminates sequence contention under parallel inference
+--       - New GUC: pg_ripple.datalog_sequence_batch (integer, default 10000)
+--
+--   • BSBM regression gate (benchmarks/bsbm/):
+--       - 12 BSBM explore queries at 1M-triple scale
+--       - Latency baselines in benchmarks/bsbm/baselines.json
+--       - Non-blocking CI warning on > 10% regression
+--
+--   • Rustdoc lint gate:
+--       - #![warn(missing_docs)] added to src/lib.rs (public items only)
+--       - CI job fails on missing_docs for public #[pg_extern] functions
+--
+--   • HTTP companion CA-bundle (pg_ripple_http):
+--       - PG_RIPPLE_HTTP_CA_BUNDLE env var: loads PEM file as TLS trust anchor
+--       - Falls back to system trust store with error log on invalid PEM
+--
+--   • Expanded worked examples (examples/):
+--       - shacl_datalog_quality.sql
+--       - hybrid_vector_search.sql
+--       - graphrag_round_trip.sql
+--
+--   • New error code:
+--       - PT542: Federation result decoder received unparseable XML/JSON
+--
+-- GUCs registered at runtime (no SQL DDL required):
+--   pg_ripple.topn_pushdown          (bool, default on)
+--   pg_ripple.datalog_sequence_batch (integer, default 10000, min 100)

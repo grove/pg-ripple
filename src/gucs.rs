@@ -526,3 +526,21 @@ pub static FEDERATION_INLINE_MAX_ROWS: pgrx::GucSetting<i32> = pgrx::GucSetting:
 /// loopback (127.x.x.x), and IPv6 link-local ranges.  Emits PT621 when a private-IP
 /// endpoint is rejected.  Set `true` in trusted internal deployments.
 pub static FEDERATION_ALLOW_PRIVATE: pgrx::GucSetting<bool> = pgrx::GucSetting::<bool>::new(false);
+
+// ── v0.46.0 GUCs ─────────────────────────────────────────────────────────────
+
+/// GUC: enable TopN push-down for `ORDER BY … LIMIT N` queries (v0.46.0).
+///
+/// When `true` (default), SPARQL SELECT queries that contain both `ORDER BY` and
+/// `LIMIT N` (with no `OFFSET > 0`) emit the SQL as `… ORDER BY … LIMIT N` rather
+/// than fetching all rows and discarding after decoding.  Skipped when `DISTINCT`
+/// is in scope.  Disable for debugging or if incorrect results are suspected.
+pub static TOPN_PUSHDOWN: pgrx::GucSetting<bool> = pgrx::GucSetting::<bool>::new(true);
+
+/// GUC: SID range reserved per parallel Datalog worker per batch (v0.46.0).
+///
+/// Before launching N parallel strata workers, the coordinator calls
+/// `SELECT setval(seq, currval(seq) + N * batch_size)` once to reserve a
+/// contiguous SID range; each worker uses its slice without touching the sequence.
+/// Default: `10000`.  Range: 100–1 000 000.
+pub static DATALOG_SEQUENCE_BATCH: pgrx::GucSetting<i32> = pgrx::GucSetting::<i32>::new(10_000);

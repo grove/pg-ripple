@@ -3542,59 +3542,59 @@ All 14 LUBM queries return exact reference cardinalities at `--univ 1`. Ontology
 
 ### Deliverables
 
-- [ ] **`proptest` integration** (`tests/proptest/`)
+- [x] **`proptest` integration** (`tests/proptest/`)
   - **SPARQL algebra round-trip** (`tests/proptest/sparql_roundtrip.rs`): generate random `spargebra::Query` values using `proptest` strategies; assert that (a) encoding the same SPARQL query twice produces byte-identical SQL; (b) queries that differ only in whitespace or prefix aliases produce the same generated SQL (plan-cache key stability); (c) star-pattern self-join elimination never changes the result set (check against a reference without elimination)
   - **Dictionary encode/decode** (`tests/proptest/dictionary.rs`): for any arbitrary IRI, blank node, or literal string, `decode_id(encode_term(t)) == t`; assert no collisions for 10,000 random distinct terms; assert encode is stable across pg_ripple restarts (same term → same ID given the same dictionary)
   - **JSON-LD framing round-trip** (`tests/proptest/jsonld_framing.rs`): generate random flat JSON-LD input graphs and random `@context` frames; assert that `frame_jsonld(input, frame)` returns valid JSON-LD and that any IRI present in the input that matches the frame appears in the output
   - Dev-dependency: `proptest = "1"` added to `Cargo.toml` under `[dev-dependencies]`
 
-- [ ] **`cargo-fuzz` federation result decoder target** (`fuzz/fuzz_targets/federation_result.rs`)
+- [x] **`cargo-fuzz` federation result decoder target** (`fuzz/fuzz_targets/federation_result.rs`)
   - Fuzz target that feeds arbitrary byte sequences through the SPARQL XML results parser (`src/sparql/federation.rs` result-decoding path) — the path that processes `application/sparql-results+xml` responses from remote SERVICE endpoints
   - Assert: no panic, no `unwrap` abort; invalid XML must produce a `PT6xx`-range error, never a crash
   - CI nightly job `fuzz-federation` runs the target for 10 minutes; any new corpus entries that trigger panics are reported as blocking failures
 
-- [ ] **Datalog convergence regression suite** (`tests/datalog_convergence/`)
+- [x] **Datalog convergence regression suite** (`tests/datalog_convergence/`)
   - Download a 1M-triple DBpedia-en subset (persons, organisations, relations) via `scripts/fetch_conformance_tests.sh` extension; load into pg_ripple
   - Apply the built-in RDFS + OWL RL rule set via `pg_ripple.materialize_owl_rl()`
   - Assert: fixpoint reached in ≤ 20 iterations; total wall-clock time < 5 minutes on CI; derived triple count falls within ±1% of a pre-computed baseline stored in `tests/datalog_convergence/baselines.json`
   - Repeat for a 200-rule custom rule set (100 forward-chaining + 100 OWL RL rules) on a 100K-triple schema.org snippet; assert convergence in ≤ 15 iterations
 
-- [ ] **W3C OWL 2 RL conformance suite** (`tests/owl2rl/`)
+- [x] **W3C OWL 2 RL conformance suite** (`tests/owl2rl/`)
   - Download the W3C OWL 2 RL test manifests from `https://github.com/w3c/owl2-profiles-tests`
   - Adapter `tests/owl2rl/manifest.rs` parses the `owl2:DatatypeEntailmentTest`, `owl2:ConsistencyTest`, and `owl2:InconsistencyTest` manifest types
   - Each test loads a premise ontology, runs `pg_ripple.materialize_owl_rl()`, then evaluates a conclusion ontology via ASK/entailment check
   - CI job `owl2rl-suite` is informational (non-blocking) until pass rate ≥ 95%; known failures tracked in `tests/owl2rl/known_failures.txt` with `owl2rl:` prefix
   - Reuse unified conformance runner from v0.43.0
 
-- [ ] **TopN push-down** (`src/sparql/sqlgen.rs`)
+- [x] **TopN push-down** (`src/sparql/sqlgen.rs`)
   - When a SPARQL query has both `ORDER BY` and `LIMIT N` (and no `OFFSET > 0`), emit the SQL as `… ORDER BY … LIMIT N` rather than fetching all rows and discarding after decoding
   - The optimisation applies to SELECT queries; skipped when `DISTINCT` is in scope (PostgreSQL cannot push LIMIT through DISTINCT without a subquery)
   - New GUC `pg_ripple.topn_pushdown` (bool, default `on`) guards the rewrite; `pg_ripple.sparql_explain()` output includes a `"topn_applied": true/false` key
   - pg_regress test `sparql_topn.sql`: assert result correctness and `EXPLAIN` shows a `Limit` node directly over the VP scan
 
-- [ ] **Sequence range pre-allocation for parallel Datalog workers** (`src/datalog/parallel.rs`)
+- [x] **Sequence range pre-allocation for parallel Datalog workers** (`src/datalog/parallel.rs`)
   - Before launching N parallel strata workers, call `SELECT setval(seq, currval(seq) + N * batch_size)` once to reserve a contiguous SID range; each worker uses its slice without touching the sequence
   - `batch_size` defaults to 10,000 and is configurable via `pg_ripple.datalog_sequence_batch` (integer GUC, default 10000, min 100)
   - pg_regress test `datalog_sequence_batch.sql`: assert that after parallel inference the global SID sequence has no gaps within the reserved range
 
-- [ ] **BSBM regression gate in CI** (`.github/workflows/ci.yml`, `benchmarks/bsbm/`)
+- [x] **BSBM regression gate in CI** (`.github/workflows/ci.yml`, `benchmarks/bsbm/`)
   - Integrate the Berlin SPARQL Benchmark (BSBM) at 1M triple scale as a nightly regression check
   - `scripts/fetch_conformance_tests.sh` extended to download and install the BSBM data generator
   - CI job `bsbm-regression`: generates a 1M-triple product dataset, runs the 12 BSBM explore queries, compares query latency against a baseline stored in `benchmarks/bsbm/baselines.json`; any query regressing by > 10% emits a CI warning (non-blocking but visible in the PR summary)
   - Complement to v1.0.0's full-scale BSBM-at-100M-triples published benchmark
 
-- [ ] **Rustdoc lint gate** (`src/lib.rs`, `Cargo.toml`, `.github/workflows/ci.yml`)
+- [x] **Rustdoc lint gate** (`src/lib.rs`, `Cargo.toml`, `.github/workflows/ci.yml`)
   - Add `#![warn(missing_docs)]` to `src/lib.rs` (scoped to public items only; internal `pub(crate)` items excluded)
   - CI job `cargo doc --no-deps --document-private-items` gated to fail on any `missing_docs` warning for public `#[pg_extern]` functions
   - Backfill doc comments for the 20 most-called public functions (as identified by `pg_stat_statements` in the test suite run); leave a `FIXME(docs):` comment on the remaining stubs to track progress
 
-- [ ] **HTTP companion: CA-bundle env var** (`pg_ripple_http/src/main.rs`)
+- [x] **HTTP companion: CA-bundle env var** (`pg_ripple_http/src/main.rs`)
   - Add `PG_RIPPLE_HTTP_CA_BUNDLE` environment variable: if set, load the PEM file at the given path as the trust anchor for all outbound TLS connections (SERVICE federation and SPARQL endpoint queries)
   - If the path does not exist or is not a valid PEM bundle, log an error at startup and fall back to the system trust store (never silently ignore)
   - This complements the v0.42.0 `rustls-tls-native-roots` hardening by allowing operators to pin a specific CA or internal PKI certificate
   - Integration test: start a mock TLS server with a self-signed CA; assert that `pg_ripple_http` rejects it by default and accepts it when `PG_RIPPLE_HTTP_CA_BUNDLE` points to the CA cert
 
-- [ ] **Expanded worked examples** (`examples/`)
+- [x] **Expanded worked examples** (`examples/`)
   - `examples/shacl_datalog_quality.sql` — end-to-end: load a bibliographic graph, define SHACL shapes, run SPARQL to list violations, apply Datalog RDFS rules, re-check shapes; documents the SHACL + Datalog interaction pattern
   - `examples/hybrid_vector_search.sql` — end-to-end: embed entities, run vector similarity search, combine with SPARQL property-path constraints; documents the `pg:similar()` + SPARQL pattern
   - `examples/graphrag_round_trip.sql` — end-to-end: load a knowledge graph, run GraphRAG export, annotate with Datalog-derived community summaries, re-import enriched triples; documents the full GraphRAG round-trip
@@ -3618,11 +3618,11 @@ All 14 LUBM queries return exact reference cardinalities at `--univ 1`. Ontology
 
 ### Documentation
 
-- [ ] `user-guide/best-practices/sparql-performance.md` — "TopN push-down" section with `EXPLAIN` example
-- [ ] `reference/guc-reference.md` — v0.46.0 section with two new GUC parameters
-- [ ] `reference/error-catalog.md` — PT542 added
-- [ ] `contributing/testing.md` — `proptest` and `cargo-fuzz` sections covering how to run and extend the harnesses
-- [ ] Release notes for v0.46.0
+- [x] `user-guide/best-practices/sparql-performance.md` — "TopN push-down" section with `EXPLAIN` example
+- [x] `reference/guc-reference.md` — v0.46.0 section with two new GUC parameters
+- [x] `reference/error-catalog.md` — PT542 added
+- [x] `contributing/testing.md` — `proptest` and `cargo-fuzz` sections covering how to run and extend the harnesses
+- [x] Release notes for v0.46.0
 
 ### Exit Criteria
 

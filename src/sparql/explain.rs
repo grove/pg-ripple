@@ -31,15 +31,15 @@ pub fn explain_sparql_jsonb(query_text: &str, analyze: bool) -> pgrx::JsonB {
 
     // Translate to SQL (this may or may not use the plan cache depending on
     // the GUC pg_ripple.plan_cache_size).
-    let (inner_sql, _encode_calls) = match &query {
+    let (inner_sql, _encode_calls, topn_applied) = match &query {
         Query::Select { pattern, .. } => {
             let trans = sqlgen::translate_select(pattern, None);
-            (trans.sql, 0usize)
+            (trans.sql, 0usize, trans.topn_applied)
         }
-        Query::Ask { pattern, .. } => (sqlgen::translate_ask(pattern), 0usize),
+        Query::Ask { pattern, .. } => (sqlgen::translate_ask(pattern), 0usize, false),
         Query::Construct { pattern, .. } => {
             let trans = sqlgen::translate_select(pattern, None);
-            (trans.sql, 0usize)
+            (trans.sql, 0usize, trans.topn_applied)
         }
         Query::Describe { .. } => {
             return pgrx::JsonB(serde_json::json!({
@@ -70,7 +70,8 @@ pub fn explain_sparql_jsonb(query_text: &str, analyze: bool) -> pgrx::JsonB {
         "sql": inner_sql,
         "plan": plan_text,
         "cache_hit": cache_hit,
-        "encode_calls": 0
+        "encode_calls": 0,
+        "topn_applied": topn_applied
     });
 
     pgrx::JsonB(result)

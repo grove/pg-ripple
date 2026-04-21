@@ -1,0 +1,71 @@
+-- pg_regress test: TopN push-down for ORDER BY + LIMIT queries (v0.46.0)
+--
+-- Tests that:
+-- 1. topn_pushdown GUC exists with default value 'on'.
+-- 2. sparql_explain() includes "topn_applied" key.
+-- 3. ORDER BY + LIMIT queries produce correct results with and without push-down.
+-- 4. DISTINCT queries are NOT subject to TopN push-down.
+
+CREATE EXTENSION IF NOT EXISTS pg_ripple;
+SELECT pg_ripple.triple_count() >= 0 AS library_loaded;
+
+SET search_path TO pg_ripple, public;
+
+-- ── Part 1: GUC checks ────────────────────────────────────────────────────────
+
+SHOW pg_ripple.topn_pushdown;
+
+-- ── Part 2: Load test data ────────────────────────────────────────────────────
+
+SELECT pg_ripple.load_turtle($TTL$
+@prefix ex: <http://example.org/> .
+ex:a ex:score "10"^^<http://www.w3.org/2001/XMLSchema#integer> .
+ex:b ex:score "20"^^<http://www.w3.org/2001/XMLSchema#integer> .
+ex:c ex:score "30"^^<http://www.w3.org/2001/XMLSchema#integer> .
+ex:d ex:score "40"^^<http://www.w3.org/2001/XMLSchema#integer> .
+ex:e ex:score "50"^^<http://www.w3.org/2001/XMLSchema#integer> .
+$TTL$, false) AS triples_loaded;
+
+-- ── Part 3: EXPLAIN shows topn_applied ───────────────────────────────────────
+
+-- ORDER BY + LIMIT: topn_applied should be true.
+SELECT (pg_ripple.sparql_explain(
+  'SELECT ?s WHERE { ?s <http://example.org/score> ?o } ORDER BY ?o LIMIT 3',
+  false
+) -> 'topn_applied') AS topn_applied_order_limit;
+
+-- No ORDER BY: topn_applied must be false.
+SELECT (pg_ripple.sparql_explain(
+  'SELECT ?s WHERE { ?s <http://example.org/score> ?o } LIMIT 3',
+  false
+) -> 'topn_applied') AS topn_applied_limit_only;
+
+-- DISTINCT + ORDER BY + LIMIT: topn_applied must be false (DISTINCT in scope).
+SELECT (pg_ripple.sparql_explain(
+  'SELECT DISTINCT ?s WHERE { ?s <http://example.org/score> ?o } ORDER BY ?o LIMIT 3',
+  false
+) -> 'topn_applied') AS topn_applied_distinct;
+
+-- ── Part 4: Result correctness ────────────────────────────────────────────────
+
+-- With TopN push-down ON: top 3 scores in ascending order.
+SET pg_ripple.topn_pushdown = on;
+SELECT pg_ripple.sparql_query(
+  'SELECT ?s ?o WHERE { ?s <http://example.org/score> ?o } ORDER BY ?o LIMIT 3'
+) AS top3_asc;
+
+-- With TopN push-down OFF: same result expected.
+SET pg_ripple.topn_pushdown = off;
+SELECT pg_ripple.sparql_query(
+  'SELECT ?s ?o WHERE { ?s <http://example.org/score> ?o } ORDER BY ?o LIMIT 3'
+) AS top3_asc_no_pushdown;
+
+-- Reset GUC.
+SET pg_ripple.topn_pushdown = on;
+
+-- ── Part 5: GUC toggle ───────────────────────────────────────────────────────
+
+SET pg_ripple.topn_pushdown = off;
+SHOW pg_ripple.topn_pushdown;
+SET pg_ripple.topn_pushdown = on;
+SHOW pg_ripple.topn_pushdown;

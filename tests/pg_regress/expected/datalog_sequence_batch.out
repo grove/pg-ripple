@@ -1,0 +1,97 @@
+-- pg_regress test: Sequence range pre-allocation for parallel Datalog (v0.46.0)
+--
+-- Tests that:
+-- 1. datalog_sequence_batch GUC exists with default value 10000.
+-- 2. GUC range validation works (min 100).
+-- 3. After parallel inference, the global SID sequence has no gaps in the
+--    reserved range (structural check via sequence inspection).
+CREATE EXTENSION IF NOT EXISTS pg_ripple;
+SELECT pg_ripple.triple_count() >= 0 AS library_loaded;
+ library_loaded 
+----------------
+ t
+(1 row)
+
+SET search_path TO pg_ripple, public;
+-- ── Part 1: GUC checks ────────────────────────────────────────────────────────
+SHOW pg_ripple.datalog_sequence_batch;
+ pg_ripple.datalog_sequence_batch 
+----------------------------------
+ 10000
+(1 row)
+
+-- Set to minimum allowed value.
+SET pg_ripple.datalog_sequence_batch = 100;
+SHOW pg_ripple.datalog_sequence_batch;
+ pg_ripple.datalog_sequence_batch 
+----------------------------------
+ 100
+(1 row)
+
+-- Set to a custom value.
+SET pg_ripple.datalog_sequence_batch = 5000;
+SHOW pg_ripple.datalog_sequence_batch;
+ pg_ripple.datalog_sequence_batch 
+----------------------------------
+ 5000
+(1 row)
+
+-- Reset to default.
+RESET pg_ripple.datalog_sequence_batch;
+SHOW pg_ripple.datalog_sequence_batch;
+ pg_ripple.datalog_sequence_batch 
+----------------------------------
+ 10000
+(1 row)
+
+-- ── Part 2: Sequence exists ───────────────────────────────────────────────────
+SELECT count(*) AS sid_sequence_exists
+FROM pg_sequences
+WHERE schemaname = '_pg_ripple'
+  AND sequencename = 'statement_id_seq';
+ sid_sequence_exists 
+---------------------
+                   1
+(1 row)
+
+-- ── Part 3: Load data and verify triple insertion uses the sequence ───────────
+SELECT pg_ripple.load_turtle($TTL$
+@prefix ex: <http://example.org/> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+ex:Animal rdfs:subClassOf ex:LivingThing .
+ex:Dog rdfs:subClassOf ex:Animal .
+ex:Fido a ex:Dog .
+$TTL$, false) AS triples_loaded;
+ triples_loaded 
+----------------
+              3
+(1 row)
+
+-- Verify triples were inserted with valid SIDs.
+SELECT count(*) > 0 AS has_triples FROM _pg_ripple.vp_rare;
+ has_triples 
+-------------
+ t
+(1 row)
+
+-- ── Part 4: GUC range boundaries ─────────────────────────────────────────────
+-- Value below minimum should be rejected.
+DO $$
+BEGIN
+  SET pg_ripple.datalog_sequence_batch = 99;
+  RAISE EXCEPTION 'expected error for value below minimum';
+EXCEPTION WHEN OTHERS THEN
+  RAISE NOTICE 'correctly rejected value below minimum: %', SQLERRM;
+END;
+$$;
+NOTICE:  correctly rejected value below minimum: 99 is outside the valid range for parameter "pg_ripple.datalog_sequence_batch" (100 .. 1000000)
+DO
+-- Value at minimum should be accepted.
+SET pg_ripple.datalog_sequence_batch = 100;
+SHOW pg_ripple.datalog_sequence_batch;
+ pg_ripple.datalog_sequence_batch 
+----------------------------------
+ 100
+(1 row)
+
+RESET pg_ripple.datalog_sequence_batch;

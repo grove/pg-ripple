@@ -139,6 +139,7 @@ Errors from the materialization engine, magic sets optimizer, WFS evaluator, and
 | PT520 | infer_wfs: iteration cap reached (`<N>` iterations) | The WFS alternating fixpoint did not converge within `pg_ripple.wfs_max_iterations` | Emitted as WARNING; partial result is returned with `"stratifiable": false`; increase the cap or simplify the rule set |
 | PT540 | lattice: fixpoint did not converge after `<N>` iterations | The lattice fixpoint did not stabilise within `pg_ripple.lattice_max_iterations` | Increase `pg_ripple.lattice_max_iterations` or verify that the join function is monotone |
 | PT541 | lattice: join_fn `<name>` could not be resolved | The user-supplied join function name could not be resolved via `regprocedure` | Check the function name, schema, and argument types; use a fully-qualified name |
+| PT542 | federation: result decoder received unparseable XML/JSON | The SPARQL results response from a remote SERVICE endpoint could not be parsed | Check the endpoint's response format; ensure it returns `application/sparql-results+xml` or `+json` |
 
 ---
 

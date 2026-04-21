@@ -39,6 +39,8 @@ FORCE=""
 DO_W3C=false
 DO_JENA=false
 DO_WATDIV=false
+DO_OWL2RL=false
+DO_BSBM=false
 EXPLICIT_SUITE=false
 
 for arg in "$@"; do
@@ -47,6 +49,8 @@ for arg in "$@"; do
         --w3c)   DO_W3C=true; EXPLICIT_SUITE=true ;;
         --jena)  DO_JENA=true; EXPLICIT_SUITE=true ;;
         --watdiv) DO_WATDIV=true; EXPLICIT_SUITE=true ;;
+        --owl2rl) DO_OWL2RL=true; EXPLICIT_SUITE=true ;;
+        --bsbm)  DO_BSBM=true; EXPLICIT_SUITE=true ;;
         *) info "Unknown argument: $arg" ;;
     esac
 done
@@ -284,14 +288,96 @@ fetch_watdiv() {
     generate_watdiv_data
 }
 
+# ── OWL 2 RL test suite (v0.46.0) ────────────────────────────────────────────
+
+OWL2RL_DIR="${OWL2RL_TEST_DIR:-${PROJECT_ROOT}/tests/owl2rl/data}"
+
+fetch_owl2rl() {
+    info "Fetching W3C OWL 2 RL test manifests..."
+
+    if [[ -d "${OWL2RL_DIR}" && "${FORCE}" != "--force" ]]; then
+        if find "${OWL2RL_DIR}" -name "manifest.ttl" 2>/dev/null | grep -q .; then
+            ok "OWL 2 RL test data already present at ${OWL2RL_DIR}"
+            return 0
+        fi
+    fi
+
+    mkdir -p "${OWL2RL_DIR}"
+
+    local OWL2RL_URL="https://github.com/w3c/owl2-profiles-tests/archive/refs/heads/master.tar.gz"
+    local OWL2RL_ARCHIVE="${OWL2RL_DIR}/owl2rl-tests.tar.gz"
+
+    if command -v curl >/dev/null 2>&1; then
+        curl -fsSL "${OWL2RL_URL}" -o "${OWL2RL_ARCHIVE}" \
+            || { info "WARNING: OWL 2 RL download failed — tests will skip gracefully."; return 0; }
+    elif command -v wget >/dev/null 2>&1; then
+        wget -q "${OWL2RL_URL}" -O "${OWL2RL_ARCHIVE}" \
+            || { info "WARNING: OWL 2 RL download failed — tests will skip gracefully."; return 0; }
+    else
+        info "WARNING: Neither curl nor wget available — OWL 2 RL tests will skip."
+        return 0
+    fi
+
+    tar -xzf "${OWL2RL_ARCHIVE}" -C "${OWL2RL_DIR}" --strip-components=1 \
+        || { info "WARNING: OWL 2 RL archive extraction failed."; return 0; }
+
+    rm -f "${OWL2RL_ARCHIVE}"
+    ok "OWL 2 RL test data extracted to ${OWL2RL_DIR}"
+}
+
+# ── BSBM data (v0.46.0) ───────────────────────────────────────────────────────
+
+BSBM_DATA_DIR="${BSBM_DATA_DIR:-${PROJECT_ROOT}/benchmarks/bsbm/data}"
+
+fetch_bsbm() {
+    info "Fetching BSBM 1M-triple product dataset..."
+
+    if [[ -d "${BSBM_DATA_DIR}" && "${FORCE}" != "--force" ]]; then
+        if find "${BSBM_DATA_DIR}" -name "*.nt" -o -name "*.ttl" 2>/dev/null | grep -q .; then
+            ok "BSBM data already present at ${BSBM_DATA_DIR}"
+            return 0
+        fi
+    fi
+
+    mkdir -p "${BSBM_DATA_DIR}"
+
+    # BSBM requires the Java-based data generator.  We check for it and skip
+    # gracefully if it's not available.
+    if ! command -v java >/dev/null 2>&1; then
+        info "WARNING: Java not found — BSBM data generation requires Java."
+        info "Install Java and the BSBM tools from http://wbsg.informatik.uni-mannheim.de/bizer/berlinsparqlbenchmark/"
+        info "BSBM regression tests will skip gracefully without data."
+        return 0
+    fi
+
+    # Check for the BSBM generator jar.
+    local BSBM_JAR="${BSBM_JAR:-}"
+    if [[ -z "${BSBM_JAR}" ]]; then
+        info "WARNING: BSBM_JAR not set — set it to the path of the BSBM generator jar."
+        info "Download from http://wbsg.informatik.uni-mannheim.de/bizer/berlinsparqlbenchmark/"
+        info "BSBM regression tests will skip gracefully without data."
+        return 0
+    fi
+
+    info "Generating BSBM 1M-triple dataset (scale factor 1000)..."
+    java -jar "${BSBM_JAR}" -pc 1000 -dir "${BSBM_DATA_DIR}" \
+        || { info "WARNING: BSBM data generation failed."; return 0; }
+
+    ok "BSBM 1M-triple dataset generated at ${BSBM_DATA_DIR}"
+}
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 [[ "${DO_W3C}" == "true" ]]    && fetch_w3c
 [[ "${DO_JENA}" == "true" ]]   && fetch_jena
 [[ "${DO_WATDIV}" == "true" ]] && fetch_watdiv
+[[ "${DO_OWL2RL}" == "true" ]] && fetch_owl2rl
+[[ "${DO_BSBM}" == "true" ]]   && fetch_bsbm
 
 ok "Conformance test data fetch complete."
 info "Run the test suites with:"
 info "  cargo test --test w3c_suite"
 info "  cargo test --test jena_suite"
 info "  cargo test --test watdiv_suite"
+info "  cargo test --test owl2rl_suite"
+info "  cargo test --test datalog_convergence_suite"

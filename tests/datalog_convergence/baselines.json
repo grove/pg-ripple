@@ -1,0 +1,5 @@
+{
+  "_comment": "Pre-computed baselines for Datalog convergence suite (v0.46.0).",
+  "_note": "Values are derived triple counts. Tests assert ±1% tolerance.",
+  "schema_org_owl_rl": 0
+}

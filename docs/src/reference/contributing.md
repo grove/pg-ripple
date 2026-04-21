@@ -251,6 +251,83 @@ Available since v0.16.0.
 
 ---
 
+## Property-Based Testing (v0.46.0)
+
+pg_ripple uses `proptest` for randomised property-based tests that assert algebraic invariants. These tests run entirely in pure Rust — no database connection required.
+
+### Running proptest suites
+
+```bash
+# Run all property-based tests
+cargo test --test proptest_suite
+
+# Run with more cases (default: 256)
+PROPTEST_CASES=10000 cargo test --test proptest_suite
+
+# Run a specific suite
+cargo test --test proptest_suite sparql_roundtrip
+cargo test --test proptest_suite dictionary
+cargo test --test proptest_suite jsonld_framing
+```
+
+### Adding a new property test
+
+1. Add your test to the appropriate file in `tests/proptest/`:
+   - SPARQL translator invariants → `sparql_roundtrip.rs`
+   - Dictionary encoder invariants → `dictionary.rs`
+   - JSON-LD framing invariants → `jsonld_framing.rs`
+   - New domain → create `tests/proptest/<domain>.rs` and add `mod <domain>;` to `tests/proptest_suite.rs`
+
+2. Use `proptest!` macros for property tests; regular `#[test]` for deterministic fixtures.
+
+3. Run the suite with `PROPTEST_CASES=10000` to verify 10,000 cases pass.
+
+### Debugging a proptest failure
+
+When a test fails, proptest prints the minimal failing input. Reproduce it:
+
+```rust
+// Add to the failing test to fix the seed:
+ProptestConfig::with_cases(1).with_proptest_rng(seed)
+```
+
+---
+
+## Fuzz Testing (v0.46.0)
+
+pg_ripple uses `cargo-fuzz` to test the federation result decoder against arbitrary byte sequences.
+
+### Running the fuzz target
+
+```bash
+# Install cargo-fuzz
+cargo install cargo-fuzz
+
+# Run for 10 minutes
+cargo fuzz run federation_result -- -max_total_time=600
+
+# Run indefinitely
+cargo fuzz run federation_result
+
+# Minimise a crashing corpus entry
+cargo fuzz tmin federation_result artifacts/federation_result/crash-<hash>
+```
+
+### Adding a new fuzz target
+
+1. Create `fuzz/fuzz_targets/<target_name>.rs` with the fuzz target function.
+2. Add a `[[bin]]` entry to `fuzz/Cargo.toml`.
+3. Add the target to the `fuzz-<target_name>` CI job in `.github/workflows/ci.yml`.
+
+### Fuzz target contract
+
+Every fuzz target must:
+- Use `#![no_main]` and `libfuzzer_sys::fuzz_target!`
+- **Never panic** regardless of input (panics are treated as fuzz failures)
+- Return `Err(...)` for invalid input, never crash
+
+---
+
 ## Reporting Issues
 
 When filing a bug report, please include:

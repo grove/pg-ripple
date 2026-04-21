@@ -1,0 +1,17 @@
+{
+  "_comment": "BSBM query latency baselines for pg_ripple (v0.46.0).",
+  "_note": "Values are median latency in milliseconds. Regressions > 10% emit a CI warning.",
+  "_scale": "1M triples",
+  "q1": 0,
+  "q2": 0,
+  "q3": 0,
+  "q4": 0,
+  "q5": 0,
+  "q6": 0,
+  "q7": 0,
+  "q8": 0,
+  "q9": 0,
+  "q10": 0,
+  "q11": 0,
+  "q12": 0
+}

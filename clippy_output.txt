@@ -1,2 +1,0 @@
-   Compiling pg_ripple v0.29.0 (/Users/geir.gronmo/projects/pg-ripple2)
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.78s

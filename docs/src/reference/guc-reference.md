@@ -316,3 +316,35 @@ Set to `on` only in controlled environments where the remote endpoint is a trust
 | Context | `userset` |
 
 Maximum number of entities in a single `owl:sameAs` equivalence cluster before canonicalization is skipped with a PT550 WARNING. A single cluster larger than this limit is usually a data quality problem (e.g., a mistakenly asserted `owl:sameAs owl:Thing`). Set to `0` to disable the check (no limit).
+
+---
+
+## v0.46.0: TopN Push-down & Datalog Sequence Batch
+
+### `pg_ripple.topn_pushdown`
+
+| | |
+|---|---|
+| Type | Boolean |
+| Default | `on` |
+| Context | `userset` |
+
+When `on` (default), SPARQL SELECT queries that contain both `ORDER BY` and `LIMIT N` (with no `OFFSET > 0` and no `DISTINCT`) emit the SQL as `… ORDER BY … LIMIT N` rather than fetching all rows and discarding after decoding.
+
+Set to `off` to disable the optimisation globally — for example, during debugging when you suspect that TopN push-down is producing incorrect results.
+
+The `sparql_explain()` output includes a `"topn_applied": true/false` key that indicates whether push-down was applied to a specific query.
+
+### `pg_ripple.datalog_sequence_batch`
+
+| | |
+|---|---|
+| Type | Integer |
+| Default | `10000` |
+| Range | `100` – `1000000` |
+| Context | `userset` |
+
+SID (statement-ID) range reserved per parallel Datalog worker per batch. Before launching N parallel strata workers, the coordinator atomically advances the global `_pg_ripple.statement_id_seq` sequence by `N * datalog_sequence_batch`, then assigns each worker an exclusive sub-range. Workers insert triples with pre-computed SIDs without touching the shared sequence, eliminating contention.
+
+Increase this value if parallel inference workers frequently conflict on the sequence. Decrease it to reduce unused SID gaps when inference produces fewer triples than expected per batch.
+
