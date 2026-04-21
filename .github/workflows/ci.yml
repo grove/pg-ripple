@@ -391,6 +391,179 @@ jobs:
         if: always()
         run: cargo pgrx stop pg18
 
+  jena-suite:
+    name: Jena conformance suite (non-blocking)
+    runs-on: ubuntu-latest
+    needs: [test, w3c-suite]
+    continue-on-error: true
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo registry
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-
+
+      - name: Cache cargo-pgrx binary
+        uses: actions/cache@v5
+        with:
+          path: ~/.cargo/bin/cargo-pgrx
+          key: ${{ runner.os }}-cargo-pgrx-${{ env.PGRX_VERSION }}
+
+      - name: Cache pgrx PostgreSQL build
+        uses: actions/cache@v5
+        with:
+          path: ~/.pgrx
+          key: ${{ runner.os }}-pgrx-pg18-${{ env.PGRX_VERSION }}
+
+      - name: Cache Jena test data
+        uses: actions/cache@v5
+        id: jena-cache
+        with:
+          path: tests/jena/data
+          key: jena-sparql-${{ hashFiles('scripts/fetch_conformance_tests.sh') }}
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            build-essential pkg-config libssl-dev libclang-dev clang lld \
+            libreadline-dev libicu-dev bison flex curl
+
+      - name: Install cargo-pgrx
+        run: |
+          if ! cargo pgrx --version 2>/dev/null | grep -q "${{ env.PGRX_VERSION }}"; then
+            cargo install cargo-pgrx --version "=${{ env.PGRX_VERSION }}" --locked
+          fi
+
+      - name: Initialise pgrx (PostgreSQL 18)
+        run: |
+          if ! ls ~/.pgrx/18.*/pgrx-install/bin/pg_config 2>/dev/null | grep -q .; then
+            cargo pgrx init --pg18 download
+          fi
+
+      - name: Fetch Jena SPARQL test suite
+        if: steps.jena-cache.outputs.cache-hit != 'true'
+        run: bash scripts/fetch_conformance_tests.sh --jena || echo "Jena download failed — tests will skip"
+
+      - name: Start pgrx PostgreSQL 18
+        run: cargo pgrx start pg18 --postgresql-conf "allow_system_table_mods=on"
+
+      - name: Install pg_ripple
+        run: cargo pgrx install --pg-config $(ls ~/.pgrx/18.*/pgrx-install/bin/pg_config | head -1)
+
+      - name: Run Jena conformance suite (4 threads)
+        env:
+          PGHOST: ${{ github.workspace }}/.pgrx
+          PGPORT: "28818"
+          PGDATABASE: postgres
+          PGUSER: ${{ env.USER }}
+          JENA_THREADS: "4"
+        run: cargo test --test jena_suite -- --nocapture
+
+      - name: Upload Jena conformance report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: jena_report
+          path: tests/conformance/report.json
+          if-no-files-found: ignore
+
+      - name: Stop pgrx PostgreSQL 18
+        if: always()
+        run: cargo pgrx stop pg18
+
+  watdiv-suite:
+    name: WatDiv benchmark suite (non-blocking)
+    runs-on: ubuntu-latest
+    needs: [test, w3c-suite]
+    continue-on-error: true
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo registry
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-
+
+      - name: Cache cargo-pgrx binary
+        uses: actions/cache@v5
+        with:
+          path: ~/.cargo/bin/cargo-pgrx
+          key: ${{ runner.os }}-cargo-pgrx-${{ env.PGRX_VERSION }}
+
+      - name: Cache pgrx PostgreSQL build
+        uses: actions/cache@v5
+        with:
+          path: ~/.pgrx
+          key: ${{ runner.os }}-pgrx-pg18-${{ env.PGRX_VERSION }}
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            build-essential pkg-config libssl-dev libclang-dev clang lld \
+            libreadline-dev libicu-dev bison flex
+
+      - name: Install cargo-pgrx
+        run: |
+          if ! cargo pgrx --version 2>/dev/null | grep -q "${{ env.PGRX_VERSION }}"; then
+            cargo install cargo-pgrx --version "=${{ env.PGRX_VERSION }}" --locked
+          fi
+
+      - name: Initialise pgrx (PostgreSQL 18)
+        run: |
+          if ! ls ~/.pgrx/18.*/pgrx-install/bin/pg_config 2>/dev/null | grep -q .; then
+            cargo pgrx init --pg18 download
+          fi
+
+      - name: Start pgrx PostgreSQL 18
+        run: cargo pgrx start pg18 --postgresql-conf "allow_system_table_mods=on"
+
+      - name: Install pg_ripple
+        run: cargo pgrx install --pg-config $(ls ~/.pgrx/18.*/pgrx-install/bin/pg_config | head -1)
+
+      - name: Run WatDiv benchmark suite (8 threads)
+        env:
+          PGHOST: ${{ github.workspace }}/.pgrx
+          PGPORT: "28818"
+          PGDATABASE: postgres
+          PGUSER: ${{ env.USER }}
+          WATDIV_THREADS: "8"
+        run: cargo test --test watdiv_suite -- --nocapture
+
+      - name: Upload WatDiv benchmark report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: watdiv_report
+          path: tests/conformance/report.json
+          if-no-files-found: ignore
+
+      - name: Stop pgrx PostgreSQL 18
+        if: always()
+        run: cargo pgrx stop pg18
+
   lubm-suite:
     name: LUBM conformance suite (required)
     runs-on: ubuntu-latest
