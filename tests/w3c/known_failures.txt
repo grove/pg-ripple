@@ -18,3 +18,7 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # Property-path tests with GRAPH — fix pending in v0.42.0
 # http://www.w3.org/2009/sparql/docs/tests/data-sparql11/property-path/manifest#pp35  property path inside GRAPH — fix pending
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Type coercion in AVG — pre-existing limitation (xsd:double cast of string literals)
+http://www.w3.org/2009/sparql/docs/tests/data-sparql11/aggregates/manifest#agg-err-02  AVG(IF(isNumeric,xsd:double cast)) — string-to-double cast in aggregation not yet supported
