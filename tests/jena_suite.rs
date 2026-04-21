@@ -175,7 +175,12 @@ fn jena_suite() {
         if r.outcome.is_unexpected_failure() {
             match &r.outcome {
                 conformance::runner::TestOutcome::XPass => {
-                    writeln!(out, "  XPASS [{}ms]  {} (remove from known_failures.txt)", r.duration_ms, r.name).ok();
+                    writeln!(
+                        out,
+                        "  XPASS [{}ms]  {} (remove from known_failures.txt)",
+                        r.duration_ms, r.name
+                    )
+                    .ok();
                 }
                 conformance::runner::TestOutcome::Fail(msg) => {
                     writeln!(out, "  FAIL  [{}ms]  {}", r.duration_ms, r.name).ok();
