@@ -64,20 +64,20 @@ fn datalog_convergence_suite() {
 
     // Build and load a 200-rule custom rule set (100 forward-chaining + 100 OWL RL).
     let custom_rules = build_custom_rules(200);
-    client
+    let load_ok = client
         .execute(
             "SELECT pg_ripple.load_rules($1, $2)",
             &[&"convergence_test", &custom_rules.as_str()],
         )
-        .unwrap_or_else(|e| {
-            // load_rules may not exist yet — skip gracefully.
-            println!("SKIP sub-test 1: load_rules not available ({e})");
-            0u64
-        });
+        .is_ok();
+    if !load_ok {
+        println!("SKIP sub-test 1: load_rules not available — skipping inference step too");
+    }
 
+    if load_ok {
     let start = Instant::now();
     let result = client.query_one(
-        "SELECT (infer_result->>'iterations')::int, (infer_result->>'derived_count')::bigint \
+        "SELECT (infer_result->>'iterations')::int, (infer_result->>'derived')::bigint \
          FROM (SELECT pg_ripple.infer_with_stats('convergence_test') AS infer_result) t",
         &[],
     );
@@ -98,12 +98,13 @@ fn datalog_convergence_suite() {
             println!("SKIP sub-test 1 inference: {e}");
         }
     }
+    } // end if load_ok
 
     // ── Sub-test 2: built-in RDFS + OWL RL on the loaded data ───────────────
     println!("\n[datalog-convergence] Sub-test 2: built-in RDFS + OWL RL inference");
     let start2 = Instant::now();
     let result2 = client.query_one(
-        "SELECT (r->>'iterations')::int, (r->>'derived_count')::bigint \
+        "SELECT (r->>'iterations')::int, (r->>'derived')::bigint \
          FROM (SELECT pg_ripple.materialize_owl_rl() AS r) t",
         &[],
     );
