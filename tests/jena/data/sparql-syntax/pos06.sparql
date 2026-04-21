@@ -1,4 +1,0 @@
-SELECT ?s ?upper WHERE {
-    ?s <http://www.w3.org/2000/01/rdf-schema#label> ?label .
-    BIND(UCASE(?label) AS ?upper)
-}

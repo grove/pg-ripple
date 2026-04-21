@@ -1566,6 +1566,12 @@ fn translate_group(
                     | AggregateFunction::Sample,
                 ..
             }
+        ) || matches!(
+            agg_expr,
+            AggregateExpression::FunctionCall {
+                name: AggregateFunction::Custom(n),
+                ..
+            } if matches!(n.as_str(), "urn:arq:median" | "urn:arq:mode")
         );
         if is_group_concat {
             text_agg_vars.insert(vname.clone());
@@ -1794,10 +1800,48 @@ fn translate_aggregate(
                     };
                     (s.clone(), s)
                 }
-                AggregateFunction::Sample | AggregateFunction::Custom(_) => {
+                AggregateFunction::Sample => {
                     let s = format!("MIN({arg})");
                     (s.clone(), s)
                 }
+                AggregateFunction::Custom(iri) => match iri.as_str() {
+                    "urn:arq:median" => {
+                        // SPARQL ARQ MEDIAN aggregate: compute PERCENTILE_CONT(0.5)
+                        // over the decoded numeric values and re-encode as xsd:decimal.
+                        let decode = format!(
+                            "CASE WHEN ({arg}) IS NULL THEN NULL \
+                             WHEN ({arg}) < 0 THEN \
+                               ((({arg}) & 72057594037927935::bigint) - \
+                               36028797018963968::bigint)::numeric \
+                             ELSE (SELECT CASE WHEN d.datatype IN (\
+                               'http://www.w3.org/2001/XMLSchema#decimal',\
+                               'http://www.w3.org/2001/XMLSchema#double',\
+                               'http://www.w3.org/2001/XMLSchema#float',\
+                               'http://www.w3.org/2001/XMLSchema#integer') \
+                               THEN d.value::numeric ELSE NULL END \
+                               FROM _pg_ripple.dictionary d WHERE d.id = ({arg}) LIMIT 1) \
+                             END"
+                        );
+                        let s = format!(
+                            "pg_ripple.encode_typed_literal(\
+                             trim_scale(PERCENTILE_CONT(0.5::numeric) \
+                             WITHIN GROUP (ORDER BY {decode}))::text,\
+                             'http://www.w3.org/2001/XMLSchema#decimal')"
+                        );
+                        (s.clone(), s)
+                    }
+                    "urn:arq:mode" => {
+                        // SPARQL ARQ MODE aggregate: return the most frequent
+                        // dictionary-encoded bigint directly (no decode/re-encode
+                        // needed because equal literals always share the same ID).
+                        let s = format!("MODE() WITHIN GROUP (ORDER BY {arg})");
+                        (s.clone(), s)
+                    }
+                    _ => {
+                        let s = format!("MIN({arg})");
+                        (s.clone(), s)
+                    }
+                },
             }
         }
     }

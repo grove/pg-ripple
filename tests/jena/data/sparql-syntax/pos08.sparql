@@ -1,9 +1,0 @@
-SELECT ?s ?count WHERE {
-    {
-        SELECT ?s (COUNT(?p) AS ?count) WHERE {
-            ?s ?p ?o .
-        }
-        GROUP BY ?s
-    }
-    FILTER(?count > 0)
-}

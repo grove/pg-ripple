@@ -32,6 +32,19 @@ const JT_UPDATE_EVAL: &str =
     "http://jena.hpl.hp.com/2005/05/test-manifest-extra#UpdateEvaluationTest";
 const JT_NEG_SYNTAX: &str = "http://jena.hpl.hp.com/2005/05/test-manifest-extra#NegativeSyntaxTest";
 const JT_POS_SYNTAX: &str = "http://jena.hpl.hp.com/2005/05/test-manifest-extra#PositiveSyntaxTest";
+/// ARQ serialization round-trip test: parse query and check it re-serializes.
+/// Treated as PositiveSyntax (the query file must parse without error).
+const MFX_TEST_SERIALIZATION: &str =
+    "http://jena.hpl.hp.com/2005/05/test-manifest-extra#TestSerialization";
+/// ARQ query evaluation test without an explicit type IRI (same semantics as
+/// mf:QueryEvaluationTest).
+const MFX_TEST_QUERY: &str = "http://jena.hpl.hp.com/2005/05/test-manifest-extra#TestQuery";
+/// ARQ-specific positive syntax test (query must parse without error).
+const MFX_POS_SYNTAX_ARQ: &str =
+    "http://jena.hpl.hp.com/2005/05/test-manifest-extra#PositiveSyntaxTestARQ";
+/// ARQ-specific negative syntax test (query must fail to parse).
+const MFX_NEG_SYNTAX_ARQ: &str =
+    "http://jena.hpl.hp.com/2005/05/test-manifest-extra#NegativeSyntaxTestARQ";
 
 // ── Shared W3C IRIs ───────────────────────────────────────────────────────────
 
@@ -49,6 +62,18 @@ const MF_POS_SYNTAX: &str =
     "http://www.w3.org/2001/sw/DataAccess/tests/test-manifest#PositiveSyntaxTest11";
 const MF_NEG_SYNTAX: &str =
     "http://www.w3.org/2001/sw/DataAccess/tests/test-manifest#NegativeSyntaxTest11";
+/// SPARQL 1.0 positive syntax test (without the "11" suffix).
+const MF_POS_SYNTAX10: &str =
+    "http://www.w3.org/2001/sw/DataAccess/tests/test-manifest#PositiveSyntaxTest";
+/// SPARQL 1.0 negative syntax test (without the "11" suffix).
+const MF_NEG_SYNTAX10: &str =
+    "http://www.w3.org/2001/sw/DataAccess/tests/test-manifest#NegativeSyntaxTest";
+/// SPARQL update positive syntax test.
+const MF_POS_UPDATE_SYNTAX: &str =
+    "http://www.w3.org/2001/sw/DataAccess/tests/test-manifest#PositiveUpdateSyntaxTest11";
+/// SPARQL update negative syntax test.
+const MF_NEG_UPDATE_SYNTAX: &str =
+    "http://www.w3.org/2001/sw/DataAccess/tests/test-manifest#NegativeUpdateSyntaxTest11";
 const QT_QUERY: &str = "http://www.w3.org/2001/sw/DataAccess/tests/test-query#query";
 const QT_DATA: &str = "http://www.w3.org/2001/sw/DataAccess/tests/test-query#data";
 const QT_GRAPH_DATA: &str = "http://www.w3.org/2001/sw/DataAccess/tests/test-query#graphData";
@@ -183,12 +208,29 @@ pub fn parse_manifest(
             .unwrap_or("");
 
         let test_type = match type_iri {
-            t if t == MF_QUERY_EVAL || t == JT_QUERY_EVAL => JenaTestType::QueryEvaluation,
+            t if t == MF_QUERY_EVAL || t == JT_QUERY_EVAL || t == MFX_TEST_QUERY => {
+                JenaTestType::QueryEvaluation
+            }
             t if t == MF_UPDATE_EVAL || t == UT_UPDATE_EVAL || t == JT_UPDATE_EVAL => {
                 JenaTestType::UpdateEvaluation
             }
-            t if t == MF_POS_SYNTAX || t == JT_POS_SYNTAX => JenaTestType::PositiveSyntax,
-            t if t == MF_NEG_SYNTAX || t == JT_NEG_SYNTAX => JenaTestType::NegativeSyntax,
+            t if t == MF_POS_SYNTAX
+                || t == MF_POS_SYNTAX10
+                || t == MF_POS_UPDATE_SYNTAX
+                || t == JT_POS_SYNTAX
+                || t == MFX_TEST_SERIALIZATION
+                || t == MFX_POS_SYNTAX_ARQ =>
+            {
+                JenaTestType::PositiveSyntax
+            }
+            t if t == MF_NEG_SYNTAX
+                || t == MF_NEG_SYNTAX10
+                || t == MF_NEG_UPDATE_SYNTAX
+                || t == JT_NEG_SYNTAX
+                || t == MFX_NEG_SYNTAX_ARQ =>
+            {
+                JenaTestType::NegativeSyntax
+            }
             _ => JenaTestType::NotClassified,
         };
 
@@ -252,6 +294,25 @@ pub fn parse_manifest(
                 }
             }
         }
+
+        // Infer type for entries that have no rdf:type but carry qt:query (the
+        // dominant pattern in ARQ manifests like Expr, PropertyFunctions, etc.)
+        // or that use `mf:action <file>` directly (syntax tests).
+        let test_type = if test_type != JenaTestType::NotClassified {
+            test_type
+        } else if let Some(ref action) = action_node {
+            if action.starts_with("file://") {
+                // Direct file IRI as action → positive syntax test (query file IS the action).
+                JenaTestType::PositiveSyntax
+            } else if query_file.is_some() {
+                // Blank-node action with qt:query sub-property → evaluation test.
+                JenaTestType::QueryEvaluation
+            } else {
+                JenaTestType::NotClassified
+            }
+        } else {
+            JenaTestType::NotClassified
+        };
 
         // For UPDATE tests, result may be a blank node with ut:data / ut:graphData.
         let result_file = if let Some(ref r) = result_node {

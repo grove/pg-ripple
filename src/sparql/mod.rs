@@ -122,6 +122,98 @@ pub(crate) fn batch_decode(ids: &[i64]) -> HashMap<i64, String> {
     result
 }
 
+// ─── ARQ aggregate preprocessing ─────────────────────────────────────────────
+
+/// Rewrite ARQ extension aggregate keywords to IRI form that spargebra can parse.
+///
+/// Jena ARQ supports `MEDIAN(?v)` and `MODE(?v)` as aggregate extensions.
+/// spargebra 0.4 doesn't recognise these keywords, but DOES accept custom
+/// aggregates written as `<IRI>(?v)`.  This function rewrites:
+///
+/// - `median(` → `<urn:arq:median>(`
+/// - `mode(` → `<urn:arq:mode>(`
+///
+/// at word boundaries (not inside identifiers or prefixed names).
+/// The rewrite is idempotent: already-rewritten queries are returned unchanged.
+fn preprocess_arq_aggregates(src: &str) -> String {
+    let lc = src.to_ascii_lowercase();
+    if !lc.contains("median") && !lc.contains("mode") {
+        return src.to_owned();
+    }
+    let bytes = src.as_bytes();
+    let n = bytes.len();
+    let mut out = String::with_capacity(n + 64);
+    let mut i = 0;
+    while i < n {
+        // Word boundary: previous char must not be an identifier char,
+        // and must not be ?, $, or : (which precede variable/prefix names).
+        let at_boundary = i == 0 || {
+            let pb = bytes[i - 1];
+            !pb.is_ascii_alphanumeric() && pb != b'_' && pb != b'?' && pb != b'$' && pb != b':'
+        };
+        if at_boundary {
+            if let Some(j) = try_arq_agg_keyword(bytes, i, b"median", 6) {
+                out.push_str("<urn:arq:median>");
+                i = j; // j points to '('
+                continue;
+            }
+            if let Some(j) = try_arq_agg_keyword(bytes, i, b"mode", 4) {
+                out.push_str("<urn:arq:mode>");
+                i = j;
+                continue;
+            }
+        }
+        // Advance by full UTF-8 codepoint to avoid splitting multibyte sequences.
+        let char_len = utf8_char_len(bytes[i]);
+        out.push_str(&src[i..i + char_len]);
+        i += char_len;
+    }
+    out
+}
+
+/// Returns the index of `(` if `bytes[pos..]` starts with `kw` (case-insensitive),
+/// followed by optional whitespace and `(`.  Also verifies word-boundary end
+/// (char after keyword is not an identifier char).
+fn try_arq_agg_keyword(bytes: &[u8], pos: usize, kw: &[u8], klen: usize) -> Option<usize> {
+    if pos + klen > bytes.len() {
+        return None;
+    }
+    if !bytes[pos..pos + klen].eq_ignore_ascii_case(kw) {
+        return None;
+    }
+    // Word boundary end
+    if pos + klen < bytes.len() && {
+        let b = bytes[pos + klen];
+        b.is_ascii_alphanumeric() || b == b'_'
+    } {
+        return None;
+    }
+    // Skip optional whitespace
+    let mut j = pos + klen;
+    while j < bytes.len()
+        && (bytes[j] == b' ' || bytes[j] == b'\t' || bytes[j] == b'\n' || bytes[j] == b'\r')
+    {
+        j += 1;
+    }
+    if j < bytes.len() && bytes[j] == b'(' {
+        Some(j)
+    } else {
+        None
+    }
+}
+
+fn utf8_char_len(b: u8) -> usize {
+    if b < 0x80 {
+        1
+    } else if b < 0xE0 {
+        2
+    } else if b < 0xF0 {
+        3
+    } else {
+        4
+    }
+}
+
 // ─── Query execution helpers ──────────────────────────────────────────────────
 
 /// Parse the query, optimize, translate to SQL, and cache the result.
@@ -295,6 +387,10 @@ fn execute_select(
 /// For SELECT queries each row is `{"var1": "value1", "var2": "value2", ...}`.
 /// For ASK queries a single row `{"result": "true"}` or `{"result": "false"}` is returned.
 pub fn sparql(query_text: &str) -> Vec<pgrx::JsonB> {
+    // Normalize ARQ aggregate extensions (MEDIAN/MODE) before parsing.
+    let preprocessed = preprocess_arq_aggregates(query_text);
+    let query_text = preprocessed.as_str();
+
     // Determine query type.
     let query = SparqlParser::new()
         .parse_query(query_text)

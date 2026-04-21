@@ -301,16 +301,38 @@ fn build_entry(case: JenaTestCase, db_url: String, _data_dir: std::path::PathBuf
                     format!("BASE <file:///test/> {src}")
                 };
                 let parser = spargebra::SparqlParser::new();
-                let ok = parser.parse_query(&src_for_parse).is_ok()
-                    || spargebra::SparqlParser::new()
-                        .parse_update(&src_for_parse)
-                        .is_ok();
-                if ok {
-                    return Err(format!(
-                        "expected parse error but query parsed successfully"
-                    ));
+                let query_result = parser.parse_query(&src_for_parse);
+                let update_result = spargebra::SparqlParser::new()
+                    .parse_update(&src_for_parse);
+                let ok = query_result.is_ok() || update_result.is_ok();
+                if !ok {
+                    // spargebra correctly rejected
+                    return Ok(());
                 }
-                return Ok(());
+                // spargebra accepted — run semantic validation to catch violations
+                // that the parser doesn't check (SPARQL 1.1 §18.2.4.1):
+                // 1. SELECT expression self-reference: ((?x+1) AS ?x)
+                // 2. SELECT expression cross-reference: ((?x+1) AS ?y) (2 AS ?x)
+                // 3. Nested aggregates: SUM(COUNT(*))
+                let has_violation = if let Ok(ref q) = query_result {
+                    let pattern = match q {
+                        spargebra::Query::Select { pattern, .. } => Some(pattern),
+                        spargebra::Query::Ask { pattern, .. } => Some(pattern),
+                        spargebra::Query::Construct { pattern, .. } => Some(pattern),
+                        spargebra::Query::Describe { pattern, .. } => Some(pattern),
+                    };
+                    pattern.map_or(false, sparql_has_semantic_violation)
+                } else if let Ok(ref u) = update_result {
+                    sparql_update_has_semantic_violation(u)
+                } else {
+                    false
+                };
+                if has_violation {
+                    return Ok(());
+                }
+                return Err(format!(
+                    "expected parse error but query parsed successfully"
+                ));
             }
             JenaTestType::QueryEvaluation | JenaTestType::UpdateEvaluation => {
                 // Full evaluation requires a live DB.
@@ -448,6 +470,193 @@ fn run_evaluation_test(client: &mut postgres::Client, case: &JenaTestCase) -> Re
 
     tx.rollback().map_err(|e| format!("rollback error: {e}"))?;
     Ok(())
+}
+
+// ── SPARQL semantic validation helpers ───────────────────────────────────────
+//
+// These functions detect semantic violations that spargebra's parser
+// accepts but SPARQL 1.1 §18.2.4.1 forbids:
+//
+// 1. SELECT expression self-reference: ((?x+1) AS ?x) — the alias variable
+//    appears free in its own expression.
+// 2. SELECT expression cross-reference: ((?x+1) AS ?y) (2 AS ?x) — an
+//    expression uses a variable introduced as alias by another SELECT expression
+//    in the same SELECT clause.
+// 3. Nested aggregates: SUM(COUNT(*)) — an aggregate's expression references
+//    a variable that is itself an aggregate output in the same Group.
+//
+// We detect these in the NegativeSyntax test handler so that queries which
+// spargebra parses without error are still correctly flagged as invalid.
+
+/// Returns true if the graph pattern (from a parsed SPARQL query) contains
+/// any SPARQL 1.1 §18.2.4.1 semantic violation.
+fn sparql_has_semantic_violation(pattern: &spargebra::algebra::GraphPattern) -> bool {
+    use spargebra::algebra::GraphPattern;
+    match pattern {
+        GraphPattern::Project { inner, .. } => {
+            // Check Extend nodes directly inside this projection for scope violations.
+            let extends = collect_extend_chain(inner);
+            if check_extend_scope_violations(&extends) {
+                return true;
+            }
+            sparql_has_semantic_violation(inner)
+        }
+        GraphPattern::Group { inner, aggregates, .. } => {
+            // Check for nested aggregates: an aggregate's expression variable
+            // is also an aggregate output in the same Group.
+            let agg_output_vars: Vec<&spargebra::term::Variable> =
+                aggregates.iter().map(|(v, _)| v).collect();
+            for (var, agg_expr) in aggregates {
+                if let spargebra::algebra::AggregateExpression::FunctionCall {
+                    expr, ..
+                } = agg_expr
+                {
+                    for out_var in &agg_output_vars {
+                        if *out_var != var && expr_uses_variable(expr, out_var) {
+                            return true; // nested aggregate detected
+                        }
+                    }
+                }
+            }
+            sparql_has_semantic_violation(inner)
+        }
+        GraphPattern::Extend { inner, .. }
+        | GraphPattern::Filter { inner, .. }
+        | GraphPattern::Distinct { inner }
+        | GraphPattern::Reduced { inner }
+        | GraphPattern::OrderBy { inner, .. }
+        | GraphPattern::Slice { inner, .. } => sparql_has_semantic_violation(inner),
+        GraphPattern::LeftJoin { left, right, .. }
+        | GraphPattern::Join { left, right }
+        | GraphPattern::Minus { left, right }
+        | GraphPattern::Union { left, right } => {
+            sparql_has_semantic_violation(left) || sparql_has_semantic_violation(right)
+        }
+        GraphPattern::Graph { inner, .. } | GraphPattern::Service { inner, .. } => {
+            sparql_has_semantic_violation(inner)
+        }
+        _ => false,
+    }
+}
+
+/// Returns true if any SPARQL update operation contains a semantic violation.
+fn sparql_update_has_semantic_violation(update: &spargebra::Update) -> bool {
+    use spargebra::GraphUpdateOperation;
+    for op in &update.operations {
+        let has_violation = match op {
+            GraphUpdateOperation::InsertData { .. }
+            | GraphUpdateOperation::DeleteData { .. }
+            | GraphUpdateOperation::Drop { .. }
+            | GraphUpdateOperation::Clear { .. }
+            | GraphUpdateOperation::Create { .. }
+            | GraphUpdateOperation::Load { .. } => false,
+            GraphUpdateOperation::DeleteInsert { pattern, .. } => {
+                sparql_has_semantic_violation(pattern)
+            }
+        };
+        if has_violation {
+            return true;
+        }
+    }
+    false
+}
+
+/// Collect the chain of consecutive Extend nodes directly inside a pattern,
+/// stopping at the first non-Extend node.  Returns (variable, expression) pairs
+/// in the order they appear in the algebra (outermost first).
+fn collect_extend_chain(
+    pattern: &spargebra::algebra::GraphPattern,
+) -> Vec<(&spargebra::term::Variable, &spargebra::algebra::Expression)> {
+    use spargebra::algebra::GraphPattern;
+    let mut result = Vec::new();
+    let mut curr = pattern;
+    // Skip over Distinct/Reduced/OrderBy/Slice which may wrap the Extend chain.
+    loop {
+        match curr {
+            GraphPattern::Extend {
+                inner,
+                variable,
+                expression,
+            } => {
+                result.push((variable, expression));
+                curr = inner;
+            }
+            GraphPattern::Distinct { inner }
+            | GraphPattern::Reduced { inner }
+            | GraphPattern::OrderBy { inner, .. }
+            | GraphPattern::Slice { inner, .. } => {
+                curr = inner;
+            }
+            _ => break,
+        }
+    }
+    result
+}
+
+/// Check the collected Extend chain for scope violations:
+/// - self-reference: alias variable appears in its own expression
+/// - cross-reference: expression uses a variable that is an alias of another
+///   Extend in the same chain (SELECT clause)
+fn check_extend_scope_violations(
+    extends: &[(&spargebra::term::Variable, &spargebra::algebra::Expression)],
+) -> bool {
+    if extends.is_empty() {
+        return false;
+    }
+    for (i, (var, expr)) in extends.iter().enumerate() {
+        // Self-reference
+        if expr_uses_variable(expr, var) {
+            return true;
+        }
+        // Cross-reference: expression uses another SELECT-alias variable
+        for (j, (other_var, _)) in extends.iter().enumerate() {
+            if i != j && expr_uses_variable(expr, other_var) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// Returns true if `expr` contains a free reference to `var`.
+fn expr_uses_variable(
+    expr: &spargebra::algebra::Expression,
+    var: &spargebra::term::Variable,
+) -> bool {
+    use spargebra::algebra::Expression;
+    match expr {
+        Expression::Variable(v) => v == var,
+        Expression::Or(a, b)
+        | Expression::And(a, b)
+        | Expression::Equal(a, b)
+        | Expression::SameTerm(a, b)
+        | Expression::Greater(a, b)
+        | Expression::GreaterOrEqual(a, b)
+        | Expression::Less(a, b)
+        | Expression::LessOrEqual(a, b)
+        | Expression::Add(a, b)
+        | Expression::Subtract(a, b)
+        | Expression::Multiply(a, b)
+        | Expression::Divide(a, b) => {
+            expr_uses_variable(a, var) || expr_uses_variable(b, var)
+        }
+        Expression::In(a, bs) => {
+            expr_uses_variable(a, var) || bs.iter().any(|b| expr_uses_variable(b, var))
+        }
+        Expression::UnaryPlus(a) | Expression::UnaryMinus(a) | Expression::Not(a) => {
+            expr_uses_variable(a, var)
+        }
+        Expression::If(a, b, c) => {
+            expr_uses_variable(a, var)
+                || expr_uses_variable(b, var)
+                || expr_uses_variable(c, var)
+        }
+        Expression::Coalesce(exprs) | Expression::FunctionCall(_, exprs) => {
+            exprs.iter().any(|e| expr_uses_variable(e, var))
+        }
+        Expression::Bound(v) => v == var,
+        _ => false,
+    }
 }
 
 // ── ARQ query normalization ───────────────────────────────────────────────────

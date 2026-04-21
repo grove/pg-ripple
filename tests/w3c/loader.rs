@@ -20,11 +20,13 @@ pub fn load_default_graph(
     match format_from_path(file) {
         "rdfxml" => {
             let content = inject_rdfxml_base(&content, file);
-            tx.execute("SELECT pg_ripple.load_rdfxml($1, false)", &[&content])?
+            tx.execute("SELECT pg_ripple.load_rdfxml($1, false)", &[&content])
+                .map_err(|e| pg_err_msg(e))?
         }
         _ => {
             let content = inject_turtle_base(&content, file);
-            tx.execute("SELECT pg_ripple.load_turtle($1, false)", &[&content])?
+            tx.execute("SELECT pg_ripple.load_turtle($1, false)", &[&content])
+                .map_err(|e| pg_err_msg(e))?
         }
     };
     Ok(())
@@ -44,14 +46,16 @@ pub fn load_named_graph(
             tx.execute(
                 "SELECT pg_ripple.load_rdfxml_into_graph($1, $2)",
                 &[&content, &graph_iri],
-            )?
+            )
+            .map_err(|e| pg_err_msg(e))?
         }
         _ => {
             let content = inject_turtle_base(&content, file);
             tx.execute(
                 "SELECT pg_ripple.load_turtle_into_graph($1, $2)",
                 &[&content, &graph_iri],
-            )?
+            )
+            .map_err(|e| pg_err_msg(e))?
         }
     };
     Ok(())
@@ -109,6 +113,16 @@ pub fn format_from_path(path: &Path) -> &'static str {
         Some("trig") => "trig",
         Some("nq") => "nquads",
         _ => "turtle",
+    }
+}
+
+/// Extract the actual PostgreSQL error message from a postgres::Error.
+/// Falls back to the Display representation if it's not a DB error.
+fn pg_err_msg(e: postgres::Error) -> String {
+    if let Some(db) = e.as_db_error() {
+        db.message().to_string()
+    } else {
+        e.to_string()
     }
 }
 
