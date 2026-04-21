@@ -189,7 +189,10 @@ fn jena_suite() {
 // ── Helper ────────────────────────────────────────────────────────────────────
 
 fn build_entry(case: JenaTestCase, db_url: String, _data_dir: std::path::PathBuf) -> TestEntry {
-    let key = case.iri.clone();
+    // Use the human-readable name (mf:name) as the lookup key for known_failures.txt.
+    // The IRI is a file:// URI that is machine-specific and cannot be used in the
+    // committed known_failures list.
+    let key = case.name.clone();
     let name = case.name.clone();
 
     let run: Box<dyn FnOnce() -> Result<(), String> + Send + 'static> = Box::new(move || {
