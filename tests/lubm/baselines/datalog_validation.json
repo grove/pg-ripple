@@ -1,0 +1,27 @@
+{
+  "description": "Datalog validation baselines for the LUBM univ1 fixture.",
+  "fixture": "tests/lubm/fixtures/univ1.ttl",
+  "note": "After loading univ1.ttl WITHOUT explicit supertype assertions (i.e. each entity typed only with its most specific class), running pg_ripple.load_rules_builtin('owl-rl') + pg_ripple.infer('owl-rl') must produce inferred triples that yield the same Q1-Q14 counts as the fully-typed fixture.",
+  "owl_rl_rule_set_name": "owl-rl",
+  "expected_rule_count_min": 20,
+  "expected_iterations_min": 1,
+  "expected_iterations_max": 10,
+  "inferred_triple_counts": {
+    "note": "Lower bounds on key entailments after OWL RL materialization from implicit-type-only data. Exact counts depend on implementation; these are minimums.",
+    "rdf:type_ub:Student_from_GraduateStudent": 7,
+    "rdf:type_ub:Student_from_UndergraduateStudent": 5,
+    "rdf:type_ub:Professor_from_FullProfessor": 1,
+    "rdf:type_ub:Professor_from_AssistantProfessor": 2,
+    "rdf:type_ub:Person_from_Student": 12,
+    "rdf:type_ub:Faculty_from_Professor": 4
+  },
+  "goal_queries": {
+    "Q1_count_after_inference": 3,
+    "Q6_count_after_inference": 12,
+    "Q14_count_after_inference": 5
+  },
+  "materialization_perf": {
+    "univ1_target_ms": 5000,
+    "note": "Materialization of OWL RL rules against univ1 fixture must complete in < 5 seconds."
+  }
+}

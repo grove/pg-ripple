@@ -13,6 +13,44 @@ Versions correspond to the milestones in [ROADMAP.md](ROADMAP.md).
 
 ---
 
+## [0.44.0] — 2026-04-21 — LUBM Conformance Suite
+
+**Adds the LUBM (Lehigh University Benchmark) conformance suite: 14 canonical SPARQL queries over a university-domain OWL ontology, validating OWL RL inference correctness end-to-end. All 14 queries pass with 0 known failures. The Datalog validation sub-suite separately confirms that `pg_ripple.infer('owl-rl')` produces identical results from implicit-type data.**
+
+### What's new
+
+- **LUBM test harness** (`tests/lubm_suite.rs`) — 14 canonical LUBM queries (`q01.sparql`–`q14.sparql`) validated against the bundled `tests/lubm/fixtures/univ1.ttl` synthetic dataset. All 14 pass with exact reference cardinality match. **0 known failures.**
+
+- **Self-contained synthetic fixture** (`tests/lubm/fixtures/univ1.ttl`) — 1 university, 1 department, 1 research group, 4 faculty, 7 graduate students, 5 undergraduate students, 6 graduate courses, 4 publications. No external data generator or Java runtime required.
+
+- **LUBM OWL ontology** (`tests/lubm/ontology/univ-bench-owl.ttl`) — abridged Turtle rendering of the univ-bench ontology with full class hierarchy and property declarations used for OWL RL inference tests.
+
+- **Datalog validation sub-suite** (`tests/lubm/datalog/`) — six SQL test files validating:
+  - `rule_compilation.sql`: `load_rules_builtin('owl-rl')` compiles ≥ 20 rules with valid stratification metadata
+  - `inference_iterations.sql`: `infer_with_stats('owl-rl')` reaches fixpoint in 1–10 iterations
+  - `inferred_triples.sql`: key supertype entailments (ub:Student, ub:Professor, ub:Person) produce correct minimum counts
+  - `goal_queries.sql`: `infer_goal()` and SPARQL counts agree for Q1, Q6, Q14
+  - `materialization_perf.sql`: `infer('owl-rl')` completes in < 5 s on the univ1 fixture
+  - `custom_rules.sql`: user-defined Datalog rules (transitive-closure, custom lattice) compile and produce correct results
+
+- **CI job** (`lubm-suite`) — runs after `w3c-suite`; generates no external data (fully self-contained); all 14 queries must pass (blocking).
+
+- **LUBM conformance reference page** (`docs/src/reference/lubm-results.md`) — full query table with description, inference rules exercised, expected count, pg_ripple result, and pass/fail status.
+
+- **`lubm:` known-failures prefix** added to `tests/conformance/known_failures.txt` — 0 entries at release.
+
+### Bug fixes
+
+- **`vp_rare` set semantics** (migration 0.43.0→0.44.0): added `UNIQUE(p, s, o, g)` constraint to `_pg_ripple.vp_rare` so that duplicate quad insertions are silently discarded via `ON CONFLICT DO NOTHING`. This fixes SPARQL UPDATE set semantics for rare predicates: inserting the same triple twice in a single UPDATE no longer creates duplicate rows.
+
+### Documentation
+
+- `docs/src/reference/lubm-results.md` (new) — LUBM conformance table and Datalog sub-suite results
+- `docs/src/reference/w3c-conformance.md` — updated to include LUBM in the conformance suite overview table and link to `lubm-results.md`
+- `docs/src/reference/running-conformance-tests.md` — updated with LUBM data generation, ontology loading, and baseline regeneration instructions
+
+---
+
 ## [0.43.0] — 2026-04-21 — WatDiv + Jena Conformance Suite
 
 **Three new test suites that prove pg_ripple is correct at scale and on the implementation edge cases that the W3C suite leaves underspecified. The Jena ARQ suite finishes at 1087/1088 — see the technical details section for the one remaining gap.**

@@ -1,0 +1,12 @@
+# LUBM Q9: Students taking graduate courses taught by AssistantProfessors.
+# Tests: 3-way join (Student × AssistantProfessor × GraduateCourse).
+# Expected result count (univ1 fixture): 7
+PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+PREFIX ub:  <http://www.lehigh.edu/~zhp2/2004/0401/univ-bench.owl#>
+SELECT ?X ?Y ?Z WHERE {
+  ?X rdf:type ub:Student .
+  ?Y rdf:type ub:AssistantProfessor .
+  ?Z rdf:type ub:GraduateCourse .
+  ?X ub:takesCourse ?Z .
+  ?Y ub:teacherOf ?Z
+}

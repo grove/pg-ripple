@@ -1,6 +1,6 @@
 # Running Conformance Tests
 
-pg_ripple ships three complementary conformance suites that can be run locally
+pg_ripple ships four complementary conformance suites that can be run locally
 or in CI.  This page covers how to set up data, run each suite, and interpret results.
 
 ## Prerequisites
@@ -151,19 +151,76 @@ watdiv:B7  known cardinality mismatch with OPTIONAL
 
 ---
 
+## LUBM benchmark suite (v0.44.0+)
+
+The LUBM (Lehigh University Benchmark) suite validates OWL RL inference correctness
+through 14 canonical SPARQL queries over a university-domain ontology.
+
+### Data location
+
+The LUBM suite is **self-contained** — no download or external data generation is needed.
+The synthetic fixture is bundled at `tests/lubm/fixtures/univ1.ttl`.
+
+### Running
+
+```sh
+# Start pg_ripple
+cargo pgrx start pg18
+
+# Run all 14 LUBM queries + Datalog validation sub-suite (< 30s):
+cargo test --test lubm_suite -- --nocapture
+```
+
+### What is tested
+
+- **14 canonical queries** (`tests/lubm/queries/q01.sparql` – `q14.sparql`) against the
+  bundled univ1 fixture — exact row-count validation.
+- **OWL RL rule loading** via `pg_ripple.load_rules_builtin('owl-rl')`.
+- **Inference materialization** via `pg_ripple.infer('owl-rl')` — verifies fixpoint
+  is reached in ≤ 10 iterations and completes in < 5 s.
+- **Goal queries** via `pg_ripple.infer_goal()` — validates inference engine results
+  match SPARQL query results.
+- **Custom Datalog rules** — defines ad-hoc rules on LUBM data and validates correctness.
+
+### Known failures
+
+Prefix entries with `lubm:` in `tests/conformance/known_failures.txt`:
+
+```
+# Example — Q2 multi-hop join returns wrong count
+lubm:Q2  multi-hop memberOf/subOrganizationOf join bug
+```
+
+### Regenerating baselines
+
+If the fixture is changed, regenerate the baseline counts:
+
+```sh
+cargo pgrx start pg18
+# Run the suite once, observe the actual counts in the output,
+# then update tests/lubm/baselines/univ1.json accordingly.
+```
+
+### See also
+
+- [LUBM Results](lubm-results.md) — full conformance table and Datalog sub-suite results
+
+---
+
 ## Unified report
 
-All three suites write results to `tests/conformance/report.json`:
+All suites write results to `tests/conformance/report.json`:
 
 ```json
 {
-  "w3c": { "suite": "w3c", "total": 3100, "passed": 3097, "failed": 0, ... },
-  "jena": { "suite": "jena", "total": 1000, "passed": 983, "failed": 0, ... },
-  "watdiv": { "suite": "watdiv", "total": 100, "passed": 100, "failed": 0, ... }
+  "w3c":    { "suite": "w3c",    "total": 3100, "passed": 3097, "failed": 0, ... },
+  "jena":   { "suite": "jena",   "total": 1000, "passed": 983,  "failed": 0, ... },
+  "watdiv": { "suite": "watdiv", "total": 100,  "passed": 100,  "failed": 0, ... }
 }
 ```
 
 This file is uploaded as the `conformance_report` CI artifact after each run.
+(The LUBM suite writes pass/fail results to stdout; a JSON report artifact is planned for v0.45.0.)
 
 ## Updating baselines
 
@@ -186,6 +243,7 @@ Format:
 w3c:http://...    reason
 jena:http://...   reason
 watdiv:S3         reason
+lubm:Q2           reason
 ```
 
 Any test listed here that **unexpectedly passes** (XPASS) triggers a CI notice
@@ -194,4 +252,5 @@ to remove the entry.
 ## See also
 
 - [W3C Conformance](../reference/w3c-conformance.md) — per-category pass rates
+- [LUBM Results](../reference/lubm-results.md) — OWL RL conformance table
 - [WatDiv Results](../reference/watdiv-results.md) — benchmark metrics and results table

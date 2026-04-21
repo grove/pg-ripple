@@ -1,22 +1,23 @@
 # W3C Conformance
 
-This page summarises pg_ripple's conformance status against the W3C SPARQL 1.1, Apache Jena, and SHACL Core test suites.
+This page summarises pg_ripple's conformance status against the W3C SPARQL 1.1, Apache Jena, SHACL Core, WatDiv, and LUBM test suites.
 
 As of v0.41.0, conformance is measured by integrated test harnesses that run in CI on every push to `main`. Pass rates are published as the `conformance_report` artifact on the [Actions page](https://github.com/grove/pg-ripple/actions).
 
 ## Test suites
 
-pg_ripple runs three complementary conformance suites:
+pg_ripple runs four complementary conformance suites:
 
 | Suite | Tests | What it validates |
 |---|---|---|
 | **W3C SPARQL 1.1** | ~3 000 | Standard conformance on small, well-defined fixtures |
 | **Apache Jena** | ~1 000 | Implementation edge cases (type coercion, date-time, blank-node scoping) |
 | **WatDiv** | 100 templates | Correctness and performance at 10M-triple scale |
+| **LUBM** | 14 queries | OWL RL inference correctness under ontological reasoning (v0.44.0+) |
 
-All three suites write per-suite results into a unified `tests/conformance/report.json` artifact.
+All suites write per-suite results into a unified `tests/conformance/report.json` artifact.
 
-See [Running Conformance Tests](running-conformance-tests.md) for local setup instructions and the [WatDiv Results](watdiv-results.md) page for benchmark metrics.
+See [Running Conformance Tests](running-conformance-tests.md) for local setup instructions, the [WatDiv Results](watdiv-results.md) page for performance metrics, and the [LUBM Results](lubm-results.md) page for OWL RL conformance details.
 
 ---
 

@@ -1,0 +1,71 @@
+@prefix rdf:  <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix owl:  <http://www.w3.org/2002/07/owl#> .
+@prefix xsd:  <http://www.w3.org/2001/XMLSchema#> .
+@prefix ub:   <http://www.lehigh.edu/~zhp2/2004/0401/univ-bench.owl#> .
+
+# Univ-Bench Ontology — abridged Turtle rendering used for LUBM conformance testing.
+# Original: http://swat.cse.lehigh.edu/onto/univ-bench.owl
+# This file contains the class hierarchy and property declarations needed for
+# OWL RL (rdfs2/rdfs3/cls-svf1) inference tests.
+
+# ── Class hierarchy ───────────────────────────────────────────────────────────
+
+ub:University  a owl:Class .
+ub:Department  a owl:Class .
+ub:ResearchGroup a owl:Class .
+ub:Institute   a owl:Class .
+ub:Organization a owl:Class .
+
+ub:Person      a owl:Class .
+ub:Employee    a owl:Class ; rdfs:subClassOf ub:Person .
+ub:Faculty     a owl:Class ; rdfs:subClassOf ub:Employee .
+ub:Professor   a owl:Class ; rdfs:subClassOf ub:Faculty .
+ub:FullProfessor      a owl:Class ; rdfs:subClassOf ub:Professor .
+ub:AssociateProfessor a owl:Class ; rdfs:subClassOf ub:Professor .
+ub:AssistantProfessor a owl:Class ; rdfs:subClassOf ub:Professor .
+ub:Lecturer    a owl:Class ; rdfs:subClassOf ub:Faculty .
+
+ub:Student                a owl:Class ; rdfs:subClassOf ub:Person .
+ub:GraduateStudent        a owl:Class ; rdfs:subClassOf ub:Student .
+ub:UndergraduateStudent   a owl:Class ; rdfs:subClassOf ub:Student .
+
+ub:ResearchAssistant  a owl:Class ; rdfs:subClassOf ub:Employee .
+ub:TeachingAssistant  a owl:Class ; rdfs:subClassOf ub:Employee .
+
+ub:Course          a owl:Class .
+ub:GraduateCourse  a owl:Class ; rdfs:subClassOf ub:Course .
+ub:Publication     a owl:Class .
+ub:Research        a owl:Class .
+
+# ── Object properties ─────────────────────────────────────────────────────────
+
+ub:subOrganizationOf  a owl:ObjectProperty .
+ub:memberOf           a owl:ObjectProperty .
+ub:worksFor           a owl:ObjectProperty .
+ub:headOf             a owl:ObjectProperty .
+ub:advisor            a owl:ObjectProperty .
+ub:takesCourse        a owl:ObjectProperty .
+ub:teacherOf          a owl:ObjectProperty .
+ub:teachingAssistantOf a owl:ObjectProperty .
+ub:undergraduateDegreeFrom a owl:ObjectProperty .
+ub:mastersDegreeFrom  a owl:ObjectProperty .
+ub:doctoralDegreeFrom a owl:ObjectProperty .
+ub:publicationAuthor  a owl:ObjectProperty .
+ub:researchInterest   a owl:ObjectProperty .
+
+# Domain/range declarations (used by OWL RL rdfs2/rdfs3 rules)
+ub:memberOf    rdfs:domain ub:Person .
+ub:worksFor    rdfs:domain ub:Employee .
+ub:advisor     rdfs:domain ub:Student ; rdfs:range ub:Faculty .
+ub:headOf      rdfs:range ub:Department .
+ub:teacherOf   rdfs:domain ub:Faculty .
+ub:takesCourse rdfs:domain ub:Student .
+
+# ── Datatype properties ───────────────────────────────────────────────────────
+
+ub:name           a owl:DatatypeProperty .
+ub:emailAddress   a owl:DatatypeProperty .
+ub:telephone      a owl:DatatypeProperty .
+ub:title          a owl:DatatypeProperty .
+ub:publicationDate a owl:DatatypeProperty .

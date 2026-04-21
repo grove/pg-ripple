@@ -1,0 +1,9 @@
+# LUBM Q12: Professors who are heads of Department0.
+# Tests: ub:headOf + ub:Professor type; exercises ub:headOf rdfs:range inference.
+# Expected result count (univ1 fixture): 1
+PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+PREFIX ub:  <http://www.lehigh.edu/~zhp2/2004/0401/univ-bench.owl#>
+SELECT ?X WHERE {
+  ?X rdf:type ub:Professor .
+  ?X ub:headOf <http://www.Department0.University0.edu>
+}

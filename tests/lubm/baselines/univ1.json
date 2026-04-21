@@ -1,0 +1,21 @@
+{
+  "description": "Expected SELECT result row counts for the 14 canonical LUBM queries against the univ1 synthetic fixture.",
+  "fixture": "tests/lubm/fixtures/univ1.ttl",
+  "note": "Counts are computed against the univ1.ttl dataset with ALL superclass types stated explicitly. No OWL RL inference is required to match these counts. The Datalog sub-suite separately validates that inference from implicit types produces identical results.",
+  "queries": {
+    "Q1":  3,
+    "Q2":  2,
+    "Q3":  2,
+    "Q4":  4,
+    "Q5":  3,
+    "Q6":  12,
+    "Q7":  3,
+    "Q8":  12,
+    "Q9":  7,
+    "Q10": 3,
+    "Q11": 1,
+    "Q12": 1,
+    "Q13": 1,
+    "Q14": 5
+  }
+}

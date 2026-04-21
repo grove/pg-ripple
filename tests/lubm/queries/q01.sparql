@@ -1,0 +1,9 @@
+# LUBM Q1: Graduate students taking GraduateCourse0 from Department0/University0.
+# Tests: rdf:type ub:GraduateStudent + ub:takesCourse lookup.
+# Expected result count (univ1 fixture): 3
+PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+PREFIX ub:  <http://www.lehigh.edu/~zhp2/2004/0401/univ-bench.owl#>
+SELECT ?X WHERE {
+  ?X rdf:type ub:GraduateStudent .
+  ?X ub:takesCourse <http://www.Department0.University0.edu/GraduateCourse0>
+}

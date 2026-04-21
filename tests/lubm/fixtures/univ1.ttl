@@ -1,0 +1,221 @@
+@prefix rdf:  <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix owl:  <http://www.w3.org/2002/07/owl#> .
+@prefix xsd:  <http://www.w3.org/2001/XMLSchema#> .
+@prefix ub:   <http://www.lehigh.edu/~zhp2/2004/0401/univ-bench.owl#> .
+
+# Synthetic LUBM univ-1 dataset for pg_ripple conformance testing.
+#
+# Structure: 1 university, 1 department, 1 research group, 4 faculty,
+# 7 graduate students, 5 undergraduate students, 6 graduate courses,
+# 1 undergraduate course, 4 publications.
+#
+# All types are stated explicitly (including superclasses) so the 14
+# canonical LUBM queries return non-zero results even without OWL RL
+# inference.  The Datalog sub-suite separately validates that inference
+# produces the same results from implicit types alone.
+#
+# Expected query result counts (after data load, no inference required):
+#   Q1:3  Q2:2  Q3:2  Q4:4  Q5:3  Q6:12  Q7:3  Q8:12  Q9:7
+#   Q10:3 Q11:1 Q12:1 Q13:1 Q14:5
+
+# ── University & Department ───────────────────────────────────────────────────
+
+<http://www.University0.edu>
+    a ub:University, owl:Thing .
+
+<http://www.Department0.University0.edu>
+    a ub:Department, owl:Thing ;
+    ub:subOrganizationOf <http://www.University0.edu> .
+
+<http://www.Department0.University0.edu/ResearchGroup0>
+    a ub:ResearchGroup, owl:Thing ;
+    ub:subOrganizationOf <http://www.Department0.University0.edu> .
+
+# ── Courses ───────────────────────────────────────────────────────────────────
+
+<http://www.Department0.University0.edu/GraduateCourse0>
+    a ub:GraduateCourse, ub:Course, owl:Thing .
+
+<http://www.Department0.University0.edu/GraduateCourse1>
+    a ub:GraduateCourse, ub:Course, owl:Thing .
+
+<http://www.Department0.University0.edu/GraduateCourse2>
+    a ub:GraduateCourse, ub:Course, owl:Thing .
+
+<http://www.Department0.University0.edu/GraduateCourse3>
+    a ub:GraduateCourse, ub:Course, owl:Thing .
+
+<http://www.Department0.University0.edu/GraduateCourse4>
+    a ub:GraduateCourse, ub:Course, owl:Thing .
+
+<http://www.Department0.University0.edu/GraduateCourse5>
+    a ub:GraduateCourse, ub:Course, owl:Thing .
+
+<http://www.Department0.University0.edu/UndergraduateCourse0>
+    a ub:Course, owl:Thing .
+
+# ── Faculty ───────────────────────────────────────────────────────────────────
+
+# FullProfessor0 — head of Department0, teaches GC3 and GC4
+<http://www.Department0.University0.edu/FullProfessor0>
+    a ub:FullProfessor, ub:Professor, ub:Faculty, ub:Employee, ub:Person, owl:Thing ;
+    ub:worksFor      <http://www.Department0.University0.edu> ;
+    ub:headOf        <http://www.Department0.University0.edu> ;
+    ub:teacherOf     <http://www.Department0.University0.edu/GraduateCourse3>,
+                     <http://www.Department0.University0.edu/GraduateCourse4> ;
+    ub:doctoralDegreeFrom <http://www.University0.edu> ;
+    ub:name          "FullProfessor0"^^xsd:string ;
+    ub:emailAddress  "fp0@Department0.University0.edu"^^xsd:string ;
+    ub:telephone     "555-1000"^^xsd:string .
+
+# AssociateProfessor0 — teaches GC5
+<http://www.Department0.University0.edu/AssociateProfessor0>
+    a ub:AssociateProfessor, ub:Professor, ub:Faculty, ub:Employee, ub:Person, owl:Thing ;
+    ub:worksFor      <http://www.Department0.University0.edu> ;
+    ub:teacherOf     <http://www.Department0.University0.edu/GraduateCourse5> ;
+    ub:name          "AssociateProfessor0"^^xsd:string ;
+    ub:emailAddress  "acp0@Department0.University0.edu"^^xsd:string ;
+    ub:telephone     "555-1001"^^xsd:string .
+
+# AssistantProfessor0 — teaches GC0, GC1, UC0; also a TA for GC3 (exercises Q13)
+<http://www.Department0.University0.edu/AssistantProfessor0>
+    a ub:AssistantProfessor, ub:Professor, ub:Faculty, ub:Employee, ub:Person, owl:Thing ;
+    ub:worksFor      <http://www.Department0.University0.edu> ;
+    ub:teacherOf     <http://www.Department0.University0.edu/GraduateCourse0>,
+                     <http://www.Department0.University0.edu/GraduateCourse1>,
+                     <http://www.Department0.University0.edu/UndergraduateCourse0> ;
+    ub:teachingAssistantOf <http://www.Department0.University0.edu/GraduateCourse3> ;
+    ub:name          "AssistantProfessor0"^^xsd:string ;
+    ub:emailAddress  "asp0@Department0.University0.edu"^^xsd:string ;
+    ub:telephone     "555-1002"^^xsd:string .
+
+# AssistantProfessor1 — teaches GC2
+<http://www.Department0.University0.edu/AssistantProfessor1>
+    a ub:AssistantProfessor, ub:Professor, ub:Faculty, ub:Employee, ub:Person, owl:Thing ;
+    ub:worksFor      <http://www.Department0.University0.edu> ;
+    ub:teacherOf     <http://www.Department0.University0.edu/GraduateCourse2> ;
+    ub:name          "AssistantProfessor1"^^xsd:string ;
+    ub:emailAddress  "asp1@Department0.University0.edu"^^xsd:string ;
+    ub:telephone     "555-1003"^^xsd:string .
+
+# Lecturer0
+<http://www.Department0.University0.edu/Lecturer0>
+    a ub:Lecturer, ub:Faculty, ub:Employee, ub:Person, owl:Thing ;
+    ub:worksFor      <http://www.Department0.University0.edu> ;
+    ub:name          "Lecturer0"^^xsd:string ;
+    ub:emailAddress  "lec0@Department0.University0.edu"^^xsd:string .
+
+# ── Graduate Students ─────────────────────────────────────────────────────────
+
+# GraduateStudent0 — takes GC0, GC1; advisor FP0; undergrad from Univ0; in ResearchGroup0
+<http://www.Department0.University0.edu/GraduateStudent0>
+    a ub:GraduateStudent, ub:Student, ub:Person, owl:Thing ;
+    ub:memberOf      <http://www.Department0.University0.edu>,
+                     <http://www.Department0.University0.edu/ResearchGroup0> ;
+    ub:takesCourse   <http://www.Department0.University0.edu/GraduateCourse0>,
+                     <http://www.Department0.University0.edu/GraduateCourse1> ;
+    ub:advisor       <http://www.Department0.University0.edu/FullProfessor0> ;
+    ub:undergraduateDegreeFrom <http://www.University0.edu> ;
+    ub:emailAddress  "gs0@Department0.University0.edu"^^xsd:string .
+
+# GraduateStudent1 — takes GC0, GC2; advisor FP0; undergrad from Univ0; in ResearchGroup0
+<http://www.Department0.University0.edu/GraduateStudent1>
+    a ub:GraduateStudent, ub:Student, ub:Person, owl:Thing ;
+    ub:memberOf      <http://www.Department0.University0.edu>,
+                     <http://www.Department0.University0.edu/ResearchGroup0> ;
+    ub:takesCourse   <http://www.Department0.University0.edu/GraduateCourse0>,
+                     <http://www.Department0.University0.edu/GraduateCourse2> ;
+    ub:advisor       <http://www.Department0.University0.edu/FullProfessor0> ;
+    ub:undergraduateDegreeFrom <http://www.University0.edu> ;
+    ub:emailAddress  "gs1@Department0.University0.edu"^^xsd:string .
+
+# GraduateStudent2 — takes GC0; advisor FP0; in ResearchGroup0
+<http://www.Department0.University0.edu/GraduateStudent2>
+    a ub:GraduateStudent, ub:Student, ub:Person, owl:Thing ;
+    ub:memberOf      <http://www.Department0.University0.edu>,
+                     <http://www.Department0.University0.edu/ResearchGroup0> ;
+    ub:takesCourse   <http://www.Department0.University0.edu/GraduateCourse0> ;
+    ub:advisor       <http://www.Department0.University0.edu/FullProfessor0> ;
+    ub:emailAddress  "gs2@Department0.University0.edu"^^xsd:string .
+
+# GraduateStudent3 — takes GC2
+<http://www.Department0.University0.edu/GraduateStudent3>
+    a ub:GraduateStudent, ub:Student, ub:Person, owl:Thing ;
+    ub:memberOf      <http://www.Department0.University0.edu> ;
+    ub:takesCourse   <http://www.Department0.University0.edu/GraduateCourse2> ;
+    ub:emailAddress  "gs3@Department0.University0.edu"^^xsd:string .
+
+# GraduateStudent4 — takes GC1
+<http://www.Department0.University0.edu/GraduateStudent4>
+    a ub:GraduateStudent, ub:Student, ub:Person, owl:Thing ;
+    ub:memberOf      <http://www.Department0.University0.edu> ;
+    ub:takesCourse   <http://www.Department0.University0.edu/GraduateCourse1> ;
+    ub:emailAddress  "gs4@Department0.University0.edu"^^xsd:string .
+
+# GraduateStudent5 — takes GC3
+<http://www.Department0.University0.edu/GraduateStudent5>
+    a ub:GraduateStudent, ub:Student, ub:Person, owl:Thing ;
+    ub:memberOf      <http://www.Department0.University0.edu> ;
+    ub:takesCourse   <http://www.Department0.University0.edu/GraduateCourse3> ;
+    ub:emailAddress  "gs5@Department0.University0.edu"^^xsd:string .
+
+# GraduateStudent6 — takes GC4
+<http://www.Department0.University0.edu/GraduateStudent6>
+    a ub:GraduateStudent, ub:Student, ub:Person, owl:Thing ;
+    ub:memberOf      <http://www.Department0.University0.edu> ;
+    ub:takesCourse   <http://www.Department0.University0.edu/GraduateCourse4> ;
+    ub:emailAddress  "gs6@Department0.University0.edu"^^xsd:string .
+
+# ── Undergraduate Students ────────────────────────────────────────────────────
+
+<http://www.Department0.University0.edu/UndergraduateStudent0>
+    a ub:UndergraduateStudent, ub:Student, ub:Person, owl:Thing ;
+    ub:memberOf    <http://www.Department0.University0.edu> ;
+    ub:takesCourse <http://www.Department0.University0.edu/UndergraduateCourse0> ;
+    ub:emailAddress "us0@Department0.University0.edu"^^xsd:string .
+
+<http://www.Department0.University0.edu/UndergraduateStudent1>
+    a ub:UndergraduateStudent, ub:Student, ub:Person, owl:Thing ;
+    ub:memberOf    <http://www.Department0.University0.edu> ;
+    ub:takesCourse <http://www.Department0.University0.edu/UndergraduateCourse0> ;
+    ub:emailAddress "us1@Department0.University0.edu"^^xsd:string .
+
+<http://www.Department0.University0.edu/UndergraduateStudent2>
+    a ub:UndergraduateStudent, ub:Student, ub:Person, owl:Thing ;
+    ub:memberOf    <http://www.Department0.University0.edu> ;
+    ub:takesCourse <http://www.Department0.University0.edu/UndergraduateCourse0> ;
+    ub:emailAddress "us2@Department0.University0.edu"^^xsd:string .
+
+<http://www.Department0.University0.edu/UndergraduateStudent3>
+    a ub:UndergraduateStudent, ub:Student, ub:Person, owl:Thing ;
+    ub:memberOf    <http://www.Department0.University0.edu> ;
+    ub:takesCourse <http://www.Department0.University0.edu/UndergraduateCourse0> ;
+    ub:emailAddress "us3@Department0.University0.edu"^^xsd:string .
+
+<http://www.Department0.University0.edu/UndergraduateStudent4>
+    a ub:UndergraduateStudent, ub:Student, ub:Person, owl:Thing ;
+    ub:memberOf    <http://www.Department0.University0.edu> ;
+    ub:emailAddress "us4@Department0.University0.edu"^^xsd:string .
+
+# ── Publications ─────────────────────────────────────────────────────────────
+
+<http://www.Department0.University0.edu/Publication0>
+    a ub:Publication, owl:Thing ;
+    ub:publicationAuthor <http://www.Department0.University0.edu/AssistantProfessor0> ;
+    ub:title "Publication 0"^^xsd:string .
+
+<http://www.Department0.University0.edu/Publication1>
+    a ub:Publication, owl:Thing ;
+    ub:publicationAuthor <http://www.Department0.University0.edu/AssistantProfessor0> ;
+    ub:title "Publication 1"^^xsd:string .
+
+<http://www.Department0.University0.edu/Publication2>
+    a ub:Publication, owl:Thing ;
+    ub:publicationAuthor <http://www.Department0.University0.edu/GraduateStudent0> ;
+    ub:title "Publication 2"^^xsd:string .
+
+<http://www.Department0.University0.edu/Publication3>
+    a ub:Publication, owl:Thing ;
+    ub:publicationAuthor <http://www.Department0.University0.edu/FullProfessor0> ;
+    ub:title "Publication 3"^^xsd:string .

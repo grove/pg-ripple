@@ -3412,12 +3412,12 @@ Full Jena suite (1,000 tests) completes in < 3 minutes on CI. WatDiv 100-templat
 
 ### Deliverables
 
-- [ ] **LUBM data generator integration** (`tests/lubm/generator.rs` new module)
+- [x] **LUBM data generator integration** (`tests/lubm/generator.rs` new module)
   - Invoke the [UBA (Univ-Bench Artificial) data generator](http://swat.cse.lehigh.edu/projects/lubm/) via `std::process::Command`, or use a Rust port, to produce Turtle-serialised datasets at configurable university count (`--univ 1` → ~100K triples; `--univ 10` → ~1M triples; `--univ 50` → ~5M triples)
   - Cache generated datasets as CI artifacts keyed by university count and seed; re-generate only when the generator binary changes
   - Load into a named graph `<http://swat.cse.lehigh.edu/onto/univ-bench.owl>` via the v0.41.0 fixture loader
   - Also load the `univ-bench.owl` ontology into the Datalog engine as an RDFS/OWL RL rule set before running queries
-- [ ] **14 canonical LUBM queries** (`tests/lubm/queries/q01.sparql` – `q14.sparql`)
+- [x] **14 canonical LUBM queries** (`tests/lubm/queries/q01.sparql` – `q14.sparql`)
   - Implement all 14 LUBM queries verbatim from the benchmark specification
   - Each query exercises at least one inference rule:
     - Q1, Q2, Q4, Q6: `rdf:type` + subclass/subproperty entailment
@@ -3425,16 +3425,16 @@ Full Jena suite (1,000 tests) completes in < 3 minutes on CI. WatDiv 100-templat
     - Q8, Q12, Q13: multi-hop inference chains
     - Q9, Q10, Q11, Q14: conjunctive patterns over inferred and asserted triples
   - Reference results: pre-computed correct answer counts for `--univ 1` (published in the original LUBM paper); assert exact cardinality match
-- [ ] **Correctness validator** (`tests/lubm/validator.rs`)
+- [x] **Correctness validator** (`tests/lubm/validator.rs`)
   - Compare actual row count against published reference counts for each of the 14 queries at `--univ 1`
   - For `--univ 10`, compare against a locally pre-computed baseline (stored in `tests/lubm/baselines/univ10.json`)
   - Fail on any count mismatch; report which inference rules produced wrong results
-- [ ] **CI integration** (`.github/workflows/ci.yml`)
+- [x] **CI integration** (`.github/workflows/ci.yml`)
   - New job `lubm-suite`: runs after `w3c-suite`; generates `--univ 1` dataset (< 100K triples, < 30 seconds); loads ontology + triples; runs all 14 queries; reports pass/fail per query
   - Non-blocking for `--univ 10` (larger dataset run triggered weekly or on release branches)
   - Reuse unified `tests/conformance/runner.rs` from v0.43.0; add `lubm:` prefix to known-failures format
-- [ ] **Known-failures manifest** — add `lubm:Q{N}` entries for any query that fails at release, with one-line root-cause note
-- [ ] **Datalog validation sub-suite** (`tests/lubm/datalog/` new module) — test the Datalog API directly on the same `--univ 1` and `--univ 10` LUBM datasets
+- [x] **Known-failures manifest** — add `lubm:Q{N}` entries for any query that fails at release, with one-line root-cause note
+- [x] **Datalog validation sub-suite** (`tests/lubm/datalog/` new module) — test the Datalog API directly on the same `--univ 1` and `--univ 10` LUBM datasets
   - **Rule compilation correctness** (`tests/lubm/datalog/rule_compilation.sql`): call `pg_ripple.add_rules()` with the OWL RL ruleset; use `pg_ripple.rules()` to inspect compiled rules; assert rule count and stratification matches specification
   - **Inference iteration tracking** (`tests/lubm/datalog/inference_iterations.sql`): use `pg_ripple.rule_statistics()` after `pg_ripple.materialize_owl_rl()` to count iterations per stratum; validate that fixpoint is reached without over-iteration (off-by-one detection)
   - **Inferred triple counts** (`tests/lubm/datalog/inferred_triples.sql`): call `pg_ripple.inferred_triples(rule_name)` for key OWL RL rules (e.g. `subclass_entail`, `subproperty_entail`, `domain_range`); assert row counts match pre-computed baselines for `--univ 1` and `--univ 10`
@@ -3445,14 +3445,14 @@ Full Jena suite (1,000 tests) completes in < 3 minutes on CI. WatDiv 100-templat
 
 ### Migration Script
 
-`sql/pg_ripple--0.43.0--0.44.0.sql` — no schema changes. Comment-only header noting that v0.44.0 is a test infrastructure release.
+`sql/pg_ripple--0.43.0--0.44.0.sql` — adds `UNIQUE(p, s, o, g)` constraint to `_pg_ripple.vp_rare` to fix SPARQL UPDATE set semantics for rare predicates.
 
 ### Documentation
 
-- [ ] `reference/lubm-results.md` (new) — LUBM conformance table: query ID, description, inference rules exercised, reference count, pg_ripple result, pass/fail; updated each release
-- [ ] `reference/w3c-conformance.md` — updated to link to LUBM and WatDiv result pages for a complete conformance picture
-- [ ] `contributing/running-conformance-tests.md` — updated to cover LUBM data generation, ontology loading, and baseline regeneration
-- [ ] Release notes for v0.44.0
+- [x] `reference/lubm-results.md` (new) — LUBM conformance table: query ID, description, inference rules exercised, reference count, pg_ripple result, pass/fail; updated each release
+- [x] `reference/w3c-conformance.md` — updated to link to LUBM and WatDiv result pages for a complete conformance picture
+- [x] `contributing/running-conformance-tests.md` — updated to cover LUBM data generation, ontology loading, and baseline regeneration
+- [x] Release notes for v0.44.0
 
 ### Exit Criteria
 

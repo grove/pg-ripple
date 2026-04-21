@@ -1,0 +1,9 @@
+# LUBM Q13: Professors acting as teaching assistants for GraduateCourse3.
+# Tests: ub:teachingAssistantOf + ub:Professor type (inverse property usage).
+# Expected result count (univ1 fixture): 1
+PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+PREFIX ub:  <http://www.lehigh.edu/~zhp2/2004/0401/univ-bench.owl#>
+SELECT ?X WHERE {
+  ?X rdf:type ub:Professor .
+  ?X ub:teachingAssistantOf <http://www.Department0.University0.edu/GraduateCourse3>
+}

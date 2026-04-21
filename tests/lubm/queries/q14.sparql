@@ -1,0 +1,8 @@
+# LUBM Q14: All undergraduate students.
+# Tests: ub:UndergraduateStudent subclass of ub:Student.
+# Expected result count (univ1 fixture): 5
+PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
+PREFIX ub:  <http://www.lehigh.edu/~zhp2/2004/0401/univ-bench.owl#>
+SELECT ?X WHERE {
+  ?X rdf:type ub:UndergraduateStudent
+}
