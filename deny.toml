@@ -1,0 +1,52 @@
+# cargo deny configuration (v0.47.0)
+#
+# https://embarkstudios.github.io/cargo-deny/
+
+[advisories]
+# Emit an error on any unpatched security advisory.
+vulnerability = "deny"
+unmaintained = "warn"
+yanked = "deny"
+notice = "warn"
+
+[licenses]
+# Allow OSI-approved and widely-used permissive / weak-copyleft licences.
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Unicode-DFS-2016",
+    "CC0-1.0",
+    "Zlib",
+    "OpenSSL",
+]
+# Deny GPL/AGPL in the dependency tree.
+deny = [
+    "GPL-2.0",
+    "GPL-3.0",
+    "AGPL-3.0",
+    "LGPL-2.0",
+    "LGPL-2.1",
+    "LGPL-3.0",
+]
+copyleft = "warn"
+# Allow the MPL-2.0 (file-level copyleft, compatible with Apache-2.0 extension).
+allow-osi-fsf-free = "neither"
+confidence-threshold = 0.8
+
+[bans]
+# Disallow multiple versions of the same crate unless explicitly skipped.
+multiple-versions = "warn"
+# Disallow wildcard dependencies.
+wildcards = "deny"
+# Known duplicate-version exceptions (indirect, pinned by different dep trees).
+skip = []
+
+[sources]
+# Only allow crates from crates.io; no git or path deps in the published crate.
+unknown-registry = "deny"
+unknown-git = "warn"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]

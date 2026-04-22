@@ -281,9 +281,6 @@ impl UnionFind {
 /// Returns `None` if the sequence cannot be queried (e.g., the extension was
 /// freshly created and the sequence has not been used yet) — callers fall back
 /// to the serial path.
-// Used by parallel inference workers at runtime (pgrx SPI context); not called
-// from non-pgrx code paths, so the compiler cannot see the call site.
-#[allow(dead_code)]
 pub fn preallocate_sid_ranges(
     client: &pgrx::spi::SpiClient<'_>,
     n_workers: usize,

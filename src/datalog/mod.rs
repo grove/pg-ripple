@@ -361,6 +361,22 @@ pub fn store_rules(rule_set: &str, rules: &[Rule]) -> i64 {
 pub fn run_inference_seminaive(rule_set_name: &str) -> (i64, i32) {
     ensure_catalog();
 
+    // ── 0. Pre-allocate SID ranges for parallel workers (v0.47.0) ────────────
+    // When parallel workers > 1, reserve a contiguous SID block upfront so
+    // each conceptual worker group can use its own range without hitting the
+    // shared sequence on every insert.  Falls back silently on error.
+    let parallel_workers = crate::DATALOG_PARALLEL_WORKERS.get() as usize;
+    let sequence_batch = crate::DATALOG_SEQUENCE_BATCH.get();
+    if parallel_workers > 1 {
+        Spi::connect(|client| {
+            let _ = crate::datalog::parallel::preallocate_sid_ranges(
+                client,
+                parallel_workers,
+                sequence_batch,
+            );
+        });
+    }
+
     // ── 1. Load rules from catalog ────────────────────────────────────────────
     let rule_rows: Vec<(String, i32, bool)> = {
         let sql = "SELECT rule_text, stratum, is_recursive \

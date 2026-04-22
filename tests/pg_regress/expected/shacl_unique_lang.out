@@ -1,0 +1,146 @@
+-- pg_regress test: sh:uniqueLang constraint (v0.47.0)
+--
+-- Covers:
+-- 1. Passing shape: all language tags on a property are distinct.
+-- 2. Failing shape: duplicate language tag triggers violation.
+-- 3. Plain literals (no lang tag) are not subject to uniqueLang.
+-- Suppress IF-NOT-EXISTS NOTICEs from extension init and internal functions.
+SET client_min_messages = WARNING;
+CREATE EXTENSION IF NOT EXISTS pg_ripple;
+SELECT pg_ripple.triple_count() >= 0 AS library_loaded;
+ library_loaded 
+----------------
+ t
+(1 row)
+
+SET search_path TO pg_ripple, public;
+-- ── Setup ─────────────────────────────────────────────────────────────────────
+-- ex:goodBook has label in different languages → passes uniqueLang
+SELECT pg_ripple.insert_triple(
+    '<https://ex.org/ulang/goodBook>',
+    '<https://ex.org/ulang/title>',
+    '"Knowledge Graph"@en'
+) > 0 AS t1;
+ t1 
+----
+ t
+(1 row)
+
+SELECT pg_ripple.insert_triple(
+    '<https://ex.org/ulang/goodBook>',
+    '<https://ex.org/ulang/title>',
+    '"Wissensgraph"@de'
+) > 0 AS t2;
+ t2 
+----
+ t
+(1 row)
+
+-- ex:badBook has two English labels → violates uniqueLang
+SELECT pg_ripple.insert_triple(
+    '<https://ex.org/ulang/badBook>',
+    '<https://ex.org/ulang/title>',
+    '"Graph A"@en'
+) > 0 AS t3;
+ t3 
+----
+ t
+(1 row)
+
+SELECT pg_ripple.insert_triple(
+    '<https://ex.org/ulang/badBook>',
+    '<https://ex.org/ulang/title>',
+    '"Graph B"@en'
+) > 0 AS t4;
+ t4 
+----
+ t
+(1 row)
+
+-- ex:plainBook has plain literals without lang tags → uniqueLang does NOT apply
+SELECT pg_ripple.insert_triple(
+    '<https://ex.org/ulang/plainBook>',
+    '<https://ex.org/ulang/title>',
+    '"Graph X"'
+) > 0 AS t5;
+ t5 
+----
+ t
+(1 row)
+
+SELECT pg_ripple.insert_triple(
+    '<https://ex.org/ulang/plainBook>',
+    '<https://ex.org/ulang/title>',
+    '"Graph X"'
+) > 0 AS t6;
+ t6 
+----
+ t
+(1 row)
+
+-- ── Shape ─────────────────────────────────────────────────────────────────────
+DO $shapes$
+DECLARE
+  shapes_ttl TEXT := $ttl$
+    @prefix sh: <http://www.w3.org/ns/shacl#> .
+    @prefix ex: <https://ex.org/ulang/> .
+
+    ex:UniqueLangShape
+        a sh:NodeShape ;
+        sh:targetNode ex:goodBook, ex:badBook, ex:plainBook ;
+        sh:property [
+            sh:path ex:title ;
+            sh:uniqueLang true
+        ] .
+  $ttl$;
+BEGIN
+  PERFORM pg_ripple.load_turtle(shapes_ttl);
+END
+$shapes$;
+DO
+-- ── Test 1: passing — distinct language tags ───────────────────────────────────
+SELECT count(*) = 0 AS ulang_good_no_violations
+FROM jsonb_array_elements(
+    pg_ripple.validate_graph(
+        'https://ex.org/ulang/UniqueLangShape'
+    )
+) v
+WHERE v->>'focusNode' LIKE '%goodBook%';
+ ulang_good_no_violations 
+--------------------------
+ t
+(1 row)
+
+-- ── Test 2: failing — duplicate language tag ──────────────────────────────────
+SELECT count(*) >= 1 AS ulang_bad_has_violation
+FROM jsonb_array_elements(
+    pg_ripple.validate_graph(
+        'https://ex.org/ulang/UniqueLangShape'
+    )
+) v
+WHERE v->>'focusNode' LIKE '%badBook%';
+ ulang_bad_has_violation 
+-------------------------
+ t
+(1 row)
+
+-- ── Test 3: plain literals don't violate uniqueLang ───────────────────────────
+SELECT count(*) = 0 AS ulang_plain_no_violations
+FROM jsonb_array_elements(
+    pg_ripple.validate_graph(
+        'https://ex.org/ulang/UniqueLangShape'
+    )
+) v
+WHERE v->>'focusNode' LIKE '%plainBook%';
+ ulang_plain_no_violations 
+---------------------------
+ t
+(1 row)
+
+-- ── Cleanup ───────────────────────────────────────────────────────────────────
+SELECT pg_ripple.drop_triples_by_graph(NULL) >= 0 AS cleaned;
+ cleaned 
+---------
+ t
+(1 row)
+

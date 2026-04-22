@@ -347,6 +347,122 @@ pub extern "C-unwind" fn _PG_init() {
         matches!(s, "cbd" | "scbd" | "simple")
     }
 
+    // ── v0.47.0 check_hook validators ─────────────────────────────────────────
+
+    /// Validate `federation_on_error`: `warning`, `error`, or `empty`.
+    #[pg_guard]
+    unsafe extern "C-unwind" fn check_federation_on_error(
+        newval: *mut *mut std::ffi::c_char,
+        _extra: *mut *mut std::ffi::c_void,
+        _source: pgrx::pg_sys::GucSource::Type,
+    ) -> bool {
+        if newval.is_null() {
+            return true;
+        }
+        let s = unsafe {
+            if (*newval).is_null() {
+                return true;
+            }
+            std::ffi::CStr::from_ptr(*newval).to_str().unwrap_or("")
+        };
+        matches!(s, "warning" | "error" | "empty")
+    }
+
+    /// Validate `federation_on_partial`: `empty` or `use`.
+    #[pg_guard]
+    unsafe extern "C-unwind" fn check_federation_on_partial(
+        newval: *mut *mut std::ffi::c_char,
+        _extra: *mut *mut std::ffi::c_void,
+        _source: pgrx::pg_sys::GucSource::Type,
+    ) -> bool {
+        if newval.is_null() {
+            return true;
+        }
+        let s = unsafe {
+            if (*newval).is_null() {
+                return true;
+            }
+            std::ffi::CStr::from_ptr(*newval).to_str().unwrap_or("")
+        };
+        matches!(s, "empty" | "use")
+    }
+
+    /// Validate `sparql_overflow_action`: `warn` or `error`.
+    #[pg_guard]
+    unsafe extern "C-unwind" fn check_sparql_overflow_action(
+        newval: *mut *mut std::ffi::c_char,
+        _extra: *mut *mut std::ffi::c_void,
+        _source: pgrx::pg_sys::GucSource::Type,
+    ) -> bool {
+        if newval.is_null() {
+            return true;
+        }
+        let s = unsafe {
+            if (*newval).is_null() {
+                return true;
+            }
+            std::ffi::CStr::from_ptr(*newval).to_str().unwrap_or("")
+        };
+        matches!(s, "warn" | "error")
+    }
+
+    /// Validate `tracing_exporter`: `stdout` or `otlp`.
+    #[pg_guard]
+    unsafe extern "C-unwind" fn check_tracing_exporter(
+        newval: *mut *mut std::ffi::c_char,
+        _extra: *mut *mut std::ffi::c_void,
+        _source: pgrx::pg_sys::GucSource::Type,
+    ) -> bool {
+        if newval.is_null() {
+            return true;
+        }
+        let s = unsafe {
+            if (*newval).is_null() {
+                return true;
+            }
+            std::ffi::CStr::from_ptr(*newval).to_str().unwrap_or("")
+        };
+        matches!(s, "stdout" | "otlp")
+    }
+
+    /// Validate `embedding_index_type`: `hnsw` or `ivfflat`.
+    #[pg_guard]
+    unsafe extern "C-unwind" fn check_embedding_index_type(
+        newval: *mut *mut std::ffi::c_char,
+        _extra: *mut *mut std::ffi::c_void,
+        _source: pgrx::pg_sys::GucSource::Type,
+    ) -> bool {
+        if newval.is_null() {
+            return true;
+        }
+        let s = unsafe {
+            if (*newval).is_null() {
+                return true;
+            }
+            std::ffi::CStr::from_ptr(*newval).to_str().unwrap_or("")
+        };
+        matches!(s, "hnsw" | "ivfflat")
+    }
+
+    /// Validate `embedding_precision`: `single`, `half`, or `binary`.
+    #[pg_guard]
+    unsafe extern "C-unwind" fn check_embedding_precision(
+        newval: *mut *mut std::ffi::c_char,
+        _extra: *mut *mut std::ffi::c_void,
+        _source: pgrx::pg_sys::GucSource::Type,
+    ) -> bool {
+        if newval.is_null() {
+            return true;
+        }
+        let s = unsafe {
+            if (*newval).is_null() {
+                return true;
+            }
+            std::ffi::CStr::from_ptr(*newval).to_str().unwrap_or("")
+        };
+        matches!(s, "single" | "half" | "binary")
+    }
+
     pgrx::GucRegistry::define_string_guc(
         c"pg_ripple.default_graph",
         c"IRI of the default named graph (empty = built-in default graph)",
@@ -617,14 +733,20 @@ pub extern "C-unwind" fn _PG_init() {
         GucFlags::default(),
     );
 
-    pgrx::GucRegistry::define_string_guc(
-        c"pg_ripple.federation_on_error",
-        c"Behaviour on SERVICE call failure: 'warning' (default), 'error', or 'empty'",
-        c"",
-        &FEDERATION_ON_ERROR,
-        GucContext::Userset,
-        GucFlags::default(),
-    );
+    // v0.47.0: validated federation_on_error
+    unsafe {
+        pgrx::GucRegistry::define_string_guc_with_hooks(
+            c"pg_ripple.federation_on_error",
+            c"Behaviour on SERVICE call failure: 'warning' (default), 'error', or 'empty'",
+            c"",
+            &FEDERATION_ON_ERROR,
+            GucContext::Userset,
+            GucFlags::default(),
+            Some(check_federation_on_error),
+            None,
+            None,
+        );
+    }
 
     // ── v0.19.0 GUCs ─────────────────────────────────────────────────────────
 
@@ -650,14 +772,20 @@ pub extern "C-unwind" fn _PG_init() {
         GucFlags::default(),
     );
 
-    pgrx::GucRegistry::define_string_guc(
-        c"pg_ripple.federation_on_partial",
-        c"Behaviour on mid-stream SERVICE failure: 'empty' (default, discard) or 'use' (keep partial rows)",
-        c"",
-        &FEDERATION_ON_PARTIAL,
-        GucContext::Userset,
-        GucFlags::default(),
-    );
+    // v0.47.0: validated federation_on_partial
+    unsafe {
+        pgrx::GucRegistry::define_string_guc_with_hooks(
+            c"pg_ripple.federation_on_partial",
+            c"Behaviour on mid-stream SERVICE failure: 'empty' (default, discard) or 'use' (keep partial rows)",
+            c"",
+            &FEDERATION_ON_PARTIAL,
+            GucContext::Userset,
+            GucFlags::default(),
+            Some(check_federation_on_partial),
+            None,
+            None,
+        );
+    }
 
     pgrx::GucRegistry::define_bool_guc(
         c"pg_ripple.federation_adaptive_timeout",
@@ -773,23 +901,32 @@ pub extern "C-unwind" fn _PG_init() {
         GucFlags::default(),
     );
 
-    pgrx::GucRegistry::define_string_guc(
-        c"pg_ripple.embedding_index_type",
-        c"Index type on _pg_ripple.embeddings: 'hnsw' (default) or 'ivfflat'; changing requires REINDEX",
-        c"",
-        &EMBEDDING_INDEX_TYPE,
-        GucContext::Userset,
-        GucFlags::default(),
-    );
+    // v0.47.0: validated embedding_index_type and embedding_precision
+    unsafe {
+        pgrx::GucRegistry::define_string_guc_with_hooks(
+            c"pg_ripple.embedding_index_type",
+            c"Index type on _pg_ripple.embeddings: 'hnsw' (default) or 'ivfflat'; changing requires REINDEX",
+            c"",
+            &EMBEDDING_INDEX_TYPE,
+            GucContext::Userset,
+            GucFlags::default(),
+            Some(check_embedding_index_type),
+            None,
+            None,
+        );
 
-    pgrx::GucRegistry::define_string_guc(
-        c"pg_ripple.embedding_precision",
-        c"Embedding storage precision: 'single' (default, vector(N)), 'half' (halfvec(N), -50% storage), 'binary' (bit(N), -96% storage); requires pgvector >= 0.7.0",
-        c"",
-        &EMBEDDING_PRECISION,
-        GucContext::Userset,
-        GucFlags::default(),
-    );
+        pgrx::GucRegistry::define_string_guc_with_hooks(
+            c"pg_ripple.embedding_precision",
+            c"Embedding storage precision: 'single' (default, vector(N)), 'half' (halfvec(N), -50% storage), 'binary' (bit(N), -96% storage); requires pgvector >= 0.7.0",
+            c"",
+            &EMBEDDING_PRECISION,
+            GucContext::Userset,
+            GucFlags::default(),
+            Some(check_embedding_precision),
+            None,
+            None,
+        );
+    }
 
     // ── v0.28.0 GUCs ─────────────────────────────────────────────────────────
 
@@ -1137,15 +1274,21 @@ pub extern "C-unwind" fn _PG_init() {
         GucFlags::default(),
     );
 
-    pgrx::GucRegistry::define_string_guc(
-        c"pg_ripple.sparql_overflow_action",
-        c"Action when sparql_max_rows is exceeded: 'warn' (default, truncate with PT601 WARNING) \
-          or 'error' (raise ERROR) (v0.40.0)",
-        c"",
-        &SPARQL_OVERFLOW_ACTION,
-        GucContext::Userset,
-        GucFlags::default(),
-    );
+    // v0.47.0: validated sparql_overflow_action
+    unsafe {
+        pgrx::GucRegistry::define_string_guc_with_hooks(
+            c"pg_ripple.sparql_overflow_action",
+            c"Action when sparql_max_rows is exceeded: 'warn' (default, truncate with PT601 WARNING) \
+              or 'error' (raise ERROR) (v0.40.0)",
+            c"",
+            &SPARQL_OVERFLOW_ACTION,
+            GucContext::Userset,
+            GucFlags::default(),
+            Some(check_sparql_overflow_action),
+            None,
+            None,
+        );
+    }
 
     pgrx::GucRegistry::define_bool_guc(
         c"pg_ripple.tracing_enabled",
@@ -1157,15 +1300,21 @@ pub extern "C-unwind" fn _PG_init() {
         GucFlags::default(),
     );
 
-    pgrx::GucRegistry::define_string_guc(
-        c"pg_ripple.tracing_exporter",
-        c"OpenTelemetry exporter backend: 'stdout' (default, writes to PG log at DEBUG5) \
-          or 'otlp' (reads OTEL_EXPORTER_OTLP_ENDPOINT) (v0.40.0)",
-        c"",
-        &TRACING_EXPORTER,
-        GucContext::Userset,
-        GucFlags::default(),
-    );
+    // v0.47.0: validated tracing_exporter
+    unsafe {
+        pgrx::GucRegistry::define_string_guc_with_hooks(
+            c"pg_ripple.tracing_exporter",
+            c"OpenTelemetry exporter backend: 'stdout' (default, writes to PG log at DEBUG5) \
+              or 'otlp' (reads OTEL_EXPORTER_OTLP_ENDPOINT) (v0.40.0)",
+            c"",
+            &TRACING_EXPORTER,
+            GucContext::Userset,
+            GucFlags::default(),
+            Some(check_tracing_exporter),
+            None,
+            None,
+        );
+    }
 
     // ── v0.42.0 GUCs ─────────────────────────────────────────────────────────
 
