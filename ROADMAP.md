@@ -11,7 +11,7 @@ Each release below has two layers:
 - **The plain-language summary** (in the coloured box) explains *what* the release delivers and *why it matters* — no programming knowledge required.
 - **The technical deliverables** list the specific items developers will build. Feel free to skip these if you're reading for the big picture.
 
-**Effort estimates** are given as *person-weeks* — e.g. "6–8 pw" means the release would take roughly 6–8 weeks for a single full-time developer, or 3–4 weeks for a pair working together. The total estimated effort from v0.1.0 to v1.0.0 is **252–344 person-weeks** (~58–79 months for one developer; ~29–40 months for a pair).
+**Effort estimates** are given as *person-weeks* — e.g. "6–8 pw" means the release would take roughly 6–8 weeks for a single full-time developer, or 3–4 weeks for a pair working together. The total estimated effort from v0.1.0 to v1.0.0 is **275–376 person-weeks** (~63–86 months for one developer; ~32–43 months for a pair).
 
 **"optional at runtime" items**: some deliverables are annotated *(optional at runtime — X must be installed)*. This means the feature depends on an external extension (e.g. pg_trickle) that may not be installed in every deployment. The feature is **required by this roadmap** and must be implemented; the Rust code gates on a runtime availability check and degrades gracefully (returns 0 / false / empty, emits a WARNING, never raises an ERROR) when the dependency is absent. These items are not optional from a delivery standpoint.
 
@@ -68,8 +68,12 @@ Each release below has two layers:
 | [0.44.0](#v0440--lubm-conformance-suite) | LUBM Conformance Suite | Lehigh University Benchmark — OWL RL inference correctness across 14 canonical queries on 1K–8M triple datasets; includes Datalog API validation sub-suite for rule compilation, iteration tracking, inferred triples, goal queries, and performance baseline | 3–5 pw |
 | [0.45.0](#v0450--shacl-completion-datalog-robustness--crash-recovery) | SHACL Completion, Datalog Robustness & Crash Recovery | Close remaining SHACL Core gaps (`sh:equals`/`sh:disjoint`, decoded violation IRIs, async load test), harden parallel Datalog strata rollback, add missing crash-recovery scenarios, and standardise migration documentation | 4–6 pw |
 | [0.46.0](#v0460--property-based-testing-fuzz-hardening--owl-2-rl-conformance) | Property-Based Testing, Fuzz Hardening & OWL 2 RL Conformance | `proptest` for SPARQL and dictionary invariants, fuzz the federation result decoder, W3C OWL 2 RL test suite in CI, TopN push-down, BSBM regression gate, sequence pre-allocation for Datalog workers, rustdoc coverage enforcement, and HTTP certificate pinning | 5–7 pw |
+| [0.47.0](#v0470--shacl-truthfulness-dead-code-activation--architecture-refactor) | SHACL Truthfulness, Dead-Code Activation & Architecture Refactor | Fix parsed-but-not-checked SHACL constraints, wire `preallocate_sid_ranges()`, finish the `sparql/translate/` module split, add 5 fuzz targets, 4 crash-recovery scenarios, cache hit-rate SRFs, GUC validators, and security hygiene | 8–10 pw |
+| [0.48.0](#v0480--shacl-core-completeness-owl-2-rl-closure--sparql-completeness) | SHACL Core Completeness, OWL 2 RL Closure & SPARQL Completeness | Complete all 35 SHACL Core constraints and complex `sh:path` expressions, close the OWL 2 RL rule set, add SPARQL Update MOVE/COPY/ADD, fix SPARQL-star variable patterns, WatDiv baselines, and operational hardening | 6–8 pw |
+| [0.49.0](#v0490--ai--llm-integration) | AI & LLM Integration | `sparql_from_nl()` NL-to-SPARQL via configurable LLM endpoint; `suggest_sameas()` and `apply_sameas_candidates()` for embedding-based entity alignment | 4–6 pw |
+| [0.50.0](#v0500--developer-experience--graphrag-polish) | Developer Experience & GraphRAG Polish | VS Code extension with SPARQL/SHACL/Datalog support and query runner; `explain_sparql(analyze:=true)` debugger; `rag_context()` RAG pipeline | 5–7 pw |
 | [1.0.0](#v100--production-release) | Production Release | Standards conformance, stress testing, security audit | 6–8 pw |
-| | | **Total estimated effort** | **252–344 pw** |
+| | | **Total estimated effort** | **275–376 pw** |
 
 ---
 
