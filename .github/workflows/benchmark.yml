@@ -37,18 +37,19 @@ jobs:
           path: ~/.cargo/bin/cargo-pgrx
           key: ${{ runner.os }}-cargo-pgrx-${{ env.PGRX_VERSION }}
 
-      - name: Cache pgrx PostgreSQL build
-        uses: actions/cache@v5
-        with:
-          path: ~/.pgrx
-          key: ${{ runner.os }}-pgrx-pg18-${{ env.PGRX_VERSION }}
-
-      - name: Install system dependencies
+      - name: Install PostgreSQL 18 from PGDG
         run: |
+          sudo apt-get install -y --no-install-recommends curl ca-certificates lsb-release
+          sudo install -d /usr/share/postgresql-common/pgdg
+          curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+            | sudo tee /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc >/dev/null
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] \
+https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
+            | sudo tee /etc/apt/sources.list.d/pgdg.list
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends \
-            build-essential pkg-config libssl-dev libclang-dev clang \
-            libreadline-dev libicu-dev bison flex
+            build-essential pkg-config libssl-dev libclang-dev clang lld \
+            postgresql-18 postgresql-server-dev-18
 
       - name: Install cargo-pgrx
         run: |
@@ -57,10 +58,7 @@ jobs:
           fi
 
       - name: Initialise pgrx (PostgreSQL 18)
-        run: |
-          if ! ls ~/.pgrx/18.*/pgrx-install/bin/pg_config 2>/dev/null | grep -q .; then
-            cargo pgrx init --pg18 download
-          fi
+        run: cargo pgrx init --pg18 /usr/lib/postgresql/18/bin/pg_config
 
       - name: Clean stale pgrx data
         run: |
@@ -71,7 +69,7 @@ jobs:
         run: cargo pgrx start pg18 --postgresql-conf "allow_system_table_mods=on"
 
       - name: Build extension
-        run: cargo pgrx install --pg-config ~/.pgrx/18.*/pgrx-install/bin/pg_config --release
+        run: cargo pgrx install --pg-config /usr/lib/postgresql/18/bin/pg_config --release
 
       - name: Create extension in database
         run: |

@@ -46,26 +46,19 @@ jobs:
           path: ~/.cargo/bin/cargo-pgrx
           key: ${{ runner.os }}-cargo-pgrx-${{ env.PGRX_VERSION }}
 
-      - name: Cache pgrx PostgreSQL build
-        uses: actions/cache@v5
-        with:
-          path: ~/.pgrx
-          key: ${{ runner.os }}-pgrx-pg18-${{ env.PGRX_VERSION }}
-
-      - name: Install system dependencies
+      - name: Install PostgreSQL 18 from PGDG
         run: |
+          sudo apt-get install -y --no-install-recommends curl ca-certificates lsb-release
+          sudo install -d /usr/share/postgresql-common/pgdg
+          curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+            | sudo tee /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc >/dev/null
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] \
+https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
+            | sudo tee /etc/apt/sources.list.d/pgdg.list
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends \
-            build-essential \
-            pkg-config \
-            libssl-dev \
-            libclang-dev \
-            clang \
-            lld \
-            libreadline-dev \
-            libicu-dev \
-            bison \
-            flex
+            build-essential pkg-config libssl-dev libclang-dev clang lld \
+            postgresql-18 postgresql-server-dev-18
 
       - name: Install cargo-pgrx
         run: |
@@ -74,10 +67,7 @@ jobs:
           fi
 
       - name: Initialise pgrx (PostgreSQL 18)
-        run: |
-          if ! ls ~/.pgrx/18.*/pgrx-install/bin/pg_config 2>/dev/null | grep -q .; then
-            cargo pgrx init --pg18 download
-          fi
+        run: cargo pgrx init --pg18 /usr/lib/postgresql/18/bin/pg_config
 
       - name: Check formatting
         run: cargo fmt --all -- --check
@@ -117,18 +107,19 @@ jobs:
           path: ~/.cargo/bin/cargo-pgrx
           key: ${{ runner.os }}-cargo-pgrx-${{ env.PGRX_VERSION }}
 
-      - name: Cache pgrx PostgreSQL build
-        uses: actions/cache@v5
-        with:
-          path: ~/.pgrx
-          key: ${{ runner.os }}-pgrx-pg18-${{ env.PGRX_VERSION }}
-
-      - name: Install system dependencies
+      - name: Install PostgreSQL 18 from PGDG
         run: |
+          sudo apt-get install -y --no-install-recommends curl ca-certificates lsb-release
+          sudo install -d /usr/share/postgresql-common/pgdg
+          curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+            | sudo tee /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc >/dev/null
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] \
+https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
+            | sudo tee /etc/apt/sources.list.d/pgdg.list
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends \
             build-essential pkg-config libssl-dev libclang-dev clang lld \
-            libreadline-dev libicu-dev bison flex
+            postgresql-18 postgresql-server-dev-18
 
       - name: Install cargo-pgrx
         run: |
@@ -137,10 +128,7 @@ jobs:
           fi
 
       - name: Initialise pgrx (PostgreSQL 18)
-        run: |
-          if ! ls ~/.pgrx/18.*/pgrx-install/bin/pg_config 2>/dev/null | grep -q .; then
-            cargo pgrx init --pg18 download
-          fi
+        run: cargo pgrx init --pg18 /usr/lib/postgresql/18/bin/pg_config
 
       - name: Run pg_regress suite
         run: cargo pgrx regress pg18 --postgresql-conf "allow_system_table_mods=on"
@@ -183,18 +171,19 @@ jobs:
           path: ~/.cargo/bin/cargo-pgrx
           key: ${{ runner.os }}-cargo-pgrx-${{ env.PGRX_VERSION }}
 
-      - name: Cache pgrx PostgreSQL build
-        uses: actions/cache@v5
-        with:
-          path: ~/.pgrx
-          key: ${{ runner.os }}-pgrx-pg18-${{ env.PGRX_VERSION }}
-
-      - name: Install system dependencies
+      - name: Install PostgreSQL 18 from PGDG
         run: |
+          sudo apt-get install -y --no-install-recommends curl ca-certificates lsb-release
+          sudo install -d /usr/share/postgresql-common/pgdg
+          curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+            | sudo tee /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc >/dev/null
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] \
+https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
+            | sudo tee /etc/apt/sources.list.d/pgdg.list
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends \
             build-essential pkg-config libssl-dev libclang-dev clang lld \
-            libreadline-dev libicu-dev bison flex
+            postgresql-18 postgresql-server-dev-18
 
       - name: Install cargo-pgrx
         run: |
@@ -203,10 +192,7 @@ jobs:
           fi
 
       - name: Initialise pgrx (PostgreSQL 18)
-        run: |
-          if ! ls ~/.pgrx/18.*/pgrx-install/bin/pg_config 2>/dev/null | grep -q .; then
-            cargo pgrx init --pg18 download
-          fi
+        run: cargo pgrx init --pg18 /usr/lib/postgresql/18/bin/pg_config
 
       - name: Start pgrx PostgreSQL 18
         run: cargo pgrx start pg18 --postgresql-conf "allow_system_table_mods=on"
@@ -259,12 +245,19 @@ jobs:
           path: tests/w3c/data
           key: w3c-sparql11-${{ hashFiles('scripts/fetch_w3c_tests.sh') }}
 
-      - name: Install system dependencies
+      - name: Install PostgreSQL 18 from PGDG
         run: |
+          sudo apt-get install -y --no-install-recommends curl ca-certificates lsb-release
+          sudo install -d /usr/share/postgresql-common/pgdg
+          curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+            | sudo tee /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc >/dev/null
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] \
+https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
+            | sudo tee /etc/apt/sources.list.d/pgdg.list
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends \
             build-essential pkg-config libssl-dev libclang-dev clang lld \
-            libreadline-dev libicu-dev bison flex curl
+            postgresql-18 postgresql-server-dev-18
 
       - name: Install cargo-pgrx
         run: |
@@ -273,10 +266,7 @@ jobs:
           fi
 
       - name: Initialise pgrx (PostgreSQL 18)
-        run: |
-          if ! ls ~/.pgrx/18.*/pgrx-install/bin/pg_config 2>/dev/null | grep -q .; then
-            cargo pgrx init --pg18 download
-          fi
+        run: cargo pgrx init --pg18 /usr/lib/postgresql/18/bin/pg_config
 
       - name: Fetch W3C SPARQL 1.1 test suite
         if: steps.w3c-cache.outputs.cache-hit != 'true'
@@ -286,7 +276,7 @@ jobs:
         run: cargo pgrx start pg18 --postgresql-conf "allow_system_table_mods=on"
 
       - name: Install pg_ripple
-        run: cargo pgrx install --pg-config $(ls ~/.pgrx/18.*/pgrx-install/bin/pg_config | head -1)
+        run: cargo pgrx install --pg-config /usr/lib/postgresql/18/bin/pg_config
 
       - name: Run W3C smoke subset
         env:
@@ -342,12 +332,19 @@ jobs:
           path: tests/w3c/data
           key: w3c-sparql11-${{ hashFiles('scripts/fetch_w3c_tests.sh') }}
 
-      - name: Install system dependencies
+      - name: Install PostgreSQL 18 from PGDG
         run: |
+          sudo apt-get install -y --no-install-recommends curl ca-certificates lsb-release
+          sudo install -d /usr/share/postgresql-common/pgdg
+          curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+            | sudo tee /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc >/dev/null
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] \
+https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
+            | sudo tee /etc/apt/sources.list.d/pgdg.list
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends \
             build-essential pkg-config libssl-dev libclang-dev clang lld \
-            libreadline-dev libicu-dev bison flex curl
+            postgresql-18 postgresql-server-dev-18
 
       - name: Install cargo-pgrx
         run: |
@@ -356,10 +353,7 @@ jobs:
           fi
 
       - name: Initialise pgrx (PostgreSQL 18)
-        run: |
-          if ! ls ~/.pgrx/18.*/pgrx-install/bin/pg_config 2>/dev/null | grep -q .; then
-            cargo pgrx init --pg18 download
-          fi
+        run: cargo pgrx init --pg18 /usr/lib/postgresql/18/bin/pg_config
 
       - name: Fetch W3C SPARQL 1.1 test suite
         if: steps.w3c-cache.outputs.cache-hit != 'true'
@@ -369,7 +363,7 @@ jobs:
         run: cargo pgrx start pg18 --postgresql-conf "allow_system_table_mods=on"
 
       - name: Install pg_ripple
-        run: cargo pgrx install --pg-config $(ls ~/.pgrx/18.*/pgrx-install/bin/pg_config | head -1)
+        run: cargo pgrx install --pg-config /usr/lib/postgresql/18/bin/pg_config
 
       - name: Run W3C full suite (8 threads)
         env:
@@ -434,12 +428,19 @@ jobs:
           path: tests/jena/data
           key: jena-sparql-${{ hashFiles('scripts/fetch_conformance_tests.sh') }}
 
-      - name: Install system dependencies
+      - name: Install PostgreSQL 18 from PGDG
         run: |
+          sudo apt-get install -y --no-install-recommends curl ca-certificates lsb-release
+          sudo install -d /usr/share/postgresql-common/pgdg
+          curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+            | sudo tee /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc >/dev/null
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] \
+https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
+            | sudo tee /etc/apt/sources.list.d/pgdg.list
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends \
             build-essential pkg-config libssl-dev libclang-dev clang lld \
-            libreadline-dev libicu-dev bison flex curl
+            postgresql-18 postgresql-server-dev-18
 
       - name: Install cargo-pgrx
         run: |
@@ -448,10 +449,7 @@ jobs:
           fi
 
       - name: Initialise pgrx (PostgreSQL 18)
-        run: |
-          if ! ls ~/.pgrx/18.*/pgrx-install/bin/pg_config 2>/dev/null | grep -q .; then
-            cargo pgrx init --pg18 download
-          fi
+        run: cargo pgrx init --pg18 /usr/lib/postgresql/18/bin/pg_config
 
       - name: Fetch Jena SPARQL test suite
         if: steps.jena-cache.outputs.cache-hit != 'true'
@@ -461,7 +459,7 @@ jobs:
         run: cargo pgrx start pg18 --postgresql-conf "allow_system_table_mods=on"
 
       - name: Install pg_ripple
-        run: cargo pgrx install --pg-config $(ls ~/.pgrx/18.*/pgrx-install/bin/pg_config | head -1)
+        run: cargo pgrx install --pg-config /usr/lib/postgresql/18/bin/pg_config
 
       - name: Run Jena conformance suite (1 thread)
         env:
@@ -513,18 +511,19 @@ jobs:
           path: ~/.cargo/bin/cargo-pgrx
           key: ${{ runner.os }}-cargo-pgrx-${{ env.PGRX_VERSION }}
 
-      - name: Cache pgrx PostgreSQL build
-        uses: actions/cache@v5
-        with:
-          path: ~/.pgrx
-          key: ${{ runner.os }}-pgrx-pg18-${{ env.PGRX_VERSION }}
-
-      - name: Install system dependencies
+      - name: Install PostgreSQL 18 from PGDG
         run: |
+          sudo apt-get install -y --no-install-recommends curl ca-certificates lsb-release
+          sudo install -d /usr/share/postgresql-common/pgdg
+          curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+            | sudo tee /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc >/dev/null
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] \
+https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
+            | sudo tee /etc/apt/sources.list.d/pgdg.list
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends \
             build-essential pkg-config libssl-dev libclang-dev clang lld \
-            libreadline-dev libicu-dev bison flex
+            postgresql-18 postgresql-server-dev-18
 
       - name: Install cargo-pgrx
         run: |
@@ -533,16 +532,13 @@ jobs:
           fi
 
       - name: Initialise pgrx (PostgreSQL 18)
-        run: |
-          if ! ls ~/.pgrx/18.*/pgrx-install/bin/pg_config 2>/dev/null | grep -q .; then
-            cargo pgrx init --pg18 download
-          fi
+        run: cargo pgrx init --pg18 /usr/lib/postgresql/18/bin/pg_config
 
       - name: Start pgrx PostgreSQL 18
         run: cargo pgrx start pg18 --postgresql-conf "allow_system_table_mods=on"
 
       - name: Install pg_ripple
-        run: cargo pgrx install --pg-config $(ls ~/.pgrx/18.*/pgrx-install/bin/pg_config | head -1)
+        run: cargo pgrx install --pg-config /usr/lib/postgresql/18/bin/pg_config
 
       - name: Run WatDiv benchmark suite (8 threads)
         env:
@@ -593,18 +589,19 @@ jobs:
           path: ~/.cargo/bin/cargo-pgrx
           key: ${{ runner.os }}-cargo-pgrx-${{ env.PGRX_VERSION }}
 
-      - name: Cache pgrx PostgreSQL build
-        uses: actions/cache@v5
-        with:
-          path: ~/.pgrx
-          key: ${{ runner.os }}-pgrx-pg18-${{ env.PGRX_VERSION }}
-
-      - name: Install system dependencies
+      - name: Install PostgreSQL 18 from PGDG
         run: |
+          sudo apt-get install -y --no-install-recommends curl ca-certificates lsb-release
+          sudo install -d /usr/share/postgresql-common/pgdg
+          curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+            | sudo tee /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc >/dev/null
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] \
+https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
+            | sudo tee /etc/apt/sources.list.d/pgdg.list
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends \
             build-essential pkg-config libssl-dev libclang-dev clang lld \
-            libreadline-dev libicu-dev bison flex
+            postgresql-18 postgresql-server-dev-18
 
       - name: Install cargo-pgrx
         run: |
@@ -613,16 +610,13 @@ jobs:
           fi
 
       - name: Initialise pgrx (PostgreSQL 18)
-        run: |
-          if ! ls ~/.pgrx/18.*/pgrx-install/bin/pg_config 2>/dev/null | grep -q .; then
-            cargo pgrx init --pg18 download
-          fi
+        run: cargo pgrx init --pg18 /usr/lib/postgresql/18/bin/pg_config
 
       - name: Start pgrx PostgreSQL 18
         run: cargo pgrx start pg18 --postgresql-conf "allow_system_table_mods=on"
 
       - name: Install pg_ripple
-        run: cargo pgrx install --pg-config $(ls ~/.pgrx/18.*/pgrx-install/bin/pg_config | head -1)
+        run: cargo pgrx install --pg-config /usr/lib/postgresql/18/bin/pg_config
 
       - name: Run LUBM conformance suite
         env:
@@ -665,18 +659,19 @@ jobs:
           path: ~/.cargo/bin/cargo-pgrx
           key: ${{ runner.os }}-cargo-pgrx-${{ env.PGRX_VERSION }}
 
-      - name: Cache pgrx PostgreSQL build
-        uses: actions/cache@v5
-        with:
-          path: ~/.pgrx
-          key: ${{ runner.os }}-pgrx-pg18-${{ env.PGRX_VERSION }}
-
-      - name: Install system dependencies
+      - name: Install PostgreSQL 18 from PGDG
         run: |
+          sudo apt-get install -y --no-install-recommends curl ca-certificates lsb-release
+          sudo install -d /usr/share/postgresql-common/pgdg
+          curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+            | sudo tee /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc >/dev/null
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] \
+https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
+            | sudo tee /etc/apt/sources.list.d/pgdg.list
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends \
             build-essential pkg-config libssl-dev libclang-dev clang lld \
-            libreadline-dev libicu-dev bison flex
+            postgresql-18 postgresql-server-dev-18
 
       - name: Install cargo-pgrx
         run: |
@@ -685,10 +680,7 @@ jobs:
           fi
 
       - name: Initialise pgrx (PostgreSQL 18)
-        run: |
-          if ! ls ~/.pgrx/18.*/pgrx-install/bin/pg_config 2>/dev/null | grep -q .; then
-            cargo pgrx init --pg18 download
-          fi
+        run: cargo pgrx init --pg18 /usr/lib/postgresql/18/bin/pg_config
 
       - name: Run property-based test suite (10,000 cases each)
         env:
@@ -737,12 +729,19 @@ jobs:
           path: tests/owl2rl/data
           key: owl2rl-${{ hashFiles('scripts/fetch_conformance_tests.sh') }}
 
-      - name: Install system dependencies
+      - name: Install PostgreSQL 18 from PGDG
         run: |
+          sudo apt-get install -y --no-install-recommends curl ca-certificates lsb-release
+          sudo install -d /usr/share/postgresql-common/pgdg
+          curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+            | sudo tee /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc >/dev/null
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] \
+https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
+            | sudo tee /etc/apt/sources.list.d/pgdg.list
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends \
             build-essential pkg-config libssl-dev libclang-dev clang lld \
-            libreadline-dev libicu-dev bison flex curl
+            postgresql-18 postgresql-server-dev-18
 
       - name: Install cargo-pgrx
         run: |
@@ -751,10 +750,7 @@ jobs:
           fi
 
       - name: Initialise pgrx (PostgreSQL 18)
-        run: |
-          if ! ls ~/.pgrx/18.*/pgrx-install/bin/pg_config 2>/dev/null | grep -q .; then
-            cargo pgrx init --pg18 download
-          fi
+        run: cargo pgrx init --pg18 /usr/lib/postgresql/18/bin/pg_config
 
       - name: Fetch OWL 2 RL test suite
         if: steps.owl2rl-cache.outputs.cache-hit != 'true'
@@ -764,7 +760,7 @@ jobs:
         run: cargo pgrx start pg18 --postgresql-conf "allow_system_table_mods=on"
 
       - name: Install pg_ripple
-        run: cargo pgrx install --pg-config $(ls ~/.pgrx/18.*/pgrx-install/bin/pg_config | head -1)
+        run: cargo pgrx install --pg-config /usr/lib/postgresql/18/bin/pg_config
 
       - name: Run OWL 2 RL conformance suite
         env:
@@ -807,18 +803,19 @@ jobs:
           path: ~/.cargo/bin/cargo-pgrx
           key: ${{ runner.os }}-cargo-pgrx-${{ env.PGRX_VERSION }}
 
-      - name: Cache pgrx PostgreSQL build
-        uses: actions/cache@v5
-        with:
-          path: ~/.pgrx
-          key: ${{ runner.os }}-pgrx-pg18-${{ env.PGRX_VERSION }}
-
-      - name: Install system dependencies
+      - name: Install PostgreSQL 18 from PGDG
         run: |
+          sudo apt-get install -y --no-install-recommends curl ca-certificates lsb-release
+          sudo install -d /usr/share/postgresql-common/pgdg
+          curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+            | sudo tee /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc >/dev/null
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] \
+https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
+            | sudo tee /etc/apt/sources.list.d/pgdg.list
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends \
             build-essential pkg-config libssl-dev libclang-dev clang lld \
-            libreadline-dev libicu-dev bison flex
+            postgresql-18 postgresql-server-dev-18
 
       - name: Install cargo-pgrx
         run: |
@@ -827,16 +824,13 @@ jobs:
           fi
 
       - name: Initialise pgrx (PostgreSQL 18)
-        run: |
-          if ! ls ~/.pgrx/18.*/pgrx-install/bin/pg_config 2>/dev/null | grep -q .; then
-            cargo pgrx init --pg18 download
-          fi
+        run: cargo pgrx init --pg18 /usr/lib/postgresql/18/bin/pg_config
 
       - name: Start pgrx PostgreSQL 18
         run: cargo pgrx start pg18 --postgresql-conf "allow_system_table_mods=on"
 
       - name: Install pg_ripple
-        run: cargo pgrx install --pg-config $(ls ~/.pgrx/18.*/pgrx-install/bin/pg_config | head -1)
+        run: cargo pgrx install --pg-config /usr/lib/postgresql/18/bin/pg_config
 
       - name: Run Datalog convergence suite
         env:
@@ -878,12 +872,19 @@ jobs:
           path: ~/.cargo/bin/cargo-pgrx
           key: ${{ runner.os }}-cargo-pgrx-${{ env.PGRX_VERSION }}
 
-      - name: Install system dependencies
+      - name: Install PostgreSQL 18 from PGDG
         run: |
+          sudo apt-get install -y --no-install-recommends curl ca-certificates lsb-release
+          sudo install -d /usr/share/postgresql-common/pgdg
+          curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+            | sudo tee /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc >/dev/null
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] \
+https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
+            | sudo tee /etc/apt/sources.list.d/pgdg.list
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends \
             build-essential pkg-config libssl-dev libclang-dev clang lld \
-            libreadline-dev libicu-dev bison flex
+            postgresql-18 postgresql-server-dev-18
 
       - name: Install cargo-pgrx
         run: |
@@ -892,10 +893,7 @@ jobs:
           fi
 
       - name: Initialise pgrx (PostgreSQL 18)
-        run: |
-          if ! ls ~/.pgrx/18.*/pgrx-install/bin/pg_config 2>/dev/null | grep -q .; then
-            cargo pgrx init --pg18 download
-          fi
+        run: cargo pgrx init --pg18 /usr/lib/postgresql/18/bin/pg_config
 
       - name: Build docs (fail on missing_docs for public items)
         run: cargo doc --no-deps --features pg18 2>&1 | tee /tmp/doc_output.txt && ! grep -q "missing documentation" /tmp/doc_output.txt
@@ -942,12 +940,19 @@ jobs:
           path: benchmarks/bsbm/data
           key: bsbm-1M-${{ hashFiles('scripts/fetch_conformance_tests.sh') }}
 
-      - name: Install system dependencies
+      - name: Install PostgreSQL 18 from PGDG
         run: |
+          sudo apt-get install -y --no-install-recommends curl ca-certificates lsb-release
+          sudo install -d /usr/share/postgresql-common/pgdg
+          curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+            | sudo tee /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc >/dev/null
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] \
+https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
+            | sudo tee /etc/apt/sources.list.d/pgdg.list
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends \
             build-essential pkg-config libssl-dev libclang-dev clang lld \
-            libreadline-dev libicu-dev bison flex curl
+            postgresql-18 postgresql-server-dev-18
 
       - name: Install cargo-pgrx
         run: |
@@ -956,10 +961,7 @@ jobs:
           fi
 
       - name: Initialise pgrx (PostgreSQL 18)
-        run: |
-          if ! ls ~/.pgrx/18.*/pgrx-install/bin/pg_config 2>/dev/null | grep -q .; then
-            cargo pgrx init --pg18 download
-          fi
+        run: cargo pgrx init --pg18 /usr/lib/postgresql/18/bin/pg_config
 
       - name: Fetch BSBM data (1M triples)
         if: steps.bsbm-cache.outputs.cache-hit != 'true'
@@ -969,7 +971,7 @@ jobs:
         run: cargo pgrx start pg18 --postgresql-conf "allow_system_table_mods=on"
 
       - name: Install pg_ripple
-        run: cargo pgrx install --pg-config $(ls ~/.pgrx/18.*/pgrx-install/bin/pg_config | head -1)
+        run: cargo pgrx install --pg-config /usr/lib/postgresql/18/bin/pg_config
 
       - name: Run BSBM regression check
         env:

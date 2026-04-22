@@ -53,17 +53,25 @@ jobs:
             cargo install cargo-pgrx --version $PGRX_VERSION --locked
           fi
 
-      - name: Install PostgreSQL build dependencies
+      - name: Install PostgreSQL 18 from PGDG
         run: |
+          sudo apt-get install -y --no-install-recommends curl ca-certificates lsb-release
+          sudo install -d /usr/share/postgresql-common/pgdg
+          curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+            | sudo tee /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc >/dev/null
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] \
+https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
+            | sudo tee /etc/apt/sources.list.d/pgdg.list
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends \
-            libreadline-dev libicu-dev bison flex
+            build-essential pkg-config libssl-dev libclang-dev clang lld \
+            postgresql-18 postgresql-server-dev-18
 
       - name: Initialize pgrx
-        run: cargo pgrx init --pg18 download
+        run: cargo pgrx init --pg18 /usr/lib/postgresql/18/bin/pg_config
 
       - name: Install pg_ripple
-        run: cargo pgrx install --pg-config ~/.pgrx/18.*/pgrx-install/bin/pg_config
+        run: cargo pgrx install --pg-config /usr/lib/postgresql/18/bin/pg_config
 
       - name: Start PostgreSQL
         run: cargo pgrx start pg18
