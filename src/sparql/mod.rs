@@ -873,6 +873,14 @@ fn describe_cbd(subject_id: i64, symmetric: bool) -> Vec<(i64, i64, i64)> {
 /// Execute a SPARQL Update statement.  Returns the total number of affected
 /// triples (inserted + deleted).
 pub fn sparql_update(query_text: &str) -> i64 {
+    // v0.48.0: pre-process SPARQL Update operations not yet supported by spargebra:
+    // ADD, COPY, and MOVE.  These are parsed from the raw query string before
+    // handing off to spargebra.
+    let query_trimmed = query_text.trim();
+    if let Some(n) = try_execute_add_copy_move(query_trimmed) {
+        return n;
+    }
+
     let update = SparqlParser::new()
         .parse_update(query_text)
         .unwrap_or_else(|e| pgrx::error!("SPARQL Update parse error: {}", e));
@@ -1348,6 +1356,189 @@ fn execute_drop(target: &spargebra::algebra::GraphTarget) -> Result<i64, String>
             }
             Ok(total)
         }
+    }
+}
+
+/// Execute `ADD source TO target` — copy all triples from `source` into `target`,
+/// preserving the source graph.  Returns the number of triples added.
+///
+/// Copy all triples from graph `src_g_id` into graph `dst_g_id`.
+/// Returns the number of triples copied (from the source count, not inserted count).
+fn execute_add_by_ids(src_g_id: i64, dst_g_id: i64) -> Result<i64, String> {
+    use pgrx::datum::DatumWithOid;
+
+    let mut total = 0i64;
+
+    // Get all predicate IDs.
+    let pred_ids: Vec<i64> = Spi::connect(|c| {
+        let tup = c
+            .select("SELECT id FROM _pg_ripple.predicates", None, &[])
+            .unwrap_or_else(|e| pgrx::error!("ADD: predicates SPI error: {e}"));
+        let mut out = Vec::new();
+        for row in tup {
+            if let Ok(Some(id)) = row.get::<i64>(1) {
+                out.push(id);
+            }
+        }
+        out
+    });
+
+    for pred_id in &pred_ids {
+        let table_oid: Option<i64> = Spi::get_one_with_args::<i64>(
+            "SELECT table_oid::bigint FROM _pg_ripple.predicates WHERE id = $1",
+            &[DatumWithOid::from(*pred_id)],
+        )
+        .unwrap_or(None);
+
+        if table_oid.is_some() {
+            let insert_sql = format!(
+                "INSERT INTO _pg_ripple.vp_{pred_id} (s, o, g) \
+                 SELECT s, o, {dst_g_id} FROM _pg_ripple.vp_{pred_id} WHERE g = {src_g_id} \
+                 ON CONFLICT DO NOTHING"
+            );
+            let count_sql =
+                format!("SELECT COUNT(*) FROM _pg_ripple.vp_{pred_id} WHERE g = {src_g_id}");
+            Spi::run(&insert_sql).unwrap_or_else(|e| pgrx::error!("ADD VP insert error: {e}"));
+            let n: i64 = Spi::get_one::<i64>(&count_sql).unwrap_or(None).unwrap_or(0);
+            total += n;
+        } else {
+            let insert_sql = format!(
+                "INSERT INTO _pg_ripple.vp_rare (p, s, o, g) \
+                 SELECT {pred_id}, s, o, {dst_g_id} \
+                 FROM _pg_ripple.vp_rare WHERE p = {pred_id} AND g = {src_g_id} \
+                 ON CONFLICT DO NOTHING"
+            );
+            let count_sql = format!(
+                "SELECT COUNT(*) FROM _pg_ripple.vp_rare WHERE p = {pred_id} AND g = {src_g_id}"
+            );
+            Spi::run(&insert_sql).unwrap_or_else(|e| pgrx::error!("ADD vp_rare insert error: {e}"));
+            let n: i64 = Spi::get_one::<i64>(&count_sql).unwrap_or(None).unwrap_or(0);
+            total += n;
+        }
+    }
+
+    Ok(total)
+}
+
+/// Pre-parser for SPARQL Update ADD/COPY/MOVE operations not yet supported by spargebra.
+///
+/// Syntax:
+///   ADD [SILENT] (<from> | DEFAULT) TO (<to> | DEFAULT)
+///   COPY [SILENT] (<from> | DEFAULT) TO (<to> | DEFAULT)
+///   MOVE [SILENT] (<from> | DEFAULT) TO (<to> | DEFAULT)
+///
+/// Returns `Some(n)` where n is the affected triple count if the query is one of these
+/// operations, or `None` if the query should be handled by spargebra.
+fn try_execute_add_copy_move(query: &str) -> Option<i64> {
+    // Quick rejection: must start with ADD, COPY, or MOVE (case-insensitive).
+    let upper = query.to_uppercase();
+    let op: &str;
+    if upper.starts_with("ADD") {
+        op = "ADD";
+    } else if upper.starts_with("COPY") {
+        op = "COPY";
+    } else if upper.starts_with("MOVE") {
+        op = "MOVE";
+    } else {
+        return None;
+    }
+
+    // Parse: <op> [SILENT] (<from_iri> | DEFAULT) TO (<to_iri> | DEFAULT)
+    let rest = query[op.len()..].trim_start();
+    let (silent, rest) = if rest.to_uppercase().starts_with("SILENT") {
+        (true, rest[6..].trim_start())
+    } else {
+        (false, rest)
+    };
+
+    // Parse the FROM graph.
+    let (from_iri_opt, rest) = parse_graph_target_token(rest)?;
+
+    // Expect "TO"
+    let rest = rest.trim_start();
+    if !rest.to_uppercase().starts_with("TO") {
+        return None;
+    }
+    let rest = rest[2..].trim_start();
+
+    // Parse the TO graph.
+    let (to_iri_opt, _rest) = parse_graph_target_token(rest)?;
+
+    // Resolve source and destination graph IDs.
+    let src_g_id: i64 = match &from_iri_opt {
+        None => 0, // DEFAULT
+        Some(iri) => match dictionary::lookup_iri(iri) {
+            Some(id) => id,
+            None => return Some(0), // source not in dict → nothing to do
+        },
+    };
+    let dst_g_id: i64 = match &to_iri_opt {
+        None => 0, // DEFAULT
+        Some(iri) => dictionary::encode(iri, dictionary::KIND_IRI),
+    };
+
+    let result: i64 = match op {
+        "ADD" => match execute_add_by_ids(src_g_id, dst_g_id) {
+            Ok(n) => n,
+            Err(e) => {
+                if silent {
+                    pgrx::warning!("SPARQL ADD failed (silent): {e}");
+                    0
+                } else {
+                    pgrx::error!("SPARQL ADD error: {e}");
+                }
+            }
+        },
+        "COPY" => {
+            // COPY = CLEAR target + ADD
+            let _ = storage::clear_graph_by_id(dst_g_id);
+            match execute_add_by_ids(src_g_id, dst_g_id) {
+                Ok(n) => n,
+                Err(e) => {
+                    if silent {
+                        pgrx::warning!("SPARQL COPY failed (silent): {e}");
+                        0
+                    } else {
+                        pgrx::error!("SPARQL COPY error: {e}");
+                    }
+                }
+            }
+        }
+        "MOVE" => {
+            // MOVE = COPY + DROP source
+            let _ = storage::clear_graph_by_id(dst_g_id);
+            let n = match execute_add_by_ids(src_g_id, dst_g_id) {
+                Ok(n) => n,
+                Err(e) => {
+                    if silent {
+                        pgrx::warning!("SPARQL MOVE (ADD phase) failed (silent): {e}");
+                        0
+                    } else {
+                        pgrx::error!("SPARQL MOVE (ADD phase) error: {e}");
+                    }
+                }
+            };
+            let dropped = storage::clear_graph_by_id(src_g_id);
+            n + dropped
+        }
+        _ => 0,
+    };
+
+    Some(result)
+}
+
+/// Parse a graph target token from a SPARQL Update ADD/COPY/MOVE string.
+/// Returns `(Some(iri), rest)` for `<iri>`, or `(None, rest)` for `DEFAULT`.
+fn parse_graph_target_token(s: &str) -> Option<(Option<String>, &str)> {
+    let s = s.trim_start();
+    if s.to_uppercase().starts_with("DEFAULT") {
+        Some((None, &s[7..]))
+    } else if s.starts_with('<') {
+        let end = s.find('>')?;
+        let iri = s[1..end].to_owned();
+        Some((Some(iri), &s[end + 1..]))
+    } else {
+        None
     }
 }
 

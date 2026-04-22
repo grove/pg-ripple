@@ -19,6 +19,8 @@ pub(crate) fn check_datatype(dt_iri: &str, args: &ConstraintArgs, violations: &m
                 constraint: "sh:datatype".to_owned(),
                 message: format!("value node id {v_id} does not have datatype <{dt_iri}>"),
                 severity: "Violation".to_owned(),
+                sh_value: None,
+                sh_source_constraint_component: None,
             });
         }
     }
@@ -47,6 +49,8 @@ pub(crate) fn check_class(class_iri: &str, args: &ConstraintArgs, violations: &m
                 constraint: "sh:class".to_owned(),
                 message: format!("value node id {v_id} is not an instance of <{class_iri}>"),
                 severity: "Violation".to_owned(),
+                sh_value: None,
+                sh_source_constraint_component: None,
             });
         }
     }
@@ -70,6 +74,8 @@ pub(crate) fn check_node_kind(
                 constraint: "sh:nodeKind".to_owned(),
                 message: format!("value node id {v_id} does not have node kind <{kind_iri}>"),
                 severity: "Violation".to_owned(),
+                sh_value: None,
+                sh_source_constraint_component: None,
             });
         }
     }

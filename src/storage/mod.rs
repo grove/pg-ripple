@@ -112,6 +112,24 @@ pub fn parse_rdf_term(s: &str) -> (String, i16, Option<String>, Option<String>) 
 
 /// Encode an RDF term string (N-Triples format) to a dictionary id.
 pub fn encode_rdf_term(s: &str) -> i64 {
+    let s = s.trim();
+    // v0.48.0: Handle RDF-star quoted triple syntax `<< s p o >>`.
+    if s.starts_with("<<") && s.ends_with(">>") {
+        let inner = s[2..s.len() - 2].trim();
+        let tokens = tokenize_rdf_terms(inner);
+        if tokens.len() >= 3 {
+            let s_id = encode_rdf_term(&tokens[0]);
+            let p_id = encode_rdf_term(&tokens[1]);
+            // Object may span multiple tokens (e.g. typed literal with spaces)
+            let o_str = if tokens.len() == 3 {
+                tokens[2].clone()
+            } else {
+                tokens[2..].join(" ")
+            };
+            let o_id = encode_rdf_term(&o_str);
+            return dictionary::encode_quoted_triple(s_id, p_id, o_id);
+        }
+    }
     let (value, kind, datatype, lang) = parse_rdf_term(s);
     match kind {
         k if k == dictionary::KIND_TYPED_LITERAL => {
@@ -123,6 +141,65 @@ pub fn encode_rdf_term(s: &str) -> i64 {
         _ => dictionary::encode(&value, kind),
     }
 }
+
+/// Tokenize a space-separated sequence of N-Triples terms, respecting IRIs,
+/// quoted literals and nested `<< >>` quoted triples.
+fn tokenize_rdf_terms(text: &str) -> Vec<String> {
+    let mut tokens = Vec::new();
+    let mut current = String::new();
+    let mut in_literal = false;
+    let mut in_iri = false;
+    let mut quoted_depth: usize = 0;
+    let chars: Vec<char> = text.chars().collect();
+    let mut i = 0;
+    while i < chars.len() {
+        let c = chars[i];
+        match c {
+            '"' if !in_iri => {
+                in_literal = !in_literal;
+                current.push(c);
+            }
+            '<' if !in_literal => {
+                if i + 1 < chars.len() && chars[i + 1] == '<' {
+                    quoted_depth += 1;
+                    current.push(c);
+                    current.push(chars[i + 1]);
+                    i += 2;
+                    continue;
+                }
+                in_iri = true;
+                current.push(c);
+            }
+            '>' if !in_literal && quoted_depth > 0 => {
+                if i + 1 < chars.len() && chars[i + 1] == '>' {
+                    quoted_depth -= 1;
+                    current.push(c);
+                    current.push(chars[i + 1]);
+                    i += 2;
+                    continue;
+                }
+                current.push(c);
+            }
+            '>' if !in_literal && in_iri => {
+                in_iri = false;
+                current.push(c);
+            }
+            ' ' | '\t' | '\n' if !in_literal && !in_iri && quoted_depth == 0 => {
+                if !current.is_empty() {
+                    tokens.push(current.trim().to_owned());
+                    current.clear();
+                }
+            }
+            _ => current.push(c),
+        }
+        i += 1;
+    }
+    if !current.trim().is_empty() {
+        tokens.push(current.trim().to_owned());
+    }
+    tokens
+}
+
 
 /// Initialize the extension's base schemas and tables.
 /// Called once from _PG_init to ensure all base infrastructure exists.

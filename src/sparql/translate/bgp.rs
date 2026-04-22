@@ -80,16 +80,172 @@ pub(crate) fn bind_term(
                 bindings.insert(vname, col_expr);
             }
         }
-        TermPattern::Triple(_) => match ground_term_id(term, ctx) {
-            Some(id) => conditions.push(format!("{col_expr} = {id}")),
-            None => {
-                pgrx::warning!(
-                    "SPARQL-star: variable inside quoted triple pattern is not yet supported; \
-                         pattern treated as no-match"
-                );
-                conditions.push("FALSE".to_owned());
+        TermPattern::Triple(inner) => {
+            // v0.48.0: SPARQL-star variable-inside-quoted-triple support.
+            // If all components are ground, look up the quoted-triple ID directly.
+            // Otherwise, generate a JOIN against the dictionary on qt_s/qt_p/qt_o columns
+            // to bind the variable components and constrain col_expr to matching IDs.
+            match ground_term_id(term, ctx) {
+                Some(id) => conditions.push(format!("{col_expr} = {id}")),
+                None => {
+                    // At least one component is a variable. We need a subquery:
+                    //   col_expr IN (SELECT id FROM _pg_ripple.dictionary WHERE kind = 5
+                    //                AND qt_s = <s_val> AND qt_p = <p_val> AND qt_o = <o_val>)
+                    // where ground components become literal equality conditions
+                    // and variable components are bound via dictionary column projections.
+                    let dict_alias = sanitize_sql_ident(&format!("_qt_dict_{col}"));
+
+                    // Collect per-component SQL expressions for the subquery conditions.
+                    let mut qt_conds: Vec<String> = Vec::new();
+                    let mut qt_bindings: Vec<(String, String)> = Vec::new(); // (var_name, col_expr)
+
+                    // Helper: turn a TermPattern component into either a literal i64 or
+                    // a "bind variable to dict column" pair.
+                    let process_qt_component =
+                        |tp: &TermPattern,
+                         dict_col: &str,
+                         ctx: &mut Ctx,
+                         conds: &mut Vec<String>,
+                         bnd: &mut Vec<(String, String)>| {
+                            match tp {
+                                TermPattern::NamedNode(nn) => match ctx.encode_iri(nn.as_str()) {
+                                    Some(id) => conds.push(format!("{dict_col} = {id}")),
+                                    None => conds.push("FALSE".to_owned()),
+                                },
+                                TermPattern::Literal(lit) => {
+                                    let id = ctx.encode_literal(lit);
+                                    conds.push(format!("{dict_col} = {id}"));
+                                }
+                                TermPattern::Variable(v) => {
+                                    bnd.push((v.as_str().to_owned(), dict_col.to_owned()));
+                                }
+                                TermPattern::BlankNode(bn) => {
+                                    let vn = sanitize_sql_ident(&format!("_bn_{bn}"));
+                                    bnd.push((vn, dict_col.to_owned()));
+                                }
+                                TermPattern::Triple(_) => {
+                                    // Nested quoted triples: not supported here, treat as no-match.
+                                    conds.push("FALSE".to_owned());
+                                }
+                            }
+                        };
+
+                    // Subject component.
+                    {
+                        let mut conds_tmp = Vec::new();
+                        let mut bnd_tmp = Vec::new();
+                        let s_col = "qt_s".to_owned();
+                        process_qt_component(
+                            &inner.subject,
+                            &s_col,
+                            ctx,
+                            &mut conds_tmp,
+                            &mut bnd_tmp,
+                        );
+                        qt_conds.extend(conds_tmp);
+                        qt_bindings.extend(bnd_tmp);
+                    }
+
+                    // Predicate component (NamedNodePattern, not TermPattern).
+                    let p_col = "qt_p".to_owned();
+                    match &inner.predicate {
+                        spargebra::term::NamedNodePattern::NamedNode(nn) => {
+                            match ctx.encode_iri(nn.as_str()) {
+                                Some(id) => qt_conds.push(format!("{p_col} = {id}")),
+                                None => qt_conds.push("FALSE".to_owned()),
+                            }
+                        }
+                        spargebra::term::NamedNodePattern::Variable(v) => {
+                            qt_bindings.push((v.as_str().to_owned(), p_col.clone()));
+                        }
+                    }
+
+                    // Object component.
+                    {
+                        let mut conds_tmp = Vec::new();
+                        let mut bnd_tmp = Vec::new();
+                        let o_col = "qt_o".to_owned();
+                        process_qt_component(
+                            &inner.object,
+                            &o_col,
+                            ctx,
+                            &mut conds_tmp,
+                            &mut bnd_tmp,
+                        );
+                        qt_conds.extend(conds_tmp);
+                        qt_bindings.extend(bnd_tmp);
+                    }
+
+                    // Build the JOIN condition: col_expr = dict.id AND kind = 5 AND <qt conditions>.
+                    let kind_cond = format!("{dict_alias}.kind = 5");
+                    let all_conds: Vec<String> =
+                        std::iter::once(kind_cond).chain(qt_conds).collect();
+                    let where_clause = all_conds.join(" AND ");
+
+                    // Add the dictionary table to FROM with a JOIN condition.
+                    // We add it as: JOIN _pg_ripple.dictionary AS {dict_alias}
+                    //               ON {col_expr} = {dict_alias}.id AND {where_clause}
+                    let _join_expr = format!("_pg_ripple.dictionary AS {dict_alias}");
+                    // Add the FROM item and conditions via the Fragment.
+                    // We use the bindings map to add the join + bind variables.
+                    // Emit: {col_expr} = {dict_alias}.id
+                    conditions.push(format!("{col_expr} = {dict_alias}.id"));
+                    conditions.push(where_clause);
+
+                    // Register the dictionary alias as a FROM item.
+                    // We add it into the frag directly via bindings/conditions only;
+                    // the actual JOIN is emitted as a CROSS JOIN with WHERE conditions
+                    // (equivalent, but simpler to generate correctly here).
+                    // Note: `frag` is not accessible here; use a dummy approach:
+                    // wrap the conditions to create the right filter.
+                    // Instead, add the table reference by pushing to a special slot.
+                    // Since we can't access frag directly from bind_term, we embed the
+                    // dictionary subquery inline via col_expr IN (SELECT id FROM ...).
+                    // Undo the conditions we just pushed and do a proper IN subquery.
+                    conditions.pop();
+                    conditions.pop();
+
+                    // Build the IN subquery approach instead.
+                    let subquery_conds: Vec<String> = std::iter::once("kind = 5".to_owned())
+                        .chain(all_conds[1..].iter().cloned())
+                        .collect();
+                    let subquery_where = subquery_conds.join(" AND ");
+
+                    // For variable bindings: we can't bind from a subquery directly without
+                    // adding the dictionary table to FROM. Instead, add an EXISTS clause
+                    // that constrains the col_expr.
+                    // For variable components (qt_s, qt_p, qt_o) where the variable needs
+                    // to be *bound*, we need to add the dictionary table to the FROM list.
+                    // We do this by recording the FROM entry in bindings under a special key
+                    // and resolving it in translate_bgp.
+
+                    // Simple approach: emit col_expr IN (SELECT id FROM dictionary WHERE ...)
+                    // and for each variable component, add a separate FROM entry + binding.
+                    let in_subq = format!(
+                        "{col_expr} IN (SELECT id FROM _pg_ripple.dictionary WHERE {subquery_where})"
+                    );
+                    conditions.push(in_subq);
+
+                    // Bind variables by adding the dict table as a lateral join.
+                    // We push to bindings map: _qt_alias = "d.qt_s" etc.
+                    // The fragment will have these bindings available for SELECT generation.
+                    for (vname, dict_col) in &qt_bindings {
+                        // dict_col is like "_qt_dict_o.qt_s" — we need it resolvable.
+                        // Re-derive the dict_col as a subquery:
+                        // SELECT qt_s FROM dictionary WHERE id = col_expr
+                        // and bind the variable to that.
+                        let derived_col = format!(
+                            "(SELECT {dict_col_base} FROM _pg_ripple.dictionary WHERE id = {col_expr})",
+                            dict_col_base = dict_col.split('.').next_back().unwrap_or(dict_col),
+                            col_expr = col_expr
+                        );
+                        if !bindings.contains_key(vname.as_str()) {
+                            bindings.insert(vname.clone(), derived_col);
+                        }
+                    }
+                }
             }
-        },
+        }
     }
 }
 

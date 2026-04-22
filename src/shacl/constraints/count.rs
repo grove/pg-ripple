@@ -17,6 +17,8 @@ pub(crate) fn check_min_count(n: i64, args: &ConstraintArgs, violations: &mut Ve
                 args.path_iri, args.count
             ),
             severity: "Violation".to_owned(),
+            sh_value: None,
+            sh_source_constraint_component: None,
         });
     }
 }
@@ -36,6 +38,8 @@ pub(crate) fn check_max_count(n: i64, args: &ConstraintArgs, violations: &mut Ve
                 args.path_iri, args.count
             ),
             severity: "Violation".to_owned(),
+            sh_value: None,
+            sh_source_constraint_component: None,
         });
     }
 }

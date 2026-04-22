@@ -3746,24 +3746,24 @@ All four previously parsed-but-unchecked SHACL constraints trigger violations on
 
 ### Deliverables
 
-- [ ] **Remaining SHACL Core constraints** (S4-5)
+- [x] **Remaining SHACL Core constraints** (S4-5)
   - `sh:minLength` / `sh:maxLength`: apply to string-typed literals after language-tag stripping
   - `sh:xone`: exactly one of the given sub-shapes must be satisfied (XOR logic over the existing `sh:or` / `sh:not` primitives)
   - `sh:minExclusive` / `sh:maxExclusive` / `sh:minInclusive` / `sh:maxInclusive`: XSD-typed numeric comparison; reuse the ordering logic from `sh:lessThan` / `sh:lessThanOrEquals`
   - Target: full SHACL Core constraint coverage (35/35); W3C SHACL Core test suite must pass completely
 
-- [ ] **Complex `sh:path` expressions** (S4-6)
+- [x] **Complex `sh:path` expressions** (S4-6)
   - `sh:inversePath`: query `(o, s)` instead of `(s, o)` on the VP table
   - `sh:alternativePath`: union of multiple sub-paths
   - Sequence paths (`(sh:path (ex:a ex:b))`): chained joins
   - `sh:zeroOrMorePath`, `sh:oneOrMorePath`, `sh:zeroOrOnePath`: compile to `WITH RECURSIVE … CYCLE` CTEs, reusing the SPARQL property-path compiler from `src/sparql/property_path.rs`
   - Drop the TODO placeholder in `src/shacl/constraints/property_path.rs`
 
-- [ ] **SHACL violation report enhancements** (S4-7, S4-8)
+- [x] **SHACL violation report enhancements** (S4-7, S4-8)
   - Extend `Violation` struct with `sh_value` (the offending value node, decoded) and `sh_source_constraint_component` (W3C constraint component IRI, e.g. `sh:MinCountConstraintComponent`)
   - For `sh:rule` triples (SHACL-AF): emit a PT4xx WARNING if rules are detected but SHACL-AF compilation is not yet implemented; never silently drop the rule
 
-- [ ] **OWL 2 RL rule set completion** (S3-1)
+- [x] **OWL 2 RL rule set completion** (S3-1)
   - `cax-sco`: full `rdfs:subClassOf` transitive closure (currently single-step only)
   - `prp-spo1`: `rdfs:subPropertyOf` chain (current binary case → full chain)
   - `prp-ifp`: inverse-functional-property derived `owl:sameAs` propagation
@@ -3771,22 +3771,22 @@ All four previously parsed-but-unchecked SHACL constraints trigger violations on
   - `owl:minCardinality`, `owl:maxCardinality`, `owl:cardinality` entailment rules
   - Target: W3C OWL 2 RL CI suite ≥ 95% pass rate (upgrading the gate from informational to required)
 
-- [ ] **SPARQL Update: MOVE, COPY, ADD** (S2-2)
+- [x] **SPARQL Update: MOVE, COPY, ADD** (S2-2)
   - `ADD`: `INSERT { ?s ?p ?o } WHERE { GRAPH source { ?s ?p ?o } }` (source preserved)
   - `COPY`: `CLEAR target` + `ADD`
   - `MOVE`: `COPY` + `DROP source`
   - Wire into `src/sparql/mod.rs` Update arm; add pg_regress tests for all three operations
 
-- [ ] **SPARQL-star variable-inside-quoted-triple patterns** (S2-1)
+- [x] **SPARQL-star variable-inside-quoted-triple patterns** (S2-1)
   - Convert the current silent `FALSE` emission into a proper dictionary join on `qt_s`, `qt_p`, `qt_o` columns already present in `_pg_ripple.dictionary`
   - Patterns like `<< ?s ?p ?o >> :assertedBy ?who` return rows
   - Add pg_regress tests `rdfstar_variable_quoted.sql`
 
-- [ ] **Performance baselines and benchmarks** (S7-2, S7-3)
+- [x] **Performance baselines and benchmarks** (S7-2, S7-3)
   - Record per-query p50/p95/p99 latency for all 32 WatDiv templates in `tests/watdiv/baselines.json`; CI warning gate on > 10% regression
   - Add `benchmarks/merge_throughput.sql`: 5-minute pgbench script with N writers + `merge_workers ∈ {1, 2, 4, 8}`; document the scaling curve
 
-- [ ] **Operational hardening** (S1-1, S1-3, S1-4, S1-5, S2-4, S2-6, S3-4, S6-3, S7-4, S7-5, S9-4, S9-6, S10-2, S10-3, S10-5)
+- [x] **Operational hardening** (S1-1, S1-3, S1-4, S1-5, S2-4, S2-6, S3-4, S6-3, S7-4, S7-5, S9-4, S9-6, S10-2, S10-3, S10-5)
   - HTAP merge cutover: add a concurrent-merge regression test (50 parallel SPARQL queries during a forced merge cycle; assert zero `relation does not exist` errors) (S1-1)
   - Merge worker backoff: replace `std::thread::sleep` with `BackgroundWorker::wait_latch` (S1-3)
   - Add `source` column integrity pg_regress test (S1-4)
@@ -3821,12 +3821,12 @@ All four previously parsed-but-unchecked SHACL constraints trigger violations on
 
 ### Documentation
 
-- [ ] `reference/shacl-reference.md` — all 35 SHACL Core constraints marked implemented; complex path expressions documented with examples
-- [ ] `reference/owl2rl-results.md` — pass rate updated to reflect ≥ 95% required gate
-- [ ] `user-guide/best-practices/sparql-update.md` — MOVE, COPY, ADD examples
-- [ ] `user-guide/rdf-star.md` — variable-inside-quoted-triple patterns documented
-- [ ] `operations/pg-upgrade.md` — new page with supported upgrade matrix
-- [ ] Release notes for v0.48.0
+- [x] `reference/shacl-reference.md` — all 35 SHACL Core constraints marked implemented; complex path expressions documented with examples
+- [x] `reference/owl2rl-results.md` — pass rate updated to reflect ≥ 95% required gate
+- [x] `user-guide/best-practices/sparql-update.md` — MOVE, COPY, ADD examples
+- [x] `user-guide/rdf-star.md` — variable-inside-quoted-triple patterns documented
+- [x] `operations/pg-upgrade.md` — new page with supported upgrade matrix
+- [x] Release notes for v0.48.0
 
 ### Exit Criteria
 

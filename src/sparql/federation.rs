@@ -342,6 +342,17 @@ pub(crate) fn execute_remote(
         )
     })?;
 
+    // PT543: enforce federation_max_response_bytes (v0.48.0).
+    let max_bytes = crate::FEDERATION_MAX_RESPONSE_BYTES.get();
+    if max_bytes >= 0 && body.len() > max_bytes as usize {
+        pgrx::error!(
+            "PT543: federation response from {url} is {} bytes, exceeding \
+             pg_ripple.federation_max_response_bytes ({})",
+            body.len(),
+            max_bytes
+        );
+    }
+
     let result: Result<RemoteResult, String> =
         parse_sparql_results_json(&body, max_results as usize)
             .map_err(|e| format!("federation result parse error from {url}: {e}"));

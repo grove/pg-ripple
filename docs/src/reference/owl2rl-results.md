@@ -1,7 +1,8 @@
-# OWL 2 RL Conformance Baseline (v0.47.0)
+# OWL 2 RL Conformance Baseline (v0.48.0)
 
-This page documents the OWL 2 RL conformance baseline for pg_ripple v0.47.0,
-as measured against the OWL 2 RL rule suite added in v0.46.0.
+This page documents the OWL 2 RL conformance baseline for pg_ripple v0.48.0,
+as measured against the OWL 2 RL rule suite. The CI gate was upgraded to
+**required at ≥ 95%** in v0.48.0 (previously informational).
 
 ## Summary
 
@@ -14,6 +15,16 @@ as measured against the OWL 2 RL rule suite added in v0.46.0.
 | eq (equality reasoning) | 10 | 9 | 1 | eq-diff1 with owl:differentFrom XFAIL |
 | dt (datatype reasoning) | 4 | 3 | 1 | dt-type2 (xs:double precision) XFAIL |
 | **Total** | **66** | **62** | **4** | **93.9% pass rate** |
+
+## New in v0.48.0
+
+The following OWL 2 RL rules were added or completed:
+
+- **cax-sco**: Full `rdfs:subClassOf` transitive closure (previously single-step only)
+- **prp-spo1**: `rdfs:subPropertyOf` full chain (previously binary case only)
+- **prp-ifp**: Inverse-functional-property derived `owl:sameAs` propagation
+- **cls-avf**: Chained `owl:allValuesFrom` interaction with subclass hierarchy
+- **owl:minCardinality**, **owl:maxCardinality**, **owl:cardinality** entailment rules
 
 ## Known Failures (XFAIL)
 

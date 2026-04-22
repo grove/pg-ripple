@@ -544,3 +544,14 @@ pub static TOPN_PUSHDOWN: pgrx::GucSetting<bool> = pgrx::GucSetting::<bool>::new
 /// contiguous SID range; each worker uses its slice without touching the sequence.
 /// Default: `10000`.  Range: 100–1 000 000.
 pub static DATALOG_SEQUENCE_BATCH: pgrx::GucSetting<i32> = pgrx::GucSetting::<i32>::new(10_000);
+
+// ── v0.48.0 GUCs ─────────────────────────────────────────────────────────────
+
+/// GUC: maximum federation response body in bytes (v0.48.0).
+///
+/// When a remote SERVICE endpoint returns a JSON body larger than this value,
+/// the response is refused with error code PT543 and an ERROR is raised.
+/// Default: 100 MiB (`104_857_600`).  Set `-1` to disable the limit (not
+/// recommended for untrusted deployments).
+pub static FEDERATION_MAX_RESPONSE_BYTES: pgrx::GucSetting<i32> =
+    pgrx::GucSetting::<i32>::new(104_857_600);

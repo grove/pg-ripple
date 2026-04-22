@@ -1,4 +1,5 @@
-//! sh:equals and sh:disjoint relational constraint checkers (v0.45.0).
+//! sh:equals, sh:disjoint, and numeric range (sh:min/maxExclusive/Inclusive) constraint
+//! checkers (v0.45.0 / v0.48.0).
 //!
 //! Both constraints compare the *set* of value-node IDs for the focus node's
 //! declared path with the set of value-node IDs for an *other* path.
@@ -13,7 +14,7 @@
 //!   values(path) ∩ values(other_path) == ∅
 //! Implemented as an EXISTS check for any shared value ID.
 
-use super::{ConstraintArgs, Violation, get_value_ids};
+use super::{ConstraintArgs, Violation, compare_dictionary_values, get_value_ids};
 
 /// Check `sh:equals other_path_iri` — the value set for the focus node's
 /// declared path must be identical to the value set for `other_path_iri`.
@@ -42,6 +43,8 @@ pub(crate) fn check_equals(
                         args.path_iri
                     ),
                     severity: "Violation".to_owned(),
+                    sh_value: None,
+                    sh_source_constraint_component: None,
                 });
             }
             return;
@@ -73,6 +76,8 @@ pub(crate) fn check_equals(
                 args.path_iri
             ),
             severity: "Violation".to_owned(),
+            sh_value: None,
+            sh_source_constraint_component: None,
         });
     }
 }
@@ -115,6 +120,150 @@ pub(crate) fn check_disjoint(
                 args.path_iri
             ),
             severity: "Violation".to_owned(),
+            sh_value: None,
+            sh_source_constraint_component: None,
         });
+    }
+}
+
+// ─── Numeric range constraints (v0.48.0) ─────────────────────────────────────
+//
+// sh:minExclusive, sh:maxExclusive, sh:minInclusive, sh:maxInclusive
+//
+// All four use the `compare_dictionary_values` helper already used by
+// sh:lessThan / sh:lessThanOrEquals in shape_based.rs.
+
+use std::cmp::Ordering;
+
+/// Try to look up a SHACL constraint bound value (IRI or literal) as a dictionary ID.
+fn lookup_bound_id(value: &str) -> Option<i64> {
+    crate::dictionary::lookup_iri(value)
+}
+
+/// Check `sh:minExclusive bound` — every value must be strictly greater than `bound`.
+pub(crate) fn check_min_exclusive(
+    bound: &str,
+    args: &ConstraintArgs,
+    violations: &mut Vec<Violation>,
+) {
+    let bound_id = match lookup_bound_id(bound) {
+        Some(id) => id,
+        None => return, // bound not in dictionary → skip (open world)
+    };
+    for v_id in get_value_ids(args.focus, args.path_id, args.graph_id) {
+        let ok = compare_dictionary_values(v_id, bound_id)
+            .map(|o| o == Ordering::Greater)
+            .unwrap_or(true);
+        if !ok {
+            violations.push(Violation {
+                focus_node: crate::shacl::decode_id_safe(args.focus),
+                shape_iri: args.shape_iri.to_owned(),
+                path: Some(args.path_iri.to_owned()),
+                constraint: "sh:minExclusive".to_owned(),
+                message: format!(
+                    "value '{}' is not > {bound}",
+                    crate::dictionary::decode(v_id).unwrap_or_default()
+                ),
+                severity: "Violation".to_owned(),
+                sh_value: None,
+                sh_source_constraint_component: None,
+            });
+        }
+    }
+}
+
+/// Check `sh:maxExclusive bound` — every value must be strictly less than `bound`.
+pub(crate) fn check_max_exclusive(
+    bound: &str,
+    args: &ConstraintArgs,
+    violations: &mut Vec<Violation>,
+) {
+    let bound_id = match lookup_bound_id(bound) {
+        Some(id) => id,
+        None => return,
+    };
+    for v_id in get_value_ids(args.focus, args.path_id, args.graph_id) {
+        let ok = compare_dictionary_values(v_id, bound_id)
+            .map(|o| o == Ordering::Less)
+            .unwrap_or(true);
+        if !ok {
+            violations.push(Violation {
+                focus_node: crate::shacl::decode_id_safe(args.focus),
+                shape_iri: args.shape_iri.to_owned(),
+                path: Some(args.path_iri.to_owned()),
+                constraint: "sh:maxExclusive".to_owned(),
+                message: format!(
+                    "value '{}' is not < {bound}",
+                    crate::dictionary::decode(v_id).unwrap_or_default()
+                ),
+                severity: "Violation".to_owned(),
+                sh_value: None,
+                sh_source_constraint_component: None,
+            });
+        }
+    }
+}
+
+/// Check `sh:minInclusive bound` — every value must be >= `bound`.
+pub(crate) fn check_min_inclusive(
+    bound: &str,
+    args: &ConstraintArgs,
+    violations: &mut Vec<Violation>,
+) {
+    let bound_id = match lookup_bound_id(bound) {
+        Some(id) => id,
+        None => return,
+    };
+    for v_id in get_value_ids(args.focus, args.path_id, args.graph_id) {
+        let ok = compare_dictionary_values(v_id, bound_id)
+            .map(|o| o != Ordering::Less)
+            .unwrap_or(true);
+        if !ok {
+            violations.push(Violation {
+                focus_node: crate::shacl::decode_id_safe(args.focus),
+                shape_iri: args.shape_iri.to_owned(),
+                path: Some(args.path_iri.to_owned()),
+                constraint: "sh:minInclusive".to_owned(),
+                message: format!(
+                    "value '{}' is not >= {bound}",
+                    crate::dictionary::decode(v_id).unwrap_or_default()
+                ),
+                severity: "Violation".to_owned(),
+                sh_value: None,
+                sh_source_constraint_component: None,
+            });
+        }
+    }
+}
+
+/// Check `sh:maxInclusive bound` — every value must be <= `bound`.
+pub(crate) fn check_max_inclusive(
+    bound: &str,
+    args: &ConstraintArgs,
+    violations: &mut Vec<Violation>,
+) {
+    let bound_id = match lookup_bound_id(bound) {
+        Some(id) => id,
+        None => return,
+    };
+    for v_id in get_value_ids(args.focus, args.path_id, args.graph_id) {
+        let ok = compare_dictionary_values(v_id, bound_id)
+            .map(|o| o != Ordering::Greater)
+            .unwrap_or(true);
+        if !ok {
+            violations.push(Violation {
+                focus_node: crate::shacl::decode_id_safe(args.focus),
+                shape_iri: args.shape_iri.to_owned(),
+                path: Some(args.path_iri.to_owned()),
+                constraint: "sh:maxInclusive".to_owned(),
+                message: format!(
+                    "value '{}' is not <= {bound}",
+                    crate::dictionary::decode(v_id).unwrap_or_default()
+                ),
+                severity: "Violation".to_owned(),
+                sh_value: None,
+                sh_source_constraint_component: None,
+            });
+        }
     }
 }
