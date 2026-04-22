@@ -545,12 +545,11 @@ pub(crate) fn translate_expr_value(
                     _
                 )
             );
-            if is_bool_pred
-                && let Some(cond_sql) = translate_expr(cond, bindings, ctx) {
-                    return Some(format!(
-                        "CASE WHEN ({cond_sql}) THEN ({then_sql}) ELSE ({else_sql}) END"
-                    ));
-                }
+            if is_bool_pred && let Some(cond_sql) = translate_expr(cond, bindings, ctx) {
+                return Some(format!(
+                    "CASE WHEN ({cond_sql}) THEN ({then_sql}) ELSE ({else_sql}) END"
+                ));
+            }
             match cond.as_ref() {
                 Expression::Variable(_)
                 | Expression::Add(_, _)

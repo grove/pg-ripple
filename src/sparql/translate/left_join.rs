@@ -16,9 +16,10 @@ pub(crate) fn translate_left_join(
     let mut right_frag = crate::sparql::sqlgen::translate_pattern(right, ctx);
 
     if let Some(expr) = expression
-        && let Some(cond) = translate_expr(expr, &right_frag.bindings, ctx) {
-            right_frag.conditions.push(cond);
-        }
+        && let Some(cond) = translate_expr(expr, &right_frag.bindings, ctx)
+    {
+        right_frag.conditions.push(cond);
+    }
 
     let shared_vars: Vec<String> = left_frag
         .bindings

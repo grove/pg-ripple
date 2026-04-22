@@ -35,9 +35,10 @@ pub(crate) fn translate_join(left: &GraphPattern, right: &GraphPattern, ctx: &mu
                     inner_r,
                     *silent_l || *silent_r,
                     ctx,
-                ) {
-                    return frag;
-                }
+                )
+            {
+                return frag;
+            }
         }
     }
     // Standard join: merge fragments.
