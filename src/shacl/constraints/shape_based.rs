@@ -120,10 +120,48 @@ pub(crate) fn check_greater_than(
     }
 }
 
+/// Check `sh:lessThanOrEquals other_path` — every value must be less than or equal to
+/// every value of `other_path` for the same focus node.
+pub(crate) fn check_less_than_or_equals(
+    other_path_iri: &str,
+    args: &ConstraintArgs,
+    violations: &mut Vec<Violation>,
+) {
+    let other_pred_id = match crate::dictionary::lookup_iri(other_path_iri) {
+        Some(id) => id,
+        None => return,
+    };
+    let my_values = get_value_ids(args.focus, args.path_id, args.graph_id);
+    let other_values = get_value_ids(args.focus, other_pred_id, args.graph_id);
+    for v_id in &my_values {
+        for o_id in &other_values {
+            match compare_dictionary_values(*v_id, *o_id) {
+                Some(std::cmp::Ordering::Less) | Some(std::cmp::Ordering::Equal) => {}
+                _ => {
+                    let focus_iri = crate::dictionary::decode(args.focus)
+                        .unwrap_or_else(|| format!("_id_{}", args.focus));
+                    violations.push(Violation {
+                        focus_node: focus_iri,
+                        shape_iri: args.shape_iri.to_owned(),
+                        path: Some(args.path_iri.to_owned()),
+                        constraint: "sh:lessThanOrEquals".to_owned(),
+                        message: format!(
+                            "value id {v_id} is not less than or equal to other-path value id {o_id}"
+                        ),
+                        severity: "Violation".to_owned(),
+                    });
+                }
+            }
+        }
+    }
+}
+
 /// `sh:closed` — Verify that there are no disallowed predicates.
 /// Currently a placeholder; full implementation requires enumerating all
 /// declared paths in the shape and checking for unexpected predicates.
 pub(crate) fn check_closed(_args: &ConstraintArgs, _violations: &mut Vec<Violation>) {
-    // sh:closed enforcement is deferred to a future release (requires
-    // the full property shape set for the target node shape).
+    // sh:closed enforcement is validated at the node level by run_validate().
+    // The per-property dispatch skips this constraint because checking requires
+    // the full set of declared property paths for the enclosing node shape,
+    // which is not available in the per-property ConstraintArgs.
 }

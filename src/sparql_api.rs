@@ -152,13 +152,33 @@ mod pg_ripple {
 
     // ── Plan cache monitoring (v0.13.0) ──────────────────────────────────────
 
-    /// Return SPARQL plan cache statistics as JSONB.
+    /// Return SPARQL plan cache statistics as a single row.
     ///
-    /// Returns `{"hits": N, "misses": N, "size": N, "capacity": N, "hit_rate": 0.xx}`.
-    /// Counters accumulate from backend start; reset with `plan_cache_reset()`.
+    /// Columns: `hits`, `misses`, `evictions` (always 0), `hit_rate`.
+    /// For the legacy JSONB form use `cache_stats()`.
+    ///
+    /// Supersedes the v0.38.0 JSONB overload (v0.47.0).
     #[pg_extern]
-    fn plan_cache_stats() -> pgrx::JsonB {
-        crate::sparql::plan_cache_stats()
+    fn plan_cache_stats() -> TableIterator<
+        'static,
+        (
+            name!(hits, i64),
+            name!(misses, i64),
+            name!(evictions, i64),
+            name!(hit_rate, f64),
+        ),
+    > {
+        // Use the public JSONB function to extract counters.
+        let jsonb = crate::sparql::plan_cache_stats();
+        let hits = jsonb.0.get("hits").and_then(|v| v.as_i64()).unwrap_or(0);
+        let misses = jsonb.0.get("misses").and_then(|v| v.as_i64()).unwrap_or(0);
+        let total = hits + misses;
+        let hit_rate = if total > 0 {
+            hits as f64 / total as f64
+        } else {
+            0.0
+        };
+        TableIterator::new(std::iter::once((hits, misses, 0_i64, hit_rate)))
     }
 
     /// Evict all cached SPARQL plan translations and reset hit/miss counters.
@@ -258,6 +278,60 @@ mod pg_ripple {
     fn reset_cache_stats() {
         crate::sparql::plan_cache_reset();
         crate::shmem::reset_cache_stats();
+    }
+
+    // ── v0.47.0: individual cache hit-rate SRFs ───────────────────────────────
+
+    /// Return dictionary encode-cache statistics as a single row.
+    ///
+    /// Columns: hits, misses, evictions, hit_rate.
+    #[pg_extern]
+    fn dictionary_cache_stats() -> TableIterator<
+        'static,
+        (
+            name!(hits, i64),
+            name!(misses, i64),
+            name!(evictions, i64),
+            name!(hit_rate, f64),
+        ),
+    > {
+        let (hits, misses, evictions, _util) = crate::shmem::get_cache_stats();
+        let total = hits + misses;
+        let hit_rate = if total > 0 {
+            hits as f64 / total as f64
+        } else {
+            0.0
+        };
+        TableIterator::new(std::iter::once((
+            hits as i64,
+            misses as i64,
+            evictions as i64,
+            hit_rate,
+        )))
+    }
+
+    /// Return federation result-cache statistics as a single row.
+    ///
+    /// Columns: hits (live cached entries), misses (always 0 — not separately
+    /// tracked), evictions (always 0), hit_rate (always 0.0 — not available).
+    #[pg_extern]
+    fn federation_cache_stats() -> TableIterator<
+        'static,
+        (
+            name!(hits, i64),
+            name!(misses, i64),
+            name!(evictions, i64),
+            name!(hit_rate, f64),
+        ),
+    > {
+        let (hits, misses) = super::get_federation_cache_stats_inner();
+        let total = hits + misses;
+        let hit_rate = if total > 0 {
+            hits as f64 / total as f64
+        } else {
+            0.0
+        };
+        TableIterator::new(std::iter::once((hits, misses, 0_i64, hit_rate)))
     }
 
     /// Flush the shared-memory encode cache, evicting all entries.

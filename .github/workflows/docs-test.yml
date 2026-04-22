@@ -53,6 +53,12 @@ jobs:
             cargo install cargo-pgrx --version $PGRX_VERSION --locked
           fi
 
+      - name: Install PostgreSQL build dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            libreadline-dev libicu-dev bison flex
+
       - name: Initialize pgrx
         run: cargo pgrx init --pg18 download
 
@@ -64,7 +70,8 @@ jobs:
 
       - name: Create test database
         run: |
-          PG_PORT=$(grep -oP 'port\s*=\s*\K\d+' ~/.pgrx/data-18/postgresql.conf || echo 28818)
+          PG_PORT=$(grep -oP 'port\s*=\s*\K\d+' ~/.pgrx/data-18/postgresql.conf 2>/dev/null || echo 28818)
+          psql -h localhost -p $PG_PORT -d postgres -c "DROP DATABASE IF EXISTS docs_test"
           createdb -h localhost -p $PG_PORT docs_test
           psql -h localhost -p $PG_PORT -d docs_test -c "CREATE EXTENSION pg_ripple"
 

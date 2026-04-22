@@ -348,3 +348,77 @@ SID (statement-ID) range reserved per parallel Datalog worker per batch. Before 
 
 Increase this value if parallel inference workers frequently conflict on the sequence. Decrease it to reduce unused SID gaps when inference produces fewer triples than expected per batch.
 
+
+
+---
+
+## v0.47.0: Validated String GUCs
+
+All six string-valued GUCs below now reject invalid values at SET time
+(previously invalid values were accepted and silently ignored at runtime).
+
+### `pg_ripple.federation_on_error`
+
+| | |
+|---|---|
+| Type | String |
+| Default | `warning` |
+| Valid values | `warning`, `error`, `empty` |
+| Context | `userset` |
+
+Controls behaviour when a SERVICE call fails completely.  `warning` emits a
+PT610 WARNING and returns an empty binding set for that endpoint.  `error`
+raises an ERROR and aborts the query.  `empty` silently returns zero rows for
+that endpoint.
+
+### `pg_ripple.federation_on_partial`
+
+| | |
+|---|---|
+| Type | String |
+| Default | `empty` |
+| Valid values | `empty`, `use` |
+| Context | `userset` |
+
+Controls behaviour when a SERVICE response stream is interrupted mid-transfer
+(e.g., the remote endpoint drops the connection).  `empty` discards partial
+results and returns zero rows.  `use` keeps the rows received before the error.
+
+### `pg_ripple.sparql_overflow_action`
+
+| | |
+|---|---|
+| Type | String |
+| Default | `warn` |
+| Valid values | `warn`, `error` |
+| Context | `userset` |
+
+Action taken when a SPARQL SELECT result set exceeds `sparql_max_rowAction taken when a SPARQL> 0`).  `warn` truncates the result set and emits a PT601
+WARNING.  `error` raises an ERROR.
+
+### `pg_ripple.tracing_exporter`
+
+| | |
+|---|--|---|--|---|--|---|--|---|--|---|--|---|--|---|--|---|--|---|--|---t`, `otlp|---|--|---|--|---|--|---|--|---|--|---|--|---|--|---|--|---|--|---ut` writ|---|--|---|--|---|--|---|--|---|--|---|--|---|--|---|--|---|--|---|--|-erhead).  `otlp` sends spans
+via the OTLP gRPC protocol to the endpoint specivia tby the
+`OTEL_EXPORTER_OTLP_ENDPOINT` environment variable.
+
+### `pg_ripple.embedding_index_type`
+
+| | |
+|---|---|
+| Type | String |
+| Default | `hnsw` |
+| Valid values | `h| Valid values | `h| Valid values | `h| Valid values | `h| Valid val_pg_ripp| Valid values | `h| Valid values | `h| Valid values | `h| Valid values | rld index; `ivfflat` builds an IVFFlat index.
+ChanginC this setCing after embeddings have been indexedChanginC this setCi`REINDEX TABLE _pg_ripple.embeddings`.
+
+### `pg_ripple.embedding_precision`
+
+| | |
+|---|---|
+| Type | String |
+| Default | `single` |
+| Valid values | `single`, `half`, `binary` |
+| Context | `userset` |
+
+Storage precision for emStorage precision forngle` uses pgvectorStorage precision for emStorage precision forngle` uses pgvectorStorage precision for emStorage precision forngle` uses pgvectorStorage precision for emStorage precision forngle` uses pgvectorStorage precision for emStorage precision forngle` uses pg`binary`.

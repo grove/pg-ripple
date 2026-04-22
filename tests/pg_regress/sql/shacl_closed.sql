@@ -1,0 +1,107 @@
+-- pg_regress test: sh:closed constraint (v0.47.0)
+--
+-- Covers:
+-- 1. Passing shape: no extra properties beyond allowed list.
+-- 2. Failing shape: extra property not in sh:ignoredProperties triggers violation.
+-- 3. sh:ignoredProperties exempts listed predicates from the closure check.
+
+SET client_min_messages = WARNING;
+CREATE EXTENSION IF NOT EXISTS pg_ripple;
+SELECT pg_ripple.triple_count() >= 0 AS library_loaded;
+
+SET search_path TO pg_ripple, public;
+
+-- ── Setup ─────────────────────────────────────────────────────────────────────
+
+-- ex:goodNode has only ex:name — inside the closed shape
+SELECT pg_ripple.insert_triple(
+    '<https://ex.org/closed/goodNode>',
+    '<https://ex.org/closed/name>',
+    '"Alice"'
+) > 0 AS t1;
+
+-- ex:badNode has ex:name AND ex:extra — extra not in sh:property paths
+SELECT pg_ripple.insert_triple(
+    '<https://ex.org/closed/badNode>',
+    '<https://ex.org/closed/name>',
+    '"Bob"'
+) > 0 AS t2;
+
+SELECT pg_ripple.insert_triple(
+    '<https://ex.org/closed/badNode>',
+    '<https://ex.org/closed/extra>',
+    '"unexpected"'
+) > 0 AS t3;
+
+-- ex:ignoredNode has ex:name AND rdf:type — rdf:type is in sh:ignoredProperties
+SELECT pg_ripple.insert_triple(
+    '<https://ex.org/closed/ignoredNode>',
+    '<https://ex.org/closed/name>',
+    '"Carol"'
+) > 0 AS t4;
+
+SELECT pg_ripple.insert_triple(
+    '<https://ex.org/closed/ignoredNode>',
+    '<http://www.w3.org/1999/02/22-rdf-syntax-ns#type>',
+    '<https://ex.org/closed/Person>'
+) > 0 AS t5;
+
+-- ── Shape: sh:closed = true, only ex:name allowed, rdf:type ignored ────────────
+
+DO $shapes$
+DECLARE
+  shapes_ttl TEXT := $ttl$
+    @prefix sh:  <http://www.w3.org/ns/shacl#> .
+    @prefix ex:  <https://ex.org/closed/> .
+    @prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+
+    ex:ClosedShape
+        a sh:NodeShape ;
+        sh:targetNode ex:goodNode, ex:badNode, ex:ignoredNode ;
+        sh:closed true ;
+        sh:ignoredProperties ( rdf:type ) ;
+        sh:property [
+            sh:path ex:name ;
+            sh:maxCount 1
+        ] .
+  $ttl$;
+BEGIN
+  PERFORM pg_ripple.load_turtle(shapes_ttl);
+END
+$shapes$;
+
+-- ── Test 1: sh:closed passing ─────────────────────────────────────────────────
+-- ex:goodNode should produce no violations
+
+SELECT count(*) = 0 AS closed_good_no_violations
+FROM jsonb_array_elements(
+    pg_ripple.validate_graph(
+        'https://ex.org/closed/ClosedShape'
+    )
+) v
+WHERE v->>'focusNode' LIKE '%goodNode%';
+
+-- ── Test 2: sh:closed failing ─────────────────────────────────────────────────
+-- ex:badNode should produce at least one sh:ClosedConstraintComponent violation
+
+SELECT count(*) >= 1 AS closed_bad_has_violation
+FROM jsonb_array_elements(
+    pg_ripple.validate_graph(
+        'https://ex.org/closed/ClosedShape'
+    )
+) v
+WHERE v->>'focusNode' LIKE '%badNode%';
+
+-- ── Test 3: sh:ignoredProperties exemption ────────────────────────────────────
+-- ex:ignoredNode has rdf:type which is in sh:ignoredProperties → no violation
+
+SELECT count(*) = 0 AS closed_ignored_no_violations
+FROM jsonb_array_elements(
+    pg_ripple.validate_graph(
+        'https://ex.org/closed/ClosedShape'
+    )
+) v
+WHERE v->>'focusNode' LIKE '%ignoredNode%';
+
+-- ── Cleanup ───────────────────────────────────────────────────────────────────
+SELECT pg_ripple.drop_triples_by_graph(NULL) >= 0 AS cleaned;

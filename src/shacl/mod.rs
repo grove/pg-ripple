@@ -91,6 +91,8 @@ pub enum ShapeConstraint {
     UniqueLang,
     /// `sh:lessThan <path-IRI>` — each value must be less than every value on the other path.
     LessThan(String),
+    /// `sh:lessThanOrEquals <path-IRI>` — each value must be less than or equal to every value on the other path.
+    LessThanOrEquals(String),
     /// `sh:greaterThan <path-IRI>` — each value must be greater than every value on the other path.
     GreaterThan(String),
     /// `sh:closed true` — reject triples whose predicate is not in the shape's declared property set.
@@ -693,6 +695,10 @@ fn parse_property_shape(
                 let other_path = expand_iri(obj_rest.trim(), prefixes)?;
                 constraints.push(ShapeConstraint::LessThan(other_path));
             }
+            "http://www.w3.org/ns/shacl#lessThanOrEquals" => {
+                let other_path = expand_iri(obj_rest.trim(), prefixes)?;
+                constraints.push(ShapeConstraint::LessThanOrEquals(other_path));
+            }
             "http://www.w3.org/ns/shacl#greaterThan" => {
                 let other_path = expand_iri(obj_rest.trim(), prefixes)?;
                 constraints.push(ShapeConstraint::GreaterThan(other_path));
@@ -1132,6 +1138,9 @@ fn dispatch_constraint(
         }
         ShapeConstraint::LessThan(p) => {
             constraints::shape_based::check_less_than(p, args, violations)
+        }
+        ShapeConstraint::LessThanOrEquals(p) => {
+            constraints::shape_based::check_less_than_or_equals(p, args, violations)
         }
         ShapeConstraint::GreaterThan(p) => {
             constraints::shape_based::check_greater_than(p, args, violations)
@@ -1989,6 +1998,7 @@ pub fn validate_sync(s_id: i64, p_id: i64, o_id: i64, g_id: i64) -> Result<(), S
                     // These constraints need all values present — skip for single insert.
                     ShapeConstraint::UniqueLang
                     | ShapeConstraint::LessThan(_)
+                    | ShapeConstraint::LessThanOrEquals(_)
                     | ShapeConstraint::GreaterThan(_)
                     | ShapeConstraint::Closed { .. }
                     // v0.45.0: relational constraints require full value sets — skip for single insert.

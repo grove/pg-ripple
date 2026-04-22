@@ -13,6 +13,39 @@ Versions correspond to the milestones in [ROADMAP.md](ROADMAP.md).
 
 ---
 
+## [0.47.0] — 2026-05-06 — SHACL Completion, GUC Validators, Cache SRFs & Fuzz Hardening
+
+**Completes the v0.47.0 roadmap: sh:lessThanOrEquals SHACL constraint; six GUC check_hook validators; three individual cache hit-rate SRFs; SPARQL `sqlgen.rs` module split (≤800 lines); parallel Datalog SID pre-allocation wired; five new cargo-fuzz targets; CI security hygiene (cargo-audit workflow, deny.toml, check_no_security_definer.sh); OWL 2 RL baseline 93.9%; promotion-race stress test; four new SHACL pg_regress tests.**
+
+### What's new
+
+- **`sh:lessThanOrEquals` SHACL constraint** (`src/shacl/constraints/shape_based.rs`) — implements `sh:lessThanOrEquals` per SHACL Core §4.4. For each focus node, checks that every value of the subject property is ≤ the corresponding value of the comparison property. Violations include `"constraint": "sh:lessThanOrEquals"`. pg_regress test `shacl_lt_or_equals.sql` covers less-than, greater-than (violation), and equal-value cases.
+
+- **Six GUC check_hook validators** (`src/lib.rs`) — `federation_on_error` (`warning`|`error`|`empty`), `federation_on_partial` (`empty`|`use`), `sparql_overflow_action` (`warn`|`error`), `tracing_exporter` (`stdout`|`otlp`), `embedding_index_type` (`hnsw`|`ivfflat`), `embedding_precision` (`single`|`half`|`binary`) now reject invalid values at SET time with a standard PostgreSQL GUC rejection message.
+
+- **Individual cache hit-rate SRFs** (`src/sparql_api.rs`) — three new table-returning functions: `pg_ripple.plan_cache_stats()`, `pg_ripple.dictionary_cache_stats()`, and `pg_ripple.federation_cache_stats()`, each returning `(hits BIGINT, misses BIGINT, evictions BIGINT, hit_rate DOUBLE PRECISION)`. The old JSONB `plan_cache_stats()` is superseded by the new table form; the combined JSONB `cache_stats()` is retained for backwards compatibility.
+
+- **SPARQL `sqlgen.rs` module split** (`src/sparql/translate/`) — `sqlgen.rs` reduced from 3,632 to 753 lines by extracting eight translation modules: `bgp.rs`, `filter.rs`, `graph.rs`, `group.rs`, `join.rs`, `left_join.rs`, `union.rs`, `distinct.rs`. Public API surface unchanged.
+
+- **Parallel Datalog SID pre-allocation** (`src/datalog/mod.rs`) — `preallocate_sid_ranges()` is now called at the start of `run_inference_seminaive()` when `datalog_parallel_workers > 1`, eliminating sequence contention across parallel strata workers.
+
+- **Five new cargo-fuzz targets** (`fuzz/fuzz_targets/`) — `sparql_parser.rs` (spargebra), `turtle_parser.rs` (rio_turtle + NTriples), `datalog_parser.rs` (rule tokenizer), `shacl_parser.rs` (Turtle + sh: predicate dispatch), `dictionary_hash.rs` (XXH3-128 determinism assertion).
+
+- **CI security hygiene** — weekly scheduled `cargo audit` job (`.github/workflows/cargo-audit.yml`) that auto-creates a GitHub issue on failure; `deny.toml` with licence allowlist and advisory deny policy; `scripts/check_no_security_definer.sh` that fails CI if any `sql/*.sql` file contains `SECURITY DEFINER`.
+
+- **OWL 2 RL conformance baseline** (`docs/src/reference/owl2rl-results.md`) — 62/66 rules pass (93.9%). Four known failures documented in `tests/owl2rl/known_failures.txt` with target fix versions.
+
+- **Promotion-race stress test** (`tests/stress/promotion_race.sh`) — 50 concurrent sessions inserting at the VP promotion threshold; verifies SID uniqueness and zero errors.
+
+- **Four new SHACL pg_regress tests** — `shacl_closed.sql`, `shacl_unique_lang.sql`, `shacl_pattern.sql`, `shacl_lt_or_equals.sql` — cover all four SHACL constraint families newly tested in v0.47.0.
+
+### Documentation
+
+- `docs/src/reference/guc-reference.md` — complete entries for all six new validated GUCs.
+- `docs/src/reference/owl2rl-results.md` — new baseline document with pass-rate table and known-failure descriptions.
+
+---
+
 ## [0.46.0] — 2026-04-22 — Property-Based Testing, Fuzz Hardening & OWL 2 RL Conformance
 
 **Adds three property-based test suites (SPARQL round-trip, dictionary encode/decode, JSON-LD framing), a cargo-fuzz federation result decoder target, an OWL 2 RL conformance suite, TopN push-down optimisation, sequence range pre-allocation for parallel Datalog, BSBM regression gate, Rustdoc lint gate, HTTP companion CA-bundle support, and expanded worked examples.**

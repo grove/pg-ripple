@@ -4,14 +4,50 @@ version = "0.1.0"
 edition = "2024"
 publish = false
 
+[workspace]
+
 [package.metadata]
 cargo-fuzz = true
 
 [dependencies]
 libfuzzer-sys = "0.4"
+spargebra = { version = "0.4", features = ["sparql-12"] }
+rio_turtle = "0.8"
+rio_api = "0.8"
+xxhash-rust = { version = "0.8", features = ["xxh3"] }
 
 [[bin]]
 name = "federation_result"
 path = "fuzz_targets/federation_result.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "sparql_parser"
+path = "fuzz_targets/sparql_parser.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "turtle_parser"
+path = "fuzz_targets/turtle_parser.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "datalog_parser"
+path = "fuzz_targets/datalog_parser.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "shacl_parser"
+path = "fuzz_targets/shacl_parser.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "dictionary_hash"
+path = "fuzz_targets/dictionary_hash.rs"
 test = false
 doc = false
