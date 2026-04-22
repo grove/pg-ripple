@@ -200,7 +200,6 @@ fn tokenize_rdf_terms(text: &str) -> Vec<String> {
     tokens
 }
 
-
 /// Initialize the extension's base schemas and tables.
 /// Called once from _PG_init to ensure all base infrastructure exists.
 #[allow(dead_code)]
