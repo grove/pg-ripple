@@ -56,6 +56,7 @@
 - [GUC Reference](reference/guc-reference.md)
 - [SPARQL Compliance Matrix](reference/sparql-compliance.md)
 - [W3C Conformance](reference/w3c-conformance.md)
+- [OWL 2 RL Conformance Results](reference/owl2rl-results.md)
 - [WatDiv Benchmark Results](reference/watdiv-results.md)
 - [Running Conformance Tests](reference/running-conformance-tests.md)
 - [Error Message Catalog](reference/error-catalog.md)

@@ -105,7 +105,7 @@ process_file() {
     local blocks_in_file=0
 
     while IFS= read -r line || [[ -n "$line" ]]; do
-        ((line_num++))
+        ((line_num++)) || true
 
         # Check for expected output block
         if [[ "$expecting_output" == true ]]; then
@@ -119,7 +119,7 @@ process_file() {
                     expecting_output=false
 
                     # Run the SQL and compare output
-                    ((TESTS++))
+                    ((TESTS++)) || true
                     actual_output=$(run_sql "$sql_block" 2>&1 || true)
                     actual_trimmed=$(echo "$actual_output" | sed 's/[[:space:]]*$//' | sed '/^$/d')
                     expected_trimmed=$(echo "$expected_output" | sed 's/[[:space:]]*$//' | sed '/^$/d')
@@ -132,7 +132,7 @@ process_file() {
                         echo "$expected_output" | head -5 | sed 's/^/      /'
                         echo "    Actual:"
                         echo "$actual_output" | head -5 | sed 's/^/      /'
-                        ((FAILURES++))
+                        ((FAILURES++)) || true
                     fi
                     sql_block=""
                     continue
@@ -144,7 +144,7 @@ process_file() {
                 # No expected block found, just execute without checking
                 if [[ -n "$sql_block" ]]; then
                     run_sql "$sql_block" >/dev/null 2>&1 || true
-                    ((SKIPPED++))
+                    ((SKIPPED++)) || true
                 fi
                 expecting_output=false
                 sql_block=""
@@ -156,7 +156,7 @@ process_file() {
             in_sql_block=true
             sql_block=""
             block_start=$line_num
-            ((blocks_in_file++))
+            ((blocks_in_file++)) || true
             continue
         fi
 
@@ -174,7 +174,7 @@ process_file() {
     # Handle trailing SQL block with no expected output
     if [[ "$expecting_output" == true && -n "$sql_block" ]]; then
         run_sql "$sql_block" >/dev/null 2>&1 || true
-        ((SKIPPED++))
+        ((SKIPPED++)) || true
     fi
 
     if [[ $blocks_in_file -gt 0 ]]; then
