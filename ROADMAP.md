@@ -3629,6 +3629,318 @@ All 14 LUBM queries return exact reference cardinalities at `--univ 1`. Ontology
 All three `proptest` suites run 10,000 cases each with no failures. Federation result decoder fuzz target runs 10 minutes without panics. Datalog convergence suite: fixpoint on 1M DBpedia triples in ≤ 20 iterations, wall-clock < 5 minutes. OWL 2 RL suite: ≥ 80% pass rate at release (target 95% for v1.0.0). TopN push-down `EXPLAIN` shows `Limit` node for ORDER BY + LIMIT queries; result set unchanged. BSBM-at-1M-triples baseline stored and regression gate active. No missing-docs warnings for public `#[pg_extern]` functions. HTTP companion starts cleanly with `PG_RIPPLE_HTTP_CA_BUNDLE` set to a valid PEM file. Migration chain test passes through 0.46.0.
 
 ---
+## v0.47.0 — SHACL Truthfulness, Dead-Code Activation & Architecture Refactor
+
+**Theme**: Close the parsed-but-not-checked SHACL gap, wire dead code, finish the SPARQL translate module split, and expand fuzz and crash-recovery coverage.
+
+> **In plain language:** v0.45.0 was titled "SHACL Completion" but the post-release audit (PLAN_OVERALL_ASSESSMENT_3.md) found four constraints that accept any data without complaint — the parser records them but the validator ignores them. That is fixed here. The `preallocate_sid_ranges()` function added in v0.46.0 to speed up parallel Datalog has been sitting unused (clippy `dead_code` warning); it gets wired in. The `src/sparql/translate/` refactor that began in v0.38.0 finally lands, shrinking `sqlgen.rs` from 3 600 lines into focused per-operator modules. Five new fuzz targets cover the attack surfaces that had only one target before. Four new crash-recovery scenarios close the remaining operational safety gaps.
+>
+> **Effort estimate: 8–10 person-weeks**
+
+### Deliverables
+
+- [ ] **SHACL parsed-but-not-checked constraint sweep** (S4-1…S4-4)
+  - Implement `sh:closed` checker in `src/shacl/constraints/closed.rs`: for each focus node enumerate all predicate IDs present; reject any not listed in `sh:property / sh:path` or `sh:ignoredProperties`
+  - Implement `sh:uniqueLang` checker: for a given focus node and path, assert no two values share the same non-empty `@lang` tag
+  - Implement `sh:pattern` checker in `src/shacl/constraints/string_based.rs` (currently an empty placeholder): apply the `sh:flags`-aware POSIX regex against the string value of each focus node
+  - Implement `sh:lessThanOrEquals` checker: decode both value nodes and compare with the XSD-typed ordering already used by FILTER expressions
+  - Wire each into the shape dispatcher at `src/shacl/mod.rs`
+  - Add pg_regress tests `shacl_closed.sql`, `shacl_unique_lang.sql`, `shacl_pattern.sql`, `shacl_lt_or_equals.sql` (S8-4)
+  - Add a startup-time warning listing every parsed-but-unchecked constraint type encountered, to guard against future regressions
+
+- [ ] **Wire `preallocate_sid_ranges()`** (S1-2)
+  - Call the function from the parallel-strata coordinator in `src/datalog/parallel.rs` before launching any worker batch
+  - Assert via `datalog_sequence_batch.sql` that `pg_sequence_last_value` advances by `n_workers * batch_size` on each batch; eliminate the clippy `dead_code` warning
+
+- [ ] **Finish `src/sparql/translate/` module split** (S2-3)
+  - Move BGP translation into `src/sparql/translate/bgp.rs` (~400 LoC)
+  - Move Filter translation into `src/sparql/translate/filter.rs` (~200 LoC)
+  - Move LeftJoin (OPTIONAL) into `src/sparql/translate/left_join.rs` (~250 LoC)
+  - Move Union into `src/sparql/translate/union.rs` (~150 LoC)
+  - Move Distinct into `src/sparql/translate/distinct.rs` (~100 LoC)
+  - Move Graph pattern into `src/sparql/translate/graph.rs` (~200 LoC)
+  - Move Group/aggregation into `src/sparql/translate/group.rs` (~300 LoC)
+  - Move Join into `src/sparql/translate/join.rs` (~200 LoC)
+  - Target: `sqlgen.rs` ≤ 800 LoC (routing and coordination only)
+
+- [ ] **Six missing GUC `check_hook` validators** (S5-1)
+  - Add validators for: `federation_on_error` (warning|error|empty), `federation_on_partial` (empty|use), `sparql_overflow_action` (warn|error), `tracing_exporter` (stdout|otlp), `embedding_index_type` (hnsw|ivfflat), `embedding_precision` (single|half|binary)
+  - Consolidate `max_path_depth` and `property_path_max_depth` into a single GUC with `min = 1, max = 65535` validator (S2-5)
+
+- [ ] **Five new `cargo-fuzz` targets** (S8-1)
+  - `fuzz/fuzz_targets/sparql_parser.rs`: feed arbitrary bytes through the SPARQL query parser; assert no panic
+  - `fuzz/fuzz_targets/turtle_parser.rs`: fuzz the Turtle/N-Triples bulk loader; assert no panic, invalid input → PT3xx error
+  - `fuzz/fuzz_targets/datalog_parser.rs`: fuzz the Datalog rule parser; assert no panic
+  - `fuzz/fuzz_targets/shacl_parser.rs`: fuzz `parse_shapes_graph()`; assert no panic
+  - `fuzz/fuzz_targets/dictionary_hash.rs`: fuzz the dictionary encode path; assert no panic and round-trip invariant
+  - Each target runs for 10 minutes in CI nightly; a new crash-inducing input is a blocking failure
+
+- [ ] **Four missing crash-recovery scenarios** (S8-3)
+  - CONSTRUCT/DESCRIBE view materialisation kill: `kill -9` during `materialize_view()`; restart and verify view state is consistent
+  - Federation result spooling kill: `kill -9` during SERVICE temp-table spool; restart and verify no orphaned temp tables
+  - Parallel Datalog stratum kill (`merge_workers > 1`): `kill -9` mid-fixpoint; restart and verify inference restarts cleanly
+  - Embedding worker queue kill: `kill -9` during async embedding queue flush; restart and verify queue drains without duplicates
+
+- [ ] **Plan / dictionary / federation cache hit-rate metrics** (S7-1)
+  - `pg_ripple.plan_cache_stats()` → `(hits BIGINT, misses BIGINT, evictions BIGINT, hit_rate DOUBLE PRECISION)`
+  - `pg_ripple.dictionary_cache_stats()` → same shape
+  - `pg_ripple.federation_cache_stats()` → same shape
+  - Wire hit_rate into the BSBM regression gate as a secondary metric
+
+- [ ] **WFS non-convergence warning** (S3-2)
+  - Emit PT520 WARNING when the well-founded semantics iteration cap is reached without convergence; include iteration count and the predicate that last changed
+
+- [ ] **OWL 2 RL conformance baseline** (S3-3)
+  - Run the OWL 2 RL suite added in v0.46.0; document the pass rate in `docs/src/reference/owl2rl-results.md`
+  - Surface XFAIL entries in `tests/owl2rl/known_failures.txt` for release-to-release tracking
+
+- [ ] **CI and security hygiene** (S6-1, S6-2, S6-4, S10-1)
+  - Add weekly scheduled `cargo audit` job; failure creates a GitHub issue automatically
+  - Add `cargo deny` configuration with licence allowlist
+  - Add `scripts/check_no_security_definer.sh` that scans `sql/*.sql` and fails on any `SECURITY DEFINER` directive
+  - Add SPDX licence compatibility check via `cargo license`
+
+- [ ] **Promotion-race stress test** (S8-5)
+  - `tests/stress/promotion_race.sh`: fire 50 concurrent inserts at the rare-predicate promotion threshold; verify SIDs are non-overlapping per worker
+
+- [ ] **Documentation** (S9-1, S9-2, S9-3, S5-3)
+  - `reference/guc-reference.md`: complete entries for all GUCs through v0.47.0; flag `datalog_sequence_batch` as now active
+  - Add GUC ↔ workload-class tuning matrix (when to raise `dictionary_cache_size`, when to increase `merge_workers`, when to tune `property_path_max_depth`)
+  - Add 5 worked examples: federation-multi-endpoint, parallel-Datalog, CONSTRUCT/DESCRIBE view materialisation, RDF-star annotation patterns, WCOJ cyclic queries
+  - Document NOTIFY queue tuning for CDC subscriptions (`max_notify_queue_pages`)
+
+### New Error Codes
+
+| Code | Severity | Message |
+|------|----------|---------|
+| PT520 | WARNING | Well-founded semantics iteration cap reached without convergence; result is partial |
+
+### Migration Script
+
+`sql/pg_ripple--0.46.0--0.47.0.sql` — no schema changes. Comment header describing new SHACL constraint checkers, wired `preallocate_sid_ranges()`, and six new GUC validators.
+
+### Documentation
+
+- [ ] `reference/shacl-reference.md` — mark `sh:closed`, `sh:uniqueLang`, `sh:pattern`, `sh:lessThanOrEquals` as fully implemented
+- [ ] `contributing/testing.md` — fuzz targets section extended for five new targets
+- [ ] `reference/guc-reference.md` — complete audit of all registered GUCs through v0.47.0
+- [ ] Release notes for v0.47.0
+
+### Exit Criteria
+
+All four previously parsed-but-unchecked SHACL constraints trigger violations on non-conforming data. `preallocate_sid_ranges()` has zero clippy `dead_code` warnings. `sqlgen.rs` ≤ 800 LoC. All five fuzz targets run 10 minutes without panics. All four crash-recovery scenarios pass. Three cache-stats SRFs return non-zero `hit_rate` after a warm workload. OWL 2 RL pass-rate baseline documented. `cargo audit` and `cargo deny` green in CI.
+
+---
+
+## v0.48.0 — SHACL Core Completeness, OWL 2 RL Closure & SPARQL Completeness
+
+**Theme**: Complete SHACL Core conformance, close the OWL 2 RL rule-set gap, finish SPARQL 1.1 Update, and resolve the SPARQL-star variable-pattern gap.
+
+> **In plain language:** After v0.47.0 makes the existing SHACL constraints truthful, this release adds the remaining seven SHACL Core constraints — the string-length bounds, exclusive/inclusive numeric ranges, and `sh:xone` — plus the complex path expressions (`sh:inversePath`, `sh:alternativePath`, sequence paths, `*`, `+`, `?`) that real-world Schema.org and SHACL-AF schemas depend on. On the reasoning side, five missing OWL 2 RL rules close the gap with the W3C OWL 2 RL profile. SPARQL 1.1 Update gains its three missing operations (`MOVE`, `COPY`, `ADD`). The SPARQL-star variable-inside-quoted-triple pattern finally returns rows instead of silently empty results. This release also delivers the operational hardening items deferred from v0.47.0.
+>
+> **Effort estimate: 6–8 person-weeks**
+
+### Deliverables
+
+- [ ] **Remaining SHACL Core constraints** (S4-5)
+  - `sh:minLength` / `sh:maxLength`: apply to string-typed literals after language-tag stripping
+  - `sh:xone`: exactly one of the given sub-shapes must be satisfied (XOR logic over the existing `sh:or` / `sh:not` primitives)
+  - `sh:minExclusive` / `sh:maxExclusive` / `sh:minInclusive` / `sh:maxInclusive`: XSD-typed numeric comparison; reuse the ordering logic from `sh:lessThan` / `sh:lessThanOrEquals`
+  - Target: full SHACL Core constraint coverage (35/35); W3C SHACL Core test suite must pass completely
+
+- [ ] **Complex `sh:path` expressions** (S4-6)
+  - `sh:inversePath`: query `(o, s)` instead of `(s, o)` on the VP table
+  - `sh:alternativePath`: union of multiple sub-paths
+  - Sequence paths (`(sh:path (ex:a ex:b))`): chained joins
+  - `sh:zeroOrMorePath`, `sh:oneOrMorePath`, `sh:zeroOrOnePath`: compile to `WITH RECURSIVE … CYCLE` CTEs, reusing the SPARQL property-path compiler from `src/sparql/property_path.rs`
+  - Drop the TODO placeholder in `src/shacl/constraints/property_path.rs`
+
+- [ ] **SHACL violation report enhancements** (S4-7, S4-8)
+  - Extend `Violation` struct with `sh_value` (the offending value node, decoded) and `sh_source_constraint_component` (W3C constraint component IRI, e.g. `sh:MinCountConstraintComponent`)
+  - For `sh:rule` triples (SHACL-AF): emit a PT4xx WARNING if rules are detected but SHACL-AF compilation is not yet implemented; never silently drop the rule
+
+- [ ] **OWL 2 RL rule set completion** (S3-1)
+  - `cax-sco`: full `rdfs:subClassOf` transitive closure (currently single-step only)
+  - `prp-spo1`: `rdfs:subPropertyOf` chain (current binary case → full chain)
+  - `prp-ifp`: inverse-functional-property derived `owl:sameAs` propagation
+  - `cls-avf`: chained `owl:allValuesFrom` interaction with subclass hierarchy
+  - `owl:minCardinality`, `owl:maxCardinality`, `owl:cardinality` entailment rules
+  - Target: W3C OWL 2 RL CI suite ≥ 95% pass rate (upgrading the gate from informational to required)
+
+- [ ] **SPARQL Update: MOVE, COPY, ADD** (S2-2)
+  - `ADD`: `INSERT { ?s ?p ?o } WHERE { GRAPH source { ?s ?p ?o } }` (source preserved)
+  - `COPY`: `CLEAR target` + `ADD`
+  - `MOVE`: `COPY` + `DROP source`
+  - Wire into `src/sparql/mod.rs` Update arm; add pg_regress tests for all three operations
+
+- [ ] **SPARQL-star variable-inside-quoted-triple patterns** (S2-1)
+  - Convert the current silent `FALSE` emission into a proper dictionary join on `qt_s`, `qt_p`, `qt_o` columns already present in `_pg_ripple.dictionary`
+  - Patterns like `<< ?s ?p ?o >> :assertedBy ?who` return rows
+  - Add pg_regress tests `rdfstar_variable_quoted.sql`
+
+- [ ] **Performance baselines and benchmarks** (S7-2, S7-3)
+  - Record per-query p50/p95/p99 latency for all 32 WatDiv templates in `tests/watdiv/baselines.json`; CI warning gate on > 10% regression
+  - Add `benchmarks/merge_throughput.sql`: 5-minute pgbench script with N writers + `merge_workers ∈ {1, 2, 4, 8}`; document the scaling curve
+
+- [ ] **Operational hardening** (S1-1, S1-3, S1-4, S1-5, S2-4, S2-6, S3-4, S6-3, S7-4, S7-5, S9-4, S9-6, S10-2, S10-3, S10-5)
+  - HTAP merge cutover: add a concurrent-merge regression test (50 parallel SPARQL queries during a forced merge cycle; assert zero `relation does not exist` errors) (S1-1)
+  - Merge worker backoff: replace `std::thread::sleep` with `BackgroundWorker::wait_latch` (S1-3)
+  - Add `source` column integrity pg_regress test (S1-4)
+  - Predicate-OID cache: add `CacheRegisterRelcacheCallback` hook (S1-5)
+  - Add `pg_ripple.federation_max_response_bytes` GUC (default 100 MiB); refuse responses exceeding it with PT543 (S2-4)
+  - CONSTRUCT RDF-star: emit `<< s p o >>` notation for ground quoted triples in CONSTRUCT output (S2-6)
+  - SAVEPOINT helper: either wire `execute_with_savepoint()` into the parallel-strata path or gate with `#[cfg(test)]` (S3-4)
+  - `pg_dump` / restore round-trip test (`tests/pg_dump_restore.sh`) (S6-3)
+  - Add `pg_ripple.insert_triples(TEXT[][])` SRF for batch single-triple inserts from orchestration tools (S7-4)
+  - HNSW vs IVFFlat benchmark and documentation (S7-5)
+  - Mermaid architecture diagram in `docs/src/reference/architecture.md` (S9-4)
+  - Migration script headers lint (`scripts/check_migration_headers.sh`) (S9-6)
+  - `release-please`-style release automation workflow (S10-2)
+  - `docs/src/operations/pg-upgrade.md` with supported upgrade matrix and pre-upgrade steps (S10-3)
+  - Extend migration-chain test to load a representative data batch after the v0.1.0 install and verify data survives through v0.48.0 (S10-5)
+
+### New GUC Parameters
+
+| GUC | Type | Default | Description |
+|-----|------|---------|-------------|
+| `pg_ripple.federation_max_response_bytes` | integer | `104857600` | Maximum federation response body in bytes (100 MiB); PT543 on violation |
+
+### New Error Codes
+
+| Code | Severity | Message |
+|------|----------|---------|
+| PT543 | ERROR | Federation response exceeded `federation_max_response_bytes` limit |
+
+### Migration Script
+
+`sql/pg_ripple--0.47.0--0.48.0.sql` — no schema changes. Comment header describing SHACL Core completion, OWL 2 RL rule additions, and SPARQL Update completions.
+
+### Documentation
+
+- [ ] `reference/shacl-reference.md` — all 35 SHACL Core constraints marked implemented; complex path expressions documented with examples
+- [ ] `reference/owl2rl-results.md` — pass rate updated to reflect ≥ 95% required gate
+- [ ] `user-guide/best-practices/sparql-update.md` — MOVE, COPY, ADD examples
+- [ ] `user-guide/rdf-star.md` — variable-inside-quoted-triple patterns documented
+- [ ] `operations/pg-upgrade.md` — new page with supported upgrade matrix
+- [ ] Release notes for v0.48.0
+
+### Exit Criteria
+
+W3C SHACL Core test suite passes 35/35 constraints. OWL 2 RL CI gate upgraded to required at ≥ 95%. All three SPARQL Update operations (MOVE, COPY, ADD) pass the W3C SPARQL 1.1 Update test suite entries for those operations. SPARQL-star variable patterns return correct rows. WatDiv latency baselines recorded and regression gate active. `pg_upgrade` compatibility document published. `pg_dump` / restore round-trip test passes. Migration chain test passes through v0.48.0.
+
+---
+
+## v0.49.0 — AI & LLM Integration
+
+**Theme**: Natural-language query generation and embedding-based entity alignment.
+
+> **In plain language:** Two high-leverage AI features: a function that takes plain English and returns a SPARQL query (using any configured LLM endpoint — Ollama, OpenAI, Claude, or a self-hosted model); and a function that uses the existing vector embeddings to surface candidate `owl:sameAs` pairs — entities that might be the same thing expressed differently. Both build on infrastructure already in place (the SPARQL engine and the v0.27.0 pgvector integration) and require no new storage schema changes.
+>
+> **Effort estimate: 4–6 person-weeks**
+
+### Deliverables
+
+- [ ] **NL → SPARQL via LLM function calling** (Feature C-1)
+  - New module `src/llm/mod.rs`; new SQL function `pg_ripple.sparql_from_nl(question TEXT) RETURNS TEXT`
+  - Calls a configured LLM endpoint with the schema VoID description as context; returns a SPARQL SELECT query string
+  - GUCs: `pg_ripple.llm_endpoint` (TEXT, default `''` = disabled), `pg_ripple.llm_model` (TEXT, default `gpt-4o`), `pg_ripple.llm_api_key_env` (TEXT, name of the env var holding the key — never stored inline)
+  - Optional few-shot examples loaded from `_pg_ripple.llm_examples (question TEXT, sparql TEXT)`; seeded via `pg_ripple.add_llm_example(question TEXT, sparql TEXT)`
+  - SHACL shapes included as additional semantic context when `pg_ripple.llm_include_shapes = on` (bool GUC, default `on`)
+  - Error codes: PT700 (LLM endpoint unreachable), PT701 (LLM returned non-SPARQL output), PT702 (generated SPARQL failed to parse)
+  - pg_regress tests run with a mock HTTP server returning a canned SPARQL response
+
+- [ ] **Embedding-based `owl:sameAs` candidate generation** (Feature C-2)
+  - New SQL function `pg_ripple.suggest_sameas(threshold REAL DEFAULT 0.9) RETURNS TABLE(s1 TEXT, s2 TEXT, similarity REAL)`
+  - Runs an HNSW self-join on the embedding column in `_pg_ripple.entities`; returns pairs whose cosine similarity exceeds `threshold`
+  - Companion `pg_ripple.apply_sameas_candidates(min_similarity REAL DEFAULT 0.95)` inserts accepted pairs as `owl:sameAs` triples and triggers cluster merging
+  - Respects `pg_ripple.sameas_max_cluster_size` (PT550) bound
+  - Example: `examples/embedding_alignment.sql` — load two datasets with overlapping entities, run `suggest_sameas`, inspect candidates, apply with `apply_sameas_candidates`
+
+### New GUC Parameters
+
+| GUC | Type | Default | Description |
+|-----|------|---------|-------------|
+| `pg_ripple.llm_endpoint` | string | `''` | LLM API base URL (empty = NL→SPARQL disabled) |
+| `pg_ripple.llm_model` | string | `gpt-4o` | LLM model identifier |
+| `pg_ripple.llm_api_key_env` | string | `PG_RIPPLE_LLM_API_KEY` | Name of the environment variable holding the LLM API key |
+| `pg_ripple.llm_include_shapes` | bool | `on` | Include SHACL shapes as LLM context when generating SPARQL |
+
+### New Error Codes
+
+| Code | Severity | Message |
+|------|----------|---------|
+| PT700 | ERROR | LLM endpoint unreachable or returned HTTP error |
+| PT701 | ERROR | LLM response did not contain a valid SPARQL query |
+| PT702 | ERROR | LLM-generated SPARQL query failed to parse |
+
+### Migration Script
+
+`sql/pg_ripple--0.48.0--0.49.0.sql` — adds `_pg_ripple.llm_examples (question TEXT, sparql TEXT)` table.
+
+### Documentation
+
+- [ ] `user-guide/nl-to-sparql.md` — new page: configuring the LLM endpoint, running `sparql_from_nl`, adding few-shot examples, error handling
+- [ ] `user-guide/entity-alignment.md` — new page: `suggest_sameas`, `apply_sameas_candidates`, tuning threshold, cluster size limits
+- [ ] `reference/guc-reference.md` — four new GUC parameters
+- [ ] `reference/error-catalog.md` — PT700–PT702
+- [ ] Release notes for v0.49.0
+
+### Exit Criteria
+
+`pg_ripple.sparql_from_nl()` returns a parseable SPARQL query against a mock LLM endpoint. `pg_ripple.suggest_sameas()` returns candidates for two overlapping test datasets with ≥ 90% recall. `apply_sameas_candidates()` does not exceed `sameas_max_cluster_size`. All GUC validators pass. PT700–PT702 are triggered by the appropriate error conditions. Migration chain test passes through v0.49.0.
+
+---
+
+## v0.50.0 — Developer Experience & GraphRAG Polish
+
+**Theme**: VS Code extension, interactive query debugger, and full RAG pipeline.
+
+> **In plain language:** Three developer-facing features that raise the ceiling on how easy it is to work with pg_ripple day-to-day. A VS Code extension brings SPARQL syntax highlighting, one-click query execution against a live endpoint, and SHACL shape linting into the editor. An extended `EXPLAIN SPARQL` command surfaces the algebra tree, generated SQL, plan-cache status, and per-step row counts as an interactive JSON structure. The RAG pipeline ties together vector recall, SPARQL graph expansion, and LLM context-window assembly into a single SQL function call.
+>
+> **Effort estimate: 5–7 person-weeks**
+
+### Deliverables
+
+- [ ] **VS Code extension** (Feature B-2) — separate repository `pg-ripple-vscode`
+  - SPARQL 1.1 syntax highlighting (TextMate grammar)
+  - SHACL Turtle syntax highlighting with shape-aware completion
+  - Datalog rule syntax highlighting
+  - Query runner: execute a SPARQL query against a configured `pg_ripple_http` endpoint, display results as a table or JSON tree
+  - SHACL shape linter: validate a `.ttl` shapes file by calling `pg_ripple.load_shapes()` via the HTTP API and surfacing violations inline
+  - Configuration: workspace settings for endpoint URL, auth token, and default named graph
+  - Published to VS Code Marketplace; linked from `README.md` and docs
+
+- [ ] **SPARQL query debugger** (Feature B-3)
+  - Extend `pg_ripple.explain_sparql(query TEXT)` to return JSONB with: algebra tree, generated SQL, plan-cache status (`hit` / `miss` / `bypass`), per-operator estimated rows, per-operator actual rows (when `analyze := true`)
+  - New overload `pg_ripple.explain_sparql(query TEXT, analyze BOOL DEFAULT FALSE) RETURNS JSONB`
+  - VS Code extension renders the JSONB as a collapsible tree with operator annotations
+  - pg_regress `sparql_explain_analyze.sql`: assert the JSONB schema is stable across SELECT, ASK, CONSTRUCT, and DESCRIBE query types
+
+- [ ] **RAG pipeline with graph-contextualised embeddings** (Feature C-3)
+  - New SQL function `pg_ripple.rag_context(question TEXT, k INT DEFAULT 10) RETURNS TEXT`
+  - Step 1: embed `question` via `pg_ripple.embed_text()` (from v0.27.0)
+  - Step 2: vector recall — top-k entities by HNSW similarity
+  - Step 3: SPARQL graph expansion — for each entity, fetch its 1-hop neighbourhood as JSON-LD
+  - Step 4: assemble a context string from the JSON-LD fragments, formatted for LLM ingestion
+  - Step 5 (optional): if `pg_ripple.llm_endpoint` is set, call `sparql_from_nl()` and execute the generated query, appending the result to the context
+  - Example: `examples/graphrag_rag_pipeline.sql` — end-to-end with a Wikipedia-derived knowledge graph
+
+### Migration Script
+
+`sql/pg_ripple--0.49.0--0.50.0.sql` — no schema changes.
+
+### Documentation
+
+- [ ] `user-guide/vscode-extension.md` — installation, configuration, SPARQL query runner, SHACL linter
+- [ ] `user-guide/explain-sparql.md` — EXPLAIN output format, ANALYZE mode, interpreting the algebra tree
+- [ ] `user-guide/rag-pipeline.md` — `rag_context()` step-by-step, tuning k, combining with NL→SPARQL
+- [ ] Release notes for v0.50.0
+
+### Exit Criteria
+
+VS Code extension is publishable to the VS Code Marketplace (VSIX builds clean). `explain_sparql(query, analyze := true)` returns JSONB with `algebra`, `sql`, `cache_status`, and per-operator `actual_rows` keys for SELECT, ASK, CONSTRUCT, and DESCRIBE queries. `rag_context()` returns non-empty context for a known question against a pre-loaded test knowledge graph. Migration chain test passes through v0.50.0.
+
+---
 
 ## v1.0.0 — Production Release
 
@@ -3734,7 +4046,11 @@ Stable, tested, documented, and published. Ready for production workloads up to 
 | 0.20.0 | +3 weeks | 5–7 pw | 100–135 pw |
 | 0.45.0 | +3 weeks | 4–6 pw | 104–141 pw |
 | 0.46.0 | +4 weeks | 5–7 pw | 109–148 pw |
-| 1.0.0 | +4 weeks | 6–8 pw | **115–156 pw** |
+| 0.47.0 | +5 weeks | 8–10 pw | 117–158 pw |
+| 0.48.0 | +4 weeks | 6–8 pw | 123–166 pw |
+| 0.49.0 | +3 weeks | 4–6 pw | 127–172 pw |
+| 0.50.0 | +4 weeks | 5–7 pw | 132–179 pw |
+| 1.0.0 | +4 weeks | 6–8 pw | **138–187 pw** |
 | 1.1–1.9 | Post-1.0 | Community-driven | — |
 
 *Estimates assume a pair of focused developers with Rust and PostgreSQL experience. "pw" = person-weeks. Calendar durations assume pair programming; a solo developer should expect roughly double the calendar time. Actual pace depends on contributor availability and scope adjustments discovered during implementation.*
