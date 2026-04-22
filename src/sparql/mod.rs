@@ -1391,22 +1391,35 @@ fn execute_add_by_ids(src_g_id: i64, dst_g_id: i64) -> Result<i64, String> {
         .unwrap_or(None);
 
         if table_oid.is_some() {
+            // Insert into the delta table (write inbox), not the view.
+            // The VP view is non-insertable; all writes must go to vp_{id}_delta.
+            let delta = format!("_pg_ripple.vp_{pred_id}_delta");
             let insert_sql = format!(
-                "INSERT INTO _pg_ripple.vp_{pred_id} (s, o, g) \
-                 SELECT s, o, {dst_g_id} FROM _pg_ripple.vp_{pred_id} WHERE g = {src_g_id} \
-                 ON CONFLICT DO NOTHING"
+                "WITH ins AS ( \
+                     INSERT INTO {delta} (s, o, g) \
+                     SELECT s, o, {dst_g_id} FROM _pg_ripple.vp_{pred_id} WHERE g = {src_g_id} \
+                     ON CONFLICT (s, o, g) DO NOTHING \
+                     RETURNING 1 \
+                 ) SELECT count(*)::bigint FROM ins"
             );
-            let count_sql =
-                format!("SELECT COUNT(*) FROM _pg_ripple.vp_{pred_id} WHERE g = {src_g_id}");
-            Spi::run(&insert_sql).unwrap_or_else(|e| pgrx::error!("ADD VP insert error: {e}"));
-            let n: i64 = Spi::get_one::<i64>(&count_sql).unwrap_or(None).unwrap_or(0);
+            let n: i64 = Spi::get_one::<i64>(&insert_sql)
+                .unwrap_or_else(|e| pgrx::error!("ADD VP insert error: {e}"))
+                .unwrap_or(0);
+            if n > 0 {
+                Spi::run_with_args(
+                    "UPDATE _pg_ripple.predicates \
+                     SET triple_count = triple_count + $2 WHERE id = $1",
+                    &[DatumWithOid::from(*pred_id), DatumWithOid::from(n)],
+                )
+                .unwrap_or_else(|e| pgrx::error!("ADD triple_count update SPI error: {e}"));
+            }
             total += n;
         } else {
             let insert_sql = format!(
                 "INSERT INTO _pg_ripple.vp_rare (p, s, o, g) \
                  SELECT {pred_id}, s, o, {dst_g_id} \
                  FROM _pg_ripple.vp_rare WHERE p = {pred_id} AND g = {src_g_id} \
-                 ON CONFLICT DO NOTHING"
+                 ON CONFLICT (p, s, o, g) DO NOTHING"
             );
             let count_sql = format!(
                 "SELECT COUNT(*) FROM _pg_ripple.vp_rare WHERE p = {pred_id} AND g = {src_g_id}"
