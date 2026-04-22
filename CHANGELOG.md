@@ -13,7 +13,7 @@ Versions correspond to the milestones in [ROADMAP.md](ROADMAP.md).
 
 ---
 
-## [0.46.0] — 2026-04-21 — Property-Based Testing, Fuzz Hardening & OWL 2 RL Conformance
+## [0.46.0] — 2026-04-22 — Property-Based Testing, Fuzz Hardening & OWL 2 RL Conformance
 
 **Adds three property-based test suites (SPARQL round-trip, dictionary encode/decode, JSON-LD framing), a cargo-fuzz federation result decoder target, an OWL 2 RL conformance suite, TopN push-down optimisation, sequence range pre-allocation for parallel Datalog, BSBM regression gate, Rustdoc lint gate, HTTP companion CA-bundle support, and expanded worked examples.**
 
@@ -54,12 +54,23 @@ Versions correspond to the milestones in [ROADMAP.md](ROADMAP.md).
 | `pg_ripple.topn_pushdown` | bool | `on` | Push `LIMIT N` into the SQL plan for `ORDER BY + LIMIT` queries |
 | `pg_ripple.datalog_sequence_batch` | integer | `10000` | SID range reserved per parallel Datalog worker per batch |
 
+### New error codes
+
+| Code | Severity | Message |
+|------|----------|---------|
+| PT542 | ERROR | Federation result decoder received unparseable XML/JSON |
+
+### Bug fixes
+
+None.
+
 ### Documentation
 
 - `docs/src/user-guide/best-practices/sparql-performance.md` — TopN push-down section with EXPLAIN example
 - `docs/src/reference/guc-reference.md` — v0.46.0 section with two new GUC parameters
 - `docs/src/reference/error-catalog.md` — PT542 added
 - `docs/src/reference/contributing.md` — proptest and cargo-fuzz sections
+- `docs/src/reference/w3c-conformance.md` — OWL 2 RL suite added to conformance table
 
 ---
 

@@ -14,6 +14,7 @@ pg_ripple runs four complementary conformance suites:
 | **Apache Jena** | ~1 000 | Implementation edge cases (type coercion, date-time, blank-node scoping) |
 | **WatDiv** | 100 templates | Correctness and performance at 10M-triple scale |
 | **LUBM** | 14 queries | OWL RL inference correctness under ontological reasoning (v0.44.0+) |
+| **OWL 2 RL** | ~200 tests | W3C OWL 2 RL entailment, consistency, and inconsistency (v0.46.0+; informational until ≥95%) |
 
 All suites write per-suite results into a unified `tests/conformance/report.json` artifact.
 

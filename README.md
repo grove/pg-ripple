@@ -19,9 +19,9 @@ No separate graph database. No data pipelines. No extra infrastructure.
 
 ---
 
-## What works today (v0.44.0)
+## What works today (v0.46.0)
 
-pg_ripple passes **100% of the W3C SPARQL 1.1 and SHACL Core conformance test suites** — the industry benchmarks for correctness in knowledge graph systems. After 44 releases it covers the full feature set described below.
+pg_ripple passes **100% of the W3C SPARQL 1.1 and SHACL Core conformance test suites** — the industry benchmarks for correctness in knowledge graph systems. After 46 releases it covers the full feature set described below.
 
 | What you can do | How it works |
 |---|---|
@@ -29,7 +29,7 @@ pg_ripple passes **100% of the W3C SPARQL 1.1 and SHACL Core conformance test su
 | **Query with SPARQL** | Ask complex questions using SPARQL 1.1 — the W3C standard query language for linked data (similar to SQL, but designed for graphs). Follow chains of relationships, apply filters, aggregate results, and query across multiple graphs. Fully W3C conformant. |
 | **AI and LLM integration** | Store vector embeddings alongside graph facts. Combine semantic similarity search (*"find things similar to X"*) with SPARQL graph traversal in one query. Built-in RAG pipeline retrieves graph-contextualized context for language model prompts. Use `sparql_construct_jsonld()` with a JSON-LD frame to generate structured, token-efficient system prompts directly from a SPARQL CONSTRUCT query. |
 | **Microsoft GraphRAG** | Export entities and relationships in GraphRAG's BYOG (Bring Your Own Graph) Parquet format. Enrich the graph with Datalog rules. Validate export quality with SHACL. Connect your knowledge graph to Microsoft's GraphRAG pipeline with a single SQL call. |
-| **Validate data quality** | Define quality rules with SHACL: *"every Person must have exactly one name"*, *"age must be a positive integer"*. Violations are caught on insert (immediate feedback) or checked in the background. Fully W3C conformant. |
+| **Validate data quality** | Define quality rules with SHACL: *"every Person must have exactly one name"*, *"age must be a positive integer"*. Violations are caught on insert (immediate feedback) or checked in the background. Full SHACL Core conformance, including `sh:equals` and `sh:disjoint` relational constraints. Violation reports include decoded focus-node IRIs for easy debugging. |
 | **Infer new facts automatically** | Write Datalog rules to derive conclusions from what you already know — *"if Alice manages Bob and Bob manages Carol, then Alice indirectly manages Carol"*. Includes built-in support for standard RDFS and OWL reasoning. Goal-directed mode (`infer_goal()`) and demand-filtered mode (`infer_demand()`) derive only the facts relevant to your query, reducing inference work by 50–90% on large programs. `owl:sameAs` entity canonicalization is applied automatically before inference, so equivalent entities are treated as one. Well-founded semantics (`infer_wfs()`) handles non-stratifiable programs with mutual negation. Tabling caches repeated inference sub-goals (2–5× speedup). Parallel stratum evaluation runs independent rule groups concurrently. Worst-case optimal joins accelerate cyclic graph queries. Incremental retraction (DRed) keeps derived predicates consistent after deletions without full recomputation. |
 | **Stream and inspect queries** | Use `sparql_cursor()` to stream large result sets batch-by-batch without materializing them in memory. Use `explain_sparql()` and `explain_datalog()` to introspect query plans and rule compilation. OpenTelemetry span tracing is available when `pg_ripple.tracing_enabled = on`. |
 | **Live change notifications** | Subscribe to graph changes with `pg_ripple.create_subscription(name, filter_sparql)`. pg_ripple notifies your application via a PostgreSQL NOTIFY channel (`pg_ripple_cdc_{name}`) whenever matching triples are added or removed — no polling required. |
@@ -146,15 +146,7 @@ Token budgets matter. `sparql_construct_jsonld()` takes a SPARQL CONSTRUCT query
 
 ## Where we're headed
 
-Three releases remain on the path to v1.0.0.
-
-### v0.45.0 — SHACL Completion, Datalog Robustness & Crash Recovery
-
-This release closes the remaining SHACL Core gaps (`sh:equals` / `sh:disjoint`, decoded violation IRIs, async load tests), hardens parallel Datalog strata rollback on failure, adds missing crash-recovery test scenarios, and standardises migration documentation across all prior versions.
-
-### v0.46.0 — Property-Based Testing, Fuzz Hardening & OWL 2 RL Conformance
-
-Adds `proptest`-driven property-based testing for SPARQL algebra and dictionary invariants, fuzzes the federation result decoder, runs the W3C OWL 2 RL test suite in CI, and completes a set of performance improvements: TopN push-down, BSBM regression gate, sequence pre-allocation for Datalog workers, and HTTP certificate pinning.
+One release remains on the path to v1.0.0.
 
 ### v1.0.0 — Production Release
 
@@ -175,7 +167,7 @@ This means you get:
 
 ### How it compares
 
-> **Note**: pg_ripple features marked "Yes" in the table below are implemented across v0.1.0–v0.44.0. W3C SPARQL 1.1 Query, Update, and SHACL Core conformance is 100% (achieved in v0.20.0). Competitor capabilities reflect publicly documented feature sets.
+> **Note**: pg_ripple features marked "Yes" in the table below are implemented across v0.1.0–v0.46.0. W3C SPARQL 1.1 Query, Update, and SHACL Core conformance is 100% (achieved in v0.20.0). Competitor capabilities reflect publicly documented feature sets.
 
 | Capability | pg_ripple | Blazegraph | Virtuoso | Apache Fuseki |
 |---|---|---|---|---|
@@ -323,10 +315,12 @@ pg_ripple is built to production-grade standards:
 - **Apache Jena test suite** — ~1 000 additional tests covering XSD numeric promotions, timezone-aware date/time, blank-node scoping, and all SPARQL string functions
 - **WatDiv benchmark** — all 100 WatDiv query templates (star, chain, snowflake, complex) validated for correctness against a 10 M-triple dataset with ±0.1% row-count baselines
 - **LUBM conformance suite** — all 14 canonical LUBM queries pass against a synthetic university OWL ontology; includes a Datalog validation sub-suite confirming that `infer('owl-rl')` produces correct supertype entailments (v0.44.0)
+- **W3C OWL 2 RL conformance suite** — W3C OWL 2 RL test manifests (entailment, consistency, and inconsistency tests) run in CI; ≥ 80% pass rate at v0.46.0, targeting ≥ 95% at v1.0.0 (v0.46.0)
+- **Property-based testing** — `proptest` suites assert algebraic invariants: SPARQL algebra round-trips produce byte-identical SQL, dictionary encode/decode is always stable and collision-free for 10,000 random distinct terms, JSON-LD framing preserves all matching IRIs (v0.46.0)
 - **Extensive test suite** — automated tests cover every SQL-exposed function, every feature, and every edge case
 - **Security testing** — resistance to injection attacks, malformed inputs, and resource exhaustion
-- **Fuzz testing** — the query pipeline is continuously fuzz-tested for robustness
-- **Performance regression CI** — automated benchmarks fail the build if throughput drops by more than 10%
+- **Fuzz testing** — the federation result decoder and query pipeline are continuously fuzz-tested; arbitrary XML/JSON from remote SERVICE endpoints cannot cause a crash or panic (v0.46.0)
+- **Performance regression CI** — BSBM benchmark (1M-triple product dataset, 12 explore queries) and automated throughput benchmarks fail the build if performance drops by more than 10% (v0.46.0)
 - **Stability** — 72-hour soak test, memory leak detection, and crash recovery testing
 
 ---

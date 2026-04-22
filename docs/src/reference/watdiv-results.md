@@ -51,10 +51,10 @@ The `watdiv-suite` CI job runs on every push to `main` and:
 
 The job is **non-blocking** (performance regressions are warnings, not failures).
 
-## Results table (v0.44.0, 10M triples, 8-core CI runner)
+## Results table (v0.46.0, 10M triples, 8-core CI runner)
 
 Results are updated automatically on each release.  The table below reflects
-the v0.44.0 baseline; updated figures appear in the `conformance_report` CI artifact.
+the v0.46.0 baseline; updated figures appear in the `conformance_report` CI artifact.
 
 | Template | Class | Expected rows | Status |
 |---|---|---|---|
