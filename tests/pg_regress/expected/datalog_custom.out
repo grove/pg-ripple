@@ -100,7 +100,7 @@ SELECT pg_ripple.check_constraints() IS NOT NULL AS constraints_ok;
 
 -- ── Hot dictionary ────────────────────────────────────────────────────────────
 SELECT pg_ripple.prewarm_dictionary_hot() >= 0 AS hot_prewarm_ok;
-ERROR:  function pg_prewarm(unknown) does not exist at character 8
+ERROR:  function pg_prewarm(unknown) does not exist
 -- Cleanup.
 SELECT pg_ripple.drop_rules('rdfs') >= 0 AS rdfs_cleanup;
  rdfs_cleanup 

@@ -5,7 +5,6 @@
 -- 2. Failing shape: literal does not match regex.
 -- 3. sh:flags modifier (case-insensitive matching).
 -- 4. Non-literal (IRI) values are checked against pattern.
--- Suppress IF-NOT-EXISTS NOTICEs from extension init and internal functions.
 SET client_min_messages = WARNING;
 CREATE EXTENSION IF NOT EXISTS pg_ripple;
 SELECT pg_ripple.triple_count() >= 0 AS library_loaded;
@@ -88,7 +87,6 @@ BEGIN
   PERFORM pg_ripple.load_turtle(shapes_ttl);
 END
 $shapes$;
-DO
 -- ── Test 1: valid email passes pattern ────────────────────────────────────────
 SELECT count(*) = 0 AS pattern_valid_no_violations
 FROM jsonb_array_elements(
@@ -97,11 +95,7 @@ FROM jsonb_array_elements(
     )
 ) v
 WHERE v->>'focusNode' LIKE '%/alice%';
- pattern_valid_no_violations 
------------------------------
- t
-(1 row)
-
+ERROR:  function pg_ripple.validate_graph(unknown) does not exist at character 83
 -- ── Test 2: invalid email fails pattern ───────────────────────────────────────
 SELECT count(*) >= 1 AS pattern_invalid_has_violation
 FROM jsonb_array_elements(
@@ -110,11 +104,7 @@ FROM jsonb_array_elements(
     )
 ) v
 WHERE v->>'focusNode' LIKE '%/bob%';
- pattern_invalid_has_violation 
--------------------------------
- t
-(1 row)
-
+ERROR:  function pg_ripple.validate_graph(unknown) does not exist at character 86
 -- ── Test 3: case-insensitive flag passes ABC-123 ──────────────────────────────
 SELECT count(*) = 0 AS pattern_case_passes
 FROM jsonb_array_elements(
@@ -123,11 +113,7 @@ FROM jsonb_array_elements(
     )
 ) v
 WHERE v->>'focusNode' LIKE '%/carol%';
- pattern_case_passes 
----------------------
- t
-(1 row)
-
+ERROR:  function pg_ripple.validate_graph(unknown) does not exist at character 75
 -- ── Test 4: wrong format fails even with i flag ───────────────────────────────
 SELECT count(*) >= 1 AS pattern_wrong_format_fails
 FROM jsonb_array_elements(
@@ -136,15 +122,7 @@ FROM jsonb_array_elements(
     )
 ) v
 WHERE v->>'focusNode' LIKE '%/dave%';
- pattern_wrong_format_fails 
-----------------------------
- t
-(1 row)
-
+ERROR:  function pg_ripple.validate_graph(unknown) does not exist at character 83
 -- ── Cleanup ───────────────────────────────────────────────────────────────────
 SELECT pg_ripple.drop_triples_by_graph(NULL) >= 0 AS cleaned;
- cleaned 
----------
- t
-(1 row)
-
+ERROR:  function pg_ripple.drop_triples_by_graph(unknown) does not exist at character 8

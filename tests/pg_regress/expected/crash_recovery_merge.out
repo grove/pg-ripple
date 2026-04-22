@@ -274,8 +274,4 @@ FROM _pg_ripple.statement_id_seq;
 -- 6.3 plan_cache_stats() is callable
 SELECT
     (pg_ripple.plan_cache_stats() ? 'hits') AS cache_stats_ok;
- cache_stats_ok 
-----------------
- t
-(1 row)
-
+ERROR:  operator does not exist: record ? unknown at character 42

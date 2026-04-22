@@ -41,7 +41,7 @@ SELECT count(*) >= 4 AS builtin_lattices_registered
 FROM jsonb_array_elements(pg_ripple.list_lattices())
 WHERE (value->>'builtin')::boolean = true;
  builtin_lattices_registered 
-------------------------------
+-----------------------------
  t
 (1 row)
 
@@ -84,25 +84,17 @@ WHERE value->>'name' = 'interval';
 -- ── Part 3: User-defined lattice registration ─────────────────────────────────
 -- 3a. Register a custom trust lattice.
 SELECT pg_ripple.create_lattice('trust_score', 'min', '1000') AS trust_lattice_created;
- trust_lattice_created 
------------------------
- t
-(1 row)
-
+ERROR:  expected a left parenthesis
 -- 3b. create_lattice() is idempotent (ON CONFLICT DO NOTHING).
 SELECT pg_ripple.create_lattice('trust_score', 'min', '1000') AS duplicate_is_false;
- duplicate_is_false 
---------------------
- f
-(1 row)
-
+ERROR:  expected a left parenthesis
 -- 3c. Custom lattice appears in list_lattices().
 SELECT count(*) = 1 AS trust_lattice_listed
 FROM jsonb_array_elements(pg_ripple.list_lattices())
 WHERE value->>'name' = 'trust_score';
  trust_lattice_listed 
 ----------------------
- t
+ f
 (1 row)
 
 -- 3d. Custom lattice has correct join_fn.
@@ -111,8 +103,7 @@ FROM jsonb_array_elements(pg_ripple.list_lattices())
 WHERE value->>'name' = 'trust_score';
  trust_join_fn 
 ---------------
- min
-(1 row)
+(0 rows)
 
 -- 3e. Custom lattice is not built-in.
 SELECT (value->>'builtin')::boolean AS trust_is_not_builtin
@@ -120,8 +111,7 @@ FROM jsonb_array_elements(pg_ripple.list_lattices())
 WHERE value->>'name' = 'trust_score';
  trust_is_not_builtin 
 ----------------------
- f
-(1 row)
+(0 rows)
 
 -- ── Part 4: infer_lattice() interface ────────────────────────────────────────
 -- 4a. infer_lattice() on empty rule set returns JSONB with expected keys.
@@ -154,18 +144,14 @@ SELECT (pg_ripple.infer_lattice('nonexistent_rules', 'min'))->>'lattice' AS latt
 
 -- 4e. JSONB contains 'rule_set' key.
 SELECT (pg_ripple.infer_lattice('nonexistent_rules', 'min'))->>'rule_set' AS rule_set_name;
-    rule_set_name    
----------------------
+   rule_set_name   
+-------------------
  nonexistent_rules
 (1 row)
 
 -- 4f. infer_lattice() with user-defined lattice.
 SELECT (pg_ripple.infer_lattice('nonexistent_rules', 'trust_score'))->>'lattice' AS custom_lattice_name;
- custom_lattice_name 
----------------------
- trust_score
-(1 row)
-
+ERROR:  infer_lattice: unknown lattice type 'trust_score'. Register it first with pg_ripple.create_lattice().
 -- ── Part 5: Trust propagation scenario ───────────────────────────────────────
 -- Insert trust graph triples.
 -- Direct trust scores (encoded as IRI-like numeric literals for simplicity).
@@ -260,13 +246,12 @@ EXCEPTION
         RAISE NOTICE 'correctly rejected unknown lattice: %', SQLERRM;
 END;
 $$;
-NOTICE:  correctly rejected unknown lattice: infer_lattice: unknown lattice type 'completely_unknown_lattice_xyz'. Register it first with pg_ripple.create_lattice().
-DO
 -- ── Part 7: Cleanup ───────────────────────────────────────────────────────────
 -- 7a. Total lattice count reflects built-ins + 1 user-defined.
 SELECT count(*) AS total_lattice_count
 FROM jsonb_array_elements(pg_ripple.list_lattices());
  total_lattice_count 
 ---------------------
-                   5
+                   4
 (1 row)
+

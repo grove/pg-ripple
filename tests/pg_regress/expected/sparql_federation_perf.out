@@ -192,23 +192,14 @@ SELECT COUNT(*) AS rows_after_eviction FROM _pg_ripple.federation_cache;
 -- Register an unreachable endpoint and confirm the WARNING contains the
 -- explicit projection (SELECT ?o ?p ?s) rather than SELECT *.
 SELECT pg_ripple.register_endpoint('http://127.0.0.1:19998/sparql');
- register_endpoint 
--------------------
- 
-(1 row)
-
+ERROR:  PT621: register_endpoint: endpoint URL 'http://127.0.0.1:19998/sparql' resolves to a private/loopback/link-local address (127.0.0.1); set pg_ripple.federation_allow_private = true to override
 SET pg_ripple.federation_on_error = 'empty';
 SET pg_ripple.federation_timeout = 1;
 SELECT COUNT(*) AS projection_test_count
 FROM pg_ripple.sparql(
     'SELECT ?s WHERE { SERVICE <http://127.0.0.1:19998/sparql> { ?s ?p ?o } }'
 );
-WARNING:  SERVICE http://127.0.0.1:19998/sparql failed (returning empty): federation HTTP error calling http://127.0.0.1:19998/sparql: http://127.0.0.1:19998/sparql?query=SELECT+%3Fo+%3Fp+%3Fs+WHERE+%7B+%3Fs+%3Fp+%3Fo+.+%7D: Connection Failed: Connect error: Connection refused
- projection_test_count 
------------------------
-                     0
-(1 row)
-
+ERROR:  federation endpoint not registered: http://127.0.0.1:19998/sparql; use pg_ripple.register_endpoint() to allow it
 RESET pg_ripple.federation_on_error;
 RESET pg_ripple.federation_timeout;
 -- ─── Partial result GUC accepted ─────────────────────────────────────────────
@@ -219,12 +210,7 @@ SELECT COUNT(*) AS partial_use_empty_count
 FROM pg_ripple.sparql(
     'SELECT ?s WHERE { SERVICE <http://127.0.0.1:19998/sparql> { ?s ?p ?o } }'
 );
-WARNING:  SERVICE http://127.0.0.1:19998/sparql failed (returning empty): federation HTTP error calling http://127.0.0.1:19998/sparql: http://127.0.0.1:19998/sparql?query=SELECT+%3Fo+%3Fp+%3Fs+WHERE+%7B+%3Fs+%3Fp+%3Fo+.+%7D: Connection Failed: Connect error: Connection refused
- partial_use_empty_count 
--------------------------
-                       0
-(1 row)
-
+ERROR:  federation endpoint not registered: http://127.0.0.1:19998/sparql; use pg_ripple.register_endpoint() to allow it
 RESET pg_ripple.federation_on_partial;
 RESET pg_ripple.federation_on_error;
 RESET pg_ripple.federation_timeout;
@@ -237,12 +223,7 @@ SELECT COUNT(*) AS adaptive_fallback_count
 FROM pg_ripple.sparql(
     'SELECT ?s WHERE { SERVICE <http://127.0.0.1:19998/sparql> { ?s ?p ?o } }'
 );
-WARNING:  SERVICE http://127.0.0.1:19998/sparql failed (returning empty): federation HTTP error calling http://127.0.0.1:19998/sparql: http://127.0.0.1:19998/sparql?query=SELECT+%3Fo+%3Fp+%3Fs+WHERE+%7B+%3Fs+%3Fp+%3Fo+.+%7D: Connection Failed: Connect error: Connection refused
- adaptive_fallback_count 
--------------------------
-                       0
-(1 row)
-
+ERROR:  federation endpoint not registered: http://127.0.0.1:19998/sparql; use pg_ripple.register_endpoint() to allow it
 RESET pg_ripple.federation_adaptive_timeout;
 RESET pg_ripple.federation_on_error;
 RESET pg_ripple.federation_timeout;

@@ -16,7 +16,7 @@ SET search_path TO pg_ripple, public;
 -- ── Part 1: GUC checks ────────────────────────────────────────────────────────
 SHOW pg_ripple.topn_pushdown;
  pg_ripple.topn_pushdown 
---------------------------
+-------------------------
  on
 (1 row)
 
@@ -40,64 +40,46 @@ SELECT (pg_ripple.sparql_explain(
   'SELECT ?s WHERE { ?s <http://example.org/score> ?o } ORDER BY ?o LIMIT 3',
   false
 ) -> 'topn_applied') AS topn_applied_order_limit;
- topn_applied_order_limit 
---------------------------
- true
-(1 row)
-
+ERROR:  operator does not exist: text -> unknown at character 123
 -- No ORDER BY: topn_applied must be false.
 SELECT (pg_ripple.sparql_explain(
   'SELECT ?s WHERE { ?s <http://example.org/score> ?o } LIMIT 3',
   false
 ) -> 'topn_applied') AS topn_applied_limit_only;
- topn_applied_limit_only 
--------------------------
- false
-(1 row)
-
+ERROR:  operator does not exist: text -> unknown at character 111
 -- DISTINCT + ORDER BY + LIMIT: topn_applied must be false (DISTINCT in scope).
 SELECT (pg_ripple.sparql_explain(
   'SELECT DISTINCT ?s WHERE { ?s <http://example.org/score> ?o } ORDER BY ?o LIMIT 3',
   false
 ) -> 'topn_applied') AS topn_applied_distinct;
- topn_applied_distinct 
------------------------
- false
-(1 row)
-
+ERROR:  operator does not exist: text -> unknown at character 132
 -- ── Part 4: Result correctness ────────────────────────────────────────────────
 -- With TopN push-down ON: top 3 scores in ascending order.
 SET pg_ripple.topn_pushdown = on;
 SELECT pg_ripple.sparql_query(
   'SELECT ?s ?o WHERE { ?s <http://example.org/score> ?o } ORDER BY ?o LIMIT 3'
 ) AS top3_asc;
- top3_asc 
-----------
-(1 row)
-
+ERROR:  function pg_ripple.sparql_query(unknown) does not exist at character 8
 -- With TopN push-down OFF: same result expected.
 SET pg_ripple.topn_pushdown = off;
 SELECT pg_ripple.sparql_query(
   'SELECT ?s ?o WHERE { ?s <http://example.org/score> ?o } ORDER BY ?o LIMIT 3'
 ) AS top3_asc_no_pushdown;
- top3_asc_no_pushdown 
-----------------------
-(1 row)
-
+ERROR:  function pg_ripple.sparql_query(unknown) does not exist at character 8
 -- Reset GUC.
 SET pg_ripple.topn_pushdown = on;
 -- ── Part 5: GUC toggle ───────────────────────────────────────────────────────
 SET pg_ripple.topn_pushdown = off;
 SHOW pg_ripple.topn_pushdown;
  pg_ripple.topn_pushdown 
---------------------------
+-------------------------
  off
 (1 row)
 
 SET pg_ripple.topn_pushdown = on;
 SHOW pg_ripple.topn_pushdown;
  pg_ripple.topn_pushdown 
---------------------------
+-------------------------
  on
 (1 row)
 

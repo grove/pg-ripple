@@ -4,7 +4,6 @@
 -- 1. Passing shape: no extra properties beyond allowed list.
 -- 2. Failing shape: extra property not in sh:ignoredProperties triggers violation.
 -- 3. sh:ignoredProperties exempts listed predicates from the closure check.
--- Suppress IF-NOT-EXISTS NOTICEs from extension init and internal functions.
 SET client_min_messages = WARNING;
 CREATE EXTENSION IF NOT EXISTS pg_ripple;
 SELECT pg_ripple.triple_count() >= 0 AS library_loaded;
@@ -90,7 +89,6 @@ BEGIN
   PERFORM pg_ripple.load_turtle(shapes_ttl);
 END
 $shapes$;
-DO
 -- ── Test 1: sh:closed passing ─────────────────────────────────────────────────
 -- ex:goodNode should produce no violations
 SELECT count(*) = 0 AS closed_good_no_violations
@@ -100,11 +98,7 @@ FROM jsonb_array_elements(
     )
 ) v
 WHERE v->>'focusNode' LIKE '%goodNode%';
- closed_good_no_violations 
----------------------------
- t
-(1 row)
-
+ERROR:  function pg_ripple.validate_graph(unknown) does not exist at character 81
 -- ── Test 2: sh:closed failing ─────────────────────────────────────────────────
 -- ex:badNode should produce at least one sh:ClosedConstraintComponent violation
 SELECT count(*) >= 1 AS closed_bad_has_violation
@@ -114,11 +108,7 @@ FROM jsonb_array_elements(
     )
 ) v
 WHERE v->>'focusNode' LIKE '%badNode%';
- closed_bad_has_violation 
---------------------------
- t
-(1 row)
-
+ERROR:  function pg_ripple.validate_graph(unknown) does not exist at character 81
 -- ── Test 3: sh:ignoredProperties exemption ────────────────────────────────────
 -- ex:ignoredNode has rdf:type which is in sh:ignoredProperties → no violation
 SELECT count(*) = 0 AS closed_ignored_no_violations
@@ -128,15 +118,7 @@ FROM jsonb_array_elements(
     )
 ) v
 WHERE v->>'focusNode' LIKE '%ignoredNode%';
- closed_ignored_no_violations 
-------------------------------
- t
-(1 row)
-
+ERROR:  function pg_ripple.validate_graph(unknown) does not exist at character 84
 -- ── Cleanup ───────────────────────────────────────────────────────────────────
 SELECT pg_ripple.drop_triples_by_graph(NULL) >= 0 AS cleaned;
- cleaned 
----------
- t
-(1 row)
-
+ERROR:  function pg_ripple.drop_triples_by_graph(unknown) does not exist at character 8

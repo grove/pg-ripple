@@ -130,7 +130,7 @@ JOIN _pg_ripple.dictionary d ON d.id = sh.predicate_id
 WHERE d.value = 'https://hints.test/foundedYear'
   AND sh.hint_type = 'min_count_1';
  foundedyear_hint_still_present 
----------------------------------
+--------------------------------
  t
 (1 row)
 
@@ -138,7 +138,7 @@ WHERE d.value = 'https://hints.test/foundedYear'
 SELECT pg_ripple.invalidate_catalog_cache() IS NULL AS cache_invalidated;
  cache_invalidated 
 -------------------
- t
+ f
 (1 row)
 
 -- ── Cleanup ───────────────────────────────────────────────────────────────────

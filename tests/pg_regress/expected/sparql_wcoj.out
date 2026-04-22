@@ -187,7 +187,7 @@ SET pg_ripple.wcoj_enabled = true;
 SELECT (pg_ripple.wcoj_triangle_query('https://wcoj.test/nonexistent')->>'triangle_count')::int AS no_triangles;
  no_triangles 
 --------------
-             0
+            0
 (1 row)
 
 -- ── Part 4: SPARQL triangle query via the standard engine ────────────────────
@@ -232,3 +232,4 @@ SHOW pg_ripple.wcoj_min_tables;
 ---------------------------
  3
 (1 row)
+

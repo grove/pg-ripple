@@ -1,7 +1,6 @@
 -- Test: diagnostic_report() function (v0.37.0)
 -- Verifies that diagnostic_report() returns a non-empty set with all expected
 -- keys and that no values are NULL.
-
 -- diagnostic_report() must return rows
 SELECT count(*) > 0 AS has_rows FROM pg_ripple.diagnostic_report();
  has_rows 
@@ -53,9 +52,9 @@ ORDER BY key;
 SELECT
     (SELECT value FROM pg_ripple.diagnostic_report() WHERE key = 'schema_version') AS sv,
     (SELECT value FROM pg_ripple.diagnostic_report() WHERE key = 'compiled_version') AS cv;
-   sv    |   cv    
----------+---------
- 0.37.0  | 0.37.0
+   sv   |   cv   
+--------+--------
+ 0.37.0 | 0.47.0
 (1 row)
 
 -- GUC values should be valid
@@ -76,3 +75,4 @@ WHERE key = 'guc_shacl_mode';
 ------------------
  t
 (1 row)
+

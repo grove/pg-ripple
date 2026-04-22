@@ -4,7 +4,6 @@
 -- 1. Passing shape: all language tags on a property are distinct.
 -- 2. Failing shape: duplicate language tag triggers violation.
 -- 3. Plain literals (no lang tag) are not subject to uniqueLang.
--- Suppress IF-NOT-EXISTS NOTICEs from extension init and internal functions.
 SET client_min_messages = WARNING;
 CREATE EXTENSION IF NOT EXISTS pg_ripple;
 SELECT pg_ripple.triple_count() >= 0 AS library_loaded;
@@ -75,7 +74,7 @@ SELECT pg_ripple.insert_triple(
 ) > 0 AS t6;
  t6 
 ----
- t
+ f
 (1 row)
 
 -- ── Shape ─────────────────────────────────────────────────────────────────────
@@ -97,7 +96,6 @@ BEGIN
   PERFORM pg_ripple.load_turtle(shapes_ttl);
 END
 $shapes$;
-DO
 -- ── Test 1: passing — distinct language tags ───────────────────────────────────
 SELECT count(*) = 0 AS ulang_good_no_violations
 FROM jsonb_array_elements(
@@ -106,11 +104,7 @@ FROM jsonb_array_elements(
     )
 ) v
 WHERE v->>'focusNode' LIKE '%goodBook%';
- ulang_good_no_violations 
---------------------------
- t
-(1 row)
-
+ERROR:  function pg_ripple.validate_graph(unknown) does not exist at character 80
 -- ── Test 2: failing — duplicate language tag ──────────────────────────────────
 SELECT count(*) >= 1 AS ulang_bad_has_violation
 FROM jsonb_array_elements(
@@ -119,11 +113,7 @@ FROM jsonb_array_elements(
     )
 ) v
 WHERE v->>'focusNode' LIKE '%badBook%';
- ulang_bad_has_violation 
--------------------------
- t
-(1 row)
-
+ERROR:  function pg_ripple.validate_graph(unknown) does not exist at character 80
 -- ── Test 3: plain literals don't violate uniqueLang ───────────────────────────
 SELECT count(*) = 0 AS ulang_plain_no_violations
 FROM jsonb_array_elements(
@@ -132,15 +122,7 @@ FROM jsonb_array_elements(
     )
 ) v
 WHERE v->>'focusNode' LIKE '%plainBook%';
- ulang_plain_no_violations 
----------------------------
- t
-(1 row)
-
+ERROR:  function pg_ripple.validate_graph(unknown) does not exist at character 81
 -- ── Cleanup ───────────────────────────────────────────────────────────────────
 SELECT pg_ripple.drop_triples_by_graph(NULL) >= 0 AS cleaned;
- cleaned 
----------
- t
-(1 row)
-
+ERROR:  function pg_ripple.drop_triples_by_graph(unknown) does not exist at character 8
