@@ -6,6 +6,151 @@
 
 ---
 
+## Plain-Language Overview
+
+*This section is written for a general audience — no prior knowledge of databases, AI, or graph technology is assumed. It explains what this report is about, why it matters, and what opportunities it describes. Technical readers can skip to the [Executive Summary](#executive-summary).*
+
+---
+
+### The Problem This Report Is About
+
+Imagine a hospital that has merged with another hospital. Both hospitals have records for many of the same patients, but those records were created independently — different spellings of names, different ID numbers, different formats for dates of birth. Before doctors can safely treat patients across both systems, someone has to figure out which records belong to the same real person. Get it wrong in one direction (say two different people are merged into one record) and a patient might receive the wrong medication. Get it wrong in the other direction (the same person treated as two different people) and their medical history is incomplete.
+
+This problem — **finding records that refer to the same real-world person, business, or thing** — is called *entity resolution* (ER), or *record linkage*. It sounds simple, but it is one of the hardest and most consequential problems in data management. It affects healthcare, banking, government, retail, and nearly every industry that deals with data from more than one source.
+
+---
+
+### Why It's Hard
+
+Three things make record linkage genuinely difficult:
+
+1. **Data is messy.** "Robert Smith", "Bob Smith", and "R. Smith" may all be the same person. A tax ID entered with or without dashes, an address with or without a unit number, a company name abbreviated or spelled in full — all of these variations make simple exact-matching useless.
+
+2. **Scale is enormous.** A major bank might need to match 50 million customer records against 200 million transactions. That's 10 *quadrillion* possible pairs to check. Checking them all is not possible; you need smart shortcuts.
+
+3. **Mistakes are expensive.** In healthcare, a wrong merge can endanger a life. In finance, it can enable fraud or violate privacy regulations. In customer data, it can expose one customer's data to another. The system has to be not just accurate but *auditable* — you need to be able to explain and justify every decision.
+
+---
+
+### Two Traditions That Each Solve Half the Problem
+
+For decades, there have been two schools of thought on how to do record linkage:
+
+**The Rules-Based Approach ("Symbolic")**
+
+Domain experts write explicit rules: "If two records have the same Social Security Number, they are the same person." "If two records have the same email address and were both created in the same country, they are probably the same person." These rules are precise, explainable, and auditable — a regulator can read them and understand exactly what the system does. But writing and maintaining rules for every edge case is exhausting, and rules break when the data changes in unexpected ways.
+
+**The AI / Machine Learning Approach ("Neural")**
+
+Instead of rules, you train a machine learning model on thousands of examples of matching and non-matching pairs. The model learns patterns that humans might not notice — subtle combinations of signals that together indicate a match. These systems are more flexible and can catch cases that rules miss. But they are black boxes: they can't explain *why* they made a decision, and nothing stops them from making absurd mistakes (like deciding two patients with contradictory blood types must be the same person because their names are similar).
+
+---
+
+### The New Approach: Neuro-Symbolic Record Linkage
+
+**Neuro-symbolic record linkage** (NS-RL) combines both traditions so each compensates for the other's weaknesses.
+
+Think of it like a hiring committee: the AI is the junior member who reads thousands of CVs quickly and flags the most promising candidates (high recall, fast). The rules-based system is the senior expert who knows the hard requirements and can immediately veto candidates who don't qualify ("this role requires a medical license — remove everyone without one, regardless of how impressive their other qualifications look"). Neither could do the job alone as well as they can together.
+
+The result is a system that is:
+- **High-recall**: the AI finds candidates that rules alone would miss
+- **Safe**: hard rules prevent obviously wrong merges from ever happening
+- **Explainable**: every decision has a trail — which rules fired, which signals contributed, what confidence score was assigned
+- **Auditable**: regulators can inspect both the rules and the evidence for any individual decision
+
+---
+
+### What pg_ripple and pg_trickle Bring to This
+
+**pg_ripple** is a database extension we have built (on top of PostgreSQL — the world's most popular open-source database) that stores and reasons about *graphs of knowledge*. Instead of just storing facts in rows and columns, it stores facts as connected triples — "Alice *works for* Acme Corp", "Acme Corp *is located in* Oslo", "Alice *has email* alice@acme.no" — and can reason over those connections using logic rules and constraints.
+
+For record linkage, this is powerful because:
+- You can declare rules like "an email address uniquely identifies a person" and the system will automatically flag any two records that share one
+- You can declare constraints like "a person cannot have two different dates of birth" and the system will automatically block any merge that would create that contradiction
+- You can store the AI model's confidence scores alongside the facts, so every proposed match is annotated with its evidence
+- Everything lives in a standard PostgreSQL database, so you can use all your existing database tools, backups, monitoring, and access controls
+
+**pg_trickle** adds something that no other system in this space provides: **real-time reactivity**. Traditional record linkage systems run as batch jobs — you kick them off overnight and get results the next morning. pg_trickle makes the whole process *continuous and live*. The moment a new patient record arrives in the database, the system checks for potential matches, validates them against all the rules, and either merges them or flags them for review — all within the same database transaction, in milliseconds.
+
+---
+
+### The Market Opportunity
+
+The global market for entity resolution, master data management, and identity graph platforms is estimated at over USD 8 billion per year (2025). Despite this, the available solutions all have significant gaps:
+
+| What's available today | The gap |
+|------------------------|---------|
+| **Splink, Zingg** — open-source, batch-only, probabilistic | No real-time processing; no graph reasoning; no compliance audit trail |
+| **Senzing** — commercial, accurate out-of-the-box | Black box; expensive; no SQL or SPARQL query interface; no rules you can inspect |
+| **Tamr, Reltio** — commercial MDM platforms | Very expensive SaaS; closed ecosystem; batch-oriented; no semantic reasoning |
+| **Neo4j, Amazon Neptune** — graph databases | No built-in ER; no Datalog rules; no real-time IVM; no SHACL safety constraints |
+| **Stardog** — semantic graph database | Closest competitor; strong on ontology reasoning; but no real-time IVM and proprietary licensing |
+
+**pg_ripple + pg_trickle is the only open-source system that combines all five**:
+1. Semantic reasoning (OWL, SHACL, Datalog rules)
+2. AI/vector similarity search (pgvector)
+3. Real-time incremental updates (pg_trickle)
+4. Full ACID database guarantees
+5. Complete PostgreSQL ecosystem integration
+
+No system in the world currently does all five. That is the opportunity.
+
+---
+
+### The Three Frontier Directions
+
+The report identifies three directions where the field is moving fastest in 2025–2026, all of which play to pg_ripple's strengths:
+
+**1. LLM-as-Arbiter for Hard Cases**
+
+When two records are in the "uncertain zone" (the AI gives them a 60–70% probability of being the same, but isn't confident), the new frontier is to ask a large language model (like GPT-4 or Claude) to review the evidence and make a reasoned decision. pg_ripple can package the relevant graph data (all known facts about both entities) as a structured document and pass it to the LLM with a precise question. The LLM's answer — along with its cited reasons — gets stored back in the database as auditable provenance. This turns an opaque probability into a reasoned, explainable, reviewable decision.
+
+**2. AI Agents as Rule Authors**
+
+Historically, the hardest part of building a rule-based ER system was writing the rules. This required specialist knowledge of SHACL (a constraint language) and Datalog (a logic programming language) that most data teams don't have. AI coding agents now make it feasible to *generate* those rules from plain-English descriptions: "Flag any two customer records that share a phone number as potential duplicates" → the agent writes the Datalog rule. But — and this is important — the friction doesn't disappear, it *transforms*. Instead of writing rules, domain experts now need to *review and approve* AI-generated rules before they go into production. In regulated industries (healthcare, finance), this is actually the right model: you want human sign-off before any automated decision system is deployed. pg_ripple's planned `explain_rule()` function will narrate what any rule does in plain English, making that review practical.
+
+**3. Continuous Resolution (Real-Time Identity Graphs)**
+
+The traditional mental model of record linkage as a "batch job you run periodically" is being replaced by a continuous identity graph that stays current as data flows in. A customer data platform that refreshes its identity graph every 24 hours will make different (and worse) decisions than one that resolves new records within 5 seconds of arrival. pg_trickle's stream tables make the latter not just possible but the default — no extra infrastructure, no message queues, no ETL pipelines.
+
+---
+
+### Three Industries Where This Creates Immediate Value
+
+**Healthcare: Patient Matching with Clinical Safety Guarantees**
+
+When two hospital systems merge, finding duplicate patient records is a matter of clinical safety. The consequences of an error (two different patients merged, or the same patient appearing twice) can be life-threatening. pg_ripple + pg_trickle can act as a safety-gated patient-matching system: the AI finds candidates quickly, the rules prevent medically impossible merges (two patients with contradictory blood types cannot be the same person), the SHACL constraint system documents every rejection with the specific rule that blocked it, and the full audit trail is queryable by compliance teams. No current open-source tool does this. Splink can match; it cannot enforce clinical safety rules as hard constraints. Senzing can match accurately; its decisions are a black box.
+
+**Financial Services: KYC/AML and Fraud Detection**
+
+"Know Your Customer" (KYC) regulations require banks to verify the identity of their clients and link related entities (same beneficial owner across multiple accounts, shell companies connected to sanctioned individuals). This is record linkage at industrial scale, with strict regulatory requirements for explainability and audit trails. The EU AI Act (2025 rollout) classifies automated identity systems in financial services as *high-risk AI*, requiring detailed technical documentation and human oversight. pg_ripple's combination of RDF-star provenance (a complete audit trail for every merge decision) and `explain()` on derivation chains (why did this rule fire? what triples supported it?) directly addresses these requirements in a way that no commercial black-box system can.
+
+**Customer Data Platforms (CDPs): The Real-Time Identity Graph**
+
+Retailers, media companies, and digital businesses build identity graphs to understand that "customer 123456" in their e-commerce system is the same person as "subscriber 789" in their newsletter system and "loyalty_card_holder 42" at the physical store. Today, these graphs are rebuilt nightly. pg_trickle's real-time IVM means the identity graph can update in seconds as new interactions arrive — the person who just subscribed to the newsletter is matched to their e-commerce account within the same session, not the next morning. This is a category-defining capability for next-generation CDPs.
+
+---
+
+### What This Report Proposes
+
+This report maps out *21 specific ways* that pg_ripple and pg_trickle work together to enable neuro-symbolic record linkage, grouped into three categories:
+
+- **7 synergies** between pg_ripple's reasoning capabilities and NS-RL techniques (using OWL logic to find certain matches, using SHACL to block impossible merges, using pgvector to find fuzzy matches, using RDF-star to record why a decision was made)
+- **6 synergies** between pg_trickle's real-time IVM and NS-RL (live dashboards, automatic re-evaluation when data changes, adaptive pipeline scheduling)
+- **8 three-way synergies** that only emerge from combining all three (live SPARQL views for ER monitoring, in-database active learning, the LLM-as-arbiter pattern, auditable linkage graphs, privacy-preserving cross-organization matching)
+
+It then proposes a five-phase implementation roadmap (v0.49.0 through v0.53.0+) with concrete features for each release, estimated at 26–36 person-weeks of additional development.
+
+---
+
+### The Bottom Line
+
+We have built — mostly without planning it this way — a platform that is exceptionally well-suited to be the world's best open-source neuro-symbolic record linkage system. The pieces are almost all there: the reasoning engine, the vector search, the real-time reactivity, the provenance tracking, the PostgreSQL ecosystem integration. What remains is relatively modest: a few high-level convenience functions, string similarity SPARQL builtins, an active-learning labeling interface, and privacy-preserving linking primitives.
+
+The window to establish leadership in this space is open now. The market is large, the incumbent solutions have real gaps, and no other open-source project is positioned where we are. This report is the roadmap for closing the remaining gap.
+
+---
+
 ## Executive Summary
 
 **Neuro-symbolic record linkage** (NS-RL) is the production-ready synthesis of two historically separate traditions in entity resolution: the *symbolic* tradition (ontology axioms, logical rules, formal constraints — explainable, auditable, but brittle to noise) and the *neural* tradition (embedding similarity, pre-trained language models, GNNs — fuzzy and high-recall, but opaque and unconstrained). NS-RL combines them so that neural models provide the high-recall blocking and fuzzy matching that rules cannot anticipate, while symbolic constraints enforce hard correctness invariants that neural models will routinely violate ("two patients with different blood types are not the same person, regardless of name similarity").
