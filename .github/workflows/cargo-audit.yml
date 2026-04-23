@@ -1,6 +1,9 @@
 name: cargo-audit
 
 on:
+  # v0.51.0: run on every PR (blocking) and weekly for maintenance.
+  pull_request:
+    branches: [main]
   schedule:
     # Run weekly on Monday at 08:00 UTC
     - cron: '0 8 * * 1'

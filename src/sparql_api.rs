@@ -386,6 +386,136 @@ mod pg_ripple {
     fn compact() -> i64 {
         crate::storage::merge::compact()
     }
+
+    // ── v0.51.0: W3C SPARQL 1.1 CSV / TSV serialisation ──────────────────────
+
+    /// Execute a SPARQL SELECT query and return results in W3C CSV format.
+    ///
+    /// Each returned row is one line of the CSV document (including the header).
+    /// Follows the SPARQL 1.1 CSV/TSV Results Format specification
+    /// (<https://www.w3.org/TR/sparql11-results-csv-tsv/>):
+    /// - First row: variable names as `?var1,?var2,...`
+    /// - Subsequent rows: comma-separated, quoted values
+    /// - Unbound variables produce empty fields
+    #[pg_extern]
+    fn sparql_csv(query: &str) -> TableIterator<'static, (name!(line, String),)> {
+        use serde_json::Value as Json;
+
+        let rows = crate::sparql::sparql(query);
+        if rows.is_empty() {
+            return TableIterator::new(std::iter::empty());
+        }
+
+        // Extract variable names from the first row.
+        let header_vars: Vec<String> = if let Some(first) = rows.first() {
+            if let Json::Object(map) = &first.0 {
+                map.keys()
+                    .filter(|k| *k != "result") // skip ASK sentinel
+                    .map(|k| format!("?{k}"))
+                    .collect()
+            } else {
+                vec![]
+            }
+        } else {
+            vec![]
+        };
+
+        if header_vars.is_empty() {
+            return TableIterator::new(std::iter::empty());
+        }
+
+        let mut lines: Vec<String> = Vec::with_capacity(rows.len() + 1);
+        lines.push(header_vars.join(","));
+
+        let var_names: Vec<String> = header_vars
+            .iter()
+            .map(|v| v.trim_start_matches('?').to_owned())
+            .collect();
+
+        for row in rows {
+            if let Json::Object(map) = row.0 {
+                let fields: Vec<String> = var_names
+                    .iter()
+                    .map(|v| {
+                        match map.get(v) {
+                            Some(Json::String(s)) => {
+                                // RFC 4180: quote if contains comma, dquote, or newline.
+                                if s.contains(',') || s.contains('"') || s.contains('\n') {
+                                    format!("\"{}\"", s.replace('"', "\"\""))
+                                } else {
+                                    s.clone()
+                                }
+                            }
+                            Some(other) => other.to_string(),
+                            None => String::new(),
+                        }
+                    })
+                    .collect();
+                lines.push(fields.join(","));
+            }
+        }
+
+        TableIterator::new(lines.into_iter().map(|l| (l,)))
+    }
+
+    /// Execute a SPARQL SELECT query and return results in W3C TSV format.
+    ///
+    /// Each returned row is one tab-separated line.
+    /// Follows the SPARQL 1.1 CSV/TSV Results Format specification
+    /// (<https://www.w3.org/TR/sparql11-results-csv-tsv/>):
+    /// - First row: variable names as `?var1\t?var2\t...`
+    /// - Subsequent rows: tab-separated N-Triples encoded values
+    /// - Unbound variables produce empty fields
+    #[pg_extern]
+    fn sparql_tsv(query: &str) -> TableIterator<'static, (name!(line, String),)> {
+        use serde_json::Value as Json;
+
+        let rows = crate::sparql::sparql(query);
+        if rows.is_empty() {
+            return TableIterator::new(std::iter::empty());
+        }
+
+        let header_vars: Vec<String> = if let Some(first) = rows.first() {
+            if let Json::Object(map) = &first.0 {
+                map.keys()
+                    .filter(|k| *k != "result")
+                    .map(|k| format!("?{k}"))
+                    .collect()
+            } else {
+                vec![]
+            }
+        } else {
+            vec![]
+        };
+
+        if header_vars.is_empty() {
+            return TableIterator::new(std::iter::empty());
+        }
+
+        let mut lines: Vec<String> = Vec::with_capacity(rows.len() + 1);
+        lines.push(header_vars.join("\t"));
+
+        let var_names: Vec<String> = header_vars
+            .iter()
+            .map(|v| v.trim_start_matches('?').to_owned())
+            .collect();
+
+        for row in rows {
+            if let Json::Object(map) = row.0 {
+                let fields: Vec<String> = var_names
+                    .iter()
+                    .map(|v| match map.get(v) {
+                        Some(Json::String(s)) => s.clone(),
+                        Some(other) => other.to_string(),
+                        None => String::new(),
+                    })
+                    .collect();
+                lines.push(fields.join("\t"));
+            }
+        }
+
+        TableIterator::new(lines.into_iter().map(|l| (l,)))
+    }
 }
 
 // ── Helper: federation cache stats ───────────────────────────────────────────

@@ -13,6 +13,54 @@ Versions correspond to the milestones in [ROADMAP.md](ROADMAP.md).
 
 ---
 
+## [0.51.0] — 2026-05-07 — Security Hardening & Production Readiness
+
+**Completes the v0.51.0 roadmap: SPARQL DoS protection (PT440), OWL 2 RL 100% conformance, SPARQL CSV/TSV output, SHACL complex path traversal, per-predicate workload stats, OTLP tracing wiring, non-root Docker container, blocking cargo-audit on PRs, SBOM generation, and comprehensive operational tooling.**
+
+### What's new
+
+- **SPARQL DoS protection (PT440)** (`src/sparql/mod.rs`): New GUCs `pg_ripple.sparql_max_algebra_depth` (default 256) and `pg_ripple.sparql_max_triple_patterns` (default 4096). Queries exceeding these limits are rejected at parse time with error code PT440. Set to 0 to disable.
+
+- **Complete OWL 2 RL conformance** (`src/datalog/builtins.rs`): Fixed four previously failing rules: `prp-spo2` (3-hop property chains), `scm-sco` (bidirectional subClassOf → equivalentClass), `eq-diff1` (sameAs + differentFrom → owl:Nothing), `dt-type2` (XSD numeric type hierarchy). The OWL 2 RL gate is now 66/66 (100%) and blocking.
+
+- **SPARQL CSV/TSV output** (`src/sparql_api.rs`): New `pg_ripple.sparql_csv(query TEXT)` and `pg_ripple.sparql_tsv(query TEXT)` SRFs returning W3C SPARQL 1.1 CSV/TSV formatted results.
+
+- **SHACL complex property path traversal** (`src/shacl/constraints/property_path.rs`): The previously disabled `traverse_sh_path()` function is now wired into the SHACL property shape dispatcher. Supports inverse, alternative, sequence, `sh:zeroOrMorePath`, `sh:oneOrMorePath`, and `sh:zeroOrOnePath`.
+
+- **Correct CONSTRUCT ground RDF-star quoted triples** (`src/sparql/mod.rs`): Ground quoted triples in CONSTRUCT templates now emit correct N-Triples-star notation `<< s p o >>` instead of being silently dropped.
+
+- **Per-predicate workload statistics** (`src/stats_admin.rs`): New `pg_ripple.predicate_workload_stats()` SRF backed by `_pg_ripple.predicate_stats` table. Returns `(predicate_iri, query_count, merge_count, last_merged)` per predicate.
+
+- **OTLP tracing endpoint** (`src/telemetry.rs`, `src/gucs.rs`): New GUC `pg_ripple.tracing_otlp_endpoint` wires the `"otlp"` exporter to a configurable endpoint. Falls back to stdout when the endpoint is empty.
+
+- **Storage cache invalidation on vacuum** (`src/storage/catalog.rs`, `src/lib.rs`): Registered a PostgreSQL relcache invalidation callback via `CacheRegisterRelcacheCallback` so the backend-local VP table OID cache is automatically flushed when a relation is vacuumed.
+
+- **Merge worker latch-driven backoff** (`src/worker.rs`): The error-backoff sleep in the merge worker now uses `BackgroundWorker::wait_latch()` so the worker responds immediately to SIGTERM rather than sleeping the full backoff interval.
+
+- **Non-root Docker container** (`Dockerfile`): The container now runs as `USER postgres` (v0.51.0 security hardening).
+
+- **Blocking cargo-audit on PRs** (`.github/workflows/cargo-audit.yml`): `cargo audit --deny warnings` now runs on every pull request, not just the weekly schedule.
+
+- **SBOM generation** (`.github/workflows/release.yml`): Every release now includes a CycloneDX SBOM (`sbom.json`) attached to the GitHub release.
+
+- **New CI linting jobs** (`.github/workflows/ci.yml`): `lint-sql-format` (unsafe dynamic SQL), `lint-migration-headers` (migration script header checks), `lint-cargo-duplicates` (advisory duplicate dependency check).
+
+- **New scripts**: `scripts/check_no_string_format_in_sql.sh`, `scripts/check_migration_headers.sh`, `scripts/check_pt_codes.sh`.
+
+- **New tests**: `tests/pg_dump_restore.sh`, `tests/pg_upgrade_compat.sh`, pg_regress `sparql_depth_limit.sql`, `sparql_csv_tsv.sql`, `shacl_complex_path.sql`.
+
+- **New examples**: `examples/llm_workflow.sql`, `examples/federation_multi_endpoint.sql`, `examples/cdc_subscription.sql`.
+
+- **New docs**: `docs/src/operations/cdc.md`, expanded tuning guide.
+
+- **Justfile**: Added `just release VERSION` and `just docs-serve` recipes.
+
+- **Migration script**: `sql/pg_ripple--0.50.0--0.51.0.sql` creates `_pg_ripple.predicate_stats` table.
+
+- **Documentation**: Updated AGENTS.md to reflect pgrx 0.18 (was incorrectly documented as 0.17).
+
+---
+
 ## [0.50.0] — 2026-04-23 — Developer Experience & GraphRAG Polish
 
 **Completes the v0.50.0 roadmap: `explain_sparql(analyze:=true)` interactive query debugger with `cache_status` and `actual_rows`; `rag_context()` full RAG pipeline; migration chain passes through v0.50.0.**

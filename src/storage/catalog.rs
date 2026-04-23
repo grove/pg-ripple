@@ -88,3 +88,39 @@ fn spi_resolve(pred_id: i64) -> Option<TableDesc> {
 
 /// Process-wide (backend-local) predicate catalog singleton.
 pub static PREDICATE_CACHE: LocalPredicateCache = LocalPredicateCache;
+
+// ─── Relcache invalidation callback (v0.51.0) ────────────────────────────────
+
+/// Register a PostgreSQL relcache invalidation callback that flushes the
+/// predicate-OID thread-local cache whenever any relation is rebuilt by
+/// `VACUUM FULL` (which assigns a new OID to the replacement heap).
+///
+/// Called once from `_PG_init`.  Safe to call in both `shared_preload_libraries`
+/// and direct `CREATE EXTENSION` contexts.
+pub fn register_relcache_callback() {
+    unsafe {
+        // SAFETY: `CacheRegisterRelcacheCallback` is a standard PostgreSQL
+        // extension point for cache invalidation notifications.  The callback
+        // `relcache_inval_cb` is a C-compatible `extern "C"` function that
+        // performs only safe Rust (clearing a thread_local HashMap).
+        // The `arg` Datum is never dereferenced by our code — we pass 0.
+        pgrx::pg_sys::CacheRegisterRelcacheCallback(
+            Some(relcache_inval_cb),
+            pgrx::pg_sys::Datum::from(0_usize),
+        );
+    }
+}
+
+/// C-compatible relcache callback: called by PostgreSQL when any relation is
+/// invalidated (rebuilt by VACUUM FULL, DDL, etc.).
+///
+/// We conservatively flush the entire predicate-OID cache so that subsequent
+/// SPARQL queries re-resolve VP table OIDs via SPI rather than using a stale
+/// mapping.
+#[allow(non_snake_case)]
+unsafe extern "C-unwind" fn relcache_inval_cb(
+    _arg: pgrx::pg_sys::Datum,
+    _rel_id: pgrx::pg_sys::Oid,
+) {
+    invalidate_predicate_cache();
+}

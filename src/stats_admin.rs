@@ -456,4 +456,56 @@ mod pg_ripple {
 
         pgrx::JsonB(Json::Object(obj))
     }
+
+    // ── v0.51.0: predicate workload statistics ────────────────────────────────
+
+    /// Return per-predicate workload statistics from `_pg_ripple.predicate_stats`.
+    ///
+    /// Columns:
+    /// - `predicate_iri TEXT`  — decoded IRI of the predicate
+    /// - `query_count BIGINT`  — number of SPARQL queries that touched this predicate
+    /// - `merge_count BIGINT`  — number of HTAP merge cycles involving this predicate
+    /// - `last_merged TIMESTAMPTZ` — timestamp of the most recent merge for this predicate
+    ///
+    /// Returns an empty set if `_pg_ripple.predicate_stats` is empty or unpopulated.
+    #[pg_extern]
+    fn predicate_workload_stats() -> TableIterator<
+        'static,
+        (
+            name!(predicate_iri, String),
+            name!(query_count, i64),
+            name!(merge_count, i64),
+            name!(last_merged, Option<pgrx::datum::TimestampWithTimeZone>),
+        ),
+    > {
+        let rows: Vec<(String, i64, i64, Option<pgrx::datum::TimestampWithTimeZone>)> =
+            Spi::connect(|c| {
+                let results = c.select(
+                    "SELECT d.value, ps.query_count, ps.merge_count, ps.last_merged
+                     FROM _pg_ripple.predicate_stats ps
+                     JOIN _pg_ripple.dictionary d ON d.id = ps.predicate_id
+                     ORDER BY ps.query_count DESC",
+                    None,
+                    &[],
+                );
+                match results {
+                    Ok(tup) => {
+                        let mut out = Vec::new();
+                        for row in tup {
+                            let iri = row.get::<&str>(1).ok().flatten().unwrap_or("").to_owned();
+                            let qc = row.get::<i64>(2).ok().flatten().unwrap_or(0);
+                            let mc = row.get::<i64>(3).ok().flatten().unwrap_or(0);
+                            let lm = row
+                                .get::<pgrx::datum::TimestampWithTimeZone>(4)
+                                .ok()
+                                .flatten();
+                            out.push((iri, qc, mc, lm));
+                        }
+                        out
+                    }
+                    Err(_) => vec![],
+                }
+            });
+        TableIterator::new(rows.into_iter().map(|(iri, qc, mc, lm)| (iri, qc, mc, lm)))
+    }
 }

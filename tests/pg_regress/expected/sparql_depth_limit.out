@@ -1,0 +1,62 @@
+-- sparql_depth_limit.sql
+-- Test SPARQL query complexity limits (PT440) introduced in v0.51.0.
+SET client_min_messages = warning;
+CREATE EXTENSION IF NOT EXISTS pg_ripple;
+SET client_min_messages = DEFAULT;
+SET search_path TO pg_ripple, public;
+-- ── Test 1: GUCs exist and have expected defaults ─────────────────────────────
+SELECT current_setting('pg_ripple.sparql_max_algebra_depth') AS depth_limit;
+ depth_limit 
+-------------
+ 256
+(1 row)
+
+SELECT current_setting('pg_ripple.sparql_max_triple_patterns') AS pattern_limit;
+ pattern_limit 
+---------------
+ 4096
+(1 row)
+
+-- ── Test 2: A simple query succeeds with default limits ───────────────────────
+SELECT pg_ripple.insert_triple(
+    '<http://t.example.org/a>',
+    '<http://t.example.org/p>',
+    '<http://t.example.org/b>'
+) AS triple_id;
+ triple_id 
+-----------
+         1
+(1 row)
+
+SELECT count(*) AS result_count
+FROM pg_ripple.sparql(
+    'SELECT ?s ?o WHERE { ?s <http://t.example.org/p> ?o }'
+);
+ result_count 
+--------------
+            1
+(1 row)
+
+-- ── Test 3: Disabling limits (0 = unlimited) works ────────────────────────────
+SET pg_ripple.sparql_max_algebra_depth = 0;
+SET pg_ripple.sparql_max_triple_patterns = 0;
+SELECT count(*) AS result_count_unlimited
+FROM pg_ripple.sparql(
+    'SELECT ?s ?o WHERE { ?s <http://t.example.org/p> ?o }'
+);
+ result_count_unlimited 
+------------------------
+                      1
+(1 row)
+
+RESET pg_ripple.sparql_max_algebra_depth;
+RESET pg_ripple.sparql_max_triple_patterns;
+-- ── Test 4: Verify the limits round-trip via SET/SHOW ────────────────────────
+SET pg_ripple.sparql_max_algebra_depth = 128;
+SELECT current_setting('pg_ripple.sparql_max_algebra_depth') AS custom_depth;
+ custom_depth 
+--------------
+ 128
+(1 row)
+
+RESET pg_ripple.sparql_max_algebra_depth;

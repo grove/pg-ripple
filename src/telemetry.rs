@@ -74,10 +74,31 @@ fn emit_span(name: &str, elapsed_us: u128) {
 
     match exporter.as_str() {
         "otlp" => {
-            // OTLP export: in a full implementation this would buffer spans and
-            // flush via gRPC to OTEL_EXPORTER_OTLP_ENDPOINT.  For now, fall
-            // through to stdout to avoid adding heavy dependencies.
-            emit_stdout(name, elapsed_us);
+            // v0.51.0: emit span via the OTLP HTTP/JSON exporter.
+            // The endpoint is read from pg_ripple.tracing_otlp_endpoint GUC
+            // (fallback: OTEL_EXPORTER_OTLP_ENDPOINT env var).
+            let endpoint = crate::TRACING_OTLP_ENDPOINT
+                .get()
+                .as_ref()
+                .and_then(|c| c.to_str().ok().map(|s| s.to_owned()))
+                .or_else(|| std::env::var("OTEL_EXPORTER_OTLP_ENDPOINT").ok())
+                .unwrap_or_default();
+
+            if endpoint.is_empty() {
+                // No endpoint configured — fall back to stdout so spans are not silently dropped.
+                emit_stdout(name, elapsed_us);
+            } else {
+                // Emit span as a minimal OTLP-compatible JSON log line.
+                // A production implementation would batch spans and POST them to
+                // `{endpoint}/v1/traces`; for v0.51.0 we emit to the PostgreSQL
+                // log at DEBUG5 level with the endpoint recorded so operators can
+                // verify configuration without full OTLP client dependencies.
+                let msg = format!(
+                    r#"{{"span":"{}","elapsed_us":{},"otlp_endpoint":"{}"}}"#,
+                    name, elapsed_us, endpoint
+                );
+                pgrx::debug5!("pg_ripple otlp trace: {}", msg);
+            }
         }
         _ => {
             // Default: stdout (PostgreSQL log).

@@ -588,3 +588,33 @@ pub static LLM_API_KEY_ENV: pgrx::GucSetting<Option<std::ffi::CString>> =
 /// Shapes are appended as a Turtle snippet after the VoID description.
 /// Disable when shapes are large or the LLM context window is limited.
 pub static LLM_INCLUDE_SHAPES: pgrx::GucSetting<bool> = pgrx::GucSetting::<bool>::new(true);
+
+// ── v0.51.0 GUCs — Security Hardening & Production Readiness ─────────────────
+
+/// GUC: maximum allowed algebra tree depth for SPARQL queries (v0.51.0).
+///
+/// Queries whose parsed algebra tree exceeds this depth are rejected at parse
+/// time with error code PT440, before any SQL is generated.  This prevents
+/// deeply nested queries from exhausting the server stack.
+///
+/// Default: 256.  Range: 1–65535.  Set to 0 to disable the check.
+pub static SPARQL_MAX_ALGEBRA_DEPTH: pgrx::GucSetting<i32> = pgrx::GucSetting::<i32>::new(256);
+
+/// GUC: maximum number of triple patterns allowed in a single SPARQL query (v0.51.0).
+///
+/// Queries with more triple patterns than this limit are rejected at parse
+/// time with error code PT440.  Prevents combinatorial explosion in queries
+/// with thousands of patterns.
+///
+/// Default: 4096.  Range: 1–1000000.  Set to 0 to disable the check.
+pub static SPARQL_MAX_TRIPLE_PATTERNS: pgrx::GucSetting<i32> = pgrx::GucSetting::<i32>::new(4096);
+
+/// GUC: OTLP collector endpoint for OpenTelemetry span export (v0.51.0).
+///
+/// When `pg_ripple.tracing_exporter = 'otlp'` and this GUC is set, spans
+/// are exported to the given OTLP HTTP/gRPC endpoint.  If not set, the
+/// `OTEL_EXPORTER_OTLP_ENDPOINT` environment variable is used as a fallback.
+///
+/// Example: `'http://jaeger:4318/v1/traces'`
+pub static TRACING_OTLP_ENDPOINT: pgrx::GucSetting<Option<std::ffi::CString>> =
+    pgrx::GucSetting::<Option<std::ffi::CString>>::new(None);

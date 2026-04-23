@@ -38,3 +38,4 @@ pub(crate) use super::{
     compare_dictionary_values, encode_shacl_in_value, get_language_tag, get_value_ids,
     value_has_datatype, value_has_node_kind, value_has_rdf_type,
 };
+pub(crate) use property_path::values_for_path_iri;

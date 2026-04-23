@@ -824,11 +824,11 @@ pub extern "C-unwind" fn _PG_init() {
 
     pgrx::GucRegistry::define_int_guc(
         c"pg_ripple.property_path_max_depth",
-        c"DEPRECATED: use max_path_depth instead. Maximum recursion depth for SPARQL property path queries; default: 64",
-        c"This GUC is an alias for max_path_depth and will be removed in a future release.",
+        c"DEPRECATED (v0.51.0): use pg_ripple.max_path_depth instead. Will be removed in v1.0.0.",
+        c"This GUC is a read-only alias for max_path_depth. Setting it has no effect; set max_path_depth instead.",
         &PROPERTY_PATH_MAX_DEPTH,
         1,
-        100_000,
+        65535,
         GucContext::Userset,
         GucFlags::default(),
     );
@@ -1475,6 +1475,42 @@ pub extern "C-unwind" fn _PG_init() {
         GucFlags::default(),
     );
 
+    // ── v0.51.0 GUCs — Security Hardening & Production Readiness ─────────────
+    pgrx::GucRegistry::define_int_guc(
+        c"pg_ripple.sparql_max_algebra_depth",
+        c"Maximum allowed SPARQL algebra tree depth; queries deeper than this are \
+          rejected with PT440 (default: 256, 0=disabled). (v0.51.0)",
+        c"",
+        &SPARQL_MAX_ALGEBRA_DEPTH,
+        0,
+        65535,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+
+    pgrx::GucRegistry::define_int_guc(
+        c"pg_ripple.sparql_max_triple_patterns",
+        c"Maximum number of triple patterns in a single SPARQL query; queries \
+          exceeding this are rejected with PT440 (default: 4096, 0=disabled). (v0.51.0)",
+        c"",
+        &SPARQL_MAX_TRIPLE_PATTERNS,
+        0,
+        1_000_000,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+
+    pgrx::GucRegistry::define_string_guc(
+        c"pg_ripple.tracing_otlp_endpoint",
+        c"OTLP collector endpoint for OpenTelemetry span export when \
+          tracing_exporter = 'otlp' (e.g. 'http://jaeger:4318/v1/traces'). \
+          Falls back to OTEL_EXPORTER_OTLP_ENDPOINT env var if empty. (v0.51.0)",
+        c"",
+        &TRACING_OTLP_ENDPOINT,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+
     // PGC_POSTMASTER GUCs can only be registered during shared_preload_libraries
     // loading.  `process_shared_preload_libraries_in_progress` is the correct
     // flag — `IsPostmasterEnvironment` is true in every server process and
@@ -1534,6 +1570,12 @@ pub extern "C-unwind" fn _PG_init() {
     // during a failed transaction) do not persist in the backend-local cache,
     // preventing phantom references (v0.22.0 critical fix C-2).
     register_xact_callback();
+
+    // ── Relcache callback (v0.51.0) ───────────────────────────────────────────
+    // Register a relcache invalidation callback so that the predicate-OID
+    // thread-local cache is flushed whenever a VP table is rebuilt by
+    // VACUUM FULL (which assigns a new OID to the replacement heap).
+    crate::storage::catalog::register_relcache_callback();
 
     // Schema and base tables are created by the `schema_setup` extension_sql!
     // block, which runs inside the CREATE EXTENSION transaction where SPI and

@@ -103,6 +103,11 @@ COPY docker/ /docker-entrypoint-initdb.d/
 # Expose PostgreSQL (5432) and SPARQL HTTP (7878) ports
 EXPOSE 5432 7878
 
+# v0.51.0: Run as the non-root postgres user instead of root.
+# This is required for production deployments (security hardening S1-1).
+# The postgres user is created by the base image.
+USER postgres
+
 # pg_ripple creates a schema named "pg_ripple".  PostgreSQL 18 blocks creation
 # of schemas whose names start with "pg_" unless allow_system_table_mods is on.
 # Passing it as a command argument ensures the flag is active both during init

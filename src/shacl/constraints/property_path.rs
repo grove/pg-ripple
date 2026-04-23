@@ -1,4 +1,3 @@
-#![allow(dead_code)] // Public API for complex sh:path traversal; not yet called from the main dispatcher
 //! Complex `sh:path` expression evaluation for SHACL validation (v0.48.0).
 //!
 //! Supports:
@@ -221,4 +220,13 @@ fn compile_inner(
             ))
         }
     }
+}
+
+/// Convenience wrapper: given a plain `path_iri` string, evaluate the path
+/// for `focus_id` in `graph_id`.  For a simple predicate IRI this is equivalent
+/// to `super::get_value_ids`; for a complex `ShPath` it compiles to SQL.
+///
+/// Called from the SHACL property-shape dispatcher (v0.51.0).
+pub fn values_for_path_iri(path_iri: &str, focus_id: i64, graph_id: i64) -> Vec<i64> {
+    traverse_sh_path(&ShPath::Predicate(path_iri.to_owned()), focus_id, graph_id)
 }

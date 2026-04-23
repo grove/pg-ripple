@@ -1003,3 +1003,72 @@ jobs:
       - name: Stop pgrx PostgreSQL 18
         if: always()
         run: cargo pgrx stop pg18
+
+  # v0.51.0: Static code quality / security linting jobs ─────────────────────
+  lint-sql-format:
+    name: Lint — SQL format! injection (v0.51.0)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check for unsafe dynamic SQL patterns
+        run: bash scripts/check_no_string_format_in_sql.sh
+
+  lint-migration-headers:
+    name: Lint — migration script headers (v0.51.0)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check migration script headers
+        run: bash scripts/check_migration_headers.sh
+
+  lint-cargo-duplicates:
+    name: Lint — cargo dependency duplicates (v0.51.0)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Check for duplicate direct dependencies (advisory)
+        run: |
+          cargo tree --duplicates 2>&1 | tee /tmp/duplicates.txt || true
+          COUNT=$(grep -c '^' /tmp/duplicates.txt 2>/dev/null || echo 0)
+          if [ "$COUNT" -gt 0 ]; then
+            echo "::warning::cargo tree found $COUNT duplicate dependencies (advisory, non-blocking)"
+          else
+            echo "No duplicate dependencies found."
+          fi
+
+  # v0.51.0: SPDX licence compliance gate
+  lint-spdx-license:
+    name: Lint - SPDX licence compliance (v0.51.0)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install cargo-license
+        run: cargo install cargo-license --locked
+      - name: Check all dependencies use allowed licences
+        run: |
+          ALLOWED="MIT Apache-2.0 Apache-2.0 WITH LLVM-exception BSD-2-Clause BSD-3-Clause ISC Unicode-DFS-2016 OpenSSL CC0-1.0 Zlib"
+          cargo license --json 2>/dev/null | \
+            python3 -c "
+          import sys, json
+          data = json.load(sys.stdin)
+          allowed = set(sys.argv[1:])
+          failures = []
+          for pkg in data:
+              lic = pkg.get('license', 'UNKNOWN')
+              # Accept conjunctions that are subsets of allowed (e.g. 'MIT OR Apache-2.0')
+              parts = [p.strip() for p in lic.replace(' AND ', ' OR ').split(' OR ')]
+              if not any(p in allowed for p in parts):
+                  failures.append(f\"{pkg['name']}@{pkg['version']}: {lic}\")
+          if failures:
+              print('Disallowed licences found:')
+              for f in failures:
+                  print(' ', f)
+              sys.exit(1)
+          print(f'All {len(data)} dependencies use allowed licences.')
+          " $ALLOWED
+
