@@ -37,20 +37,20 @@ SELECT pg_ripple.insert_triple(
     '<https://ex.org/cluster/a>',
     '<http://www.w3.org/2002/07/owl#sameAs>',
     '<https://ex.org/cluster/b>'
-) AS inserted_ab;
+) > 0 AS inserted_ab;
  inserted_ab 
 -------------
-     1405180
+ t
 (1 row)
 
 SELECT pg_ripple.insert_triple(
     '<https://ex.org/cluster/b>',
     '<http://www.w3.org/2002/07/owl#sameAs>',
     '<https://ex.org/cluster/c>'
-) AS inserted_bc;
+) > 0 AS inserted_bc;
  inserted_bc 
 -------------
-     1405181
+ t
 (1 row)
 
 -- Insert a test triple for inference.
@@ -58,10 +58,10 @@ SELECT pg_ripple.insert_triple(
     '<https://ex.org/cluster/a>',
     '<https://ex.org/hasProp>',
     '"test value"'
-) AS inserted_prop;
+) > 0 AS inserted_prop;
  inserted_prop 
 ---------------
-       1405182
+ t
 (1 row)
 
 -- Load simple transitivity rule.
@@ -89,10 +89,10 @@ SELECT pg_ripple.insert_triple(
     '<https://ex.org/cluster/c>',
     '<http://www.w3.org/2002/07/owl#sameAs>',
     '<https://ex.org/cluster/d>'
-) AS inserted_cd;
+) > 0 AS inserted_cd;
  inserted_cd 
 -------------
-     1405190
+ t
 (1 row)
 
 -- Inference should emit PT550 WARNING and skip canonicalization (not an error).

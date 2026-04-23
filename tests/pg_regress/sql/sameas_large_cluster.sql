@@ -30,20 +30,20 @@ SELECT pg_ripple.insert_triple(
     '<https://ex.org/cluster/a>',
     '<http://www.w3.org/2002/07/owl#sameAs>',
     '<https://ex.org/cluster/b>'
-) AS inserted_ab;
+) > 0 AS inserted_ab;
 
 SELECT pg_ripple.insert_triple(
     '<https://ex.org/cluster/b>',
     '<http://www.w3.org/2002/07/owl#sameAs>',
     '<https://ex.org/cluster/c>'
-) AS inserted_bc;
+) > 0 AS inserted_bc;
 
 -- Insert a test triple for inference.
 SELECT pg_ripple.insert_triple(
     '<https://ex.org/cluster/a>',
     '<https://ex.org/hasProp>',
     '"test value"'
-) AS inserted_prop;
+) > 0 AS inserted_prop;
 
 -- Load simple transitivity rule.
 SELECT pg_ripple.load_rules($$
@@ -64,7 +64,7 @@ SELECT pg_ripple.insert_triple(
     '<https://ex.org/cluster/c>',
     '<http://www.w3.org/2002/07/owl#sameAs>',
     '<https://ex.org/cluster/d>'
-) AS inserted_cd;
+) > 0 AS inserted_cd;
 
 -- Inference should emit PT550 WARNING and skip canonicalization (not an error).
 -- The inference itself may still run (without sameAs rewriting).
