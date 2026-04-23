@@ -381,7 +381,7 @@ pub fn merge_predicate(pred_id: i64) -> i64 {
         Spi::run_with_args(
             "INSERT INTO _pg_ripple.statements (sid_min, sid_max, predicate_id, table_oid) \
              VALUES ($1, $2, $3, \
-                 (SELECT oid FROM pg_class c \
+                 (SELECT c.oid FROM pg_class c \
                   JOIN pg_namespace n ON n.oid = c.relnamespace \
                   WHERE n.nspname = '_pg_ripple' AND c.relname = $4)) \
              ON CONFLICT (sid_min) DO UPDATE \

@@ -801,8 +801,56 @@ pgrx::extension_sql!(
 // load_vocab_template(), trickle_available().
 // New catalog: _pg_ripple.cdc_bridge_triggers.
 pgrx::extension_sql!(
+    r#"
+-- CDC bridge trigger catalog (v0.52.0).
+-- One row per trigger installed via pg_ripple.enable_cdc_bridge_trigger().
+CREATE TABLE IF NOT EXISTS _pg_ripple.cdc_bridge_triggers (
+    name         TEXT        NOT NULL PRIMARY KEY,
+    predicate_id BIGINT      NOT NULL,
+    outbox_table TEXT        NOT NULL,
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- PL/pgSQL trigger function used by per-predicate CDC bridge triggers.
+-- TG_ARGV[0] = predicate_id (bigint text), TG_ARGV[1] = outbox table name.
+CREATE OR REPLACE FUNCTION _pg_ripple.cdc_bridge_trigger_fn()
+RETURNS TRIGGER LANGUAGE plpgsql AS $$
+DECLARE
+    pred_id    BIGINT  := TG_ARGV[0]::bigint;
+    outbox_tbl TEXT    := TG_ARGV[1];
+    s_iri      TEXT;
+    p_iri      TEXT;
+    o_iri      TEXT;
+    payload    JSONB;
+    dedup_key  TEXT;
+    sid        BIGINT;
+BEGIN
+    SELECT value INTO s_iri FROM _pg_ripple.dictionary WHERE id = NEW.s;
+    SELECT value INTO p_iri FROM _pg_ripple.dictionary WHERE id = pred_id;
+    SELECT value INTO o_iri FROM _pg_ripple.dictionary WHERE id = NEW.o;
+    sid := NEW.i;
+    dedup_key := 'ripple:' || sid::text;
+    payload := jsonb_build_object(
+        '@context',   'https://schema.org/',
+        '@id',        COALESCE(s_iri, '_:' || NEW.s::text),
+        p_iri,        COALESCE(o_iri, NEW.o::text),
+        '_dedup_key', dedup_key
+    );
+    EXECUTE format(
+        'INSERT INTO %I (event_id, payload) VALUES ($1, $2) ON CONFLICT DO NOTHING',
+        outbox_tbl
+    ) USING dedup_key, payload;
+    RETURN NEW;
+END;
+$$;
+"#,
+    name = "v052_cdc_bridge_schema",
+    requires = ["v051_schema_version_fresh_install_stamp"]
+);
+
+pgrx::extension_sql!(
     "INSERT INTO _pg_ripple.schema_version (version, upgraded_from, installed_at) \
      VALUES ('0.52.0', NULL, clock_timestamp());",
     name = "v052_schema_version_fresh_install_stamp",
-    requires = ["v051_schema_version_fresh_install_stamp"]
+    requires = ["v052_cdc_bridge_schema"]
 );

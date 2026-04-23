@@ -1,19 +1,19 @@
-% Generic JSON key → Schema.org property heuristic alignment rules
-% ─────────────────────────────────────────────────────────────────
-%
-% Maps common generic JSON field names to Schema.org property IRIs.
-% Useful as a starting point when data sources use unnamespaced keys.
-%
-% Usage:
-%   SELECT pg_ripple.load_vocab_template('generic_to_schema');
-%   SELECT pg_ripple.infer('generic_to_schema');
-%
-% Schema.org prefix: https://schema.org/
-%
-% NOTE: These are heuristic rules; customise them per deployment.
-%       Load domain-specific alignment rules after this template to override.
+# Generic JSON key → Schema.org property heuristic alignment rules
+# ─────────────────────────────────────────────────────────────────
+#
+# Maps common generic JSON field names to Schema.org property IRIs.
+# Useful as a starting point when data sources use unnamespaced keys.
+#
+# Usage:
+#   SELECT pg_ripple.load_vocab_template('generic_to_schema');
+#   SELECT pg_ripple.infer('generic_to_schema');
+#
+# Schema.org prefix: https://schema.org/
+#
+# NOTE: These are heuristic rules; customise them per deployment.
+#       Load domain-specific alignment rules after this template to override.
 
-% --- Common identity/name fields ---
+# --- Common identity/name fields ---
 
 aligned_pred(?s, "https://schema.org/name", ?o) :-
     triple(?s, "name", ?o).
@@ -30,7 +30,7 @@ aligned_pred(?s, "https://schema.org/identifier", ?o) :-
 aligned_pred(?s, "https://schema.org/identifier", ?o) :-
     triple(?s, "identifier", ?o).
 
-% --- Description fields ---
+# --- Description fields ---
 
 aligned_pred(?s, "https://schema.org/description", ?o) :-
     triple(?s, "description", ?o).
@@ -38,7 +38,7 @@ aligned_pred(?s, "https://schema.org/description", ?o) :-
 aligned_pred(?s, "https://schema.org/description", ?o) :-
     triple(?s, "summary", ?o).
 
-% --- Date/time fields ---
+# --- Date/time fields ---
 
 aligned_pred(?s, "https://schema.org/dateCreated", ?o) :-
     triple(?s, "created_at", ?o).
@@ -52,7 +52,7 @@ aligned_pred(?s, "https://schema.org/dateModified", ?o) :-
 aligned_pred(?s, "https://schema.org/dateModified", ?o) :-
     triple(?s, "updatedAt", ?o).
 
-% --- Contact fields ---
+# --- Contact fields ---
 
 aligned_pred(?s, "https://schema.org/email", ?o) :-
     triple(?s, "email", ?o).
@@ -66,7 +66,7 @@ aligned_pred(?s, "https://schema.org/telephone", ?o) :-
 aligned_pred(?s, "https://schema.org/telephone", ?o) :-
     triple(?s, "telephone", ?o).
 
-% --- URL fields ---
+# --- URL fields ---
 
 aligned_pred(?s, "https://schema.org/url", ?o) :-
     triple(?s, "url", ?o).
@@ -77,7 +77,7 @@ aligned_pred(?s, "https://schema.org/url", ?o) :-
 aligned_pred(?s, "https://schema.org/url", ?o) :-
     triple(?s, "link", ?o).
 
-% --- Address fields ---
+# --- Address fields ---
 
 aligned_pred(?s, "https://schema.org/addressCountry", ?o) :-
     triple(?s, "country", ?o).
@@ -91,7 +91,7 @@ aligned_pred(?s, "https://schema.org/postalCode", ?o) :-
 aligned_pred(?s, "https://schema.org/postalCode", ?o) :-
     triple(?s, "zip", ?o).
 
-% --- Status/type fields ---
+# --- Status/type fields ---
 
 aligned_pred(?s, "https://schema.org/status", ?o) :-
     triple(?s, "status", ?o).
@@ -102,7 +102,7 @@ aligned_pred(?s, "https://schema.org/additionalType", ?o) :-
 aligned_pred(?s, "https://schema.org/additionalType", ?o) :-
     triple(?s, "category", ?o).
 
-% --- Numeric/measurement fields ---
+# --- Numeric/measurement fields ---
 
 aligned_pred(?s, "https://schema.org/value", ?o) :-
     triple(?s, "value", ?o).
@@ -116,6 +116,6 @@ aligned_pred(?s, "https://schema.org/price", ?o) :-
 aligned_pred(?s, "https://schema.org/quantity", ?o) :-
     triple(?s, "quantity", ?o).
 
-% Emit aligned triples
+# Emit aligned triples
 triple(?s, ?p, ?o) :-
     aligned_pred(?s, ?p, ?o).

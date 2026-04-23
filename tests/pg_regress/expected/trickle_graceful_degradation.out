@@ -40,7 +40,7 @@ END;
 $$;
 SELECT TRUE AS error_raised_when_integration_off;
  error_raised_when_integration_off 
-------------------------------------
+-----------------------------------
  t
 (1 row)
 
