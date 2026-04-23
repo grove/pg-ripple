@@ -1,4 +1,4 @@
-# pg_ripple — Roadmap Feature Descriptions
+# pg_ripple Roadmap
 
 This file contains plain-language descriptions of every pg_ripple release from v0.1.0 through v0.54.0 and v1.0.0. The goal is to give a clear picture of what each version delivers, why it matters, and how much work is involved — without requiring deep technical knowledge.
 
