@@ -98,6 +98,7 @@ SELECT pg_ripple.insert_triple(
 -- Inference should emit PT550 WARNING and skip canonicalization (not an error).
 -- The inference itself may still run (without sameAs rewriting).
 SELECT pg_ripple.infer() >= 0 AS inference_ok_with_warning;
+WARNING:  PT550: owl:sameAs equivalence class of 3 members exceeds pg_ripple.sameas_max_cluster_size (2); canonicalization skipped — check for data quality issues
  inference_ok_with_warning 
 ---------------------------
  t
