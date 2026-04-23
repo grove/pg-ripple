@@ -793,3 +793,16 @@ pgrx::extension_sql!(
     name = "v051_schema_version_fresh_install_stamp",
     requires = ["v050_schema_version_fresh_install_stamp"]
 );
+
+// v0.52.0: pg-trickle Relay Integration.
+// New SQL-visible features: json_to_ntriples(), json_to_ntriples_and_load(),
+// enable/disable_cdc_bridge_trigger(), cdc_bridge_triggers() SRF,
+// triple_to_jsonld(), triples_to_jsonld(), statement_dedup_key(),
+// load_vocab_template(), trickle_available().
+// New catalog: _pg_ripple.cdc_bridge_triggers.
+pgrx::extension_sql!(
+    "INSERT INTO _pg_ripple.schema_version (version, upgraded_from, installed_at) \
+     VALUES ('0.52.0', NULL, clock_timestamp());",
+    name = "v052_schema_version_fresh_install_stamp",
+    requires = ["v051_schema_version_fresh_install_stamp"]
+);

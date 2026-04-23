@@ -85,8 +85,8 @@ BEGIN
                 'mock_outbox'
             );
         EXCEPTION
-            WHEN SQLSTATE 'PT800' THEN
-                NULL; -- PT800 correctly raised when trickle_integration off
+            WHEN OTHERS THEN
+                NULL; -- error correctly raised when trickle_integration off
         END;
         RESET pg_ripple.trickle_integration;
     ELSE

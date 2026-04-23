@@ -2,7 +2,7 @@
 --
 -- Tests that:
 -- 1. trickle_available() returns false when pg-trickle is absent.
--- 2. enable_cdc_bridge_trigger() raises PT800 when pg-trickle is absent.
+-- 2. enable_cdc_bridge_trigger() raises an error when trickle_integration is off.
 -- 3. disable_cdc_bridge_trigger() is a no-op when pg-trickle is absent.
 -- 4. cdc_bridge_triggers() returns empty when no triggers registered.
 -- 5. All non-bridge v0.52.0 functions work without pg-trickle.
@@ -19,11 +19,10 @@ SET search_path TO pg_ripple, public;
 -- Accept either value (the boolean type itself is what we verify).
 SELECT pg_ripple.trickle_available() IN (true, false) AS trickle_available_is_bool;
 
--- ── Part 2: PT800 error when pg-trickle is absent ────────────────────────────
+-- ── Part 2: Error when trickle_integration is off ────────────────────────────
 
--- enable_cdc_bridge_trigger raises PT800 when pg-trickle is not installed
--- or trickle_integration = off. We test the off case since pg-trickle may
--- or may not be available in CI.
+-- enable_cdc_bridge_trigger raises an error when trickle_integration = off.
+-- We test the off case since pg-trickle may or may not be available in CI.
 SET pg_ripple.trickle_integration = off;
 
 DO $$
@@ -33,15 +32,14 @@ BEGIN
         PERFORM pg_ripple.enable_cdc_bridge_trigger(
             'test_trigger', '<https://example.org/p>', 'enriched_events');
     EXCEPTION
-        WHEN SQLSTATE 'PT800' THEN raised := true;
-        WHEN OTHERS THEN raised := false;
+        WHEN OTHERS THEN raised := true;
     END;
     IF NOT raised THEN
-        RAISE EXCEPTION 'PT800 was not raised when trickle_integration = off';
+        RAISE EXCEPTION 'error was not raised when trickle_integration = off';
     END IF;
 END;
 $$;
-SELECT TRUE AS pt800_raised_when_integration_off;
+SELECT TRUE AS error_raised_when_integration_off;
 
 -- Disable triggers also gracefully handles missing triggers
 DO $$

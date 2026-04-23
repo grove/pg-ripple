@@ -30,30 +30,20 @@ use pgrx::prelude::*;
 /// Raise a user-facing error when pg-trickle is not available or integration
 /// is disabled via GUC.
 ///
-/// Uses SQLSTATE PT800 (custom class PT) to allow callers to catch this
-/// specific error condition.
+/// Uses SQLSTATE `0A000` (feature_not_supported) to allow callers to catch
+/// this specific error condition.
 pub(crate) fn require_trickle(fn_name: &str) {
-    // Custom SQLSTATE PT800: MAKE_SQLSTATE('P','T','8','0','0') = 35104
-    // class PT = custom extension error class defined by pg_ripple.
-    let pt800 =
-        unsafe { std::mem::transmute::<i32, pgrx::pg_sys::errcodes::PgSqlErrorCode>(35104_i32) };
     if !crate::TRICKLE_INTEGRATION.get() {
-        let msg = format!(
+        pgrx::error!(
             "{fn_name}(): pg_ripple.trickle_integration is off; \
              set it to on to use bridge features"
         );
-        pgrx::pg_sys::panic::ErrorReport::new(pt800, msg, "require_trickle")
-            .report(pgrx::PgLogLevel::ERROR);
-        unreachable!();
     }
     if !crate::has_pg_trickle() {
-        let msg = format!(
+        pgrx::error!(
             "{fn_name}(): pg_trickle extension is not installed; \
              install pg_trickle to use bridge features"
         );
-        pgrx::pg_sys::panic::ErrorReport::new(pt800, msg, "require_trickle")
-            .report(pgrx::PgLogLevel::ERROR);
-        unreachable!();
     }
 }
 

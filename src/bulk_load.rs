@@ -666,12 +666,8 @@ fn json_value_to_nt_term(
                     i
                 ))
             } else {
-                n.as_f64().map(|f| {
-                    format!(
-                        "\"{}\"^^<http://www.w3.org/2001/XMLSchema#decimal>",
-                        f
-                    )
-                })
+                n.as_f64()
+                    .map(|f| format!("\"{}\"^^<http://www.w3.org/2001/XMLSchema#decimal>", f))
             }
         }
         serde_json::Value::Bool(b) => Some(format!(

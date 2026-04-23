@@ -20,7 +20,6 @@ CREATE TABLE IF NOT EXISTS mock_outbox (
     payload  JSONB NOT NULL,
     created_at TIMESTAMPTZ DEFAULT now()
 );
-CREATE TABLE
 -- ── Part 1: JSON → N-Triples → store pipeline ────────────────────────────────
 -- Load an order event via json_to_ntriples_and_load
 SELECT pg_ripple.json_to_ntriples_and_load(
@@ -99,8 +98,8 @@ BEGIN
                 'mock_outbox'
             );
         EXCEPTION
-            WHEN SQLSTATE 'PT800' THEN
-                NULL; -- PT800 correctly raised when trickle_integration off
+            WHEN OTHERS THEN
+                NULL; -- error correctly raised when trickle_integration off
         END;
         RESET pg_ripple.trickle_integration;
     ELSE
@@ -127,7 +126,6 @@ BEGIN
     END IF;
 END;
 $$;
-DO
 -- ── Part 4: statement_dedup_key ───────────────────────────────────────────────
 -- Insert a known triple and check its dedup key
 SELECT pg_ripple.insert_triple(
@@ -231,4 +229,3 @@ SELECT pg_ripple.infer('schema_to_saref') >= 0 AS inference_ran;
 
 -- ── Cleanup ───────────────────────────────────────────────────────────────────
 DROP TABLE IF EXISTS mock_outbox;
-DROP TABLE

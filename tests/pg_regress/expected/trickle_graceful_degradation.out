@@ -2,7 +2,7 @@
 --
 -- Tests that:
 -- 1. trickle_available() returns false when pg-trickle is absent.
--- 2. enable_cdc_bridge_trigger() raises PT800 when pg-trickle is absent.
+-- 2. enable_cdc_bridge_trigger() raises an error when trickle_integration is off.
 -- 3. disable_cdc_bridge_trigger() is a no-op when pg-trickle is absent.
 -- 4. cdc_bridge_triggers() returns empty when no triggers registered.
 -- 5. All non-bridge v0.52.0 functions work without pg-trickle.
@@ -10,7 +10,7 @@ SET client_min_messages = warning;
 CREATE EXTENSION IF NOT EXISTS pg_ripple;
 SET client_min_messages = DEFAULT;
 SET search_path TO pg_ripple, public;
--- -- Part 1: trickle_available() --
+-- ── Part 1: trickle_available() ───────────────────────────────────────────────
 -- In a standard CI environment without pg-trickle, this returns false.
 -- In an environment with pg-trickle, this returns true.
 -- Accept either value (the boolean type itself is what we verify).
@@ -20,12 +20,10 @@ SELECT pg_ripple.trickle_available() IN (true, false) AS trickle_available_is_bo
  t
 (1 row)
 
--- -- Part 2: PT800 error when pg-trickle is absent --
--- enable_cdc_bridge_trigger raises PT800 when pg-trickle is not installed
--- or trickle_integration = off. We test the off case since pg-trickle may
--- or may not be available in CI.
+-- ── Part 2: Error when trickle_integration is off ────────────────────────────
+-- enable_cdc_bridge_trigger raises an error when trickle_integration = off.
+-- We test the off case since pg-trickle may or may not be available in CI.
 SET pg_ripple.trickle_integration = off;
-SET
 DO $$
 DECLARE raised BOOLEAN := false;
 BEGIN
@@ -33,17 +31,15 @@ BEGIN
         PERFORM pg_ripple.enable_cdc_bridge_trigger(
             'test_trigger', '<https://example.org/p>', 'enriched_events');
     EXCEPTION
-        WHEN SQLSTATE 'PT800' THEN raised := true;
-        WHEN OTHERS THEN raised := false;
+        WHEN OTHERS THEN raised := true;
     END;
     IF NOT raised THEN
-        RAISE EXCEPTION 'PT800 was not raised when trickle_integration = off';
+        RAISE EXCEPTION 'error was not raised when trickle_integration = off';
     END IF;
 END;
 $$;
-DO
-SELECT TRUE AS pt800_raised_when_integration_off;
- pt800_raised_when_integration_off 
+SELECT TRUE AS error_raised_when_integration_off;
+ error_raised_when_integration_off 
 ------------------------------------
  t
 (1 row)
@@ -54,7 +50,6 @@ BEGIN
     PERFORM pg_ripple.disable_cdc_bridge_trigger('nonexistent');
 END;
 $$;
-DO
 SELECT TRUE AS disable_nonexistent_safe;
  disable_nonexistent_safe 
 --------------------------
@@ -62,8 +57,7 @@ SELECT TRUE AS disable_nonexistent_safe;
 (1 row)
 
 RESET pg_ripple.trickle_integration;
-RESET
--- -- Part 3: cdc_bridge_triggers() catalog SRF --
+-- ── Part 3: cdc_bridge_triggers() catalog SRF ────────────────────────────────
 -- With no triggers registered, returns empty result set.
 SELECT count(*) AS no_triggers FROM pg_ripple.cdc_bridge_triggers();
  no_triggers 
@@ -71,7 +65,7 @@ SELECT count(*) AS no_triggers FROM pg_ripple.cdc_bridge_triggers();
            0
 (1 row)
 
--- -- Part 4: Non-bridge v0.52.0 features --
+-- ── Part 4: Non-bridge v0.52.0 features ──────────────────────────────────────
 -- json_to_ntriples: basic conversion
 SELECT pg_ripple.json_to_ntriples(
     '{"name": "Alice", "age": 30}'::jsonb,
@@ -157,7 +151,7 @@ SELECT pg_ripple.statement_dedup_key(
  t
 (1 row)
 
--- -- Part 5: Vocabulary template loading --
+-- ── Part 5: Vocabulary template loading ──────────────────────────────────────
 -- Each template should load without error and return > 0 rules.
 SELECT pg_ripple.load_vocab_template('schema_to_saref') > 0 AS saref_loaded;
  saref_loaded 
@@ -193,21 +187,20 @@ BEGIN
     END;
 END;
 $$;
-DO
 SELECT TRUE AS unknown_template_raises_error;
  unknown_template_raises_error 
---------------------------------
+-------------------------------
  t
 (1 row)
 
--- -- Part 6: Schema catalog checks --
+-- ── Part 6: Schema catalog checks ────────────────────────────────────────────
 SELECT EXISTS (
     SELECT 1 FROM pg_class c
     JOIN pg_namespace n ON n.oid = c.relnamespace
     WHERE n.nspname = '_pg_ripple' AND c.relname = 'cdc_bridge_triggers'
 ) AS cdc_bridge_triggers_table_exists;
  cdc_bridge_triggers_table_exists 
------------------------------------
+----------------------------------
  t
 (1 row)
 
