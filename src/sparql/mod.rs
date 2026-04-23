@@ -45,6 +45,88 @@ use spargebra::term::{GraphName, NamedOrBlankNode, Term};
 use crate::dictionary;
 use crate::storage;
 
+// ─── SPARQL query complexity enforcement (v0.51.0) ───────────────────────────
+
+/// Count the algebra tree depth of a SPARQL `GraphPattern`.
+fn algebra_depth(pattern: &spargebra::algebra::GraphPattern) -> u32 {
+    use spargebra::algebra::GraphPattern as GP;
+    match pattern {
+        GP::Bgp { .. } | GP::Values { .. } => 1,
+        GP::Join { left, right }
+        | GP::LeftJoin { left, right, .. }
+        | GP::Union { left, right }
+        | GP::Minus { left, right } => 1 + algebra_depth(left).max(algebra_depth(right)),
+        GP::Filter { inner, .. }
+        | GP::Graph { inner, .. }
+        | GP::Extend { inner, .. }
+        | GP::Distinct { inner }
+        | GP::Reduced { inner }
+        | GP::Project { inner, .. }
+        | GP::Slice { inner, .. }
+        | GP::OrderBy { inner, .. }
+        | GP::Group { inner, .. }
+        | GP::Service { inner, .. } => 1 + algebra_depth(inner),
+        _ => 1,
+    }
+}
+
+/// Count the total number of triple patterns in a SPARQL `GraphPattern`.
+fn count_triple_patterns(pattern: &spargebra::algebra::GraphPattern) -> u32 {
+    use spargebra::algebra::GraphPattern as GP;
+    match pattern {
+        GP::Bgp { patterns } => patterns.len() as u32,
+        GP::Values { .. } => 0,
+        GP::Join { left, right }
+        | GP::LeftJoin { left, right, .. }
+        | GP::Union { left, right }
+        | GP::Minus { left, right } => count_triple_patterns(left) + count_triple_patterns(right),
+        GP::Filter { inner, .. }
+        | GP::Graph { inner, .. }
+        | GP::Extend { inner, .. }
+        | GP::Distinct { inner }
+        | GP::Reduced { inner }
+        | GP::Project { inner, .. }
+        | GP::Slice { inner, .. }
+        | GP::OrderBy { inner, .. }
+        | GP::Group { inner, .. }
+        | GP::Service { inner, .. } => count_triple_patterns(inner),
+        _ => 0,
+    }
+}
+
+/// Check that a query's algebra tree depth and triple-pattern count are within
+/// the configured limits.  Raises `PT440` if either limit is exceeded.
+///
+/// Called before any SQL translation to provide early, cheap DoS protection.
+pub(crate) fn check_query_complexity(pattern: &spargebra::algebra::GraphPattern) {
+    let max_depth = crate::SPARQL_MAX_ALGEBRA_DEPTH.get();
+    if max_depth > 0 {
+        let depth = algebra_depth(pattern);
+        if depth > max_depth as u32 {
+            pgrx::error!(
+                "PT440: SPARQL algebra tree depth {} exceeds sparql_max_algebra_depth limit of {}; \
+                 simplify the query or raise pg_ripple.sparql_max_algebra_depth",
+                depth,
+                max_depth
+            );
+        }
+    }
+
+    let max_patterns = crate::SPARQL_MAX_TRIPLE_PATTERNS.get();
+    if max_patterns > 0 {
+        let count = count_triple_patterns(pattern);
+        if count > max_patterns as u32 {
+            pgrx::error!(
+                "PT440: SPARQL query contains {} triple patterns, exceeding \
+                 sparql_max_triple_patterns limit of {}; simplify the query or raise \
+                 pg_ripple.sparql_max_triple_patterns",
+                count,
+                max_patterns
+            );
+        }
+    }
+}
+
 // ─── Batch dictionary decode ──────────────────────────────────────────────────
 
 /// Decode a set of `i64` dictionary IDs to N-Triples–formatted strings in one
@@ -248,6 +330,9 @@ fn prepare_select(
             pgrx::error!("CONSTRUCT/DESCRIBE not yet supported in v0.3.0");
         }
     };
+
+    // v0.51.0: reject over-limit queries before any SQL translation (PT440).
+    check_query_complexity(&pattern);
 
     let trans = sqlgen::translate_select(&pattern, base_iri.as_deref());
     let entry = (
@@ -739,14 +824,49 @@ pub fn sparql_construct(query_text: &str) -> Vec<pgrx::JsonB> {
                     ))
                 }
                 spargebra::term::TermPattern::BlankNode(_) => None,
-                spargebra::term::TermPattern::Triple(_inner) => {
-                    // v0.24.0: quoted-triple objects are stored as dictionary IDs;
-                    // decode via the batch_decode map (the ID was collected above).
-                    // The quoted-triple ID is bound to the variable referencing it;
-                    // look up the variable column in the result row.
-                    // For now, resolve via the variable binding if any object variable
-                    // maps to a quoted-triple ID in the decode map.
-                    None // ground quoted triples in CONSTRUCT templates not yet decoded to N-Triple-star notation
+                spargebra::term::TermPattern::Triple(inner) => {
+                    // v0.51.0: emit ground quoted triples as N-Triples-star notation
+                    // `<< s p o >>` (S2-6 / N5-5).  Only ground (all-IRI) inner
+                    // triples are supported; variable-containing inner triples are
+                    // handled via the outer variable bindings.
+                    let ts_val = match &inner.subject {
+                        spargebra::term::TermPattern::NamedNode(nn) => {
+                            Some(format!("<{}>", nn.as_str()))
+                        }
+                        _ => None,
+                    };
+                    let tp_val = match &inner.predicate {
+                        spargebra::term::NamedNodePattern::NamedNode(nn) => {
+                            Some(format!("<{}>", nn.as_str()))
+                        }
+                        _ => None,
+                    };
+                    let to_val = match &inner.object {
+                        spargebra::term::TermPattern::NamedNode(nn) => {
+                            Some(format!("<{}>", nn.as_str()))
+                        }
+                        spargebra::term::TermPattern::Literal(lit) => {
+                            let lang = lit.language();
+                            let dt = lit.datatype().as_str();
+                            let kind = if lang.is_some() {
+                                dictionary::KIND_LANG_LITERAL
+                            } else {
+                                dictionary::KIND_TYPED_LITERAL
+                            };
+                            Some(dictionary::format_ntriples_term(
+                                lit.value(),
+                                kind,
+                                Some(dt),
+                                lang,
+                                0,
+                            ))
+                        }
+                        _ => None,
+                    };
+                    match (ts_val, tp_val, to_val) {
+                        (Some(s), Some(p), Some(o)) => Some(format!("<< {s} {p} {o} >>")),
+                        _ => None,
+                    }
                 }
                 spargebra::term::TermPattern::Variable(v) => {
                     if var_set.contains(v.as_str()) {

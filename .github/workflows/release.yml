@@ -196,6 +196,22 @@ jobs:
             --notes-file /tmp/release_notes.md \
             --verify-tag
 
+      # v0.51.0: Generate SBOM (Software Bill of Materials) and attach to release.
+      - name: Install cargo-cyclonedx
+        run: cargo install cargo-cyclonedx --locked
+
+      - name: Generate SBOM (CycloneDX)
+        run: |
+          cargo cyclonedx --format json --output-file sbom.json
+          echo "Generated SBOM: $(wc -c < sbom.json) bytes"
+
+      - name: Attach SBOM to GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          gh release upload "${TAG}" sbom.json --clobber
+
   # ── 4. Build and publish Docker image ────────────────────────────────────────
   docker:
     name: Docker image (ghcr.io)

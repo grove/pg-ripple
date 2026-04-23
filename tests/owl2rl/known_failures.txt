@@ -1,4 +1,4 @@
-# OWL 2 RL known failures for pg_ripple (v0.47.0)
+# OWL 2 RL known failures for pg_ripple (v0.51.0)
 #
 # Format: one entry per line, prefixed with "owl2rl:" followed by the test ID.
 # Lines starting with "#" are comments.
@@ -6,10 +6,7 @@
 # Tests listed here are treated as XFAIL in CI and do NOT block releases.
 # Removing a line (fixing the underlying issue) is cause for celebration.
 #
-# v0.47.0 baseline: 62/66 pass (93.9%)
+# v0.51.0: All 4 previously known failures are fixed — 66/66 pass (100.0%).
+# The CI gate has been flipped from advisory to blocking.
 #
-# id                     added      target     reason
-owl2rl:prp-spo2         # v0.47.0  v0.49.0    three-hop propertyChainAxiom not yet supported
-owl2rl:scm-sco          # v0.47.0  v0.49.0    cyclical subclass → owl:equivalentClass not inferred
-owl2rl:eq-diff1         # v0.47.0  v0.50.0    owl:Nothing not propagated from sameAs/differentFrom conflict
-owl2rl:dt-type2         # v0.47.0  v0.51.0    XSD numeric promotion not applied on store
+# id                     added      fixed     notes

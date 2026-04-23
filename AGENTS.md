@@ -2,14 +2,14 @@
 
 **pg_ripple** is a PostgreSQL 18 extension written in Rust (pgrx 0.17) that implements a high-performance RDF triple store with native SPARQL query execution. See [plans/implementation_plan.md](plans/implementation_plan.md) for the full architecture and [ROADMAP.md](ROADMAP.md) for the phased delivery plan.
 
-> **Implementation status** (as of 2026-04-22): v0.46.0 is released and all pg_regress tests pass. The full SPARQL 1.1 stack, SHACL (including `sh:equals`/`sh:disjoint`), Datalog (including aggregation, magic sets, `owl:sameAs` canonicalization, demand-filtered inference, well-founded semantics, tabling, DRed, parallel stratum evaluation, and worst-case optimal joins), HTAP storage, parallel merge workers, cost-based federation, live CDC subscriptions, streaming SPARQL cursors, explain/observability, JSON-LD framing, CONSTRUCT/DESCRIBE/ASK views, vector + SPARQL hybrid search, GraphRAG export, and the `pg_ripple_http` companion service are all implemented. Property-based testing (`proptest`), fuzz testing of the federation result decoder, the W3C OWL 2 RL conformance suite, TopN push-down, BSBM regression gate, and HTTP CA-bundle pinning are all delivered. One release remains: v1.0.0 (production hardening, stress testing, security audit). All four conformance suites run in CI: W3C SPARQL 1.1 (smoke subset required; full suite informational), Apache Jena (~1,000 tests; non-blocking until ≥95% pass rate), WatDiv (100 query templates; non-blocking, correctness + performance), LUBM (14 OWL RL queries; required), and OWL 2 RL (informational until ≥95% pass rate).
+> **Implementation status** (as of 2026-04-22): v0.51.0 is released and all pg_regress tests pass. The full SPARQL 1.1 stack, SHACL (including `sh:equals`/`sh:disjoint`), Datalog (including aggregation, magic sets, `owl:sameAs` canonicalization, demand-filtered inference, well-founded semantics, tabling, DRed, parallel stratum evaluation, and worst-case optimal joins), HTAP storage, parallel merge workers, cost-based federation, live CDC subscriptions, streaming SPARQL cursors, explain/observability, JSON-LD framing, CONSTRUCT/DESCRIBE/ASK views, vector + SPARQL hybrid search, GraphRAG export, and the `pg_ripple_http` companion service are all implemented. Property-based testing (`proptest`), fuzz testing of the federation result decoder, the W3C OWL 2 RL conformance suite, TopN push-down, BSBM regression gate, and HTTP CA-bundle pinning are all delivered. One release remains: v1.0.0 (production hardening, stress testing, security audit). All four conformance suites run in CI: W3C SPARQL 1.1 (smoke subset required; full suite informational), Apache Jena (~1,000 tests; non-blocking until ≥95% pass rate), WatDiv (100 query templates; non-blocking, correctness + performance), LUBM (14 OWL RL queries; required), and OWL 2 RL (informational until ≥95% pass rate).
 
 ## Tech Stack
 
 | Concern | Technology |
 |---|---|
 | Language | Rust, Edition 2024 |
-| PG binding | pgrx 0.17 (`pg18` feature flag) |
+| PG binding | pgrx 0.18 (`pg18` feature flag) |
 | PostgreSQL target | 18.x only |
 | SPARQL parser | `spargebra` |
 | SPARQL optimizer | `sparopt` (first-pass algebra optimizer) |

@@ -134,11 +134,12 @@ pub extern "C-unwind" fn pg_ripple_merge_worker_main(arg: pg_sys::Datum) {
                 );
             }
 
-            // Sleep explicitly before retrying.  We cannot rely on wait_latch
-            // because pending SIGHUP signals (sent by poke_merge_worker during
-            // bulk loads) cause it to return immediately, creating a rapid
-            // panic loop.
-            std::thread::sleep(Duration::from_secs(interval_secs));
+            // v0.51.0: use wait_latch for correct SIGTERM response during backoff (S1-3).
+            // If SIGTERM is received, wait_latch returns false and the outer while loop exits.
+            // If SIGHUP triggers an immediate return, consecutive_errors > 5 prevents spin-looping.
+            if !BackgroundWorker::wait_latch(Some(Duration::from_secs(interval_secs))) {
+                break;
+            }
             continue;
         }
 

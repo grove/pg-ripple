@@ -41,6 +41,65 @@ fn collect_actual_rows(node: &serde_json::Value, out: &mut Vec<serde_json::Value
     }
 }
 
+/// Extract aggregate buffer I/O statistics from an EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)
+/// plan tree.  Returns a JSON object with keys `shared_hit`, `shared_read`,
+/// `shared_dirtied`, `shared_written` (all integers, zero if not present).
+fn extract_buffers(plan: &serde_json::Value) -> serde_json::Value {
+    let mut shared_hit: i64 = 0;
+    let mut shared_read: i64 = 0;
+    let mut shared_dirtied: i64 = 0;
+    let mut shared_written: i64 = 0;
+
+    fn walk(node: &serde_json::Value, h: &mut i64, r: &mut i64, d: &mut i64, w: &mut i64) {
+        match node {
+            serde_json::Value::Array(arr) => {
+                for elem in arr {
+                    walk(elem, h, r, d, w);
+                }
+            }
+            serde_json::Value::Object(map) => {
+                *h += map
+                    .get("Shared Hit Blocks")
+                    .and_then(|v| v.as_i64())
+                    .unwrap_or(0);
+                *r += map
+                    .get("Shared Read Blocks")
+                    .and_then(|v| v.as_i64())
+                    .unwrap_or(0);
+                *d += map
+                    .get("Shared Dirtied Blocks")
+                    .and_then(|v| v.as_i64())
+                    .unwrap_or(0);
+                *w += map
+                    .get("Shared Written Blocks")
+                    .and_then(|v| v.as_i64())
+                    .unwrap_or(0);
+                for key in ["Plan", "Plans", "InitPlan", "SubPlan"] {
+                    if let Some(child) = map.get(key) {
+                        walk(child, h, r, d, w);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    walk(
+        plan,
+        &mut shared_hit,
+        &mut shared_read,
+        &mut shared_dirtied,
+        &mut shared_written,
+    );
+
+    serde_json::json!({
+        "shared_hit": shared_hit,
+        "shared_read": shared_read,
+        "shared_dirtied": shared_dirtied,
+        "shared_written": shared_written
+    })
+}
+
 /// Execute `explain_sparql` returning a structured JSONB document.
 ///
 /// When `analyze` is `true`, runs `EXPLAIN (ANALYZE, FORMAT JSON, BUFFERS true)`;
@@ -101,10 +160,12 @@ pub fn explain_sparql_jsonb(query_text: &str, analyze: bool) -> pgrx::JsonB {
             .join("\n")
     });
 
-    // When analyze=true, run a separate EXPLAIN (ANALYZE, FORMAT JSON) to extract
-    // per-operator actual row counts from the JSON plan tree.
-    let actual_rows_json: serde_json::Value = if analyze {
-        let explain_json_sql = format!("EXPLAIN (ANALYZE, FORMAT JSON) {inner_sql}");
+    // When analyze=true, run a separate EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) to extract
+    // per-operator actual row counts and buffer I/O stats from the JSON plan tree.
+    let actual_rows_json: serde_json::Value;
+    let buffers_json: serde_json::Value;
+    if analyze {
+        let explain_json_sql = format!("EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) {inner_sql}");
         let json_str: String = Spi::connect(|client| {
             client
                 .select(&explain_json_sql, None, &[])
@@ -117,9 +178,11 @@ pub fn explain_sparql_jsonb(query_text: &str, analyze: bool) -> pgrx::JsonB {
             serde_json::from_str(&json_str).unwrap_or(serde_json::Value::Null);
         let mut rows_out = Vec::new();
         collect_actual_rows(&parsed, &mut rows_out);
-        serde_json::Value::Array(rows_out)
+        actual_rows_json = serde_json::Value::Array(rows_out);
+        buffers_json = extract_buffers(&parsed);
     } else {
-        serde_json::Value::Null
+        actual_rows_json = serde_json::Value::Null;
+        buffers_json = serde_json::Value::Null;
     };
 
     let mut result = serde_json::json!({
@@ -134,6 +197,7 @@ pub fn explain_sparql_jsonb(query_text: &str, analyze: bool) -> pgrx::JsonB {
 
     if analyze {
         result["actual_rows"] = actual_rows_json;
+        result["buffers"] = buffers_json;
     }
 
     pgrx::JsonB(result)

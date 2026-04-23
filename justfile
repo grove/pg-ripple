@@ -164,3 +164,29 @@ docker-run tag="local":
 # Build then run in one step
 [group: "docker"]
 docker tag="local": (docker-build tag) (docker-run tag)
+
+# ── Documentation ─────────────────────────────────────────────────────────
+
+# Serve the documentation site locally via mdBook (opens browser)
+[group: "dev"]
+docs-serve:
+    mdbook serve docs --open
+
+# ── Release ───────────────────────────────────────────────────────────────
+
+# Prepare a new release: bump version in Cargo.toml and pg_ripple.control,
+# then remind you to create a migration script.
+#
+# Usage:  just release 0.52.0
+[group: "release"]
+release VERSION:
+    @echo "=== Preparing release v{{VERSION}} ==="
+    sed -i '' 's/^version = "[0-9.]*"/version = "{{VERSION}}"/' Cargo.toml
+    sed -i '' "s/^default_version = '[0-9.]*'/default_version = '{{VERSION}}'/" pg_ripple.control
+    @echo "Bumped Cargo.toml and pg_ripple.control to {{VERSION}}"
+    @echo ""
+    @echo "Next steps:"
+    @echo "  1. Create sql/pg_ripple--PREV--{{VERSION}}.sql"
+    @echo "  2. Update CHANGELOG.md"
+    @echo "  3. git add -A && git commit -m 'v{{VERSION}}: prepare release'"
+    @echo "  4. git tag v{{VERSION}} && git push --tags"

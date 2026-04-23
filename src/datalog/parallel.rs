@@ -323,6 +323,54 @@ pub fn preallocate_sid_ranges(
     Some(ranges)
 }
 
+// ─── Savepoint helper (v0.51.0) ───────────────────────────────────────────────
+
+/// Execute a batch of SQL statements inside a PostgreSQL SAVEPOINT.
+///
+/// If any statement in `stmts` fails, the savepoint is rolled back and the
+/// error is logged as a warning; otherwise it is released.  This guarantees
+/// that a failed parallel batch does not abort the enclosing transaction.
+///
+/// # Usage in the parallel-strata coordinator
+///
+/// Before launching each independent `ParallelGroup`'s rules, call this
+/// function with the compiled SQL for that group.  A failed group's delta
+/// tables are left empty for this iteration (the group will be retried next
+/// round), while successful groups commit their results immediately.
+#[allow(dead_code)]
+pub fn execute_with_savepoint(stmts: &[String], savepoint_name: &str) -> bool {
+    use pgrx::Spi;
+
+    let sp_begin = format!("SAVEPOINT {savepoint_name}");
+    let sp_release = format!("RELEASE SAVEPOINT {savepoint_name}");
+    let sp_rollback = format!("ROLLBACK TO SAVEPOINT {savepoint_name}");
+
+    if Spi::run_with_args(&sp_begin, &[]).is_err() {
+        pgrx::warning!("datalog parallel: failed to set SAVEPOINT {savepoint_name}");
+        return false;
+    }
+
+    for sql in stmts {
+        if let Err(e) = Spi::run_with_args(sql, &[]) {
+            pgrx::warning!(
+                "datalog parallel: batch error in SAVEPOINT {savepoint_name}: {e}; rolling back"
+            );
+            let _ = Spi::run_with_args(&sp_rollback, &[]);
+            return false;
+        }
+    }
+
+    if Spi::run_with_args(&sp_release, &[]).is_err() {
+        pgrx::warning!(
+            "datalog parallel: failed to RELEASE SAVEPOINT {savepoint_name}; rolling back"
+        );
+        let _ = Spi::run_with_args(&sp_rollback, &[]);
+        return false;
+    }
+
+    true
+}
+
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]

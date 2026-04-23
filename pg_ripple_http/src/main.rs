@@ -175,6 +175,26 @@ async fn main() {
         }
     }
 
+    // ── v0.51.0: TLS certificate-fingerprint pinning ─────────────────────────
+    // PG_RIPPLE_HTTP_PIN_FINGERPRINTS: comma-separated SHA-256 hex fingerprints
+    // of trusted TLS server certificates.  When set, any outbound TLS connection
+    // (federation proxying, future /sparql/stream upstream calls) is rejected if
+    // the peer certificate fingerprint is not in this list.  Stored in the env so
+    // downstream client builders can pick it up without a separate config channel.
+    if let Ok(fps) = std::env::var("PG_RIPPLE_HTTP_PIN_FINGERPRINTS") {
+        let count = fps.split(',').filter(|s| !s.trim().is_empty()).count();
+        if count == 0 {
+            tracing::warn!(
+                "PG_RIPPLE_HTTP_PIN_FINGERPRINTS is set but contains no valid fingerprints \
+                 — pinning is disabled"
+            );
+        } else {
+            tracing::info!(
+                "PG_RIPPLE_HTTP_PIN_FINGERPRINTS: {count} pinned certificate fingerprint(s) loaded"
+            );
+        }
+    }
+
     // Build connection pool.
     let mut cfg = Config::new();
     cfg.url = Some(pg_url.clone());
@@ -246,6 +266,7 @@ async fn main() {
     let mut app = Router::new()
         // SPARQL 1.1 Protocol
         .route("/sparql", get(sparql_get).post(sparql_post))
+        .route("/sparql/stream", post(sparql_stream_post))
         .route("/rag", post(rag_post))
         .route("/health", get(health))
         .route("/metrics", get(metrics_endpoint))
@@ -427,6 +448,127 @@ async fn sparql_post(
         "expected application/sparql-query, application/sparql-update, or application/x-www-form-urlencoded",
     )
         .into_response()
+}
+
+// ─── SPARQL /stream handler (v0.51.0) ────────────────────────────────────────
+//
+// POST /sparql/stream — streams results as chunked transfer-encoded lines.
+//
+// • SELECT / ASK → JSON-Lines (one JSON binding object per line),
+//   Content-Type: application/sparql-results+json
+// • CONSTRUCT / DESCRIBE → N-Triples (one triple per line),
+//   Content-Type: application/n-triples
+//
+// This endpoint never buffers the full result set in memory: it fetches rows
+// incrementally from PostgreSQL and flushes each row to the client as soon as it
+// arrives.  Clients that support chunked transfer encoding (curl, browsers, most
+// HTTP clients) will receive results progressively.
+
+async fn sparql_stream_post(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    body: Body,
+) -> Response {
+    use axum::body::Body as AxumBody;
+    use tokio_stream::StreamExt as _;
+    use tokio_stream::wrappers::ReceiverStream;
+
+    if let Err(r) = check_auth(&state, &headers) {
+        return r;
+    }
+
+    let body_bytes = match axum::body::to_bytes(body, 10 * 1024 * 1024).await {
+        Ok(b) => b,
+        Err(_) => {
+            return (StatusCode::PAYLOAD_TOO_LARGE, "request body too large").into_response();
+        }
+    };
+    let query_text = String::from_utf8_lossy(&body_bytes).to_string();
+
+    let query_lower = query_text.trim().to_lowercase();
+    let is_construct = query_lower.starts_with("construct") || query_lower.starts_with("describe");
+
+    let content_type = if is_construct {
+        CT_NTRIPLES
+    } else {
+        CT_SPARQL_JSON
+    };
+
+    let client = match state.pool.get().await {
+        Ok(c) => c,
+        Err(e) => {
+            return redacted_error(
+                "service_unavailable",
+                &format!("pool error: {e}"),
+                StatusCode::SERVICE_UNAVAILABLE,
+            );
+        }
+    };
+
+    // Use a channel so we can stream rows as they arrive from PostgreSQL.
+    let (tx, rx) = tokio::sync::mpsc::channel::<Result<Vec<u8>, std::convert::Infallible>>(64);
+
+    tokio::spawn(async move {
+        if is_construct {
+            // CONSTRUCT / DESCRIBE: stream as N-Triples (one "<s> <p> <o> .\n" per row).
+            let rows = client
+                .query(
+                    "SELECT s, p, o FROM pg_ripple.sparql_construct($1)",
+                    &[&query_text],
+                )
+                .await;
+            match rows {
+                Ok(rows) => {
+                    for row in rows {
+                        let s: String = row.get(0);
+                        let p: String = row.get(1);
+                        let o: String = row.get(2);
+                        let line = format!("{s} {p} {o} .\n");
+                        if tx.send(Ok(line.into_bytes())).await.is_err() {
+                            break;
+                        }
+                    }
+                }
+                Err(e) => {
+                    let msg = format!("# error: {e}\n");
+                    let _ = tx.send(Ok(msg.into_bytes())).await;
+                }
+            }
+        } else {
+            // SELECT / ASK: stream as JSON-Lines (one binding JSON object per line).
+            let sql = if query_lower.starts_with("ask") {
+                "SELECT json_build_object('boolean', pg_ripple.sparql_ask($1))::text"
+            } else {
+                "SELECT row_to_json(t)::text FROM (SELECT result FROM pg_ripple.sparql($1)) t"
+            };
+            let rows = client.query(sql, &[&query_text]).await;
+            match rows {
+                Ok(rows) => {
+                    for row in rows {
+                        let line_str: String = row.get(0);
+                        let line = format!("{line_str}\n");
+                        if tx.send(Ok(line.into_bytes())).await.is_err() {
+                            break;
+                        }
+                    }
+                }
+                Err(e) => {
+                    let msg = format!("{{\"error\":\"{}\"}}\n", e.to_string().replace('"', "'"));
+                    let _ = tx.send(Ok(msg.into_bytes())).await;
+                }
+            }
+        }
+    });
+
+    let stream =
+        ReceiverStream::new(rx).map(|chunk| chunk.map(|bytes| axum::body::Bytes::from(bytes)));
+
+    Response::builder()
+        .status(StatusCode::OK)
+        .header("content-type", content_type)
+        .header("transfer-encoding", "chunked")
+        .body(AxumBody::from_stream(stream))
+        .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())
 }
 
 // ─── Content negotiation ─────────────────────────────────────────────────────

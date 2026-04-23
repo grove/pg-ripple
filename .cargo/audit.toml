@@ -1,0 +1,16 @@
+# cargo-audit configuration
+# See: https://github.com/rustsec/rustsec/tree/main/cargo-audit
+
+[advisories]
+# Pre-existing advisories acknowledged and triaged for v0.51.0.
+# These affect transitive dependencies only and are not exploitable in
+# the pg_ripple use-case (server-side PostgreSQL extension with no untrusted
+# external input to the affected code paths).
+ignore = [
+    # serde_cbor: unmaintained (replaced by ciborium).  No direct dep.
+    "RUSTSEC-2021-0127",
+    # rsa: timing side-channel in RSA decryption.  Not used for RSA in pg_ripple.
+    "RUSTSEC-2024-0436",
+    # paste: proc-macro crate unsoundness.  Only used at compile time.
+    "RUSTSEC-2026-0104",
+]

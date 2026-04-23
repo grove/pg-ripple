@@ -280,9 +280,78 @@ assert_column "_pg_ripple" "dictionary" "qt_s"
 ok "schema unchanged (no DDL in 0.5.0→0.5.1)"
 echo
 
+# ── Intermediate migrations (0.5.1 → 0.50.0) — apply in sequence ─────────────
+# These migrations are applied silently; only their final state matters.
+for migration in \
+    "pg_ripple--0.5.1--0.6.0.sql" \
+    "pg_ripple--0.6.0--0.7.0.sql" \
+    "pg_ripple--0.7.0--0.8.0.sql" \
+    "pg_ripple--0.8.0--0.9.0.sql" \
+    "pg_ripple--0.9.0--0.10.0.sql" \
+    "pg_ripple--0.10.0--0.11.0.sql" \
+    "pg_ripple--0.11.0--0.12.0.sql" \
+    "pg_ripple--0.12.0--0.13.0.sql" \
+    "pg_ripple--0.13.0--0.14.0.sql" \
+    "pg_ripple--0.14.0--0.15.0.sql" \
+    "pg_ripple--0.15.0--0.16.0.sql" \
+    "pg_ripple--0.16.0--0.17.0.sql" \
+    "pg_ripple--0.17.0--0.18.0.sql" \
+    "pg_ripple--0.18.0--0.19.0.sql" \
+    "pg_ripple--0.19.0--0.20.0.sql" \
+    "pg_ripple--0.20.0--0.21.0.sql" \
+    "pg_ripple--0.21.0--0.22.0.sql" \
+    "pg_ripple--0.22.0--0.23.0.sql" \
+    "pg_ripple--0.23.0--0.24.0.sql" \
+    "pg_ripple--0.24.0--0.25.0.sql" \
+    "pg_ripple--0.25.0--0.26.0.sql" \
+    "pg_ripple--0.26.0--0.27.0.sql" \
+    "pg_ripple--0.27.0--0.28.0.sql" \
+    "pg_ripple--0.28.0--0.29.0.sql" \
+    "pg_ripple--0.29.0--0.30.0.sql" \
+    "pg_ripple--0.30.0--0.31.0.sql" \
+    "pg_ripple--0.31.0--0.32.0.sql" \
+    "pg_ripple--0.32.0--0.33.0.sql" \
+    "pg_ripple--0.33.0--0.34.0.sql" \
+    "pg_ripple--0.34.0--0.35.0.sql" \
+    "pg_ripple--0.35.0--0.36.0.sql" \
+    "pg_ripple--0.36.0--0.37.0.sql" \
+    "pg_ripple--0.37.0--0.38.0.sql" \
+    "pg_ripple--0.38.0--0.39.0.sql" \
+    "pg_ripple--0.39.0--0.40.0.sql" \
+    "pg_ripple--0.40.0--0.41.0.sql" \
+    "pg_ripple--0.41.0--0.42.0.sql" \
+    "pg_ripple--0.42.0--0.43.0.sql" \
+    "pg_ripple--0.43.0--0.44.0.sql" \
+    "pg_ripple--0.44.0--0.45.0.sql" \
+    "pg_ripple--0.45.0--0.46.0.sql" \
+    "pg_ripple--0.46.0--0.47.0.sql" \
+    "pg_ripple--0.47.0--0.48.0.sql" \
+    "pg_ripple--0.48.0--0.49.0.sql" \
+    "pg_ripple--0.49.0--0.50.0.sql" \
+; do
+    if [[ -f "${SQL_DIR}/${migration}" ]]; then
+        apply_script "${SQL_DIR}/${migration}" "${migration}"
+    fi
+done
+
+# ── Step 7: migrate 0.50.0 → 0.51.0 ──────────────────────────────────────────
+
+info "=== migration 0.50.0 → 0.51.0 ==="
+apply_script "${SQL_DIR}/pg_ripple--0.50.0--0.51.0.sql" "pg_ripple--0.50.0--0.51.0.sql"
+
+# v0.51.0 adds _pg_ripple.predicate_stats table.
+assert_true "predicate_stats table exists" \
+    "EXISTS (
+        SELECT 1 FROM information_schema.tables
+        WHERE table_schema = '_pg_ripple'
+          AND table_name   = 'predicate_stats'
+    )"
+ok "0.50.0→0.51.0: predicate_stats table created"
+echo
+
 # ── Final state verification ──────────────────────────────────────────────────
 
-info "=== final schema verification (v0.5.1) ==="
+info "=== final schema verification (v0.51.0) ==="
 
 # Dictionary table columns
 for col in id hash value kind datatype lang qt_s qt_p qt_o; do

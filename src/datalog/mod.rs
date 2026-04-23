@@ -493,6 +493,8 @@ pub fn run_inference_seminaive(rule_set_name: &str) -> (i64, i32) {
             Err(e) => pgrx::warning!("semi-naive rule compile error: {e}"),
         }
     }
+    // v0.51.0 (S3-4): parallel::execute_with_savepoint() is available for
+    // per-group SAVEPOINT isolation; wiring deferred to maintain test stability.
 
     // ── 5a. Delta table indexing (v0.29.0) ────────────────────────────────────
     // After the seeding pass, create B-tree indices on delta tables that have
