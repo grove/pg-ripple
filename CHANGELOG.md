@@ -13,6 +13,32 @@ Versions correspond to the milestones in [ROADMAP.md](ROADMAP.md).
 
 ---
 
+## [0.49.0] — 2026-04-23 — AI & LLM Integration
+
+**Completes the v0.49.0 roadmap: `sparql_from_nl()` NL-to-SPARQL via configurable LLM endpoint; `suggest_sameas()` and `apply_sameas_candidates()` for embedding-based entity alignment; four new GUCs; error codes PT700–PT702.**
+
+### What's new
+
+- **`pg_ripple.sparql_from_nl(question TEXT) RETURNS TEXT`** (`src/llm/mod.rs`): converts a natural-language question to a SPARQL SELECT query using any OpenAI-compatible LLM endpoint.
+  - Set `pg_ripple.llm_endpoint = 'mock'` for testing without a real LLM.
+  - `add_llm_example(question, sparql)` stores few-shot examples in `_pg_ripple.llm_examples`.
+  - Error codes: PT700 (endpoint unreachable/not configured), PT701 (non-SPARQL response), PT702 (SPARQL parse failure).
+  - SHACL shapes included as additional context when `pg_ripple.llm_include_shapes = on`.
+
+- **`pg_ripple.suggest_sameas(threshold REAL DEFAULT 0.9)`**: HNSW cosine self-join on `_pg_ripple.embeddings`; returns `TABLE(s1 TEXT, s2 TEXT, similarity REAL)` pairs above the threshold. Degrades gracefully when pgvector is unavailable.
+
+- **`pg_ripple.apply_sameas_candidates(min_similarity REAL DEFAULT 0.95)`**: inserts accepted pairs as `owl:sameAs` triples; respects `sameas_max_cluster_size`. Returns count of inserted triples.
+
+- **New GUCs**: `pg_ripple.llm_endpoint`, `pg_ripple.llm_model`, `pg_ripple.llm_api_key_env`, `pg_ripple.llm_include_shapes`.
+
+- **Schema change**: `_pg_ripple.llm_examples (question TEXT PRIMARY KEY, sparql TEXT, created_at TIMESTAMPTZ)`.
+
+### Migration
+
+Run `ALTER EXTENSION pg_ripple UPDATE TO '0.49.0'` — adds `_pg_ripple.llm_examples` and updates the schema version.
+
+---
+
 ## [0.48.0] — 2026-05-13 — SHACL Core Completeness, OWL 2 RL Closure & SPARQL Completeness
 
 **Completes the v0.48.0 roadmap: all 35 SHACL Core constraints implemented; complex `sh:path` expressions with recursive CTEs; OWL 2 RL rule-set closure (five new rules); SPARQL Update ADD/COPY/MOVE; SPARQL-star variable-inside-quoted-triple patterns; `federation_max_response_bytes` GUC; `insert_triples()` batch SRF; WatDiv baselines; `pg-upgrade.md` operations guide.**

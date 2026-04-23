@@ -161,6 +161,39 @@ pub enum WfsError {
     FixpointNotConverged { rule_set: String, max_iter: i32 },
 }
 
+/// LLM integration errors (PT700–PT702) — v0.49.0.
+#[allow(dead_code)]
+#[derive(Debug, Error)]
+pub enum LlmError {
+    /// PT700 — LLM endpoint not configured or unreachable.
+    ///
+    /// Raised when `pg_ripple.llm_endpoint` is empty or the HTTP call fails.
+    #[error(
+        "LLM endpoint unreachable or returned HTTP error: {detail} (PT700); \
+         set pg_ripple.llm_endpoint to an OpenAI-compatible base URL"
+    )]
+    EndpointUnreachable { detail: String },
+
+    /// PT701 — LLM response did not contain a SPARQL query.
+    ///
+    /// The HTTP call succeeded but the response body did not contain
+    /// a recognisable SPARQL SELECT/CONSTRUCT/ASK/DESCRIBE statement.
+    #[error(
+        "LLM response did not contain a valid SPARQL query (PT701); \
+         raw response: {raw}"
+    )]
+    NonSparqlResponse { raw: String },
+
+    /// PT702 — LLM-generated SPARQL failed to parse.
+    ///
+    /// The response contained a SPARQL-looking string but `spargebra` rejected it.
+    #[error(
+        "LLM-generated SPARQL query failed to parse (PT702): {parse_error}; \
+         query text: {query}"
+    )]
+    ParseFailed { parse_error: String, query: String },
+}
+
 /// Lattice errors (PT540–PT541) — v0.36.0 / v0.45.0.
 #[allow(dead_code)]
 #[derive(Debug, Error)]

@@ -165,9 +165,9 @@ Errors from extension initialization, GUC validation, and background workers.
 
 | Code | Message | Cause | Fix |
 |---|---|---|---|
-| PT700 | _PG_init: cache_budget exceeds shared_memory_size | `pg_ripple.cache_budget` is larger than `pg_ripple.shared_memory_size` | Reduce `cache_budget` or increase `shared_memory_size` |
-| PT701 | _PG_init: shmem initialization failed | Shared memory allocation failed | Increase system shared memory (`kern.sysv.shmmax` on macOS, `kernel.shmmax` on Linux) |
-| PT702 | worker_database not set; merge worker defaulting to 'postgres' | The `pg_ripple.worker_database` GUC is not set | Set it to the correct database name in `postgresql.conf` |
+| PT700 | LLM endpoint unreachable or returned HTTP error: `<detail>` | `pg_ripple.llm_endpoint` is empty, or the HTTP call to the LLM failed | Set a valid endpoint URL; check network access and API key |
+| PT701 | LLM response did not contain a valid SPARQL query | The LLM returned text that is not a SPARQL query | Add few-shot examples via `add_llm_example()`; switch to a more capable model |
+| PT702 | LLM-generated SPARQL query failed to parse: `<parse_error>` | The generated SPARQL string could not be parsed by spargebra | Add a few-shot example for this question pattern; use a SPARQL-fine-tuned model |
 | PT703 | merge worker watchdog: worker has been silent for `<N>` seconds | The background merge worker may have crashed | Check `pg_log` for crash details; restart PostgreSQL |
 | PT704 | extension version mismatch: binary `<v1>`, control `<v2>` | The compiled extension version does not match `pg_ripple.control` | Rebuild and reinstall the extension |
 | PT705 | GUC validation: `<param>` out of range | A GUC parameter was set to an invalid value | Check the [GUC Reference](guc-reference.md) for valid ranges |

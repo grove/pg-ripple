@@ -35,6 +35,7 @@ mod framing;
 mod fts;
 mod graphrag_admin;
 mod gucs;
+mod llm;
 mod maintenance_api;
 mod schema;
 mod shacl;
@@ -1430,6 +1431,46 @@ pub extern "C-unwind" fn _PG_init() {
         &FEDERATION_MAX_RESPONSE_BYTES,
         -1,
         i32::MAX,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+
+    // ── v0.49.0 GUCs — AI & LLM Integration ──────────────────────────────────
+    pgrx::GucRegistry::define_string_guc(
+        c"pg_ripple.llm_endpoint",
+        c"LLM API base URL for NL→SPARQL generation (empty = disabled, 'mock' = built-in test mock). \
+          Must be an OpenAI-compatible base URL. (v0.49.0)",
+        c"",
+        &LLM_ENDPOINT,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+
+    pgrx::GucRegistry::define_string_guc(
+        c"pg_ripple.llm_model",
+        c"LLM model identifier for NL→SPARQL generation (default: gpt-4o). (v0.49.0)",
+        c"",
+        &LLM_MODEL,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+
+    pgrx::GucRegistry::define_string_guc(
+        c"pg_ripple.llm_api_key_env",
+        c"Name of the environment variable holding the LLM API key \
+          (default: PG_RIPPLE_LLM_API_KEY). Never stored inline. (v0.49.0)",
+        c"",
+        &LLM_API_KEY_ENV,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+
+    pgrx::GucRegistry::define_bool_guc(
+        c"pg_ripple.llm_include_shapes",
+        c"Include active SHACL shapes as LLM context when generating SPARQL \
+          (default: on). (v0.49.0)",
+        c"",
+        &LLM_INCLUDE_SHAPES,
         GucContext::Userset,
         GucFlags::default(),
     );
