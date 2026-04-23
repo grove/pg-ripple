@@ -3204,6 +3204,9 @@ All 24 Datalog endpoints respond correctly in integration tests. `GET /datalog/r
 >
 > **Effort estimate: 5–7 person-weeks**
 
+<details>
+<summary>Completed items (click to expand)</summary>
+
 ### Deliverables
 
 - [x] **W3C manifest parser** (`tests/w3c/manifest.rs` new module)
@@ -3266,6 +3269,8 @@ All 24 Datalog endpoints respond correctly in integration tests. `GET /datalog/r
 ### Exit Criteria
 
 Smoke subset (180 tests) passes with 0 unexpected failures on `main`. Full suite (3,000+ tests) runs in < 2 minutes on an 8-core CI runner. Per-category pass rate report uploaded as CI artifact. Known-failures manifest has 0 entries for `optional` and `aggregates` categories (those bugs fixed in v0.40.0). Migration chain test passes through 0.41.0.
+
+</details>
 
 ---
 
