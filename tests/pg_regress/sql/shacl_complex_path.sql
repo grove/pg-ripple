@@ -33,8 +33,7 @@ SELECT pg_ripple.load_shacl(
 ) >= 1 AS shapes_loaded;
 
 -- Test 2: Validation of a conformant node returns no violations
-SELECT jsonb_array_length(violations) AS violation_count
-FROM pg_ripple.validate();
+SELECT jsonb_array_length(pg_ripple.validate()->'violations') AS violation_count;
 
 -- Test 3: Add a node that violates minCount
 SELECT pg_ripple.insert_triple(
@@ -44,16 +43,14 @@ SELECT pg_ripple.insert_triple(
 ) > 0 AS noname_type_inserted;
 
 -- NoName has no ex:name -- should produce a minCount violation.
-SELECT jsonb_array_length(violations) >= 1 AS has_violations
-FROM pg_ripple.validate();
+SELECT jsonb_array_length(pg_ripple.validate()->'violations') >= 1 AS has_violations;
 
 -- Test 4: Drop the violating node and re-validate
 SELECT pg_ripple.sparql_update($$
     DELETE WHERE { <http://shacl.example.org/NoName> ?p ?o . }
 $$) >= 0 AS noname_cleaned;
 
-SELECT jsonb_array_length(violations) AS violation_count_after_fix
-FROM pg_ripple.validate();
+SELECT jsonb_array_length(pg_ripple.validate()->'violations') AS violation_count_after_fix;
 
 -- Cleanup
 SELECT pg_ripple.sparql_update($$

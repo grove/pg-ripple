@@ -785,22 +785,11 @@ pgrx::extension_sql!(
 // v0.51.0: Security Hardening & Production Readiness.
 // New SQL-visible features: sparql_max_algebra_depth / sparql_max_triple_patterns GUCs,
 // sparql_csv() / sparql_tsv(), predicate_workload_stats().
-pgrx::extension_sql!(
-    r#"
-CREATE TABLE IF NOT EXISTS _pg_ripple.predicate_stats (
-    predicate_id BIGINT  PRIMARY KEY,
-    query_count  BIGINT  NOT NULL DEFAULT 0,
-    merge_count  BIGINT  NOT NULL DEFAULT 0,
-    last_merged  TIMESTAMPTZ
-);
-"#,
-    name = "v051_predicate_stats",
-    requires = ["v050_schema_version_fresh_install_stamp"]
-);
-
+// No schema changes for fresh install — predicate_stats is created on-demand
+// by enable_live_statistics() via pg_trickle, and by the upgrade migration.
 pgrx::extension_sql!(
     "INSERT INTO _pg_ripple.schema_version (version, upgraded_from, installed_at) \
      VALUES ('0.51.0', NULL, clock_timestamp());",
     name = "v051_schema_version_fresh_install_stamp",
-    requires = ["v051_predicate_stats"]
+    requires = ["v050_schema_version_fresh_install_stamp"]
 );

@@ -44,8 +44,7 @@ SELECT pg_ripple.load_shacl(
 (1 row)
 
 -- Test 2: Validation of a conformant node returns no violations
-SELECT jsonb_array_length(violations) AS violation_count
-FROM pg_ripple.validate();
+SELECT jsonb_array_length(pg_ripple.validate()->'violations') AS violation_count;
  violation_count 
 -----------------
                0
@@ -63,8 +62,7 @@ SELECT pg_ripple.insert_triple(
 (1 row)
 
 -- NoName has no ex:name -- should produce a minCount violation.
-SELECT jsonb_array_length(violations) >= 1 AS has_violations
-FROM pg_ripple.validate();
+SELECT jsonb_array_length(pg_ripple.validate()->'violations') >= 1 AS has_violations;
  has_violations 
 ----------------
  t
@@ -79,8 +77,7 @@ $$) >= 0 AS noname_cleaned;
  t
 (1 row)
 
-SELECT jsonb_array_length(violations) AS violation_count_after_fix
-FROM pg_ripple.validate();
+SELECT jsonb_array_length(pg_ripple.validate()->'violations') AS violation_count_after_fix;
  violation_count_after_fix 
 ---------------------------
                          0
