@@ -228,6 +228,8 @@ jobs:
         with:
           context: .
           push: true
+          build-args: |
+            PGRX_VERSION=${{ env.PGRX_VERSION }}
           tags: |
             ghcr.io/grove/pg-ripple:${{ steps.version.outputs.version }}
             ghcr.io/grove/pg-ripple:latest

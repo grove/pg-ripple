@@ -19,12 +19,11 @@
 #   For production deployments, use password-based authentication instead.
 
 # ── Build stage ───────────────────────────────────────────────────────────────
-# pgrx 0.17 uses let_chains (stabilised in Rust 1.88). The Cargo.toml
-# rust-version is set to 1.85, but the actual minimum for pgrx-sql-entity-graph
-# is 1.88+.  Use rust:1-bookworm which tracks the latest stable 1.x release.
+# pgrx 0.18 requires Rust stable. Use rust:1-bookworm which tracks the latest
+# stable 1.x release.
 FROM rust:1-bookworm AS builder
 
-ARG PGRX_VERSION=0.17.0
+ARG PGRX_VERSION=0.18.0
 
 # Add the PostgreSQL Global Development Group APT repository so we get the
 # exact PostgreSQL 18 server development headers that match postgres:18-bookworm.
