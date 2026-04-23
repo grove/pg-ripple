@@ -770,3 +770,14 @@ pgrx::extension_sql!(
     name = "v049_schema_version_fresh_install_stamp",
     requires = ["v049_llm_examples"]
 );
+
+// v0.50.0: Developer Experience & GraphRAG Polish.
+// New Rust functions: explain_sparql(query, analyze) extended with cache_status +
+// actual_rows; rag_context(question, k) full RAG pipeline.
+// No schema changes — stamp only.
+pgrx::extension_sql!(
+    "INSERT INTO _pg_ripple.schema_version (version, upgraded_from, installed_at) \
+     VALUES ('0.50.0', NULL, clock_timestamp());",
+    name = "v050_schema_version_fresh_install_stamp",
+    requires = ["v049_schema_version_fresh_install_stamp"]
+);

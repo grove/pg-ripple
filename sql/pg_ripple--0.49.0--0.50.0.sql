@@ -1,0 +1,14 @@
+-- Migration v0.49.0 → v0.50.0: Developer Experience & GraphRAG Polish
+--
+-- New functions introduced in v0.50.0 (compiled from Rust — no SQL changes):
+--
+--   pg_ripple.rag_context(question TEXT, k INT DEFAULT 10) RETURNS TEXT
+--     Full RAG pipeline: vector recall → 1-hop SPARQL expansion → context
+--     string assembly.  Gracefully degrades when pgvector is absent.
+--
+--   pg_ripple.explain_sparql(query TEXT, analyze BOOL DEFAULT FALSE) RETURNS JSONB
+--     Extended to include `cache_status` (hit/miss/bypass) and `actual_rows`
+--     keys alongside the existing `algebra`, `sql`, `plan`, and `cache_hit`
+--     keys.  DESCRIBE queries no longer return an error.
+--
+-- No schema changes are required for this migration.

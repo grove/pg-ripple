@@ -3950,14 +3950,14 @@ W3C SHACL Core test suite passes 35/35 constraints. OWL 2 RL CI gate upgraded to
 
 ### Deliverables
 
-- [ ] **SPARQL query debugger** (Feature B-3)
+- [x] **SPARQL query debugger** (Feature B-3)
   - Extend `pg_ripple.explain_sparql(query TEXT)` to return JSONB with: algebra tree, generated SQL, plan-cache status (`hit` / `miss` / `bypass`), per-operator estimated rows, per-operator actual rows (when `analyze := true`)
   - New overload `pg_ripple.explain_sparql(query TEXT, analyze BOOL DEFAULT FALSE) RETURNS JSONB`
   - VS Code extension renders the JSONB as a collapsible tree with operator annotations
   - pg_regress `sparql_explain_analyze.sql`: assert the JSONB schema is stable across SELECT, ASK, CONSTRUCT, and DESCRIBE query types
   - VS Code extension renders the JSONB as a collapsible tree with operator annotations (deferred to v1.10)
 
-- [ ] **RAG pipeline with graph-contextualised embeddings** (Feature C-3)
+- [x] **RAG pipeline with graph-contextualised embeddings** (Feature C-3)
   - New SQL function `pg_ripple.rag_context(question TEXT, k INT DEFAULT 10) RETURNS TEXT`
   - Step 1: embed `question` via `pg_ripple.embed_text()` (from v0.27.0)
   - Step 2: vector recall — top-k entities by HNSW similarity
@@ -3972,9 +3972,9 @@ W3C SHACL Core test suite passes 35/35 constraints. OWL 2 RL CI gate upgraded to
 
 ### Documentation
 
-- [ ] `user-guide/explain-sparql.md` — EXPLAIN output format, ANALYZE mode, interpreting the algebra tree
-- [ ] `user-guide/rag-pipeline.md` — `rag_context()` step-by-step, tuning k, combining with NL→SPARQL
-- [ ] Release notes for v0.50.0
+- [x] `user-guide/explain-sparql.md` — EXPLAIN output format, ANALYZE mode, interpreting the algebra tree
+- [x] `user-guide/rag-pipeline.md` — `rag_context()` step-by-step, tuning k, combining with NL→SPARQL
+- [x] Release notes for v0.50.0
 
 ### Exit Criteria
 
