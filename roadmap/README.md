@@ -1,6 +1,6 @@
 # pg_ripple — Roadmap Feature Descriptions
 
-This directory contains plain-language descriptions of pg_ripple's upcoming releases (v0.51.0–v0.53.0). The goal is to give a clear picture of what each version delivers, why it matters, and how much work is involved — without requiring deep technical knowledge.
+This directory contains plain-language descriptions of pg_ripple's upcoming releases (v0.51.0–v0.54.0). The goal is to give a clear picture of what each version delivers, why it matters, and how much work is involved — without requiring deep technical knowledge.
 
 **For the complete roadmap** with all versions from v0.1.0 to v1.0.0 and detailed technical deliverables, see [ROADMAP.md](../ROADMAP.md).
 
