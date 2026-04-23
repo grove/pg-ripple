@@ -751,6 +751,9 @@ Round-trip: load Turtle → query → export Turtle. All major RDF serialization
 >
 > **Effort estimate: 10–12 person-weeks**
 
+<details>
+<summary>Completed items (click to expand)</summary>
+
 See [plans/ecosystem/datalog.md](plans/ecosystem/datalog.md) for the full design.
 
 <details>
@@ -3282,6 +3285,9 @@ Smoke subset (180 tests) passes with 0 unexpected failures on `main`. Full suite
 >
 > **Effort estimate: 10–12 person-weeks**
 
+<details>
+<summary>Completed items (click to expand)</summary>
+
 ### Deliverables
 
 - [x] **Parallel merge worker pool** (`src/worker.rs`, `src/storage/merge.rs`)
@@ -3348,6 +3354,8 @@ Smoke subset (180 tests) passes with 0 unexpected failures on `main`. Full suite
 
 Parallel merge stress test passes (100 writers, 4 workers, no lost deletes). VoID stats fetched on endpoint registration. Independent SERVICE clauses execute in parallel (verifiable via `explain_sparql()`). CDC subscription delivers `NOTIFY` payloads for all inserts matching the filter. HTTPS cert validation enforced in `pg_ripple_http`. Migration chain test passes through 0.42.0.
 
+</details>
+
 ---
 
 ## v0.43.0 — WatDiv + Jena Conformance Suite
@@ -3357,6 +3365,9 @@ Parallel merge stress test passes (100 writers, 4 workers, no lost deletes). VoI
 > **In plain language:** W3C conformance (v0.41.0) proves pg_ripple is correct on small, well-defined fixtures. This release proves it is correct *at scale* and on the implementation edge cases that W3C deliberately leaves underspecified. WatDiv loads 10M–100M triples and runs 100–1,000 queries across four complexity levels (star, chain, snowflake, complex) — catching SQL planner regressions and VP table performance cliffs that only appear under realistic data distributions. Apache Jena contributes ~1,000 additional tests covering type coercion corner cases, timezone handling in date comparisons, numeric precision, and blank-node scoping rules that the W3C suite glosses over.
 >
 > **Effort estimate: 5–7 person-weeks** (90% infrastructure reuse from v0.41.0)
+
+<details>
+<summary>Completed items (click to expand)</summary>
 
 ### Deliverables
 
@@ -3409,6 +3420,8 @@ Parallel merge stress test passes (100 writers, 4 workers, no lost deletes). VoI
 
 Full Jena suite (1,000 tests) completes in < 3 minutes on CI. WatDiv 100-template suite at 10M triples completes in < 5 minutes. Jena known-failures manifest ≤ 30 `XFAIL` entries (type coercion and date-time edge cases acceptable until addressed post-1.0). WatDiv row-count correctness within ±0.1% for all 100 templates. Migration chain test passes through 0.43.0.
 
+</details>
+
 ---
 
 ## v0.44.0 — LUBM Conformance Suite
@@ -3418,6 +3431,9 @@ Full Jena suite (1,000 tests) completes in < 3 minutes on CI. WatDiv 100-templat
 > **In plain language:** LUBM is a classic academic benchmark that generates a synthetic university-domain ontology dataset (scalable from 1K to 8M+ triples) and defines 14 canonical queries that exercise OWL RL inference rules — subclass traversal, property inheritance, inverse properties, transitivity, and domain/range entailments. This release wires LUBM into the conformance harness to validate that pg_ripple's Datalog engine and SPARQL query layer produce correct results when ontological reasoning is active. A dedicated Datalog validation sub-suite tests the Datalog API directly (rule compilation, stratification, iterative inference, goal queries, and materialization) to catch bugs invisible to SPARQL-level testing. It is the only benchmark that tests the *interaction* between the SPARQL translator and the Datalog inference engine under realistic ontological load.
 >
 > **Effort estimate: 3–5 person-weeks** (80% harness reuse from v0.41.0 and v0.43.0; +2–3 pw for Datalog API validation sub-suite)
+
+<details>
+<summary>Completed items (click to expand)</summary>
 
 ### Deliverables
 
@@ -3467,6 +3483,8 @@ Full Jena suite (1,000 tests) completes in < 3 minutes on CI. WatDiv 100-templat
 
 All 14 LUBM queries return exact reference cardinalities at `--univ 1`. Ontology + `--univ 1` dataset loads and all queries complete in < 30 seconds on CI. All Datalog API calls in the sub-suite return results matching pre-computed baselines (rule count, iteration count, inferred triple counts, goal query results). Materialization performance at `--univ 1` is < 5 seconds. Custom Datalog rule validation passes (transitive closure results match ground truth). Known-failures manifest has 0 `lubm:` entries at release. Migration chain test passes through 0.44.0.
 
+</details>
+
 ---
 
 ## v0.45.0 — SHACL Completion, Datalog Robustness & Crash Recovery
@@ -3476,6 +3494,9 @@ All 14 LUBM queries return exact reference cardinalities at `--univ 1`. Ontology
 > **In plain language:** This release finishes the SHACL implementation by adding the two remaining Core constraints (`sh:equals` and `sh:disjoint`), makes violation messages readable by always including the decoded focus-node IRI, and proves the async validation queue can sustain a sustained burst of 10,000 writes per second. On the Datalog side it ensures that a crash in one parallel evaluation worker rolls back all other workers cleanly, and that user-supplied lattice join functions are validated before the engine tries to call them. A new set of crash-recovery tests covers the two scenarios that were never tested: killing PostgreSQL mid-promotion of a rare predicate and killing it mid-inference. Finally, every migration script from this release onward carries a standardised header documenting the schema changes, data-rewrite cost, downgrade strategy, and the test file that covers it.
 >
 > **Effort estimate: 4–6 person-weeks**
+
+<details>
+<summary>Completed items (click to expand)</summary>
 
 ### Deliverables
 
@@ -3539,6 +3560,8 @@ All 14 LUBM queries return exact reference cardinalities at `--univ 1`. Ontology
 
 `sh:equals` and `sh:disjoint` pg_regress tests pass. SHACL violation messages include decoded focus-node IRIs. Parallel-strata rollback test demonstrates no partial facts on deliberate failure. `lattice.join_fn` injection via search-path ambiguous name is rejected at `create_lattice()` time with PT541. WFS cap test passes: PT520 WARNING emitted, partial result returned. Both new crash-recovery scripts exit 0. Migration chain test passes through 0.45.0.
 
+</details>
+
 ---
 
 ## v0.46.0 — Property-Based Testing, Fuzz Hardening & OWL 2 RL Conformance
@@ -3548,6 +3571,9 @@ All 14 LUBM queries return exact reference cardinalities at `--univ 1`. Ontology
 > **In plain language:** Three gaps that can hide subtle bugs: (1) randomised property-based tests that assert algebraic invariants about the SPARQL translator and dictionary encoder — if encoding the same term twice ever yields different IDs, or if a query changes semantics when extra whitespace is added, these tests catch it; (2) fuzz tests for the federation result parser, which accepts untrusted network data; and (3) the W3C OWL 2 RL test manifests, which verify that pg_ripple's Datalog engine handles the full range of ontological reasoning that OWL 2 RL demands. On the performance side, a LIMIT push-down eliminates redundant decoding rows for paginated queries, sequence range pre-allocation removes a contention point in parallel Datalog, and BSBM joins the CI suite as a regression gate. The rustdoc lint ensures no public function ships without a doc comment.
 >
 > **Effort estimate: 5–7 person-weeks**
+
+<details>
+<summary>Completed items (click to expand)</summary>
 
 ### Deliverables
 
@@ -3637,6 +3663,8 @@ All 14 LUBM queries return exact reference cardinalities at `--univ 1`. Ontology
 
 All three `proptest` suites run 10,000 cases each with no failures. Federation result decoder fuzz target runs 10 minutes without panics. Datalog convergence suite: fixpoint on 1M DBpedia triples in ≤ 20 iterations, wall-clock < 5 minutes. OWL 2 RL suite: ≥ 80% pass rate at release (target 95% for v1.0.0). TopN push-down `EXPLAIN` shows `Limit` node for ORDER BY + LIMIT queries; result set unchanged. BSBM-at-1M-triples baseline stored and regression gate active. No missing-docs warnings for public `#[pg_extern]` functions. HTTP companion starts cleanly with `PG_RIPPLE_HTTP_CA_BUNDLE` set to a valid PEM file. Migration chain test passes through 0.46.0.
 
+</details>
+
 ---
 ## v0.47.0 — SHACL Truthfulness, Dead-Code Activation & Architecture Refactor
 
@@ -3645,6 +3673,9 @@ All three `proptest` suites run 10,000 cases each with no failures. Federation r
 > **In plain language:** v0.45.0 was titled "SHACL Completion" but the post-release audit (PLAN_OVERALL_ASSESSMENT_3.md) found four constraints that accept any data without complaint — the parser records them but the validator ignores them. That is fixed here. The `preallocate_sid_ranges()` function added in v0.46.0 to speed up parallel Datalog has been sitting unused (clippy `dead_code` warning); it gets wired in. The `src/sparql/translate/` refactor that began in v0.38.0 finally lands, shrinking `sqlgen.rs` from 3 600 lines into focused per-operator modules. Five new fuzz targets cover the attack surfaces that had only one target before. Four new crash-recovery scenarios close the remaining operational safety gaps.
 >
 > **Effort estimate: 8–10 person-weeks**
+
+<details>
+<summary>Completed items (click to expand)</summary>
 
 ### Deliverables
 
@@ -3739,6 +3770,8 @@ All three `proptest` suites run 10,000 cases each with no failures. Federation r
 
 All four previously parsed-but-unchecked SHACL constraints trigger violations on non-conforming data. `preallocate_sid_ranges()` has zero clippy `dead_code` warnings. `sqlgen.rs` ≤ 800 LoC. All five fuzz targets run 10 minutes without panics. All four crash-recovery scenarios pass. Three cache-stats SRFs return non-zero `hit_rate` after a warm workload. OWL 2 RL pass-rate baseline documented. `cargo audit` and `cargo deny` green in CI.
 
+</details>
+
 ---
 
 ## v0.48.0 — SHACL Core Completeness, OWL 2 RL Closure & SPARQL Completeness
@@ -3748,6 +3781,9 @@ All four previously parsed-but-unchecked SHACL constraints trigger violations on
 > **In plain language:** After v0.47.0 makes the existing SHACL constraints truthful, this release adds the remaining seven SHACL Core constraints — the string-length bounds, exclusive/inclusive numeric ranges, and `sh:xone` — plus the complex path expressions (`sh:inversePath`, `sh:alternativePath`, sequence paths, `*`, `+`, `?`) that real-world Schema.org and SHACL-AF schemas depend on. On the reasoning side, five missing OWL 2 RL rules close the gap with the W3C OWL 2 RL profile. SPARQL 1.1 Update gains its three missing operations (`MOVE`, `COPY`, `ADD`). The SPARQL-star variable-inside-quoted-triple pattern finally returns rows instead of silently empty results. This release also delivers the operational hardening items deferred from v0.47.0.
 >
 > **Effort estimate: 6–8 person-weeks**
+
+<details>
+<summary>Completed items (click to expand)</summary>
 
 ### Deliverables
 
@@ -3837,6 +3873,8 @@ All four previously parsed-but-unchecked SHACL constraints trigger violations on
 
 W3C SHACL Core test suite passes 35/35 constraints. OWL 2 RL CI gate upgraded to required at ≥ 95%. All three SPARQL Update operations (MOVE, COPY, ADD) pass the W3C SPARQL 1.1 Update test suite entries for those operations. SPARQL-star variable patterns return correct rows. WatDiv latency baselines recorded and regression gate active. `pg_upgrade` compatibility document published. `pg_dump` / restore round-trip test passes. Migration chain test passes through v0.48.0.
 
+</details>
+
 ---
 
 ## v0.49.0 — AI & LLM Integration
@@ -3846,6 +3884,9 @@ W3C SHACL Core test suite passes 35/35 constraints. OWL 2 RL CI gate upgraded to
 > **In plain language:** Two high-leverage AI features: a function that takes plain English and returns a SPARQL query (using any configured LLM endpoint — Ollama, OpenAI, Claude, or a self-hosted model); and a function that uses the existing vector embeddings to surface candidate `owl:sameAs` pairs — entities that might be the same thing expressed differently. Both build on infrastructure already in place (the SPARQL engine and the v0.27.0 pgvector integration) and require no new storage schema changes.
 >
 > **Effort estimate: 4–6 person-weeks**
+
+<details>
+<summary>Completed items (click to expand)</summary>
 
 ### Deliverables
 
@@ -3897,6 +3938,8 @@ W3C SHACL Core test suite passes 35/35 constraints. OWL 2 RL CI gate upgraded to
 ### Exit Criteria
 
 `pg_ripple.sparql_from_nl()` returns a parseable SPARQL query against a mock LLM endpoint. `pg_ripple.suggest_sameas()` returns candidates for two overlapping test datasets with ≥ 90% recall. `apply_sameas_candidates()` does not exceed `sameas_max_cluster_size`. All GUC validators pass. PT700–PT702 are triggered by the appropriate error conditions. Migration chain test passes through v0.49.0.
+
+</details>
 
 ---
 
