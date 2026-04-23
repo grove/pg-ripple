@@ -166,4 +166,24 @@ mod pg_ripple {
             .unwrap_or_else(|e| pgrx::error!("{}", e));
         pgrx::JsonB(result)
     }
+
+    // ── v0.52.0: Single-triple and star-pattern JSON-LD serializers ───────────
+
+    /// Decode a single triple `(s, p, o)` from dictionary IDs to a JSON-LD object.
+    ///
+    /// Returns a JSON-LD node with `@id`, the predicate IRI as the property key,
+    /// and the object value.  Uses the backend-local LRU dictionary cache.
+    #[pg_extern]
+    fn triple_to_jsonld(s: i64, p: i64, o: i64) -> pgrx::JsonB {
+        pgrx::JsonB(crate::export::triple_to_jsonld(s, p, o))
+    }
+
+    /// Collect all triples for `subject` into a single JSON-LD document.
+    ///
+    /// Performs a star-pattern scan over all VP tables for the given subject
+    /// dictionary ID and groups the results into one JSON-LD node.
+    #[pg_extern]
+    fn triples_to_jsonld(subject: i64) -> pgrx::JsonB {
+        pgrx::JsonB(crate::export::triples_to_jsonld_by_subject(subject))
+    }
 }

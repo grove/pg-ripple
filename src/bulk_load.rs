@@ -628,3 +628,197 @@ fn parse_nt_star_literal(s: &str) -> Option<(i64, &str)> {
         Some((id, rest))
     }
 }
+
+// ─── JSON → N-Triples (v0.52.0) ──────────────────────────────────────────────
+
+/// Escape a string for safe use inside an N-Triples double-quoted literal.
+fn escape_nt_literal(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 4);
+    for c in s.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            _ => out.push(c),
+        }
+    }
+    out
+}
+
+/// Convert a `serde_json::Value` to an N-Triples object term string.
+///
+/// Objects become a blank node with further triples (emitted into `extra`).
+/// Arrays become repeated triples on the caller side.
+fn json_value_to_nt_term(
+    val: &serde_json::Value,
+    context: &std::collections::HashMap<String, String>,
+    bn_counter: &mut u64,
+    extra: &mut String,
+) -> Option<String> {
+    match val {
+        serde_json::Value::String(s) => Some(format!("\"{}\"", escape_nt_literal(s))),
+        serde_json::Value::Number(n) => {
+            if let Some(i) = n.as_i64() {
+                Some(format!(
+                    "\"{}\"^^<http://www.w3.org/2001/XMLSchema#integer>",
+                    i
+                ))
+            } else {
+                n.as_f64().map(|f| {
+                    format!(
+                        "\"{}\"^^<http://www.w3.org/2001/XMLSchema#decimal>",
+                        f
+                    )
+                })
+            }
+        }
+        serde_json::Value::Bool(b) => Some(format!(
+            "\"{}\"^^<http://www.w3.org/2001/XMLSchema#boolean>",
+            b
+        )),
+        serde_json::Value::Null => None,
+        serde_json::Value::Object(map) => {
+            *bn_counter += 1;
+            let bn = format!("_:b{}", bn_counter);
+            for (k, v) in map {
+                let pred_iri = resolve_key_to_iri(k, context);
+                json_object_to_ntriples_inner(&bn, &pred_iri, v, context, bn_counter, extra);
+            }
+            Some(bn)
+        }
+        serde_json::Value::Array(_) => None, // arrays handled at the caller level
+    }
+}
+
+/// Resolve a JSON key to a full IRI using the provided context mapping.
+///
+/// The context maps short keys (e.g. `"name"`) to full IRIs
+/// (e.g. `"https://schema.org/name"`).  If no mapping exists the key is used
+/// as-is, which produces a relative IRI (acceptable for local development).
+fn resolve_key_to_iri(key: &str, context: &std::collections::HashMap<String, String>) -> String {
+    context.get(key).cloned().unwrap_or_else(|| key.to_owned())
+}
+
+/// Recursively emit N-Triples for one `(subject, predicate, value)` combination.
+fn json_object_to_ntriples_inner(
+    subject: &str,
+    pred_iri: &str,
+    val: &serde_json::Value,
+    context: &std::collections::HashMap<String, String>,
+    bn_counter: &mut u64,
+    out: &mut String,
+) {
+    let pred_term = format!("<{}>", pred_iri);
+    match val {
+        serde_json::Value::Array(items) => {
+            for item in items {
+                json_object_to_ntriples_inner(subject, pred_iri, item, context, bn_counter, out);
+            }
+        }
+        _ => {
+            if let Some(obj_term) = json_value_to_nt_term(val, context, bn_counter, out) {
+                let s_term = if subject.starts_with("_:") {
+                    subject.to_owned()
+                } else {
+                    format!("<{}>", subject)
+                };
+                out.push_str(&s_term);
+                out.push(' ');
+                out.push_str(&pred_term);
+                out.push(' ');
+                out.push_str(&obj_term);
+                out.push_str(" .\n");
+            }
+        }
+    }
+}
+
+/// Convert a flat JSON object to N-Triples, mapping each key to a predicate IRI.
+///
+/// - `payload` — JSON object; keys become predicates, values become objects.
+/// - `subject_iri` — IRI for the RDF subject (without angle brackets).
+/// - `type_iri` — optional `rdf:type` IRI.  When provided, a `<subject>
+///   <rdf:type> <type_iri> .` triple is prepended.
+/// - `context` — optional JSONB `{"key": "iri", …}` mapping.  When `None`,
+///   keys are used verbatim as IRIs (useful when keys are already full IRIs or
+///   the caller applies vocabulary alignment via Datalog rules separately).
+///
+/// Returns the N-Triples string.  Nested objects become blank nodes.  Arrays
+/// produce one triple per element.  `null` values are silently skipped.
+pub fn json_to_ntriples(
+    payload: &serde_json::Value,
+    subject_iri: &str,
+    type_iri: Option<&str>,
+    context_map: Option<&serde_json::Value>,
+) -> String {
+    let map = match payload {
+        serde_json::Value::Object(m) => m,
+        _ => {
+            pgrx::warning!("json_to_ntriples: payload must be a JSON object");
+            return String::new();
+        }
+    };
+
+    // Build context: key → IRI lookup table.
+    let mut ctx: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+    if let Some(serde_json::Value::Object(c)) = context_map {
+        if let Some(serde_json::Value::String(vocab)) = c.get("@vocab") {
+            // @vocab provides the default IRI prefix for all unmapped keys.
+            for (k, _) in map {
+                if !k.starts_with('@') && !c.contains_key(k.as_str()) {
+                    ctx.insert(k.clone(), format!("{}{}", vocab, k));
+                }
+            }
+        }
+        for (k, v) in c {
+            if k == "@vocab" || k.starts_with('@') {
+                continue;
+            }
+            if let serde_json::Value::String(iri) = v {
+                ctx.insert(k.clone(), iri.clone());
+            }
+        }
+    }
+
+    let mut out = String::with_capacity(512);
+    let mut bn_counter: u64 = 0;
+
+    // Emit rdf:type triple if requested.
+    if let Some(t) = type_iri {
+        out.push_str(&format!(
+            "<{}> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <{}> .\n",
+            subject_iri, t
+        ));
+    }
+
+    // Emit one triple per key/value pair in the payload.
+    for (key, val) in map {
+        if key.starts_with('@') {
+            continue; // skip JSON-LD keywords
+        }
+        let pred_iri = resolve_key_to_iri(key, &ctx);
+        json_object_to_ntriples_inner(subject_iri, &pred_iri, val, &ctx, &mut bn_counter, &mut out);
+    }
+
+    out
+}
+
+/// Load the N-Triples produced by `json_to_ntriples` directly into the store.
+///
+/// This is the common path used by the `json_to_ntriples_and_load` SQL function:
+/// it converts the JSON to N-Triples then immediately loads them, returning the
+/// count of triples inserted.
+pub fn json_to_ntriples_and_load(
+    payload: &serde_json::Value,
+    subject_iri: &str,
+    type_iri: Option<&str>,
+    context_map: Option<&serde_json::Value>,
+) -> i64 {
+    let nt = json_to_ntriples(payload, subject_iri, type_iri, context_map);
+    if nt.is_empty() {
+        return 0;
+    }
+    load_ntriples(&nt, false)
+}

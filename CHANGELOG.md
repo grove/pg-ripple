@@ -13,6 +13,34 @@ Versions correspond to the milestones in [ROADMAP.md](ROADMAP.md).
 
 ---
 
+## [0.52.0] — 2026-05-01 — pg-trickle Relay Integration
+
+**Implements the v0.52.0 roadmap: JSON→RDF pipeline, CDC bridge triggers, JSON-LD event serializer, outbox dedup keys, vocabulary alignment templates, and pg-trickle runtime detection with graceful degradation.**
+
+### What's new
+
+- **JSON → RDF pipeline** (`src/bulk_load.rs`): New `pg_ripple.json_to_ntriples(payload JSONB, subject_iri TEXT, type_iri TEXT, context JSONB) RETURNS TEXT` converts any JSON object to N-Triples using an optional `@vocab` context for key-to-IRI mapping. Handles nested objects (blank nodes), arrays (repeated predicates), and plain string values. `json_to_ntriples_and_load()` combines conversion and load in one call.
+
+- **CDC bridge triggers** (`src/storage/cdc_bridge.rs`): New `pg_ripple.enable_cdc_bridge_trigger(name, predicate, outbox)` installs a per-predicate `AFTER INSERT` trigger on the VP delta table that decodes dictionary IDs and writes a JSON-LD event with a dedup key to the specified outbox table within the same transaction. `disable_cdc_bridge_trigger(name)` removes it. `cdc_bridge_triggers()` SRF lists all registered triggers.
+
+- **JSON-LD event serializer** (`src/export.rs`): New `pg_ripple.triple_to_jsonld(s, p, o BIGINT) RETURNS JSONB` decodes a single triple from dictionary IDs and returns a JSON-LD object. `triples_to_jsonld(subject BIGINT)` performs a star-pattern scan for all triples of a subject and returns a grouped JSON-LD node.
+
+- **Outbox dedup key** (`src/storage/mod.rs`): New `pg_ripple.statement_dedup_key(s, p, o BIGINT) RETURNS TEXT` looks up the statement ID (`i` column) for a triple and returns `'ripple:{sid}'` as a relay-compatible dedup key. Returns NULL when the triple does not exist.
+
+- **Vocabulary alignment templates** (`sql/vocab/`): Four built-in Datalog rule sets loadable via `pg_ripple.load_vocab_template(name TEXT) RETURNS INT`:
+  - `schema_to_saref` — Schema.org ↔ SAREF IoT sensor data alignment
+  - `schema_to_fhir` — Schema.org ↔ FHIR R4 basic resources (Patient, Observation)
+  - `schema_to_provo` — Schema.org ↔ PROV-O provenance ontology
+  - `generic_to_schema` — generic JSON key → Schema.org property heuristics
+
+- **pg-trickle runtime detection** (`src/views_api.rs`, `src/cdc_bridge_api.rs`): `pg_ripple.trickle_available() RETURNS BOOL` returns `true` when both `pg_ripple.trickle_integration = on` and the `pg_trickle` extension is installed. Bridge functions raise SQLSTATE PT800 when pg-trickle is absent or integration is disabled.
+
+- **New GUCs** (`src/gucs.rs`): `pg_ripple.cdc_bridge_enabled` (bool, default off), `pg_ripple.cdc_bridge_batch_size` (int, default 100), `pg_ripple.cdc_bridge_flush_ms` (int, default 200), `pg_ripple.cdc_bridge_outbox_table` (text), `pg_ripple.trickle_integration` (bool, default on).
+
+- **CDC bridge catalog** (`_pg_ripple.cdc_bridge_triggers`): New catalog table records all registered CDC bridge triggers with columns `(name, predicate_id, outbox_table, created_at)`.
+
+---
+
 ## [0.51.0] — 2026-04-23 — Security Hardening & Production Readiness
 
 **Completes the v0.51.0 roadmap: SPARQL DoS protection (PT440), OWL 2 RL 100% conformance, SPARQL CSV/TSV output, SHACL complex path traversal, per-predicate workload stats, OTLP tracing wiring, non-root Docker container, blocking cargo-audit on PRs, SBOM generation, and comprehensive operational tooling.**

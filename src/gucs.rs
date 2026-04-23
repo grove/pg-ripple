@@ -618,3 +618,42 @@ pub static SPARQL_MAX_TRIPLE_PATTERNS: pgrx::GucSetting<i32> = pgrx::GucSetting:
 /// Example: `'http://jaeger:4318/v1/traces'`
 pub static TRACING_OTLP_ENDPOINT: pgrx::GucSetting<Option<std::ffi::CString>> =
     pgrx::GucSetting::<Option<std::ffi::CString>>::new(None);
+
+// ── v0.52.0 GUCs — pg-trickle Relay Integration ───────────────────────────────
+
+/// GUC: master switch for the CDC → pg-trickle outbox bridge worker (v0.52.0).
+///
+/// When `true`, the `_pg_ripple.cdc_bridge_worker` background worker listens
+/// on the CDC NOTIFY channel, decodes dictionary IDs in bulk, and writes
+/// JSON-LD events to the configured outbox table.  Off by default; requires
+/// pg-trickle to be installed to have effect.
+pub static CDC_BRIDGE_ENABLED: pgrx::GucSetting<bool> = pgrx::GucSetting::<bool>::new(false);
+
+/// GUC: maximum number of CDC notifications batched before a flush (v0.52.0).
+///
+/// The bridge worker accumulates this many notifications before executing one
+/// bulk-decode SPI call.  Trade-off: higher values reduce SPI overhead at the
+/// cost of increased latency.  Default: 100.
+pub static CDC_BRIDGE_BATCH_SIZE: pgrx::GucSetting<i32> = pgrx::GucSetting::<i32>::new(100);
+
+/// GUC: maximum milliseconds between bridge worker flush cycles (v0.52.0).
+///
+/// If fewer than `cdc_bridge_batch_size` notifications accumulate within this
+/// window, the bridge worker flushes anyway to bound latency.  Default: 200 ms.
+pub static CDC_BRIDGE_FLUSH_MS: pgrx::GucSetting<i32> = pgrx::GucSetting::<i32>::new(200);
+
+/// GUC: outbox table that the CDC bridge worker writes JSON-LD events to (v0.52.0).
+///
+/// Must be an existing table with at least `(event_id TEXT, payload JSONB)` columns.
+/// Defaults to `enriched_events`.  The bridge worker target schema is always
+/// the current `search_path`; prefix with a schema name if needed.
+pub static CDC_BRIDGE_OUTBOX_TABLE: pgrx::GucSetting<Option<std::ffi::CString>> =
+    pgrx::GucSetting::<Option<std::ffi::CString>>::new(None);
+
+/// GUC: master switch for pg-trickle integration features (v0.52.0).
+///
+/// When `true` (default), bridge functions check whether pg-trickle is installed
+/// and operate normally when it is.  Set `false` to disable all bridge features
+/// even when pg-trickle is present (useful in mixed-extension environments where
+/// the integration is not desired).
+pub static TRICKLE_INTEGRATION: pgrx::GucSetting<bool> = pgrx::GucSetting::<bool>::new(true);

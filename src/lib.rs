@@ -22,6 +22,7 @@ use pgrx::prelude::*;
 
 mod bulk_load;
 mod cdc;
+mod cdc_bridge_api;
 mod data_ops;
 mod datalog;
 mod datalog_api;
@@ -1507,6 +1508,61 @@ pub extern "C-unwind" fn _PG_init() {
           Falls back to OTEL_EXPORTER_OTLP_ENDPOINT env var if empty. (v0.51.0)",
         c"",
         &TRACING_OTLP_ENDPOINT,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+
+    // ── v0.52.0 GUCs — pg-trickle Relay Integration ───────────────────────────
+    pgrx::GucRegistry::define_bool_guc(
+        c"pg_ripple.cdc_bridge_enabled",
+        c"Enable the CDC → pg-trickle outbox bridge worker (default: off). \
+          Requires pg-trickle to be installed. (v0.52.0)",
+        c"",
+        &CDC_BRIDGE_ENABLED,
+        GucContext::Sighup,
+        GucFlags::default(),
+    );
+
+    pgrx::GucRegistry::define_int_guc(
+        c"pg_ripple.cdc_bridge_batch_size",
+        c"Maximum CDC notifications batched before a bridge worker flush \
+          (default: 100, min: 1, max: 10000). (v0.52.0)",
+        c"",
+        &CDC_BRIDGE_BATCH_SIZE,
+        1,
+        10_000,
+        GucContext::Sighup,
+        GucFlags::default(),
+    );
+
+    pgrx::GucRegistry::define_int_guc(
+        c"pg_ripple.cdc_bridge_flush_ms",
+        c"Maximum milliseconds between bridge worker flush cycles \
+          (default: 200, min: 10, max: 60000). (v0.52.0)",
+        c"",
+        &CDC_BRIDGE_FLUSH_MS,
+        10,
+        60_000,
+        GucContext::Sighup,
+        GucFlags::default(),
+    );
+
+    pgrx::GucRegistry::define_string_guc(
+        c"pg_ripple.cdc_bridge_outbox_table",
+        c"Target outbox table for the CDC bridge worker (default: 'enriched_events'). \
+          Must have (event_id TEXT, payload JSONB) columns. (v0.52.0)",
+        c"",
+        &CDC_BRIDGE_OUTBOX_TABLE,
+        GucContext::Sighup,
+        GucFlags::default(),
+    );
+
+    pgrx::GucRegistry::define_bool_guc(
+        c"pg_ripple.trickle_integration",
+        c"Enable pg-trickle integration features; set off to disable bridge even \
+          when pg-trickle is installed (default: on). (v0.52.0)",
+        c"",
+        &TRICKLE_INTEGRATION,
         GucContext::Userset,
         GucFlags::default(),
     );

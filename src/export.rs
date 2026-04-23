@@ -1247,3 +1247,89 @@ fn write_text_units_parquet(
         .close()
         .unwrap_or_else(|e| pgrx::error!("export_graphrag_text_units: writer close: {e}"));
 }
+
+// ─── Single-triple and star-pattern JSON-LD serializers (v0.52.0) ─────────────
+
+/// Decode a dictionary ID to a human-readable string, falling back to `_:{id}`
+/// for unknown entries (e.g. blank nodes that were never stored in the dictionary).
+fn decode_id_to_str(id: i64) -> String {
+    crate::dictionary::decode(id).unwrap_or_else(|| format!("_:{}", id))
+}
+
+/// Convert a single triple `(s, p, o)` from dictionary IDs to a JSON-LD object.
+///
+/// Returns a JSON-LD node with an inline `@context` block.  The predicate IRI
+/// is used as the property key; the object is represented as a JSON-LD value
+/// object (`{"@id": "..."}` for IRIs, `{"@value": "..."}` for literals).
+///
+/// The function uses the backend-local LRU dictionary cache, so repeated calls
+/// for common IRIs (class names, property names) incur no SPI round-trips.
+pub fn triple_to_jsonld(s: i64, p: i64, o: i64) -> serde_json::Value {
+    let s_str = decode_id_to_str(s);
+    let p_str = decode_id_to_str(p);
+    let o_str = decode_id_to_str(o);
+
+    let s_id_val = if s_str.starts_with('<') && s_str.ends_with('>') {
+        serde_json::json!(s_str[1..s_str.len() - 1])
+    } else {
+        serde_json::json!(s_str)
+    };
+
+    let p_key = if p_str.starts_with('<') && p_str.ends_with('>') {
+        p_str[1..p_str.len() - 1].to_owned()
+    } else {
+        p_str.clone()
+    };
+
+    let o_val = nt_term_to_jsonld_value(&o_str);
+
+    serde_json::json!({
+        "@id": s_id_val,
+        p_key: [o_val]
+    })
+}
+
+/// Collect all triples for a given subject into a single JSON-LD document.
+///
+/// Uses a star-pattern query over all VP tables to retrieve every triple where
+/// `s = subject`.  Predicates are grouped into a single JSON-LD node, making
+/// this more efficient than calling `triple_to_jsonld` once per predicate for
+/// an entity burst.
+pub fn triples_to_jsonld_by_subject(subject: i64) -> serde_json::Value {
+    // Collect all (p, o) pairs for the subject across all VP tables.
+    let rows = crate::storage::triples_for_subject(subject);
+
+    if rows.is_empty() {
+        return serde_json::json!({"@id": decode_id_to_str(subject)});
+    }
+
+    let s_str = decode_id_to_str(subject);
+    let s_id_val = if s_str.starts_with('<') && s_str.ends_with('>') {
+        serde_json::json!(s_str[1..s_str.len() - 1])
+    } else {
+        serde_json::json!(s_str)
+    };
+
+    let mut node = serde_json::Map::new();
+    node.insert("@id".to_owned(), s_id_val);
+
+    // Group by predicate
+    let mut by_pred: BTreeMap<String, Vec<serde_json::Value>> = BTreeMap::new();
+    for (p, o) in rows {
+        let p_str = decode_id_to_str(p);
+        let p_key = if p_str.starts_with('<') && p_str.ends_with('>') {
+            p_str[1..p_str.len() - 1].to_owned()
+        } else {
+            p_str
+        };
+        let o_str = decode_id_to_str(o);
+        let o_val = nt_term_to_jsonld_value(&o_str);
+        by_pred.entry(p_key).or_default().push(o_val);
+    }
+
+    for (k, vals) in by_pred {
+        node.insert(k, serde_json::Value::Array(vals));
+    }
+
+    serde_json::Value::Object(node)
+}

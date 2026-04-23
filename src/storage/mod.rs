@@ -27,6 +27,7 @@
 //! The default graph has identifier `0`.  Named graphs have positive `i64` ids.
 
 pub mod catalog;
+pub mod cdc_bridge;
 pub mod merge;
 
 use pgrx::datum::DatumWithOid;
@@ -359,6 +360,9 @@ pub fn initialize_schema() {
     // v0.6.0: HTAP pattern tables + CDC schema + predicates.htap column.
     merge::initialize_pattern_tables();
     crate::cdc::initialize_cdc_schema();
+
+    // v0.52.0: CDC bridge triggers catalog.
+    cdc_bridge::initialize_cdc_bridge_schema();
 
     // Note: the predicate_stats view is created via extension_sql in lib.rs,
     // not here, to avoid deadlocks when initialize_schema() is called from
@@ -2043,4 +2047,30 @@ pub fn deduplicate_all() -> i64 {
     }
 
     total
+}
+
+/// Look up the statement ID (`i` column) for a given `(s, p, o)` triple.
+///
+/// Returns `None` if the triple does not exist.
+pub fn statement_id_for_triple(s: i64, p: i64, o: i64) -> Option<i64> {
+    // Check dedicated VP table first.
+    let table_oid = Spi::get_one_with_args::<i64>(
+        "SELECT table_oid::bigint FROM _pg_ripple.predicates WHERE id = $1",
+        &[DatumWithOid::from(p)],
+    )
+    .unwrap_or(None);
+
+    if table_oid.is_some() {
+        let sql = format!("SELECT i FROM _pg_ripple.vp_{p} WHERE s = {s} AND o = {o} LIMIT 1");
+        if let Ok(Some(sid)) = Spi::get_one::<i64>(&sql) {
+            return Some(sid);
+        }
+    }
+
+    // Fall back to vp_rare.
+    Spi::get_one_with_args::<i64>(
+        &format!("SELECT i FROM _pg_ripple.vp_rare WHERE p = {p} AND s = {s} AND o = {o} LIMIT 1"),
+        &[],
+    )
+    .unwrap_or(None)
 }
