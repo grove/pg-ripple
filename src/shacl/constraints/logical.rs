@@ -1,4 +1,4 @@
-//! sh:node, sh:or, sh:and, sh:not, sh:qualifiedValueShape constraint checkers.
+//! sh:node, sh:or, sh:and, sh:not, sh:xone, sh:qualifiedValueShape constraint checkers.
 
 use super::{ConstraintArgs, Violation, get_value_ids, node_conforms_to_shape};
 
@@ -23,6 +23,8 @@ pub(crate) fn check_node(
                     v_id
                 ),
                 severity: "Violation".to_owned(),
+                sh_value: None,
+                sh_source_constraint_component: None,
             });
         }
     }
@@ -52,6 +54,8 @@ pub(crate) fn check_or(
                     v_id, shape_iris
                 ),
                 severity: "Violation".to_owned(),
+                sh_value: None,
+                sh_source_constraint_component: None,
             });
         }
     }
@@ -76,6 +80,8 @@ pub(crate) fn check_and(
                     constraint: "sh:and".to_owned(),
                     message: format!("value id {v_id} does not conform to shape <{si}>"),
                     severity: "Violation".to_owned(),
+                    sh_value: None,
+                    sh_source_constraint_component: None,
                 });
             }
         }
@@ -102,12 +108,45 @@ pub(crate) fn check_not(
                     "value id {v_id} unexpectedly conforms to negated shape <{ref_shape_iri}>"
                 ),
                 severity: "Violation".to_owned(),
+                sh_value: None,
+                sh_source_constraint_component: None,
             });
         }
     }
 }
 
-/// Check `sh:qualifiedValueShape` with min/max count bounds.
+/// Check `sh:xone [shape_iris]` — every value must conform to *exactly one* of the given shapes.
+pub(crate) fn check_xone(
+    shape_iris: &[String],
+    args: &ConstraintArgs,
+    violations: &mut Vec<Violation>,
+) {
+    let value_ids = get_value_ids(args.focus, args.path_id, args.graph_id);
+    for v_id in value_ids {
+        let matching: usize = shape_iris
+            .iter()
+            .filter(|si| node_conforms_to_shape(v_id, si, args.graph_id, args.all_shapes))
+            .count();
+        if matching != 1 {
+            let focus_iri = crate::dictionary::decode(args.focus)
+                .unwrap_or_else(|| format!("_id_{}", args.focus));
+            violations.push(Violation {
+                focus_node: focus_iri,
+                shape_iri: args.shape_iri.to_owned(),
+                path: Some(args.path_iri.to_owned()),
+                constraint: "sh:xone".to_owned(),
+                message: format!(
+                    "value id {v_id} conforms to {matching} of {:?}, expected exactly 1",
+                    shape_iris
+                ),
+                severity: "Violation".to_owned(),
+                sh_value: None,
+                sh_source_constraint_component: None,
+            });
+        }
+    }
+}
+
 pub(crate) fn check_qualified(
     qvs_shape_iri: &str,
     min_count: Option<i64>,
@@ -135,6 +174,8 @@ pub(crate) fn check_qualified(
                 "expected at least {min} values conforming to <{qvs_shape_iri}>, found {qualifying}"
             ),
             severity: "Violation".to_owned(),
+            sh_value: None,
+            sh_source_constraint_component: None,
         });
     }
     if let Some(max) = max_count
@@ -151,6 +192,8 @@ pub(crate) fn check_qualified(
                 "expected at most {max} values conforming to <{qvs_shape_iri}>, found {qualifying}"
             ),
             severity: "Violation".to_owned(),
+            sh_value: None,
+            sh_source_constraint_component: None,
         });
     }
 }

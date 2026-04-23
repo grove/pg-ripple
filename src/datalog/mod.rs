@@ -1008,6 +1008,14 @@ pub fn run_inference(rule_set_name: &str) -> i64 {
             .collect::<Vec<_>>()
     });
 
+    // ── sameAs cluster-size check (honours pg_ripple.sameas_max_cluster_size) ──
+    // Emit PT550 WARNING (and skip canonicalization) if any cluster is too large.
+    // This mirrors the same check in run_inference_seminaive so that infer()
+    // honours sameas_max_cluster_size regardless of which internal path is used.
+    if crate::SAMEAS_REASONING.get() {
+        let _ = rewrite::compute_sameas_map();
+    }
+
     let mut total_derived = 0i64;
 
     for (rule_text, _stratum, _recursive) in rule_rows {

@@ -225,6 +225,70 @@ mod pg_ripple {
         sid
     }
 
+    /// Batch insert triples from a flat `TEXT[]` array (v0.48.0).
+    ///
+    /// The array is interpreted in groups of 3 or 4 consecutive elements:
+    /// `ARRAY['s1','p1','o1', 's2','p2','o2']` (stride 3, default graph) or
+    /// `ARRAY['s1','p1','o1','g1', 's2','p2','o2','g2']` (stride 4, named graphs).
+    ///
+    /// The stride is inferred from the total element count:
+    /// - divisible by 4 but not 3 → stride 4;  otherwise → stride 3.
+    ///
+    /// Returns a set of `BIGINT` statement identifiers (SIDs), one per
+    /// inserted triple.  This is a set-returning function:
+    /// `SELECT * FROM pg_ripple.insert_triples(ARRAY['s','p','o'])`.
+    #[pg_extern]
+    fn insert_triples(flat: Vec<Option<String>>) -> pgrx::iter::SetOfIterator<'static, i64> {
+        if flat.is_empty() {
+            return pgrx::iter::SetOfIterator::new(vec![]);
+        }
+        let stride: usize = if flat.len().is_multiple_of(4) && !flat.len().is_multiple_of(3) {
+            4
+        } else {
+            3
+        };
+        if !flat.len().is_multiple_of(stride) {
+            pgrx::error!(
+                "insert_triples: array has {} elements which is not divisible by stride {stride}",
+                flat.len()
+            );
+        }
+        let mut sids: Vec<i64> = Vec::with_capacity(flat.len() / stride);
+        let mut i = 0;
+        while i + stride <= flat.len() {
+            let s = match &flat[i] {
+                Some(v) => v.as_str(),
+                None => pgrx::error!("insert_triples: element {i} (s) must not be NULL"),
+            };
+            let p = match &flat[i + 1] {
+                Some(v) => v.as_str(),
+                None => pgrx::error!("insert_triples: element {} (p) must not be NULL", i + 1),
+            };
+            let o = match &flat[i + 2] {
+                Some(v) => v.as_str(),
+                None => pgrx::error!("insert_triples: element {} (o) must not be NULL", i + 2),
+            };
+            let g_id: i64 = if stride == 4 {
+                match &flat[i + 3] {
+                    Some(g) => crate::dictionary::encode(
+                        crate::storage::strip_angle_brackets_pub(g),
+                        crate::dictionary::KIND_IRI,
+                    ),
+                    None => 0,
+                }
+            } else {
+                0
+            };
+            let sid = crate::storage::insert_triple(s, p, o, g_id);
+            sids.push(sid);
+            i += stride;
+        }
+        if !sids.is_empty() {
+            crate::datalog::tabling_invalidate_all();
+        }
+        pgrx::iter::SetOfIterator::new(sids)
+    }
+
     /// Look up a statement by its globally-unique statement identifier (SID).
     ///
     /// Returns `{"s": "...", "p": "...", "o": "...", "g": "..."}` as JSONB,

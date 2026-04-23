@@ -78,11 +78,12 @@ jobs:
         run: cargo pgrx start pg18
 
       - name: Create test database
+        env:
+          PGPORT: "28818"
         run: |
-          PG_PORT=$(grep -oP 'port\s*=\s*\K\d+' ~/.pgrx/data-18/postgresql.conf 2>/dev/null || echo 28818)
-          psql -h localhost -p $PG_PORT -d postgres -c "DROP DATABASE IF EXISTS docs_test"
-          createdb -h localhost -p $PG_PORT docs_test
-          psql -h localhost -p $PG_PORT -d docs_test -c "CREATE EXTENSION pg_ripple"
+          psql -h localhost -p $PGPORT -d postgres -c "DROP DATABASE IF EXISTS docs_test"
+          createdb -h localhost -p $PGPORT docs_test
+          psql -h localhost -p $PGPORT -d docs_test -c "CREATE EXTENSION pg_ripple"
 
       - name: Run documentation tests
         env:

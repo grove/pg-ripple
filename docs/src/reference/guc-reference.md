@@ -352,6 +352,32 @@ Increase this value if parallel inference workers frequently conflict on the seq
 
 ---
 
+## v0.48.0 GUCs
+
+### `pg_ripple.federation_max_response_bytes`
+
+| | |
+|---|---|
+| Type | Integer |
+| Default | `104857600` (100 MiB) |
+| Range | `-1` (disabled) – `2147483647` |
+| Context | `userset` |
+
+Maximum allowed size in bytes for a federation (SERVICE) response body. When a
+remote SPARQL endpoint returns a JSON response larger than this value, pg_ripple
+raises error code **PT543** and aborts the query. Set to `-1` to disable the
+limit (not recommended for deployments with untrusted federation endpoints).
+
+```sql
+-- Allow up to 500 MiB responses for a single query
+SET pg_ripple.federation_max_response_bytes = 524288000;
+
+-- Disable the limit (trusted internal network only)
+SET pg_ripple.federation_max_response_bytes = -1;
+```
+
+---
+
 ## v0.47.0: Validated String GUCs
 
 All six string-valued GUCs below now reject invalid values at SET time

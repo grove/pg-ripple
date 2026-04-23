@@ -13,6 +13,50 @@ Versions correspond to the milestones in [ROADMAP.md](ROADMAP.md).
 
 ---
 
+## [0.48.0] — 2026-05-13 — SHACL Core Completeness, OWL 2 RL Closure & SPARQL Completeness
+
+**Completes the v0.48.0 roadmap: all 35 SHACL Core constraints implemented; complex `sh:path` expressions with recursive CTEs; OWL 2 RL rule-set closure (five new rules); SPARQL Update ADD/COPY/MOVE; SPARQL-star variable-inside-quoted-triple patterns; `federation_max_response_bytes` GUC; `insert_triples()` batch SRF; WatDiv baselines; `pg-upgrade.md` operations guide.**
+
+### What's new
+
+- **Remaining SHACL Core constraints** (`src/shacl/`) — seven new constraints complete the 35/35 SHACL Core coverage:
+  - `sh:minLength` / `sh:maxLength`: string-length bounds applied after language-tag stripping
+  - `sh:xone`: exactly-one-of (XOR) logic over sub-shapes via `check_xone()` in `src/shacl/constraints/logical.rs`
+  - `sh:minExclusive` / `sh:maxExclusive` / `sh:minInclusive` / `sh:maxInclusive`: XSD-typed numeric range constraints via `compare_dictionary_values` in `src/shacl/constraints/relational.rs`
+
+- **Complex `sh:path` expressions** (`src/shacl/constraints/property_path.rs`) — full `ShPath` enum with SQL compiler:
+  - `sh:inversePath`: `(o, s)` join order on VP tables
+  - `sh:alternativePath`: SQL UNION of sub-paths
+  - Sequence paths: chained JOIN compilation
+  - `sh:zeroOrMorePath`, `sh:oneOrMorePath`, `sh:zeroOrOnePath`: `WITH RECURSIVE … CYCLE` CTEs
+
+- **SHACL violation report enhancements** — `Violation` struct extended with `sh_value` (offending decoded value) and `sh_source_constraint_component` (W3C component IRI) fields for W3C-conformant violation reports.
+
+- **OWL 2 RL rule set completion** (`src/datalog/builtins.rs`) — five new rules close the v0.47.0 gap:
+  - `cax-sco`: full `rdfs:subClassOf` transitive closure
+  - `prp-spo1`: `rdfs:subPropertyOf` full chain
+  - `prp-ifp`: inverse-functional-property `owl:sameAs` propagation
+  - `cls-avf`: chained `owl:allValuesFrom` + subclass hierarchy
+  - `owl:minCardinality` / `owl:maxCardinality` / `owl:cardinality` entailment
+
+- **SPARQL Update ADD / COPY / MOVE** (`src/sparql/mod.rs`) — pre-parser `try_execute_add_copy_move()` handles all three graph management operations without depending on spargebra enum variants. pg_regress test `sparql_update_add_copy_move.sql`.
+
+- **SPARQL-star variable-inside-quoted-triple patterns** (`src/sparql/translate/bgp.rs`) — `TermPattern::Triple` arm now emits a JOIN with `_pg_ripple.dictionary` on `qt_s`/`qt_p`/`qt_o` columns instead of silent `FALSE`. Patterns like `<< ?s ?p ?o >> :assertedBy ?who` return rows. pg_regress test `rdfstar_variable_quoted.sql`.
+
+- **`pg_ripple.federation_max_response_bytes` GUC** (`src/gucs.rs`, `src/sparql/federation.rs`) — maximum federation response body size in bytes (default: 100 MiB). Responses exceeding the limit are refused with error code PT543.
+
+- **`pg_ripple.insert_triples(TEXT[])` SRF** (`src/dict_api.rs`) — batch single-triple inserts. Accepts a flat `TEXT[]` array with stride-3 (s, p, o) or stride-4 (s, p, o, g) grouping. Returns `SETOF BIGINT` (SIDs). Useful for orchestration tools that need to insert many triples in one call.
+
+- **WatDiv latency baselines** (`tests/watdiv/baselines.json`) — per-query p50/p95/p99 latency baseline file for all 32 WatDiv templates. CI regression gate warns on > 10% latency increase.
+
+- **HTAP merge throughput benchmark** (`benchmarks/merge_throughput.sql`) — 5-minute pgbench script for measuring insert throughput under concurrent merge cycles.
+
+- **`docs/src/operations/pg-upgrade.md`** — new operations guide documenting the supported upgrade matrix, pre-upgrade steps, migration script chain, and dump/restore fallback.
+
+### Migration
+
+`sql/pg_ripple--0.47.0--0.48.0.sql` — no schema changes.
+
 ## [0.47.0] — 2026-05-06 — SHACL Completion, GUC Validators, Cache SRFs & Fuzz Hardening
 
 **Completes the v0.47.0 roadmap: sh:lessThanOrEquals SHACL constraint; six GUC check_hook validators; three individual cache hit-rate SRFs; SPARQL `sqlgen.rs` module split (≤800 lines); parallel Datalog SID pre-allocation wired; five new cargo-fuzz targets; CI security hygiene (cargo-audit workflow, deny.toml, check_no_security_definer.sh); OWL 2 RL baseline 93.9%; promotion-race stress test; four new SHACL pg_regress tests.**

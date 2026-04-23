@@ -105,6 +105,21 @@ pub enum ShapeConstraint {
     /// `sh:disjoint <path-IRI>` — the value sets of the focus node's path and the
     /// given other path must be disjoint (no common value IDs).
     Disjoint(String),
+    // ── v0.48.0 SHACL Core completeness ───────────────────────────────────────
+    /// `sh:minLength n` — value's lexical form must have length >= n (Unicode code points).
+    MinLength(i64),
+    /// `sh:maxLength n` — value's lexical form must have length <= n (Unicode code points).
+    MaxLength(i64),
+    /// `sh:xone [shape1 shape2 ...]` — value must conform to exactly one of the given shapes.
+    Xone(Vec<String>),
+    /// `sh:minExclusive bound` — value must be strictly greater than the bound.
+    MinExclusive(String),
+    /// `sh:maxExclusive bound` — value must be strictly less than the bound.
+    MaxExclusive(String),
+    /// `sh:minInclusive bound` — value must be >= the bound.
+    MinInclusive(String),
+    /// `sh:maxInclusive bound` — value must be <= the bound.
+    MaxInclusive(String),
 }
 
 /// A SHACL PropertyShape (associated with a path via `sh:path`).
@@ -327,6 +342,24 @@ fn split_turtle_statements(flat: &str) -> Vec<&str> {
 }
 
 /// Expand a CURIE (`prefix:local`) or bracketed IRI (`<...>`) to a full IRI.
+fn expand_literal_or_iri(
+    token: &str,
+    prefixes: &std::collections::HashMap<String, String>,
+) -> Result<String, String> {
+    let token = token.trim();
+    // Typed literals: "value"^^prefix:local or "value"^^<iri>
+    if token.starts_with('"') || token.starts_with('\'') {
+        if let Some(caret_pos) = token.rfind("^^") {
+            let lexical_part = &token[..caret_pos + 2];
+            let datatype = token[caret_pos + 2..].trim();
+            let dt_iri = expand_iri(datatype, prefixes)?;
+            return Ok(format!("{lexical_part}<{dt_iri}>"));
+        }
+        return Ok(token.to_owned());
+    }
+    expand_iri(token, prefixes)
+}
+
 fn expand_iri(
     token: &str,
     prefixes: &std::collections::HashMap<String, String>,
@@ -535,6 +568,41 @@ fn parse_shape_statement(
                 let iri = expand_iri(obj_rest.trim(), prefixes)?;
                 constraints.push(ShapeConstraint::Disjoint(iri));
             }
+            // ── v0.48.0 SHACL Core completeness ──────────────────────────────
+            "http://www.w3.org/ns/shacl#minLength" => {
+                let n: i64 = obj_rest
+                    .trim()
+                    .parse()
+                    .map_err(|_| format!("sh:minLength value is not an integer: '{obj_rest}'"))?;
+                constraints.push(ShapeConstraint::MinLength(n));
+            }
+            "http://www.w3.org/ns/shacl#maxLength" => {
+                let n: i64 = obj_rest
+                    .trim()
+                    .parse()
+                    .map_err(|_| format!("sh:maxLength value is not an integer: '{obj_rest}'"))?;
+                constraints.push(ShapeConstraint::MaxLength(n));
+            }
+            "http://www.w3.org/ns/shacl#xone" => {
+                let shape_iris = parse_list_values(obj_rest.trim(), prefixes)?;
+                constraints.push(ShapeConstraint::Xone(shape_iris));
+            }
+            "http://www.w3.org/ns/shacl#minExclusive" => {
+                let val = expand_literal_or_iri(obj_rest.trim(), prefixes)?;
+                constraints.push(ShapeConstraint::MinExclusive(val));
+            }
+            "http://www.w3.org/ns/shacl#maxExclusive" => {
+                let val = expand_literal_or_iri(obj_rest.trim(), prefixes)?;
+                constraints.push(ShapeConstraint::MaxExclusive(val));
+            }
+            "http://www.w3.org/ns/shacl#minInclusive" => {
+                let val = expand_literal_or_iri(obj_rest.trim(), prefixes)?;
+                constraints.push(ShapeConstraint::MinInclusive(val));
+            }
+            "http://www.w3.org/ns/shacl#maxInclusive" => {
+                let val = expand_literal_or_iri(obj_rest.trim(), prefixes)?;
+                constraints.push(ShapeConstraint::MaxInclusive(val));
+            }
             _ => {
                 // Unknown predicate — ignore (forward-compatible).
             }
@@ -711,6 +779,41 @@ fn parse_property_shape(
             "http://www.w3.org/ns/shacl#disjoint" => {
                 let iri = expand_iri(obj_rest.trim(), prefixes)?;
                 constraints.push(ShapeConstraint::Disjoint(iri));
+            }
+            // ── v0.48.0 SHACL Core completeness ──────────────────────────────
+            "http://www.w3.org/ns/shacl#minLength" => {
+                let n: i64 = obj_rest
+                    .trim()
+                    .parse()
+                    .map_err(|_| format!("sh:minLength value is not an integer: '{obj_rest}'"))?;
+                constraints.push(ShapeConstraint::MinLength(n));
+            }
+            "http://www.w3.org/ns/shacl#maxLength" => {
+                let n: i64 = obj_rest
+                    .trim()
+                    .parse()
+                    .map_err(|_| format!("sh:maxLength value is not an integer: '{obj_rest}'"))?;
+                constraints.push(ShapeConstraint::MaxLength(n));
+            }
+            "http://www.w3.org/ns/shacl#xone" => {
+                let shape_iris = parse_list_values(obj_rest.trim(), prefixes)?;
+                constraints.push(ShapeConstraint::Xone(shape_iris));
+            }
+            "http://www.w3.org/ns/shacl#minExclusive" => {
+                let val = expand_literal_or_iri(obj_rest.trim(), prefixes)?;
+                constraints.push(ShapeConstraint::MinExclusive(val));
+            }
+            "http://www.w3.org/ns/shacl#maxExclusive" => {
+                let val = expand_literal_or_iri(obj_rest.trim(), prefixes)?;
+                constraints.push(ShapeConstraint::MaxExclusive(val));
+            }
+            "http://www.w3.org/ns/shacl#minInclusive" => {
+                let val = expand_literal_or_iri(obj_rest.trim(), prefixes)?;
+                constraints.push(ShapeConstraint::MinInclusive(val));
+            }
+            "http://www.w3.org/ns/shacl#maxInclusive" => {
+                let val = expand_literal_or_iri(obj_rest.trim(), prefixes)?;
+                constraints.push(ShapeConstraint::MaxInclusive(val));
             }
             _ => {}
         }
@@ -934,6 +1037,12 @@ pub struct Violation {
     pub constraint: String,
     pub message: String,
     pub severity: String,
+    /// The offending value node, decoded (v0.48.0, W3C `sh:value`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sh_value: Option<String>,
+    /// W3C constraint component IRI, e.g. `sh:MinCountConstraintComponent` (v0.48.0).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sh_source_constraint_component: Option<String>,
 }
 
 // ── v0.8.0 helper: recursive shape conformance check ─────────────────────────
@@ -1067,6 +1176,8 @@ fn validate_property_shape(
                                 ps.path_iri
                             ),
                             severity: "Violation".to_owned(),
+                            sh_value: None,
+                            sh_source_constraint_component: None,
                         });
                     }
                 }
@@ -1149,6 +1260,26 @@ fn dispatch_constraint(
         ShapeConstraint::Equals(p) => constraints::relational::check_equals(p, args, violations),
         ShapeConstraint::Disjoint(p) => {
             constraints::relational::check_disjoint(p, args, violations)
+        }
+        // ── v0.48.0 SHACL Core completeness ───────────────────────────────────
+        ShapeConstraint::MinLength(n) => {
+            constraints::string_based::check_min_length(*n, args, violations)
+        }
+        ShapeConstraint::MaxLength(n) => {
+            constraints::string_based::check_max_length(*n, args, violations)
+        }
+        ShapeConstraint::Xone(ss) => constraints::logical::check_xone(ss, args, violations),
+        ShapeConstraint::MinExclusive(b) => {
+            constraints::relational::check_min_exclusive(b, args, violations)
+        }
+        ShapeConstraint::MaxExclusive(b) => {
+            constraints::relational::check_max_exclusive(b, args, violations)
+        }
+        ShapeConstraint::MinInclusive(b) => {
+            constraints::relational::check_min_inclusive(b, args, violations)
+        }
+        ShapeConstraint::MaxInclusive(b) => {
+            constraints::relational::check_max_inclusive(b, args, violations)
         }
     }
 }
@@ -2003,7 +2134,15 @@ pub fn validate_sync(s_id: i64, p_id: i64, o_id: i64, g_id: i64) -> Result<(), S
                     | ShapeConstraint::Closed { .. }
                     // v0.45.0: relational constraints require full value sets — skip for single insert.
                     | ShapeConstraint::Equals(_)
-                    | ShapeConstraint::Disjoint(_) => {}
+                    | ShapeConstraint::Disjoint(_)
+                    // v0.48.0: new constraints — deferred to offline validation for single insert.
+                    | ShapeConstraint::MinLength(_)
+                    | ShapeConstraint::MaxLength(_)
+                    | ShapeConstraint::Xone(_)
+                    | ShapeConstraint::MinExclusive(_)
+                    | ShapeConstraint::MaxExclusive(_)
+                    | ShapeConstraint::MinInclusive(_)
+                    | ShapeConstraint::MaxInclusive(_) => {}
                 }
             }
         }

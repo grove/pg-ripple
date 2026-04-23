@@ -111,3 +111,31 @@ RDF-star is a natural fit for encoding LPG edge properties: a quoted triple repr
 << <ex:alice> <ex:knows> <ex:bob> >> <ex:since>   "2023-01-01"^^xsd:date .
 << <ex:alice> <ex:knows> <ex:bob> >> <ex:strength> "strong" .
 ```
+
+
+## Variable-inside-quoted-triple patterns (v0.48.0)
+
+As of v0.48.0, variables inside quoted triple patterns are supported.
+This allows binding variables to the components of a quoted triple that
+appears as the subject or object of another triple:
+
+```sql
+-- Bind ?v to the object component of the matching quoted triple
+SELECT * FROM pg_ripple.sparql('
+  PREFIX ex: <http://example.org/>
+  SELECT ?v ?who WHERE {
+    << ex:alice ex:age ?v >> ex:assertedBy ?who .
+  }
+');
+
+-- Bind all three components
+SELECT * FROM pg_ripple.sparql('
+  PREFIX ex: <http://example.org/>
+  SELECT ?s ?p ?o ?who WHERE {
+    << ?s ?p ?o >> ex:assertedBy ?who .
+  }
+');
+```
+
+This works by joining the `_pg_ripple.dictionary` table on the `qt_s`,
+`qt_p`, and `qt_o` columns (available for entries with `kind = 5`).

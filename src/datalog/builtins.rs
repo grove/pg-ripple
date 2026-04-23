@@ -157,6 +157,40 @@ const OWL_RL_RULES: &str = r#"
 
 # OWL RL: intersectionOf membership (binary)
 ?x rdf:type ?c :- ?x rdf:type ?c1, ?x rdf:type ?c2, ?c owl:intersectionOf ?list .
+
+# ── v0.48.0: OWL 2 RL rule-set completion ─────────────────────────────────────
+
+# cax-sco: rdfs:subClassOf full transitive closure (adds the second-order transitivity
+# rule that was previously only one-step via rdfs9).  The rdfs11 rule already
+# handles rdfs:subClassOf transitivity, so this rule restates it for clarity and
+# ensures it is present when ONLY owl-rl is loaded without rdfs.
+?x rdf:type ?c :- ?x rdf:type ?a, ?a rdfs:subClassOf ?b, ?b rdfs:subClassOf ?c .
+
+# prp-spo1: rdfs:subPropertyOf full chain (equivalent to rdfs7 but stated
+# explicitly for the OWL RL profile so the rule is present without RDFS).
+?x ?r ?y :- ?x ?p ?y, ?p rdfs:subPropertyOf ?r .
+
+# prp-ifp: InverseFunctionalProperty → sameAs (already present above but
+# restated for OWL RL naming clarity; ON CONFLICT rules are idempotent).
+?x1 owl:sameAs ?x2 :- ?x1 ?p ?y, ?x2 ?p ?y, ?p rdf:type owl:InverseFunctionalProperty .
+
+# cls-avf: allValuesFrom interaction with subclass hierarchy.
+# If x is of type R and R restricts property p to allValuesFrom C, and there
+# exists a subclass D of C, then values of x via p that are of type D also
+# satisfy the restriction via inheritance.
+?y rdf:type ?d :- ?x rdf:type ?r, ?x ?p ?y, ?r owl:allValuesFrom ?c, ?r owl:onProperty ?p, ?d rdfs:subClassOf ?c .
+
+# owl:minCardinality entailment: if a class R has minCardinality 0 on property p,
+# no inference is needed.  minCardinality 1 on a functional property allows
+# inferring that the value exists when we see a type assertion.
+# The Datalog-expressible subset: class membership from cardinality axioms.
+?x rdf:type ?r :- ?x ?p ?y, ?r owl:minCardinality ?n, ?r owl:onProperty ?p .
+
+# owl:maxCardinality + FunctionalProperty → sameAs for values.
+?y1 owl:sameAs ?y2 :- ?x rdf:type ?r, ?x ?p ?y1, ?x ?p ?y2, ?r owl:maxCardinality ?n, ?r owl:onProperty ?p, ?p rdf:type owl:FunctionalProperty .
+
+# owl:cardinality = exactly N; same entailments as combined min+max.
+?x rdf:type ?r :- ?x ?p ?y, ?r owl:cardinality ?n, ?r owl:onProperty ?p .
 "#;
 
 // ─── Tests ───────────────────────────────────────────────────────────────────

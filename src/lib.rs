@@ -1421,6 +1421,19 @@ pub extern "C-unwind" fn _PG_init() {
         GucFlags::default(),
     );
 
+    // ── v0.48.0 GUCs ─────────────────────────────────────────────────────────
+    pgrx::GucRegistry::define_int_guc(
+        c"pg_ripple.federation_max_response_bytes",
+        c"Maximum federation response body in bytes (default: 100 MiB = 104857600). \
+          Responses larger than this are refused with PT543. Set -1 to disable. (v0.48.0)",
+        c"",
+        &FEDERATION_MAX_RESPONSE_BYTES,
+        -1,
+        i32::MAX,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+
     // PGC_POSTMASTER GUCs can only be registered during shared_preload_libraries
     // loading.  `process_shared_preload_libraries_in_progress` is the correct
     // flag — `IsPostmasterEnvironment` is true in every server process and

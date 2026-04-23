@@ -26,6 +26,8 @@ pub(crate) fn check_in(
                 constraint: "sh:in".to_owned(),
                 message: format!("value node id {v_id} is not in the allowed value set"),
                 severity: "Violation".to_owned(),
+                sh_value: None,
+                sh_source_constraint_component: None,
             });
         }
     }
@@ -52,6 +54,8 @@ pub(crate) fn check_has_value(
             constraint: "sh:hasValue".to_owned(),
             message: format!("expected value '{expected_val}' not found"),
             severity: "Violation".to_owned(),
+            sh_value: None,
+            sh_source_constraint_component: None,
         });
     }
 }
@@ -81,6 +85,8 @@ pub(crate) fn check_less_than(
                     constraint: "sh:lessThan".to_owned(),
                     message: format!("value id {v_id} is not less than other-path value id {o_id}"),
                     severity: "Violation".to_owned(),
+                    sh_value: None,
+                    sh_source_constraint_component: None,
                 });
             }
         }
@@ -114,6 +120,8 @@ pub(crate) fn check_greater_than(
                         "value id {v_id} is not greater than other-path value id {o_id}"
                     ),
                     severity: "Violation".to_owned(),
+                    sh_value: None,
+                    sh_source_constraint_component: None,
                 });
             }
         }
@@ -149,6 +157,8 @@ pub(crate) fn check_less_than_or_equals(
                             "value id {v_id} is not less than or equal to other-path value id {o_id}"
                         ),
                         severity: "Violation".to_owned(),
+                sh_value: None,
+                sh_source_constraint_component: None,
                     });
                 }
             }

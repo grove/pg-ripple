@@ -21,3 +21,7 @@
 --   • WFS iteration-cap test (wfs_max_iterations GUC)
 --   • Standardised migration script headers (backfilled to key past scripts)
 --   • Recovery procedure runbook in RELEASE.md
+
+INSERT INTO _pg_ripple.schema_version (version, upgraded_from)
+VALUES ('0.45.0', '0.44.0')
+ON CONFLICT DO NOTHING;

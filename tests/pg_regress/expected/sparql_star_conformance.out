@@ -390,7 +390,6 @@ FROM pg_ripple.sparql($$
         ?x <http://example.org/star/believes> << ?s ?p ?o >> .
     }
 $$);
-WARNING:  SPARQL-star: variable inside quoted triple pattern is not yet supported; pattern treated as no-match
  var_in_qt_returns_zero 
 ------------------------
                       0
