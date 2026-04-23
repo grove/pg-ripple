@@ -71,7 +71,7 @@ Each release below has two layers:
 | [0.47.0](#v0470--shacl-truthfulness-dead-code-activation--architecture-refactor) | SHACL Truthfulness, Dead-Code Activation & Architecture Refactor | Fix parsed-but-not-checked SHACL constraints, wire `preallocate_sid_ranges()`, finish the `sparql/translate/` module split, add 5 fuzz targets, 4 crash-recovery scenarios, cache hit-rate SRFs, GUC validators, and security hygiene | 8–10 pw |
 | [0.48.0](#v0480--shacl-core-completeness-owl-2-rl-closure--sparql-completeness) | SHACL Core Completeness, OWL 2 RL Closure & SPARQL Completeness | Complete all 35 SHACL Core constraints and complex `sh:path` expressions, close the OWL 2 RL rule set, add SPARQL Update MOVE/COPY/ADD, fix SPARQL-star variable patterns, WatDiv baselines, and operational hardening | 6–8 pw |
 | [0.49.0](#v0490--ai--llm-integration) | AI & LLM Integration | `sparql_from_nl()` NL-to-SPARQL via configurable LLM endpoint; `suggest_sameas()` and `apply_sameas_candidates()` for embedding-based entity alignment | 4–6 pw |
-| [0.50.0](#v0500--developer-experience--graphrag-polish) | Developer Experience & GraphRAG Polish | VS Code extension with SPARQL/SHACL/Datalog support and query runner; `explain_sparql(analyze:=true)` debugger; `rag_context()` RAG pipeline | 5–7 pw |
+| [0.50.0](#v0500--developer-experience--graphrag-polish) | Developer Experience & GraphRAG Polish | `explain_sparql(analyze:=true)` interactive query debugger; `rag_context()` RAG pipeline | 3–5 pw |
 | [1.0.0](#v100--production-release) | Production Release | Standards conformance, stress testing, security audit | 6–8 pw |
 | | | **Total estimated effort** | **275–376 pw** |
 
@@ -3897,28 +3897,20 @@ W3C SHACL Core test suite passes 35/35 constraints. OWL 2 RL CI gate upgraded to
 
 ## v0.50.0 — Developer Experience & GraphRAG Polish
 
-**Theme**: VS Code extension, interactive query debugger, and full RAG pipeline.
+**Theme**: Interactive query debugger and full RAG pipeline.
 
-> **In plain language:** Three developer-facing features that raise the ceiling on how easy it is to work with pg_ripple day-to-day. A VS Code extension brings SPARQL syntax highlighting, one-click query execution against a live endpoint, and SHACL shape linting into the editor. An extended `EXPLAIN SPARQL` command surfaces the algebra tree, generated SQL, plan-cache status, and per-step row counts as an interactive JSON structure. The RAG pipeline ties together vector recall, SPARQL graph expansion, and LLM context-window assembly into a single SQL function call.
+> **In plain language:** Two developer-facing features that raise the ceiling on how easy it is to work with pg_ripple day-to-day. An extended `EXPLAIN SPARQL` command surfaces the algebra tree, generated SQL, plan-cache status, and per-step row counts as an interactive JSON structure. The RAG pipeline ties together vector recall, SPARQL graph expansion, and LLM context-window assembly into a single SQL function call.
 >
 > **Effort estimate: 5–7 person-weeks**
 
 ### Deliverables
-
-- [ ] **VS Code extension** (Feature B-2) — separate repository `pg-ripple-vscode`
-  - SPARQL 1.1 syntax highlighting (TextMate grammar)
-  - SHACL Turtle syntax highlighting with shape-aware completion
-  - Datalog rule syntax highlighting
-  - Query runner: execute a SPARQL query against a configured `pg_ripple_http` endpoint, display results as a table or JSON tree
-  - SHACL shape linter: validate a `.ttl` shapes file by calling `pg_ripple.load_shapes()` via the HTTP API and surfacing violations inline
-  - Configuration: workspace settings for endpoint URL, auth token, and default named graph
-  - Published to VS Code Marketplace; linked from `README.md` and docs
 
 - [ ] **SPARQL query debugger** (Feature B-3)
   - Extend `pg_ripple.explain_sparql(query TEXT)` to return JSONB with: algebra tree, generated SQL, plan-cache status (`hit` / `miss` / `bypass`), per-operator estimated rows, per-operator actual rows (when `analyze := true`)
   - New overload `pg_ripple.explain_sparql(query TEXT, analyze BOOL DEFAULT FALSE) RETURNS JSONB`
   - VS Code extension renders the JSONB as a collapsible tree with operator annotations
   - pg_regress `sparql_explain_analyze.sql`: assert the JSONB schema is stable across SELECT, ASK, CONSTRUCT, and DESCRIBE query types
+  - VS Code extension renders the JSONB as a collapsible tree with operator annotations (deferred to v1.10)
 
 - [ ] **RAG pipeline with graph-contextualised embeddings** (Feature C-3)
   - New SQL function `pg_ripple.rag_context(question TEXT, k INT DEFAULT 10) RETURNS TEXT`
@@ -3935,14 +3927,13 @@ W3C SHACL Core test suite passes 35/35 constraints. OWL 2 RL CI gate upgraded to
 
 ### Documentation
 
-- [ ] `user-guide/vscode-extension.md` — installation, configuration, SPARQL query runner, SHACL linter
 - [ ] `user-guide/explain-sparql.md` — EXPLAIN output format, ANALYZE mode, interpreting the algebra tree
 - [ ] `user-guide/rag-pipeline.md` — `rag_context()` step-by-step, tuning k, combining with NL→SPARQL
 - [ ] Release notes for v0.50.0
 
 ### Exit Criteria
 
-VS Code extension is publishable to the VS Code Marketplace (VSIX builds clean). `explain_sparql(query, analyze := true)` returns JSONB with `algebra`, `sql`, `cache_status`, and per-operator `actual_rows` keys for SELECT, ASK, CONSTRUCT, and DESCRIBE queries. `rag_context()` returns non-empty context for a known question against a pre-loaded test knowledge graph. Migration chain test passes through v0.50.0.
+`explain_sparql(query, analyze := true)` returns JSONB with `algebra`, `sql`, `cache_status`, and per-operator `actual_rows` keys for SELECT, ASK, CONSTRUCT, and DESCRIBE queries. `rag_context()` returns non-empty context for a known question against a pre-loaded test knowledge graph. Migration chain test passes through v0.50.0.
 
 ---
 
@@ -4020,6 +4011,7 @@ Stable, tested, documented, and published. Ready for production workloads up to 
 | 1.7 | GeoSPARQL + PostGIS | Answer geographic questions ("find all hospitals within 5 km of this point") | `geo:asWKT` literal type backed by PostGIS `geometry`, spatial FILTER functions, R-tree index on spatial VP tables |
 | 1.8 | R2RML Virtual Graphs | Expose existing database tables as if they were RDF data — no migration needed | W3C R2RML mappings, SPARQL queries transparently join VP tables with mapped SQL tables |
 | 1.9 | Quad-Level Provenance | Track where each fact came from and when it was added | Per-quad metadata table with source, timestamp, and transaction ID; integration with Datalog rule provenance (why-provenance) |
+| 1.10 | VS Code Extension | Editor integration for writing and running SPARQL, SHACL, and Datalog | Separate `pg-ripple-vscode` repo; TextMate grammars for SPARQL 1.1, SHACL Turtle, and Datalog; query runner against `pg_ripple_http`; SHACL shape linter; collapsible EXPLAIN tree view; VS Code Marketplace publication |
 
 ---
 
