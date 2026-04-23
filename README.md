@@ -5,7 +5,7 @@
 [![Roadmap](https://img.shields.io/badge/Roadmap-view-informational)](ROADMAP.md)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![PostgreSQL 18](https://img.shields.io/badge/PostgreSQL-18-blue?logo=postgresql&logoColor=white)](https://www.postgresql.org/)
-[![pgrx 0.17](https://img.shields.io/badge/pgrx-0.17-orange)](https://github.com/pgcentralfoundation/pgrx)
+[![pgrx 0.18](https://img.shields.io/badge/pgrx-0.18-orange)](https://github.com/pgcentralfoundation/pgrx)
 [![WatDiv correctness](https://img.shields.io/badge/WatDiv-100%25%20correct-brightgreen)](docs/src/reference/watdiv-results.md)
 [![LUBM conformance](https://img.shields.io/badge/LUBM-14%2F14%20pass-brightgreen)](docs/src/reference/lubm-results.md)
 
@@ -19,19 +19,19 @@ No separate graph database. No data pipelines. No extra infrastructure.
 
 ---
 
-## What works today (v0.46.0)
+## What works today (v0.51.0)
 
-pg_ripple passes **100% of the W3C SPARQL 1.1 and SHACL Core conformance test suites** — the industry benchmarks for correctness in knowledge graph systems. After 46 releases it covers the full feature set described below.
+pg_ripple passes **100% of the W3C SPARQL 1.1, SHACL Core, and OWL 2 RL conformance test suites** — the industry benchmarks for correctness in knowledge graph systems. After 51 releases it covers the full feature set described below.
 
 | What you can do | How it works |
 |---|---|
 | **Import knowledge** | Load data in standard formats: Turtle, N-Triples, N-Quads, TriG, or RDF/XML — from files, inline text, or remote URLs. Named graphs let you organize facts into logical groups (e.g. one graph per data source or topic). |
-| **Query with SPARQL** | Ask complex questions using SPARQL 1.1 — the W3C standard query language for linked data (similar to SQL, but designed for graphs). Follow chains of relationships, apply filters, aggregate results, and query across multiple graphs. Fully W3C conformant. |
+| **Query with SPARQL** | Ask complex questions using SPARQL 1.1 — the W3C standard query language for linked data (similar to SQL, but designed for graphs). Follow chains of relationships, apply filters, aggregate results, and query across multiple graphs. Fully W3C conformant. Configurable DoS limits (`pg_ripple.sparql_max_algebra_depth`, `pg_ripple.sparql_max_triple_patterns`) reject malformed deep queries at parse time. |
 | **AI and LLM integration** | Store vector embeddings alongside graph facts. Combine semantic similarity search (*"find things similar to X"*) with SPARQL graph traversal in one query. Built-in RAG pipeline retrieves graph-contextualized context for language model prompts. Use `sparql_construct_jsonld()` with a JSON-LD frame to generate structured, token-efficient system prompts directly from a SPARQL CONSTRUCT query. |
 | **Microsoft GraphRAG** | Export entities and relationships in GraphRAG's BYOG (Bring Your Own Graph) Parquet format. Enrich the graph with Datalog rules. Validate export quality with SHACL. Connect your knowledge graph to Microsoft's GraphRAG pipeline with a single SQL call. |
-| **Validate data quality** | Define quality rules with SHACL: *"every Person must have exactly one name"*, *"age must be a positive integer"*. Violations are caught on insert (immediate feedback) or checked in the background. Full SHACL Core conformance, including `sh:equals` and `sh:disjoint` relational constraints. Violation reports include decoded focus-node IRIs for easy debugging. |
+| **Validate data quality** | Define quality rules with SHACL: *"every Person must have exactly one name"*, *"age must be a positive integer"*. Violations are caught on insert (immediate feedback) or checked in the background. Full SHACL Core conformance, including `sh:equals`, `sh:disjoint`, and complex property path traversal (inverse, alternative, sequence, zero-or-more, one-or-more). Violation reports include decoded focus-node IRIs for easy debugging. |
 | **Infer new facts automatically** | Write Datalog rules to derive conclusions from what you already know — *"if Alice manages Bob and Bob manages Carol, then Alice indirectly manages Carol"*. Includes built-in support for standard RDFS and OWL reasoning. Goal-directed mode (`infer_goal()`) and demand-filtered mode (`infer_demand()`) derive only the facts relevant to your query, reducing inference work by 50–90% on large programs. `owl:sameAs` entity canonicalization is applied automatically before inference, so equivalent entities are treated as one. Well-founded semantics (`infer_wfs()`) handles non-stratifiable programs with mutual negation. Tabling caches repeated inference sub-goals (2–5× speedup). Parallel stratum evaluation runs independent rule groups concurrently. Worst-case optimal joins accelerate cyclic graph queries. Incremental retraction (DRed) keeps derived predicates consistent after deletions without full recomputation. |
-| **Stream and inspect queries** | Use `sparql_cursor()` to stream large result sets batch-by-batch without materializing them in memory. Use `explain_sparql()` and `explain_datalog()` to introspect query plans and rule compilation. OpenTelemetry span tracing is available when `pg_ripple.tracing_enabled = on`. |
+| **Stream and inspect queries** | Use `sparql_cursor()` to stream large result sets batch-by-batch without materializing them in memory. Export results as W3C CSV or TSV via `sparql_csv()` / `sparql_tsv()`. Use `explain_sparql()` and `explain_datalog()` to introspect query plans and rule compilation. OpenTelemetry span tracing is available, with a configurable OTLP endpoint (`pg_ripple.tracing_otlp_endpoint`). |
 | **Live change notifications** | Subscribe to graph changes with `pg_ripple.create_subscription(name, filter_sparql)`. pg_ripple notifies your application via a PostgreSQL NOTIFY channel (`pg_ripple_cdc_{name}`) whenever matching triples are added or removed — no polling required. |
 | **Export and share** | Export your graph as Turtle, N-Triples, JSON-LD, or RDF/XML. Use JSON-LD framing to produce nested documents shaped for REST APIs or LLM prompts. |
 | **Standard HTTP endpoint** | The companion `pg_ripple_http` service exposes a W3C SPARQL Protocol endpoint over HTTP/HTTPS. Supports JSON, XML, CSV, Turtle, and JSON-LD responses; authentication; Prometheus metrics; and Docker Compose for easy deployment. |
@@ -167,7 +167,7 @@ This means you get:
 
 ### How it compares
 
-> **Note**: pg_ripple features marked "Yes" in the table below are implemented across v0.1.0–v0.46.0. W3C SPARQL 1.1 Query, Update, and SHACL Core conformance is 100% (achieved in v0.20.0). Competitor capabilities reflect publicly documented feature sets.
+> **Note**: pg_ripple features marked "Yes" in the table below are implemented across v0.1.0–v0.51.0. W3C SPARQL 1.1 Query, Update, SHACL Core, and OWL 2 RL conformance is 100%. Competitor capabilities reflect publicly documented feature sets.
 
 | Capability | pg_ripple | Blazegraph | Virtuoso | Apache Fuseki |
 |---|---|---|---|---|
@@ -256,7 +256,7 @@ pg_ripple is built from the ground up for performance inside PostgreSQL.
 | Component | Technology |
 |---|---|
 | Language | Rust (Edition 2024) |
-| PostgreSQL binding | [pgrx](https://github.com/pgcentralfoundation/pgrx) 0.17 |
+| PostgreSQL binding | [pgrx](https://github.com/pgcentralfoundation/pgrx) 0.18 |
 | PostgreSQL version | 18.x |
 | SPARQL parser | [spargebra](https://crates.io/crates/spargebra) — W3C-compliant SPARQL 1.1 algebra |
 | SPARQL optimizer | [sparopt](https://crates.io/crates/sparopt) — first-pass algebra optimizer (filter pushdown, constant folding) |
@@ -315,12 +315,13 @@ pg_ripple is built to production-grade standards:
 - **Apache Jena test suite** — ~1 000 additional tests covering XSD numeric promotions, timezone-aware date/time, blank-node scoping, and all SPARQL string functions
 - **WatDiv benchmark** — all 100 WatDiv query templates (star, chain, snowflake, complex) validated for correctness against a 10 M-triple dataset with ±0.1% row-count baselines
 - **LUBM conformance suite** — all 14 canonical LUBM queries pass against a synthetic university OWL ontology; includes a Datalog validation sub-suite confirming that `infer('owl-rl')` produces correct supertype entailments (v0.44.0)
-- **W3C OWL 2 RL conformance suite** — W3C OWL 2 RL test manifests (entailment, consistency, and inconsistency tests) run in CI; ≥ 80% pass rate at v0.46.0, targeting ≥ 95% at v1.0.0 (v0.46.0)
-- **Property-based testing** — `proptest` suites assert algebraic invariants: SPARQL algebra round-trips produce byte-identical SQL, dictionary encode/decode is always stable and collision-free for 10,000 random distinct terms, JSON-LD framing preserves all matching IRIs (v0.46.0)
+- **W3C OWL 2 RL conformance suite** — W3C OWL 2 RL test manifests (entailment, consistency, and inconsistency tests) run in CI; **100% pass rate (66/66) achieved at v0.51.0** — blocking gate in CI (v0.51.0)
+- **Property-based testing** — `proptest` suites assert algebraic invariants: SPARQL algebra round-trips produce byte-identical SQL, dictionary encode/decode is always stable and collision-free for 10,000 random distinct terms, JSON-LD framing preserves all matching IRIs (v0.51.0)
 - **Extensive test suite** — automated tests cover every SQL-exposed function, every feature, and every edge case
 - **Security testing** — resistance to injection attacks, malformed inputs, and resource exhaustion
-- **Fuzz testing** — the federation result decoder and query pipeline are continuously fuzz-tested; arbitrary XML/JSON from remote SERVICE endpoints cannot cause a crash or panic (v0.46.0)
-- **Performance regression CI** — BSBM benchmark (1M-triple product dataset, 12 explore queries) and automated throughput benchmarks fail the build if performance drops by more than 10% (v0.46.0)
+- **Fuzz testing** — the federation result decoder and query pipeline are continuously fuzz-tested; arbitrary XML/JSON from remote SERVICE endpoints cannot cause a crash or panic (v0.51.0)
+- **Performance regression CI** — BSBM benchmark (1M-triple product dataset, 12 explore queries) and automated throughput benchmarks fail the build if performance drops by more than 10% (v0.51.0)
+- **Security CI** — `cargo audit --deny warnings` runs on every pull request; SBOM (CycloneDX) generated and attached to every release
 - **Stability** — 72-hour soak test, memory leak detection, and crash recovery testing
 
 ---

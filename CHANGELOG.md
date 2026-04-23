@@ -13,7 +13,7 @@ Versions correspond to the milestones in [ROADMAP.md](ROADMAP.md).
 
 ---
 
-## [0.51.0] — 2026-05-07 — Security Hardening & Production Readiness
+## [0.51.0] — 2026-04-23 — Security Hardening & Production Readiness
 
 **Completes the v0.51.0 roadmap: SPARQL DoS protection (PT440), OWL 2 RL 100% conformance, SPARQL CSV/TSV output, SHACL complex path traversal, per-predicate workload stats, OTLP tracing wiring, non-root Docker container, blocking cargo-audit on PRs, SBOM generation, and comprehensive operational tooling.**
 
