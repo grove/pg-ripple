@@ -15,3 +15,7 @@
 --     shacl_parser, dictionary_hash (fuzz/fuzz_targets/)
 --
 -- Migration is a no-op: extension handles the version string update.
+
+INSERT INTO _pg_ripple.schema_version (version, upgraded_from)
+VALUES ('0.47.0', '0.46.0')
+ON CONFLICT DO NOTHING;

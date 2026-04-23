@@ -18,3 +18,7 @@ WHERE a.i > b.i
 -- Add the UNIQUE constraint.
 ALTER TABLE _pg_ripple.vp_rare
     ADD CONSTRAINT vp_rare_psoq_unique UNIQUE (p, s, o, g);
+
+INSERT INTO _pg_ripple.schema_version (version, upgraded_from)
+VALUES ('0.44.0', '0.43.0')
+ON CONFLICT DO NOTHING;

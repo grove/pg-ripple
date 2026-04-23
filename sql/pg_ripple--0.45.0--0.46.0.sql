@@ -59,3 +59,7 @@
 -- GUCs registered at runtime (no SQL DDL required):
 --   pg_ripple.topn_pushdown          (bool, default on)
 --   pg_ripple.datalog_sequence_batch (integer, default 10000, min 100)
+
+INSERT INTO _pg_ripple.schema_version (version, upgraded_from)
+VALUES ('0.46.0', '0.45.0')
+ON CONFLICT DO NOTHING;

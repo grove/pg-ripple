@@ -45,3 +45,7 @@ CREATE TABLE IF NOT EXISTS _pg_ripple.subscriptions (
 -- Safe to run on existing data (duplicate quads are not possible in a correctly-built store).
 ALTER TABLE _pg_ripple.vp_rare
     ADD CONSTRAINT IF NOT EXISTS vp_rare_psog_unique UNIQUE (p, s, o, g);
+
+INSERT INTO _pg_ripple.schema_version (version, upgraded_from)
+VALUES ('0.42.0', '0.41.0')
+ON CONFLICT DO NOTHING;

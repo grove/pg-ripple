@@ -36,3 +36,7 @@
 --   • pg_ripple.insert_triples(TEXT[][]) SRF for batch single-triple inserts
 
 -- No DDL changes required for this migration.
+
+INSERT INTO _pg_ripple.schema_version (version, upgraded_from)
+VALUES ('0.48.0', '0.47.0')
+ON CONFLICT DO NOTHING;

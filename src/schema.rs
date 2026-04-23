@@ -733,3 +733,15 @@ $$;
     name = "stat_statements_decoded_view",
     requires = ["predicate_stats_view"]
 );
+
+// Stamp the compiled (CARGO_PKG_VERSION) version at fresh-install time so that
+// diagnostic_report() returns a matching schema_version on a clean CREATE EXTENSION.
+// Uses clock_timestamp() so this row is inserted after the v0.37.0 init row
+// (both share the same transaction-start now() value) and is therefore returned
+// first by "ORDER BY installed_at DESC LIMIT 1".
+pgrx::extension_sql!(
+    "INSERT INTO _pg_ripple.schema_version (version, upgraded_from, installed_at) \
+     VALUES ('0.48.0', NULL, clock_timestamp());",
+    name = "v048_schema_version_fresh_install_stamp",
+    requires = ["v037_schema_version"]
+);

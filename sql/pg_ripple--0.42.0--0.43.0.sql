@@ -9,3 +9,7 @@
 --
 -- All new functionality is in the test layer; the pg_ripple SQL/Rust API
 -- is unchanged from v0.42.0.
+
+INSERT INTO _pg_ripple.schema_version (version, upgraded_from)
+VALUES ('0.43.0', '0.42.0')
+ON CONFLICT DO NOTHING;

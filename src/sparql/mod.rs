@@ -1415,17 +1415,20 @@ fn execute_add_by_ids(src_g_id: i64, dst_g_id: i64) -> Result<i64, String> {
             }
             total += n;
         } else {
+            // Use a CTE to count actually-inserted rows (not source-graph size),
+            // so that identity operations (src == dst) correctly return 0.
             let insert_sql = format!(
-                "INSERT INTO _pg_ripple.vp_rare (p, s, o, g) \
-                 SELECT {pred_id}, s, o, {dst_g_id} \
-                 FROM _pg_ripple.vp_rare WHERE p = {pred_id} AND g = {src_g_id} \
-                 ON CONFLICT (p, s, o, g) DO NOTHING"
+                "WITH ins AS ( \
+                     INSERT INTO _pg_ripple.vp_rare (p, s, o, g) \
+                     SELECT {pred_id}, s, o, {dst_g_id} \
+                     FROM _pg_ripple.vp_rare WHERE p = {pred_id} AND g = {src_g_id} \
+                     ON CONFLICT (p, s, o, g) DO NOTHING \
+                     RETURNING 1 \
+                 ) SELECT count(*)::bigint FROM ins"
             );
-            let count_sql = format!(
-                "SELECT COUNT(*) FROM _pg_ripple.vp_rare WHERE p = {pred_id} AND g = {src_g_id}"
-            );
-            Spi::run(&insert_sql).unwrap_or_else(|e| pgrx::error!("ADD vp_rare insert error: {e}"));
-            let n: i64 = Spi::get_one::<i64>(&count_sql).unwrap_or(None).unwrap_or(0);
+            let n: i64 = Spi::get_one::<i64>(&insert_sql)
+                .unwrap_or_else(|e| pgrx::error!("ADD vp_rare insert error: {e}"))
+                .unwrap_or(0);
             total += n;
         }
     }

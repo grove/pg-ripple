@@ -12,3 +12,7 @@
 --   - CI jobs: w3c-smoke (required), w3c-suite (informational)
 --
 -- No VP table schema changes, no new GUC parameters, no new SQL functions.
+
+INSERT INTO _pg_ripple.schema_version (version, upgraded_from)
+VALUES ('0.41.0', '0.40.0')
+ON CONFLICT DO NOTHING;
