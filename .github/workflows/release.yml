@@ -202,7 +202,7 @@ jobs:
 
       - name: Generate SBOM (CycloneDX)
         run: |
-          cargo cyclonedx --format json --output-file sbom.json
+          cargo cyclonedx --format json --override-filename sbom
           echo "Generated SBOM: $(wc -c < sbom.json) bytes"
 
       - name: Attach SBOM to GitHub release
