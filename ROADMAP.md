@@ -17,6 +17,12 @@ Each release below has two layers:
 
 ---
 
+## For non-technical readers
+
+If you're looking for a plain-language explanation of what each release delivers and why it matters, start with [**roadmap/README.md**](roadmap/README.md). That document describes v0.51.0–v0.53.0 in terms anyone can understand — no programming knowledge required.
+
+---
+
 ## Overview at a glance
 
 | Version | Name | What it delivers (one sentence) | Effort |

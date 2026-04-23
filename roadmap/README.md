@@ -1,6 +1,8 @@
 # pg_ripple — Roadmap Feature Descriptions
 
-This directory contains plain-language descriptions of pg_ripple's upcoming releases. The goal is to give a clear picture of what each version delivers, why it matters, and how much work is involved — without requiring deep technical knowledge.
+This directory contains plain-language descriptions of pg_ripple's upcoming releases (v0.51.0–v0.53.0). The goal is to give a clear picture of what each version delivers, why it matters, and how much work is involved — without requiring deep technical knowledge.
+
+**For the complete roadmap** with all versions from v0.1.0 to v1.0.0 and detailed technical deliverables, see [ROADMAP.md](../ROADMAP.md).
 
 ---
 
@@ -20,3 +22,9 @@ pg_ripple is a database extension for PostgreSQL that lets you store and query k
 | **v1.0.0** | Production Release | Final conformance, stress test, security audit, API stability guarantee | 6–8 pw |
 
 **Total estimated effort to v1.0.0 from the current state (v0.50.0): 25–34 person-weeks**
+
+---
+
+## For the detailed roadmap
+
+For the complete roadmap with technical deliverables, versioning history, and all released versions (v0.1.0–v0.50.0), see [**ROADMAP.md**](../ROADMAP.md).
