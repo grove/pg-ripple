@@ -19,9 +19,10 @@ pg_ripple is a database extension for PostgreSQL that lets you store and query k
 | **[v0.51.0](v0.51.0.md)** | Security Hardening & Production Readiness | Non-root container, SPARQL DoS limits, HTTP streaming, OTLP tracing, pg_upgrade docs, OWL 2 RL completion | 8–10 pw |
 | **[v0.52.0](v0.52.0.md)** | DX, Extended Standards & Architecture | SHACL-SPARQL, `COPY rdf FROM`, RAG hardening, OpenAPI spec, CDC lifecycle events, code quality splits | 6–9 pw |
 | **[v0.53.0](v0.53.0.md)** | High Availability & Logical Replication | RDF logical replication, Helm chart, vector index benchmarks | 5–7 pw |
+| **[v0.54.0](v0.54.0.md)** | pg-trickle Relay Integration | JSON→RDF helpers, CDC→outbox bridge worker, CDC bridge triggers, JSON-LD event serializer, dedup keys, vocabulary alignment templates, pg-trickle runtime detection, integration test suite | 5–7 pw |
 | **v1.0.0** | Production Release | Final conformance, stress test, security audit, API stability guarantee | 6–8 pw |
 
-**Total estimated effort to v1.0.0 from the current state (v0.50.0): 25–34 person-weeks**
+**Total estimated effort to v1.0.0 from the current state (v0.50.0): 30–41 person-weeks**
 
 ---
 

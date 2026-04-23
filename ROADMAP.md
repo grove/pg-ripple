@@ -81,6 +81,7 @@ If you're looking for a plain-language explanation of what each release delivers
 | [0.51.0](#v0510--security-hardening--production-readiness) | Security Hardening & Production Readiness | Non-root container, SPARQL DoS protection, HTTP streaming, OTLP, pg_upgrade compat, CDC docs, conformance gate flips | 8–10 pw |
 | [0.52.0](#v0520--dx-extended-standards--architecture) | DX, Extended Standards & Architecture | SHACL-SPARQL, `COPY rdf FROM`, RAG hardening, CDC lifecycle events, architecture module splits, OpenAPI spec | 6–9 pw |
 | [0.53.0](#v0530--high-availability--logical-replication) | High Availability & Logical Replication | PG18 logical-decoding RDF replication, Helm chart, merge/vector-index performance baselines | 5–7 pw |
+| [0.54.0](#v0540--pg-trickle-relay-integration) | pg-trickle Relay Integration | JSON→RDF helpers, CDC→outbox bridge worker, CDC bridge triggers, JSON-LD event serializer, dedup keys, vocabulary templates, pg-trickle runtime detection, integration test suite | 5–7 pw |
 | [1.0.0](#v100--production-release) | Production Release | Standards conformance, stress testing, security audit | 6–8 pw |
 | | | **Total estimated effort** | **275–376 pw** |
 
@@ -4165,6 +4166,86 @@ A primary + replica test using the logical-decoding plugin achieves < 1 s replic
 
 ---
 
+## v0.54.0 — pg-trickle Relay Integration
+
+**Theme**: Hub-and-spoke event streaming — connect pg_ripple to external sources and consumers via pg-trickle's relay transport layer.
+
+> **In plain language:** pg_ripple can already store, infer, and query knowledge graphs. This release makes it easy to *feed* the graph from real-world event streams (Kafka, NATS, webhooks) and *publish* enriched results back out to consumers — all inside PostgreSQL, without any application code. The key pieces are: a helper function that converts any JSON event into RDF triples, a background worker that watches for newly inferred triples and writes them to pg-trickle's outbox, and configurable triggers for latency-sensitive paths. Pre-built vocabulary alignment templates handle the common case where different data sources use different names for the same concepts.
+>
+> **Effort estimate: 5–7 person-weeks**
+>
+> **Design reference**: [plans/pg_trickle_relay_integration.md](plans/pg_trickle_relay_integration.md)
+
+### Deliverables
+
+#### JSON → RDF Transform Helpers
+
+- [ ] **`pg_ripple.json_to_ntriples(payload JSONB, subject_iri TEXT, type_iri TEXT) RETURNS TEXT`** (`src/bulk_load.rs`): converts a JSON object to N-Triples; handles nested objects, arrays, and XSD-typed values; optional `context JSONB` argument maps JSON keys to vocabulary URIs
+- [ ] **`pg_ripple.json_to_ntriples_trigger() RETURNS TRIGGER`**: PL/pgSQL wrapper callable directly as an `AFTER INSERT` trigger on pg-trickle inbox tables; reads `NEW.payload`, derives subject IRI from configurable trigger argument
+- [ ] **`docs/src/integrations/json-to-rdf.md`**: mapping rules, supported JSON structures, trigger usage examples
+
+#### CDC → pg-trickle Outbox Bridge Worker
+
+- [ ] **`_pg_ripple.cdc_bridge_worker`** (`src/storage/cdc_bridge.rs`): `BackgroundWorker` that listens on the CDC `NOTIFY` channel, batches notifications by `pg_ripple.cdc_bridge_batch_size` (default: 100) or `pg_ripple.cdc_bridge_flush_ms` (default: 200 ms), bulk-decodes dictionary IDs via a single SPI call, and batch-inserts JSON-LD events into `pg_ripple.cdc_bridge_outbox_table` (configurable GUC)
+- [ ] **New GUCs**: `pg_ripple.cdc_bridge_enabled` (bool, default: `off`), `pg_ripple.cdc_bridge_batch_size` (int, default: 100), `pg_ripple.cdc_bridge_flush_ms` (int, default: 200), `pg_ripple.cdc_bridge_outbox_table` (text, default: `enriched_events`), `pg_ripple.trickle_integration` (bool, default: `on` when pg-trickle detected)
+- [ ] **`docs/src/integrations/cdc-bridge.md`**: architecture, GUC tuning, backpressure guidance
+
+#### Selective CDC Bridge Triggers
+
+- [ ] **`pg_ripple.enable_cdc_bridge_trigger(name TEXT, predicate TEXT, outbox TEXT) RETURNS VOID`** (`src/storage/cdc_bridge.rs`): installs a trigger on the VP delta table for the given predicate that writes decoded JSON-LD directly to the specified outbox table in the same transaction
+- [ ] **`pg_ripple.disable_cdc_bridge_trigger(name TEXT) RETURNS VOID`**: drops the trigger
+- [ ] **`pg_ripple.cdc_bridge_triggers() RETURNS TABLE(name TEXT, predicate TEXT, outbox TEXT, active BOOL)`**: catalog SRF
+- [ ] **Catalog table**: `_pg_ripple.cdc_bridge_triggers (name TEXT PRIMARY KEY, predicate_id BIGINT, outbox_table TEXT, created_at TIMESTAMPTZ)`
+
+#### JSON-LD Event Serializer
+
+- [ ] **`pg_ripple.triple_to_jsonld(s BIGINT, p BIGINT, o BIGINT) RETURNS JSONB`** (`src/export/jsonld.rs`): decodes a single triple from dictionary IDs using the LRU cache; returns a JSON-LD object with inline `@context`
+- [ ] **`pg_ripple.triples_to_jsonld(subject BIGINT) RETURNS JSONB`**: collects all triples for a subject into a single JSON-LD document (star-pattern batch)
+- [ ] Both functions used internally by bridge worker and CDC triggers; directly callable from SQL
+
+#### Outbox Dedup Key from Statement ID
+
+- [ ] **`pg_ripple.statement_dedup_key(s BIGINT, p BIGINT, o BIGINT) RETURNS TEXT`** (`src/storage/vp_tables.rs`): looks up the `i` column for the given triple and returns `'ripple:{statement_id}'` as a relay-compatible dedup key
+- [ ] Dedup key included automatically in outbox JSON-LD payloads produced by the bridge worker and CDC bridge triggers as `"_dedup_key"` field
+
+#### Vocabulary Alignment Templates
+
+- [ ] **`sql/vocab/schema_to_saref.pl`**: Schema.org ↔ SAREF (IoT sensor data) alignment rules
+- [ ] **`sql/vocab/schema_to_fhir.pl`**: Schema.org ↔ FHIR R4 basic resources (Patient, Observation)
+- [ ] **`sql/vocab/schema_to_provo.pl`**: Schema.org ↔ PROV-O (provenance, agent, activity)
+- [ ] **`sql/vocab/generic_to_schema.pl`**: generic JSON key → Schema.org property heuristic rules
+- [ ] **`pg_ripple.load_vocab_template(name TEXT) RETURNS INT`**: loads a named template from `sql/vocab/`; returns number of rules loaded
+- [ ] **`docs/src/integrations/vocabulary-templates.md`**: template reference and customisation guide
+
+#### pg-trickle Runtime Detection & Graceful Degradation
+
+- [ ] **Runtime detection at `_PG_init`** (`src/lib.rs`): check for pg-trickle via `SPI_execute('SELECT 1 FROM pg_extension WHERE extname = $1', 'pg_trickle')`; set module-level flag
+- [ ] **Graceful degradation**: bridge functions return `PT800` error code when pg-trickle is absent; rest of pg_ripple unaffected
+- [ ] **Error code `PT800`**: `pg_trickle extension is not installed; install pg_trickle to use bridge features`
+- [ ] **`pg_ripple.trickle_available() RETURNS BOOL`**: SQL-callable runtime check
+
+#### Integration Test Suite
+
+- [ ] **`tests/pg_regress/sql/trickle_integration.sql`**: end-to-end tests using pg-trickle mock (inbox INSERT → trigger → load_ntriples → Datalog → CDC → outbox row); asserts round-trip correctness, dedup key uniqueness, JSON-LD schema
+- [ ] **`tests/pg_regress/sql/trickle_graceful_degradation.sql`**: verifies `PT800` error when pg-trickle absent, all non-bridge functions unaffected
+- [ ] **CI matrix extension**: add `pg_trickle` to the Docker Compose test service; `trickle_integration` tests are `REGRESS_OPTS += --schedule=trickle` (skipped if pg-trickle unavailable)
+
+#### Documentation
+
+- [ ] **`docs/src/integrations/pg-trickle-overview.md`**: hub-and-spoke architecture overview, full pipeline diagram, links to sub-pages
+- [ ] **`docs/src/integrations/hub-and-spoke-example.md`**: complete worked example: Kafka orders → RDF → Datalog enrichment → NATS outbound
+- [ ] Update `docs/src/reference/guc-reference.md` with v0.54.0 GUCs
+
+### Migration Script
+
+`sql/pg_ripple--0.53.0--0.54.0.sql` — schema changes: create `_pg_ripple.cdc_bridge_triggers` catalog table; no changes to VP tables or the dictionary.
+
+### Exit Criteria
+
+All `trickle_integration` pg_regress tests pass when pg-trickle is installed. `trickle_graceful_degradation` tests pass when pg-trickle is absent (bridge functions return `PT800`; all other functions return expected results). CDC bridge trigger delivers a decoded JSON-LD event to the outbox table within 20 ms of a VP delta INSERT in the same transaction. Bridge worker achieves ≥ 1,000 events/s sustained throughput on a 4-core CI runner. `json_to_ntriples()` handles nested JSON objects, arrays, and XSD-typed values correctly. Vocabulary template `schema_to_saref.pl` loads without errors and aligns at least the top 10 SAREF properties. Migration chain test passes through v0.54.0.
+
+---
+
 ## v1.0.0 — Production Release
 
 **Theme**: Stability, conformance, and production certification.
@@ -4277,7 +4358,8 @@ Stable, tested, documented, and published. Ready for production workloads up to 
 | 0.51.0 | +5 weeks | 8–10 pw | 140–189 pw |
 | 0.52.0 | +5 weeks | 6–9 pw | 146–198 pw |
 | 0.53.0 | +4 weeks | 5–7 pw | 151–205 pw |
-| 1.0.0 | +4 weeks | 6–8 pw | **157–213 pw** |
+| 0.54.0 | +4 weeks | 5–7 pw | 156–212 pw |
+| 1.0.0 | +4 weeks | 6–8 pw | **162–220 pw** |
 | 1.1–1.9 | Post-1.0 | Community-driven | — |
 
 *Estimates assume a pair of focused developers with Rust and PostgreSQL experience. "pw" = person-weeks. Calendar durations assume pair programming; a solo developer should expect roughly double the calendar time. Actual pace depends on contributor availability and scope adjustments discovered during implementation.*
