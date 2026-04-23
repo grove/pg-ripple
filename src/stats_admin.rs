@@ -506,6 +506,6 @@ mod pg_ripple {
                     Err(_) => vec![],
                 }
             });
-        TableIterator::new(rows.into_iter())
+        TableIterator::new(rows)
     }
 }

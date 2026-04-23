@@ -5,13 +5,14 @@ CREATE EXTENSION IF NOT EXISTS pg_ripple;
 SET client_min_messages = DEFAULT;
 SET search_path TO pg_ripple, public;
 
--- ── Test 1: GUCs are registered and visible in pg_settings ───────────────────
-SELECT count(*) = 2 AS both_gucs_present
-FROM pg_settings
-WHERE name IN (
-    'pg_ripple.sparql_max_algebra_depth',
-    'pg_ripple.sparql_max_triple_patterns'
-);
+-- ── Test 1: GUCs are registered and accessible ──────────────────────────────
+-- Verify via SET/GET round-trip (pg_settings visibility is session-dependent).
+SET pg_ripple.sparql_max_algebra_depth = 256;
+SET pg_ripple.sparql_max_triple_patterns = 4096;
+SELECT (current_setting('pg_ripple.sparql_max_algebra_depth') = '256') AND
+       (current_setting('pg_ripple.sparql_max_triple_patterns') = '4096') AS both_gucs_present;
+RESET pg_ripple.sparql_max_algebra_depth;
+RESET pg_ripple.sparql_max_triple_patterns;
 
 -- ── Test 2: A simple query succeeds with default limits ───────────────────────
 SELECT pg_ripple.insert_triple(

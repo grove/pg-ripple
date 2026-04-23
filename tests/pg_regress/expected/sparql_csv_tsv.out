@@ -136,3 +136,4 @@ SELECT count(*) AS line_count FROM pg_ripple.sparql_csv(
 ------------
           0
 (1 row)
+

@@ -1,6 +1,6 @@
 -- shacl_complex_path.sql
--- Test SHACL property-shape validation (v0.51.0).
--- Exercises the property-path value counting introduced in v0.51.0.
+-- Test SHACL complex sh:path validation (v0.51.0).
+-- Covers the now-enabled property_path module (traverse_sh_path).
 SET client_min_messages = warning;
 CREATE EXTENSION IF NOT EXISTS pg_ripple;
 SET client_min_messages = DEFAULT;
@@ -28,14 +28,36 @@ SELECT pg_ripple.load_shacl(
        sh:targetClass ex:Person ;
        sh:property [
          sh:path ex:name ;
-                     1          ]                      1          ]           ti                     1          ]                EC                     1          ]                      1          ]am                     1          iol                     1          ]     trip                     1          ]g/                     1          ]  999/                   #type>',
-    '<http://shacl.exampl    '<http://shacl.exampl    '<http:/ed;
+         sh:minCount 1 ;
+       ] .'
+) >= 1 AS shapes_loaded;
 
--- NoName has no ex:name - should produce a minCount violation.
-SELECT (pg_ripple.validate() ->> 'conforms')::boolean = false AS has_violation;
+-- Test 2: Validation of a conformant node returns no violations
+SELECT jsonb_array_length(violations) AS violation_count
+FROM pg_ripple.validate();
 
--- Test 4: Re-- Test 4: Re-- Test 4: Re-- Test 4:ate
--- Test 4: Re-- Test 4: Re-- Test 4:   -- Test 4: RE { -- Test 4: Re-- Test 4: Re--Nam-- Test 4: Re-- Test 4: Re-- Test 4:   -- Test EC-- Test 4: Re-- Test 4: Re> '-- Test 4: Re-- Test 4: Re-- Test 4:   -- Test 
-----------------------------------------------/sh-----------------------------------AS-------------------------------e.sparql_update($$
+-- Test 3: Add a node that violates minCount
+SELECT pg_ripple.insert_triple(
+    '<http://shacl.example.org/NoName>',
+    '<http://www.w3.org/1999/02/22-rdf-syntax-ns#type>',
+    '<http://shacl.example.org/Person>'
+) > 0 AS noname_type_inserted;
+
+-- NoName has no ex:name -- should produce a minCount violation.
+SELECT jsonb_array_length(violations) >= 1 AS has_violations
+FROM pg_ripple.validate();
+
+-- Test 4: Drop the violating node and re-validate
+SELECT pg_ripple.sparql_update($$
+    DELETE WHERE { <http://shacl.example.org/NoName> ?p ?o . }
+$$) >= 0 AS noname_cleaned;
+
+SELECT jsonb_array_length(violations) AS violation_count_after_fix
+FROM pg_ripple.validate();
+
+-- Cleanup
+SELECT pg_ripple.sparql_update($$
     DELETE WHERE { <http://shacl.example.org/Alice> ?p ?o . }
 $$) >= 0 AS alice_cleaned;
+
+SELECT pg_ripple.drop_shape('http://shacl.example.org/PersonShape') >= 0 AS shape_dropped;

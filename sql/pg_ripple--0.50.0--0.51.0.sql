@@ -29,3 +29,8 @@ CREATE TABLE IF NOT EXISTS _pg_ripple.predicate_stats (
 -- introduced in v0.42.0.  The old GUC still works but will be removed in v1.0.0.
 -- Users relying on it should migrate to:
 --   SET pg_ripple.max_path_depth = <value>;
+
+-- ── Schema version ────────────────────────────────────────────────────────────
+INSERT INTO _pg_ripple.schema_version (version, upgraded_from, installed_at)
+VALUES ('0.51.0', '0.50.0', now())
+ON CONFLICT DO NOTHING;
