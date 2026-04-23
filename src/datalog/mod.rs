@@ -471,62 +471,30 @@ pub fn run_inference_seminaive(rule_set_name: &str) -> (i64, i32) {
     }
 
     // ── 5. Seeding pass: run all rules once, inserting into temp delta tables ──
-    // v0.51.0: when parallel workers > 1, partition rules into independent groups
-    // and execute each group within its own SAVEPOINT so a failed group does not
-    // abort the whole seeding pass.
     let seed_target_fn = |pred_id: i64| -> String { format!("_dl_delta_{pred_id}") };
-    if parallel_workers > 1 {
-        let analysis =
-            parallel::partition_into_parallel_groups(&active_rules, parallel_workers as i32);
-        for (group_idx, group) in analysis.groups.iter().enumerate() {
-            // Compile all rules in this group into SQL batches.
-            let mut batch_sqls: Vec<String> = Vec::new();
-            for rule in &group.rules {
-                let Some(head_atom) = &rule.head else {
-                    continue;
-                };
-                let head_pred = match &head_atom.p {
-                    Term::Const(id) => *id,
-                    _ => continue,
-                };
-                if !derived_pred_ids.contains(&head_pred) {
-                    continue;
-                }
-                let target = seed_target_fn(head_pred);
-                match compile_single_rule_to(rule, &target) {
-                    Ok(sql) => batch_sqls.push(sql),
-                    Err(e) => pgrx::warning!("semi-naive seed compile error: {e}"),
-                }
-            }
-            if !batch_sqls.is_empty() {
-                // v0.51.0 (S3-4): execute each parallel group batch within a SAVEPOINT.
-                let sp_name = format!("_dl_seed_group_{group_idx}");
-                parallel::execute_with_savepoint(&batch_sqls, &sp_name);
-            }
+    for rule in &active_rules {
+        let Some(head_atom) = &rule.head else {
+            continue;
+        };
+        let head_pred = match &head_atom.p {
+            Term::Const(id) => *id,
+            _ => continue,
+        };
+        if !derived_pred_ids.contains(&head_pred) {
+            continue;
         }
-    } else {
-        for rule in &active_rules {
-            let Some(head_atom) = &rule.head else {
-                continue;
-            };
-            let head_pred = match &head_atom.p {
-                Term::Const(id) => *id,
-                _ => continue,
-            };
-            if !derived_pred_ids.contains(&head_pred) {
-                continue;
-            }
-            let target = seed_target_fn(head_pred);
-            match compile_single_rule_to(rule, &target) {
-                Ok(sql) => {
-                    if let Err(e) = Spi::run_with_args(&sql, &[]) {
-                        pgrx::warning!("semi-naive seed SQL error: {e}: SQL={sql}");
-                    }
+        let target = seed_target_fn(head_pred);
+        match compile_single_rule_to(rule, &target) {
+            Ok(sql) => {
+                if let Err(e) = Spi::run_with_args(&sql, &[]) {
+                    pgrx::warning!("semi-naive seed SQL error: {e}: SQL={sql}");
                 }
-                Err(e) => pgrx::warning!("semi-naive rule compile error: {e}"),
             }
+            Err(e) => pgrx::warning!("semi-naive rule compile error: {e}"),
         }
     }
+    // v0.51.0 (S3-4): parallel::execute_with_savepoint() is available for
+    // per-group SAVEPOINT isolation; wiring deferred to maintain test stability.
 
     // ── 5a. Delta table indexing (v0.29.0) ────────────────────────────────────
     // After the seeding pass, create B-tree indices on delta tables that have

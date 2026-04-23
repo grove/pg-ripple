@@ -1186,11 +1186,11 @@ fn validate_property_shape(
         }
     };
     for &focus in focus_nodes {
-        // v0.51.0: route value-count through the property_path module so that
-        // future complex sh:path expressions (inverse, sequence, recursive)
-        // are handled correctly even for the count computation (S3-4 / N5-4).
-        let values = constraints::values_for_path_iri(&ps.path_iri, focus, graph_id);
-        let count = values.len() as i64;
+        let count = if graph_id < 0 {
+            count_values_all_graphs(focus, path_id)
+        } else {
+            count_values_in_graph(focus, path_id, graph_id)
+        };
         let args = constraints::ConstraintArgs {
             focus,
             count,

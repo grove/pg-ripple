@@ -506,6 +506,6 @@ mod pg_ripple {
                     Err(_) => vec![],
                 }
             });
-        TableIterator::new(rows.into_iter().map(|(iri, qc, mc, lm)| (iri, qc, mc, lm)))
+        TableIterator::new(rows.into_iter())
     }
 }

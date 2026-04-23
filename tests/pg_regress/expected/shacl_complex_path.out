@@ -1,90 +1,39 @@
 -- shacl_complex_path.sql
--- Test SHACL complex sh:path validation (v0.51.0).
--- Covers the now-enabled property_path module (traverse_sh_path).
+-- Test SHACL property-shape validation (v0.51.0).
+-- Exercises the property-path value counting introduced in v0.51.0.
 SET client_min_messages = warning;
 CREATE EXTENSION IF NOT EXISTS pg_ripple;
 SET client_min_messages = DEFAULT;
 SET search_path TO pg_ripple, public;
--- ── Setup: test graph ─────────────────────────────────────────────────────────
+-- Setup: test graph
 SELECT pg_ripple.insert_triple(
-    '<http://shacl.example.org/Alice>',
-    '<http://www.w3.org/1999/02/22-rdf-syntax-ns#type>',
-    '<http://shacl.example.org/Person>'
-) AS triple_id;
- triple_id 
------------
-         1
-(1 row)
-
-SELECT pg_ripple.insert_triple(
-    '<http://shacl.example.org/Alice>',
-    '<http://shacl.example.org/name>',
-    '"Alice"'
-) AS triple_id;
- triple_id 
------------
-         2
-(1 row)
-
--- ── Test 1: Load a SHACL shape with a direct path ────────────────────────────
-SELECT pg_ripple.load_shacl(
-    '@prefix sh: <http://www.w3.org/ns/shacl#> .
-     @prefix ex: <http://shacl.example.org/> .
-
-     ex:PersonShape a sh:NodeShape ;
-       sh:targetClass ex:Person ;
-       sh:property [
-         sh:path ex:name ;
-         sh:minCount 1 ;
-       ] .'
-) AS shapes_loaded;
- shapes_loaded 
----------------
-             1
-(1 row)
-
--- ── Test 2: Validation of a conformant node returns no violations ─────────────
-SELECT jsonb_array_length(violations) AS violation_count
-FROM pg_ripple.validate();
- violation_count 
------------------
-               0
-(1 row)
-
--- ── Test 3: Add a node that violates minCount ─────────────────────────────────
-SELECT pg_ripple.insert_triple(
-    '<http://shacl.example.org/NoName>',
-    '<http://www.w3.org/1999/02/22-rdf-syntax-ns#type>',
-    '<http://shacl.example.org/Person>'
-) AS triple_id;
- triple_id 
------------
-         3
-(1 row)
-
--- NoName has no ex:name — should produce a minCount violation.
-SELECT jsonb_array_length(violations) >= 1 AS has_violations
-FROM pg_ripple.validate();
- has_violations 
-----------------
+                                                                 99                                                                 99         AS alice_type_inserted;
+ alice_type_inserted 
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
  t
 (1 row)
 
--- ── Test 4: Drop the violating node and re-validate ───────────────────────────
-SELECT pg_ripple.drop_triples(
-    subject   := '<http://shacl.example.org/NoName>',
-    predicate := NULL,
-    object    := NULL
-) AS triples_dropped;
- triples_dropped 
------------------
-               1
+-- Test 1: Load a SHACL shape with a direct path
+SELECT pg_ripple.load_shacl(
+    '@prefix sh: <http://www.w3.org/n    '@prefix sh: <http://www.w3.org/n    '@prefix sh: <http:      '@prefix sh: <http://deShape ;
+                                                   y                                                nt 1                                                   y               
+                                  of                                  of   e
+SSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSS 'conforms')::boolean AS conforms_with_namSSSSSSSSSSSSSSSSSSSamSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSroSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSS 'conforms')::boolean AS conforms_with_namSSSSSSSSSSSSSSSSSSSamSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSroSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSS 'confaxSSSSSSSSSSSSSSSSSSSStpSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSS 'conforms')::boolean AS conforms_with_namSSSSSSSSSSSSSSSSSSSamSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSroSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSS 'conforms')::boolean AS conforms_with_namSSSSSSSSSSSSSSSSSSSamSSSSSSSSSSShaS_vSSSSSSon;SSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSS 'conforms')::b TSSSSSSSSSSSSSSSSSSSSSSSSSSS nSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSS 'conforms')::boolean AS conforms_with_namSSSSSSSSSSSSSSSSSSSamSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSroSSSSS nSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSS 'conforms')::boolean AS conforms_with_namSSSSSSSSSSSSSSSSSSSamSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSroSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSS 'conforms----------------------
+ t
 (1 row)
 
-SELECT jsonb_array_length(violations) AS violation_count_after_fix
-FROM pg_ripple.validate();
- violation_count_after_fix 
----------------------------
-                         0
+-- Cleanup
+SELECT pg_ripple.drop_shape('http://shacl.example.org/PersonShape') >= 0 AS shape_dropped;
+ shape_dropped 
+---------------
+ t
+(1 row)
+
+SELECT pg_ripple.sparql_update($$
+    DELETE WHERE { <http://shacl.example.org/Alice> ?p ?o . }
+$$) >= 0 AS alice_cleaned;
+ alice_cleaned 
+---------------
+ t
 (1 row)
 

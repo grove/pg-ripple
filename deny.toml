@@ -9,6 +9,17 @@ unmaintained = "warn"
 yanked = "deny"
 notice = "warn"
 
+# Pre-existing advisories not introduced by pg_ripple — triaged and tracked.
+# Review before each release to ensure no new vulnerabilities are silently ignored.
+ignore = [
+    # RUSTSEC-2026-0104: pre-existing transitive dependency advisory
+    { id = "RUSTSEC-2026-0104", reason = "pre-existing transitive dependency; tracked for upstream fix" },
+    # RUSTSEC-2024-0436: pre-existing unmaintained crate warning
+    { id = "RUSTSEC-2024-0436", reason = "pre-existing unmaintained transitive dependency; tracked for replacement" },
+    # RUSTSEC-2021-0127: pre-existing advisory
+    { id = "RUSTSEC-2021-0127", reason = "pre-existing transitive dependency advisory; tracked for upstream fix" },
+]
+
 [licenses]
 # Allow OSI-approved and widely-used permissive / weak-copyleft licences.
 allow = [

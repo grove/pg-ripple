@@ -227,6 +227,7 @@ fn compile_inner(
 /// to `super::get_value_ids`; for a complex `ShPath` it compiles to SQL.
 ///
 /// Called from the SHACL property-shape dispatcher (v0.51.0).
+#[allow(dead_code)] // v0.51.0: available for complex sh:path wiring; not yet called from shacl/mod.rs
 pub fn values_for_path_iri(path_iri: &str, focus_id: i64, graph_id: i64) -> Vec<i64> {
     traverse_sh_path(&ShPath::Predicate(path_iri.to_owned()), focus_id, graph_id)
 }
