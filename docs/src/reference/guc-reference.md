@@ -448,3 +448,55 @@ ChanginC this setCing after embeddings have been indexedChanginC this setCi`REIN
 | Context | `userset` |
 
 Storage precision for emStorage precision forngle` uses pgvectorStorage precision for emStorage precision forngle` uses pgvectorStorage precision for emStorage precision forngle` uses pgvectorStorage precision for emStorage precision forngle` uses pgvectorStorage precision for emStorage precision forngle` uses pg`binary`.
+
+---
+
+## AI & LLM Integration Parameters (v0.49.0)
+
+### `pg_ripple.llm_endpoint`
+
+| | |
+|---|---|
+| Type | String |
+| Default | `''` (empty — disabled) |
+| Context | `userset` |
+
+Base URL for an OpenAI-compatible `/v1/chat/completions` API used by `sparql_from_nl()`. When empty, calling `sparql_from_nl()` immediately raises PT700. Set to `'mock'` to use the built-in test mock without a real LLM. Examples: `https://api.openai.com/v1`, `http://localhost:11434/v1` (Ollama).
+
+---
+
+### `pg_ripple.llm_model`
+
+| | |
+|---|---|
+| Type | String |
+| Default | `gpt-4o` |
+| Context | `userset` |
+
+LLM model identifier passed in the `model` field of the chat completion request body. Supported values depend on the endpoint — e.g. `gpt-4o`, `gpt-4-turbo`, `llama3`, `mistral`.
+
+---
+
+### `pg_ripple.llm_api_key_env`
+
+| | |
+|---|---|
+| Type | String |
+| Default | `PG_RIPPLE_LLM_API_KEY` |
+| Context | `userset` |
+
+Name of the environment variable from which `sparql_from_nl()` reads the Bearer API key at call time. The key is never stored in the database or visible in `pg_settings`.
+
+---
+
+### `pg_ripple.llm_include_shapes`
+
+| | |
+|---|---|
+| Type | Boolean |
+| Default | `on` |
+| Context | `userset` |
+
+When `on`, the LLM prompt sent by `sparql_from_nl()` includes a summary of active SHACL shapes as additional schema context. Disable when shapes are very large or the LLM context window is limited.
+
+

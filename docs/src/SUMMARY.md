@@ -28,6 +28,8 @@
 - [Reasoning and Inference](features/reasoning-and-inference.md)
 - [Exporting and Sharing](features/exporting-and-sharing.md)
 - [AI Retrieval & Graph RAG](features/ai-retrieval-graph-rag.md)
+- [Natural Language to SPARQL](features/nl-to-sparql.md)
+- [Entity Alignment with owl:sameAs](features/entity-alignment.md)
 - [APIs and Integration](features/apis-and-integration.md)
 - [CDC Subscriptions](features/cdc-subscriptions.md)
 

@@ -3844,7 +3844,7 @@ W3C SHACL Core test suite passes 35/35 constraints. OWL 2 RL CI gate upgraded to
 
 ### Deliverables
 
-- [ ] **NL → SPARQL via LLM function calling** (Feature C-1)
+- [x] **NL → SPARQL via LLM function calling** (Feature C-1)
   - New module `src/llm/mod.rs`; new SQL function `pg_ripple.sparql_from_nl(question TEXT) RETURNS TEXT`
   - Calls a configured LLM endpoint with the schema VoID description as context; returns a SPARQL SELECT query string
   - GUCs: `pg_ripple.llm_endpoint` (TEXT, default `''` = disabled), `pg_ripple.llm_model` (TEXT, default `gpt-4o`), `pg_ripple.llm_api_key_env` (TEXT, name of the env var holding the key — never stored inline)
@@ -3853,7 +3853,7 @@ W3C SHACL Core test suite passes 35/35 constraints. OWL 2 RL CI gate upgraded to
   - Error codes: PT700 (LLM endpoint unreachable), PT701 (LLM returned non-SPARQL output), PT702 (generated SPARQL failed to parse)
   - pg_regress tests run with a mock HTTP server returning a canned SPARQL response
 
-- [ ] **Embedding-based `owl:sameAs` candidate generation** (Feature C-2)
+- [x] **Embedding-based `owl:sameAs` candidate generation** (Feature C-2)
   - New SQL function `pg_ripple.suggest_sameas(threshold REAL DEFAULT 0.9) RETURNS TABLE(s1 TEXT, s2 TEXT, similarity REAL)`
   - Runs an HNSW self-join on the embedding column in `_pg_ripple.entities`; returns pairs whose cosine similarity exceeds `threshold`
   - Companion `pg_ripple.apply_sameas_candidates(min_similarity REAL DEFAULT 0.95)` inserts accepted pairs as `owl:sameAs` triples and triggers cluster merging
@@ -3883,11 +3883,11 @@ W3C SHACL Core test suite passes 35/35 constraints. OWL 2 RL CI gate upgraded to
 
 ### Documentation
 
-- [ ] `user-guide/nl-to-sparql.md` — new page: configuring the LLM endpoint, running `sparql_from_nl`, adding few-shot examples, error handling
-- [ ] `user-guide/entity-alignment.md` — new page: `suggest_sameas`, `apply_sameas_candidates`, tuning threshold, cluster size limits
-- [ ] `reference/guc-reference.md` — four new GUC parameters
-- [ ] `reference/error-catalog.md` — PT700–PT702
-- [ ] Release notes for v0.49.0
+- [x] `user-guide/nl-to-sparql.md` — new page: configuring the LLM endpoint, running `sparql_from_nl`, adding few-shot examples, error handling
+- [x] `user-guide/entity-alignment.md` — new page: `suggest_sameas`, `apply_sameas_candidates`, tuning threshold, cluster size limits
+- [x] `reference/guc-reference.md` — four new GUC parameters
+- [x] `reference/error-catalog.md` — PT700–PT702
+- [x] Release notes for v0.49.0
 
 ### Exit Criteria
 

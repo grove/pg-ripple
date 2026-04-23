@@ -745,3 +745,28 @@ pgrx::extension_sql!(
     name = "v048_schema_version_fresh_install_stamp",
     requires = ["v037_schema_version"]
 );
+
+// v0.49.0: LLM few-shot examples table.
+pgrx::extension_sql!(
+    r#"
+-- Few-shot question → SPARQL examples for the NL-to-SPARQL LLM integration (v0.49.0).
+-- Rows are loaded by sparql_from_nl() on each call to provide context to the LLM.
+CREATE TABLE IF NOT EXISTS _pg_ripple.llm_examples (
+    question    TEXT        NOT NULL PRIMARY KEY,
+    sparql      TEXT        NOT NULL,
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+COMMENT ON TABLE _pg_ripple.llm_examples IS
+    'Few-shot question/SPARQL examples for the NL-to-SPARQL LLM integration. '
+    'Populated via pg_ripple.add_llm_example().';
+"#,
+    name = "v049_llm_examples",
+    requires = ["v048_schema_version_fresh_install_stamp"]
+);
+
+pgrx::extension_sql!(
+    "INSERT INTO _pg_ripple.schema_version (version, upgraded_from, installed_at) \
+     VALUES ('0.49.0', NULL, clock_timestamp());",
+    name = "v049_schema_version_fresh_install_stamp",
+    requires = ["v049_llm_examples"]
+);

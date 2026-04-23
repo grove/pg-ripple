@@ -555,3 +555,36 @@ pub static DATALOG_SEQUENCE_BATCH: pgrx::GucSetting<i32> = pgrx::GucSetting::<i3
 /// recommended for untrusted deployments).
 pub static FEDERATION_MAX_RESPONSE_BYTES: pgrx::GucSetting<i32> =
     pgrx::GucSetting::<i32>::new(104_857_600);
+
+// ── v0.49.0 GUCs — AI & LLM Integration ──────────────────────────────────────
+
+/// GUC: LLM API base URL for natural-language → SPARQL generation (v0.49.0).
+///
+/// When empty (the default), `sparql_from_nl()` raises PT700 immediately.
+/// Set to `'mock'` to use the built-in test mock (returns a canned SELECT).
+/// Otherwise, the value must be an OpenAI-compatible base URL
+/// (e.g. `https://api.openai.com/v1`, a local Ollama endpoint, or vLLM).
+pub static LLM_ENDPOINT: pgrx::GucSetting<Option<std::ffi::CString>> =
+    pgrx::GucSetting::<Option<std::ffi::CString>>::new(None);
+
+/// GUC: LLM model identifier used for NL → SPARQL generation (v0.49.0).
+///
+/// Passed as the `model` field in the OpenAI-compatible `/v1/chat/completions`
+/// request body.  Default: `gpt-4o`.
+pub static LLM_MODEL: pgrx::GucSetting<Option<std::ffi::CString>> =
+    pgrx::GucSetting::<Option<std::ffi::CString>>::new(None);
+
+/// GUC: name of the environment variable that holds the LLM API key (v0.49.0).
+///
+/// The key is never stored inline.  At call time, `sparql_from_nl()` reads
+/// `std::env::var(llm_api_key_env)` to obtain the Bearer token.
+/// Default: `PG_RIPPLE_LLM_API_KEY`.
+pub static LLM_API_KEY_ENV: pgrx::GucSetting<Option<std::ffi::CString>> =
+    pgrx::GucSetting::<Option<std::ffi::CString>>::new(None);
+
+/// GUC: when `on` (default), include active SHACL shapes as semantic context
+/// in the prompt sent to the LLM endpoint (v0.49.0).
+///
+/// Shapes are appended as a Turtle snippet after the VoID description.
+/// Disable when shapes are large or the LLM context window is limited.
+pub static LLM_INCLUDE_SHAPES: pgrx::GucSetting<bool> = pgrx::GucSetting::<bool>::new(true);
