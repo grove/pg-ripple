@@ -498,3 +498,81 @@ pub fn apply_sameas_candidates(min_similarity: default!(f32, "0.95")) -> i64 {
 
     inserted
 }
+
+// ─── RAG pipeline ─────────────────────────────────────────────────────────────
+
+/// Assemble a retrieval-augmented generation context string for an LLM query.
+///
+/// Steps:
+/// 1. Vector recall — find the `k` most similar entities to `question` via
+///    HNSW cosine distance (requires pgvector + populated `_pg_ripple.embeddings`).
+/// 2. SPARQL graph expansion — for each entity fetch its 1-hop neighbourhood
+///    using `contextualize_entity()` and render as a JSON-LD-style fragment.
+/// 3. Assemble a context string from the fragments, formatted for LLM ingestion.
+/// 4. (Optional) If `pg_ripple.llm_endpoint` is set, call `sparql_from_nl()`
+///    with the assembled context appended, and append the SPARQL result.
+///
+/// When pgvector is absent or the embeddings table is empty, the function
+/// degrades gracefully and returns an empty string with a WARNING rather than
+/// raising an ERROR.
+#[pg_extern(schema = "pg_ripple", name = "rag_context", volatile)]
+pub fn rag_context(question: &str, k: default!(i32, "10")) -> String {
+    // Graceful degradation when pgvector is unavailable.
+    if !crate::PGVECTOR_ENABLED.get() {
+        pgrx::warning!(
+            "pg_ripple.rag_context: pgvector disabled \
+             (pg_ripple.pgvector_enabled = false); returning empty context"
+        );
+        return String::new();
+    }
+
+    if !crate::sparql::embedding::has_pgvector() {
+        pgrx::warning!(
+            "pg_ripple.rag_context: pgvector extension not installed (PT603); \
+             install pgvector and run the 0.27.0 migration to enable RAG"
+        );
+        return String::new();
+    }
+
+    let k_clamped = k.clamp(1, 100);
+
+    // Step 1 & 2: vector recall + 1-hop context for each entity.
+    let rows = crate::sparql::embedding::rag_retrieve(question, None, k_clamped, None, "jsonb");
+
+    if rows.is_empty() {
+        return String::new();
+    }
+
+    // Step 3: assemble context string.
+    let mut parts: Vec<String> = Vec::with_capacity(rows.len());
+    for (entity_iri, label, context_json, _distance) in &rows {
+        let ctx_str = serde_json::to_string_pretty(&context_json.0).unwrap_or_default();
+        parts.push(format!(
+            "Entity: {entity_iri}\nLabel: {label}\nContext:\n{ctx_str}"
+        ));
+    }
+    let mut context = parts.join("\n\n---\n\n");
+
+    // Step 4 (optional): if LLM endpoint is configured, generate and execute
+    // a SPARQL query for the question and append the result.
+    let endpoint_raw = crate::LLM_ENDPOINT
+        .get()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let endpoint = endpoint_raw.trim().to_owned();
+
+    if !endpoint.is_empty() {
+        // Generate SPARQL via NL→SPARQL.
+        let sparql = sparql_from_nl(question);
+        // Execute and append a summary of results.
+        let result_rows = crate::sparql::sparql(&sparql);
+        if !result_rows.is_empty() {
+            let result_json = serde_json::to_string_pretty(&result_rows).unwrap_or_default();
+            context.push_str(&format!(
+                "\n\n---\n\nSPARQL Result for: {question}\n{result_json}"
+            ));
+        }
+    }
+
+    context
+}

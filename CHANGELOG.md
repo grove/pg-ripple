@@ -13,6 +13,37 @@ Versions correspond to the milestones in [ROADMAP.md](ROADMAP.md).
 
 ---
 
+## [0.50.0] — 2026-04-23 — Developer Experience & GraphRAG Polish
+
+**Completes the v0.50.0 roadmap: `explain_sparql(analyze:=true)` interactive query debugger with `cache_status` and `actual_rows`; `rag_context()` full RAG pipeline; migration chain passes through v0.50.0.**
+
+### What's new
+
+- **Extended `pg_ripple.explain_sparql(query TEXT, analyze BOOL DEFAULT FALSE) RETURNS JSONB`** (`src/sparql/explain.rs`):
+  - New `cache_status` key: `"hit"` / `"miss"` / `"bypass"` — replaces the legacy `cache_hit` boolean (which is kept for backward compatibility).
+  - New `actual_rows` key (array): per-operator actual row counts extracted from `EXPLAIN ANALYZE` JSON output when `analyze = true`.
+  - DESCRIBE queries now return a valid JSONB document (algebra + synthetic SQL stub) instead of an error.
+  - EXPLAIN output now uses `FORMAT JSON` for structured parsing.
+
+- **`pg_ripple.rag_context(question TEXT, k INT DEFAULT 10) RETURNS TEXT`** (`src/llm/mod.rs`): full five-step RAG pipeline:
+  1. HNSW vector recall — top-k entities by cosine similarity.
+  2. SPARQL graph expansion — 1-hop neighbourhood via `contextualize_entity()`.
+  3. JSON-LD context assembly — rich text context for LLM ingestion.
+  4. (Optional) NL→SPARQL execution if `pg_ripple.llm_endpoint` is set.
+  - Degrades gracefully (WARNING + empty string) when pgvector is absent.
+
+- **New pg_regress test**: `sparql_explain_analyze.sql` — asserts JSONB schema stability across SELECT, ASK, CONSTRUCT, and DESCRIBE query types.
+
+- **Documentation**:
+  - `docs/src/user-guide/explain-sparql.md` — EXPLAIN output format, ANALYZE mode, interpreting the algebra tree.
+  - `docs/src/user-guide/rag-pipeline.md` — `rag_context()` step-by-step, tuning k, combining with NL→SPARQL.
+
+### Migration
+
+Run `ALTER EXTENSION pg_ripple UPDATE TO '0.50.0'` — no schema changes; new Rust functions are automatically available.
+
+---
+
 ## [0.49.0] — 2026-04-23 — AI & LLM Integration
 
 **Completes the v0.49.0 roadmap: `sparql_from_nl()` NL-to-SPARQL via configurable LLM endpoint; `suggest_sameas()` and `apply_sameas_candidates()` for embedding-based entity alignment; four new GUCs; error codes PT700–PT702.**

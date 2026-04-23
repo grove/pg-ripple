@@ -1,18 +1,45 @@
-//! JSONB explain output for SPARQL queries (v0.40.0).
+//! JSONB explain output for SPARQL queries (v0.40.0 + v0.50.0).
 //!
 //! `explain_sparql_jsonb(query, analyze)` returns a JSONB document with keys:
 //!
 //! - `"algebra"` — spargebra algebra tree as a JSON string
 //! - `"sql"` — the generated SQL with IRI-decoded predicate names
-//! - `"plan"` — PostgreSQL EXPLAIN output as JSON (includes actual timings when analyze=true)
-//! - `"cache_hit"` — whether the plan was served from the plan cache
+//! - `"plan"` — PostgreSQL EXPLAIN output as text (includes actual timings when analyze=true)
+//! - `"cache_hit"` — (legacy) whether the plan was served from the plan cache
+//! - `"cache_status"` — `"hit"` / `"miss"` / `"bypass"` cache state
 //! - `"encode_calls"` — number of dictionary encode lookups during translation
+//! - `"actual_rows"` — flat list of per-operator actual row counts (only when analyze=true)
 
 use pgrx::prelude::*;
 use spargebra::Query;
 
 use crate::sparql::plan_cache;
 use crate::sparql::sqlgen;
+
+/// Recursively collect all "Actual Rows" values from a PostgreSQL EXPLAIN JSON
+/// plan tree.  The plan is a JSON value of the form returned by
+/// `EXPLAIN (FORMAT JSON)`.
+fn collect_actual_rows(node: &serde_json::Value, out: &mut Vec<serde_json::Value>) {
+    match node {
+        serde_json::Value::Array(arr) => {
+            for elem in arr {
+                collect_actual_rows(elem, out);
+            }
+        }
+        serde_json::Value::Object(map) => {
+            if let Some(rows) = map.get("Actual Rows") {
+                out.push(rows.clone());
+            }
+            // Recurse into Plan / Plans / InitPlan / SubPlan children.
+            for key in ["Plan", "Plans", "InitPlan", "SubPlan"] {
+                if let Some(child) = map.get(key) {
+                    collect_actual_rows(child, out);
+                }
+            }
+        }
+        _ => {}
+    }
+}
 
 /// Execute `explain_sparql` returning a structured JSONB document.
 ///
@@ -26,53 +53,88 @@ pub fn explain_sparql_jsonb(query_text: &str, analyze: bool) -> pgrx::JsonB {
     // Algebra tree (string representation).
     let algebra_str = format!("{query:#?}");
 
-    // Check plan cache hit before translating.
-    let cache_hit = plan_cache::get(query_text).is_some();
+    // Determine cache_status before translating.
+    let cache_size = crate::gucs::PLAN_CACHE_SIZE.get();
+    let cache_status: &str = if cache_size <= 0 {
+        "bypass"
+    } else if plan_cache::get(query_text).is_some() {
+        "hit"
+    } else {
+        "miss"
+    };
+    let cache_hit = cache_status == "hit";
 
-    // Translate to SQL (this may or may not use the plan cache depending on
-    // the GUC pg_ripple.plan_cache_size).
-    let (inner_sql, _encode_calls, topn_applied) = match &query {
+    // Translate to SQL.
+    let (inner_sql, topn_applied) = match &query {
         Query::Select { pattern, .. } => {
             let trans = sqlgen::translate_select(pattern, None);
-            (trans.sql, 0usize, trans.topn_applied)
+            (trans.sql, trans.topn_applied)
         }
-        Query::Ask { pattern, .. } => (sqlgen::translate_ask(pattern), 0usize, false),
+        Query::Ask { pattern, .. } => (sqlgen::translate_ask(pattern), false),
         Query::Construct { pattern, .. } => {
             let trans = sqlgen::translate_select(pattern, None);
-            (trans.sql, 0usize, trans.topn_applied)
+            (trans.sql, trans.topn_applied)
         }
         Query::Describe { .. } => {
-            return pgrx::JsonB(serde_json::json!({
-                "error": "DESCRIBE queries are not supported by explain_sparql",
-                "algebra": algebra_str
-            }));
+            // DESCRIBE: return explain information with a synthetic SELECT.
+            let describe_sql = "SELECT s.value AS subject, p.value AS predicate, \
+                                o.value AS object \
+                FROM _pg_ripple.dictionary s, _pg_ripple.dictionary p, \
+                     _pg_ripple.dictionary o LIMIT 0"
+                .to_owned();
+            (describe_sql, false)
         }
     };
 
-    // Run EXPLAIN on the generated SQL.  We use the default TEXT format
-    // and store the output as a plain string — FORMAT JSON parsing via SPI
-    // is unreliable across different pgrx/PostgreSQL versions.
-    let analyze_kw = if analyze { "ANALYZE, " } else { "" };
-    let explain_sql = format!("EXPLAIN ({analyze_kw}FORMAT TEXT) {inner_sql}");
+    // Run EXPLAIN on the generated SQL.
+    // Use FORMAT TEXT for the `plan` field (backward-compatible, always non-empty),
+    // and a separate EXPLAIN (ANALYZE, FORMAT JSON) pass for actual_rows when requested.
+    let analyze_text_kw = if analyze { "ANALYZE, " } else { "" };
+    let explain_text_sql = format!("EXPLAIN ({analyze_text_kw}FORMAT TEXT) {inner_sql}");
 
     let plan_text: String = Spi::connect(|client| {
-        let rows = client
-            .select(&explain_sql, None, &[])
-            .unwrap_or_else(|e| pgrx::error!("explain_sparql_jsonb EXPLAIN SPI error: {e}"));
-        // Each row of EXPLAIN output is one line of the plan.
-        rows.filter_map(|row| row.get::<String>(1).ok().flatten())
+        client
+            .select(&explain_text_sql, None, &[])
+            .unwrap_or_else(|e| pgrx::error!("explain_sparql_jsonb EXPLAIN SPI error: {e}"))
+            .filter_map(|row| row.get::<String>(1).ok().flatten())
             .collect::<Vec<_>>()
             .join("\n")
     });
 
-    let result = serde_json::json!({
+    // When analyze=true, run a separate EXPLAIN (ANALYZE, FORMAT JSON) to extract
+    // per-operator actual row counts from the JSON plan tree.
+    let actual_rows_json: serde_json::Value = if analyze {
+        let explain_json_sql = format!("EXPLAIN (ANALYZE, FORMAT JSON) {inner_sql}");
+        let json_str: String = Spi::connect(|client| {
+            client
+                .select(&explain_json_sql, None, &[])
+                .unwrap_or_else(|e| pgrx::error!("explain_sparql_jsonb ANALYZE SPI error: {e}"))
+                .filter_map(|row| row.get::<String>(1).ok().flatten())
+                .collect::<Vec<_>>()
+                .join("")
+        });
+        let parsed: serde_json::Value =
+            serde_json::from_str(&json_str).unwrap_or(serde_json::Value::Null);
+        let mut rows_out = Vec::new();
+        collect_actual_rows(&parsed, &mut rows_out);
+        serde_json::Value::Array(rows_out)
+    } else {
+        serde_json::Value::Null
+    };
+
+    let mut result = serde_json::json!({
         "algebra": algebra_str,
         "sql": inner_sql,
         "plan": plan_text,
         "cache_hit": cache_hit,
+        "cache_status": cache_status,
         "encode_calls": 0,
         "topn_applied": topn_applied
     });
+
+    if analyze {
+        result["actual_rows"] = actual_rows_json;
+    }
 
     pgrx::JsonB(result)
 }
