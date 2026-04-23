@@ -17,7 +17,6 @@ SELECT (current_setting('pg_ripple.sparql_max_algebra_depth') = '256') AND
 
 RESET pg_ripple.sparql_max_algebra_depth;
 RESET pg_ripple.sparql_max_triple_patterns;
-
 -- ── Test 2: A simple query succeeds with default limits ───────────────────────
 SELECT pg_ripple.insert_triple(
     '<http://t.example.org/a>',
