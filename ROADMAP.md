@@ -73,7 +73,7 @@ Each release below has two layers:
 | [0.49.0](#v0490--ai--llm-integration) | AI & LLM Integration | `sparql_from_nl()` NL-to-SPARQL via configurable LLM endpoint; `suggest_sameas()` and `apply_sameas_candidates()` for embedding-based entity alignment | 4–6 pw |
 | [0.50.0](#v0500--developer-experience--graphrag-polish) | Developer Experience & GraphRAG Polish | `explain_sparql(analyze:=true)` interactive query debugger; `rag_context()` RAG pipeline | 3–5 pw |
 | [0.51.0](#v0510--security-hardening--production-readiness) | Security Hardening & Production Readiness | Non-root container, SPARQL DoS protection, HTTP streaming, OTLP, pg_upgrade compat, CDC docs, conformance gate flips | 8–10 pw |
-| [0.52.0](#v0520--dx-extended-standards--architecture) | DX, Extended Standards & Architecture | VS Code extension, SHACL-SPARQL, `COPY rdf FROM`, RAG hardening, CDC lifecycle events, architecture module splits | 6–9 pw |
+| [0.52.0](#v0520--dx-extended-standards--architecture) | DX, Extended Standards & Architecture | SHACL-SPARQL, `COPY rdf FROM`, RAG hardening, CDC lifecycle events, architecture module splits, OpenAPI spec | 6–9 pw |
 | [0.53.0](#v0530--high-availability--logical-replication) | High Availability & Logical Replication | PG18 logical-decoding RDF replication, Helm chart, merge/vector-index performance baselines | 5–7 pw |
 | [1.0.0](#v100--production-release) | Production Release | Standards conformance, stress testing, security audit | 6–8 pw |
 | | | **Total estimated effort** | **275–376 pw** |
@@ -4065,9 +4065,9 @@ All v1.0.0 blocking items in [plans/PLAN_OVERALL_ASSESSMENT_4.md](plans/PLAN_OVE
 
 ## v0.52.0 — DX, Extended Standards & Architecture
 
-**Theme**: VS Code extension, SHACL-SPARQL constraint component, `COPY rdf FROM` bulk load, RAG pipeline hardening, CDC lifecycle events, and architecture module splits that prevent the god-module pattern from returning.
+**Theme**: SHACL-SPARQL constraint component, `COPY rdf FROM` bulk load, RAG pipeline hardening, CDC lifecycle events, architecture module splits, and OpenAPI specification for the HTTP companion.
 
-> **In plain language:** This release brings pg_ripple's feature set to "world-class" on the dimensions that developers interact with every day. A VS Code extension lets engineers write SPARQL in a first-class editor with syntax highlighting and an integrated query runner. SHACL-SPARQL enables sophisticated data-quality rules written in SPARQL itself. Bulk loading via PostgreSQL's `COPY` command handles massive datasets without custom client code. The LLM-based RAG pipeline gains security hardening and response caching. And the codebase gets structural maintenance that keeps it navigable for future contributors.
+> **In plain language:** This release advances pg_ripple's standards completeness and developer ergonomics. SHACL-SPARQL enables sophisticated data-quality rules written in SPARQL itself. Bulk loading via PostgreSQL's `COPY` command handles massive datasets without custom client code. The LLM-based RAG pipeline gains security hardening and response caching. An OpenAPI specification makes the HTTP companion self-documenting. And the codebase gets structural maintenance that keeps it navigable for future contributors. (The VS Code extension moves to v1.10.)
 >
 > **Effort estimate: 6–9 person-weeks**
 
@@ -4075,7 +4075,6 @@ All v1.0.0 blocking items in [plans/PLAN_OVERALL_ASSESSMENT_4.md](plans/PLAN_OVE
 
 #### Developer Tooling
 
-- [ ] **VS Code extension** (F-7 / future 1.10): separate `pg-ripple-vscode` repository; TextMate grammars for SPARQL 1.1, SHACL Turtle, and Datalog; hover-documentation for SPARQL built-ins; query runner against `pg_ripple_http`; collapsible `explain_sparql()` tree view; SHACL shape linter via `/sparql` validation call; publish to VS Code Marketplace
 - [ ] **OpenAPI specification for HTTP service** (N8-4): generate `openapi.yaml` from `utoipa` annotations in `pg_ripple_http/src/main.rs`; publish at `docs/src/reference/openapi.yaml`
 - [ ] **Architecture diagram** (N8-3 / S9-4): Mermaid diagram in `docs/src/reference/architecture.md` showing: client → dictionary → VP tables → SPARQL/Datalog/SHACL engines → views/exporters → federation → HTTP companion
 
@@ -4115,7 +4114,7 @@ All v1.0.0 blocking items in [plans/PLAN_OVERALL_ASSESSMENT_4.md](plans/PLAN_OVE
 
 ### Exit Criteria
 
-VS Code extension published to the Marketplace. `sh:SPARQLConstraintComponent` passes W3C SHACL-SPARQL smoke test. `COPY pg_ripple.triples FROM 'file.nt' WITH (FORMAT 'ntriples')` loads 1 M triples successfully. All 9 fuzz targets run in CI. WatDiv gate is blocking.
+`sh:SPARQLConstraintComponent` passes W3C SHACL-SPARQL smoke test. `COPY pg_ripple.triples FROM 'file.nt' WITH (FORMAT 'ntriples')` loads 1 M triples successfully. OpenAPI spec published and validated. All 9 fuzz targets run in CI. WatDiv gate is blocking.
 
 ---
 
