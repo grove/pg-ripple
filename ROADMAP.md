@@ -72,6 +72,9 @@ Each release below has two layers:
 | [0.48.0](#v0480--shacl-core-completeness-owl-2-rl-closure--sparql-completeness) | SHACL Core Completeness, OWL 2 RL Closure & SPARQL Completeness | Complete all 35 SHACL Core constraints and complex `sh:path` expressions, close the OWL 2 RL rule set, add SPARQL Update MOVE/COPY/ADD, fix SPARQL-star variable patterns, WatDiv baselines, and operational hardening | 6–8 pw |
 | [0.49.0](#v0490--ai--llm-integration) | AI & LLM Integration | `sparql_from_nl()` NL-to-SPARQL via configurable LLM endpoint; `suggest_sameas()` and `apply_sameas_candidates()` for embedding-based entity alignment | 4–6 pw |
 | [0.50.0](#v0500--developer-experience--graphrag-polish) | Developer Experience & GraphRAG Polish | `explain_sparql(analyze:=true)` interactive query debugger; `rag_context()` RAG pipeline | 3–5 pw |
+| [0.51.0](#v0510--security-hardening--production-readiness) | Security Hardening & Production Readiness | Non-root container, SPARQL DoS protection, HTTP streaming, OTLP, pg_upgrade compat, CDC docs, conformance gate flips | 8–10 pw |
+| [0.52.0](#v0520--dx-extended-standards--architecture) | DX, Extended Standards & Architecture | VS Code extension, SHACL-SPARQL, `COPY rdf FROM`, RAG hardening, CDC lifecycle events, architecture module splits | 6–9 pw |
+| [0.53.0](#v0530--high-availability--logical-replication) | High Availability & Logical Replication | PG18 logical-decoding RDF replication, Helm chart, merge/vector-index performance baselines | 5–7 pw |
 | [1.0.0](#v100--production-release) | Production Release | Standards conformance, stress testing, security audit | 6–8 pw |
 | | | **Total estimated effort** | **275–376 pw** |
 
@@ -3987,6 +3990,176 @@ W3C SHACL Core test suite passes 35/35 constraints. OWL 2 RL CI gate upgraded to
 
 ---
 
+## v0.51.0 — Security Hardening & Production Readiness
+
+**Theme**: Close every blocking item for v1.0.0: non-root container, SPARQL DoS protection, HTTP streaming, OTLP observability, pg_upgrade compatibility, CDC backpressure documentation, released-image hardening, and release automation. Also addresses all High- and Medium-severity findings from [plans/PLAN_OVERALL_ASSESSMENT_4.md](plans/PLAN_OVERALL_ASSESSMENT_4.md).
+
+> **In plain language:** This release converts pg_ripple from "release-candidate quality" to "production-certified". Every security and operational gap found in the v0.50.0 audit is closed: the container no longer runs as root, a malicious SPARQL query can no longer exhaust the server stack, the HTTP service can stream large results without buffering them in memory, real OpenTelemetry spans reach external APM tools, and every database administrator can follow a documented upgrade path. After this release, the only remaining step to v1.0.0 is a final conformance and stress run.
+>
+> **Effort estimate: 8–10 person-weeks**
+
+### Deliverables
+
+#### Security & Container Hardening (blocking for v1.0.0)
+
+- [ ] **Non-root Docker image** (N6-1 / F-2): add `USER postgres:postgres` before `CMD` in [Dockerfile](Dockerfile); publish two image tags — `:dev` (trust auth, for local testing) and `:prod` (password-required, aliases to `:latest`) to eliminate the `trust`-auth-in-published-image risk (N6-4)
+- [ ] **SPARQL algebra-tree depth limit** (N6-2 / F-4): new GUCs `pg_ripple.sparql_max_algebra_depth` (default 256) and `pg_ripple.sparql_max_triple_patterns` (default 4 096); reject over-limit queries at parse time with **PT440**; add pg_regress `sparql_depth_limit.sql`
+- [ ] **Certificate-fingerprint pinning** (S5-2 / N6-3): `PG_RIPPLE_HTTP_PIN_FINGERPRINTS` env var in `pg_ripple_http` — comma-separated SHA-256 hashes; reject TLS handshake on mismatch
+- [ ] **SPDX licence check** (S6-2): add `cargo license --json` to CI; fail on any dependency not in the MIT/Apache-2.0/BSD/ISC allow-list
+- [ ] **SBOM generation** (N6-6): add `cargo cyclonedx` step to the release workflow; attach `sbom.xml` as a GitHub release artefact
+- [ ] **`secrets/` directory renamed** (N6-5): move `secrets/` to `tests/fixtures/sealed_secrets/`; add a top-level README explaining the contents are test stubs with no real credentials
+- [ ] **SQL-injection format! lint** (N1-5): `scripts/check_no_string_format_in_sql.sh` — bans `format!` patterns that interpolate non-`i64` values into SQL strings; runs in CI alongside `check_no_security_definer.sh`
+- [ ] **`cargo tree --duplicates` advisory CI gate** (N1-2): non-blocking job that records the duplicate-crate count as a CI annotation; blocks on any increase > 2
+
+#### HTTP Streaming (blocking for v1.0.0)
+
+- [ ] **`POST /sparql/stream` endpoint** (N2-1 / N9-1 / F-1): wire `sparql_cursor()`, `sparql_cursor_turtle()`, `sparql_cursor_jsonld()` ([src/sparql/cursor.rs](src/sparql/cursor.rs)) into a chunked-transfer-encoded HTTP handler in `pg_ripple_http`; content-type negotiation: `application/sparql-results+json` JSON-Lines (SELECT/ASK), `application/n-triples` (CONSTRUCT); add streaming section to [pg_ripple_http/README.md](pg_ripple_http/README.md)
+
+#### Operational Excellence (blocking for v1.0.0)
+
+- [ ] **`pg_upgrade` compatibility matrix + integration test** (S10-3 / F-12): document PG18.x → PG18.y upgrade matrix in `docs/src/operations/pg-upgrade.md`; add `tests/pg_upgrade_compat.sh` that runs `pg_upgrade` + `ALTER EXTENSION pg_ripple UPDATE` on a loaded database
+- [ ] **CDC subscription backpressure documented** (S5-3): add `docs/src/operations/cdc.md` covering NOTIFY queue tuning (`max_notify_queue_pages`), recommended subscriber patterns, and a warning template for slow consumers
+- [ ] **Release automation** (S10-2): GitHub Actions workflow that opens a PR with version-bump, CHANGELOG draft, and migration-script template on `git tag v*`; `just release VERSION` recipe wires it from the developer side
+- [ ] **`cargo audit`/`cargo deny` blocking** (S6-1): flip existing weekly `cargo-audit.yml` and `deny.toml` checks from advisory to blocking on every PR
+- [ ] **PT-code drift linter** (N3-3): `scripts/check_pt_codes.sh` diffs `grep -roh 'PT[4-7][0-9][0-9]' src/` against `docs/src/reference/error-catalog.md`; fails CI on any undocumented code
+- [ ] **Migration script header linter** (S9-6): `scripts/check_migration_headers.sh` enforces the AGENTS.md header template on every `sql/pg_ripple--*.sql` file
+- [ ] **Migration chain data-preservation test** (S10-5): extend `tests/test_migration_chain.sh` to insert a representative dataset after v0.1.0, apply every migration, and re-query triple counts + SPARQL patterns at v0.51.0
+- [ ] **`pg_dump`/restore round-trip test** (S6-3): `tests/pg_dump_restore.sh` loads 10 k triples, dumps, drops extension, restores, verifies triple count
+
+#### Observability
+
+- [ ] **OTLP tracing exporter wired** (N2-2 / F-3): `opentelemetry-otlp` + `tracing-opentelemetry` dependencies; new GUC `pg_ripple.tracing_otlp_endpoint`; when `tracing_exporter = 'otlp'` spans for SPARQL parse/translate/execute are exported to the configured collector, annotated with algebra digest and VP table scans
+- [ ] **`predicate_workload_stats()` SRF** (N3-1 / F-5): `pg_ripple.predicate_workload_stats() RETURNS TABLE(predicate_iri TEXT, query_count BIGINT, merge_count BIGINT, last_merged TIMESTAMPTZ)` backed by per-predicate counters in `_pg_ripple.predicate_stats`; updated atomically by the merge worker and query executor
+- [ ] **`explain_sparql()` BUFFERS** (N3-2): extend `explain_sparql(analyze:=true)` JSON output with a `buffers` key (`{shared_hit, shared_read, shared_dirtied, shared_written}`) when `analyze = true`
+
+#### Storage & SPARQL Correctness
+
+- [ ] **Merge worker latch-driven backoff** (S1-3): replace `std::thread::sleep` at [src/worker.rs:142](src/worker.rs#L142) with `BackgroundWorker::wait_latch(Some(Duration::from_secs(interval_secs)))` for correct SIGTERM response during backoff
+- [ ] **Predicate-OID syscache callback** (S1-5): register `CacheRegisterRelcacheCallback` in [src/storage/catalog.rs](src/storage/catalog.rs) to invalidate the predicate-OID thread-local cache when a VP table is rebuilt by `VACUUM FULL`
+- [ ] **Consolidate path-depth GUCs** (S2-5): remove deprecated `property_path_max_depth`; migrate users to `max_path_depth`; emit a WARNING if the old name is set; add `min = 1, max = 65535` check_hook
+- [ ] **CONSTRUCT ground RDF-star quoted triples** (S2-6 / N5-5): emit `<< s p o >>` N-Triples-star notation for ground quoted triples in CONSTRUCT templates ([src/sparql/mod.rs:742-748](src/sparql/mod.rs#L742))
+- [ ] **Wire `execute_with_savepoint()`** (S3-4): call the SAVEPOINT helper in the parallel-strata coordinator before launching worker batches, or mark `#[cfg(test)]` and document the decision
+- [ ] **Complete complex `sh:path` dispatcher** (S4-6 / N4-1): remove `#![allow(dead_code)]` from [src/shacl/constraints/property_path.rs](src/shacl/constraints/property_path.rs); wire sequence, alternative, inverse, `*`, `+`, `?` paths into the SHACL constraint dispatcher; add `tests/pg_regress/sql/shacl_complex_path.sql`
+
+#### SPARQL Standards
+
+- [ ] **Native SPARQL CSV/TSV SRFs** (N9-4 / F-6): `pg_ripple.sparql_csv(query TEXT) RETURNS SETOF TEXT` and `sparql_tsv(query TEXT) RETURNS SETOF TEXT` per W3C SPARQL 1.1 Results CSV and TSV formats; add pg_regress `sparql_csv_tsv.sql`
+- [ ] **OWL 2 RL XFAIL closure** (N5-4): fix the four known failures in [tests/owl2rl/known_failures.txt](tests/owl2rl/known_failures.txt) (`prp-spo2`, `scm-sco`, `eq-diff1`, `dt-type2`); flip OWL 2 RL conformance gate from informational to blocking at 66/66
+
+#### Documentation
+
+- [ ] **GUC ↔ workload-class tuning matrix** (S9-2): new section in `docs/src/operations/tuning.md` mapping each GUC to workload characteristics
+- [ ] **Worked examples for new features** (S9-3 / N8-2): `examples/llm_workflow.sql` (NL→SPARQL with mock endpoint, sameAs candidates, RAG context); `examples/federation_multi_endpoint.sql`; `examples/cdc_subscription.sql`
+- [ ] **AGENTS.md pgrx version** (N7-4): update tech-stack table from pgrx 0.17 → 0.18
+- [ ] **`justfile` `release` and `docs` recipes** (N7-5): `just release VERSION` (bumps version, generates migration script template, opens changelog section); `just docs-serve` (starts mdBook dev server)
+
+### Migration Script
+
+`sql/pg_ripple--0.50.0--0.51.0.sql` — schema changes: add `_pg_ripple.predicate_stats (predicate_id BIGINT PRIMARY KEY, query_count BIGINT DEFAULT 0, merge_count BIGINT DEFAULT 0, last_merged TIMESTAMPTZ)`; deprecation notice for `property_path_max_depth` GUC.
+
+### Exit Criteria
+
+All v1.0.0 blocking items in [plans/PLAN_OVERALL_ASSESSMENT_4.md](plans/PLAN_OVERALL_ASSESSMENT_4.md) are closed. Docker image runs as non-root. `POST /sparql/stream` returns chunked N-Triples for a large CONSTRUCT query without full in-memory buffering. `sparql_max_algebra_depth = 5` rejects a nested query of depth 6 with PT440. OWL 2 RL gate is blocking at 66/66. Migration chain data-preservation test passes v0.1.0 → v0.51.0.
+
+---
+
+## v0.52.0 — DX, Extended Standards & Architecture
+
+**Theme**: VS Code extension, SHACL-SPARQL constraint component, `COPY rdf FROM` bulk load, RAG pipeline hardening, CDC lifecycle events, and architecture module splits that prevent the god-module pattern from returning.
+
+> **In plain language:** This release brings pg_ripple's feature set to "world-class" on the dimensions that developers interact with every day. A VS Code extension lets engineers write SPARQL in a first-class editor with syntax highlighting and an integrated query runner. SHACL-SPARQL enables sophisticated data-quality rules written in SPARQL itself. Bulk loading via PostgreSQL's `COPY` command handles massive datasets without custom client code. The LLM-based RAG pipeline gains security hardening and response caching. And the codebase gets structural maintenance that keeps it navigable for future contributors.
+>
+> **Effort estimate: 6–9 person-weeks**
+
+### Deliverables
+
+#### Developer Tooling
+
+- [ ] **VS Code extension** (F-7 / future 1.10): separate `pg-ripple-vscode` repository; TextMate grammars for SPARQL 1.1, SHACL Turtle, and Datalog; hover-documentation for SPARQL built-ins; query runner against `pg_ripple_http`; collapsible `explain_sparql()` tree view; SHACL shape linter via `/sparql` validation call; publish to VS Code Marketplace
+- [ ] **OpenAPI specification for HTTP service** (N8-4): generate `openapi.yaml` from `utoipa` annotations in `pg_ripple_http/src/main.rs`; publish at `docs/src/reference/openapi.yaml`
+- [ ] **Architecture diagram** (N8-3 / S9-4): Mermaid diagram in `docs/src/reference/architecture.md` showing: client → dictionary → VP tables → SPARQL/Datalog/SHACL engines → views/exporters → federation → HTTP companion
+
+#### Standards Completeness
+
+- [ ] **SHACL-SPARQL `sh:SPARQLConstraintComponent`** (N5-3 / F-9): W3C SHACL-SPARQL; `sh:SPARQLConstraintComponent` executes a user-authored SPARQL query as a constraint; results decoded into `Violation` structs; add pg_regress `shacl_sparql_constraint.sql`
+- [ ] **SHACL-AF `sh:rule` warning / compile** (S4-8 / N9-3): emit **PT480** `ShAFRuleUnsupported` when `sh:rule` triples are detected; or (preferred path) compile SPARQLRules to the existing Datalog rule engine
+- [ ] **`COPY rdf FROM` integration** (N9-5 / F-10): register a custom PostgreSQL `COPY` handler so `COPY pg_ripple.triples FROM '/path/to.nt' WITH (FORMAT 'ntriples')` and `(FORMAT 'turtle')` work as first-class PostgreSQL commands with batched dictionary encoding; return row count
+
+#### RAG & LLM Hardening
+
+- [ ] **RAG pipeline hardening** (F-11): sanitise NL input before LLM call (block prompt-injection patterns; truncate at `llm_max_input_tokens`); add response caching keyed on `(question_hash, k, schema_digest)` in `_pg_ripple.rag_cache`; add `pg_ripple_http /rag` REST endpoint; add `examples/llm_workflow.sql` if not added in v0.51.0
+
+#### CDC & Subscriptions
+
+- [ ] **CDC lifecycle events** (N9-2): second NOTIFY channel `pg_ripple_cdc_lifecycle_{name}` emitting merge-cycle events (`{"op":"merge","predicate_id":N,"merged":M,"tombstones":T}`) and VP promotion events (`{"op":"promote","predicate_id":N,"from":"rare","to":"vp"}`)
+
+#### Test Coverage
+
+- [ ] **Property-based test generator enrichment** (N4-2): enrich dictionary generator (NFC/NFD Unicode, RTL, emoji, zero-width), SPARQL round-trip generator (property paths, subqueries, aggregates), JSON-LD framing generator (nested `@context`, `@list`, `@container`)
+- [ ] **RDF/XML + JSON-LD framing fuzz targets** (N4-3): `fuzz/fuzz_targets/rdfxml_parser.rs` and `fuzz/fuzz_targets/jsonld_framer.rs`; assert no panic on arbitrary input
+- [ ] **HTTP companion fuzz coverage** (N4-4): `fuzz/fuzz_targets/http_request.rs` targeting the `pg_ripple_http` request-handler chain
+- [ ] **WatDiv conformance gate flip** (N4-5): promote WatDiv latency baseline gate from warning to blocking after two consecutive stable releases
+
+#### Architecture & Code Quality
+
+- [ ] **`gucs.rs` subsystem split** (N1-1): split 1,617-line `src/gucs.rs` into `src/gucs/{sparql.rs, datalog.rs, shacl.rs, federation.rs, llm.rs, storage.rs, observability.rs}`
+- [ ] **`src/datalog/mod.rs` split** (N1-4): extract semi-naïve evaluator → `seminaive.rs`, magic-set transformer → `magic.rs`, demand-filter rewrite → `demand.rs`, parallel-strata coordinator → `coordinator.rs`
+- [ ] **`filter.rs` split** (N7-1): split 901-line `src/sparql/translate/filter.rs` into `filter_expr.rs` (expression compilation) and `filter_dispatch.rs` (pattern dispatch)
+- [ ] **HTTP companion hot-path `unwrap()` fixes** (N1-3): convert request-handler-path `unwrap()` calls at [pg_ripple_http/src/main.rs:829,865](pg_ripple_http/src/main.rs#L829) to `?`-propagation with HTTP 400/500 responses
+- [ ] **Merge-throughput baseline** (N2-3): record p50/p95 at `merge_workers ∈ {1,2,4,8}` in `benchmarks/merge_throughput_baselines.json`; add CI warning gate on >15 % regression
+- [ ] **HTAP merge cutover atomic fix** (C-3): investigate and, if confirmed safe, eliminate the `CREATE OR REPLACE VIEW` step in [src/storage/merge.rs:331-346](src/storage/merge.rs#L331); add concurrent-merge stress test asserting zero `relation does not exist` errors over 50 parallel queries
+
+### Migration Script
+
+`sql/pg_ripple--0.51.0--0.52.0.sql` — schema changes: add `_pg_ripple.rag_cache (question_hash TEXT PRIMARY KEY, k INT, schema_digest TEXT, result TEXT, cached_at TIMESTAMPTZ)`; add PT480 to error catalog.
+
+### Exit Criteria
+
+VS Code extension published to the Marketplace. `sh:SPARQLConstraintComponent` passes W3C SHACL-SPARQL smoke test. `COPY pg_ripple.triples FROM 'file.nt' WITH (FORMAT 'ntriples')` loads 1 M triples successfully. All 9 fuzz targets run in CI. WatDiv gate is blocking.
+
+---
+
+## v0.53.0 — High Availability & Logical Replication
+
+**Theme**: Production HA via PG18 logical-decoding RDF replication, Kubernetes Helm chart, and vector-index performance baselines.
+
+> **In plain language:** For organisations running pg_ripple in production, this release provides the infrastructure they need for high availability: a second PostgreSQL instance can subscribe to the RDF graph's change stream and stay in sync with the primary in near-real-time. A Kubernetes Helm chart makes deployment in containerised environments first-class. Vector-index benchmarks give operators the data they need to choose between HNSW and IVFFlat for their specific workload.
+>
+> **Effort estimate: 5–7 person-weeks**
+
+### Deliverables
+
+#### Logical Replication (F-8)
+
+- [ ] **Logical-decoding output plugin**: custom PG18 logical-decoding plugin (`pg_ripple_logical` crate) that decodes VP delta-table `INSERT`/`DELETE` changes into N-Triples format; plug into a `CREATE PUBLICATION pg_ripple_pub FOR ALL TABLES IN SCHEMA _pg_ripple`
+- [ ] **Replica-side consumer**: `pg_ripple.logical_apply_worker` background worker that subscribes to the publication, receives N-Triples batches, and applies them via `load_ntriples()` in order; conflict resolution: `last-writer-wins` per SID, configurable via `pg_ripple.replication_conflict_strategy`
+- [ ] **Replication status SRF**: `pg_ripple.replication_stats() RETURNS TABLE(slot_name TEXT, lag_bytes BIGINT, last_applied_lsn PG_LSN, last_applied_at TIMESTAMPTZ)`
+- [ ] **`docs/src/operations/replication.md`**: architecture overview, setup walkthrough (primary + replica), lag monitoring, failover procedure
+
+#### Kubernetes & Helm Chart (F-2 Helm portion)
+
+- [ ] **Helm chart**: `charts/pg_ripple/` with values for `replicaCount`, `persistence` (PVC), `http.service` (LoadBalancer/ClusterIP), `federationEndpoints`, `shacl.shapesConfigMap`, `llm.apiKeySecret`; liveness and readiness probes via `GET /health`; published to GitHub Pages Helm repo
+- [ ] **`docs/src/operations/kubernetes.md`**: deployment guide for Helm, values reference, monitoring integration with Prometheus; design stub for future Go operator using `controller-runtime`
+
+#### Vector-Index Performance (N2-4)
+
+- [ ] **Vector-index comparison benchmark**: `benchmarks/vector_index_compare.sql` — 100 k-embedding fixture; measure p50/p95/p99 ANN recall and latency for `embedding_index_type ∈ {hnsw, ivfflat}` at `embedding_precision ∈ {single, half, binary}`; results published in `docs/src/reference/vector-index-tradeoffs.md`
+
+#### Documentation
+
+- [ ] `docs/src/operations/high-availability.md` — decision tree: pg_ripple logical replication vs. standard PG streaming replication; trade-offs and supported topologies
+- [ ] Update `docs/src/reference/guc-reference.md` with v0.53.0 GUCs (`replication_enabled`, `replication_conflict_strategy`)
+
+### Migration Script
+
+`sql/pg_ripple--0.52.0--0.53.0.sql` — schema change: create `_pg_ripple.replication_status` catalog table when `pg_ripple.replication_enabled = on`.
+
+### Exit Criteria
+
+A primary + replica test using the logical-decoding plugin achieves < 1 s replication lag on a 10 k-triple/s insert workload. Helm chart deploys successfully on `minikube`. Vector-index benchmark results published and linked from the GUC reference.
+
+---
+
 ## v1.0.0 — Production Release
 
 **Theme**: Stability, conformance, and production certification.
@@ -4096,7 +4269,10 @@ Stable, tested, documented, and published. Ready for production workloads up to 
 | 0.48.0 | +4 weeks | 6–8 pw | 123–166 pw |
 | 0.49.0 | +3 weeks | 4–6 pw | 127–172 pw |
 | 0.50.0 | +4 weeks | 5–7 pw | 132–179 pw |
-| 1.0.0 | +4 weeks | 6–8 pw | **138–187 pw** |
+| 0.51.0 | +5 weeks | 8–10 pw | 140–189 pw |
+| 0.52.0 | +5 weeks | 6–9 pw | 146–198 pw |
+| 0.53.0 | +4 weeks | 5–7 pw | 151–205 pw |
+| 1.0.0 | +4 weeks | 6–8 pw | **157–213 pw** |
 | 1.1–1.9 | Post-1.0 | Community-driven | — |
 
 *Estimates assume a pair of focused developers with Rust and PostgreSQL experience. "pw" = person-weeks. Calendar durations assume pair programming; a solo developer should expect roughly double the calendar time. Actual pace depends on contributor availability and scope adjustments discovered during implementation.*
