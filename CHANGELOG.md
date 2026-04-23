@@ -42,6 +42,18 @@ Versions correspond to the milestones in [ROADMAP.md](ROADMAP.md).
 
 Run `ALTER EXTENSION pg_ripple UPDATE TO '0.50.0'` — no schema changes; new Rust functions are automatically available.
 
+<details>
+<summary>Technical details</summary>
+
+- **src/sparql/explain.rs** — `explain_sparql_jsonb()` extended: `cache_status` field (`"hit"` / `"miss"` / `"bypass"`), `actual_rows` array from `EXPLAIN ANALYZE` JSON, DESCRIBE query stub generation, `FORMAT JSON` output mode
+- **src/llm/mod.rs** — `rag_context()` five-step pipeline: HNSW recall → SPARQL expansion via `contextualize_entity()` → JSON-LD assembly → optional NL→SPARQL execution; graceful pgvector degradation path (WARNING + empty string)
+- **tests/pg_regress/sql/sparql_explain_analyze.sql** — JSONB schema stability assertions for SELECT, ASK, CONSTRUCT, and DESCRIBE query types; `cache_status` and `actual_rows` key presence checks
+- **docs/src/user-guide/explain-sparql.md** — new; EXPLAIN output format reference, ANALYZE mode walkthrough, algebra tree interpretation guide
+- **docs/src/user-guide/rag-pipeline.md** — new; `rag_context()` step-by-step usage, k-tuning guidance, NL→SPARQL integration pattern
+- **sql/pg_ripple--0.49.0--0.50.0.sql** — comment-only; no schema changes required
+
+</details>
+
 ---
 
 ## [0.49.0] — 2026-04-23 — AI & LLM Integration
