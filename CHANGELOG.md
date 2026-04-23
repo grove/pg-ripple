@@ -39,7 +39,7 @@ Run `ALTER EXTENSION pg_ripple UPDATE TO '0.49.0'` — adds `_pg_ripple.llm_exam
 
 ---
 
-## [0.48.0] — 2026-05-13 — SHACL Core Completeness, OWL 2 RL Closure & SPARQL Completeness
+## [0.48.0] — 2026-04-23 — SHACL Core Completeness, OWL 2 RL Closure & SPARQL Completeness
 
 **Completes the v0.48.0 roadmap: all 35 SHACL Core constraints implemented; complex `sh:path` expressions with recursive CTEs; OWL 2 RL rule-set closure (five new rules); SPARQL Update ADD/COPY/MOVE; SPARQL-star variable-inside-quoted-triple patterns; `federation_max_response_bytes` GUC; `insert_triples()` batch SRF; WatDiv baselines; `pg-upgrade.md` operations guide.**
 
@@ -83,7 +83,7 @@ Run `ALTER EXTENSION pg_ripple UPDATE TO '0.49.0'` — adds `_pg_ripple.llm_exam
 
 `sql/pg_ripple--0.47.0--0.48.0.sql` — no schema changes.
 
-## [0.47.0] — 2026-05-06 — SHACL Completion, GUC Validators, Cache SRFs & Fuzz Hardening
+## [0.47.0] — 2026-04-22 — SHACL Completion, GUC Validators, Cache SRFs & Fuzz Hardening
 
 **Completes the v0.47.0 roadmap: sh:lessThanOrEquals SHACL constraint; six GUC check_hook validators; three individual cache hit-rate SRFs; SPARQL `sqlgen.rs` module split (≤800 lines); parallel Datalog SID pre-allocation wired; five new cargo-fuzz targets; CI security hygiene (cargo-audit workflow, deny.toml, check_no_security_definer.sh); OWL 2 RL baseline 93.9%; promotion-race stress test; four new SHACL pg_regress tests.**
 
@@ -116,7 +116,7 @@ Run `ALTER EXTENSION pg_ripple UPDATE TO '0.49.0'` — adds `_pg_ripple.llm_exam
 
 ---
 
-## [0.46.0] — 2026-04-22 — Property-Based Testing, Fuzz Hardening & OWL 2 RL Conformance
+## [0.46.0] — 2026-04-21 — Property-Based Testing, Fuzz Hardening & OWL 2 RL Conformance
 
 **Adds three property-based test suites (SPARQL round-trip, dictionary encode/decode, JSON-LD framing), a cargo-fuzz federation result decoder target, an OWL 2 RL conformance suite, TopN push-down optimisation, sequence range pre-allocation for parallel Datalog, BSBM regression gate, Rustdoc lint gate, HTTP companion CA-bundle support, and expanded worked examples.**
 
@@ -335,7 +335,7 @@ No schema changes — this is a pure test infrastructure and query engine correc
 
 ---
 
-## [0.42.0] — 2026-05-03 — Parallel Merge, Cost-Based Federation & Live CDC
+## [0.42.0] — 2026-04-20 — Parallel Merge, Cost-Based Federation & Live CDC
 
 **Three architectural improvements that close the last major gaps before the 1.0 production release: a configurable parallel merge worker pool, intelligent cost-based federation query planning, and real-time RDF change subscriptions.**
 
@@ -553,7 +553,7 @@ The `pg_ripple_http` service gains a new `/datalog` route namespace built as a t
 
 ---
 
-## [0.38.0] — 2026-05-03 — Architecture Refactoring & Query Completeness
+## [0.38.0] — 2026-04-19 — Architecture Refactoring & Query Completeness
 
 **Structural release: god-module split, PredicateCatalog, SHACL query hints, SPARQL Update completeness.**
 
@@ -583,7 +583,7 @@ ALTER EXTENSION pg_ripple UPDATE TO '0.38.0';
 
 ---
 
-## [0.37.0] — 2026-04-26 — Storage Concurrency Hardening & Error Safety
+## [0.37.0] — 2026-04-19 — Storage Concurrency Hardening & Error Safety
 
 **Reliability release: zero hard panics, concurrent-safe merge/delete/promote, GUC validators.**
 
@@ -609,7 +609,7 @@ ALTER EXTENSION pg_ripple UPDATE TO '0.38.0';
 
 ---
 
-## [0.36.0] — 2026-04-25 — Worst-Case Optimal Joins & Lattice-Based Datalog
+## [0.36.0] — 2026-04-19 — Worst-Case Optimal Joins & Lattice-Based Datalog
 
 **Leapfrog Triejoin for cyclic SPARQL patterns and monotone lattice aggregation for Datalog^L.**
 
@@ -721,7 +721,7 @@ The `partition_into_parallel_groups()` function:
 
 ---
 
-## [0.34.0] — 2026-05-03 — Bounded-Depth Termination & Incremental Retraction (DRed)
+## [0.34.0] — 2026-04-19 — Bounded-Depth Termination & Incremental Retraction (DRed)
 
 **Smarter fixpoint termination and write-correct incremental maintenance.**
 
@@ -858,7 +858,7 @@ No schema changes. Run `ALTER EXTENSION pg_ripple UPDATE` to upgrade from v0.30.
 
 ---
 
-## [0.30.0] — 2025-04-19 — Datalog Aggregation & Compiled Rule Plans
+## [0.30.0] — 2026-04-19 — Datalog Aggregation & Compiled Rule Plans
 
 **pg_ripple's Datalog engine gains Datalog^agg (aggregate literals in rule bodies) and a process-local rule plan cache.** All pg_regress tests pass (3 new tests for v0.30.0 features).
 
@@ -897,7 +897,7 @@ No schema changes. Run `ALTER EXTENSION pg_ripple UPDATE` to upgrade.
 
 ---
 
-## [0.29.0] — 2026-04-20 — Datalog Optimization: Magic Sets & Cost-Based Compilation
+## [0.29.0] — 2026-04-19 — Datalog Optimization: Magic Sets & Cost-Based Compilation
 
 **pg_ripple's Datalog engine gains goal-directed inference (magic sets), cost-based join reordering, anti-join negation, predicate-filter pushdown, delta-table indexing, and redundant-rule elimination.** All pg_regress tests pass (6 new tests for v0.29.0 features).
 
@@ -932,7 +932,7 @@ No schema changes. Run `ALTER EXTENSION pg_ripple UPDATE` to upgrade.
 
 ---
 
-## [0.28.0] — 2026-04-18 — Advanced Hybrid Search & RAG Pipeline
+## [0.28.0] — 2026-04-19 — Advanced Hybrid Search & RAG Pipeline
 
 **pg_ripple completes its hybrid search stack with Reciprocal Rank Fusion, graph-contextualized embeddings, end-to-end RAG retrieval, incremental embedding, multi-model support, and SPARQL federation with external vector services.** All pg_regress tests pass (6 new tests for v0.28.0 features).
 
@@ -1106,7 +1106,7 @@ Run `sql/pg_ripple--0.26.0--0.27.0.sql` on existing installations. The script de
 
 ---
 
-## [0.23.0] — 2026-04-20 — SHACL Core Completion & SPARQL Diagnostics
+## [0.23.0] — 2026-04-18 — SHACL Core Completion & SPARQL Diagnostics
 
 **pg_ripple completes the SHACL 1.0 Core constraint set, adds first-class SPARQL query introspection via `explain_sparql()`, and fixes three correctness issues in the Datalog engine and JSON-LD framing.** All 67 pg_regress tests pass (3 new tests for v0.23.0 features).
 
@@ -1135,7 +1135,7 @@ Run `sql/pg_ripple--0.26.0--0.27.0.sql` on existing installations. The script de
 
 ---
 
-## [0.22.0] — 2026-04-17 — Storage Correctness & Security Hardening
+## [0.22.0] — 2026-04-18 — Storage Correctness & Security Hardening
 
 **pg_ripple eliminates four critical race conditions, locks down the internal schema from unprivileged users, and hardens the HTTP companion service against information-disclosure and timing attacks.** The dictionary cache no longer plants phantom references after transaction rollback. The background merge process closes all known atomicity windows. Rare-predicate promotion is now atomic. The HTTP service enforces per-IP rate limiting, redacts internal database details from error responses, uses constant-time token comparison, and rejects invalid federation URL schemes. All 70 pg_regress tests pass.
 
@@ -1201,7 +1201,7 @@ No other schema changes require manual action. The migration script `sql/pg_ripp
 
 No schema changes. The migration script `sql/pg_ripple--0.20.0--0.21.0.sql` is comment-only. The new `sparql_strict` GUC is registered at extension load time.
 
-## [0.20.0] — 2026-05-16 — W3C Conformance & Stability Foundation
+## [0.20.0] — 2026-04-17 — W3C Conformance & Stability Foundation
 
 **pg_ripple achieves 100% conformance with the W3C SPARQL 1.1 Query, SPARQL 1.1 Update, and SHACL Core test suites.** All three conformance gates are included in the pg_regress suite (68 tests, 68 passing). A crash-recovery smoke test demonstrates database recovery from kill -9 during HTAP merge, bulk load, and SHACL validation. Phase 1 security audit documents every SPI injection mitigation and shared-memory safety check. A new API stability contract designates all `pg_ripple.*` functions as stable for 1.x releases.
 
@@ -1426,7 +1426,7 @@ Graph-aware loaders encode the `graph_iri` argument via the dictionary and deleg
 
 ---
 
-## [0.14.0] — 2025-07-18 — Administrative & Operational Readiness
+## [0.14.0] — 2026-04-16 — Administrative & Operational Readiness
 
 This release focuses on production operations: maintenance commands, monitoring, graph-level access control, and comprehensive documentation. Everything a system administrator needs to run pg_ripple confidently in production.
 
