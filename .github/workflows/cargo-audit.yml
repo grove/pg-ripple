@@ -33,7 +33,7 @@ jobs:
         run: cargo install cargo-audit --locked
 
       - name: Run cargo audit
-        run: cargo audit --deny warnings --config .cargo/audit.toml
+        run: cargo audit --deny warnings
 
       - name: Create issue on failure
         if: failure()
