@@ -487,15 +487,16 @@ SELECT pgtrickle.set_relay_inbox(
     source => '{"type":"kafka","brokers":"${env:KAFKA_BROKERS}","topic":"orders"}'
 );
 
--- Stream table trigger to convert JSON orders → RDF
+-- Stream table trigger to convert JSON orders → RDF via JSON-LD toRdf
 CREATE OR REPLACE FUNCTION transform_order_to_rdf()
 RETURNS TRIGGER LANGUAGE plpgsql AS $$
 DECLARE ntriples TEXT;
 BEGIN
-    ntriples := pg_ripple.json_to_ntriples(
-        NEW.payload,
-        'https://example.org/order/' || (NEW.payload->>'order_id'),
-        'https://schema.org/Order'
+    ntriples := pg_ripple.jsonld_to_ntriples(
+        NEW.payload
+            || jsonb_build_object('@id', 'https://example.org/order/' || (NEW.payload->>'order_id'))
+            || jsonb_build_object('@type', 'https://schema.org/Order'),
+        context => 'schema-org'
     );
     PERFORM pg_ripple.load_ntriples(ntriples, false);
     RETURN NEW;
@@ -633,5 +634,5 @@ services:
 | 2 | What serialization format for outbound events? | (a) Flat JSON with s/p/o keys, (b) JSON-LD, (c) N-Triples text | (b) — JSON-LD is both human-readable and machine-parseable as linked data |
 | 3 | Should pg-ripple detect pg-trickle at `_PG_init` or lazily? | (a) Startup check, (b) Lazy detection on first bridge call | (b) — `CREATE EXTENSION` order is unspecified; lazy detection avoids boot order issues |
 | 4 | How to handle Datalog fan-out (1 input → N inferred triples) in the outbox? | (a) One outbox row per inferred triple, (b) Batched JSON array per inference run | (b) — reduces outbox row count; relay can unpack if needed |
-| 5 | Should inbound JSON→RDF transformation be generic or schema-specific? | (a) Generic `json_to_ntriples()` mapping, (b) Per-source custom triggers | Both — provide a generic helper (item 1 in build list) + allow custom triggers for complex cases |
+| 5 | Should inbound JSON→RDF transformation be generic or schema-specific? | (a) Generic helper, (b) Per-source custom triggers | Both — ship `pg_ripple.jsonld_to_ntriples()` as a thin wrapper over the W3C JSON-LD 1.1 `toRdf` algorithm (symmetric with our existing JSON-LD framing export, conformance-tested against the W3C suite); allow PL/pgSQL custom triggers as the escape hatch for shapes no `@context` can express |
 | 6 | Target version for initial integration? | Depends on pg-trickle relay availability | Could prototype with pg-trickle v0.25.0 relay; pg-ripple side could ship as v0.51.0 or later |

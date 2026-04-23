@@ -4082,11 +4082,17 @@ All v1.0.0 blocking items in [plans/PLAN_OVERALL_ASSESSMENT_4.md](plans/PLAN_OVE
 
 ### Deliverables
 
-#### JSON → RDF Transform Helpers
+#### JSON → RDF via JSON-LD `toRdf` (symmetric with framing)
 
-- [ ] **`pg_ripple.json_to_ntriples(payload JSONB, subject_iri TEXT, type_iri TEXT) RETURNS TEXT`** (`src/bulk_load.rs`): converts a JSON object to N-Triples; handles nested objects, arrays, and XSD-typed values; optional `context JSONB` argument maps JSON keys to vocabulary URIs
-- [ ] **`pg_ripple.json_to_ntriples_trigger() RETURNS TRIGGER`**: PL/pgSQL wrapper callable directly as an `AFTER INSERT` trigger on pg-trickle inbox tables; reads `NEW.payload`, derives subject IRI from configurable trigger argument
-- [ ] **`docs/src/integrations/json-to-rdf.md`**: mapping rules, supported JSON structures, trigger usage examples
+Rationale: pg_ripple already emits RDF as JSON-LD with framing on the way out. The W3C [JSON-LD 1.1 API](https://www.w3.org/TR/json-ld11-api/) defines the inverse — **Expand** + **toRdf** — so the symmetric, round-trippable design is to accept JSON + a `@context` and run the standard algorithm rather than invent a bespoke mapping. All of the original "nested objects → triples", "arrays → RDF lists", "XSD-typed values", and "key → IRI rename" requirements are already first-class JSON-LD `@context` features with a published conformance test suite.
+
+- [ ] **`pg_ripple.jsonld_to_ntriples(payload JSONB, context JSONB DEFAULT NULL, base_iri TEXT DEFAULT NULL) RETURNS TEXT`** (`src/bulk_load.rs`): thin wrapper over a JSON-LD 1.1 processor (preferred: `sophia_jsonld`, fallback: `json-ld` crate); runs Expand → toRdf and serializes to N-Triples/N-Quads; `context` may be inline JSONB, a URL, or a registered name resolved against `_pg_ripple.jsonld_contexts`
+- [ ] **`pg_ripple.jsonld_to_ntriples_trigger() RETURNS TRIGGER`**: PL/pgSQL wrapper callable directly as an `AFTER INSERT` trigger on pg-trickle inbox tables; trigger arguments: `context_name`, optional `id_template` (e.g. `'https://example.org/order/{order_id}'` interpolating from `NEW.payload`), optional `type_iri`; payload is augmented with `@id`/`@type` only when the source JSON lacks them
+- [ ] **`pg_ripple.register_jsonld_context(name TEXT, document JSONB) RETURNS VOID`** + **`pg_ripple.unregister_jsonld_context(name TEXT) RETURNS VOID`** + catalog SRF `pg_ripple.jsonld_contexts() RETURNS TABLE(name TEXT, document JSONB, registered_at TIMESTAMPTZ)`
+- [ ] **Catalog table**: `_pg_ripple.jsonld_contexts (name TEXT PRIMARY KEY, document JSONB NOT NULL, registered_at TIMESTAMPTZ NOT NULL DEFAULT now())`
+- [ ] **JSON-LD 1.1 toRdf conformance**: integrate the [W3C JSON-LD 1.1 toRdf test suite](https://w3c.github.io/json-ld-api/tests/) under `tests/conformance/jsonld/`; pass rate ≥ 95% required (matching the OWL 2 RL / Jena bar); regressions blocked by CI
+- [ ] **Round-trip property test**: `proptest` case asserts `frame(load(toRdf(expand(json)))) ≡ json` modulo blank-node relabelling for a generated population of JSON-LD documents
+- [ ] **`docs/src/integrations/json-to-rdf.md`**: explains the JSON-LD context model, registered context registry, the Expand/toRdf algorithm, and trigger usage; cross-links to the existing JSON-LD framing export docs to highlight the symmetry; notes RML / SPARQL-Generate as deferred future work for non-context-expressible mappings
 
 #### CDC → pg-trickle Outbox Bridge Worker
 
@@ -4142,11 +4148,11 @@ All v1.0.0 blocking items in [plans/PLAN_OVERALL_ASSESSMENT_4.md](plans/PLAN_OVE
 
 ### Migration Script
 
-`sql/pg_ripple--0.51.0--0.52.0.sql` — schema changes: create `_pg_ripple.cdc_bridge_triggers` catalog table; no changes to VP tables or the dictionary.
+`sql/pg_ripple--0.51.0--0.52.0.sql` — schema changes: create `_pg_ripple.cdc_bridge_triggers` and `_pg_ripple.jsonld_contexts` catalog tables; no changes to VP tables or the dictionary.
 
 ### Exit Criteria
 
-All `trickle_integration` pg_regress tests pass when pg-trickle is installed. `trickle_graceful_degradation` tests pass when pg-trickle is absent (bridge functions return `PT800`; all other functions return expected results). CDC bridge trigger delivers a decoded JSON-LD event to the outbox table within 20 ms of a VP delta INSERT in the same transaction. Bridge worker achieves ≥ 1,000 events/s sustained throughput on a 4-core CI runner. `json_to_ntriples()` handles nested JSON objects, arrays, and XSD-typed values correctly. Vocabulary template `schema_to_saref.pl` loads without errors and aligns at least the top 10 SAREF properties. Migration chain test passes through v0.52.0.
+All `trickle_integration` pg_regress tests pass when pg-trickle is installed. `trickle_graceful_degradation` tests pass when pg-trickle is absent (bridge functions return `PT800`; all other functions return expected results). CDC bridge trigger delivers a decoded JSON-LD event to the outbox table within 20 ms of a VP delta INSERT in the same transaction. Bridge worker achieves ≥ 1,000 events/s sustained throughput on a 4-core CI runner. `jsonld_to_ntriples()` passes the W3C JSON-LD 1.1 toRdf test suite at ≥ 95%; the `frame ∘ toRdf` round-trip property test holds for the generated `proptest` population. Vocabulary template `schema_to_saref.pl` loads without errors and aligns at least the top 10 SAREF properties. Migration chain test passes through v0.52.0.
 
 ---
 
