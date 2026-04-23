@@ -756,9 +756,6 @@ Round-trip: load Turtle → query → export Turtle. All major RDF serialization
 
 See [plans/ecosystem/datalog.md](plans/ecosystem/datalog.md) for the full design.
 
-<details>
-<summary>Completed items (click to expand)</summary>
-
 ### Deliverables
 
 - [x] **Rule parser** (`src/datalog/parser.rs`)
