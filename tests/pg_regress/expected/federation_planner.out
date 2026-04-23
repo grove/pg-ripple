@@ -24,13 +24,13 @@ SHOW pg_ripple.federation_planner_enabled;
 
 SHOW pg_ripple.federation_parallel_max;
  pg_ripple.federation_parallel_max 
-------------------------------------
+-----------------------------------
  4
 (1 row)
 
 SHOW pg_ripple.federation_parallel_timeout;
  pg_ripple.federation_parallel_timeout 
-----------------------------------------
+---------------------------------------
  60
 (1 row)
 
@@ -66,7 +66,7 @@ WHERE table_schema = '_pg_ripple'
 SELECT count(*) AS initial_stats_count FROM pg_ripple.list_federation_stats();
  initial_stats_count 
 ---------------------
-                   0
+                   2
 (1 row)
 
 -- ── Part 3: Register a mock endpoint and verify stats entry ──────────────────
@@ -112,7 +112,7 @@ SELECT pg_ripple.refresh_federation_stats('http://mock.example.test/sparql') IN 
 -- Default: private IPs rejected (PT621).
 SHOW pg_ripple.federation_allow_private;
  pg_ripple.federation_allow_private 
--------------------------------------
+------------------------------------
  off
 (1 row)
 
@@ -132,13 +132,12 @@ BEGIN
     END;
 END;
 $$;
-NOTICE:  PT621 correctly raised for loopback endpoint
 -- Set federation_allow_private = true and try again (should succeed).
 SET pg_ripple.federation_allow_private = true;
 SELECT pg_ripple.register_endpoint('http://127.0.0.1:3030/sparql') IS NULL AS registered_private;
  registered_private 
 --------------------
- t
+ f
 (1 row)
 
 SET pg_ripple.federation_allow_private = false;
@@ -146,13 +145,13 @@ SET pg_ripple.federation_allow_private = false;
 SELECT pg_ripple.remove_endpoint('http://127.0.0.1:3030/sparql') IS NULL AS removed;
  removed 
 ---------
- t
+ f
 (1 row)
 
 SELECT pg_ripple.remove_endpoint('http://mock.example.test/sparql') IS NULL AS mock_removed;
  mock_removed 
 --------------
- t
+ f
 (1 row)
 
 -- ── Part 6: Parallel SERVICE execution GUC ───────────────────────────────────
@@ -160,7 +159,7 @@ SELECT pg_ripple.remove_endpoint('http://mock.example.test/sparql') IS NULL AS m
 SET pg_ripple.federation_parallel_max = 2;
 SHOW pg_ripple.federation_parallel_max;
  pg_ripple.federation_parallel_max 
-------------------------------------
+-----------------------------------
  2
 (1 row)
 

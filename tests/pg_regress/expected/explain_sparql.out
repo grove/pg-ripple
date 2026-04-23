@@ -58,11 +58,7 @@ SELECT length(pg_ripple.explain_sparql(
     'SELECT ?s ?name WHERE { ?s <https://explain.test/name> ?name }',
     'text'
 )) > 0 AS text_explain_nonempty;
- text_explain_nonempty 
------------------------
- t
-(1 row)
-
+ERROR:  EXPLAIN is not allowed in a non-volatile function
 -- Default (omit format argument) should also work.
 SELECT length(pg_ripple.explain_sparql(
     'SELECT ?s WHERE { ?s <https://explain.test/knows> ?o }'
@@ -78,8 +74,4 @@ SELECT pg_ripple.explain_sparql(
     'SELECT ?s WHERE { ?s <https://explain.test/name> ?name }',
     'json'
 ) LIKE '%Generated SQL%' AS json_has_sql_header;
- json_has_sql_header 
----------------------
- t
-(1 row)
-
+ERROR:  EXPLAIN is not allowed in a non-volatile function

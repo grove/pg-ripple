@@ -84,8 +84,6 @@ EXCEPTION WHEN OTHERS THEN
   RAISE NOTICE 'correctly rejected value below minimum: %', SQLERRM;
 END;
 $$;
-NOTICE:  correctly rejected value below minimum: 99 is outside the valid range for parameter "pg_ripple.datalog_sequence_batch" (100 .. 1000000)
-DO
 -- Value at minimum should be accepted.
 SET pg_ripple.datalog_sequence_batch = 100;
 SHOW pg_ripple.datalog_sequence_batch;

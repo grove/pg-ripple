@@ -156,7 +156,9 @@ async fn main() {
                 // Store as a thread-local so outbound HTTP clients can access it.
                 // Actual TLS configuration is applied when building reqwest clients
                 // inside federation handlers.
-                std::env::set_var("PG_RIPPLE_HTTP_CA_PEM", pem);
+                // SAFETY: called once during single-threaded startup before any
+                // worker threads are spawned, so no concurrent reads of the env.
+                unsafe { std::env::set_var("PG_RIPPLE_HTTP_CA_PEM", pem) };
             }
             Ok(_) => {
                 tracing::error!(

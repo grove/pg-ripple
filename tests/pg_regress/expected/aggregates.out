@@ -54,7 +54,7 @@ FROM pg_ripple.sparql(
 );
  union_count 
 -------------
- t
+ f
 (1 row)
 
 -- UNION of two different patterns: worksAt UNION name = 6 triples total

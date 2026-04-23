@@ -26,7 +26,7 @@ WARNING:  pg_trickle is not installed; SHACL DAG monitors are unavailable. Insta
 
 -- ─── 2. disable_shacl_dag_monitors is safe with no monitors ─────────────────
 SELECT pg_ripple.disable_shacl_dag_monitors() = 0 AS disable_safe_when_empty;
-ERROR:  schema "pg_trickle" does not exist at character 8
+ERROR:  schema "pg_trickle" does not exist
 -- ─── 3. list_shacl_dag_monitors returns empty set ───────────────────────────
 SELECT count(*) AS monitor_count FROM pg_ripple.list_shacl_dag_monitors();
  monitor_count 
@@ -109,7 +109,7 @@ SELECT count(*) AS catalog_still_empty FROM _pg_ripple.shacl_dag_monitors;
 
 -- ─── 7. disable / list are idempotent ───────────────────────────────────────
 SELECT pg_ripple.disable_shacl_dag_monitors() = 0 AS disable_idempotent;
-ERROR:  schema "pg_trickle" does not exist at character 8
+ERROR:  schema "pg_trickle" does not exist
 SELECT count(*) AS monitors_still_empty FROM pg_ripple.list_shacl_dag_monitors();
  monitors_still_empty 
 ----------------------

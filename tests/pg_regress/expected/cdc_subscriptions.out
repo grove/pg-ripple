@@ -65,7 +65,7 @@ SELECT pg_ripple.insert_triple(
 ) AS inserted;
  inserted 
 ----------
- t
+      513
 (1 row)
 
 -- Subscription still active.

@@ -11,11 +11,7 @@ repository = "https://github.com/grove/pg-ripple"
 rust-version = "1.88"
 
 [lib]
-crate-type = ["cdylib", "lib"]
-
-[[bin]]
-name = "pgrx_embed_pg_ripple"
-path = "./src/bin/pgrx_embed.rs"
+crate-type = ["cdylib"]
 
 [features]
 default = ["pg18"]
@@ -23,7 +19,7 @@ pg18 = ["pgrx/pg18", "pgrx-tests/pg18"]
 pg_test = []
 
 [dependencies]
-pgrx = { version = "=0.17.0", default-features = false }
+pgrx = { version = "=0.18.0", default-features = false }
 spargebra = { version = "0.4", features = ["sparql-12"] }
 sparopt = { version = "0.3", features = ["sparql-12"] }
 xxhash-rust = { version = "0.8", features = ["xxh3"] }
@@ -41,7 +37,7 @@ ureq = { version = "2", features = ["tls"] }
 parquet = { version = "53", default-features = false, features = ["snap"] }
 
 [dev-dependencies]
-pgrx-tests = { version = "=0.17.0", default-features = false }
+pgrx-tests = { version = "=0.18.0", default-features = false }
 spargebra = "0.4"
 sparopt = "0.3"
 postgres = { version = "0.19", features = ["with-serde_json-1"] }

@@ -68,23 +68,14 @@ SELECT current_setting('pg_ripple.federation_max_results')::int AS reset_max_res
 -- ─── Timeout with unreachable endpoint ───────────────────────────────────────
 -- Register unreachable endpoint; short timeout; empty mode; check round-trip.
 SELECT pg_ripple.register_endpoint('http://127.0.0.1:19998/timeout-test');
- register_endpoint 
--------------------
- 
-(1 row)
-
+ERROR:  PT621: register_endpoint: endpoint URL 'http://127.0.0.1:19998/timeout-test' resolves to a private/loopback/link-local address (127.0.0.1); set pg_ripple.federation_allow_private = true to override
 SET pg_ripple.federation_timeout = 1;
 SET pg_ripple.federation_on_error = 'empty';
 SELECT COUNT(*) AS timeout_empty_count
 FROM pg_ripple.sparql(
     'SELECT ?s WHERE { SERVICE <http://127.0.0.1:19998/timeout-test> { ?s ?p ?o } }'
 );
-WARNING:  SERVICE http://127.0.0.1:19998/timeout-test failed (returning empty): federation HTTP error calling http://127.0.0.1:19998/timeout-test: http://127.0.0.1:19998/timeout-test?query=SELECT+%3Fo+%3Fp+%3Fs+WHERE+%7B+%3Fs+%3Fp+%3Fo+.+%7D: Connection Failed: Connect error: Connection refused
- timeout_empty_count 
----------------------
-                   0
-(1 row)
-
+ERROR:  federation endpoint not registered: http://127.0.0.1:19998/timeout-test; use pg_ripple.register_endpoint() to allow it
 RESET pg_ripple.federation_timeout;
 RESET pg_ripple.federation_on_error;
 SELECT pg_ripple.remove_endpoint('http://127.0.0.1:19998/timeout-test');

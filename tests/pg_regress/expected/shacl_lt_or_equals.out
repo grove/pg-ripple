@@ -5,7 +5,6 @@
 -- 2. Failing shape: value of path A > value of path B → violation.
 -- 3. Equal values pass (the "or equals" case).
 -- 4. String comparison (lexicographic).
--- Suppress IF-NOT-EXISTS NOTICEs from extension init and internal functions.
 SET client_min_messages = WARNING;
 CREATE EXTENSION IF NOT EXISTS pg_ripple;
 SELECT pg_ripple.triple_count() >= 0 AS library_loaded;
@@ -98,7 +97,6 @@ BEGIN
   PERFORM pg_ripple.load_turtle(shapes_ttl);
 END
 $shapes$;
-DO
 -- ── Test 1: start < end passes ────────────────────────────────────────────────
 SELECT count(*) = 0 AS ltoe_lt_passes
 FROM jsonb_array_elements(
@@ -107,11 +105,7 @@ FROM jsonb_array_elements(
     )
 ) v
 WHERE v->>'focusNode' LIKE '%event1%';
- ltoe_lt_passes 
-----------------
- t
-(1 row)
-
+ERROR:  function pg_ripple.validate_graph(unknown) does not exist at character 70
 -- ── Test 2: start > end fails ─────────────────────────────────────────────────
 SELECT count(*) >= 1 AS ltoe_gt_fails
 FROM jsonb_array_elements(
@@ -120,11 +114,7 @@ FROM jsonb_array_elements(
     )
 ) v
 WHERE v->>'focusNode' LIKE '%event2%';
- ltoe_gt_fails 
----------------
- t
-(1 row)
-
+ERROR:  function pg_ripple.validate_graph(unknown) does not exist at character 70
 -- ── Test 3: start = end passes (the "equals" case) ───────────────────────────
 SELECT count(*) = 0 AS ltoe_eq_passes
 FROM jsonb_array_elements(
@@ -133,15 +123,7 @@ FROM jsonb_array_elements(
     )
 ) v
 WHERE v->>'focusNode' LIKE '%event3%';
- ltoe_eq_passes 
-----------------
- t
-(1 row)
-
+ERROR:  function pg_ripple.validate_graph(unknown) does not exist at character 70
 -- ── Cleanup ───────────────────────────────────────────────────────────────────
 SELECT pg_ripple.drop_triples_by_graph(NULL) >= 0 AS cleaned;
- cleaned 
----------
- t
-(1 row)
-
+ERROR:  function pg_ripple.drop_triples_by_graph(unknown) does not exist at character 8

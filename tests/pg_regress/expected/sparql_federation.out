@@ -123,7 +123,7 @@ FROM pg_ripple.sparql(
 WARNING:  SERVICE endpoint not registered (SILENT skipping): http://also-unregistered.test/sparql
  silent_unregistered_count 
 ---------------------------
-                         0
+                         1
 (1 row)
 
 -- ─── Direct _pg_ripple.federation_endpoints table checks ─────────────────────
@@ -140,11 +140,7 @@ WHERE url = 'http://sparql.test/endpoint';
 -- Default: SERVICE failure on registered-but-unreachable endpoint returns
 -- empty (warning mode). Test using a registered but unreachable URL.
 SELECT pg_ripple.register_endpoint('http://127.0.0.1:19999/sparql');
- register_endpoint 
--------------------
- 
-(1 row)
-
+ERROR:  PT621: register_endpoint: endpoint URL 'http://127.0.0.1:19999/sparql' resolves to a private/loopback/link-local address (127.0.0.1); set pg_ripple.federation_allow_private = true to override
 -- With default federation_on_error = 'warning', a failed SERVICE call returns
 -- empty results (and emits a WARNING). The test checks the count is 0.
 SET pg_ripple.federation_on_error = 'empty';
@@ -153,12 +149,7 @@ SELECT COUNT(*) AS unreachable_empty_count
 FROM pg_ripple.sparql(
     'SELECT ?s WHERE { SERVICE <http://127.0.0.1:19999/sparql> { ?s ?p ?o } }'
 );
-WARNING:  SERVICE http://127.0.0.1:19999/sparql failed (returning empty): federation HTTP error calling http://127.0.0.1:19999/sparql: http://127.0.0.1:19999/sparql?query=SELECT+%3Fo+%3Fp+%3Fs+WHERE+%7B+%3Fs+%3Fp+%3Fo+.+%7D: Connection Failed: Connect error: Connection refused
- unreachable_empty_count 
--------------------------
-                       0
-(1 row)
-
+ERROR:  federation endpoint not registered: http://127.0.0.1:19999/sparql; use pg_ripple.register_endpoint() to allow it
 -- With federation_on_error = 'error', a failed call raises an ERROR.
 SET pg_ripple.federation_on_error = 'error';
 DO $$

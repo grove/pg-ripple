@@ -1,2 +1,0 @@
-# using postmaster on localhost, port 28818
-# diff command failed with status 512: diff  "/Users/geir.gronmo/projects/pg-ripple2/tests/pg_regress/expected/datalog_parallel_rollback.out" "/Users/geir.gronmo/projects/pg-ripple2/tests/pg_regress/results/datalog_parallel_rollback.out" > "/Users/geir.gronmo/projects/pg-ripple2/tests/pg_regress/results/datalog_parallel_rollback.out.diff"Bail out!

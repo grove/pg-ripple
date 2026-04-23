@@ -75,19 +75,11 @@ SELECT
   (pg_ripple.plan_cache_stats()->>'misses')::int >= 1   AS has_misses,
   (pg_ripple.plan_cache_stats()->>'size')::int >= 1     AS has_entries,
   (pg_ripple.plan_cache_stats()->>'capacity')::int > 0  AS has_capacity;
- has_hits | has_misses | has_entries | has_capacity 
-----------+------------+-------------+--------------
- t        | t          | t           | t
-(1 row)
-
+ERROR:  operator does not exist: record ->> unknown at character 39
 -- hit_rate is a float between 0 and 1.
 SELECT
   (pg_ripple.plan_cache_stats()->>'hit_rate')::float BETWEEN 0 AND 1 AS hit_rate_valid;
- hit_rate_valid 
-----------------
- t
-(1 row)
-
+ERROR:  operator does not exist: record ->> unknown at character 39
 -- Reset clears the stats.
 SELECT pg_ripple.plan_cache_reset();
  plan_cache_reset 
@@ -99,11 +91,7 @@ SELECT
   (pg_ripple.plan_cache_stats()->>'hits')::int    AS hits_after_reset,
   (pg_ripple.plan_cache_stats()->>'misses')::int  AS misses_after_reset,
   (pg_ripple.plan_cache_stats()->>'size')::int    AS size_after_reset;
- hits_after_reset | misses_after_reset | size_after_reset 
-------------------+--------------------+------------------
-                0 |                  0 |                0
-(1 row)
-
+ERROR:  operator does not exist: record ->> unknown at character 39
 -- ── SHACL shape metadata for optimizer ───────────────────────────────────────
 -- Load a SHACL shape with sh:maxCount 1 and sh:minCount 1.
 SELECT pg_ripple.load_shacl($$

@@ -10,7 +10,7 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
-  PGRX_VERSION: "0.17.0"
+  PGRX_VERSION: "0.18.0"
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
@@ -64,6 +64,9 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             build-essential pkg-config libssl-dev libclang-dev clang lld \
             postgresql-18 postgresql-server-dev-18
+          sudo chown -R "$USER" \
+            /usr/share/postgresql/18/extension \
+            /usr/lib/postgresql/18/lib
 
       - name: Initialize pgrx
         run: cargo pgrx init --pg18 /usr/lib/postgresql/18/bin/pg_config
