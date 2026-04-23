@@ -3948,6 +3948,9 @@ W3C SHACL Core test suite passes 35/35 constraints. OWL 2 RL CI gate upgraded to
 >
 > **Effort estimate: 5–7 person-weeks**
 
+<details>
+<summary>Completed items (click to expand)</summary>
+
 ### Deliverables
 
 - [x] **SPARQL query debugger** (Feature B-3)
@@ -3979,6 +3982,8 @@ W3C SHACL Core test suite passes 35/35 constraints. OWL 2 RL CI gate upgraded to
 ### Exit Criteria
 
 `explain_sparql(query, analyze := true)` returns JSONB with `algebra`, `sql`, `cache_status`, and per-operator `actual_rows` keys for SELECT, ASK, CONSTRUCT, and DESCRIBE queries. `rag_context()` returns non-empty context for a known question against a pre-loaded test knowledge graph. Migration chain test passes through v0.50.0.
+
+</details>
 
 ---
 
