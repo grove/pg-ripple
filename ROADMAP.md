@@ -97,10 +97,11 @@
 
 | Version | Theme | Status | Scope | Full details |
 |---------|-------|--------|-------|--------------|
-| [v0.55.0](roadmap/v0.55.0.md) | Security hardening (SSRF allowlist, HTAP race fix), error-catalog reconciliation, tombstone GC, SPARQL views, named-graph RLS, Kafka CDC, LangChain tool, VoID, SPARQL Service Description | Planned | Very Large | [Full details](roadmap/v0.55.0-full.md) |
+| [v0.55.0](roadmap/v0.55.0.md) | Security hardening (SSRF allowlist, HTAP race fix), error-catalog reconciliation, tombstone GC, named-graph RLS, read-replica routing, VoID, SPARQL Service Description, OpenAPI spec | Planned | Large | [Full details](roadmap/v0.55.0-full.md) |
 | [v0.56.0](roadmap/v0.56.0.md) | GeoSPARQL 1.1, SPARQL Entailment Regime tests, Arrow/Flight export, dbt adapter, federation circuit breaker, SPARQL audit log, dead-code audit, deprecated GUC removal | Planned | Large | [Full details](roadmap/v0.56.0-full.md) |
 | [v0.57.0](roadmap/v0.57.0.md) | OWL 2 EL/QL reasoning profiles, KG embeddings (TransE/RotatE), entity alignment, LLM SPARQL repair, ontology mapping, multi-tenant graph isolation, columnar VP, adaptive indexing | Planned | Very Large | [Full details](roadmap/v0.57.0-full.md) |
 | [v0.58.0](roadmap/v0.58.0.md) | Temporal RDF queries (`point_in_time`), SPARQL-DL, Citus horizontal sharding, PROV-O graph provenance, v1.0.0 readiness integration suite | Planned | Large | [Full details](roadmap/v0.58.0-full.md) |
+| [v0.59.0](roadmap/v0.59.0.md) | Ecosystem integration: Jupyter SPARQL kernel, LangChain / LlamaIndex tool packages, Kafka CDC sink, materialized SPARQL views | Planned | Medium | [Full details](roadmap/v0.59.0-full.md) |
 
 ### Stable Release (v1.0.0)
 
@@ -129,6 +130,8 @@ v0.55–v0.56    ─── Quality & security: SSRF allowlist, HTAP race fix, er
        │
 v0.57–v0.58    ─── Reasoning & sharding: OWL 2 EL/QL, KG embeddings, entity alignment, temporal queries, Citus, PROV-O
        │
+v0.59          ─── Ecosystem integration: Jupyter kernel, LangChain/LlamaIndex, Kafka CDC, materialized SPARQL views
+       │
 v1.0.0         ─── Stable release: production hardening, stress tests, security audit
 ```
 
@@ -147,5 +150,8 @@ open security findings from PLAN_OVERALL_ASSESSMENT_6 (SSRF allowlist, HTAP merg
 race, error-catalog drift) and add GeoSPARQL 1.1, Arrow/Flight export, and a dbt
 adapter. v0.57.0 through v0.58.0 extend the reasoning platform to OWL 2 EL/QL,
 add KG embeddings, entity alignment, temporal RDF queries, Citus sharding, and
-PROV-O provenance. v1.0.0 is the stable release.
+PROV-O provenance. v0.59.0 delivers the ecosystem integration layer: a Jupyter
+SPARQL kernel, LangChain / LlamaIndex tool packages, a Kafka CDC sink, and
+materialized SPARQL views that were deferred from v0.55.0 to keep that release
+focused on security and quality. v1.0.0 is the stable release.
 
