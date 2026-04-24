@@ -504,19 +504,43 @@ pub fn apply_sameas_candidates(min_similarity: default!(f32, "0.95")) -> i64 {
 /// Assemble a retrieval-augmented generation context string for an LLM query.
 ///
 /// Steps:
-/// 1. Vector recall — find the `k` most similar entities to `question` via
+/// 1. Input sanitization — trim whitespace, enforce max token length,
+///    reject null-byte / prompt-injection patterns.
+/// 2. Cache look-up — return a cached result if available.
+/// 3. Vector recall — find the `k` most similar entities to `question` via
 ///    HNSW cosine distance (requires pgvector + populated `_pg_ripple.embeddings`).
-/// 2. SPARQL graph expansion — for each entity fetch its 1-hop neighbourhood
+/// 4. SPARQL graph expansion — for each entity fetch its 1-hop neighbourhood
 ///    using `contextualize_entity()` and render as a JSON-LD-style fragment.
-/// 3. Assemble a context string from the fragments, formatted for LLM ingestion.
-/// 4. (Optional) If `pg_ripple.llm_endpoint` is set, call `sparql_from_nl()`
+/// 5. Assemble a context string from the fragments, formatted for LLM ingestion.
+/// 6. (Optional) If `pg_ripple.llm_endpoint` is set, call `sparql_from_nl()`
 ///    with the assembled context appended, and append the SPARQL result.
+/// 7. Cache store — persist the result for future calls.
 ///
 /// When pgvector is absent or the embeddings table is empty, the function
 /// degrades gracefully and returns an empty string with a WARNING rather than
 /// raising an ERROR.
 #[pg_extern(schema = "pg_ripple", name = "rag_context", volatile)]
 pub fn rag_context(question: &str, k: default!(i32, "10")) -> String {
+    // ── Step 1: input sanitization ──────────────────────────────────────────
+    // Reject null bytes (could confuse downstream string handling).
+    if question.contains('\0') {
+        pgrx::error!("rag_context: question must not contain null bytes");
+    }
+
+    // Trim and enforce a maximum token/character limit (16 KiB is generous).
+    let question = question.trim();
+    if question.len() > 16_384 {
+        pgrx::error!(
+            "rag_context: question exceeds maximum length of 16,384 characters \
+             (got {}); truncate the input before calling rag_context()",
+            question.len()
+        );
+    }
+
+    if question.is_empty() {
+        return String::new();
+    }
+
     // Graceful degradation when pgvector is unavailable.
     if !crate::PGVECTOR_ENABLED.get() {
         pgrx::warning!(
@@ -536,14 +560,37 @@ pub fn rag_context(question: &str, k: default!(i32, "10")) -> String {
 
     let k_clamped = k.clamp(1, 100);
 
-    // Step 1 & 2: vector recall + 1-hop context for each entity.
+    // ── Step 2: cache look-up ───────────────────────────────────────────────
+    // Compute a stable hash of the question for the cache key.
+    use std::hash::{DefaultHasher, Hash, Hasher};
+    let mut hasher = DefaultHasher::new();
+    question.hash(&mut hasher);
+    let q_hash = format!("{:016x}", hasher.finish());
+
+    let cached: Option<String> = pgrx::Spi::get_one_with_args::<String>(
+        "SELECT result FROM _pg_ripple.rag_cache \
+         WHERE question_hash = $1 AND k = $2 AND schema_digest = $3 \
+         AND cached_at > now() - interval '1 hour'",
+        &[
+            pgrx::datum::DatumWithOid::from(q_hash.as_str()),
+            pgrx::datum::DatumWithOid::from(k_clamped),
+            pgrx::datum::DatumWithOid::from(""),
+        ],
+    )
+    .unwrap_or(None);
+
+    if let Some(result) = cached {
+        return result;
+    }
+
+    // Step 3 & 4: vector recall + 1-hop context for each entity.
     let rows = crate::sparql::embedding::rag_retrieve(question, None, k_clamped, None, "jsonb");
 
     if rows.is_empty() {
         return String::new();
     }
 
-    // Step 3: assemble context string.
+    // Step 5: assemble context string.
     let mut parts: Vec<String> = Vec::with_capacity(rows.len());
     for (entity_iri, label, context_json, _distance) in &rows {
         let ctx_str = serde_json::to_string_pretty(&context_json.0).unwrap_or_default();
@@ -553,7 +600,7 @@ pub fn rag_context(question: &str, k: default!(i32, "10")) -> String {
     }
     let mut context = parts.join("\n\n---\n\n");
 
-    // Step 4 (optional): if LLM endpoint is configured, generate and execute
+    // Step 6 (optional): if LLM endpoint is configured, generate and execute
     // a SPARQL query for the question and append the result.
     let endpoint_raw = crate::LLM_ENDPOINT
         .get()
@@ -573,6 +620,22 @@ pub fn rag_context(question: &str, k: default!(i32, "10")) -> String {
             ));
         }
     }
+
+    // ── Step 7: cache store ─────────────────────────────────────────────────
+    // Best-effort: ignore errors so caching never breaks the main result.
+    let _ = pgrx::Spi::run_with_args(
+        "INSERT INTO _pg_ripple.rag_cache \
+             (question_hash, k, schema_digest, result, cached_at) \
+         VALUES ($1, $2, $3, $4, now()) \
+         ON CONFLICT (question_hash, k, schema_digest) \
+         DO UPDATE SET result = EXCLUDED.result, cached_at = EXCLUDED.cached_at",
+        &[
+            pgrx::datum::DatumWithOid::from(q_hash.as_str()),
+            pgrx::datum::DatumWithOid::from(k_clamped),
+            pgrx::datum::DatumWithOid::from(""),
+            pgrx::datum::DatumWithOid::from(context.as_str()),
+        ],
+    );
 
     context
 }

@@ -37,6 +37,7 @@
 pub mod builtins;
 pub mod cache;
 pub mod compiler;
+pub mod coordinator;
 pub mod demand;
 pub mod dred;
 pub mod explain;
@@ -45,6 +46,7 @@ pub mod magic;
 pub mod parallel;
 pub mod parser;
 pub mod rewrite;
+pub mod seminaive;
 pub mod stratify;
 pub mod tabling;
 pub mod wfs;

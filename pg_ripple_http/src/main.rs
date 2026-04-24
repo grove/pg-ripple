@@ -885,7 +885,14 @@ fn format_select_json(results: &[serde_json::Value]) -> Response {
         .status(StatusCode::OK)
         .header("content-type", CT_SPARQL_JSON)
         .body(Body::from(body.to_string()))
-        .unwrap()
+        .unwrap_or_else(|e| {
+            tracing::error!("response build error: {e}");
+            common::redacted_error(
+                "internal_server_error",
+                &format!("response build failed: {e}"),
+                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            )
+        })
 }
 
 fn format_select_xml(results: &[serde_json::Value]) -> Response {
@@ -936,7 +943,14 @@ fn format_select_xml(results: &[serde_json::Value]) -> Response {
         .status(StatusCode::OK)
         .header("content-type", CT_SPARQL_XML)
         .body(Body::from(xml))
-        .unwrap()
+        .unwrap_or_else(|e| {
+            tracing::error!("response build error: {e}");
+            common::redacted_error(
+                "internal_server_error",
+                &format!("response build failed: {e}"),
+                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            )
+        })
 }
 
 fn format_select_csv(results: &[serde_json::Value]) -> Response {
@@ -968,7 +982,14 @@ fn format_select_csv(results: &[serde_json::Value]) -> Response {
         .status(StatusCode::OK)
         .header("content-type", CT_CSV)
         .body(Body::from(csv))
-        .unwrap()
+        .unwrap_or_else(|e| {
+            tracing::error!("response build error: {e}");
+            common::redacted_error(
+                "internal_server_error",
+                &format!("response build failed: {e}"),
+                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            )
+        })
 }
 
 fn format_select_tsv(results: &[serde_json::Value]) -> Response {
@@ -1004,7 +1025,14 @@ fn format_select_tsv(results: &[serde_json::Value]) -> Response {
         .status(StatusCode::OK)
         .header("content-type", CT_TSV)
         .body(Body::from(tsv))
-        .unwrap()
+        .unwrap_or_else(|e| {
+            tracing::error!("response build error: {e}");
+            common::redacted_error(
+                "internal_server_error",
+                &format!("response build failed: {e}"),
+                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            )
+        })
 }
 
 fn format_ask_result(result: bool, accept: &str) -> Response {
@@ -1021,7 +1049,14 @@ fn format_ask_result(result: bool, accept: &str) -> Response {
                 .status(StatusCode::OK)
                 .header("content-type", CT_SPARQL_XML)
                 .body(Body::from(xml))
-                .unwrap()
+                .unwrap_or_else(|e| {
+                    tracing::error!("response build error: {e}");
+                    common::redacted_error(
+                        "internal_server_error",
+                        &format!("response build failed: {e}"),
+                        axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                    )
+                })
         }
         _ => {
             let body = serde_json::json!({
@@ -1032,7 +1067,14 @@ fn format_ask_result(result: bool, accept: &str) -> Response {
                 .status(StatusCode::OK)
                 .header("content-type", CT_SPARQL_JSON)
                 .body(Body::from(body.to_string()))
-                .unwrap()
+                .unwrap_or_else(|e| {
+                    tracing::error!("response build error: {e}");
+                    common::redacted_error(
+                        "internal_server_error",
+                        &format!("response build failed: {e}"),
+                        axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                    )
+                })
         }
     }
 }
@@ -1048,7 +1090,14 @@ fn format_graph_results(triples: &[(String, String, String)], accept: &str) -> R
                 .status(StatusCode::OK)
                 .header("content-type", CT_NTRIPLES)
                 .body(Body::from(body))
-                .unwrap()
+                .unwrap_or_else(|e| {
+                    tracing::error!("response build error: {e}");
+                    common::redacted_error(
+                        "internal_server_error",
+                        &format!("response build failed: {e}"),
+                        axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                    )
+                })
         }
         CT_JSONLD => {
             let graph: Vec<serde_json::Value> = triples
@@ -1066,7 +1115,14 @@ fn format_graph_results(triples: &[(String, String, String)], accept: &str) -> R
                 .body(Body::from(
                     serde_json::to_string(&graph).unwrap_or_default(),
                 ))
-                .unwrap()
+                .unwrap_or_else(|e| {
+                    tracing::error!("response build error: {e}");
+                    common::redacted_error(
+                        "internal_server_error",
+                        &format!("response build failed: {e}"),
+                        axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                    )
+                })
         }
         _ => {
             // Default: Turtle
@@ -1078,7 +1134,14 @@ fn format_graph_results(triples: &[(String, String, String)], accept: &str) -> R
                 .status(StatusCode::OK)
                 .header("content-type", CT_TURTLE)
                 .body(Body::from(body))
-                .unwrap()
+                .unwrap_or_else(|e| {
+                    tracing::error!("response build error: {e}");
+                    common::redacted_error(
+                        "internal_server_error",
+                        &format!("response build failed: {e}"),
+                        axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                    )
+                })
         }
     }
 }
@@ -1242,7 +1305,14 @@ async fn metrics_endpoint(State(state): State<Arc<AppState>>) -> Response {
         .status(StatusCode::OK)
         .header("content-type", "text/plain; version=0.0.4")
         .body(Body::from(body))
-        .unwrap()
+        .unwrap_or_else(|e| {
+            tracing::error!("response build error: {e}");
+            common::redacted_error(
+                "internal_server_error",
+                &format!("response build failed: {e}"),
+                axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            )
+        })
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────

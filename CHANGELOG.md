@@ -13,6 +13,42 @@ Versions correspond to the milestones in [ROADMAP.md](ROADMAP.md).
 
 ---
 
+## [0.53.0] — 2026-05-08 — DX, Extended Standards & Architecture
+
+**Implements the v0.53.0 roadmap: SHACL-SPARQL constraints, COPY rdf FROM, RAG pipeline hardening, CDC lifecycle events, fuzz coverage expansion, WatDiv gate promotion, and merge-throughput baselines.**
+
+### What's new
+
+- **SHACL-SPARQL constraint component** (`src/shacl/`): Implements `sh:SPARQLConstraintComponent` (W3C SHACL-SPARQL). A new `SparqlConstraint` variant on `ShapeConstraint` stores a SPARQL SELECT query; during validation the query is executed with `$this` bound to the focus-node IRI. Any non-empty result set generates a `Violation`. The parser now recognises `sh:sparql` predicates in node and property shapes.
+
+- **`pg_ripple.copy_rdf_from(path, format)`** (`src/dict_api.rs`): New SQL function that loads RDF triples from a server-side file. Supported formats: `ntriples`, `nquads`, `turtle`, `trig`, `rdfxml`. Returns the number of triples inserted.
+
+- **RAG pipeline hardening** (`src/llm/mod.rs`, `src/schema.rs`): `rag_context()` now (1) validates and sanitises input (null-byte rejection, 16 KiB length cap), (2) looks up results in `_pg_ripple.rag_cache` (1-hour TTL) before running inference, and (3) stores results in the cache after computation. The `_pg_ripple.rag_cache` table is created by the schema initialiser and migration script.
+
+- **CDC lifecycle events** (`src/storage/merge.rs`): The HTAP merge worker now emits `pg_notify('pg_ripple_cdc_lifecycle', payload)` at the end of each successful merge cycle. The JSON payload contains `{"op":"merge","predicate_id":N,"merged":M,"tombstones":T}`. Clients can `LISTEN pg_ripple_cdc_lifecycle` to receive real-time merge notifications.
+
+- **New fuzz targets** (`fuzz/fuzz_targets/`): Three new cargo-fuzz targets: `rdfxml_parser` (RDF/XML via rio_xml), `jsonld_framer` (JSON-LD framing via serde_json), `http_request` (HTTP query-string and URI parsing via url). Dependencies `rio_xml`, `serde_json`, and `url` added to `fuzz/Cargo.toml`.
+
+- **WatDiv suite gate promoted** (`.github/workflows/ci.yml`): Changed `watdiv-suite` job from `continue-on-error: true` to `continue-on-error: false`. The WatDiv benchmark suite is now a required CI gate.
+
+- **Merge-throughput baselines** (`benchmarks/merge_throughput_baselines.json`): Added reference p50/p95 throughput measurements for `merge_workers ∈ {1,2,4,8}` to anchor the benchmark regression gate.
+
+- **Error codes PT480 / PT481** (`src/error.rs`): PT480 warns when `sh:rule` is detected but SHACL-AF inference is off; PT481 is emitted when a SHACL-SPARQL constraint query fails to execute.
+
+- **GUC subsystem split** (`src/gucs/`): `src/gucs.rs` refactored into seven focused modules: `storage`, `sparql`, `datalog`, `shacl`, `federation`, `llm`, `observability`.
+
+- **filter.rs split** (`src/sparql/translate/filter/`): `filter.rs` split into `filter_dispatch` (pattern dispatch utilities) and `filter_expr` (SPARQL Expression → SQL compiler).
+
+- **Datalog coordinator / semi-naïve modules** (`src/datalog/`): New `coordinator.rs` and `seminaive.rs` delegation modules.
+
+- **HTTP `unwrap()` hardening** (`pg_ripple_http/src/main.rs`): All `Response::builder()` `.unwrap()` calls in hot-path handlers replaced with `unwrap_or_else(|e| ...)` that returns a structured `internal_server_error` JSON response.
+
+### Migration
+
+Run `ALTER EXTENSION pg_ripple UPDATE TO '0.53.0';` or use the supplied migration script `sql/pg_ripple--0.52.0--0.53.0.sql`.
+
+---
+
 ## [0.52.0] — 2026-05-01 — pg-trickle Relay Integration
 
 **Implements the v0.52.0 roadmap: JSON→RDF pipeline, CDC bridge triggers, JSON-LD event serializer, outbox dedup keys, vocabulary alignment templates, and pg-trickle runtime detection with graceful degradation.**

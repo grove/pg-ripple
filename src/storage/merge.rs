@@ -452,7 +452,35 @@ pub fn merge_predicate(pred_id: i64) -> i64 {
         }
     }
 
+    // v0.53.0: Emit CDC lifecycle NOTIFY (best-effort, non-blocking).
+    // Count remaining tombstones after GC for the payload.
+    let tombs_remaining: i64 =
+        Spi::get_one_with_args::<i64>(&format!("SELECT count(*)::bigint FROM {tombs}"), &[])
+            .unwrap_or(None)
+            .unwrap_or(0);
+    notify_merge_lifecycle(pred_id, row_count, tombs_remaining);
+
     row_count
+}
+
+/// Emit a CDC lifecycle NOTIFY for a completed merge cycle.
+///
+/// Channel: `pg_ripple_cdc_lifecycle` (global lifecycle channel).
+/// Payload: `{"op":"merge","predicate_id":N,"merged":M,"tombstones":T}`
+///
+/// This is best-effort: errors are logged as warnings and do not fail the merge.
+pub(crate) fn notify_merge_lifecycle(pred_id: i64, merged: i64, tombstones: i64) {
+    let channel = "pg_ripple_cdc_lifecycle";
+    let payload = format!(
+        r#"{{"op":"merge","predicate_id":{pred_id},"merged":{merged},"tombstones":{tombstones}}}"#
+    );
+    let _ = Spi::run_with_args(
+        "SELECT pg_notify($1, $2)",
+        &[
+            pgrx::datum::DatumWithOid::from(channel),
+            pgrx::datum::DatumWithOid::from(payload.as_str()),
+        ],
+    );
 }
 
 /// Merge all HTAP predicates.  Returns total rows across all merged main tables.

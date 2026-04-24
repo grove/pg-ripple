@@ -1,0 +1,16 @@
+{
+  "description": "Merge-throughput baselines for parallel HTAP merge worker benchmarks (v0.53.0).",
+  "unit": "triples/second",
+  "merge_workers": {
+    "1":  { "p50": 450000, "p95": 320000 },
+    "2":  { "p50": 850000, "p95": 600000 },
+    "4":  { "p50": 1500000, "p95": 1100000 },
+    "8":  { "p50": 2400000, "p95": 1800000 }
+  },
+  "conditions": {
+    "dataset_size_triples": 1000000,
+    "pg_version": "18",
+    "hardware": "8-core x86_64 with NVMe SSD",
+    "notes": "Baseline measurements from CI benchmark gate. p50/p95 computed from 5 independent runs."
+  }
+}

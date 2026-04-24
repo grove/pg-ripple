@@ -854,3 +854,32 @@ pgrx::extension_sql!(
     name = "v052_schema_version_fresh_install_stamp",
     requires = ["v052_cdc_bridge_schema"]
 );
+
+// ── v0.53.0 ───────────────────────────────────────────────────────────────────
+
+pgrx::extension_sql!(
+    r#"
+-- RAG answer cache (v0.53.0)
+-- Stores previously computed rag_context() results keyed by
+-- (question_hash, k, schema_digest) to avoid redundant LLM round-trips.
+CREATE TABLE IF NOT EXISTS _pg_ripple.rag_cache (
+    question_hash TEXT         NOT NULL,
+    k             INT          NOT NULL DEFAULT 10,
+    schema_digest TEXT         NOT NULL DEFAULT '',
+    result        TEXT         NOT NULL DEFAULT '',
+    cached_at     TIMESTAMPTZ  NOT NULL DEFAULT now(),
+    PRIMARY KEY (question_hash, k, schema_digest)
+);
+CREATE INDEX IF NOT EXISTS idx_rag_cache_cached_at
+    ON _pg_ripple.rag_cache (cached_at);
+"#,
+    name = "v053_rag_cache",
+    requires = ["v052_schema_version_fresh_install_stamp"]
+);
+
+pgrx::extension_sql!(
+    "INSERT INTO _pg_ripple.schema_version (version, upgraded_from, installed_at) \
+     VALUES ('0.53.0', '0.52.0', clock_timestamp());",
+    name = "v053_schema_version_stamp",
+    requires = ["v053_rag_cache"]
+);

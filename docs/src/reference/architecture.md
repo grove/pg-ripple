@@ -1,10 +1,10 @@
 # Architecture
 
-This page describes the internal architecture of pg_ripple as of v0.38.0.
+This page describes the internal architecture of pg_ripple as of v0.53.0.
 
 ## Overview
 
-pg_ripple is a PostgreSQL 18 extension written in Rust (pgrx 0.17) that
+pg_ripple is a PostgreSQL 18 extension written in Rust (pgrx 0.18) that
 implements a high-performance RDF triple store with native SPARQL query
 execution.  All user-visible functions live in the `pg_ripple` schema; internal
 tables and VP (Vertical Partitioning) tables live in the `_pg_ripple` schema.
@@ -14,40 +14,71 @@ tables and VP (Vertical Partitioning) tables live in the `_pg_ripple` schema.
 ```mermaid
 graph TD
     Client["SQL client / SPARQL tool"]
+    HTTP["pg_ripple_http\n(Axum companion service)"]
+    RAG["RAG / LLM pipeline\nllm/mod.rs + rag_cache"]
 
-    subgraph Extension["pg_ripple extension (Rust + pgrx)"]
-        API["SQL API layer\n(lib.rs + *_api.rs)"]
+    subgraph Extension["pg_ripple extension (Rust + pgrx 0.18)"]
+        API["SQL API layer\nlib.rs + *_api.rs"]
         SPARQL["SPARQL engine\nsparql/mod.rs"]
-        TRANS["Algebra → SQL\nsparql/translate/"]
+        TRANS["Algebra → SQL\nsparql/translate/\nfilter_dispatch + filter_expr"]
         SQLGEN["SQL generator\nsparql/sqlgen.rs"]
-        DICT["Dictionary\ndictionary/mod.rs"]
-        SHACL["SHACL validator\nshacl/mod.rs"]
-        DL["Datalog engine\ndatalog/mod.rs"]
-        EXP["Serialisers\nexport/mod.rs"]
-        STOR["Storage layer\nstorage/mod.rs"]
+        DICT["Dictionary\ndictionary/mod.rs\n(XXH3-128 + LRU cache)"]
+        SHACL["SHACL validator\nshacl/mod.rs\n(Core + SPARQL constraints)"]
+        DL["Datalog engine\ndatalog/\nseminaive + coordinator\nmagic_sets + demand"]
+        EXP["Serialisers\nexport/mod.rs\n(Turtle/JSON-LD/N-Triples)"]
+        STOR["Storage layer\nstorage/mod.rs\n(HTAP delta/main/tombstones)"]
+        MERGE["Merge worker\nstorage/merge.rs\n(CDC lifecycle NOTIFY)"]
         CAT["Predicate catalog\nstorage/catalog.rs"]
         HINTS["SHACL hints\nshacl/hints.rs"]
+        FED["Federation planner\nsparql/federation.rs\n(cost-based, parallel)"]
+        CDC["CDC bridge\nstorage/cdc_bridge.rs"]
+        GUCS["GUC subsystem\ngucs/{sparql, datalog, shacl,\nfederation, llm, storage,\nobservability}.rs"]
     end
 
     subgraph PG["PostgreSQL 18"]
-        VP["VP tables\n_pg_ripple.vp_{id}"]
+        VP["VP tables\n_pg_ripple.vp_{id}_delta\n_pg_ripple.vp_{id}_main\n_pg_ripple.vp_{id}_tombstones"]
         DICT_TBL["dictionary table\n_pg_ripple.dictionary"]
         PRED["predicates table\n_pg_ripple.predicates"]
         RARE["rare predicates\n_pg_ripple.vp_rare"]
         SHAPE_HINTS["shape_hints table\n_pg_ripple.shape_hints"]
+        RAG_CACHE["rag_cache\n_pg_ripple.rag_cache"]
+        CDC_SUBS["cdc_subscriptions\n_pg_ripple.cdc_subscriptions"]
     end
 
     Client --> API
+    HTTP --> API
+    HTTP --> RAG
+    RAG --> RAG_CACHE
     API --> SPARQL
     API --> SHACL
     API --> DL
     API --> EXP
+    API --> FED
+    API --> CDC
     SPARQL --> TRANS
     TRANS --> SQLGEN
     SQLGEN --> CAT
     CAT --> HINTS
     HINTS --> SHAPE_HINTS
     SQLGEN --> DICT
+    DICT --> DICT_TBL
+    SPARQL --> VP
+    SHACL --> VP
+    DL --> VP
+    STOR --> VP
+    MERGE --> STOR
+    MERGE --> CDC_SUBS
+    CDC --> CDC_SUBS
+    VP --> PRED
+    VP --> RARE
+    FED --> HTTP
+    GUCS -.->|"configures"| SPARQL
+    GUCS -.->|"configures"| DL
+    GUCS -.->|"configures"| FED
+    GUCS -.->|"configures"| MERGE
+```
+
+
     DICT --> DICT_TBL
     SQLGEN --> VP
     CAT --> PRED
