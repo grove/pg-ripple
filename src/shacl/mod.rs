@@ -62,7 +62,9 @@ pub enum ShapeConstraint {
     LessThan(String),
     LessThanOrEquals(String),
     GreaterThan(String),
-    Closed { ignored_properties: Vec<String> },
+    Closed {
+        ignored_properties: Vec<String>,
+    },
     Equals(String),
     Disjoint(String),
     MinLength(i64),
@@ -98,16 +100,14 @@ pub struct Shape {
 
 // ─── Re-exports (preserve original public API paths) ─────────────────────────
 
-pub use af_rules::bridge_shacl_rules;
 pub use hints::{compile_dag_monitors, drop_dag_monitors, list_dag_monitors};
-pub use spi::{load_shapes, parse_and_store_shapes};
+pub use spi::parse_and_store_shapes;
 pub use validator::{
-    decode_id_safe, process_validation_batch, run_validate, validate_sync, Violation,
+    Violation, decode_id_safe, process_validation_batch, run_validate, validate_sync,
 };
 
 // pub(crate) re-exports consumed by constraints/* and other internal callers
 pub(crate) use validator::{
-    compare_dictionary_values, count_values_all_graphs, count_values_in_graph,
-    encode_shacl_in_value, get_language_tag, get_value_ids, get_vp_table_name,
+    compare_dictionary_values, encode_shacl_in_value, get_language_tag, get_value_ids,
     node_conforms_to_shape, value_has_datatype, value_has_node_kind, value_has_rdf_type,
 };

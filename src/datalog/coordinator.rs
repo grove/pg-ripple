@@ -9,9 +9,11 @@
 //! `parallel::execute_with_savepoint()`.  A failed group's delta tables are
 //! left empty for this iteration (retried next round).
 
-use pgrx::prelude::*;
+use super::{
+    BodyLiteral, Rule, Term, check_aggregation_stratification, compile_aggregate_rule, parse_rules,
+};
 use crate::datalog::parallel::{ParallelAnalysis, execute_with_savepoint};
-use super::{Rule, Term, BodyLiteral, compile_aggregate_rule, check_aggregation_stratification, parse_rules};
+use pgrx::prelude::*;
 
 /// Analyse rule groups and return parallelism statistics.
 #[allow(dead_code)]
@@ -80,7 +82,11 @@ pub fn run_inference_agg(rule_set_name: &str) -> (i64, i64, i32) {
         );
         let non_agg_rules: Vec<Rule> = all_rules
             .iter()
-            .filter(|r| !r.body.iter().any(|lit| matches!(lit, BodyLiteral::Aggregate(_))))
+            .filter(|r| {
+                !r.body
+                    .iter()
+                    .any(|lit| matches!(lit, BodyLiteral::Aggregate(_)))
+            })
             .cloned()
             .collect();
         let (derived, iters) = super::seminaive::run_seminaive_inner(&non_agg_rules, rule_set_name);
@@ -88,7 +94,9 @@ pub fn run_inference_agg(rule_set_name: &str) -> (i64, i64, i32) {
     }
 
     let (agg_rules, non_agg_rules): (Vec<Rule>, Vec<Rule>) = all_rules.into_iter().partition(|r| {
-        r.body.iter().any(|lit| matches!(lit, BodyLiteral::Aggregate(_)))
+        r.body
+            .iter()
+            .any(|lit| matches!(lit, BodyLiteral::Aggregate(_)))
     });
 
     let (normal_derived, iterations) = if !non_agg_rules.is_empty() {
@@ -105,8 +113,13 @@ pub fn run_inference_agg(rule_set_name: &str) -> (i64, i64, i32) {
     } else {
         let mut compiled = Vec::new();
         for rule in &agg_rules {
-            let Some(head_atom) = &rule.head else { continue; };
-            let head_pred = match &head_atom.p { Term::Const(id) => *id, _ => continue, };
+            let Some(head_atom) = &rule.head else {
+                continue;
+            };
+            let head_pred = match &head_atom.p {
+                Term::Const(id) => *id,
+                _ => continue,
+            };
             crate::storage::merge::ensure_htap_tables(head_pred);
             let target = format!("_pg_ripple.vp_{head_pred}_delta");
             match compile_aggregate_rule(rule, &target) {

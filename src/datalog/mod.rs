@@ -63,7 +63,6 @@ pub use dred::{check_dred_safety, run_dred_on_delete};
 pub use lattice::{ensure_lattice_catalog, register_lattice, run_infer_lattice};
 pub use magic::parse_goal;
 pub use magic::run_infer_goal;
-pub use parallel::partition_into_parallel_groups;
 pub use parser::parse_rules;
 pub use stratify::check_aggregation_stratification;
 pub use stratify::check_subsumption;
@@ -340,9 +339,9 @@ pub fn store_rules(rule_set: &str, rules: &[Rule]) -> i64 {
 }
 
 // ─── Inference re-exports (moved to seminaive.rs / coordinator.rs) ───────────
-pub use seminaive::{run_inference_seminaive, run_inference_seminaive_full, run_inference, run_var_pred_rule};
 pub use coordinator::run_inference_agg;
 pub(crate) use seminaive::run_seminaive_inner;
+pub use seminaive::{run_inference, run_inference_seminaive, run_inference_seminaive_full};
 
 // ─── Constraint checking ──────────────────────────────────────────────────────
 

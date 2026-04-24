@@ -13,9 +13,8 @@
 use pgrx::prelude::*;
 
 use super::{
-    BodyLiteral, Rule, Term,
-    compile_rule_delta_variants_to, compile_rule_set, compile_single_rule_to,
-    has_variable_pred, parse_rules, check_subsumption, vp_read_expr_pub,
+    BodyLiteral, Rule, Term, check_subsumption, compile_rule_delta_variants_to, compile_rule_set,
+    compile_single_rule_to, has_variable_pred, parse_rules, vp_read_expr_pub,
 };
 
 // ─── Main semi-naive inference entry point ───────────────────────────────────
@@ -29,11 +28,8 @@ pub fn run_inference_seminaive(rule_set_name: &str) -> (i64, i32) {
     let sequence_batch = crate::DATALOG_SEQUENCE_BATCH.get();
     if parallel_workers > 1 {
         Spi::connect(|client| {
-            let _ = super::parallel::preallocate_sid_ranges(
-                client,
-                parallel_workers,
-                sequence_batch,
-            );
+            let _ =
+                super::parallel::preallocate_sid_ranges(client, parallel_workers, sequence_batch);
         });
     }
 
@@ -83,7 +79,11 @@ pub fn run_inference_seminaive(rule_set_name: &str) -> (i64, i32) {
         .iter()
         .filter_map(|r| {
             r.head.as_ref().and_then(|h| {
-                if let Term::Const(id) = &h.p { Some(*id) } else { None }
+                if let Term::Const(id) = &h.p {
+                    Some(*id)
+                } else {
+                    None
+                }
             })
         })
         .collect();
@@ -115,9 +115,16 @@ pub fn run_inference_seminaive(rule_set_name: &str) -> (i64, i32) {
     }
 
     for rule in &active_rules {
-        let Some(head_atom) = &rule.head else { continue; };
-        let head_pred = match &head_atom.p { Term::Const(id) => *id, _ => continue, };
-        if !derived_pred_ids.contains(&head_pred) { continue; }
+        let Some(head_atom) = &rule.head else {
+            continue;
+        };
+        let head_pred = match &head_atom.p {
+            Term::Const(id) => *id,
+            _ => continue,
+        };
+        if !derived_pred_ids.contains(&head_pred) {
+            continue;
+        }
         let target = format!("_dl_delta_{head_pred}");
         match compile_single_rule_to(rule, &target) {
             Ok(sql) => {
@@ -162,7 +169,10 @@ pub fn run_inference_seminaive(rule_set_name: &str) -> (i64, i32) {
         iteration_count += 1;
 
         for &pred_id in &derived_pred_ids {
-            let _ = Spi::run_with_args(&format!("DROP TABLE IF EXISTS _dl_delta_new_{pred_id}"), &[]);
+            let _ = Spi::run_with_args(
+                &format!("DROP TABLE IF EXISTS _dl_delta_new_{pred_id}"),
+                &[],
+            );
             Spi::run_with_args(
                 &format!(
                     "CREATE TEMP TABLE _dl_delta_new_{pred_id} \
@@ -179,11 +189,23 @@ pub fn run_inference_seminaive(rule_set_name: &str) -> (i64, i32) {
         let new_delta_fn = |pred_id: i64| -> String { format!("_dl_delta_new_{pred_id}") };
 
         for rule in &active_rules {
-            let Some(head_atom) = &rule.head else { continue; };
-            let head_pred = match &head_atom.p { Term::Const(id) => *id, _ => continue, };
-            if !derived_pred_ids.contains(&head_pred) { continue; }
+            let Some(head_atom) = &rule.head else {
+                continue;
+            };
+            let head_pred = match &head_atom.p {
+                Term::Const(id) => *id,
+                _ => continue,
+            };
+            if !derived_pred_ids.contains(&head_pred) {
+                continue;
+            }
 
-            match compile_rule_delta_variants_to(rule, &derived_pred_ids, &delta_fn, Some(&new_delta_fn)) {
+            match compile_rule_delta_variants_to(
+                rule,
+                &derived_pred_ids,
+                &delta_fn,
+                Some(&new_delta_fn),
+            ) {
                 Ok(variant_sqls) => {
                     for sql in &variant_sqls {
                         if let Err(e) = Spi::run_with_args(sql, &[]) {
@@ -210,14 +232,21 @@ pub fn run_inference_seminaive(rule_set_name: &str) -> (i64, i32) {
 
         for &pred_id in &derived_pred_ids {
             let _ = Spi::run_with_args(
-                &format!("INSERT INTO _dl_delta_{pred_id} (s, o, g) \
-                     SELECT s, o, g FROM _dl_delta_new_{pred_id} ON CONFLICT DO NOTHING"),
+                &format!(
+                    "INSERT INTO _dl_delta_{pred_id} (s, o, g) \
+                     SELECT s, o, g FROM _dl_delta_new_{pred_id} ON CONFLICT DO NOTHING"
+                ),
                 &[],
             );
-            let _ = Spi::run_with_args(&format!("DROP TABLE IF EXISTS _dl_delta_new_{pred_id}"), &[]);
+            let _ = Spi::run_with_args(
+                &format!("DROP TABLE IF EXISTS _dl_delta_new_{pred_id}"),
+                &[],
+            );
         }
 
-        if new_this_iter == 0 { break; }
+        if new_this_iter == 0 {
+            break;
+        }
     }
 
     let mut total_derived: i64 = 0;
@@ -248,7 +277,10 @@ pub fn run_inference_seminaive(rule_set_name: &str) -> (i64, i32) {
 
     for &pred_id in &derived_pred_ids {
         let _ = Spi::run_with_args(&format!("DROP TABLE IF EXISTS _dl_delta_{pred_id}"), &[]);
-        let _ = Spi::run_with_args(&format!("DROP TABLE IF EXISTS _dl_delta_new_{pred_id}"), &[]);
+        let _ = Spi::run_with_args(
+            &format!("DROP TABLE IF EXISTS _dl_delta_new_{pred_id}"),
+            &[],
+        );
     }
 
     (total_derived, iteration_count)
@@ -313,7 +345,11 @@ pub fn run_inference(rule_set_name: &str) -> i64 {
 
     let rule_rows = Spi::connect(|client| {
         client
-            .select(rules_sql, None, &[pgrx::datum::DatumWithOid::from(rule_set_name)])
+            .select(
+                rules_sql,
+                None,
+                &[pgrx::datum::DatumWithOid::from(rule_set_name)],
+            )
             .unwrap_or_else(|e| pgrx::error!("rule select SPI error: {e}"))
             .map(|row| {
                 let text: String = row.get::<String>(1).ok().flatten().unwrap_or_default();
@@ -332,7 +368,10 @@ pub fn run_inference(rule_set_name: &str) -> i64 {
     for (rule_text, _stratum, _recursive) in rule_rows {
         let rules = match parse_rules(&rule_text, rule_set_name) {
             Ok(rs) => rs.rules,
-            Err(e) => { pgrx::warning!("rule parse error during inference: {e}"); continue; }
+            Err(e) => {
+                pgrx::warning!("rule parse error during inference: {e}");
+                continue;
+            }
         };
         for rule in &rules {
             if has_variable_pred(rule) {
@@ -386,14 +425,23 @@ fn substitute_pred_var(rule: &Rule, var_name: &str, pred_id: i64) -> Rule {
         }
     };
     let sub_atom = |a: &super::Atom| -> super::Atom {
-        super::Atom { s: sub(&a.s), p: sub(&a.p), o: sub(&a.o), g: sub(&a.g) }
+        super::Atom {
+            s: sub(&a.s),
+            p: sub(&a.p),
+            o: sub(&a.o),
+            g: sub(&a.g),
+        }
     };
     let new_head = rule.head.as_ref().map(sub_atom);
-    let new_body = rule.body.iter().map(|lit| match lit {
-        BodyLiteral::Positive(a) => BodyLiteral::Positive(sub_atom(a)),
-        BodyLiteral::Negated(a) => BodyLiteral::Negated(sub_atom(a)),
-        other => other.clone(),
-    }).collect();
+    let new_body = rule
+        .body
+        .iter()
+        .map(|lit| match lit {
+            BodyLiteral::Positive(a) => BodyLiteral::Positive(sub_atom(a)),
+            BodyLiteral::Negated(a) => BodyLiteral::Negated(sub_atom(a)),
+            other => other.clone(),
+        })
+        .collect();
     Rule {
         head: new_head,
         body: new_body,
@@ -404,29 +452,49 @@ fn substitute_pred_var(rule: &Rule, var_name: &str, pred_id: i64) -> Rule {
 fn enumerate_pred_var_values(rule: &Rule, var_name: &str) -> Vec<i64> {
     let mut values: std::collections::HashSet<i64> = std::collections::HashSet::new();
     for lit in &rule.body {
-        let atom = match lit { BodyLiteral::Positive(a) => a, _ => continue, };
-        let atom_pred_id = match &atom.p { Term::Const(id) => *id, _ => continue, };
+        let atom = match lit {
+            BodyLiteral::Positive(a) => a,
+            _ => continue,
+        };
+        let atom_pred_id = match &atom.p {
+            Term::Const(id) => *id,
+            _ => continue,
+        };
         let is_subj = matches!(&atom.s, Term::Var(v) if v == var_name);
         let is_obj = matches!(&atom.o, Term::Var(v) if v == var_name);
         if is_subj {
             let sql = match &atom.o {
-                Term::Const(o_id) => format!("SELECT DISTINCT s FROM {} WHERE o = {o_id}", vp_read_expr_pub(atom_pred_id)),
+                Term::Const(o_id) => format!(
+                    "SELECT DISTINCT s FROM {} WHERE o = {o_id}",
+                    vp_read_expr_pub(atom_pred_id)
+                ),
                 _ => format!("SELECT DISTINCT s FROM {}", vp_read_expr_pub(atom_pred_id)),
             };
             let ids: Vec<i64> = Spi::connect(|c| {
-                c.select(&sql, None, &[]).ok()
-                    .map(|rows| rows.filter_map(|row| row.get::<i64>(1).ok().flatten()).collect::<Vec<_>>())
+                c.select(&sql, None, &[])
+                    .ok()
+                    .map(|rows| {
+                        rows.filter_map(|row| row.get::<i64>(1).ok().flatten())
+                            .collect::<Vec<_>>()
+                    })
                     .unwrap_or_default()
             });
             values.extend(ids);
         } else if is_obj {
             let sql = match &atom.s {
-                Term::Const(s_id) => format!("SELECT DISTINCT o FROM {} WHERE s = {s_id}", vp_read_expr_pub(atom_pred_id)),
+                Term::Const(s_id) => format!(
+                    "SELECT DISTINCT o FROM {} WHERE s = {s_id}",
+                    vp_read_expr_pub(atom_pred_id)
+                ),
                 _ => format!("SELECT DISTINCT o FROM {}", vp_read_expr_pub(atom_pred_id)),
             };
             let ids: Vec<i64> = Spi::connect(|c| {
-                c.select(&sql, None, &[]).ok()
-                    .map(|rows| rows.filter_map(|row| row.get::<i64>(1).ok().flatten()).collect::<Vec<_>>())
+                c.select(&sql, None, &[])
+                    .ok()
+                    .map(|rows| {
+                        rows.filter_map(|row| row.get::<i64>(1).ok().flatten())
+                            .collect::<Vec<_>>()
+                    })
                     .unwrap_or_default()
             });
             values.extend(ids);
@@ -436,25 +504,47 @@ fn enumerate_pred_var_values(rule: &Rule, var_name: &str) -> Vec<i64> {
 }
 
 fn compute_pred_var_bindings(rule: &Rule, pred_vars: &[String]) -> Vec<Vec<(String, i64)>> {
-    if pred_vars.is_empty() { return vec![vec![]]; }
+    if pred_vars.is_empty() {
+        return vec![vec![]];
+    }
 
     for lit in &rule.body {
-        let atom = match lit { BodyLiteral::Positive(a) => a, _ => continue, };
-        let atom_pred_id = match &atom.p { Term::Const(id) => *id, _ => continue, };
-        let subj_var = match &atom.s { Term::Var(v) if pred_vars.contains(v) => Some(v.clone()), _ => None, };
-        let obj_var = match &atom.o { Term::Var(v) if pred_vars.contains(v) => Some(v.clone()), _ => None, };
+        let atom = match lit {
+            BodyLiteral::Positive(a) => a,
+            _ => continue,
+        };
+        let atom_pred_id = match &atom.p {
+            Term::Const(id) => *id,
+            _ => continue,
+        };
+        let subj_var = match &atom.s {
+            Term::Var(v) if pred_vars.contains(v) => Some(v.clone()),
+            _ => None,
+        };
+        let obj_var = match &atom.o {
+            Term::Var(v) if pred_vars.contains(v) => Some(v.clone()),
+            _ => None,
+        };
         if let (Some(sv), Some(ov)) = (subj_var, obj_var) {
-            let sql = format!("SELECT DISTINCT s, o FROM {}", vp_read_expr_pub(atom_pred_id));
+            let sql = format!(
+                "SELECT DISTINCT s, o FROM {}",
+                vp_read_expr_pub(atom_pred_id)
+            );
             let pairs: Vec<(i64, i64)> = Spi::connect(|c| {
-                c.select(&sql, None, &[]).ok()
-                    .map(|rows| rows.filter_map(|row| {
-                        let s = row.get::<i64>(1).ok().flatten()?;
-                        let o = row.get::<i64>(2).ok().flatten()?;
-                        Some((s, o))
-                    }).collect::<Vec<_>>())
+                c.select(&sql, None, &[])
+                    .ok()
+                    .map(|rows| {
+                        rows.filter_map(|row| {
+                            let s = row.get::<i64>(1).ok().flatten()?;
+                            let o = row.get::<i64>(2).ok().flatten()?;
+                            Some((s, o))
+                        })
+                        .collect::<Vec<_>>()
+                    })
                     .unwrap_or_default()
             });
-            return pairs.into_iter()
+            return pairs
+                .into_iter()
                 .map(|(s, o)| vec![(sv.clone(), s), (ov.clone(), o)])
                 .collect();
         }
@@ -463,7 +553,9 @@ fn compute_pred_var_bindings(rule: &Rule, pred_vars: &[String]) -> Vec<Vec<(Stri
     let mut per_var: Vec<(String, Vec<i64>)> = Vec::new();
     for var_name in pred_vars {
         let vals = enumerate_pred_var_values(rule, var_name);
-        if vals.is_empty() { return vec![]; }
+        if vals.is_empty() {
+            return vec![];
+        }
         per_var.push((var_name.clone(), vals));
     }
 
@@ -485,9 +577,13 @@ fn compute_pred_var_bindings(rule: &Rule, pred_vars: &[String]) -> Vec<Vec<(Stri
 /// Handle a rule with variable predicates by instantiating at runtime.
 pub fn run_var_pred_rule(rule: &Rule) -> i64 {
     let pred_vars = collect_pred_vars(rule);
-    if pred_vars.is_empty() { return 0; }
+    if pred_vars.is_empty() {
+        return 0;
+    }
     let bindings = compute_pred_var_bindings(rule, &pred_vars);
-    if bindings.is_empty() { return 0; }
+    if bindings.is_empty() {
+        return 0;
+    }
     let mut total = 0i64;
     for binding in bindings {
         let mut specialized = rule.clone();
@@ -515,10 +611,20 @@ pub fn run_var_pred_rule(rule: &Rule) -> i64 {
 pub(crate) fn run_seminaive_inner(rules: &[Rule], rule_set_name: &str) -> (i64, i32) {
     let derived_pred_ids: std::collections::HashSet<i64> = rules
         .iter()
-        .filter_map(|r| r.head.as_ref().and_then(|h| if let Term::Const(id) = &h.p { Some(*id) } else { None }))
+        .filter_map(|r| {
+            r.head.as_ref().and_then(|h| {
+                if let Term::Const(id) = &h.p {
+                    Some(*id)
+                } else {
+                    None
+                }
+            })
+        })
         .collect();
 
-    if derived_pred_ids.is_empty() { return (0, 0); }
+    if derived_pred_ids.is_empty() {
+        return (0, 0);
+    }
 
     for &pred_id in &derived_pred_ids {
         let _ = Spi::run_with_args(&format!("DROP TABLE IF EXISTS _dl_delta_{pred_id}"), &[]);
@@ -531,12 +637,23 @@ pub(crate) fn run_seminaive_inner(rules: &[Rule], rule_set_name: &str) -> (i64, 
     }
 
     for rule in rules {
-        let Some(head_atom) = &rule.head else { continue; };
-        let head_pred = match &head_atom.p { Term::Const(id) => *id, _ => continue, };
-        if !derived_pred_ids.contains(&head_pred) { continue; }
+        let Some(head_atom) = &rule.head else {
+            continue;
+        };
+        let head_pred = match &head_atom.p {
+            Term::Const(id) => *id,
+            _ => continue,
+        };
+        if !derived_pred_ids.contains(&head_pred) {
+            continue;
+        }
         let target = format!("_dl_delta_{head_pred}");
         match compile_single_rule_to(rule, &target) {
-            Ok(sql) => { if let Err(e) = Spi::run_with_args(&sql, &[]) { pgrx::warning!("run_seminaive_inner: seed SQL error: {e}"); } }
+            Ok(sql) => {
+                if let Err(e) = Spi::run_with_args(&sql, &[]) {
+                    pgrx::warning!("run_seminaive_inner: seed SQL error: {e}");
+                }
+            }
             Err(e) => pgrx::warning!("run_seminaive_inner: seed compile error: {e}"),
         }
     }
@@ -544,13 +661,18 @@ pub(crate) fn run_seminaive_inner(rules: &[Rule], rule_set_name: &str) -> (i64, 
     let mut iteration_count = 1i32;
     loop {
         if iteration_count >= 10_000 {
-            pgrx::warning!("run_seminaive_inner: max iterations reached for rule_set '{rule_set_name}'");
+            pgrx::warning!(
+                "run_seminaive_inner: max iterations reached for rule_set '{rule_set_name}'"
+            );
             break;
         }
         iteration_count += 1;
 
         for &pred_id in &derived_pred_ids {
-            let _ = Spi::run_with_args(&format!("DROP TABLE IF EXISTS _dl_delta_new_{pred_id}"), &[]);
+            let _ = Spi::run_with_args(
+                &format!("DROP TABLE IF EXISTS _dl_delta_new_{pred_id}"),
+                &[],
+            );
             Spi::run_with_args(
                 &format!("CREATE TEMP TABLE _dl_delta_new_{pred_id} \
                      (s BIGINT NOT NULL, o BIGINT NOT NULL, g BIGINT NOT NULL DEFAULT 0, UNIQUE (s, o, g))"),
@@ -564,11 +686,29 @@ pub(crate) fn run_seminaive_inner(rules: &[Rule], rule_set_name: &str) -> (i64, 
         let new_delta_fn = |pred_id: i64| -> String { format!("_dl_delta_new_{pred_id}") };
 
         for rule in rules {
-            let Some(head_atom) = &rule.head else { continue; };
-            let head_pred = match &head_atom.p { Term::Const(id) => *id, _ => continue, };
-            if !derived_pred_ids.contains(&head_pred) { continue; }
-            match compile_rule_delta_variants_to(rule, &derived_pred_ids, &delta_fn, Some(&new_delta_fn)) {
-                Ok(sqls) => { for sql in &sqls { if let Err(e) = Spi::run_with_args(sql, &[]) { pgrx::warning!("run_seminaive_inner: variant SQL error: {e}"); } } }
+            let Some(head_atom) = &rule.head else {
+                continue;
+            };
+            let head_pred = match &head_atom.p {
+                Term::Const(id) => *id,
+                _ => continue,
+            };
+            if !derived_pred_ids.contains(&head_pred) {
+                continue;
+            }
+            match compile_rule_delta_variants_to(
+                rule,
+                &derived_pred_ids,
+                &delta_fn,
+                Some(&new_delta_fn),
+            ) {
+                Ok(sqls) => {
+                    for sql in &sqls {
+                        if let Err(e) = Spi::run_with_args(sql, &[]) {
+                            pgrx::warning!("run_seminaive_inner: variant SQL error: {e}");
+                        }
+                    }
+                }
                 Err(e) => pgrx::warning!("run_seminaive_inner: compile error: {e}"),
             }
         }
@@ -583,13 +723,20 @@ pub(crate) fn run_seminaive_inner(rules: &[Rule], rule_set_name: &str) -> (i64, 
 
         for &pred_id in &derived_pred_ids {
             let _ = Spi::run_with_args(
-                &format!("INSERT INTO _dl_delta_{pred_id} (s,o,g) SELECT s,o,g FROM _dl_delta_new_{pred_id} ON CONFLICT DO NOTHING"),
+                &format!(
+                    "INSERT INTO _dl_delta_{pred_id} (s,o,g) SELECT s,o,g FROM _dl_delta_new_{pred_id} ON CONFLICT DO NOTHING"
+                ),
                 &[],
             );
-            let _ = Spi::run_with_args(&format!("DROP TABLE IF EXISTS _dl_delta_new_{pred_id}"), &[]);
+            let _ = Spi::run_with_args(
+                &format!("DROP TABLE IF EXISTS _dl_delta_new_{pred_id}"),
+                &[],
+            );
         }
 
-        if new_this_iter == 0 { break; }
+        if new_this_iter == 0 {
+            break;
+        }
     }
 
     let mut total: i64 = 0;
@@ -598,20 +745,28 @@ pub(crate) fn run_seminaive_inner(rules: &[Rule], rule_set_name: &str) -> (i64, 
             "WITH ins AS (INSERT INTO _pg_ripple.vp_rare (p, s, o, g) \
              SELECT {pred_id}::bigint, s, o, g FROM _dl_delta_{pred_id} \
              ON CONFLICT DO NOTHING RETURNING 1) SELECT COUNT(*)::bigint FROM ins"
-        )).unwrap_or(None).unwrap_or(0);
+        ))
+        .unwrap_or(None)
+        .unwrap_or(0);
         total += cnt;
         if cnt > 0 {
             let _ = Spi::run_with_args(
                 "INSERT INTO _pg_ripple.predicates (id, table_oid, triple_count) VALUES ($1, NULL, $2) \
                  ON CONFLICT (id) DO UPDATE SET triple_count = _pg_ripple.predicates.triple_count + EXCLUDED.triple_count",
-                &[pgrx::datum::DatumWithOid::from(pred_id), pgrx::datum::DatumWithOid::from(cnt)],
+                &[
+                    pgrx::datum::DatumWithOid::from(pred_id),
+                    pgrx::datum::DatumWithOid::from(cnt),
+                ],
             );
         }
     }
 
     for &pred_id in &derived_pred_ids {
         let _ = Spi::run_with_args(&format!("DROP TABLE IF EXISTS _dl_delta_{pred_id}"), &[]);
-        let _ = Spi::run_with_args(&format!("DROP TABLE IF EXISTS _dl_delta_new_{pred_id}"), &[]);
+        let _ = Spi::run_with_args(
+            &format!("DROP TABLE IF EXISTS _dl_delta_new_{pred_id}"),
+            &[],
+        );
     }
 
     (total, iteration_count)

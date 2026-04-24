@@ -1,0 +1,40 @@
+-- pg_regress test: erase_subject GDPR tooling (v0.55.0)
+-- Verifies that erase_subject() removes all triples for a given subject.
+
+SET client_min_messages = warning;
+CREATE EXTENSION IF NOT EXISTS pg_ripple;
+SET client_min_messages = DEFAULT;
+SET search_path TO pg_ripple, public;
+
+-- Load triples for a subject we will erase.
+SELECT pg_ripple.load_ntriples(
+  E'<http://example.org/alice> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://example.org/Person> .\n' ||
+  E'<http://example.org/alice> <http://example.org/name> "Alice" .\n' ||
+  E'<http://example.org/alice> <http://example.org/email> "alice@example.org" .\n' ||
+  E'<http://example.org/bob> <http://example.org/name> "Bob" .\n',
+  'http://example.org/erasure_test'
+) AS triples_loaded;
+
+-- Verify triples for alice are present.
+SELECT count(*) AS alice_triples_before
+FROM pg_ripple.sparql(
+  'SELECT ?p ?o WHERE { GRAPH <http://example.org/erasure_test> { <http://example.org/alice> ?p ?o } }'
+);
+
+-- Erase all triples for alice.
+SELECT pg_ripple.erase_subject('http://example.org/alice') AS erased_count;
+
+-- Verify alice's triples are gone.
+SELECT count(*) AS alice_triples_after
+FROM pg_ripple.sparql(
+  'SELECT ?p ?o WHERE { GRAPH <http://example.org/erasure_test> { <http://example.org/alice> ?p ?o } }'
+);
+
+-- Verify bob's triple is still present.
+SELECT count(*) AS bob_triples_after
+FROM pg_ripple.sparql(
+  'SELECT ?o WHERE { GRAPH <http://example.org/erasure_test> { <http://example.org/bob> <http://example.org/name> ?o } }'
+);
+
+-- Cleanup.
+SELECT pg_ripple.drop_graph('http://example.org/erasure_test') IS NOT NULL AS dropped;
