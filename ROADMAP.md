@@ -93,6 +93,15 @@
 | [v0.53.0](roadmap/v0.53.0.md) | SHACL-SPARQL, `COPY rdf FROM`, RAG hardening, CDC lifecycle events, architecture module splits, OpenAPI spec | ✅ Released | Medium | [Full details](roadmap/v0.53.0-full.md) |
 | [v0.54.0](roadmap/v0.54.0.md) | PG18 logical-decoding RDF replication, Helm chart, CloudNativePG image volume, merge/vector-index performance baselines | ✅ Released | Medium | [Full details](roadmap/v0.54.0-full.md) |
 
+### Quality, Security & Ecosystem (v0.55.0 – v0.58.0)
+
+| Version | Theme | Status | Scope | Full details |
+|---------|-------|--------|-------|--------------|
+| [v0.55.0](roadmap/v0.55.0.md) | Security hardening (SSRF allowlist, HTAP race fix), error-catalog reconciliation, tombstone GC, SPARQL views, named-graph RLS, Kafka CDC, LangChain tool, VoID, SPARQL Service Description | Planned | Very Large | [Full details](roadmap/v0.55.0-full.md) |
+| [v0.56.0](roadmap/v0.56.0.md) | GeoSPARQL 1.1, SPARQL Entailment Regime tests, Arrow/Flight export, dbt adapter, federation circuit breaker, SPARQL audit log, dead-code audit, deprecated GUC removal | Planned | Large | [Full details](roadmap/v0.56.0-full.md) |
+| [v0.57.0](roadmap/v0.57.0.md) | OWL 2 EL/QL reasoning profiles, KG embeddings (TransE/RotatE), entity alignment, LLM SPARQL repair, ontology mapping, multi-tenant graph isolation, columnar VP, adaptive indexing | Planned | Very Large | [Full details](roadmap/v0.57.0-full.md) |
+| [v0.58.0](roadmap/v0.58.0.md) | Temporal RDF queries (`point_in_time`), SPARQL-DL, Citus horizontal sharding, PROV-O graph provenance, v1.0.0 readiness integration suite | Planned | Large | [Full details](roadmap/v0.58.0-full.md) |
+
 ### Stable Release (v1.0.0)
 
 | Version | Theme | Status | Scope | Full details |
@@ -116,6 +125,10 @@ v0.47–v0.51    ─── Architecture hardening: dead-code wiring, SHACL compl
        │
 v0.52–v0.54    ─── Integration: pg-trickle relay, OpenAPI, logical replication, Helm chart
        │
+v0.55–v0.56    ─── Quality & security: SSRF allowlist, HTAP race fix, error-catalog, GeoSPARQL, Arrow/Flight, dbt, audit log
+       │
+v0.57–v0.58    ─── Reasoning & sharding: OWL 2 EL/QL, KG embeddings, entity alignment, temporal queries, Citus, PROV-O
+       │
 v1.0.0         ─── Stable release: production hardening, stress tests, security audit
 ```
 
@@ -129,5 +142,10 @@ v0.33.0 through v0.46.0 deliver the documentation site, parallel evaluation,
 worst-case optimal joins, full conformance suites, and the AI/LLM integration layer.
 v0.47.0 through v0.51.0 complete the architecture refactor and shipping hardening
 required for a production release. v0.52.0 through v0.54.0 deliver the pg-trickle
-relay integration and high-availability story. v1.0.0 is the stable release.
+relay integration and high-availability story. v0.55.0 through v0.56.0 address all
+open security findings from PLAN_OVERALL_ASSESSMENT_6 (SSRF allowlist, HTAP merge
+race, error-catalog drift) and add GeoSPARQL 1.1, Arrow/Flight export, and a dbt
+adapter. v0.57.0 through v0.58.0 extend the reasoning platform to OWL 2 EL/QL,
+add KG embeddings, entity alignment, temporal RDF queries, Citus sharding, and
+PROV-O provenance. v1.0.0 is the stable release.
 
