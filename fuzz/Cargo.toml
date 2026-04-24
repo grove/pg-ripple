@@ -13,8 +13,11 @@ cargo-fuzz = true
 libfuzzer-sys = "0.4"
 spargebra = { version = "0.4", features = ["sparql-12"] }
 rio_turtle = "0.8"
+rio_xml = "0.8"
 rio_api = "0.8"
 xxhash-rust = { version = "0.8", features = ["xxh3"] }
+serde_json = "1"
+url = "2"
 
 [[bin]]
 name = "federation_result"
@@ -49,5 +52,24 @@ doc = false
 [[bin]]
 name = "dictionary_hash"
 path = "fuzz_targets/dictionary_hash.rs"
+test = false
+doc = false
+
+# v0.53.0 — new fuzz targets
+[[bin]]
+name = "rdfxml_parser"
+path = "fuzz_targets/rdfxml_parser.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "jsonld_framer"
+path = "fuzz_targets/jsonld_framer.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "http_request"
+path = "fuzz_targets/http_request.rs"
 test = false
 doc = false

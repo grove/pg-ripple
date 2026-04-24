@@ -477,4 +477,42 @@ mod pg_ripple {
     fn xsd_double_fmt(s: &str) -> String {
         crate::sparql::sqlgen::xsd_double_fmt_impl(s)
     }
+
+    // ── COPY rdf FROM (v0.53.0) ──────────────────────────────────────────────
+
+    /// Load RDF triples from a server-side file into the triple store.
+    ///
+    /// The `format` argument controls the parser:
+    ///
+    /// | Format string           | Parser                |
+    /// |-------------------------|-----------------------|
+    /// | `ntriples` / `nt`       | N-Triples             |
+    /// | `nquads` / `nq`         | N-Quads               |
+    /// | `turtle` / `ttl`        | Turtle                |
+    /// | `trig`                  | TriG                  |
+    /// | `rdfxml` / `xml`        | RDF/XML               |
+    ///
+    /// Returns the number of triples actually inserted.  Requires that the
+    /// PostgreSQL server process has read access to `path`.
+    ///
+    /// ```sql
+    /// SELECT pg_ripple.copy_rdf_from('/data/foaf.ttl', 'turtle');
+    /// SELECT pg_ripple.copy_rdf_from('/data/data.nq', 'nquads');
+    /// ```
+    #[pg_extern]
+    fn copy_rdf_from(path: &str, format: pgrx::default!(&str, "'ntriples'")) -> i64 {
+        let fmt = format.to_lowercase();
+        match fmt.as_str() {
+            "ntriples" | "nt" => crate::bulk_load::load_ntriples_file(path, false),
+            "nquads" | "nq" => crate::bulk_load::load_nquads_file(path, false),
+            "turtle" | "ttl" => crate::bulk_load::load_turtle_file(path, false),
+            "trig" => crate::bulk_load::load_trig_file(path, false),
+            "rdfxml" | "xml" => crate::bulk_load::load_rdfxml_file(path, false),
+            other => pgrx::error!(
+                "copy_rdf_from: unsupported format {:?}; \
+                 use ntriples, nquads, turtle, trig, or rdfxml",
+                other
+            ),
+        }
+    }
 }

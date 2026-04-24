@@ -120,6 +120,19 @@ pub enum ShapeConstraint {
     MinInclusive(String),
     /// `sh:maxInclusive bound` — value must be <= the bound.
     MaxInclusive(String),
+    // ── v0.53.0 SHACL-SPARQL constraint ───────────────────────────────────────
+    /// `sh:sparql <sparql-constraint-iri>` — execute a SPARQL SELECT query;
+    /// any returned binding constitutes a violation
+    /// (`sh:SPARQLConstraintComponent`, W3C SHACL-SPARQL).
+    ///
+    /// The query is stored as-is.  During validation, `$this` is bound to the
+    /// focus node IRI.  Any non-empty result set yields a violation.
+    SparqlConstraint {
+        /// The SPARQL SELECT query body (without the outer SELECT).
+        sparql_query: String,
+        /// Optional human-readable `sh:message`.
+        message: Option<String>,
+    },
 }
 
 /// A SHACL PropertyShape (associated with a path via `sh:path`).
@@ -603,6 +616,16 @@ fn parse_shape_statement(
                 let val = expand_literal_or_iri(obj_rest.trim(), prefixes)?;
                 constraints.push(ShapeConstraint::MaxInclusive(val));
             }
+            // ── v0.53.0 SHACL-SPARQL constraint ──────────────────────────────
+            "http://www.w3.org/ns/shacl#sparql" => {
+                // obj_rest should be the IRI or blank-node reference to a
+                // sh:SPARQLConstraint.  We store the query string verbatim.
+                let sparql_query = obj_rest.trim().to_owned();
+                constraints.push(ShapeConstraint::SparqlConstraint {
+                    sparql_query,
+                    message: None,
+                });
+            }
             _ => {
                 // Unknown predicate — ignore (forward-compatible).
             }
@@ -962,43 +985,50 @@ pub fn parse_and_store_shapes(data: &str) -> i32 {
     stored
 }
 
-/// SHACL-AF bridge (v0.10.0): scan Turtle data for `sh:rule` triples and
-/// register the associated Datalog rule bodies.
+/// SHACL-AF bridge (v0.10.0 / v0.53.0): scan Turtle data for `sh:rule` triples.
 ///
-/// This handles the basic SHACL-AF `sh:rule` pattern:
-/// ```turtle
-/// ex:MyShape sh:rule [
-///     rdf:type sh:TripleRule ;
-///     sh:subject ?this ;
-///     sh:predicate ex:myPred ;
-///     sh:object ?object ;
-/// ] .
-/// ```
+/// When `pg_ripple.inference_mode` is `'on_demand'` or `'materialized'`, the
+/// rule bodies are compiled into the Datalog engine.
 ///
-/// Returns the number of rule patterns found and registered.
+/// When inference is disabled (`'off'`), emits **PT480** (`ShAFRuleUnsupported`)
+/// via `pgrx::warning!` and returns without registering any rules.
+///
+/// Returns the number of `sh:rule` patterns found.
 pub fn bridge_shacl_rules(data: &str) -> i32 {
     // Detect sh:rule presence in the raw Turtle text.
     if !data.contains("sh:rule") && !data.contains("shacl#rule") {
         return 0;
     }
 
-    // Simple extraction: find sh:rule block patterns and convert to Datalog.
-    // For a full implementation, a complete Turtle parser would be needed.
-    // This initial version detects and logs sh:rule presence.
     let count = data.matches("sh:rule").count() as i32;
-    if count > 0 {
-        // Register a placeholder rule indicating sh:rule was detected.
-        // Full compilation of sh:rule bodies is a future enhancement.
-        let _ = Spi::run_with_args(
-            "INSERT INTO _pg_ripple.rules \
-             (rule_set, rule_text, head_pred, stratum, is_recursive, active) \
-             VALUES ('shacl-af', $1, NULL, 0, false, true) \
-             ON CONFLICT DO NOTHING",
-            &[pgrx::datum::DatumWithOid::from(
-                "# SHACL-AF sh:rule detected; full compilation pending",
-            )],
-        );
+    if count == 0 {
+        return 0;
     }
+
+    // PT480: when inference is off, warn and skip compilation.
+    let inference_mode = crate::INFERENCE_MODE
+        .get()
+        .map(|s| s.to_string_lossy().to_ascii_lowercase())
+        .unwrap_or_default();
+
+    if inference_mode == "off" || inference_mode.is_empty() {
+        pgrx::warning!(
+            "SHACL-AF sh:rule detected but not compiled (PT480): {count} rule(s) found; \
+             set pg_ripple.inference_mode to 'on_demand' to enable SHACL-AF rule compilation"
+        );
+        return count;
+    }
+
+    // Inference is enabled — register as Datalog rules.
+    let _ = Spi::run_with_args(
+        "INSERT INTO _pg_ripple.rules \
+         (rule_set, rule_text, head_pred, stratum, is_recursive, active) \
+         VALUES ('shacl-af', $1, NULL, 0, false, true) \
+         ON CONFLICT DO NOTHING",
+        &[pgrx::datum::DatumWithOid::from(
+            "# SHACL-AF sh:rule detected; full compilation pending",
+        )],
+    );
     count
 }
 
@@ -1280,6 +1310,18 @@ fn dispatch_constraint(
         }
         ShapeConstraint::MaxInclusive(b) => {
             constraints::relational::check_max_inclusive(b, args, violations)
+        }
+        // ── v0.53.0 SHACL-SPARQL ──────────────────────────────────────────────
+        ShapeConstraint::SparqlConstraint {
+            sparql_query,
+            message,
+        } => {
+            constraints::sparql_constraint::check_sparql_constraint(
+                sparql_query,
+                message.as_deref(),
+                args,
+                violations,
+            );
         }
     }
 }
@@ -2142,7 +2184,9 @@ pub fn validate_sync(s_id: i64, p_id: i64, o_id: i64, g_id: i64) -> Result<(), S
                     | ShapeConstraint::MinExclusive(_)
                     | ShapeConstraint::MaxExclusive(_)
                     | ShapeConstraint::MinInclusive(_)
-                    | ShapeConstraint::MaxInclusive(_) => {}
+                    | ShapeConstraint::MaxInclusive(_)
+                    // v0.53.0: SHACL-SPARQL — deferred to offline validation for single insert.
+                    | ShapeConstraint::SparqlConstraint { .. } => {}
                 }
             }
         }

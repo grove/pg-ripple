@@ -194,6 +194,29 @@ pub enum LlmError {
     ParseFailed { parse_error: String, query: String },
 }
 
+/// SHACL-AF errors (PT480–PT481) — v0.53.0.
+#[allow(dead_code)]
+#[derive(Debug, Error)]
+pub enum ShAFError {
+    /// PT480 — `sh:rule` (SHACL-AF) detected but not compiled.
+    ///
+    /// Emitted when `load_shacl()` encounters one or more `sh:rule` triples
+    /// in the supplied Turtle document and the `pg_ripple.inference_mode` is
+    /// set to `'off'` (so compilation into the Datalog engine is disabled).
+    /// Change `inference_mode` to `'on_demand'` or `'materialized'` to enable
+    /// SHACL-AF rule compilation, or remove the `sh:rule` triples if they are
+    /// not needed.
+    #[error(
+        "SHACL-AF sh:rule detected but not compiled (PT480): {count} rule(s) found; \
+         set pg_ripple.inference_mode to 'on_demand' to enable compilation"
+    )]
+    ShAFRuleUnsupported { count: i32 },
+
+    /// PT481 — `sh:sparql` (SHACL-SPARQL) constraint query failed to execute.
+    #[error("SHACL-SPARQL constraint query execution failed (PT481): {detail}")]
+    SparqlConstraintFailed { detail: String },
+}
+
 /// Lattice errors (PT540–PT541) — v0.36.0 / v0.45.0.
 #[allow(dead_code)]
 #[derive(Debug, Error)]

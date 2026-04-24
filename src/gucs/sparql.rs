@@ -1,0 +1,64 @@
+//! GUC parameters for the SPARQL query engine (query planning, plan cache,
+//! property paths, WCOJ, TopN push-down, and DoS limits).
+
+/// GUC: maximum number of cached SPARQL→SQL plan translations per backend.
+pub static PLAN_CACHE_SIZE: pgrx::GucSetting<i32> = pgrx::GucSetting::<i32>::new(256);
+
+/// GUC: maximum recursion depth for SPARQL property path queries (`+`, `*`).
+pub static MAX_PATH_DEPTH: pgrx::GucSetting<i32> = pgrx::GucSetting::<i32>::new(100);
+
+/// GUC: DESCRIBE algorithm — 'cbd', 'scbd', or 'simple'.
+pub static DESCRIBE_STRATEGY: pgrx::GucSetting<Option<std::ffi::CString>> =
+    pgrx::GucSetting::<Option<std::ffi::CString>>::new(None);
+
+// ─── v0.13.0 SPARQL GUCs ─────────────────────────────────────────────────────
+
+/// GUC: enable BGP join reordering based on pg_stats selectivity estimates.
+pub static BGP_REORDER: pgrx::GucSetting<bool> = pgrx::GucSetting::<bool>::new(true);
+
+/// GUC: minimum number of VP table joins before trying parallel query workers.
+pub static PARALLEL_QUERY_MIN_JOINS: pgrx::GucSetting<i32> = pgrx::GucSetting::<i32>::new(3);
+
+// ─── v0.21.0 SPARQL GUCs ─────────────────────────────────────────────────────
+
+/// GUC: when `on` (default), raise ERRCODE_FEATURE_NOT_SUPPORTED for unsupported
+/// SPARQL built-in functions.
+pub static SPARQL_STRICT: pgrx::GucSetting<bool> = pgrx::GucSetting::<bool>::new(true);
+
+// ─── v0.24.0 SPARQL GUCs ─────────────────────────────────────────────────────
+
+/// GUC: maximum recursion depth for SPARQL property path queries (`+`, `*`).
+pub static PROPERTY_PATH_MAX_DEPTH: pgrx::GucSetting<i32> = pgrx::GucSetting::<i32>::new(64);
+
+// ─── v0.36.0 SPARQL / WCOJ GUCs ──────────────────────────────────────────────
+
+/// GUC: master switch for Worst-Case Optimal Join (WCOJ) optimisation (v0.36.0).
+pub static WCOJ_ENABLED: pgrx::GucSetting<bool> = pgrx::GucSetting::<bool>::new(true);
+
+/// GUC: minimum number of VP table joins before WCOJ analysis is applied (v0.36.0).
+pub static WCOJ_MIN_TABLES: pgrx::GucSetting<i32> = pgrx::GucSetting::<i32>::new(3);
+
+// ─── v0.40.0 SPARQL GUCs ─────────────────────────────────────────────────────
+
+/// GUC: maximum rows returned by a SPARQL SELECT or CONSTRUCT query (v0.40.0).
+pub static SPARQL_MAX_ROWS: pgrx::GucSetting<i32> = pgrx::GucSetting::<i32>::new(0);
+
+/// GUC: action when `sparql_max_rows` is exceeded (v0.40.0).
+pub static SPARQL_OVERFLOW_ACTION: pgrx::GucSetting<Option<std::ffi::CString>> =
+    pgrx::GucSetting::<Option<std::ffi::CString>>::new(None);
+
+// ─── v0.46.0 SPARQL GUCs ─────────────────────────────────────────────────────
+
+/// GUC: enable TopN push-down for `ORDER BY … LIMIT N` queries (v0.46.0).
+pub static TOPN_PUSHDOWN: pgrx::GucSetting<bool> = pgrx::GucSetting::<bool>::new(true);
+
+/// GUC: SID range reserved per parallel Datalog worker per batch (v0.46.0).
+pub static DATALOG_SEQUENCE_BATCH: pgrx::GucSetting<i32> = pgrx::GucSetting::<i32>::new(10_000);
+
+// ─── v0.51.0 SPARQL DoS limit GUCs ───────────────────────────────────────────
+
+/// GUC: maximum allowed algebra tree depth for SPARQL queries (v0.51.0).
+pub static SPARQL_MAX_ALGEBRA_DEPTH: pgrx::GucSetting<i32> = pgrx::GucSetting::<i32>::new(256);
+
+/// GUC: maximum number of triple patterns allowed in a single SPARQL query (v0.51.0).
+pub static SPARQL_MAX_TRIPLE_PATTERNS: pgrx::GucSetting<i32> = pgrx::GucSetting::<i32>::new(4096);
