@@ -4213,9 +4213,9 @@ All `trickle_integration` pg_regress tests pass when pg-trickle is installed. `t
 
 ## v0.54.0 — High Availability & Logical Replication
 
-**Theme**: Production HA via PG18 logical-decoding RDF replication, Kubernetes Helm chart, CloudNativePG image volume support, and vector-index performance baselines.
+**Theme**: Production HA via PG18 logical-decoding RDF replication, batteries-included Docker image, Kubernetes Helm chart, CloudNativePG image volume support, and vector-index performance baselines.
 
-> **In plain language:** For organisations running pg_ripple in production, this release provides the infrastructure they need for high availability: a second PostgreSQL instance can subscribe to the RDF graph's change stream and stay in sync with the primary in near-real-time. A Kubernetes Helm chart makes deployment in containerised environments first-class. A CloudNativePG image volume lets operators running the CloudNativePG operator install pg_ripple into a managed cluster with a single manifest change — no custom PostgreSQL image build required. Vector-index benchmarks give operators the data they need to choose between HNSW and IVFFlat for their specific workload.
+> **In plain language:** For organisations running pg_ripple in production, this release provides the infrastructure they need for high availability: a second PostgreSQL instance can subscribe to the RDF graph's change stream and stay in sync with the primary in near-real-time. A Docker image bundles pg_ripple with pg_trickle, PostGIS, and pgvector pre-installed and ready to use. A Kubernetes Helm chart makes deployment in containerised environments first-class. A CloudNativePG image volume lets operators running the CloudNativePG operator install pg_ripple into a managed cluster with a single manifest change. Vector-index benchmarks give operators data to choose between HNSW and IVFFlat.
 >
 > **Effort estimate: 5–7 person-weeks**
 
@@ -4228,14 +4228,21 @@ All `trickle_integration` pg_regress tests pass when pg-trickle is installed. `t
 - [ ] **Replication status SRF**: `pg_ripple.replication_stats() RETURNS TABLE(slot_name TEXT, lag_bytes BIGINT, last_applied_lsn PG_LSN, last_applied_at TIMESTAMPTZ)`
 - [ ] **`docs/src/operations/replication.md`**: architecture overview, setup walkthrough (primary + replica), lag monitoring, failover procedure
 
+#### Docker Image (Batteries-Included)
+
+- [ ] **Multi-extension Docker image**: build or extend existing `docker/Dockerfile` to compile and bundle pg_trickle, PostGIS, and pgvector alongside pg_ripple; verify all four extensions load correctly at `CREATE EXTENSION` time
+- [ ] **Publish to GHCR**: `ghcr.io/grove/pg_ripple:0.54.0` with all extensions pre-installed; tag at every release via GitHub Actions
+- [ ] **`docs/src/operations/docker.md`**: overview of batteries-included image, quickstart (docker run / docker-compose), list of pre-installed extensions and their versions, environment variable configuration
+- [ ] **Docker Compose example**: `docker-compose.yml` updated to reference batteries-included image; includes example SPARQL queries that exercise SPARQL views (pg_trickle), GeoSPARQL (PostGIS), and vector search (pgvector)
+
 #### Kubernetes & Helm Chart (F-2 Helm portion)
 
-- [ ] **Helm chart**: `charts/pg_ripple/` with values for `replicaCount`, `persistence` (PVC), `http.service` (LoadBalancer/ClusterIP), `federationEndpoints`, `shacl.shapesConfigMap`, `llm.apiKeySecret`; liveness and readiness probes via `GET /health`; published to GitHub Pages Helm repo
-- [ ] **`docs/src/operations/kubernetes.md`**: deployment guide for Helm, values reference, monitoring integration with Prometheus; design stub for future Go operator using `controller-runtime`
+- [ ] **Helm chart**: `charts/pg_ripple/` with values for `replicaCount`, `persistence` (PVC), `http.service` (LoadBalancer/ClusterIP), `federationEndpoints`, `shacl.shapesConfigMap`, `llm.apiKeySecret`; liveness and readiness probes via `GET /health`; uses batteries-included image by default; published to GitHub Pages Helm repo
+- [ ] **`docs/src/operations/kubernetes.md`**: deployment guide for Helm, values reference, monitoring integration with Prometheus; design stub for future Go operator using `controller-runtime`; note that pg_trickle, PostGIS, and pgvector are pre-installed
 
 #### CloudNativePG Image Volume Support
 
-- [ ] **Extension image**: publish `ghcr.io/grove/pg_ripple:<version>` built from `docker/Dockerfile.cnpg` — a minimal image containing the compiled `.so` and SQL files at `/var/lib/postgresql/extension-files/`; tagged alongside each release via GitHub Actions
+- [ ] **Extension image**: publish `ghcr.io/grove/pg_ripple:<version>-cnpg` built from `docker/Dockerfile.cnpg` — a minimal image containing compiled `.so` and SQL files for pg_ripple, pg_trickle, PostGIS, and pgvector at `/var/lib/postgresql/extension-files/`; tagged at every release via GitHub Actions
 - [ ] **CloudNativePG `Cluster` manifest example**: `examples/cloudnativepg_cluster.yaml` referencing `spec.postgresql.extensionImages` (CNP ≥ 1.24) so users can install pg_ripple into a managed cluster with no custom PostgreSQL image build
 - [ ] **`docs/src/operations/cloudnativepg.md`**: step-by-step guide — prerequisites (CNP ≥ 1.24, image volume feature gate), annotated manifest walkthrough, post-deploy `CREATE EXTENSION pg_ripple` verification, upgrade procedure via image tag bump
 - [ ] **CI smoke test**: `tests/cloudnativepg_image_smoke.sh` — builds the extension image locally, verifies the expected files are present at the correct paths, and confirms the image can be referenced in a `kind`-based CNP cluster
@@ -4255,7 +4262,7 @@ All `trickle_integration` pg_regress tests pass when pg-trickle is installed. `t
 
 ### Exit Criteria
 
-A primary + replica test using the logical-decoding plugin achieves < 1 s replication lag on a 10 k-triple/s insert workload. Helm chart deploys successfully on `minikube`. CloudNativePG extension image smoke test passes in CI (image files at correct paths; CNP `kind` cluster loads the extension). Vector-index benchmark results published and linked from the GUC reference.
+A primary + replica test using the logical-decoding plugin achieves < 1 s replication lag on a 10 k-triple/s insert workload. Batteries-included Docker image successfully builds and all four extensions (pg_ripple, pg_trickle, PostGIS, pgvector) load without conflicts. Helm chart deploys successfully on `minikube`. CloudNativePG extension image smoke test passes in CI (image files at correct paths; CNP `kind` cluster loads the extension). Vector-index benchmark results published and linked from the GUC reference.
 
 ---
 
