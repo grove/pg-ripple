@@ -1,0 +1,38 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "pg-ripple.fullname" . }}
+  labels:
+    {{- include "pg-ripple.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.service.type }}
+  ports:
+    - port: {{ .Values.service.port }}
+      targetPort: postgres
+      protocol: TCP
+      name: postgres
+    {{- if .Values.http.enabled }}
+    - port: {{ .Values.http.service.port }}
+      targetPort: http
+      protocol: TCP
+      name: http
+    {{- end }}
+  selector:
+    {{- include "pg-ripple.selectorLabels" . | nindent 4 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "pg-ripple.fullname" . }}-headless
+  labels:
+    {{- include "pg-ripple.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  clusterIP: None
+  ports:
+    - port: {{ .Values.service.port }}
+      targetPort: postgres
+      protocol: TCP
+      name: postgres
+  selector:
+    {{- include "pg-ripple.selectorLabels" . | nindent 4 }}

@@ -96,3 +96,13 @@ pub static CDC_BRIDGE_OUTBOX_TABLE: pgrx::GucSetting<Option<std::ffi::CString>> 
 
 /// GUC: master switch for pg-trickle integration features (v0.52.0).
 pub static TRICKLE_INTEGRATION: pgrx::GucSetting<bool> = pgrx::GucSetting::<bool>::new(true);
+
+// ─── v0.54.0 logical replication GUCs ────────────────────────────────────────
+
+/// GUC: enable the RDF logical replication consumer worker (v0.54.0).
+pub static REPLICATION_ENABLED: pgrx::GucSetting<bool> = pgrx::GucSetting::<bool>::new(false);
+
+/// GUC: conflict resolution strategy for the logical apply worker (v0.54.0).
+/// Values: `last_writer_wins` (default).
+pub static REPLICATION_CONFLICT_STRATEGY: pgrx::GucSetting<Option<std::ffi::CString>> =
+    pgrx::GucSetting::<Option<std::ffi::CString>>::new(None);

@@ -38,6 +38,7 @@ mod graphrag_admin;
 mod gucs;
 mod llm;
 mod maintenance_api;
+mod replication;
 mod schema;
 mod shacl;
 mod shmem;
@@ -1567,6 +1568,29 @@ pub extern "C-unwind" fn _PG_init() {
         GucFlags::default(),
     );
 
+    // ── v0.54.0 GUCs — High Availability & Logical Replication ───────────────
+
+    pgrx::GucRegistry::define_bool_guc(
+        c"pg_ripple.replication_enabled",
+        c"Enable the RDF logical replication consumer (logical_apply_worker). \
+          When on, a background worker subscribes to the pg_ripple_pub publication \
+          and applies N-Triples batches to the local store (default: off). (v0.54.0)",
+        c"",
+        &REPLICATION_ENABLED,
+        GucContext::Sighup,
+        GucFlags::default(),
+    );
+
+    pgrx::GucRegistry::define_string_guc(
+        c"pg_ripple.replication_conflict_strategy",
+        c"Conflict resolution strategy for the logical apply worker: \
+          'last_writer_wins' (default) — keeps the row with the highest SID. (v0.54.0)",
+        c"",
+        &REPLICATION_CONFLICT_STRATEGY,
+        GucContext::Sighup,
+        GucFlags::default(),
+    );
+
     // PGC_POSTMASTER GUCs can only be registered during shared_preload_libraries
     // loading.  `process_shared_preload_libraries_in_progress` is the correct
     // flag — `IsPostmasterEnvironment` is true in every server process and
@@ -1615,6 +1639,10 @@ pub extern "C-unwind" fn _PG_init() {
     if unsafe { pg_sys::process_shared_preload_libraries_in_progress } {
         shmem::init();
         worker::register_merge_workers();
+        // Register the RDF logical apply worker when replication is enabled (v0.54.0).
+        if crate::REPLICATION_ENABLED.get() {
+            replication::register_logical_apply_worker();
+        }
         // Register ExecutorEnd hook to poke the merge worker latch when the
         // accumulated unmerged delta row count crosses the trigger threshold.
         register_executor_end_hook();

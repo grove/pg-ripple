@@ -1,13 +1,26 @@
-# Docker Compose example for pg_ripple with SPARQL Protocol HTTP endpoint.
+# Docker Compose example for pg_ripple (batteries-included) with SPARQL Protocol HTTP endpoint.
+#
+# The batteries-included image pre-installs pg_ripple, PostGIS, and pgvector.
 #
 # Usage:
 #   docker compose up -d
 #   curl http://localhost:7878/health
+#   # Load triples
+#   psql -h localhost -U postgres -c "CREATE EXTENSION pg_ripple CASCADE;"
+#   psql -h localhost -U postgres -c "SELECT pg_ripple.load_ntriples('<https://example.org/s> <https://example.org/p> <https://example.org/o> .');"
+#   # SPARQL query
 #   curl -G http://localhost:7878/sparql --data-urlencode "query=SELECT * WHERE { ?s ?p ?o } LIMIT 10"
+#
+# Optional extensions (available in batteries-included image):
+#   psql -h localhost -U postgres -c "CREATE EXTENSION postgis;"   -- GeoSPARQL
+#   psql -h localhost -U postgres -c "CREATE EXTENSION vector;"    -- vector search
 
 services:
   postgres:
-    build: .
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.batteries
+    image: ghcr.io/grove/pg_ripple:0.54.0
     ports:
       - "5432:5432"
     environment:
@@ -21,7 +34,10 @@ services:
       retries: 5
 
   sparql:
-    build: .
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.batteries
+    image: ghcr.io/grove/pg_ripple:0.54.0
     entrypoint: ["/usr/local/bin/pg_ripple_http"]
     ports:
       - "7878:7878"
@@ -36,3 +52,4 @@ services:
 
 volumes:
   pgdata:
+
