@@ -17,7 +17,7 @@
 /// Execute semi-naive inference and return `(total_triples_derived, iterations)`.
 ///
 /// Delegates to [`super::run_inference_seminaive`].
-#[allow(dead_code)]
+#[allow(dead_code)] // module API — used by external tools and the future inference loop refactor
 pub fn run(rule_set_name: &str) -> (i64, i32) {
     super::run_inference_seminaive(rule_set_name)
 }
@@ -25,7 +25,7 @@ pub fn run(rule_set_name: &str) -> (i64, i32) {
 /// Execute semi-naive inference and return full statistics.
 ///
 /// Delegates to [`super::run_inference_seminaive_full`].
-#[allow(dead_code)]
+#[allow(dead_code)] // module API — used by external tools and the future inference loop refactor
 pub fn run_full(rule_set_name: &str) -> (i64, i32, Vec<String>, usize, usize) {
     super::run_inference_seminaive_full(rule_set_name)
 }

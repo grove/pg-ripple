@@ -403,16 +403,28 @@ pub fn merge_predicate(pred_id: i64) -> i64 {
     Spi::run_with_args(&format!("TRUNCATE {delta}"), &[])
         .unwrap_or_else(|e| pgrx::error!("merge: truncate delta error: {e}"));
 
-    // Delete only tombstones with i <= max_sid_at_snapshot. Newer tombstones
-    // (from deletes that committed during this merge cycle) survive to the next
-    // merge cycle, preventing the "tombstone resurrection" race condition where
-    // a delete could be missed if it happened after main_new was created but
-    // before this merge cycle started.
-    Spi::run_with_args(
-        &format!("DELETE FROM {tombs} WHERE i <= $1"),
-        &[DatumWithOid::from(max_sid_at_snapshot)],
-    )
-    .unwrap_or_else(|e| pgrx::error!("merge: delete old tombstones error: {e}"));
+    // v0.55.0 F-2: when TOMBSTONE_RETENTION_SECONDS=0, TRUNCATE the entire tombstones
+    // table (all entries were absorbed into main_new) for cheaper reclaim.
+    // Otherwise, delete only tombstones with i <= max_sid_at_snapshot.  Newer
+    // tombstones (from deletes that committed during this merge cycle) survive to
+    // the next merge cycle, preventing the "tombstone resurrection" race where a
+    // delete could be missed if it arrived after main_new was created.
+    if crate::TOMBSTONE_RETENTION_SECONDS.get() == 0 {
+        Spi::run_with_args(&format!("TRUNCATE {tombs}"), &[])
+            .unwrap_or_else(|e| pgrx::error!("merge: truncate tombstones error: {e}"));
+        // Record the GC timestamp in the predicates catalog (v0.55.0 migration col).
+        Spi::run_with_args(
+            "UPDATE _pg_ripple.predicates SET tombstones_cleared_at = now() WHERE id = $1",
+            &[DatumWithOid::from(pred_id)],
+        )
+        .unwrap_or_else(|e| pgrx::warning!("merge: tombstones_cleared_at update error: {e}"));
+    } else {
+        Spi::run_with_args(
+            &format!("DELETE FROM {tombs} WHERE i <= $1"),
+            &[DatumWithOid::from(max_sid_at_snapshot)],
+        )
+        .unwrap_or_else(|e| pgrx::error!("merge: delete old tombstones error: {e}"));
+    }
 
     // Step 5: ANALYZE so planner has fresh stats.
     // AUTO_ANALYZE GUC (v0.24.0): skip ANALYZE if the user has disabled it.

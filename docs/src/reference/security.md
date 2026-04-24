@@ -232,3 +232,32 @@ The `_pg_ripple.federation_cache.query_hash` column was upgraded from `BIGINT` (
 
 The migration script truncates the cache table before changing the column type — cache rows are ephemeral and can be safely discarded.
 
+
+### LLM API key security (H-2, v0.55.0)
+
+The `pg_ripple.llm_api_key_env` GUC accepts the **name** of an environment variable that holds the LLM API key — it does **not** accept the key value itself.
+
+**Correct usage:**
+```sql
+-- Set the env var name; the key lives in the environment
+SET pg_ripple.llm_api_key_env = 'MY_LLM_API_KEY';
+-- Then set the env var in your systemd unit or docker-compose:
+-- MY_LLM_API_KEY=sk-...
+```
+
+**Wrong (and warned):**
+```sql
+-- This emits a WARNING because the value looks like a raw API key
+SET pg_ripple.llm_api_key_env = 'sk-abc123...';
+-- WARNING: pg_ripple.llm_api_key_env looks like a raw API key, not an
+-- environment variable name. Set it to the NAME of an env var ...
+```
+
+Storing API keys directly in GUCs is insecure because:
+- They appear in `pg_settings` (visible to any user with `SHOW` privilege)
+- They appear in PostgreSQL error logs and `pg_stat_activity`
+- They may be included in backups and `pg_dump` output
+
+Use environment variables, a secrets manager (HashiCorp Vault, AWS Secrets Manager), or
+PostgreSQL's `ALTER SYSTEM SET ... IN VAULT` integration to keep API keys out of the database
+server configuration.

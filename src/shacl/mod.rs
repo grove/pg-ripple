@@ -1902,7 +1902,13 @@ pub fn run_validate(graph: Option<&str>) -> pgrx::JsonB {
 
     let report = serde_json::json!({
         "conforms": conforms,
-        "violations": all_violations
+        "violations": all_violations,
+        // v0.55.0 D-2: capture the WAL LSN at validation start so consumers
+        // can correlate this report with a specific database state.
+        "validation_snapshot_lsn": Spi::get_one_with_args::<String>(
+            "SELECT pg_current_wal_lsn()::text",
+            &[]
+        ).unwrap_or(None).unwrap_or_else(|| "0/0".to_owned())
     });
 
     pgrx::JsonB(report)

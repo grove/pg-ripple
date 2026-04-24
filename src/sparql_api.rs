@@ -334,6 +334,29 @@ mod pg_ripple {
         TableIterator::new(std::iter::once((hits, misses, 0_i64, hit_rate)))
     }
 
+    /// Return cumulative federation call counters (v0.55.0 G-4).
+    ///
+    /// Columns: `calls` (total SERVICE calls attempted), `errors` (calls that
+    /// returned an error), `blocked` (calls blocked by endpoint policy PT606).
+    /// Counters are in-memory (reset on postmaster restart).
+    #[pg_extern]
+    fn federation_call_stats()
+    -> TableIterator<'static, (name!(calls, i64), name!(errors, i64), name!(blocked, i64))> {
+        use std::sync::atomic::Ordering;
+        let (calls, errors, blocked) = if crate::shmem::SHMEM_READY.load(Ordering::Relaxed) {
+            (
+                crate::shmem::FED_CALL_COUNT.get().load(Ordering::Relaxed) as i64,
+                crate::shmem::FED_ERROR_COUNT.get().load(Ordering::Relaxed) as i64,
+                crate::shmem::FED_BLOCKED_COUNT
+                    .get()
+                    .load(Ordering::Relaxed) as i64,
+            )
+        } else {
+            (0_i64, 0_i64, 0_i64)
+        };
+        TableIterator::new(std::iter::once((calls, errors, blocked)))
+    }
+
     /// Flush the shared-memory encode cache, evicting all entries.
     ///
     /// Use this to clear stale hash→id mappings that may have been left by

@@ -269,5 +269,66 @@ pg_ripple extends the SPARQL standard with additional capabilities:
 | Custom aggregate extensions | ❌ Not supported | Standard aggregates fully supported |
 | Variable-in-quoted-triple `<< ?s ?p ?o >>` | ⚠️ Partial | Returns 0 rows with WARNING; ground patterns work |
 | `LOAD <url>` from arbitrary HTTP | ⚠️ Depends | Requires `pg_ripple_http` or server-side file |
-| `DESCRIBE` strategy customization | ❌ Not supported | Uses symmetric CBD only |
+| `DESCRIBE` strategy customization | ✅ Supported | Four strategies via GUC (v0.55.0) |
 | Multiple result formats for `SELECT` | ⚠️ Partial | JSON primary; XML/CSV/TSV via `pg_ripple_http` only |
+
+---
+
+## DESCRIBE Strategy Reference (v0.55.0)
+
+pg_ripple supports four DESCRIBE algorithms, selectable via the
+`pg_ripple.describe_strategy` GUC (default: `cbd`):
+
+### `cbd` — Concise Bounded Description (default)
+
+Returns all triples where the described resource appears as subject,
+plus all triples reachable by following blank-node objects recursively.
+This is the minimal W3C-defined DESCRIBE semantics.
+
+```sql
+SET pg_ripple.describe_strategy = 'cbd';
+SELECT * FROM pg_ripple.sparql('DESCRIBE <https://example.org/Alice>');
+```
+
+### `scbd` — Symmetric Concise Bounded Description
+
+Extends CBD by also including all triples where the described resource
+appears as **object**. This captures both outgoing and incoming edges.
+Suitable when you need the full neighbourhood of a resource.
+
+```sql
+SET pg_ripple.describe_strategy = 'scbd';
+SELECT * FROM pg_ripple.sparql('DESCRIBE <https://example.org/Alice>');
+```
+
+### `simple` — Subject-Only (forward-star)
+
+Returns only triples where the described resource is the **subject** —
+no blank-node following. Fastest strategy; use when you only need
+direct properties of a resource and do not need blank-node closures.
+
+```sql
+SET pg_ripple.describe_strategy = 'simple';
+SELECT * FROM pg_ripple.sparql('DESCRIBE <https://example.org/Alice>');
+```
+
+### Choosing a Strategy
+
+| Strategy | Outgoing edges | Incoming edges | Blank-node closure | Speed |
+|---|---|---|---|---|
+| `cbd` | ✅ | ❌ | ✅ | Medium |
+| `scbd` | ✅ | ✅ | ✅ | Slower |
+| `simple` | ✅ | ❌ | ❌ | Fastest |
+
+The GUC can be set at the session or transaction level:
+
+```sql
+-- Session-level
+SET pg_ripple.describe_strategy = 'scbd';
+
+-- Transaction-level
+BEGIN;
+SET LOCAL pg_ripple.describe_strategy = 'simple';
+SELECT * FROM pg_ripple.sparql('DESCRIBE <https://example.org/Bob>');
+COMMIT;
+```

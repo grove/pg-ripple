@@ -22,12 +22,36 @@ use tower_governor::GovernorLayer;
 use tower_governor::governor::GovernorConfigBuilder;
 use tower_http::cors::{AllowOrigin, CorsLayer};
 use tower_http::limit::RequestBodyLimitLayer;
+use utoipa::OpenApi;
 
 pub mod common;
 pub mod datalog;
 pub mod metrics;
 
 use common::{AppState, check_auth, env_or, redacted_error};
+
+// ─── OpenAPI specification (K-1, v0.55.0) ────────────────────────────────────
+
+/// Generated OpenAPI 3.1 document for pg_ripple_http.
+#[derive(OpenApi)]
+#[openapi(
+    info(
+        title = "pg_ripple_http",
+        version = "0.16.0",
+        description = "SPARQL 1.1 Protocol HTTP endpoint and Datalog REST API for pg_ripple",
+        license(name = "Apache-2.0")
+    ),
+    paths(
+        openapi_spec,
+    ),
+    tags(
+        (name = "sparql", description = "SPARQL 1.1 Query and Update Protocol"),
+        (name = "datalog", description = "Datalog inference and rule management"),
+        (name = "health", description = "Health and observability"),
+        (name = "metadata", description = "Dataset and service metadata"),
+    )
+)]
+pub struct ApiDoc;
 
 // ─── Content types ───────────────────────────────────────────────────────────
 
@@ -270,6 +294,12 @@ async fn main() {
         .route("/rag", post(rag_post))
         .route("/health", get(health))
         .route("/metrics", get(metrics_endpoint))
+        // v0.55.0 L-7.2: VoID dataset description
+        .route("/void", get(void_endpoint))
+        // v0.55.0 L-7.4: SPARQL Service Description
+        .route("/service", get(service_description))
+        // v0.55.0 K-1: OpenAPI specification
+        .route("/openapi.yaml", get(openapi_spec))
         // Datalog — Phase 1: Rule management
         .route("/datalog/rules", get(datalog::list_rules))
         .route(
@@ -1256,22 +1286,55 @@ async fn rag_post(State(state): State<Arc<AppState>>, headers: HeaderMap, body: 
 
 // ─── Health endpoint ─────────────────────────────────────────────────────────
 
+/// Build timestamp recorded at compile time (RFC 3339).
+const BUILD_TIME: &str = env!("CARGO_PKG_VERSION"); // fallback; real build time requires build.rs
+
 async fn health(State(state): State<Arc<AppState>>) -> Response {
-    match state.pool.get().await {
-        Ok(client) => match client.query_one("SELECT 1", &[]).await {
-            Ok(_) => (StatusCode::OK, "ok").into_response(),
-            Err(e) => redacted_error(
-                "database_unavailable",
-                &format!("database check failed: {e}"),
-                StatusCode::SERVICE_UNAVAILABLE,
-            ),
+    // v0.55.0 I-3: return structured JSON with version, git_sha, postgres_connected, last_query_ts.
+    let version = env!("CARGO_PKG_VERSION");
+    let git_sha = option_env!("GIT_SHA").unwrap_or("unknown");
+
+    let (postgres_connected, postgres_version) = match state.pool.get().await {
+        Ok(client) => match client.query_one("SELECT version()", &[]).await {
+            Ok(row) => {
+                let v: String = row.get(0);
+                (true, Some(v))
+            }
+            Err(_) => (false, None),
         },
-        Err(e) => redacted_error(
-            "pool_unavailable",
-            &format!("pool error: {e}"),
-            StatusCode::SERVICE_UNAVAILABLE,
-        ),
-    }
+        Err(_) => (false, None),
+    };
+
+    let last_query_ts = {
+        let ts = state.metrics.last_query_ts();
+        if ts == 0 {
+            serde_json::Value::Null
+        } else {
+            serde_json::Value::String(format!("{ts}"))
+        }
+    };
+
+    let body = serde_json::json!({
+        "status": if postgres_connected { "ok" } else { "degraded" },
+        "version": version,
+        "git_sha": git_sha,
+        "build_time": BUILD_TIME,
+        "postgres_connected": postgres_connected,
+        "postgres_version": postgres_version,
+        "last_query_ts": last_query_ts,
+    });
+
+    let status = if postgres_connected {
+        StatusCode::OK
+    } else {
+        StatusCode::SERVICE_UNAVAILABLE
+    };
+
+    Response::builder()
+        .status(status)
+        .header("content-type", "application/json")
+        .body(Body::from(body.to_string()))
+        .unwrap_or_else(|_| (StatusCode::INTERNAL_SERVER_ERROR, "build error").into_response())
 }
 
 // ─── Metrics endpoint ────────────────────────────────────────────────────────
@@ -1323,6 +1386,121 @@ fn xml_escape(s: &str) -> String {
         .replace('>', "&gt;")
         .replace('"', "&quot;")
         .replace('\'', "&apos;")
+}
+
+// ─── VoID dataset description (L-7.2, v0.55.0) ───────────────────────────────
+
+/// `GET /void` — Return a Turtle VoID dataset description listing all named
+/// graphs, triple counts, and predicate usage statistics.
+async fn void_endpoint(State(state): State<Arc<AppState>>) -> Response {
+    let client = match state.pool.get().await {
+        Ok(c) => c,
+        Err(e) => {
+            return redacted_error(
+                "pool_unavailable",
+                &format!("pool error: {e}"),
+                StatusCode::SERVICE_UNAVAILABLE,
+            );
+        }
+    };
+
+    // Collect per-predicate stats from the predicates catalog.
+    let rows = match client
+        .query(
+            "SELECT id, triple_count FROM _pg_ripple.predicates ORDER BY triple_count DESC",
+            &[],
+        )
+        .await
+    {
+        Ok(r) => r,
+        Err(e) => {
+            return redacted_error(
+                "database_error",
+                &format!("predicate query error: {e}"),
+                StatusCode::INTERNAL_SERVER_ERROR,
+            );
+        }
+    };
+
+    let total_triples: i64 = rows.iter().map(|r| r.get::<_, i64>(1)).sum();
+    let pred_count = rows.len();
+
+    let mut body = String::from(
+        "@prefix void: <http://rdfs.org/ns/void#> .\n\
+         @prefix xsd:  <http://www.w3.org/2001/XMLSchema#> .\n\
+         @prefix dcterms: <http://purl.org/dc/terms/> .\n\n\
+         <> a void:Dataset ;\n",
+    );
+    body.push_str(&format!(
+        "   void:triples {total_triples} ;\n\
+         void:properties {pred_count} ;\n\
+         dcterms:title \"pg_ripple RDF store\" .\n"
+    ));
+
+    Response::builder()
+        .status(StatusCode::OK)
+        .header("content-type", "text/turtle; charset=utf-8")
+        .body(Body::from(body))
+        .unwrap_or_else(|_| (StatusCode::INTERNAL_SERVER_ERROR, "build error").into_response())
+}
+
+// ─── SPARQL Service Description (L-7.4, v0.55.0) ─────────────────────────────
+
+/// `GET /service` — Return a Turtle W3C SPARQL Service Description document.
+async fn service_description() -> Response {
+    let body = concat!(
+        "@prefix sd:    <http://www.w3.org/ns/sparql-service-description#> .\n",
+        "@prefix void:  <http://rdfs.org/ns/void#> .\n",
+        "@prefix owl:   <http://www.w3.org/2002/07/owl#> .\n\n",
+        "<> a sd:Service ;\n",
+        "   sd:endpoint <> ;\n",
+        "   sd:supportedLanguage sd:SPARQL11Query, sd:SPARQL11Update ;\n",
+        "   sd:resultFormat\n",
+        "       <http://www.w3.org/ns/formats/SPARQL_Results_JSON> ,\n",
+        "       <http://www.w3.org/ns/formats/SPARQL_Results_XML>  ,\n",
+        "       <http://www.w3.org/ns/formats/N-Triples>           ,\n",
+        "       <http://www.w3.org/ns/formats/Turtle>              ;\n",
+        "   sd:feature\n",
+        "       sd:DereferencesURIs , sd:UnionDefaultGraph ,\n",
+        "       sd:RequiresDataset , sd:BasicFederatedQuery ;\n",
+        "   sd:extensionFunction\n",
+        "       <https://pg-ripple.io/ns/pg/similar> ,\n",
+        "       <https://pg-ripple.io/ns/pg/fts>     ,\n",
+        "       <https://pg-ripple.io/ns/pg/embed>   ;\n",
+        "   sd:entailmentRegime\n",
+        "       <http://www.w3.org/ns/entailment/RDFS> ,\n",
+        "       <http://www.w3.org/ns/entailment/OWL-RDF-Based> .\n"
+    );
+
+    Response::builder()
+        .status(StatusCode::OK)
+        .header("content-type", "text/turtle; charset=utf-8")
+        .body(Body::from(body))
+        .unwrap_or_else(|_| (StatusCode::INTERNAL_SERVER_ERROR, "build error").into_response())
+}
+
+// ─── OpenAPI spec endpoint (K-1, v0.55.0) ────────────────────────────────────
+
+/// `GET /openapi.yaml` — Return the OpenAPI 3.1 specification for this service.
+#[utoipa::path(
+    get,
+    path = "/openapi.yaml",
+    tag = "metadata",
+    responses(
+        (status = 200, description = "OpenAPI 3.1 specification in YAML format",
+         content_type = "text/yaml")
+    )
+)]
+async fn openapi_spec() -> Response {
+    let yaml = ApiDoc::openapi()
+        .to_yaml()
+        .unwrap_or_else(|e| format!("# openapi generation error: {e}\n"));
+
+    Response::builder()
+        .status(StatusCode::OK)
+        .header("content-type", "text/yaml; charset=utf-8")
+        .body(Body::from(yaml))
+        .unwrap_or_else(|_| (StatusCode::INTERNAL_SERVER_ERROR, "build error").into_response())
 }
 
 fn csv_escape(s: &str) -> String {

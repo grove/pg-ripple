@@ -12,6 +12,8 @@ pub struct Metrics {
     datalog_queries: AtomicU64,
     errors: AtomicU64,
     total_duration_us: AtomicU64,
+    /// Unix timestamp (seconds) of the last query, or 0 if no query yet.
+    last_query_ts: AtomicU64,
 }
 
 impl Default for Metrics {
@@ -27,6 +29,7 @@ impl Metrics {
             datalog_queries: AtomicU64::new(0),
             errors: AtomicU64::new(0),
             total_duration_us: AtomicU64::new(0),
+            last_query_ts: AtomicU64::new(0),
         }
     }
 
@@ -34,6 +37,13 @@ impl Metrics {
         self.sparql_queries.fetch_add(1, Ordering::Relaxed);
         self.total_duration_us
             .fetch_add(duration.as_micros() as u64, Ordering::Relaxed);
+        self.last_query_ts.store(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs(),
+            Ordering::Relaxed,
+        );
     }
 
     pub fn record_datalog_query(&self, duration: Duration) {
@@ -65,5 +75,10 @@ impl Metrics {
 
     pub fn total_duration_secs(&self) -> f64 {
         self.total_duration_us.load(Ordering::Relaxed) as f64 / 1_000_000.0
+    }
+
+    /// Unix timestamp (seconds) of the last query, or 0 if no query has been made.
+    pub fn last_query_ts(&self) -> u64 {
+        self.last_query_ts.load(Ordering::Relaxed)
     }
 }

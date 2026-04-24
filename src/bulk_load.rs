@@ -316,6 +316,23 @@ fn read_file_content(path: &str) -> String {
         pgrx::error!("permission denied: \"{path}\" is outside the database cluster directory");
     }
 
+    // v0.55.0 C-2: additional per-path allowlist from COPY_RDF_ALLOWED_PATHS GUC.
+    // If the GUC is set, the path must also match one of the allowed prefixes.
+    let allowed_paths = crate::COPY_RDF_ALLOWED_PATHS
+        .get()
+        .and_then(|c| c.to_str().ok().map(|s| s.to_owned()));
+    if let Some(prefixes_str) = allowed_paths.filter(|s| !s.is_empty()) {
+        let canonical_str = canonical.to_string_lossy();
+        let allowed = prefixes_str
+            .split(',')
+            .map(|p| p.trim())
+            .filter(|p| !p.is_empty())
+            .any(|prefix| canonical_str.starts_with(prefix));
+        if !allowed {
+            pgrx::error!("PT480: path \"{path}\" is not in pg_ripple.copy_rdf_allowed_paths");
+        }
+    }
+
     // pg_read_file() requires superuser or pg_monitor role; SPI propagates
     // the caller's privileges, so a non-superuser call will fail with a
     // permissions error — no additional check needed here.

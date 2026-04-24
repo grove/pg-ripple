@@ -71,53 +71,73 @@ pub const ENCODE_CACHE_CAPACITY: usize = ENCODE_CACHE_SETS * 4;
 const SHMEM_MAGIC: u32 = 0x70677269;
 
 /// Shared layout version.  Initialised to `SHMEM_MAGIC` on first startup.
+// SAFETY: PgAtomic::new requires a unique C-string name per slot; the name
+// literal is a compile-time constant and is distinct from all other slots.
 pub static LAYOUT_VERSION: PgAtomic<AtomicU32> =
     unsafe { PgAtomic::new(c"pg_ripple_layout_version") };
 
 // ─── Merge worker coordination ────────────────────────────────────────────────
 
 /// PID of the running merge background worker (0 when not running).
+// SAFETY: unique C-string name; PgAtomic is a pgrx-managed shared-memory slot.
 pub static MERGE_WORKER_PID: PgAtomic<AtomicI32> = unsafe { PgAtomic::new(c"pg_ripple_merge_pid") };
 
 // ─── Delta row tracker (bloom-filter substitute) ──────────────────────────────
 
 /// Total number of unmerged rows across all VP delta tables.
+// SAFETY: unique C-string name; PgAtomic is a pgrx-managed shared-memory slot.
 pub static TOTAL_DELTA_ROWS: PgAtomic<AtomicI64> =
     unsafe { PgAtomic::new(c"pg_ripple_delta_rows") };
 
 // ─── Bloom filter (per-bit reference counting, v0.22.0+) ──────────────────────
 
 /// 1024-bit Bloom filter: which predicates may have rows in their delta tables.
-/// Indexed by two multiplicative hashes of the predicate ID.
-///
-/// v0.22.0+: Replaced with per-bit reference counting to prevent hash collisions
-/// from causing false-negative delta skips.  Each bit position gets an 8-bit
-/// saturating counter; a bit is only cleared when its counter reaches 0.
-pub static DELTA_BLOOM: PgLwLock<[u64; 16]> = unsafe { PgLwLock::new(c"pg_ripple_delta_bloom") };
+pub static DELTA_BLOOM: PgLwLock<[u64; 16]> =
+    // SAFETY: unique C-string name; PgLwLock is a pgrx-managed LWLock-protected slot.
+    unsafe { PgLwLock::new(c"pg_ripple_delta_bloom") };
 
 /// Per-bit reference counters for the delta bloom filter (v0.22.0+).
-/// 1024 u8 values, one for each bit position in DELTA_BLOOM.
-/// Counter saturates at 255; a bit is only cleared when the counter reaches 0.
 pub static DELTA_BLOOM_COUNTERS: PgLwLock<[u8; 1024]> =
+    // SAFETY: unique C-string name; PgLwLock is a pgrx-managed LWLock-protected slot.
     unsafe { PgLwLock::new(c"pg_ripple_delta_bloom_counters") };
 
 // ─── Shared-memory encode cache (1 shard × 1024 sets × 4 ways = 4096 capacity) ─
 
+// SAFETY: unique C-string name; PgLwLock is a pgrx-managed LWLock-protected slot.
 pub static ENCODE_CACHE_S0: PgLwLock<EncodeCacheShard> =
     unsafe { PgLwLock::new(c"pg_ripple_ec_s0") };
 
+// SAFETY: unique C-string name; PgLwLock is a pgrx-managed LWLock-protected slot.
 pub static ENCODE_CACHE_IDS: PgLwLock<EncodeCacheIds> =
     unsafe { PgLwLock::new(c"pg_ripple_ec_ids") };
 
 /// Cache statistics: hits counter.
+// SAFETY: unique C-string name; PgAtomic is a pgrx-managed shared-memory slot.
 pub static CACHE_HITS: PgAtomic<AtomicU64> = unsafe { PgAtomic::new(c"pg_ripple_cache_hits") };
 
 /// Cache statistics: misses counter.
+// SAFETY: unique C-string name; PgAtomic is a pgrx-managed shared-memory slot.
 pub static CACHE_MISSES: PgAtomic<AtomicU64> = unsafe { PgAtomic::new(c"pg_ripple_cache_misses") };
 
 /// Cache statistics: evictions counter.
+// SAFETY: unique C-string name; PgAtomic is a pgrx-managed shared-memory slot.
 pub static CACHE_EVICTIONS: PgAtomic<AtomicU64> =
     unsafe { PgAtomic::new(c"pg_ripple_cache_evictions") };
+
+/// v0.55.0 G-4: Federation call stats — total calls made to remote SERVICE endpoints.
+// SAFETY: unique C-string name; PgAtomic is a pgrx-managed shared-memory slot.
+pub static FED_CALL_COUNT: PgAtomic<AtomicU64> =
+    unsafe { PgAtomic::new(c"pg_ripple_fed_call_count") };
+
+/// v0.55.0 G-4: Federation call stats — total calls that returned an error.
+// SAFETY: unique C-string name; PgAtomic is a pgrx-managed shared-memory slot.
+pub static FED_ERROR_COUNT: PgAtomic<AtomicU64> =
+    unsafe { PgAtomic::new(c"pg_ripple_fed_error_count") };
+
+/// v0.55.0 G-4: Federation call stats — total calls that were blocked by policy (PT606).
+// SAFETY: unique C-string name; PgAtomic is a pgrx-managed shared-memory slot.
+pub static FED_BLOCKED_COUNT: PgAtomic<AtomicU64> =
+    unsafe { PgAtomic::new(c"pg_ripple_fed_blocked_count") };
 
 // ─── Initialisation guard ────────────────────────────────────────────────────
 
@@ -152,6 +172,11 @@ pub fn init() {
     pg_shmem_init!(CACHE_MISSES = AtomicU64::new(0));
     pg_shmem_init!(CACHE_EVICTIONS = AtomicU64::new(0));
 
+    // v0.55.0 G-4: federation call stats counters.
+    pg_shmem_init!(FED_CALL_COUNT = AtomicU64::new(0));
+    pg_shmem_init!(FED_ERROR_COUNT = AtomicU64::new(0));
+    pg_shmem_init!(FED_BLOCKED_COUNT = AtomicU64::new(0));
+
     // Register a FINAL shmem_startup_hook that sets SHMEM_READY = true only
     // AFTER all three PgAtomic startup hooks above have fired and the inner
     // pointers are valid.  This eliminates the window where SHMEM_READY is
@@ -161,6 +186,10 @@ pub fn init() {
     //   shmem_ready_hook → delta_rows_hook → pid_hook → layout_hook → prev
     // Execution order (oldest-first via `prev` call at front of each hook):
     //   layout_hook → pid_hook → delta_rows_hook → SHMEM_READY = true
+    // SAFETY: shmem_startup_hook is a PostgreSQL function pointer replaced via
+    // the standard hook-chaining pattern; called only in postmaster context
+    // before any backend has started.  The static mut PREV_FINAL_STARTUP is
+    // accessed exclusively from `_PG_init` (single-threaded postmaster).
     unsafe {
         static mut PREV_FINAL_STARTUP: Option<unsafe extern "C-unwind" fn()> = None;
         PREV_FINAL_STARTUP = pg_sys::shmem_startup_hook;
@@ -339,6 +368,8 @@ pub fn reset_bloom_filter() {
 /// Only used for the shared-memory cache key; the dictionary table still stores
 /// the original `hash128`.
 fn db_scoped_hash(hash128: u128) -> u128 {
+    // SAFETY: MyDatabaseId is a stable per-backend global set by PostgreSQL
+    // during backend startup; reading it is safe from any backend process.
     let db_oid = u32::from(unsafe { pg_sys::MyDatabaseId }) as u128;
     // Multiplicative mixing spreads the OID bits across the hash so that
     // set selection and way selection both change when the database changes.
