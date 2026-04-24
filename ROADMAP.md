@@ -4211,6 +4211,9 @@ All `trickle_integration` pg_regress tests pass when pg-trickle is installed. `t
 
 ---
 
+<details>
+<summary><strong>v0.54.0 — High Availability &amp; Logical Replication</strong> ✅ released</summary>
+
 ## v0.54.0 — High Availability & Logical Replication
 
 **Theme**: Production HA via PG18 logical-decoding RDF replication, batteries-included Docker image, Kubernetes Helm chart, CloudNativePG image volume support, and vector-index performance baselines.
@@ -4263,6 +4266,8 @@ All `trickle_integration` pg_regress tests pass when pg-trickle is installed. `t
 ### Exit Criteria
 
 A primary + replica test using the logical-decoding plugin achieves < 1 s replication lag on a 10 k-triple/s insert workload. Batteries-included Docker image successfully builds and all four extensions (pg_ripple, pg_trickle, PostGIS, pgvector) load without conflicts. Helm chart deploys successfully on `minikube`. CloudNativePG extension image smoke test passes in CI (image files at correct paths; CNP `kind` cluster loads the extension). Vector-index benchmark results published and linked from the GUC reference.
+
+</details>
 
 ---
 
