@@ -1,0 +1,97 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "pg-ripple.fullname" . }}
+  labels:
+    {{- include "pg-ripple.labels" . | nindent 4 }}
+spec:
+  serviceName: {{ include "pg-ripple.fullname" . }}-headless
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "pg-ripple.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "pg-ripple.selectorLabels" . | nindent 8 }}
+      annotations:
+        {{- toYaml .Values.podAnnotations | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "pg-ripple.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: postgres
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: postgres
+              containerPort: 5432
+              protocol: TCP
+          env:
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "pg-ripple.fullname" . }}-secret
+                  key: postgres-password
+            - name: POSTGRES_DB
+              value: {{ .Values.postgres.database | quote }}
+            {{- if .Values.ripple.llm.apiKeySecret }}
+            - name: OPENAI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.ripple.llm.apiKeySecret }}
+                  key: {{ .Values.ripple.llm.apiKeySecretKey }}
+            {{- end }}
+          livenessProbe:
+            {{- toYaml .Values.livenessProbe | nindent 12 }}
+          readinessProbe:
+            {{- toYaml .Values.readinessProbe | nindent 12 }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+            - name: postgres-config
+              mountPath: /etc/postgresql/conf.d
+        {{- if .Values.http.enabled }}
+        - name: sparql-http
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["/usr/local/bin/pg_ripple_http"]
+          ports:
+            - name: http
+              containerPort: 7878
+              protocol: TCP
+          env:
+            - name: PG_RIPPLE_HTTP_PG_URL
+              value: "postgresql://postgres:$(POSTGRES_PASSWORD)@localhost/{{ .Values.postgres.database }}"
+            - name: PG_RIPPLE_HTTP_PORT
+              value: "7878"
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "pg-ripple.fullname" . }}-secret
+                  key: postgres-password
+            {{- range $k, $v := .Values.http.env }}
+            - name: {{ $k }}
+              value: {{ $v | quote }}
+            {{- end }}
+        {{- end }}
+      volumes:
+        - name: postgres-config
+          configMap:
+            name: {{ include "pg-ripple.fullname" . }}-config
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: [{{ .Values.persistence.accessMode | quote }}]
+        {{- if .Values.persistence.storageClass }}
+        storageClassName: {{ .Values.persistence.storageClass | quote }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.persistence.size | quote }}

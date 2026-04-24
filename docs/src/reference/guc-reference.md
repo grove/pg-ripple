@@ -500,3 +500,42 @@ Name of the environment variable from which `sparql_from_nl()` reads the Bearer 
 When `on`, the LLM prompt sent by `sparql_from_nl()` includes a summary of active SHACL shapes as additional schema context. Disable when shapes are very large or the LLM context window is limited.
 
 
+
+
+---
+
+## v0.54.0 GUCs — High Availability & Logical Replication
+
+### `pg_ripple.replication_enabled`
+
+| | |
+|---|---|
+| Type | Boolean |
+| Default | `off` |
+| Context | `sighup` |
+
+When `on`, starts the `logical_apply_worker` background worker that subscribes
+to the `pg_ripple_pub` publication and applies incoming N-Triples batches to
+the local store.  Requires `wal_level = logical` on the primary.
+
+Requires a server restart (or SIGHUP) to take effect.
+
+---
+
+### `pg_ripple.replication_conflict_strategy`
+
+| | |
+|---|---|
+| Type | String |
+| Default | `last_writer_wins` |
+| Context | `sighup` |
+
+Conflict resolution strategy used by the logical apply worker when an incoming
+triple's `(s, p, g)` already exists in the local store with a different object
+or SID.
+
+Supported values:
+
+| Value | Behaviour |
+|-------|-----------|
+| `last_writer_wins` | Keep the row with the highest Statement ID (SID). This is the default and matches eventual-consistency semantics. |

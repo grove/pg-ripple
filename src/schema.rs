@@ -883,3 +883,32 @@ pgrx::extension_sql!(
     name = "v053_schema_version_stamp",
     requires = ["v053_rag_cache"]
 );
+
+// ── v0.54.0 ───────────────────────────────────────────────────────────────────
+
+pgrx::extension_sql!(
+    r#"
+-- Replication status catalog (v0.54.0).
+-- Tracks pending N-Triples batches delivered by the logical replication slot;
+-- the logical_apply_worker reads and processes rows from this table.
+CREATE TABLE IF NOT EXISTS _pg_ripple.replication_status (
+    id           BIGSERIAL    NOT NULL PRIMARY KEY,
+    slot_name    TEXT         NOT NULL DEFAULT 'pg_ripple_sub',
+    batch_data   TEXT         NOT NULL DEFAULT '',
+    received_at  TIMESTAMPTZ  NOT NULL DEFAULT now(),
+    processed_at TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_replication_status_unprocessed
+    ON _pg_ripple.replication_status (id)
+    WHERE processed_at IS NULL;
+"#,
+    name = "v054_replication_status",
+    requires = ["v053_schema_version_stamp"]
+);
+
+pgrx::extension_sql!(
+    "INSERT INTO _pg_ripple.schema_version (version, upgraded_from, installed_at) \
+     VALUES ('0.54.0', '0.53.0', clock_timestamp());",
+    name = "v054_schema_version_stamp",
+    requires = ["v054_replication_status"]
+);

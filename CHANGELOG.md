@@ -13,6 +13,48 @@ Versions correspond to the milestones in [ROADMAP.md](ROADMAP.md).
 
 ---
 
+## [0.54.0] — 2026-04-24 — High Availability & Logical Replication
+
+**Implements the v0.54.0 roadmap: RDF logical replication, batteries-included Docker image, Kubernetes Helm chart, CloudNativePG extension image volume, and vector-index performance benchmarks.**
+
+### What's new
+
+- **RDF logical replication** (`src/replication.rs`): New `pg_ripple.logical_apply_worker` background worker (enabled via `pg_ripple.replication_enabled = on`) that subscribes to the `pg_ripple_pub` publication, receives N-Triples batches, and applies them via `load_ntriples()` in order. Conflict resolution: `last_writer_wins` per SID, configurable via `pg_ripple.replication_conflict_strategy`.
+
+- **`pg_ripple.replication_stats()`**: New SRF that exposes the current replication slot state — `slot_name`, `lag_bytes`, `last_applied_lsn`, `last_applied_at`. Returns a single NULL row when replication is disabled.
+
+- **New GUCs**: `pg_ripple.replication_enabled` (bool, default off) and `pg_ripple.replication_conflict_strategy` (text, default `last_writer_wins`).
+
+- **`_pg_ripple.replication_status` catalog table**: Created by the migration script; tracks pending N-Triples batches delivered by the logical replication slot for the apply worker to consume.
+
+- **Batteries-included Docker image** (`docker/Dockerfile.batteries`): Builds `ghcr.io/grove/pg_ripple:<version>` with pg_ripple, PostGIS 3.4.3, and pgvector 0.7.4 pre-installed. All four extensions load without conflicts. Published to GHCR on every release via GitHub Actions.
+
+- **CloudNativePG extension image** (`docker/Dockerfile.cnpg`): Publishes `ghcr.io/grove/pg_ripple:<version>-cnpg` — a minimal image containing compiled `.so` and SQL files at `/var/lib/postgresql/extension-files/` for use with CloudNativePG operator ≥ 1.24. No custom PostgreSQL image build required.
+
+- **CloudNativePG `Cluster` manifest example** (`examples/cloudnativepg_cluster.yaml`): Annotated manifest referencing `spec.postgresql.extensionImages` for zero-build CNP deployment.
+
+- **CI smoke test** (`tests/cloudnativepg_image_smoke.sh`): Builds the extension image locally and verifies the expected files are present at the correct paths.
+
+- **Kubernetes Helm chart** (`charts/pg_ripple/`): Deploys the batteries-included image as a `StatefulSet` with configurable `replicaCount`, `persistence` (PVC), `http.service` (LoadBalancer/ClusterIP), `federationEndpoints`, `shacl.shapesConfigMap`, `llm.apiKeySecret`. Liveness and readiness probes via `pg_isready`.
+
+- **Vector-index comparison benchmark** (`benchmarks/vector_index_compare.sql`): 100 k-embedding fixture measuring index build time and ANN recall/latency for `{hnsw, ivfflat}` × `{single, half, binary}`. Reference results published in `docs/src/reference/vector-index-tradeoffs.md`.
+
+- **`docker-compose.yml` updated**: Now uses the batteries-included image by default with example SPARQL queries that exercise GeoSPARQL (PostGIS) and vector search (pgvector).
+
+- **Documentation** (`docs/src/`):
+  - `operations/replication.md` — architecture overview, setup walkthrough, lag monitoring, failover procedure
+  - `operations/docker.md` — batteries-included image quickstart and configuration reference
+  - `operations/kubernetes.md` — Helm deployment guide, values reference, Prometheus integration
+  - `operations/cloudnativepg.md` — step-by-step CNP setup, manifest walkthrough, upgrade procedure
+  - `operations/high-availability.md` — HA topology decision tree and trade-offs table
+  - `reference/vector-index-tradeoffs.md` — HNSW vs IVFFlat benchmark results and recommendations
+
+### Migration
+
+Run `ALTER EXTENSION pg_ripple UPDATE TO '0.54.0';` or use the supplied migration script `sql/pg_ripple--0.53.0--0.54.0.sql`.
+
+---
+
 ## [0.53.0] — 2026-05-08 — DX, Extended Standards & Architecture
 
 **Implements the v0.53.0 roadmap: SHACL-SPARQL constraints, COPY rdf FROM, RAG pipeline hardening, CDC lifecycle events, fuzz coverage expansion, WatDiv gate promotion, and merge-throughput baselines.**

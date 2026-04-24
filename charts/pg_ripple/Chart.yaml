@@ -1,0 +1,21 @@
+apiVersion: v2
+name: pg-ripple
+description: |
+  A Helm chart for deploying pg_ripple — a high-performance RDF triple store with
+  native SPARQL query execution — on Kubernetes. Bundles pg_ripple with pg_trickle,
+  PostGIS, and pgvector in the batteries-included image.
+type: application
+version: 0.54.0
+appVersion: "0.54.0"
+keywords:
+  - postgresql
+  - rdf
+  - sparql
+  - triplestore
+  - knowledge-graph
+home: https://github.com/grove/pg-ripple
+sources:
+  - https://github.com/grove/pg-ripple
+maintainers:
+  - name: grove
+    url: https://github.com/grove

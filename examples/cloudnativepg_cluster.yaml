@@ -1,0 +1,68 @@
+# CloudNativePG Cluster manifest for pg_ripple (v0.54.0)
+#
+# Prerequisites:
+#   - CloudNativePG operator ≥ 1.24 installed in the cluster
+#   - Image volume feature gate enabled (enabled by default in CNP ≥ 1.24)
+#
+# Usage:
+#   kubectl apply -f cloudnativepg_cluster.yaml
+#   kubectl wait --for=condition=Ready cluster/pg-ripple-cluster --timeout=120s
+#   kubectl exec -it pg-ripple-cluster-1 -- psql -U postgres -c "CREATE EXTENSION pg_ripple;"
+#
+# After the extension is created, verify with:
+#   kubectl exec -it pg-ripple-cluster-1 -- psql -U postgres \
+#     -c "SELECT pg_ripple.load_ntriples('<https://example.org/s> <https://example.org/p> <https://example.org/o> .');"
+#
+# For the full guide see: docs/src/operations/cloudnativepg.md
+
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: pg-ripple-cluster
+  namespace: default
+  labels:
+    app.kubernetes.io/name: pg-ripple
+    app.kubernetes.io/version: "0.54.0"
+spec:
+  # Use the standard CNP base image — pg_ripple files are mounted from the
+  # extension image below; no custom PostgreSQL container image is needed.
+  imageName: ghcr.io/cloudnative-pg/postgresql:18
+
+  instances: 3
+
+  # ── Extension image volume (CNP ≥ 1.24) ──────────────────────────────────
+  # The pg_ripple extension image is mounted as a volume at extension-install
+  # time.  CNP copies files from /var/lib/postgresql/extension-files/lib/ to
+  # $libdir and from /var/lib/postgresql/extension-files/ext/ to
+  # $sharedir/extension/.
+  postgresql:
+    extensionImages:
+      - name: pg-ripple-ext
+        image: ghcr.io/grove/pg_ripple:0.54.0-cnpg
+    parameters:
+      allow_system_table_mods: "on"
+      shared_preload_libraries: "pg_ripple"
+
+  # ── Storage ───────────────────────────────────────────────────────────────
+  storage:
+    size: 20Gi
+
+  # ── Superuser secret ─────────────────────────────────────────────────────
+  # Create this secret before applying:
+  #   kubectl create secret generic pg-ripple-superuser \
+  #     --from-literal=username=postgres \
+  #     --from-literal=password=<your-password>
+  superuserSecret:
+    name: pg-ripple-superuser
+
+  # ── Bootstrap ────────────────────────────────────────────────────────────
+  bootstrap:
+    initdb:
+      database: postgres
+      postInitSQL:
+        - "CREATE EXTENSION IF NOT EXISTS pg_ripple;"
+        - "CREATE EXTENSION IF NOT EXISTS vector;"
+
+  # ── Monitoring ────────────────────────────────────────────────────────────
+  monitoring:
+    enablePodMonitor: false   # set to true if Prometheus Operator is installed

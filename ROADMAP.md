@@ -4223,38 +4223,38 @@ All `trickle_integration` pg_regress tests pass when pg-trickle is installed. `t
 
 #### Logical Replication (F-8)
 
-- [ ] **Logical-decoding output plugin**: custom PG18 logical-decoding plugin (`pg_ripple_logical` crate) that decodes VP delta-table `INSERT`/`DELETE` changes into N-Triples format; plug into a `CREATE PUBLICATION pg_ripple_pub FOR ALL TABLES IN SCHEMA _pg_ripple`
-- [ ] **Replica-side consumer**: `pg_ripple.logical_apply_worker` background worker that subscribes to the publication, receives N-Triples batches, and applies them via `load_ntriples()` in order; conflict resolution: `last-writer-wins` per SID, configurable via `pg_ripple.replication_conflict_strategy`
-- [ ] **Replication status SRF**: `pg_ripple.replication_stats() RETURNS TABLE(slot_name TEXT, lag_bytes BIGINT, last_applied_lsn PG_LSN, last_applied_at TIMESTAMPTZ)`
-- [ ] **`docs/src/operations/replication.md`**: architecture overview, setup walkthrough (primary + replica), lag monitoring, failover procedure
+- [x] **Logical-decoding output plugin**: custom PG18 logical-decoding plugin (`pg_ripple_logical` crate) that decodes VP delta-table `INSERT`/`DELETE` changes into N-Triples format; plug into a `CREATE PUBLICATION pg_ripple_pub FOR ALL TABLES IN SCHEMA _pg_ripple`
+- [x] **Replica-side consumer**: `pg_ripple.logical_apply_worker` background worker that subscribes to the publication, receives N-Triples batches, and applies them via `load_ntriples()` in order; conflict resolution: `last-writer-wins` per SID, configurable via `pg_ripple.replication_conflict_strategy`
+- [x] **Replication status SRF**: `pg_ripple.replication_stats() RETURNS TABLE(slot_name TEXT, lag_bytes BIGINT, last_applied_lsn PG_LSN, last_applied_at TIMESTAMPTZ)`
+- [x] **`docs/src/operations/replication.md`**: architecture overview, setup walkthrough (primary + replica), lag monitoring, failover procedure
 
 #### Docker Image (Batteries-Included)
 
-- [ ] **Multi-extension Docker image**: build or extend existing `docker/Dockerfile` to compile and bundle pg_trickle, PostGIS, and pgvector alongside pg_ripple; verify all four extensions load correctly at `CREATE EXTENSION` time
-- [ ] **Publish to GHCR**: `ghcr.io/grove/pg_ripple:0.54.0` with all extensions pre-installed; tag at every release via GitHub Actions
-- [ ] **`docs/src/operations/docker.md`**: overview of batteries-included image, quickstart (docker run / docker-compose), list of pre-installed extensions and their versions, environment variable configuration
-- [ ] **Docker Compose example**: `docker-compose.yml` updated to reference batteries-included image; includes example SPARQL queries that exercise SPARQL views (pg_trickle), GeoSPARQL (PostGIS), and vector search (pgvector)
+- [x] **Multi-extension Docker image**: build or extend existing `docker/Dockerfile` to compile and bundle pg_trickle, PostGIS, and pgvector alongside pg_ripple; verify all four extensions load correctly at `CREATE EXTENSION` time
+- [x] **Publish to GHCR**: `ghcr.io/grove/pg_ripple:0.54.0` with all extensions pre-installed; tag at every release via GitHub Actions
+- [x] **`docs/src/operations/docker.md`**: overview of batteries-included image, quickstart (docker run / docker-compose), list of pre-installed extensions and their versions, environment variable configuration
+- [x] **Docker Compose example**: `docker-compose.yml` updated to reference batteries-included image; includes example SPARQL queries that exercise SPARQL views (pg_trickle), GeoSPARQL (PostGIS), and vector search (pgvector)
 
 #### Kubernetes & Helm Chart (F-2 Helm portion)
 
-- [ ] **Helm chart**: `charts/pg_ripple/` with values for `replicaCount`, `persistence` (PVC), `http.service` (LoadBalancer/ClusterIP), `federationEndpoints`, `shacl.shapesConfigMap`, `llm.apiKeySecret`; liveness and readiness probes via `GET /health`; uses batteries-included image by default; published to GitHub Pages Helm repo
-- [ ] **`docs/src/operations/kubernetes.md`**: deployment guide for Helm, values reference, monitoring integration with Prometheus; design stub for future Go operator using `controller-runtime`; note that pg_trickle, PostGIS, and pgvector are pre-installed
+- [x] **Helm chart**: `charts/pg_ripple/` with values for `replicaCount`, `persistence` (PVC), `http.service` (LoadBalancer/ClusterIP), `federationEndpoints`, `shacl.shapesConfigMap`, `llm.apiKeySecret`; liveness and readiness probes via `GET /health`; uses batteries-included image by default; published to GitHub Pages Helm repo
+- [x] **`docs/src/operations/kubernetes.md`**: deployment guide for Helm, values reference, monitoring integration with Prometheus; design stub for future Go operator using `controller-runtime`; note that pg_trickle, PostGIS, and pgvector are pre-installed
 
 #### CloudNativePG Image Volume Support
 
-- [ ] **Extension image**: publish `ghcr.io/grove/pg_ripple:<version>-cnpg` built from `docker/Dockerfile.cnpg` — a minimal image containing compiled `.so` and SQL files for pg_ripple, pg_trickle, PostGIS, and pgvector at `/var/lib/postgresql/extension-files/`; tagged at every release via GitHub Actions
-- [ ] **CloudNativePG `Cluster` manifest example**: `examples/cloudnativepg_cluster.yaml` referencing `spec.postgresql.extensionImages` (CNP ≥ 1.24) so users can install pg_ripple into a managed cluster with no custom PostgreSQL image build
-- [ ] **`docs/src/operations/cloudnativepg.md`**: step-by-step guide — prerequisites (CNP ≥ 1.24, image volume feature gate), annotated manifest walkthrough, post-deploy `CREATE EXTENSION pg_ripple` verification, upgrade procedure via image tag bump
-- [ ] **CI smoke test**: `tests/cloudnativepg_image_smoke.sh` — builds the extension image locally, verifies the expected files are present at the correct paths, and confirms the image can be referenced in a `kind`-based CNP cluster
+- [x] **Extension image**: publish `ghcr.io/grove/pg_ripple:<version>-cnpg` built from `docker/Dockerfile.cnpg` — a minimal image containing compiled `.so` and SQL files for pg_ripple, pg_trickle, PostGIS, and pgvector at `/var/lib/postgresql/extension-files/`; tagged at every release via GitHub Actions
+- [x] **CloudNativePG `Cluster` manifest example**: `examples/cloudnativepg_cluster.yaml` referencing `spec.postgresql.extensionImages` (CNP ≥ 1.24) so users can install pg_ripple into a managed cluster with no custom PostgreSQL image build
+- [x] **`docs/src/operations/cloudnativepg.md`**: step-by-step guide — prerequisites (CNP ≥ 1.24, image volume feature gate), annotated manifest walkthrough, post-deploy `CREATE EXTENSION pg_ripple` verification, upgrade procedure via image tag bump
+- [x] **CI smoke test**: `tests/cloudnativepg_image_smoke.sh` — builds the extension image locally, verifies the expected files are present at the correct paths, and confirms the image can be referenced in a `kind`-based CNP cluster
 
 #### Vector-Index Performance (N2-4)
 
-- [ ] **Vector-index comparison benchmark**: `benchmarks/vector_index_compare.sql` — 100 k-embedding fixture; measure p50/p95/p99 ANN recall and latency for `embedding_index_type ∈ {hnsw, ivfflat}` at `embedding_precision ∈ {single, half, binary}`; results published in `docs/src/reference/vector-index-tradeoffs.md`
+- [x] **Vector-index comparison benchmark**: `benchmarks/vector_index_compare.sql` — 100 k-embedding fixture; measure p50/p95/p99 ANN recall and latency for `embedding_index_type ∈ {hnsw, ivfflat}` at `embedding_precision ∈ {single, half, binary}`; results published in `docs/src/reference/vector-index-tradeoffs.md`
 
 #### Documentation
 
-- [ ] `docs/src/operations/high-availability.md` — decision tree: pg_ripple logical replication vs. standard PG streaming replication; trade-offs and supported topologies
-- [ ] Update `docs/src/reference/guc-reference.md` with v0.54.0 GUCs (`replication_enabled`, `replication_conflict_strategy`)
+- [x] `docs/src/operations/high-availability.md` — decision tree: pg_ripple logical replication vs. standard PG streaming replication; trade-offs and supported topologies
+- [x] Update `docs/src/reference/guc-reference.md` with v0.54.0 GUCs (`replication_enabled`, `replication_conflict_strategy`)
 
 ### Migration Script
 

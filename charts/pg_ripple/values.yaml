@@ -1,0 +1,114 @@
+# pg_ripple Helm chart — default values (v0.54.0)
+# Override any of these in your values.yaml or via --set on the command line.
+
+# -- Number of PostgreSQL replica Pods.
+replicaCount: 1
+
+image:
+  # -- Batteries-included image (pg_ripple + PostGIS + pgvector).
+  repository: ghcr.io/grove/pg_ripple
+  tag: "0.54.0"
+  pullPolicy: IfNotPresent
+
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+podAnnotations: {}
+
+podSecurityContext:
+  fsGroup: 999   # postgres GID
+
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 999   # postgres UID
+  allowPrivilegeEscalation: false
+
+# ── PostgreSQL configuration ──────────────────────────────────────────────────
+postgres:
+  # -- PostgreSQL superuser password (stored as a Secret; override in production).
+  password: "ripple"
+  # -- Database to create on first start.
+  database: "postgres"
+  # -- Extra postgresql.conf options.
+  extraConf:
+    allow_system_table_mods: "on"
+    shared_preload_libraries: "pg_ripple"
+
+# ── Persistence ───────────────────────────────────────────────────────────────
+persistence:
+  enabled: true
+  storageClass: ""
+  accessMode: ReadWriteOnce
+  size: 10Gi
+  annotations: {}
+
+# ── Services ──────────────────────────────────────────────────────────────────
+service:
+  # -- PostgreSQL service type.
+  type: ClusterIP
+  port: 5432
+
+http:
+  enabled: true
+  service:
+    # -- SPARQL HTTP service type. Use LoadBalancer to expose externally.
+    type: ClusterIP
+    port: 7878
+  # -- Extra environment variables for the pg_ripple_http sidecar.
+  env: {}
+
+# ── pg_ripple GUC configuration ───────────────────────────────────────────────
+ripple:
+  # -- SPARQL Federation endpoints (list of {name, url} objects).
+  federationEndpoints: []
+  # -- ConfigMap name containing SHACL shapes (optional).
+  shacl:
+    shapesConfigMap: ""
+  # -- Secret name containing the LLM API key (optional).
+  llm:
+    apiKeySecret: ""
+    apiKeySecretKey: "api-key"
+
+# ── Liveness and readiness probes ────────────────────────────────────────────
+livenessProbe:
+  exec:
+    command: ["pg_isready", "-U", "postgres"]
+  initialDelaySeconds: 30
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 6
+
+readinessProbe:
+  exec:
+    command: ["pg_isready", "-U", "postgres"]
+  initialDelaySeconds: 5
+  periodSeconds: 5
+  timeoutSeconds: 3
+  failureThreshold: 3
+
+# ── Resources ─────────────────────────────────────────────────────────────────
+resources: {}
+#  requests:
+#    cpu: "500m"
+#    memory: "512Mi"
+#  limits:
+#    cpu: "2"
+#    memory: "2Gi"
+
+# ── Node scheduling ───────────────────────────────────────────────────────────
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+# ── Prometheus monitoring ─────────────────────────────────────────────────────
+metrics:
+  enabled: false
+  serviceMonitor:
+    enabled: false
+    namespace: ""
+    interval: "30s"
