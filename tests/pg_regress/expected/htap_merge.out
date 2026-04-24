@@ -40,7 +40,11 @@ FROM pg_ripple.find_triples(NULL, '<http://htap.test/P1>', NULL);
 
 -- ── 2. compact() promotes delta rows into main ────────────────────────────────
 SELECT pg_ripple.compact() >= 0 AS compact_ok;
-ERROR:  column reference "oid" is ambiguous
+ compact_ok 
+------------
+ t
+(1 row)
+
 -- Triples still visible after promotion.
 SELECT count(*) AS triples_after_compact
 FROM pg_ripple.find_triples(NULL, '<http://htap.test/P1>', NULL);
@@ -77,7 +81,11 @@ FROM pg_ripple.find_triples('<http://htap.test/S1>', '<http://htap.test/P1>', NU
 
 -- ── 4. Second compact() — tombstones cleared, survivor stays ─────────────────
 SELECT pg_ripple.compact() >= 0 AS compact2_ok;
-ERROR:  column reference "oid" is ambiguous
+ compact2_ok 
+-------------
+ t
+(1 row)
+
 SELECT count(*) AS triples_after_compact2
 FROM pg_ripple.find_triples(NULL, '<http://htap.test/P1>', NULL);
  triples_after_compact2 

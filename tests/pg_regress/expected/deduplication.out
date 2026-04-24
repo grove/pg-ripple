@@ -161,7 +161,11 @@ SELECT pg_ripple.insert_triple(
 -- Enable dedup_on_merge and compact.
 SET pg_ripple.dedup_on_merge = true;
 SELECT pg_ripple.compact() >= 0 AS compact_with_dedup_ok;
-ERROR:  column reference "oid" is ambiguous
+ compact_with_dedup_ok 
+-----------------------
+ t
+(1 row)
+
 RESET pg_ripple.dedup_on_merge;
 RESET pg_ripple.vp_promotion_threshold;
 -- After merge+dedup: exactly 1 copy in main.
