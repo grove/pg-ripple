@@ -178,21 +178,21 @@ mod tests {
     #[pg_test]
     fn test_replication_stats_disabled() {
         // replication_enabled defaults to off, so we should get one NULL row.
-        let rows = pgrx::Spi::connect(|c| {
+        // Collect owned values inside the closure to avoid SpiHeapTupleData lifetime issues.
+        let slot_names: Vec<Option<String>> = pgrx::Spi::connect(|c| {
             c.select(
-                "SELECT slot_name, lag_bytes, last_applied_lsn, last_applied_at \
-                 FROM pg_ripple.replication_stats()",
+                "SELECT slot_name FROM pg_ripple.replication_stats()",
                 None,
                 &[],
             )
-            .expect("replication_stats() must not error")
+            .unwrap()
             .into_iter()
-            .collect::<Vec<_>>()
+            .map(|row| row["slot_name"].value::<String>().unwrap())
+            .collect()
         });
-        assert_eq!(rows.len(), 1, "should return exactly one row when disabled");
-        let slot: Option<String> = rows[0]["slot_name"].value().unwrap_or(None);
+        assert_eq!(slot_names.len(), 1, "should return exactly one row when disabled");
         assert!(
-            slot.is_none(),
+            slot_names[0].is_none(),
             "slot_name must be NULL when replication is disabled"
         );
     }
