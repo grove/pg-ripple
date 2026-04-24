@@ -187,16 +187,19 @@ pub fn enable_cdc_bridge_trigger(name: &str, predicate: &str, outbox: &str) {
 /// Drop a CDC bridge trigger previously installed by `enable_cdc_bridge_trigger`.
 pub fn disable_cdc_bridge_trigger(name: &str) {
     // Look up predicate_id for the trigger — return silently when not found.
-    let pred_id = match Spi::get_one_with_args::<i64>(
-        "SELECT predicate_id FROM _pg_ripple.cdc_bridge_triggers WHERE name = $1",
-        &[DatumWithOid::from(name)],
-    ) {
-        Ok(Some(id)) => id,
-        Ok(None) => {
-            // Trigger not registered — this is a no-op.
-            return;
-        }
-        Err(e) => pgrx::error!("disable_cdc_bridge_trigger: catalog error: {e}"),
+    let pred_ids: Vec<i64> = Spi::connect(|c| {
+        c.select(
+            "SELECT predicate_id FROM _pg_ripple.cdc_bridge_triggers WHERE name = $1",
+            None,
+            &[DatumWithOid::from(name)],
+        )
+        .unwrap_or_else(|e| pgrx::error!("disable_cdc_bridge_trigger: catalog error: {e}"))
+        .filter_map(|row| row.get::<i64>(1).ok().flatten())
+        .collect()
+    });
+    let pred_id = match pred_ids.first() {
+        Some(&id) => id,
+        None => return, // trigger not registered — no-op
     };
 
     let delta_table = match Spi::get_one_with_args::<i64>(
