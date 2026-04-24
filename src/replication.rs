@@ -190,7 +190,11 @@ mod tests {
             .map(|row| row["slot_name"].value::<String>().unwrap())
             .collect()
         });
-        assert_eq!(slot_names.len(), 1, "should return exactly one row when disabled");
+        assert_eq!(
+            slot_names.len(),
+            1,
+            "should return exactly one row when disabled"
+        );
         assert!(
             slot_names[0].is_none(),
             "slot_name must be NULL when replication is disabled"
