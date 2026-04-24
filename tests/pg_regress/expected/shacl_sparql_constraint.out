@@ -15,8 +15,8 @@ FROM pg_proc p
 JOIN pg_namespace n ON n.oid = p.pronamespace
 WHERE n.nspname = 'pg_ripple'
   AND p.proname = 'copy_rdf_from';
-   fn_name   
--------------
+    fn_name    
+---------------
  copy_rdf_from
 (1 row)
 
@@ -34,7 +34,7 @@ ex:SparqlTestShape
 $SHACL$) AS load_ok;
  load_ok 
 ---------
- t
+       1
 (1 row)
 
 -- ── 3. shape loaded — can list it ────────────────────────────────────────────
@@ -76,3 +76,4 @@ LIMIT 1;
 -----------------
  t
 (1 row)
+

@@ -15,8 +15,8 @@ pub mod filter_expr;
 
 #[allow(unused_imports)]
 pub(crate) use filter_dispatch::{
-    encode_ground_term, extract_modifiers, literal_lexical_value, sanitize_sql_ident,
-    translate_order_by, translate_values, Modifiers,
+    Modifiers, encode_ground_term, extract_modifiers, literal_lexical_value, sanitize_sql_ident,
+    translate_order_by, translate_values,
 };
 #[allow(unused_imports)]
 pub(crate) use filter_expr::{
