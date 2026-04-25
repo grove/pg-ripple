@@ -1,6 +1,6 @@
--- pg_regress test: property_path_max_depth GUC (v0.24.0)
+-- pg_regress test: max_path_depth GUC (v0.24.0)
 --
--- Tests that the pg_ripple.property_path_max_depth GUC is registered,
+-- Tests that the pg_ripple.max_path_depth GUC is registered,
 -- accessible, and has the correct default.
 
 SET search_path TO pg_ripple, public;
@@ -28,15 +28,15 @@ BEGIN
 END $$;
 
 -- ── 1. GUC exists and has correct default value ───────────────────────────────
-SELECT current_setting('pg_ripple.property_path_max_depth')::int = 64 AS default_is_64;
+SELECT current_setting('pg_ripple.max_path_depth')::int = 100 AS default_is_100;
 
 -- ── 2. GUC can be changed ────────────────────────────────────────────────────
-SET pg_ripple.property_path_max_depth = 10;
-SELECT current_setting('pg_ripple.property_path_max_depth')::int = 10 AS set_to_10;
+SET pg_ripple.max_path_depth = 10;
+SELECT current_setting('pg_ripple.max_path_depth')::int = 10 AS set_to_10;
 
 -- ── 3. Restore default ───────────────────────────────────────────────────────
-RESET pg_ripple.property_path_max_depth;
-SELECT current_setting('pg_ripple.property_path_max_depth')::int = 64 AS back_to_64;
+RESET pg_ripple.max_path_depth;
+SELECT current_setting('pg_ripple.max_path_depth')::int = 100 AS back_to_100;
 
 -- ── 4. GUC affects SPARQL property path queries ───────────────────────────────
 
@@ -47,8 +47,8 @@ SELECT pg_ripple.insert_triple('<https://example.org/pp/c>', '<https://example.o
 SELECT pg_ripple.insert_triple('<https://example.org/pp/d>', '<https://example.org/pp/hop>', '<https://example.org/pp/e>') > 0 AS hop4;
 SELECT pg_ripple.insert_triple('<https://example.org/pp/e>', '<https://example.org/pp/hop>', '<https://example.org/pp/f>') > 0 AS hop5;
 
--- With default depth=64, a+ path should reach all nodes.
-SET pg_ripple.property_path_max_depth = 64;
+-- With default depth=100, a+ path should reach all nodes.
+SET pg_ripple.max_path_depth = 100;
 SELECT count(*) >= 1 AS transitive_reachable
 FROM pg_ripple.sparql(
     'PREFIX pp: <https://example.org/pp/> '
@@ -56,8 +56,8 @@ FROM pg_ripple.sparql(
 );
 
 -- Restore.
-RESET pg_ripple.property_path_max_depth;
-SELECT current_setting('pg_ripple.property_path_max_depth')::int = 64 AS restored_ok;
+RESET pg_ripple.max_path_depth;
+SELECT current_setting('pg_ripple.max_path_depth')::int = 100 AS restored_ok;
 
 -- Post-test cleanup: remove all pp/* triples so later tests are not polluted.
 DO $$

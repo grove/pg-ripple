@@ -261,6 +261,8 @@ pub fn merge_predicate(pred_id: i64) -> i64 {
             .unwrap_or(0);
 
     // Drop any leftover _main_new from a previous failed merge.
+    Spi::run_with_args("SET LOCAL pg_ripple.maintenance_mode = 'on'", &[])
+        .unwrap_or_else(|e| pgrx::error!("merge: set maintenance_mode (cleanup) error: {e}"));
     Spi::run_with_args(&format!("DROP TABLE IF EXISTS {main_new}"), &[])
         .unwrap_or_else(|e| pgrx::error!("merge: drop leftover main_new error: {e}"));
 
@@ -325,6 +327,7 @@ pub fn merge_predicate(pred_id: i64) -> i64 {
 
     // Step 3: atomic rename — drop old main, rename new → main.
     // Use lock_timeout to avoid blocking query path for too long.
+    // (maintenance_mode was already set at the start of this function.)
     Spi::run_with_args("SET LOCAL lock_timeout = '5s'", &[])
         .unwrap_or_else(|e| pgrx::error!("merge: set lock_timeout error: {e}"));
 
@@ -771,6 +774,8 @@ pub fn migrate_flat_to_htap(pred_id: i64) {
     .unwrap_or_else(|e| pgrx::error!("htap_migrate: predicates update error: {e}"));
 
     // Drop the backup table.
+    Spi::run_with_args("SET LOCAL pg_ripple.maintenance_mode = 'on'", &[])
+        .unwrap_or_else(|e| pgrx::error!("htap_migrate: set maintenance_mode error: {e}"));
     Spi::run_with_args(&format!("DROP TABLE IF EXISTS {backup}"), &[])
         .unwrap_or_else(|e| pgrx::error!("htap_migrate: drop backup error: {e}"));
 }

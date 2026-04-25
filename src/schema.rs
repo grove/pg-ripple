@@ -965,6 +965,8 @@ $$;
 
 -- I-2 (v0.56.0): DDL event trigger to warn when _pg_ripple.vp_* objects are
 -- dropped outside pg_ripple maintenance functions.
+-- The trigger is suppressed when pg_ripple.maintenance_mode = 'on' so that
+-- the merge worker and vacuum functions can drop/rename VP tables freely.
 CREATE OR REPLACE FUNCTION _pg_ripple.ddl_guard_vp_tables()
     RETURNS event_trigger
     LANGUAGE plpgsql
@@ -972,7 +974,17 @@ CREATE OR REPLACE FUNCTION _pg_ripple.ddl_guard_vp_tables()
 AS $$
 DECLARE
     _obj record;
+    _in_maintenance bool;
 BEGIN
+    -- Skip if we are inside a pg_ripple maintenance operation.
+    _in_maintenance := coalesce(
+        current_setting('pg_ripple.maintenance_mode', true) = 'on',
+        false
+    );
+    IF _in_maintenance THEN
+        RETURN;
+    END IF;
+
     FOR _obj IN
         SELECT schema_name, object_name, command_tag
         FROM pg_event_trigger_dropped_objects()
