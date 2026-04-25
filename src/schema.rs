@@ -1014,3 +1014,35 @@ pgrx::extension_sql!(
     name = "v056_schema_version_stamp",
     requires = ["v056_audit_and_catalog_events"]
 );
+
+// ─── v0.57.0: KGE embeddings + multi-tenant catalog ──────────────────────────
+
+pgrx::extension_sql!(
+    r#"
+-- KGE embeddings table (v0.57.0 L-4.1).
+-- Uses double precision[] to avoid a hard dependency on pgvector.
+CREATE TABLE IF NOT EXISTS _pg_ripple.kge_embeddings (
+    entity_id   BIGINT      NOT NULL PRIMARY KEY,
+    embedding   double precision[],
+    model       TEXT        NOT NULL DEFAULT 'transe',
+    trained_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- Multi-tenant catalog (v0.57.0 L-5.3).
+CREATE TABLE IF NOT EXISTS _pg_ripple.tenants (
+    tenant_name    TEXT        NOT NULL PRIMARY KEY,
+    graph_iri      TEXT        NOT NULL,
+    quota_triples  BIGINT      NOT NULL DEFAULT 0,
+    created_at     TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+"#,
+    name = "v057_kge_tenants_setup",
+    requires = ["v056_schema_version_stamp"]
+);
+
+pgrx::extension_sql!(
+    "INSERT INTO _pg_ripple.schema_version (version, upgraded_from, installed_at) \
+     VALUES ('0.57.0', '0.56.0', clock_timestamp());",
+    name = "v057_schema_version_stamp",
+    requires = ["v057_kge_tenants_setup"]
+);

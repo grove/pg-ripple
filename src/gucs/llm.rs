@@ -60,3 +60,12 @@ pub static LLM_API_KEY_ENV: pgrx::GucSetting<Option<std::ffi::CString>> =
 /// GUC: when `on` (default), include active SHACL shapes as semantic context
 /// in the prompt sent to the LLM endpoint (v0.49.0).
 pub static LLM_INCLUDE_SHAPES: pgrx::GucSetting<bool> = pgrx::GucSetting::<bool>::new(true);
+
+// ─── v0.57.0 KGE GUCs ────────────────────────────────────────────────────────
+
+/// GUC: enable the KGE background worker (v0.57.0).
+pub static KGE_ENABLED: pgrx::GucSetting<bool> = pgrx::GucSetting::<bool>::new(false);
+
+/// GUC: knowledge-graph embedding model: `'transe'` (default) or `'rotate'` (v0.57.0).
+pub static KGE_MODEL: pgrx::GucSetting<Option<std::ffi::CString>> =
+    pgrx::GucSetting::<Option<std::ffi::CString>>::new(None);
