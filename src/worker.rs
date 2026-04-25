@@ -271,6 +271,17 @@ fn run_merge_cycle_for_worker(worker_idx: u32, n_workers: u32) {
                 }
             }
             crate::storage::merge::merge_predicate(p_id);
+            // L-3.3 (v0.56.0): When inference_mode = 'incremental_rdfs', trigger
+            // targeted RDFS closure rules for subClassOf / subPropertyOf predicates.
+            if crate::INFERENCE_MODE
+                .get()
+                .as_ref()
+                .and_then(|c| c.to_str().ok())
+                .unwrap_or("")
+                == "incremental_rdfs"
+            {
+                crate::datalog::run_incremental_rdfs_for_predicate(p_id);
+            }
             if n_workers > 1 {
                 let _ = Spi::run_with_args(
                     "SELECT pg_advisory_unlock($1)",

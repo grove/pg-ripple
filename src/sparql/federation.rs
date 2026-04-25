@@ -34,7 +34,7 @@
 
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use pgrx::datum::DatumWithOid;
 use pgrx::prelude::*;
@@ -43,6 +43,108 @@ use spargebra::algebra::GraphPattern;
 use spargebra::term::NamedNodePattern;
 
 use crate::dictionary;
+
+// ─── G-3 (v0.56.0): Federation circuit breaker ───────────────────────────────
+
+/// State of a per-endpoint circuit breaker.
+#[derive(Debug, Clone)]
+enum CircuitState {
+    /// Circuit is closed: requests flow normally.
+    Closed,
+    /// Circuit is open: requests are rejected immediately (PT605).
+    Open { opened_at: Instant },
+    /// Circuit is half-open: one probe request is allowed through.
+    HalfOpen,
+}
+
+/// Per-endpoint circuit breaker tracking consecutive failures and state.
+#[derive(Debug, Clone)]
+struct CircuitBreaker {
+    state: CircuitState,
+    consecutive_failures: u32,
+}
+
+impl CircuitBreaker {
+    fn new() -> Self {
+        Self {
+            state: CircuitState::Closed,
+            consecutive_failures: 0,
+        }
+    }
+
+    /// Record a successful call: reset failures and close circuit.
+    fn record_success(&mut self) {
+        self.consecutive_failures = 0;
+        self.state = CircuitState::Closed;
+    }
+
+    /// Record a failed call. Opens the circuit when the threshold is hit.
+    fn record_failure(&mut self) {
+        self.consecutive_failures += 1;
+        let threshold = crate::gucs::federation::FEDERATION_CIRCUIT_BREAKER_THRESHOLD.get() as u32;
+        if threshold > 0 && self.consecutive_failures >= threshold {
+            self.state = CircuitState::Open {
+                opened_at: Instant::now(),
+            };
+        }
+    }
+
+    /// Returns `true` when the circuit is open and the call should be blocked.
+    fn is_open(&mut self) -> bool {
+        let reset_secs =
+            crate::gucs::federation::FEDERATION_CIRCUIT_BREAKER_RESET_SECONDS.get() as u64;
+        if let CircuitState::Open { opened_at } = self.state {
+            if opened_at.elapsed().as_secs() >= reset_secs {
+                // Transition to half-open to allow one probe.
+                self.state = CircuitState::HalfOpen;
+                return false;
+            }
+            return true;
+        }
+        false
+    }
+}
+
+thread_local! {
+    /// Per-backend circuit breaker map keyed by endpoint URL.
+    static CIRCUIT_BREAKERS: RefCell<HashMap<String, CircuitBreaker>> =
+        RefCell::new(HashMap::new());
+}
+
+/// Check whether the circuit breaker for `url` is open.
+/// Returns `true` when the call should be blocked (PT605).
+fn circuit_is_open(url: &str) -> bool {
+    let threshold = crate::gucs::federation::FEDERATION_CIRCUIT_BREAKER_THRESHOLD.get();
+    if threshold <= 0 {
+        return false; // Disabled.
+    }
+    CIRCUIT_BREAKERS.with(|cb| {
+        let mut map = cb.borrow_mut();
+        let breaker = map
+            .entry(url.to_owned())
+            .or_insert_with(CircuitBreaker::new);
+        breaker.is_open()
+    })
+}
+
+fn circuit_record_success(url: &str) {
+    CIRCUIT_BREAKERS.with(|cb| {
+        let mut map = cb.borrow_mut();
+        if let Some(breaker) = map.get_mut(url) {
+            breaker.record_success();
+        }
+    });
+}
+
+fn circuit_record_failure(url: &str) {
+    CIRCUIT_BREAKERS.with(|cb| {
+        let mut map = cb.borrow_mut();
+        let breaker = map
+            .entry(url.to_owned())
+            .or_insert_with(CircuitBreaker::new);
+        breaker.record_failure();
+    });
+}
 
 // ─── Thread-local connection pool (v0.19.0) ──────────────────────────────────
 
@@ -434,6 +536,14 @@ pub(crate) fn execute_remote(
 ) -> Result<(Vec<String>, Vec<Vec<Option<String>>>), String> {
     type RemoteResult = (Vec<String>, Vec<Vec<Option<String>>>);
 
+    // ── G-3 (v0.56.0): Circuit breaker check ──────────────────────────────────
+    if circuit_is_open(url) {
+        pgrx::debug1!("federation circuit breaker open for {url}: returning PT605");
+        return Err(format!(
+            "PT605: federation circuit breaker open for endpoint {url}; try again later"
+        ));
+    }
+
     // ── Endpoint policy check (v0.55.0) ───────────────────────────────────────
     if let Err(e) = check_endpoint_policy(url) {
         if crate::shmem::SHMEM_READY.load(std::sync::atomic::Ordering::Relaxed) {
@@ -468,10 +578,12 @@ pub(crate) fn execute_remote(
         .set("Accept", "application/sparql-results+json")
         .call()
         .map_err(|e| {
-            format!(
+            let msg = format!(
                 "federation HTTP error calling {url}: {}",
                 normalize_http_err(e)
-            )
+            );
+            circuit_record_failure(url);
+            msg
         })?;
 
     let body = response.into_string().map_err(|e| {
@@ -499,11 +611,15 @@ pub(crate) fn execute_remote(
     // ── Cache store on success (v0.19.0) ──────────────────────────────────────
     if result.is_ok() {
         cache_store(url, sparql_text, &body);
+        // G-3 (v0.56.0): record success to reset circuit breaker failure counter.
+        circuit_record_success(url);
     } else if crate::shmem::SHMEM_READY.load(std::sync::atomic::Ordering::Relaxed) {
         // v0.55.0 G-4: increment error counter on parse failure.
         crate::shmem::FED_ERROR_COUNT
             .get()
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        // G-3 (v0.56.0): parse failure counts as a circuit breaker failure.
+        circuit_record_failure(url);
     }
 
     result

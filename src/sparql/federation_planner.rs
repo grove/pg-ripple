@@ -20,7 +20,16 @@
 //!   triple counts
 //! - `void:distinctSubjects` / `void:distinctObjects` — selectivity estimates
 
-#![allow(dead_code)]
+// v0.56.0 dead-code audit (A-6):
+// refresh_endpoint_stats: LIVE — called from federation_registry.rs:185.
+// load_endpoint_stats: dead — not yet wired into the query planner; keep with
+//   per-item annotation as it forms the planned cost-based API.
+// estimate_selectivity, rank_endpoints_for_predicate, compute_parallel_groups:
+//   dead — planned API for cost-based source selection; keep with per-item
+//   annotations until wired.
+// fetch_void_stats, execute_count_query, execute_predicate_count_query,
+//   urlencoding_encode: internal helpers — annotated per-item.
+// Replaced file-wide #![allow(dead_code)] with per-item annotations below.
 
 use std::collections::HashMap;
 
@@ -217,6 +226,7 @@ fn execute_predicate_count_query(url: &str, sparql: &str) -> Result<HashMap<Stri
 }
 
 /// Load cached VoID statistics for a given endpoint URL from the database.
+#[allow(dead_code)] // v0.56.0 audit: planned API, not yet wired into query planner
 pub fn load_endpoint_stats(url: &str) -> EndpointStats {
     let mut stats = EndpointStats::default();
 
@@ -251,6 +261,7 @@ pub fn load_endpoint_stats(url: &str) -> EndpointStats {
 /// For a given predicate IRI, estimate the number of triples at `url` using
 /// cached VoID statistics.  Falls back to `stats.total_triples` when no
 /// per-predicate count is available.
+#[allow(dead_code)] // v0.56.0 audit: planned API, not yet wired into query planner
 pub fn estimate_selectivity(url: &str, predicate_iri: Option<&str>) -> i64 {
     let stats = load_endpoint_stats(url);
     if stats.total_triples == 0 {
@@ -270,6 +281,7 @@ pub fn estimate_selectivity(url: &str, predicate_iri: Option<&str>) -> i64 {
 ///
 /// Returns a `Vec<(url, estimated_selectivity)>` sorted ascending by
 /// selectivity (fewest estimated triples first = most selective = execute first).
+#[allow(dead_code)] // v0.56.0 audit: planned API, not yet wired into query planner
 pub fn rank_endpoints_for_predicate(predicate_iri: Option<&str>) -> Vec<(String, i64)> {
     // Collect all registered + enabled endpoint URLs.
     let urls: Vec<String> = Spi::connect(|c| {
@@ -306,6 +318,7 @@ pub fn rank_endpoints_for_predicate(predicate_iri: Option<&str>) -> Vec<(String,
 /// # Arguments
 /// - `services`: list of `(url, variables)` pairs where `variables` is the set
 ///   of projected variable names for that SERVICE call.
+#[allow(dead_code)] // v0.56.0 audit: planned API, not yet wired into parallel executor
 pub fn compute_parallel_groups(services: &[(String, Vec<String>)]) -> Vec<Vec<usize>> {
     let mut groups: Vec<Vec<usize>> = Vec::new();
     // Greedy algorithm: assign each SERVICE to the first group where it shares

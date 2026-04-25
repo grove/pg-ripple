@@ -13,6 +13,48 @@ Versions correspond to the milestones in [ROADMAP.md](ROADMAP.md).
 
 ---
 
+## [0.56.0] — 2026-04-30 — Standards Completeness & Operational Depth
+
+**Implements the v0.56.0 roadmap: GeoSPARQL 1.1 geometry functions, federation circuit breaker, SPARQL audit log, DDL event trigger, BRIN re-summarize after merge, SID sequence runway monitor, incremental RDFS closure mode, R2RML direct mapping, lz4 dictionary compression, dead-code audit, and deprecated GUC removal.**
+
+### What's new
+
+- **GeoSPARQL 1.1 additions** (L-1.1): New filter predicates `geof:within` → `ST_Within` and `geof:intersects` → `ST_Intersects`. New value functions `geof:buffer`, `geof:convexHull`, `geof:envelope`, `geo:asWKT`, and `geo:hasSpatialAccuracy`.
+
+- **Federation circuit breaker** (G-3): Thread-local `CircuitBreaker` state machine per endpoint URL. Opens after `pg_ripple.federation_circuit_breaker_threshold` consecutive failures (default: 5), resets after `pg_ripple.federation_circuit_breaker_reset_seconds` (default: 60 s). Returns PT605 while open.
+
+- **SPARQL audit log** (H-3): New table `_pg_ripple.audit_log` populated when `pg_ripple.audit_log_enabled = on`. Records SPARQL UPDATE operations (role, txid, operation, query). New SQL functions: `pg_ripple.audit_log()` and `pg_ripple.purge_audit_log(before TIMESTAMPTZ)`.
+
+- **DDL event trigger** (I-2): `_pg_ripple.ddl_guard_vp_tables()` event trigger function and `_pg_ripple_ddl_guard` event trigger. Emits PT511 warning and inserts into `_pg_ripple.catalog_events` when VP tables are dropped outside maintenance functions.
+
+- **BRIN re-summarize after merge** (F-7): The merge worker calls `brin_summarize_new_values()` on the main VP table BRIN index after the atomic rename step, keeping BRIN statistics current.
+
+- **SID runway monitor** (F-3): New SQL function `pg_ripple.sid_runway()` returns `(current_value, max_value, insert_rate_per_day, years_remaining)` estimating how long before `statement_id_seq` wraps.
+
+- **Incremental RDFS closure** (L-3.3): New `pg_ripple.inference_mode = 'incremental_rdfs'` value. After each merge, `run_incremental_rdfs_for_predicate()` is called for RDFS schema predicates only, avoiding full-graph re-inference on every write.
+
+- **R2RML direct mapping** (L-7.3): New SQL function `pg_ripple.r2rml_load(mapping_iri TEXT) → BIGINT`. Reads a W3C R2RML 2012 mapping document already loaded in the store, executes the mapped SQL queries, and bulk-inserts the generated triples.
+
+- **lz4 dictionary compression** (L-2.4): `ALTER TABLE _pg_ripple.dictionary ALTER COLUMN value SET COMPRESSION lz4` applied at install and in the migration script. Reduces storage for long IRIs and literal strings on PG18 builds with lz4 support.
+
+- **Dead-code audit** (A-6): `telemetry.rs`, `federation_planner.rs`, and `filter_expr.rs` cleaned up. Removed unused functions `inline_int_arith` and `inline_int_divide`; added per-item `#[allow(dead_code)]` annotations with explanations for planned-but-not-yet-wired APIs.
+
+- **Remove deprecated `property_path_max_depth` GUC** (S2-5): The alias GUC `pg_ripple.property_path_max_depth` introduced in v0.24.0 is removed. Use `pg_ripple.max_path_depth` (the canonical name) instead.
+
+### Schema changes
+
+- New table `_pg_ripple.audit_log`
+- New table `_pg_ripple.catalog_events`
+- New function `_pg_ripple.ddl_guard_vp_tables() RETURNS event_trigger`
+- New event trigger `_pg_ripple_ddl_guard ON sql_drop`
+- `ALTER TABLE _pg_ripple.dictionary ALTER COLUMN value SET COMPRESSION lz4`
+
+### Migration
+
+Run `ALTER EXTENSION pg_ripple UPDATE` or apply `sql/pg_ripple--0.55.0--0.56.0.sql`.
+
+---
+
 ## [0.55.0] — 2026-04-24 — Security Hardening, Observability & Developer Experience
 
 **Implements the v0.55.0 roadmap: federation SSRF protection, Unicode normalization, tombstone GC optimization, SPARQL-star annotation tests, SHACL snapshot semantics, Datalog dead-code cleanup, pg_ripple_http OpenAPI spec and VoID/Service endpoints, parallel concurrent insert tests, and comprehensive error catalog additions.**

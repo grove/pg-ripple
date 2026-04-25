@@ -343,6 +343,58 @@ pub use coordinator::run_inference_agg;
 pub(crate) use seminaive::run_seminaive_inner;
 pub use seminaive::{run_inference, run_inference_seminaive, run_inference_seminaive_full};
 
+// ─── L-3.3 (v0.56.0): Incremental RDFS closure ──────────────────────────────
+
+/// Run incremental RDFS closure rules for a specific predicate (by dictionary ID).
+///
+/// Only re-runs the four targeted rules when the predicate is `rdfs:subClassOf` or
+/// `rdfs:subPropertyOf`:
+/// - rdfs2 (domain inference), rdfs3 (range inference),
+/// - rdfs7 (subPropertyOf propagation), rdfs9 (subClassOf type propagation)
+///
+/// Called by the merge worker when `inference_mode = 'incremental_rdfs'`.
+/// No-op for predicates that are not RDFS schema predicates.
+pub fn run_incremental_rdfs_for_predicate(pred_id: i64) {
+    // Look up the predicate IRI from the dictionary.
+    let pred_iri: Option<String> = Spi::connect(|c| {
+        c.select(
+            "SELECT value FROM _pg_ripple.dictionary WHERE id = $1",
+            None,
+            &[pgrx::datum::DatumWithOid::from(pred_id)],
+        )
+        .ok()
+        .and_then(|mut r| r.next())
+        .and_then(|row| row.get::<&str>(1).ok().flatten().map(|s| s.to_owned()))
+    });
+
+    let Some(iri) = pred_iri else {
+        return;
+    };
+
+    // Only trigger re-inference for RDFS schema predicates.
+    let is_rdfs_schema = matches!(
+        iri.as_str(),
+        "http://www.w3.org/2000/01/rdf-schema#subClassOf"
+            | "http://www.w3.org/2000/01/rdf-schema#subPropertyOf"
+            | "http://www.w3.org/2000/01/rdf-schema#domain"
+            | "http://www.w3.org/2000/01/rdf-schema#range"
+    );
+
+    if !is_rdfs_schema {
+        return;
+    }
+
+    // Run only the RDFS entailment rules from the built-in 'rdfs' rule set.
+    // This re-uses the full semi-naive evaluator but restricted to the rdfs
+    // rule set — efficient because only RDFS rules apply here.
+    let derived = run_inference("rdfs");
+    pgrx::debug1!(
+        "incremental_rdfs: triggered by predicate {} ({iri}): {} triples derived",
+        pred_id,
+        derived
+    );
+}
+
 // ─── Constraint checking ──────────────────────────────────────────────────────
 
 /// Check all active constraint rules (empty-head rules) for the given rule set

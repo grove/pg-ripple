@@ -18,3 +18,8 @@ pub static TRACING_EXPORTER: pgrx::GucSetting<Option<std::ffi::CString>> =
 /// GUC: OTLP collector endpoint for OpenTelemetry span export (v0.51.0).
 pub static TRACING_OTLP_ENDPOINT: pgrx::GucSetting<Option<std::ffi::CString>> =
     pgrx::GucSetting::<Option<std::ffi::CString>>::new(None);
+
+// ─── v0.56.0 observability GUCs — SPARQL audit log ──────────────────────────
+
+/// GUC: enable SPARQL write-operation audit logging into `_pg_ripple.audit_log` (v0.56.0).
+pub static AUDIT_LOG_ENABLED: pgrx::GucSetting<bool> = pgrx::GucSetting::<bool>::new(false);

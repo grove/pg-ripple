@@ -316,6 +316,8 @@ pub(crate) fn translate_expr(
     }
 }
 
+// v0.56.0 dead-code audit (A-6): expr_as_text_sql is a utility function
+// used for text-comparison filters; suppress until wired into all filter paths.
 #[allow(dead_code)]
 pub(crate) fn expr_as_text_sql(
     expr_in: &Expression,
@@ -464,32 +466,8 @@ fn inline_int_pack(sql: &str) -> String {
     )
 }
 
-#[allow(dead_code)]
-fn inline_int_arith(op: &str, la: &str, ra: &str) -> String {
-    let extract_a = inline_int_extract(la);
-    let extract_b = inline_int_extract(ra);
-    format!(
-        "CASE WHEN ({la}) >= 0 OR ({ra}) >= 0 THEN NULL::bigint \
-         ELSE {packed} END",
-        packed = inline_int_pack(&format!("({extract_a} {op} {extract_b})")),
-    )
-}
-
-#[allow(dead_code)]
-fn inline_int_divide(la: &str, ra: &str) -> String {
-    let extract_a = inline_int_extract(la);
-    let extract_b = inline_int_extract(ra);
-    let xsd_decimal = "http://www.w3.org/2001/XMLSchema#decimal";
-    let div = format!("({extract_a}::numeric / NULLIF({extract_b}, 0)::numeric)");
-    format!(
-        "CASE WHEN ({la}) >= 0 OR ({ra}) >= 0 THEN NULL::bigint \
-         ELSE (SELECT pg_ripple.encode_typed_literal( \
-                   CASE WHEN _dv LIKE '%.%' THEN _dv ELSE _dv || '.0' END, \
-                   '{xsd_decimal}' \
-               ) FROM (SELECT trim_scale({div})::text AS _dv) _divtmp) \
-         END",
-    )
-}
+// v0.56.0 dead-code audit (A-6): inline_int_arith and inline_int_divide were
+// dead (never called). Removed. inline_int_negate below remains live.
 
 fn inline_int_negate(sql: &str) -> String {
     let extract = inline_int_extract(sql);

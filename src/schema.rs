@@ -920,3 +920,97 @@ pgrx::extension_sql!(
     name = "v055_schema_version_stamp",
     requires = ["v054_schema_version_stamp"]
 );
+
+// ── v0.56.0 ───────────────────────────────────────────────────────────────────
+
+pgrx::extension_sql!(
+    r#"
+-- SPARQL audit log (v0.56.0).
+-- Records SPARQL UPDATE / DELETE DATA / DROP / CLEAR / COPY / MOVE operations
+-- when pg_ripple.audit_log_enabled = on.
+CREATE TABLE IF NOT EXISTS _pg_ripple.audit_log (
+    id                    BIGSERIAL    NOT NULL PRIMARY KEY,
+    ts                    TIMESTAMPTZ  NOT NULL DEFAULT now(),
+    role                  NAME         NOT NULL DEFAULT current_user,
+    txid                  BIGINT       NOT NULL DEFAULT txid_current(),
+    operation             TEXT         NOT NULL DEFAULT '',
+    query                 TEXT         NOT NULL DEFAULT '',
+    affected_predicate_ids BIGINT[]    NOT NULL DEFAULT '{}'
+);
+CREATE INDEX IF NOT EXISTS idx_audit_log_ts ON _pg_ripple.audit_log (ts);
+
+-- DDL event trigger catalog (v0.56.0).
+-- Records DROP TABLE / DROP INDEX events on _pg_ripple.vp_* objects.
+CREATE TABLE IF NOT EXISTS _pg_ripple.catalog_events (
+    id           BIGSERIAL    NOT NULL PRIMARY KEY,
+    ts           TIMESTAMPTZ  NOT NULL DEFAULT now(),
+    op           TEXT         NOT NULL DEFAULT '',
+    objname      TEXT         NOT NULL DEFAULT '',
+    blocked_by_ripple BOOL    NOT NULL DEFAULT false
+);
+CREATE INDEX IF NOT EXISTS idx_catalog_events_ts ON _pg_ripple.catalog_events (ts);
+
+-- L-2.4 (v0.56.0): Enable lz4 page-level TOAST compression on the dictionary
+-- value column to reduce table size for long IRIs and literal strings.
+-- PG18 supports lz4 compression natively; existing data is recompressed lazily
+-- on next VACUUM or rewrite.  Silently ignored if lz4 is unavailable.
+DO $$
+BEGIN
+    ALTER TABLE _pg_ripple.dictionary ALTER COLUMN value SET COMPRESSION lz4;
+EXCEPTION WHEN OTHERS THEN
+    -- lz4 may not be compiled into this PostgreSQL build; not fatal.
+    RAISE NOTICE 'pg_ripple: lz4 compression not available for dictionary.value: %', SQLERRM;
+END;
+$$;
+
+-- I-2 (v0.56.0): DDL event trigger to warn when _pg_ripple.vp_* objects are
+-- dropped outside pg_ripple maintenance functions.
+-- The trigger is suppressed when pg_ripple.maintenance_mode = 'on' so that
+-- the merge worker and vacuum functions can drop/rename VP tables freely.
+CREATE OR REPLACE FUNCTION _pg_ripple.ddl_guard_vp_tables()
+    RETURNS event_trigger
+    LANGUAGE plpgsql
+    SECURITY DEFINER
+AS $$
+DECLARE
+    _obj record;
+    _in_maintenance bool;
+BEGIN
+    -- Skip if we are inside a pg_ripple maintenance operation.
+    _in_maintenance := coalesce(
+        current_setting('pg_ripple.maintenance_mode', true) = 'on',
+        false
+    );
+    IF _in_maintenance THEN
+        RETURN;
+    END IF;
+
+    FOR _obj IN
+        SELECT schema_name, object_name
+        FROM pg_event_trigger_dropped_objects()
+        WHERE object_type IN ('table', 'index')
+          AND schema_name = '_pg_ripple'
+          AND object_name LIKE 'vp_%'
+    LOOP
+        RAISE WARNING 'PT511: _pg_ripple relation % dropped outside pg_ripple maintenance function; '
+                      'run pg_ripple.vacuum() to maintain consistent state', _obj.object_name;
+        INSERT INTO _pg_ripple.catalog_events (op, objname, blocked_by_ripple)
+        VALUES (tg_tag, _obj.schema_name || '.' || _obj.object_name, false);
+    END LOOP;
+END;
+$$;
+
+CREATE EVENT TRIGGER _pg_ripple_ddl_guard
+    ON sql_drop
+    EXECUTE FUNCTION _pg_ripple.ddl_guard_vp_tables();
+"#,
+    name = "v056_audit_and_catalog_events",
+    requires = ["v055_schema_version_stamp"]
+);
+
+pgrx::extension_sql!(
+    "INSERT INTO _pg_ripple.schema_version (version, upgraded_from, installed_at) \
+     VALUES ('0.56.0', '0.55.0', clock_timestamp());",
+    name = "v056_schema_version_stamp",
+    requires = ["v056_audit_and_catalog_events"]
+);

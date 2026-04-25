@@ -1109,6 +1109,18 @@ pub fn sparql_update(query_text: &str) -> i64 {
         }
     }
 
+    // H-3 (v0.56.0): Record operation in the SPARQL audit log when enabled.
+    if crate::gucs::observability::AUDIT_LOG_ENABLED.get() {
+        let op_name = detect_update_operation_type(query_text);
+        let _ = Spi::run_with_args(
+            "INSERT INTO _pg_ripple.audit_log (operation, query) VALUES ($1, $2)",
+            &[
+                pgrx::datum::DatumWithOid::from(op_name),
+                pgrx::datum::DatumWithOid::from(query_text),
+            ],
+        );
+    }
+
     affected
 }
 
@@ -1819,4 +1831,37 @@ pub fn plan_cache_stats() -> pgrx::JsonB {
 /// Evict all cached SPARQL plans and reset hit/miss counters.
 pub fn plan_cache_reset() {
     plan_cache::reset();
+}
+
+// ─── H-3 (v0.56.0): Audit log helper ────────────────────────────────────────
+
+/// Return a short operation-type label for a SPARQL Update query text.
+/// Used to populate the `operation` column of `_pg_ripple.audit_log`.
+fn detect_update_operation_type(query: &str) -> &'static str {
+    let upper = query.trim_start().to_uppercase();
+    if upper.starts_with("INSERT DATA") {
+        "INSERT DATA"
+    } else if upper.starts_with("DELETE DATA") {
+        "DELETE DATA"
+    } else if upper.starts_with("DELETE") {
+        "DELETE/INSERT"
+    } else if upper.starts_with("INSERT") {
+        "INSERT WHERE"
+    } else if upper.starts_with("CLEAR") {
+        "CLEAR"
+    } else if upper.starts_with("DROP") {
+        "DROP"
+    } else if upper.starts_with("COPY") {
+        "COPY"
+    } else if upper.starts_with("MOVE") {
+        "MOVE"
+    } else if upper.starts_with("ADD") {
+        "ADD"
+    } else if upper.starts_with("LOAD") {
+        "LOAD"
+    } else if upper.starts_with("CREATE") {
+        "CREATE"
+    } else {
+        "UPDATE"
+    }
 }

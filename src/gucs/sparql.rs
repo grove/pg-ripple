@@ -26,9 +26,7 @@ pub static PARALLEL_QUERY_MIN_JOINS: pgrx::GucSetting<i32> = pgrx::GucSetting::<
 pub static SPARQL_STRICT: pgrx::GucSetting<bool> = pgrx::GucSetting::<bool>::new(true);
 
 // ─── v0.24.0 SPARQL GUCs ─────────────────────────────────────────────────────
-
-/// GUC: maximum recursion depth for SPARQL property path queries (`+`, `*`).
-pub static PROPERTY_PATH_MAX_DEPTH: pgrx::GucSetting<i32> = pgrx::GucSetting::<i32>::new(64);
+// NOTE (v0.56.0 S2-5): PROPERTY_PATH_MAX_DEPTH removed; use MAX_PATH_DEPTH.
 
 // ─── v0.36.0 SPARQL / WCOJ GUCs ──────────────────────────────────────────────
 

@@ -38,6 +38,7 @@ mod graphrag_admin;
 mod gucs;
 mod llm;
 mod maintenance_api;
+mod r2rml;
 mod replication;
 mod schema;
 mod security_api;
@@ -277,7 +278,7 @@ pub extern "C-unwind" fn _PG_init() {
             }
             std::ffi::CStr::from_ptr(*newval).to_str().unwrap_or("")
         };
-        matches!(s, "off" | "on_demand" | "materialized")
+        matches!(s, "off" | "on_demand" | "materialized" | "incremental_rdfs")
     }
 
     /// Validate `enforce_constraints`: `off`, `warn`, or `error`.
@@ -699,7 +700,7 @@ pub extern "C-unwind" fn _PG_init() {
     unsafe {
         pgrx::GucRegistry::define_string_guc_with_hooks(
             c"pg_ripple.inference_mode",
-            c"Datalog inference mode: 'off' (default), 'on_demand', 'materialized'",
+            c"Datalog inference mode: 'off' (default), 'on_demand', 'materialized', 'incremental_rdfs' (v0.56.0)",
             c"",
             &INFERENCE_MODE,
             GucContext::Userset,
@@ -896,17 +897,8 @@ pub extern "C-unwind" fn _PG_init() {
     );
 
     // ── v0.24.0 GUCs ─────────────────────────────────────────────────────────
-
-    pgrx::GucRegistry::define_int_guc(
-        c"pg_ripple.property_path_max_depth",
-        c"DEPRECATED (v0.51.0): use pg_ripple.max_path_depth instead. Will be removed in v1.0.0.",
-        c"This GUC is a read-only alias for max_path_depth. Setting it has no effect; set max_path_depth instead.",
-        &PROPERTY_PATH_MAX_DEPTH,
-        1,
-        65535,
-        GucContext::Userset,
-        GucFlags::default(),
-    );
+    // NOTE (v0.56.0 S2-5): pg_ripple.property_path_max_depth GUC was removed.
+    // Use pg_ripple.max_path_depth instead (raises PT501 if the old name is set).
 
     pgrx::GucRegistry::define_bool_guc(
         c"pg_ripple.auto_analyze",
@@ -1740,6 +1732,42 @@ pub extern "C-unwind" fn _PG_init() {
           Falls back to primary on connection failure (PT530 WARNING). (v0.55.0)",
         c"",
         &READ_REPLICA_DSN,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+
+    // ── v0.56.0 GUCs — Audit log & federation circuit breaker ────────────────
+
+    pgrx::GucRegistry::define_bool_guc(
+        c"pg_ripple.audit_log_enabled",
+        c"When on, record SPARQL UPDATE/DELETE/DROP/CLEAR operations in _pg_ripple.audit_log. \
+          Default off. (v0.56.0)",
+        c"",
+        &crate::gucs::observability::AUDIT_LOG_ENABLED,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+
+    pgrx::GucRegistry::define_int_guc(
+        c"pg_ripple.federation_circuit_breaker_threshold",
+        c"Consecutive endpoint failures before the federation circuit breaker opens (default: 5). \
+          0 = circuit breaker disabled. (v0.56.0)",
+        c"",
+        &crate::gucs::federation::FEDERATION_CIRCUIT_BREAKER_THRESHOLD,
+        0,
+        1000,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+
+    pgrx::GucRegistry::define_int_guc(
+        c"pg_ripple.federation_circuit_breaker_reset_seconds",
+        c"Seconds until a tripped federation circuit breaker transitions to half-open (default: 60). \
+          (v0.56.0)",
+        c"",
+        &crate::gucs::federation::FEDERATION_CIRCUIT_BREAKER_RESET_SECONDS,
+        1,
+        3600,
         GucContext::Userset,
         GucFlags::default(),
     );
