@@ -26,7 +26,7 @@ END $$;
 -- ── 1. GUC exists and has correct default value ───────────────────────────────
 SELECT current_setting('pg_ripple.max_path_depth')::int = 100 AS default_is_100;
  default_is_100 
----------------
+----------------
  t
 (1 row)
 
@@ -42,7 +42,7 @@ SELECT current_setting('pg_ripple.max_path_depth')::int = 10 AS set_to_10;
 RESET pg_ripple.max_path_depth;
 SELECT current_setting('pg_ripple.max_path_depth')::int = 100 AS back_to_100;
  back_to_100 
-------------
+-------------
  t
 (1 row)
 
