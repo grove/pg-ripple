@@ -198,4 +198,3 @@ mod tests {
         assert_eq!(result, 0, "erase_subject on nonexistent IRI must return 0");
     }
 }
-
