@@ -7,12 +7,11 @@ SET client_min_messages = DEFAULT;
 SET search_path TO pg_ripple, public;
 -- With inference_mode = 'off', sh:rule patterns should emit PT480 warning.
 SET pg_ripple.inference_mode = 'off';
-DO $$
+DO $DO$
 BEGIN
   PERFORM pg_ripple.load_shacl($$
     @prefix sh: <http://www.w3.org/ns/shacl#> .
     @prefix ex: <http://example.org/> .
-
     ex:Rule1 a sh:NodeShape ;
       sh:rule [
         sh:subject ex:subject1 ;
@@ -24,8 +23,7 @@ BEGIN
 EXCEPTION WHEN OTHERS THEN
   RAISE NOTICE 'load_shacl result: %', left(SQLERRM, 80);
 END
-$$;
-NOTICE:  OK: load_shacl with sh:rule completed (inference off)
+$DO$;
 RESET pg_ripple.inference_mode;
 -- With inference_mode = 'on_demand', sh:rule should be registered.
 SET pg_ripple.inference_mode = 'on_demand';

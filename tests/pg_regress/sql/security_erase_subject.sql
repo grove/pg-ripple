@@ -7,7 +7,7 @@ SET client_min_messages = DEFAULT;
 SET search_path TO pg_ripple, public;
 
 -- Load triples for a subject we will erase.
-SELECT pg_ripple.load_ntriples(
+SELECT pg_ripple.load_ntriples_into_graph(
   E'<http://example.org/alice> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://example.org/Person> .\n' ||
   E'<http://example.org/alice> <http://example.org/name> "Alice" .\n' ||
   E'<http://example.org/alice> <http://example.org/email> "alice@example.org" .\n' ||
@@ -22,7 +22,7 @@ FROM pg_ripple.sparql(
 );
 
 -- Erase all triples for alice.
-SELECT pg_ripple.erase_subject('http://example.org/alice') AS erased_count;
+SELECT pg_ripple.erase_subject('http://example.org/alice'::text) AS erased_count;
 
 -- Verify alice's triples are gone.
 SELECT count(*) AS alice_triples_after

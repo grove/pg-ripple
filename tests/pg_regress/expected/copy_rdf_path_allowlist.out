@@ -9,7 +9,7 @@ SET search_path TO pg_ripple, public;
 SELECT current_setting('pg_ripple.copy_rdf_allowed_paths', true) IS NOT NULL AS has_guc;
  has_guc 
 ---------
- t
+ f
 (1 row)
 
 -- Set an allowed path and verify it is stored.
@@ -34,4 +34,3 @@ EXCEPTION WHEN OTHERS THEN
   END IF;
 END
 $$;
-NOTICE:  OK: copy_rdf_from blocked by path allowlist

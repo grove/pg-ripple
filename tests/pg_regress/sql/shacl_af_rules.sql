@@ -10,7 +10,7 @@ SET search_path TO pg_ripple, public;
 -- With inference_mode = 'off', sh:rule patterns should emit PT480 warning.
 SET pg_ripple.inference_mode = 'off';
 
-DO $$
+DO $DO$
 BEGIN
   PERFORM pg_ripple.load_shacl($$
     @prefix sh: <http://www.w3.org/ns/shacl#> .
@@ -27,7 +27,7 @@ BEGIN
 EXCEPTION WHEN OTHERS THEN
   RAISE NOTICE 'load_shacl result: %', left(SQLERRM, 80);
 END
-$$;
+$DO$;
 
 RESET pg_ripple.inference_mode;
 

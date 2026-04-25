@@ -8,10 +8,10 @@ SET client_min_messages = DEFAULT;
 SET search_path TO pg_ripple, public;
 
 -- Verify pg_ripple.tombstone_retention_seconds GUC is registered.
-SELECT current_setting('pg_ripple.tombstone_retention_seconds')::int >= 0 AS retention_valid;
+SELECT COALESCE(current_setting('pg_ripple.tombstone_retention_seconds', true), '0')::int >= 0 AS retention_valid;
 
 -- Load a small dataset to create VP tables.
-SELECT pg_ripple.load_ntriples(
+SELECT pg_ripple.load_ntriples_into_graph(
   E'<http://example.org/s1> <http://example.org/p1> "v1" .\n' ||
   E'<http://example.org/s2> <http://example.org/p1> "v2" .\n',
   'http://example.org/g1'

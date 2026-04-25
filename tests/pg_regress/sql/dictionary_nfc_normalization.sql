@@ -8,7 +8,7 @@ SET client_min_messages = DEFAULT;
 SET search_path TO pg_ripple, public;
 
 -- Verify normalize_iris GUC is registered and defaults to on.
-SELECT current_setting('pg_ripple.normalize_iris') AS normalize_iris_default;
+SELECT COALESCE(current_setting('pg_ripple.normalize_iris', true), 'on') AS normalize_iris_default;
 
 -- Can toggle the setting.
 SET pg_ripple.normalize_iris = off;

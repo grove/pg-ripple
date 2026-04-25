@@ -149,7 +149,7 @@ SELECT COUNT(*) AS unreachable_empty_count
 FROM pg_ripple.sparql(
     'SELECT ?s WHERE { SERVICE <http://127.0.0.1:19999/sparql> { ?s ?p ?o } }'
 );
-ERROR:  federation endpoint not registered: http://127.0.0.1:19999/sparql; use pg_ripple.register_endpoint() to allow it
+ERROR:  PT606: SERVICE endpoint blocked by federation_endpoint_policy: http://127.0.0.1:19999/sparql
 -- With federation_on_error = 'error', a failed call raises an ERROR.
 SET pg_ripple.federation_on_error = 'error';
 DO $$

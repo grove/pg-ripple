@@ -52,7 +52,6 @@ fn revoke_graph_access(graph_iri: &str, role: &str) {
 /// including WAL and backup media, a full backup cycle is required after calling
 /// this function.
 #[pg_extern]
-#[search_path(pg_catalog, public)]
 fn erase_subject(iri: &str) -> i64 {
     // Encode the IRI to get its dictionary ID.
     let subject_id = crate::dictionary::encode(iri, crate::dictionary::KIND_IRI);
@@ -103,11 +102,20 @@ fn erase_subject(iri: &str) -> i64 {
         }
     }
 
-    // Delete KGE embeddings for the subject.
-    let _ = pgrx::Spi::run_with_args(
-        "DELETE FROM _pg_ripple.kge_embeddings WHERE s = $1",
-        &[DatumWithOid::from(subject_id)],
-    );
+    // Delete KGE embeddings for the subject (best-effort; table may not exist).
+    let kge_exists: bool = pgrx::Spi::get_one::<bool>(
+        "SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_class c \
+         JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace \
+         WHERE n.nspname = '_pg_ripple' AND c.relname = 'kge_embeddings')",
+    )
+    .unwrap_or(None)
+    .unwrap_or(false);
+    if kge_exists {
+        let _ = pgrx::Spi::run_with_args(
+            "DELETE FROM _pg_ripple.kge_embeddings WHERE s = $1",
+            &[DatumWithOid::from(subject_id)],
+        );
+    }
 
     // Remove the subject's dictionary entry if it's no longer referenced by any VP table.
     // This is best-effort — we skip the cross-table reference check for performance.
