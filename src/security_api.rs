@@ -187,7 +187,7 @@ mod pg_ripple {
 }
 
 #[cfg(any(test, feature = "pg_test"))]
-#[pg_schema]
+#[pgrx::pg_schema]
 mod tests {
     use pgrx::prelude::*;
 
