@@ -71,7 +71,7 @@ SELECT count(*) >= 2 AS knows_with_conf FROM pg_ripple.sparql(
 );
  knows_with_conf 
 -----------------
- f
+ t
 (1 row)
 
 -- 2.2 Filter by annotation value: only high-confidence edges (>= 0.90)

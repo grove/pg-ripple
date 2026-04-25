@@ -6,53 +6,60 @@
 //! - `revoke_graph_access()` — drop an RLS policy revoking a role's access to a named graph.
 //! - `erase_subject()` — GDPR-style erasure: atomically delete all triples with `s = encode(iri)`.
 
-use pgrx::datum::DatumWithOid;
-use pgrx::prelude::*;
+// ─── Internal helpers ─────────────────────────────────────────────────────────
 
-/// Grant a PostgreSQL role access to a named graph via Row-Level Security.
-///
-/// Creates an RLS policy `pg_ripple_graph_<role>_<graph_suffix>` on the
-/// `_pg_ripple.vp_rare` table for the named graph.
-/// The policy allows SELECT (or the requested `privilege`) when the `g` column
-/// equals the dictionary-encoded graph IRI.
-///
-/// # Arguments
-///
-/// - `graph_iri` — the named graph IRI (e.g. `<https://example.org/graph1>`).
-/// - `role` — the PostgreSQL role name to grant access to.
-/// - `privilege` — `'SELECT'` (default) or `'ALL'`.
-#[pg_extern]
-#[search_path(pg_catalog, public)]
-fn grant_graph_access(graph_iri: &str, role: &str, privilege: default!(&str, "'SELECT'")) {
-    do_grant_graph_access(graph_iri, role, privilege);
+fn graph_iri_to_policy_suffix(graph_iri: &str) -> String {
+    // Create a stable short suffix from the IRI for use in policy names.
+    use xxhash_rust::xxh3::xxh3_64;
+    format!("{:016x}", xxh3_64(graph_iri.as_bytes()))
 }
 
-/// Revoke a PostgreSQL role's named-graph RLS access.
-///
-/// Drops the RLS policy previously created by `grant_graph_access()`.
-#[pg_extern]
-#[search_path(pg_catalog, public)]
-fn revoke_graph_access(graph_iri: &str, role: &str) {
-    do_revoke_graph_access(graph_iri, role);
+fn do_grant_graph_access(graph_iri: &str, role: &str, privilege: &str) {
+    let graph_id = crate::dictionary::encode(graph_iri, crate::dictionary::KIND_IRI);
+    let suffix = graph_iri_to_policy_suffix(graph_iri);
+    let policy_name = format!("pg_ripple_graph_{role}_{suffix}");
+
+    // Sanitise privilege to only allow safe values.
+    let pg_privilege = match privilege.to_uppercase().as_str() {
+        "SELECT" | "ALL" => privilege.to_uppercase(),
+        _ => {
+            pgrx::error!(
+                "PT710: grant_graph: invalid permission '{}'; use 'SELECT' or 'ALL'",
+                privilege
+            );
+        }
+    };
+
+    // Enable RLS on vp_rare if not already enabled (best effort).
+    let _ = pgrx::Spi::run_with_args(
+        "ALTER TABLE _pg_ripple.vp_rare ENABLE ROW LEVEL SECURITY",
+        &[],
+    );
+
+    // Create the policy on vp_rare.
+    let policy_sql = format!(
+        "CREATE POLICY {policy_name} ON _pg_ripple.vp_rare \
+         AS PERMISSIVE FOR {pg_privilege} TO {role} \
+         USING (g = {graph_id})"
+    );
+    pgrx::Spi::run_with_args(&policy_sql, &[]).unwrap_or_else(|e| {
+        pgrx::warning!("grant_graph_access: policy creation failed: {e}");
+    });
 }
 
-/// Atomically erase all triples whose subject equals `encode(iri)`.
-///
-/// Deletes from:
-/// - all dedicated VP tables (`_pg_ripple.vp_*`)
-/// - `_pg_ripple.vp_rare` (for rare predicates)
-/// - `_pg_ripple.dictionary` (removes the subject's dictionary entry if no longer referenced)
-/// - `_pg_ripple.kge_embeddings` (removes embedding rows for the subject)
-///
-/// Returns the count of deleted triples.
-///
-/// # GDPR note
-///
-/// This function provides a best-effort erasure path.  For guaranteed erasure
-/// including WAL and backup media, a full backup cycle is required after calling
-/// this function.
-#[pg_extern]
-fn erase_subject(iri: &str) -> i64 {
+fn do_revoke_graph_access(graph_iri: &str, role: &str) {
+    let suffix = graph_iri_to_policy_suffix(graph_iri);
+    let policy_name = format!("pg_ripple_graph_{role}_{suffix}");
+
+    let drop_sql = format!("DROP POLICY IF EXISTS {policy_name} ON _pg_ripple.vp_rare");
+    pgrx::Spi::run_with_args(&drop_sql, &[]).unwrap_or_else(|e| {
+        pgrx::warning!("revoke_graph_access: policy drop failed: {e}");
+    });
+}
+
+pub(crate) fn erase_subject_impl(iri: &str) -> i64 {
+    use pgrx::datum::DatumWithOid;
+
     // Encode the IRI to get its dictionary ID.
     let subject_id = crate::dictionary::encode(iri, crate::dictionary::KIND_IRI);
 
@@ -127,55 +134,56 @@ fn erase_subject(iri: &str) -> i64 {
     total_deleted
 }
 
-// ─── Internal helpers ─────────────────────────────────────────────────────────
+// ─── SQL-exported API ─────────────────────────────────────────────────────────
 
-fn graph_iri_to_policy_suffix(graph_iri: &str) -> String {
-    // Create a stable short suffix from the IRI for use in policy names.
-    use xxhash_rust::xxh3::xxh3_64;
-    format!("{:016x}", xxh3_64(graph_iri.as_bytes()))
-}
+#[pgrx::pg_schema]
+mod pg_ripple {
+    use pgrx::prelude::*;
 
-fn do_grant_graph_access(graph_iri: &str, role: &str, privilege: &str) {
-    let graph_id = crate::dictionary::encode(graph_iri, crate::dictionary::KIND_IRI);
-    let suffix = graph_iri_to_policy_suffix(graph_iri);
-    let policy_name = format!("pg_ripple_graph_{role}_{suffix}");
+    /// Grant a PostgreSQL role access to a named graph via Row-Level Security.
+    ///
+    /// Creates an RLS policy `pg_ripple_graph_<role>_<graph_suffix>` on the
+    /// `_pg_ripple.vp_rare` table for the named graph.
+    /// The policy allows SELECT (or the requested `privilege`) when the `g` column
+    /// equals the dictionary-encoded graph IRI.
+    ///
+    /// # Arguments
+    ///
+    /// - `graph_iri` — the named graph IRI (e.g. `<https://example.org/graph1>`).
+    /// - `role` — the PostgreSQL role name to grant access to.
+    /// - `privilege` — `'SELECT'` (default) or `'ALL'`.
+    #[pg_extern]
+    fn grant_graph_access(graph_iri: &str, role: &str, privilege: default!(&str, "'SELECT'")) {
+        super::do_grant_graph_access(graph_iri, role, privilege);
+    }
 
-    // Sanitise privilege to only allow safe values.
-    let pg_privilege = match privilege.to_uppercase().as_str() {
-        "SELECT" | "ALL" => privilege.to_uppercase(),
-        _ => {
-            pgrx::error!(
-                "PT710: grant_graph: invalid permission '{}'; use 'SELECT' or 'ALL'",
-                privilege
-            );
-        }
-    };
+    /// Revoke a PostgreSQL role's named-graph RLS access.
+    ///
+    /// Drops the RLS policy previously created by `grant_graph_access()`.
+    #[pg_extern]
+    fn revoke_graph_access(graph_iri: &str, role: &str) {
+        super::do_revoke_graph_access(graph_iri, role);
+    }
 
-    // Enable RLS on vp_rare if not already enabled (best effort).
-    let _ = pgrx::Spi::run_with_args(
-        "ALTER TABLE _pg_ripple.vp_rare ENABLE ROW LEVEL SECURITY",
-        &[],
-    );
-
-    // Create the policy on vp_rare.
-    let policy_sql = format!(
-        "CREATE POLICY {policy_name} ON _pg_ripple.vp_rare \
-         AS PERMISSIVE FOR {pg_privilege} TO {role} \
-         USING (g = {graph_id})"
-    );
-    pgrx::Spi::run_with_args(&policy_sql, &[]).unwrap_or_else(|e| {
-        pgrx::warning!("grant_graph_access: policy creation failed: {e}");
-    });
-}
-
-fn do_revoke_graph_access(graph_iri: &str, role: &str) {
-    let suffix = graph_iri_to_policy_suffix(graph_iri);
-    let policy_name = format!("pg_ripple_graph_{role}_{suffix}");
-
-    let drop_sql = format!("DROP POLICY IF EXISTS {policy_name} ON _pg_ripple.vp_rare");
-    pgrx::Spi::run_with_args(&drop_sql, &[]).unwrap_or_else(|e| {
-        pgrx::warning!("revoke_graph_access: policy drop failed: {e}");
-    });
+    /// Atomically erase all triples whose subject equals `encode(iri)`.
+    ///
+    /// Deletes from:
+    /// - all dedicated VP tables (`_pg_ripple.vp_*`)
+    /// - `_pg_ripple.vp_rare` (for rare predicates)
+    /// - `_pg_ripple.dictionary` (removes the subject's dictionary entry if no longer referenced)
+    /// - `_pg_ripple.kge_embeddings` (removes embedding rows for the subject)
+    ///
+    /// Returns the count of deleted triples.
+    ///
+    /// # GDPR note
+    ///
+    /// This function provides a best-effort erasure path.  For guaranteed erasure
+    /// including WAL and backup media, a full backup cycle is required after calling
+    /// this function.
+    #[pg_extern]
+    fn erase_subject(iri: &str) -> i64 {
+        super::erase_subject_impl(iri)
+    }
 }
 
 #[cfg(any(test, feature = "pg_test"))]
@@ -186,7 +194,8 @@ mod tests {
     #[pg_test]
     fn test_erase_subject_no_data() {
         // Erasing a non-existent subject should return 0 without error.
-        let result = super::erase_subject("<https://example.org/nonexistent>");
+        let result = crate::security_api::erase_subject_impl("<https://example.org/nonexistent>");
         assert_eq!(result, 0, "erase_subject on nonexistent IRI must return 0");
     }
 }
+
