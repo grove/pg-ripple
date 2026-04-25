@@ -1010,7 +1010,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Check for unsafe dynamic SQL patterns
         run: bash scripts/check_no_string_format_in_sql.sh
 
@@ -1019,7 +1019,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Check all PT error codes are documented
         run: bash scripts/check_pt_codes.sh
 
@@ -1028,7 +1028,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Check migration script headers
         run: bash scripts/check_migration_headers.sh
 
@@ -1037,7 +1037,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
       - name: Check for duplicate direct dependencies (advisory)
         run: |
@@ -1054,7 +1054,7 @@ jobs:
     name: Lint - SPDX licence compliance (v0.51.0)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
       - name: Install cargo-license
         run: cargo install cargo-license --locked
