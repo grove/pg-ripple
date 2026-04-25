@@ -19,7 +19,7 @@ SHOW pg_ripple.columnar_threshold;
 -- Test: adaptive_indexing_enabled GUC.
 SHOW pg_ripple.adaptive_indexing_enabled;
  pg_ripple.adaptive_indexing_enabled 
---------------------------------------
+-------------------------------------
  off
 (1 row)
 

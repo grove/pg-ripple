@@ -17,6 +17,7 @@ RESET pg_ripple.llm_endpoint;
 RESET pg_ripple.llm_model;
 -- Test: repair_sparql without endpoint returns empty string.
 SELECT pg_ripple.repair_sparql('SELECT ?s WHERE { ?s ?p ?o }', '') = '' AS empty_without_endpoint;
+WARNING:  repair_sparql: pg_ripple.llm_endpoint is not set; returning empty repair
  empty_without_endpoint 
 ------------------------
  t

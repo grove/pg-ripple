@@ -129,7 +129,7 @@ pub(crate) fn erase_subject_impl(iri: &str) -> i64 {
     .unwrap_or(false);
     if kge_exists {
         let _ = pgrx::Spi::run_with_args(
-            "DELETE FROM _pg_ripple.kge_embeddings WHERE s = $1",
+            "DELETE FROM _pg_ripple.kge_embeddings WHERE entity_id = $1",
             &[DatumWithOid::from(subject_id)],
         );
     }
