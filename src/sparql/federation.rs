@@ -89,9 +89,12 @@ fn get_agent(timeout: Duration, pool_size: usize) -> ureq::Agent {
                     .build(),
             );
         }
-        // SAFETY: we just ensured opt.is_some()
-        #[allow(clippy::unwrap_used)]
-        opt.as_ref().unwrap().clone()
+        // opt is Some(…) because we just set it above when it was None.
+        // Using unwrap_or_else with unreachable! avoids both clippy::unwrap_used
+        // and clippy::expect_used while preserving the invariant documentation.
+        opt.as_ref()
+            .unwrap_or_else(|| unreachable!("get_agent: agent should be Some after init"))
+            .clone()
     })
 }
 
@@ -100,7 +103,126 @@ pub(crate) fn get_agent_pub(timeout: Duration, pool_size: usize) -> ureq::Agent 
     get_agent(timeout, pool_size)
 }
 
-// ─── Allowlist check ─────────────────────────────────────────────────────────
+// ─── Endpoint policy check (v0.55.0) ─────────────────────────────────────────
+
+/// Check the federation endpoint network policy for `url`.
+///
+/// Three policy modes are supported:
+/// - `'open'`         — allow all endpoints (development/testing only).
+/// - `'allowlist'`    — only permit URLs listed in `pg_ripple.federation_allowed_endpoints`.
+/// - `'default-deny'` — block RFC-1918, loopback, link-local, and `file://` URLs.
+///
+/// Returns `Ok(())` when the URL is permitted, or `Err(message)` when blocked.
+///
+/// Error messages begin with `PT606:` for observability.
+pub(crate) fn check_endpoint_policy(url: &str) -> Result<(), String> {
+    let policy = crate::FEDERATION_ENDPOINT_POLICY
+        .get()
+        .map(|c| c.to_string_lossy().to_string())
+        .unwrap_or_else(|| "default-deny".to_string());
+
+    match policy.as_str() {
+        "open" => Ok(()),
+        "allowlist" => {
+            let allowed = crate::FEDERATION_ALLOWED_ENDPOINTS
+                .get()
+                .map(|c| c.to_string_lossy().to_string())
+                .unwrap_or_default();
+            let permitted = allowed
+                .split(',')
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .any(|entry| entry == url);
+            if permitted {
+                Ok(())
+            } else {
+                Err(format!(
+                    "PT606: SERVICE endpoint blocked by federation_endpoint_policy: {url}"
+                ))
+            }
+        }
+        _ => {
+            // default-deny: block private/loopback/link-local/file:// URLs.
+            if url.starts_with("file://") {
+                return Err(format!(
+                    "PT606: SERVICE endpoint blocked by federation_endpoint_policy: {url}"
+                ));
+            }
+
+            if extract_host(url).is_some_and(|host| is_blocked_host(&host)) {
+                return Err(format!(
+                    "PT606: SERVICE endpoint blocked by federation_endpoint_policy: {url}"
+                ));
+            }
+            Ok(())
+        }
+    }
+}
+
+/// Returns `true` when `host` is a loopback, link-local, or RFC-1918 address.
+fn is_blocked_host(host: &str) -> bool {
+    // loopback
+    if host == "localhost" || host == "127.0.0.1" || host == "::1" || host.starts_with("127.") {
+        return true;
+    }
+    // link-local IPv4: 169.254.x.x
+    if host.starts_with("169.254.") {
+        return true;
+    }
+    // link-local IPv6: fe80::
+    if host.to_lowercase().starts_with("fe80") {
+        return true;
+    }
+    // RFC-1918: 10.x.x.x
+    if host.starts_with("10.") {
+        return true;
+    }
+    // RFC-1918: 172.16.x.x – 172.31.x.x
+    if host
+        .strip_prefix("172.")
+        .and_then(|rest| rest.split('.').next())
+        .and_then(|s| s.parse::<u8>().ok())
+        .is_some_and(|second| (16..=31).contains(&second))
+    {
+        return true;
+    }
+    // RFC-1918: 192.168.x.x
+    if host.starts_with("192.168.") {
+        return true;
+    }
+    false
+}
+
+/// Extract the hostname/IP from a URL string without external dependencies.
+///
+/// Returns `None` for malformed URLs.
+fn extract_host(url: &str) -> Option<String> {
+    // Strip scheme (e.g. "https://").
+    let after_scheme = url.split_once("://").map(|(_, rest)| rest)?;
+    // Strip path, query, fragment.
+    let authority = after_scheme.split('/').next().unwrap_or(after_scheme);
+    // Strip userinfo@
+    let host_port = if let Some((_, hp)) = authority.split_once('@') {
+        hp
+    } else {
+        authority
+    };
+    // IPv6 literal: [::1]:port
+    if host_port.starts_with('[') {
+        return host_port
+            .split_once(']')
+            .map(|(h, _)| h.trim_start_matches('[').to_string());
+    }
+    // Strip port.
+    let host = host_port.split(':').next().unwrap_or(host_port);
+    if host.is_empty() {
+        None
+    } else {
+        Some(host.to_string())
+    }
+}
+
+// ─── Database allowlist check ────────────────────────────────────────────────
 
 /// Returns `true` when `url` is registered in `_pg_ripple.federation_endpoints`
 /// with `enabled = true`.
@@ -312,6 +434,23 @@ pub(crate) fn execute_remote(
 ) -> Result<(Vec<String>, Vec<Vec<Option<String>>>), String> {
     type RemoteResult = (Vec<String>, Vec<Vec<Option<String>>>);
 
+    // ── Endpoint policy check (v0.55.0) ───────────────────────────────────────
+    if let Err(e) = check_endpoint_policy(url) {
+        if crate::shmem::SHMEM_READY.load(std::sync::atomic::Ordering::Relaxed) {
+            crate::shmem::FED_BLOCKED_COUNT
+                .get()
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        }
+        return Err(e);
+    }
+
+    // v0.55.0 G-4: increment total call counter.
+    if crate::shmem::SHMEM_READY.load(std::sync::atomic::Ordering::Relaxed) {
+        crate::shmem::FED_CALL_COUNT
+            .get()
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    }
+
     // ── Cache check (v0.19.0) ─────────────────────────────────────────────────
     if let Some(cached_body) = cache_lookup(url, sparql_text) {
         return parse_sparql_results_json(&cached_body, max_results as usize)
@@ -360,6 +499,11 @@ pub(crate) fn execute_remote(
     // ── Cache store on success (v0.19.0) ──────────────────────────────────────
     if result.is_ok() {
         cache_store(url, sparql_text, &body);
+    } else if crate::shmem::SHMEM_READY.load(std::sync::atomic::Ordering::Relaxed) {
+        // v0.55.0 G-4: increment error counter on parse failure.
+        crate::shmem::FED_ERROR_COUNT
+            .get()
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     }
 
     result

@@ -1,32 +1,4 @@
 //! Delete-Rederive (DRed) algorithm for incremental retraction of derived facts (v0.34.0).
-//!
-//! # Background
-//!
-//! Standard Datalog materialisation builds a fixed-point closure over base facts.
-//! When a base triple is deleted, a naive implementation would re-run the entire
-//! inference from scratch.  DRed (Gupta, Katiyar & Sagiv, 1993) avoids that by:
-//!
-//! 1. **Over-delete** — pessimistically remove from the derived closure every row
-//!    that *could* depend on the deleted triple (using the rule SQL with the
-//!    deleted fact as a positive filter).
-//!
-//! 2. **Re-derive** — re-run the rule SQL restricted to the over-deleted set.
-//!    Any row that can still be derived via an alternative derivation path is
-//!    reinserted.
-//!
-//! 3. **Commit** — rows not reinserted after phase 2 are permanently removed.
-//!
-//! This produces exact, write-correct results without full re-materialisation.
-//! The error code `PT530` is emitted if a cycle is detected that DRed cannot
-//! safely resolve; the system falls back to full recompute in that case.
-//!
-//! ## GUC controls
-//!
-//! - `pg_ripple.dred_enabled` (bool, default `true`) — master switch.
-//! - `pg_ripple.dred_batch_size` (integer, default `1000`) — maximum number of
-//!   deleted base triples to process in a single DRed transaction.
-
-#![allow(dead_code)]
 
 use pgrx::datum::DatumWithOid;
 use pgrx::prelude::*;

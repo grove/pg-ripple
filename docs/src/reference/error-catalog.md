@@ -117,6 +117,9 @@ Errors from the Datalog rule parser, stratifier, and rule management.
 | PT406 | rule: unsafe variable `<var>` | A variable appears in the head but not in a positive body literal | Ensure every head variable also appears in a positive body literal |
 | PT407 | rule: built-in predicate not recognized: `<name>` | An unknown built-in predicate was used | Check available built-ins: `=`, `!=`, `<`, `>`, `<=`, `>=`, `+`, `-`, `*`, `/` |
 | PT408 | rule: aggregation variable not in group-by | An aggregated variable is used outside the grouping context | Add the variable to the group-by list |
+| PT440 | SPARQL query exceeds algebra depth or pattern limit | The query is too complex: its algebra tree is deeper than `pg_ripple.sparql_max_algebra_depth` or contains more triple patterns than `pg_ripple.sparql_max_triple_patterns` | Simplify the query, break it into smaller queries, or increase the limits |
+| PT480 | SHACL-AF sh:rule not compiled | `sh:rule` triples were found in the shapes but Datalog inference is disabled or the bridge failed | Enable inference with `pg_ripple.datalog_inference = 'on'`, or remove `sh:rule` triples |
+| PT481 | SHACL-SPARQL constraint query failed | A `sh:sparql` constraint's embedded SPARQL query could not be executed | Check the embedded SPARQL syntax and that all prefixes are declared in the shapes document |
 
 ---
 
@@ -136,10 +139,15 @@ Errors from the materialization engine, magic sets optimizer, WFS evaluator, and
 | PT507 | infer_agg: aggregation cycle detected | An aggregation rule depends on its own aggregate result | Rewrite to break the cycle |
 | PT508 | infer_goal: predicate not in any rule set | The goal predicate is not defined by any loaded rule | Load a rule set that defines the predicate |
 | PT509 | owl:sameAs canonicalization: cycle limit exceeded | The `owl:sameAs` equivalence class merging exceeded the iteration limit | Check for very large `owl:sameAs` clusters |
+| PT510 | infer_agg: aggregation-stratification violation | A rule's aggregate depends (directly or through recursion) on its own derived result | Rewrite rules so that aggregated predicates are not re-used in the rule set that derives them |
+| PT511 | infer_agg: unsupported aggregate function | The rule uses an aggregate not supported by the SQL compiler | Use one of `COUNT`, `SUM`, `MIN`, `MAX`, `AVG` |
 | PT520 | infer_wfs: iteration cap reached (`<N>` iterations) | The WFS alternating fixpoint did not converge within `pg_ripple.wfs_max_iterations` | Emitted as WARNING; partial result is returned with `"stratifiable": false`; increase the cap or simplify the rule set |
+| PT530 | DRed cycle detected: `<rule_set>` | Delete-Rederive detected a cycle in the rule derivation graph that it cannot safely resolve; the system falls back to full recompute | This is a WARNING, not an error; the operation still succeeds. Reduce cyclic dependencies in your rule set, or set `pg_ripple.dred_enabled = off` to always use full recompute |
 | PT540 | lattice: fixpoint did not converge after `<N>` iterations | The lattice fixpoint did not stabilise within `pg_ripple.lattice_max_iterations` | Increase `pg_ripple.lattice_max_iterations` or verify that the join function is monotone |
 | PT541 | lattice: join_fn `<name>` could not be resolved | The user-supplied join function name could not be resolved via `regprocedure` | Check the function name, schema, and argument types; use a fully-qualified name |
 | PT542 | federation: result decoder received unparseable XML/JSON | The SPARQL results response from a remote SERVICE endpoint could not be parsed | Check the endpoint's response format; ensure it returns `application/sparql-results+xml` or `+json` |
+| PT543 | federation response body exceeds `federation_max_response_bytes` | The HTTP response body from a remote SERVICE endpoint is larger than the configured limit | Increase `pg_ripple.federation_max_response_bytes`, or set it to `-1` to disable; consider filtering at the remote endpoint instead |
+| PT550 | owl:sameAs cluster too large: `<size>` members | An `owl:sameAs` equivalence class exceeds `pg_ripple.sameas_max_cluster_size`; canonicalization is skipped for this cluster | Investigate the data for spurious `owl:sameAs` triples; increase the limit if the cluster is legitimate |
 
 ---
 
@@ -155,7 +163,12 @@ Errors from export serializers, GraphRAG export, and the HTTP companion service.
 | PT603 | export_jsonld: framing failed | The JSON-LD framing algorithm encountered an error | Check the frame structure; see [JSON-LD Framing](../features/exporting-and-sharing.md) |
 | PT604 | export_graphrag_entities: no entities found | No entities match the GraphRAG export criteria | Load data or adjust the GraphRAG ontology |
 | PT605 | jsonld_frame_to_sparql: invalid frame | The JSON-LD frame could not be converted to SPARQL | Check the frame JSON structure |
-| PT606 | export: streaming interrupted | The streaming export was cancelled or the client disconnected | Retry the export |
+| PT606 | SERVICE endpoint blocked by federation_endpoint_policy | The federation endpoint URL was blocked by `pg_ripple.federation_endpoint_policy` (v0.55.0). Blocked targets include RFC-1918 addresses, loopback, link-local, and `file://` URLs in `default-deny` mode, or URLs not in `federation_allowed_endpoints` in `allowlist` mode | Set `federation_endpoint_policy = 'open'` (dev only), add the URL to `federation_allowed_endpoints`, or use a public endpoint. Also used as the streaming-interrupted code (v0.48.0 meaning: streaming export was cancelled) |
+| PT607 | vector service endpoint not registered | The vector endpoint URL is not registered in `_pg_ripple.federation_endpoints` | Register the endpoint with `pg_ripple.register_endpoint()` |
+| PT620 | SERVICE result set exceeds inline limit | The remote SERVICE returned more rows than `pg_ripple.federation_inline_max_rows`; results were materialized via a temp table instead | Increase `federation_inline_max_rows` or filter at the remote endpoint |
+| PT621 | register_endpoint: private IP rejected | The endpoint URL resolves to a private/loopback IP and `pg_ripple.federation_allow_private = off` | Set `federation_allow_private = on` (development only) or use a public endpoint |
+| PT640 | SPARQL result set exceeded sparql_max_rows | The result set was too large; truncated to `pg_ripple.sparql_max_rows` | Increase `pg_ripple.sparql_max_rows` or add LIMIT/OFFSET to the query |
+| PT642 | export truncated to `<N>` rows | The streaming export hit `pg_ripple.export_max_rows` | Increase `pg_ripple.export_max_rows` or paginate using OFFSET |
 
 ---
 
@@ -176,6 +189,18 @@ Errors from extension initialization, GUC validation, and background workers.
 | PT708 | pgvector not installed | A vector/embedding function was called without pgvector | Install pgvector or disable with `pg_ripple.pgvector_enabled = off` |
 | PT709 | enable_graph_rls: RLS policy creation failed | Row-level security policy could not be created | Check superuser privileges |
 | PT710 | grant_graph: invalid permission | Permission must be `'read'`, `'write'`, or `'admin'` | Use one of the three valid permission strings |
+| PT711 | JSON-LD: unrecognised @embed value | The JSON-LD frame contains an unrecognised `@embed` keyword value (valid values are `@once`, `@always`, `@never`) | Fix the frame's `@embed` value |
+| PT712 | JSON-LD: frame nesting depth exceeded | The JSON-LD frame's nesting depth exceeds `pg_ripple.max_path_depth` | Increase `pg_ripple.max_path_depth` or simplify the frame |
+
+---
+
+## PT800–PT899: pg-trickle CDC Bridge
+
+Errors from the pg-trickle CDC bridge integration.
+
+| Code | Message | Cause | Fix |
+|---|---|---|---|
+| PT800 | pg_trickle not installed or trickle_integration disabled | A CDC bridge function was called but the pg_trickle extension is not installed or `pg_ripple.trickle_integration = off` | Install pg_trickle and set `pg_ripple.trickle_integration = on`, or use `pg_ripple.load_ntriples()` for direct loads |
 
 ```admonish warning title="Reporting bugs"
 If you encounter an error code not listed here, or a message that says "contact maintainers", please open a GitHub issue with the full error output, your pg_ripple version (`SELECT pg_ripple.canary()`), and a minimal reproducer.

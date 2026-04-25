@@ -58,3 +58,17 @@ pub static FEDERATION_ALLOW_PRIVATE: pgrx::GucSetting<bool> = pgrx::GucSetting::
 /// GUC: maximum federation response body in bytes (v0.48.0).
 pub static FEDERATION_MAX_RESPONSE_BYTES: pgrx::GucSetting<i32> =
     pgrx::GucSetting::<i32>::new(104_857_600);
+
+// ─── v0.55.0 federation security GUCs ──────────────────────────────────────
+
+/// GUC: federation endpoint network policy (v0.55.0).
+/// Values: 'default-deny' (block private/loopback/link-local),
+///         'allowlist' (only explicitly listed),
+///         'open' (allow all — use with care).
+pub static FEDERATION_ENDPOINT_POLICY: pgrx::GucSetting<Option<std::ffi::CString>> =
+    pgrx::GucSetting::<Option<std::ffi::CString>>::new(Some(c"default-deny"));
+
+/// GUC: comma-separated list of allowed federation endpoints (v0.55.0).
+/// Only consulted when `pg_ripple.federation_endpoint_policy = 'allowlist'`.
+pub static FEDERATION_ALLOWED_ENDPOINTS: pgrx::GucSetting<Option<std::ffi::CString>> =
+    pgrx::GucSetting::<Option<std::ffi::CString>>::new(None);

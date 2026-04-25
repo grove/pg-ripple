@@ -45,7 +45,6 @@ use pgrx::prelude::*;
 use std::cell::RefCell;
 use std::num::NonZeroUsize;
 use xxhash_rust::xxh3::xxh3_128;
-
 const CACHE_CAPACITY: usize = 16_384;
 
 pub const KIND_IRI: i16 = 0;
@@ -105,6 +104,18 @@ fn term_hash(term: &str, kind: i16) -> u128 {
 /// 2. Backend-local LRU cache (fast, no lock)
 /// 3. SPI round-trip to `_pg_ripple.dictionary`
 pub fn encode(term: &str, kind: i16) -> i64 {
+    // v0.55.0 C-1: NFC normalize IRIs (and blank nodes) when NORMALIZE_IRIS=true.
+    // This ensures that semantically identical IRIs with different Unicode
+    // representations hash to the same dictionary entry.
+    if (kind == KIND_IRI || kind == KIND_BLANK) && crate::NORMALIZE_IRIS.get() {
+        use unicode_normalization::UnicodeNormalization;
+        let normalized: String = term.nfc().collect();
+        return encode_inner(&normalized, kind);
+    }
+    encode_inner(term, kind)
+}
+
+fn encode_inner(term: &str, kind: i16) -> i64 {
     let hash128 = term_hash(term, kind);
 
     // Tier 1: shared-memory encode cache (v0.6.0).

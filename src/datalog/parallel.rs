@@ -45,7 +45,7 @@ pub struct ParallelGroup {
 #[derive(Debug, Clone)]
 pub struct ParallelAnalysis {
     /// The independent groups.  A single-element vec means no parallelism.
-    #[allow(dead_code)]
+    #[allow(dead_code)] // accessed via coordinator::analyze_groups; not yet read directly
     pub groups: Vec<ParallelGroup>,
     /// Number of independent groups (= `groups.len()`).
     pub parallel_groups: usize,
@@ -337,7 +337,7 @@ pub fn preallocate_sid_ranges(
 /// function with the compiled SQL for that group.  A failed group's delta
 /// tables are left empty for this iteration (the group will be retried next
 /// round), while successful groups commit their results immediately.
-#[allow(dead_code)]
+#[allow(dead_code)] // called from coordinator::execute_stratum_batch
 pub fn execute_with_savepoint(stmts: &[String], savepoint_name: &str) -> bool {
     use pgrx::Spi;
 

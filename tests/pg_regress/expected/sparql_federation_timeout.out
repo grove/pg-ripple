@@ -75,7 +75,7 @@ SELECT COUNT(*) AS timeout_empty_count
 FROM pg_ripple.sparql(
     'SELECT ?s WHERE { SERVICE <http://127.0.0.1:19998/timeout-test> { ?s ?p ?o } }'
 );
-ERROR:  federation endpoint not registered: http://127.0.0.1:19998/timeout-test; use pg_ripple.register_endpoint() to allow it
+ERROR:  PT606: SERVICE endpoint blocked by federation_endpoint_policy: http://127.0.0.1:19998/timeout-test
 RESET pg_ripple.federation_timeout;
 RESET pg_ripple.federation_on_error;
 SELECT pg_ripple.remove_endpoint('http://127.0.0.1:19998/timeout-test');

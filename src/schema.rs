@@ -42,12 +42,13 @@ CREATE SEQUENCE IF NOT EXISTS _pg_ripple.load_generation_seq
 
 -- Predicate catalog
 CREATE TABLE IF NOT EXISTS _pg_ripple.predicates (
-    id           BIGINT  NOT NULL PRIMARY KEY,
-    table_oid    OID,
-    triple_count BIGINT  NOT NULL DEFAULT 0,
-    htap         BOOLEAN NOT NULL DEFAULT false,
-    schema_name  TEXT,
-    table_name   TEXT
+    id                    BIGINT      NOT NULL PRIMARY KEY,
+    table_oid             OID,
+    triple_count          BIGINT      NOT NULL DEFAULT 0,
+    htap                  BOOLEAN     NOT NULL DEFAULT false,
+    schema_name           TEXT,
+    table_name            TEXT,
+    tombstones_cleared_at TIMESTAMPTZ
 );
 
 -- Rare-predicate consolidation table
@@ -911,4 +912,11 @@ pgrx::extension_sql!(
      VALUES ('0.54.0', '0.53.0', clock_timestamp());",
     name = "v054_schema_version_stamp",
     requires = ["v054_replication_status"]
+);
+
+pgrx::extension_sql!(
+    "INSERT INTO _pg_ripple.schema_version (version, upgraded_from, installed_at) \
+     VALUES ('0.55.0', '0.54.0', clock_timestamp());",
+    name = "v055_schema_version_stamp",
+    requires = ["v054_schema_version_stamp"]
 );

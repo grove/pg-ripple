@@ -199,7 +199,7 @@ SELECT COUNT(*) AS projection_test_count
 FROM pg_ripple.sparql(
     'SELECT ?s WHERE { SERVICE <http://127.0.0.1:19998/sparql> { ?s ?p ?o } }'
 );
-ERROR:  federation endpoint not registered: http://127.0.0.1:19998/sparql; use pg_ripple.register_endpoint() to allow it
+ERROR:  PT606: SERVICE endpoint blocked by federation_endpoint_policy: http://127.0.0.1:19998/sparql
 RESET pg_ripple.federation_on_error;
 RESET pg_ripple.federation_timeout;
 -- ─── Partial result GUC accepted ─────────────────────────────────────────────
@@ -210,7 +210,7 @@ SELECT COUNT(*) AS partial_use_empty_count
 FROM pg_ripple.sparql(
     'SELECT ?s WHERE { SERVICE <http://127.0.0.1:19998/sparql> { ?s ?p ?o } }'
 );
-ERROR:  federation endpoint not registered: http://127.0.0.1:19998/sparql; use pg_ripple.register_endpoint() to allow it
+ERROR:  PT606: SERVICE endpoint blocked by federation_endpoint_policy: http://127.0.0.1:19998/sparql
 RESET pg_ripple.federation_on_partial;
 RESET pg_ripple.federation_on_error;
 RESET pg_ripple.federation_timeout;
@@ -223,7 +223,7 @@ SELECT COUNT(*) AS adaptive_fallback_count
 FROM pg_ripple.sparql(
     'SELECT ?s WHERE { SERVICE <http://127.0.0.1:19998/sparql> { ?s ?p ?o } }'
 );
-ERROR:  federation endpoint not registered: http://127.0.0.1:19998/sparql; use pg_ripple.register_endpoint() to allow it
+ERROR:  PT606: SERVICE endpoint blocked by federation_endpoint_policy: http://127.0.0.1:19998/sparql
 RESET pg_ripple.federation_adaptive_timeout;
 RESET pg_ripple.federation_on_error;
 RESET pg_ripple.federation_timeout;

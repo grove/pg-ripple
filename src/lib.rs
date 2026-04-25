@@ -40,6 +40,7 @@ mod llm;
 mod maintenance_api;
 mod replication;
 mod schema;
+mod security_api;
 mod shacl;
 mod shmem;
 mod sparql;
@@ -215,6 +216,9 @@ pub(crate) fn has_live_statistics() -> bool {
 /// Must only be called from `_PG_init` inside the postmaster context
 /// (i.e. when loaded via `shared_preload_libraries`).
 fn register_executor_end_hook() {
+    // SAFETY: ExecutorEnd_hook is a PostgreSQL global hook pointer; we install
+    // the standard hook-chaining pattern in postmaster context during _PG_init.
+    // The static mut is accessed only from `_PG_init` (single-threaded at startup).
     unsafe {
         static mut PREV_EXECUTOR_END: pg_sys::ExecutorEnd_hook_type = None;
 
@@ -265,6 +269,8 @@ pub extern "C-unwind" fn _PG_init() {
         if newval.is_null() {
             return true;
         }
+        // SAFETY: newval is a GUC check-hook argument; the pointer is valid for
+        // the duration of this call and the string has at least a NUL terminator.
         let s = unsafe {
             if (*newval).is_null() {
                 return true;
@@ -284,6 +290,8 @@ pub extern "C-unwind" fn _PG_init() {
         if newval.is_null() {
             return true;
         }
+        // SAFETY: newval is a GUC check-hook argument; the pointer is valid for
+        // the duration of this call and the string has at least a NUL terminator.
         let s = unsafe {
             if (*newval).is_null() {
                 return true;
@@ -303,6 +311,8 @@ pub extern "C-unwind" fn _PG_init() {
         if newval.is_null() {
             return true;
         }
+        // SAFETY: newval is a GUC check-hook argument; the pointer is valid for
+        // the duration of this call and the string has at least a NUL terminator.
         let s = unsafe {
             if (*newval).is_null() {
                 return true;
@@ -322,6 +332,8 @@ pub extern "C-unwind" fn _PG_init() {
         if newval.is_null() {
             return true;
         }
+        // SAFETY: newval is a GUC check-hook argument; the pointer is valid for
+        // the duration of this call and the string has at least a NUL terminator.
         let s = unsafe {
             if (*newval).is_null() {
                 return true;
@@ -341,6 +353,8 @@ pub extern "C-unwind" fn _PG_init() {
         if newval.is_null() {
             return true;
         }
+        // SAFETY: newval is a GUC check-hook argument; the pointer is valid for
+        // the duration of this call and the string has at least a NUL terminator.
         let s = unsafe {
             if (*newval).is_null() {
                 return true;
@@ -362,6 +376,8 @@ pub extern "C-unwind" fn _PG_init() {
         if newval.is_null() {
             return true;
         }
+        // SAFETY: newval is a GUC check-hook argument; the pointer is valid for
+        // the duration of this call and the string has at least a NUL terminator.
         let s = unsafe {
             if (*newval).is_null() {
                 return true;
@@ -381,6 +397,8 @@ pub extern "C-unwind" fn _PG_init() {
         if newval.is_null() {
             return true;
         }
+        // SAFETY: newval is a GUC check-hook argument; the pointer is valid for
+        // the duration of this call and the string has at least a NUL terminator.
         let s = unsafe {
             if (*newval).is_null() {
                 return true;
@@ -400,6 +418,8 @@ pub extern "C-unwind" fn _PG_init() {
         if newval.is_null() {
             return true;
         }
+        // SAFETY: newval is a GUC check-hook argument; the pointer is valid for
+        // the duration of this call and the string has at least a NUL terminator.
         let s = unsafe {
             if (*newval).is_null() {
                 return true;
@@ -419,6 +439,8 @@ pub extern "C-unwind" fn _PG_init() {
         if newval.is_null() {
             return true;
         }
+        // SAFETY: newval is a GUC check-hook argument; the pointer is valid for
+        // the duration of this call and the string has at least a NUL terminator.
         let s = unsafe {
             if (*newval).is_null() {
                 return true;
@@ -438,6 +460,8 @@ pub extern "C-unwind" fn _PG_init() {
         if newval.is_null() {
             return true;
         }
+        // SAFETY: newval is a GUC check-hook argument; the pointer is valid for
+        // the duration of this call and the string has at least a NUL terminator.
         let s = unsafe {
             if (*newval).is_null() {
                 return true;
@@ -457,6 +481,8 @@ pub extern "C-unwind" fn _PG_init() {
         if newval.is_null() {
             return true;
         }
+        // SAFETY: newval is a GUC check-hook argument; the pointer is valid for
+        // the duration of this call and the string has at least a NUL terminator.
         let s = unsafe {
             if (*newval).is_null() {
                 return true;
@@ -464,6 +490,43 @@ pub extern "C-unwind" fn _PG_init() {
             std::ffi::CStr::from_ptr(*newval).to_str().unwrap_or("")
         };
         matches!(s, "single" | "half" | "binary")
+    }
+
+    /// v0.55.0 H-2: Assign hook for `pg_ripple.llm_api_key_env`.
+    ///
+    /// Emits a WARNING if the value looks like a raw API key (i.e., contains
+    /// non-identifier characters such as hyphens, dots, slashes, or lowercase
+    /// letters mixed with digits) rather than an environment-variable name.
+    /// Environment variable names are conventionally ALL_CAPS with underscores.
+    #[pg_guard]
+    unsafe extern "C-unwind" fn assign_llm_api_key_env(
+        newval: *const std::ffi::c_char,
+        _extra: *mut std::ffi::c_void,
+    ) {
+        if newval.is_null() {
+            return;
+        }
+        // SAFETY: newval is a GUC assign-hook argument; pointer is valid for
+        // the duration of this call and the string has at least a NUL terminator.
+        let s = unsafe { std::ffi::CStr::from_ptr(newval).to_str().unwrap_or("") };
+        if s.is_empty() {
+            return;
+        }
+        // Heuristic: env var names only contain A-Z, 0-9, and underscores.
+        // If the value contains lowercase letters, hyphens, slashes, or looks
+        // like a base64/JWT token (long string with mixed chars), warn the user.
+        let looks_like_raw_key = s.len() > 20
+            || s.contains(['-', '.', '/', '=', '+'])
+            || s.chars().any(|c| c.is_ascii_lowercase());
+        if looks_like_raw_key {
+            pgrx::warning!(
+                "pg_ripple.llm_api_key_env looks like a raw API key, not an \
+                 environment variable name. Set it to the NAME of an env var \
+                 (e.g. MY_LLM_KEY) rather than the key value itself. \
+                 Storing API keys in GUCs is insecure: they appear in \
+                 pg_settings and server logs."
+            );
+        }
     }
 
     pgrx::GucRegistry::define_string_guc(
@@ -518,6 +581,8 @@ pub extern "C-unwind" fn _PG_init() {
     );
 
     // v0.37.0: validated describe_strategy
+    // SAFETY: define_string_guc_with_hooks requires an unsafe block;
+    // the hook function pointers are valid extern "C" function pointers.
     unsafe {
         pgrx::GucRegistry::define_string_guc_with_hooks(
             c"pg_ripple.describe_strategy",
@@ -601,6 +666,8 @@ pub extern "C-unwind" fn _PG_init() {
     // ── v0.7.0 GUCs ──────────────────────────────────────────────────────────
 
     // v0.37.0: validated shacl_mode
+    // SAFETY: define_string_guc_with_hooks requires an unsafe block;
+    // the hook function pointers are valid extern "C" function pointers.
     unsafe {
         pgrx::GucRegistry::define_string_guc_with_hooks(
             c"pg_ripple.shacl_mode",
@@ -627,6 +694,8 @@ pub extern "C-unwind" fn _PG_init() {
     // ── v0.10.0 GUCs ─────────────────────────────────────────────────────────
 
     // v0.37.0: Use define_string_guc_with_hooks to validate enum values at SET time.
+    // SAFETY: define_string_guc_with_hooks requires an unsafe block;
+    // the hook function pointers are valid extern "C" function pointers.
     unsafe {
         pgrx::GucRegistry::define_string_guc_with_hooks(
             c"pg_ripple.inference_mode",
@@ -737,6 +806,8 @@ pub extern "C-unwind" fn _PG_init() {
     );
 
     // v0.47.0: validated federation_on_error
+    // SAFETY: define_string_guc_with_hooks requires an unsafe block;
+    // the hook function pointers are valid extern "C" function pointers.
     unsafe {
         pgrx::GucRegistry::define_string_guc_with_hooks(
             c"pg_ripple.federation_on_error",
@@ -776,6 +847,8 @@ pub extern "C-unwind" fn _PG_init() {
     );
 
     // v0.47.0: validated federation_on_partial
+    // SAFETY: define_string_guc_with_hooks requires an unsafe block;
+    // the hook function pointers are valid extern "C" function pointers.
     unsafe {
         pgrx::GucRegistry::define_string_guc_with_hooks(
             c"pg_ripple.federation_on_partial",
@@ -905,6 +978,8 @@ pub extern "C-unwind" fn _PG_init() {
     );
 
     // v0.47.0: validated embedding_index_type and embedding_precision
+    // SAFETY: define_string_guc_with_hooks requires an unsafe block;
+    // the hook function pointers are valid extern "C" function pointers.
     unsafe {
         pgrx::GucRegistry::define_string_guc_with_hooks(
             c"pg_ripple.embedding_index_type",
@@ -1278,6 +1353,8 @@ pub extern "C-unwind" fn _PG_init() {
     );
 
     // v0.47.0: validated sparql_overflow_action
+    // SAFETY: define_string_guc_with_hooks requires an unsafe block;
+    // the hook function pointers are valid extern "C" function pointers.
     unsafe {
         pgrx::GucRegistry::define_string_guc_with_hooks(
             c"pg_ripple.sparql_overflow_action",
@@ -1304,6 +1381,8 @@ pub extern "C-unwind" fn _PG_init() {
     );
 
     // v0.47.0: validated tracing_exporter
+    // SAFETY: define_string_guc_with_hooks requires an unsafe block;
+    // the hook function pointers are valid extern "C" function pointers.
     unsafe {
         pgrx::GucRegistry::define_string_guc_with_hooks(
             c"pg_ripple.tracing_exporter",
@@ -1437,6 +1516,27 @@ pub extern "C-unwind" fn _PG_init() {
         GucFlags::default(),
     );
 
+    // ── v0.55.0 GUCs — Federation SSRF Security ──────────────────────────────
+    pgrx::GucRegistry::define_string_guc(
+        c"pg_ripple.federation_endpoint_policy",
+        c"Network policy for SERVICE clause endpoints: 'default-deny' (block RFC-1918/loopback/link-local), \
+          'allowlist' (only pg_ripple.federation_allowed_endpoints), 'open' (allow all). (v0.55.0)",
+        c"",
+        &FEDERATION_ENDPOINT_POLICY,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+
+    pgrx::GucRegistry::define_string_guc(
+        c"pg_ripple.federation_allowed_endpoints",
+        c"Comma-separated list of allowed federation SERVICE endpoints. \
+          Only consulted when federation_endpoint_policy = 'allowlist'. (v0.55.0)",
+        c"",
+        &FEDERATION_ALLOWED_ENDPOINTS,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+
     // ── v0.49.0 GUCs — AI & LLM Integration ──────────────────────────────────
     pgrx::GucRegistry::define_string_guc(
         c"pg_ripple.llm_endpoint",
@@ -1457,15 +1557,22 @@ pub extern "C-unwind" fn _PG_init() {
         GucFlags::default(),
     );
 
-    pgrx::GucRegistry::define_string_guc(
-        c"pg_ripple.llm_api_key_env",
-        c"Name of the environment variable holding the LLM API key \
-          (default: PG_RIPPLE_LLM_API_KEY). Never stored inline. (v0.49.0)",
-        c"",
-        &LLM_API_KEY_ENV,
-        GucContext::Userset,
-        GucFlags::default(),
-    );
+    // SAFETY: define_string_guc_with_hooks requires an unsafe block;
+    // the hook function pointers are valid extern "C" function pointers.
+    unsafe {
+        pgrx::GucRegistry::define_string_guc_with_hooks(
+            c"pg_ripple.llm_api_key_env",
+            c"Name of the environment variable holding the LLM API key \
+              (default: PG_RIPPLE_LLM_API_KEY). Never stored inline. (v0.49.0)",
+            c"",
+            &LLM_API_KEY_ENV,
+            GucContext::Userset,
+            GucFlags::default(),
+            None,
+            Some(assign_llm_api_key_env),
+            None,
+        );
+    }
 
     pgrx::GucRegistry::define_bool_guc(
         c"pg_ripple.llm_include_shapes",
@@ -1588,6 +1695,52 @@ pub extern "C-unwind" fn _PG_init() {
         c"",
         &REPLICATION_CONFLICT_STRATEGY,
         GucContext::Sighup,
+        GucFlags::default(),
+    );
+
+    // ── v0.55.0 GUCs — Security & Storage Quality ────────────────────────────
+
+    pgrx::GucRegistry::define_int_guc(
+        c"pg_ripple.tombstone_retention_seconds",
+        c"Seconds to retain tombstones after a merge cycle. \
+          0 (default) = truncate tombstones immediately after a full merge. (v0.55.0)",
+        c"",
+        &TOMBSTONE_RETENTION_SECONDS,
+        0,
+        86400,
+        GucContext::Sighup,
+        GucFlags::default(),
+    );
+
+    pgrx::GucRegistry::define_bool_guc(
+        c"pg_ripple.normalize_iris",
+        c"When on (default), normalize IRI strings to NFC before dictionary encoding. \
+          Ensures that semantically equivalent IRIs with different Unicode normalization \
+          map to the same dictionary entry. (v0.55.0)",
+        c"",
+        &NORMALIZE_IRIS,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+
+    pgrx::GucRegistry::define_string_guc(
+        c"pg_ripple.copy_rdf_allowed_paths",
+        c"Comma-separated list of allowed path prefixes for copy_rdf_from(). \
+          When set, only paths matching a listed prefix are permitted. \
+          When empty (default), ALL paths are denied (PT403 default-deny policy). (v0.55.0)",
+        c"",
+        &COPY_RDF_ALLOWED_PATHS,
+        GucContext::Sighup,
+        GucFlags::default(),
+    );
+
+    pgrx::GucRegistry::define_string_guc(
+        c"pg_ripple.read_replica_dsn",
+        c"DSN for a read replica to route SELECT/CONSTRUCT/ASK/DESCRIBE queries to. \
+          Falls back to primary on connection failure (PT530 WARNING). (v0.55.0)",
+        c"",
+        &READ_REPLICA_DSN,
+        GucContext::Userset,
         GucFlags::default(),
     );
 

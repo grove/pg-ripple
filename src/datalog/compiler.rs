@@ -1,4 +1,3 @@
-#![allow(dead_code)]
 //! SQL compiler for Datalog rules.
 //!
 //! Each Datalog rule is compiled to one or more SQL statements:
@@ -41,6 +40,7 @@ fn const_sql(id: i64) -> String {
 
 /// Render a term in SQL: `?var` → alias column reference; `Const(n)` → integer literal.
 /// `alias` is the table alias for this atom's join position (e.g. "t0", "t1").
+#[allow(dead_code)] // used by compile_rule_delta_variants and compile_single_rule_to
 fn render_term_col(term: &Term, alias: &str, col: &str) -> String {
     match term {
         Term::Var(v) => format!("{alias}_{v}"), // resolved later as bound column
@@ -51,6 +51,7 @@ fn render_term_col(term: &Term, alias: &str, col: &str) -> String {
 }
 
 /// Check whether a term is a variable.
+#[allow(dead_code)] // used in conditional logic and future optimizations
 fn is_var(term: &Term) -> bool {
     matches!(term, Term::Var(_))
 }
@@ -1231,8 +1232,8 @@ fn arith_op_sql(op: &ArithOp) -> &'static str {
 /// only consider tuples that include at least one row from the delta
 /// of the previous iteration, avoiding redundant recomputation.
 ///
-/// Returns one SQL string per generated variant (may be empty if no body atoms
-/// reference derived predicates).
+/// Like `compile_rule_delta_variants_to` but uses the default VP delta table targets.
+#[allow(dead_code)] // public API; compile_rule_delta_variants_to is the canonical form
 pub fn compile_rule_delta_variants(
     rule: &Rule,
     derived_pred_ids: &std::collections::HashSet<i64>,

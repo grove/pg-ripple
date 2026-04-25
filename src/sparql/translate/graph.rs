@@ -245,6 +245,17 @@ pub(crate) fn translate_service(
         }
     };
 
+    // v0.55.0: SSRF / endpoint-policy check MUST run before the registration
+    // check so that PT606 is raised for private/cloud-metadata addresses even
+    // when the endpoint is not (and will never be) registered.
+    if let Err(policy_err) = federation::check_endpoint_policy(&url) {
+        if silent {
+            pgrx::warning!("SERVICE endpoint blocked by policy (SILENT skipping): {url}");
+            return service_silent_fallback(ctx);
+        }
+        pgrx::error!("{}", policy_err);
+    }
+
     if !federation::is_endpoint_allowed(&url) {
         if silent {
             pgrx::warning!("SERVICE endpoint not registered (SILENT skipping): {url}");

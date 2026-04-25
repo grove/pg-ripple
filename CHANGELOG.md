@@ -13,6 +13,66 @@ Versions correspond to the milestones in [ROADMAP.md](ROADMAP.md).
 
 ---
 
+## [0.55.0] — 2026-04-24 — Security Hardening, Observability & Developer Experience
+
+**Implements the v0.55.0 roadmap: federation SSRF protection, Unicode normalization, tombstone GC optimization, SPARQL-star annotation tests, SHACL snapshot semantics, Datalog dead-code cleanup, pg_ripple_http OpenAPI spec and VoID/Service endpoints, parallel concurrent insert tests, and comprehensive error catalog additions.**
+
+### What's new
+
+- **Federation SSRF allowlist** (G-1/H-1): New GUCs `pg_ripple.federation_endpoint_policy` (default: `default-deny`) and `pg_ripple.federation_allowed_endpoints`. The `check_endpoint_policy()` guard blocks private/loopback/link-local addresses unless the policy is `open`. PT606 errors emitted for blocked endpoints.
+
+- **Federation call stats** (G-4): New `pg_ripple.federation_call_stats()` SRF returning `(calls, errors, blocked)` from in-memory atomic counters. Counters are updated by `execute_remote()` and reset on postmaster restart.
+
+- **Unicode NFC normalization** (C-1): New bool GUC `pg_ripple.normalize_iris` (default: `on`). When enabled, all IRIs and blank nodes are NFC-normalized before dictionary encoding. Requires the new `unicode-normalization` crate dependency.
+
+- **COPY RDF path allowlist** (C-2): New GUC `pg_ripple.copy_rdf_allowed_paths` (comma-separated path prefixes). When set, `load_*_file()` functions reject paths not matching an allowed prefix with PT480.
+
+- **Tombstone GC optimization** (F-2): When `pg_ripple.tombstone_retention_seconds = 0`, the merge worker now `TRUNCATE`s the tombstones table after a successful merge instead of issuing a `DELETE … WHERE i <= $1`. Also records `tombstones_cleared_at` in the predicates catalog. Migration script adds the `tombstones_cleared_at TIMESTAMPTZ` column.
+
+- **LLM API key warning** (H-2): New assign hook for `pg_ripple.llm_api_key_env` emits a `WARNING` if the value looks like a raw API key rather than an environment-variable name. Security documentation added to `docs/src/reference/security.md`.
+
+- **pg_ripple_http OpenAPI spec** (K-1): Added `utoipa` and `utoipa-scalar` dependencies. `GET /openapi.yaml` returns the OpenAPI 3.1 specification for the HTTP service.
+
+- **pg_ripple_http VoID and Service Description** (L-7.2/L-7.4): `GET /void` returns a Turtle VoID dataset description with triple counts; `GET /service` returns a W3C SPARQL Service Description document.
+
+- **Health endpoint enriched** (I-3): `GET /health` now returns structured JSON including `version`, `git_sha`, `postgres_connected`, `postgres_version`, and `last_query_ts`.
+
+- **SHACL validation snapshot LSN** (D-2): The `run_validate()` JSON report now includes `validation_snapshot_lsn` (WAL LSN captured at validation start) so consumers can correlate reports with a specific database state.
+
+- **DESCRIBE strategy documentation** (B-2): `docs/src/reference/sparql-compliance.md` now documents all four `describe_strategy` values (`cbd`, `scbd`, `simple`) with definitions, examples, and a comparison table.
+
+- **SPARQL-star annotation tests** (B-4): New pg_regress test `tests/pg_regress/sql/sparql_star_annotation.sql` with expected output covering the full annotation pattern (load, query, filter, provenance, nested annotations, CONSTRUCT).
+
+- **Merge/vector CI baseline gates** (F-5/F-6): `.github/workflows/benchmark.yml` now includes merge throughput and vector recall baseline gate steps that compare measured performance against `benchmarks/merge_throughput_baselines.json`.
+
+- **Crash recovery test** (J-2): New `tests/crash_recovery/merge_kill.sh` tests SIGKILL during merge with tombstone table recovery.
+
+- **Concurrent write test** (J-3): New `tests/concurrent/parallel_insert.sh` launches N parallel psql sessions each inserting a disjoint triple set and verifies no writes are lost or duplicated.
+
+- **Logical replication example** (K-2): New `examples/replication_setup.sql` with annotated walkthrough of primary + replica setup using `pg_ripple.replication_enabled = on`.
+
+- **sh:path helper audit** (D-1): Audited `values_for_path_iri` in `src/shacl/constraints/property_path.rs` — all `ShPath` variants are handled correctly; updated `#[allow(dead_code)]` documentation.
+
+- **Datalog dead-code cleanup** (E-2/E-3): Removed module-level `#![allow(dead_code)]` from `dred.rs` and `compiler.rs`; functions genuinely unused now have per-function `#[allow(dead_code)]` with explanatory comments.
+
+- **Savepoint safety** (E-1): `execute_with_savepoint` wired into coordinator's `execute_stratum_batch`, ensuring each stratum evaluates within a savepoint to protect against partial-evaluation failures.
+
+- **New GUCs**: `pg_ripple.federation_endpoint_policy`, `pg_ripple.federation_allowed_endpoints`, `pg_ripple.tombstone_retention_seconds`, `pg_ripple.normalize_iris`, `pg_ripple.copy_rdf_allowed_paths`, `pg_ripple.read_replica_dsn`.
+
+- **Error catalog additions** (I-1): Added PT440, PT480, PT481, PT510, PT511, PT530, PT543, PT550, PT606(SSRF), PT607, PT620, PT621, PT640, PT642, PT711, PT712, PT800. `scripts/check_pt_codes.sh` passes (35 codes documented). CI job `lint-pt-codes` added.
+
+- **CI improvements**: `jena-suite` and `owl2rl-suite` now run with `continue-on-error: false` (must pass).
+
+- **Orphaned test cleanup** (J-1): Removed empty `tests/pg_regress/expected/test.txt`.
+
+### Migration
+
+The `sql/pg_ripple--0.54.0--0.55.0.sql` migration script:
+- Adds `tombstones_cleared_at TIMESTAMPTZ` to `_pg_ripple.predicates`
+- No other schema changes (all new features are Rust function changes or GUC additions)
+
+---
+
 ## [0.54.0] — 2026-04-24 — High Availability & Logical Replication
 
 **Implements the v0.54.0 roadmap: RDF logical replication, batteries-included Docker image, Kubernetes Helm chart, CloudNativePG extension image volume, and vector-index performance benchmarks.**

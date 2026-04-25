@@ -106,3 +106,28 @@ pub static REPLICATION_ENABLED: pgrx::GucSetting<bool> = pgrx::GucSetting::<bool
 /// Values: `last_writer_wins` (default).
 pub static REPLICATION_CONFLICT_STRATEGY: pgrx::GucSetting<Option<std::ffi::CString>> =
     pgrx::GucSetting::<Option<std::ffi::CString>>::new(None);
+
+// ─── v0.55.0 storage and security GUCs ───────────────────────────────────────
+
+/// GUC: number of seconds to retain tombstones after a merge cycle (v0.55.0).
+/// When 0 (default), tombstones are truncated immediately after a merge cycle
+/// that consumes all tombstones for a predicate.
+pub static TOMBSTONE_RETENTION_SECONDS: pgrx::GucSetting<i32> = pgrx::GucSetting::<i32>::new(0);
+
+/// GUC: when on (default), normalize IRI strings to NFC before dictionary encoding (v0.55.0).
+/// Ensures that semantically equivalent IRIs differing only in Unicode normalization
+/// form map to the same dictionary entry.
+pub static NORMALIZE_IRIS: pgrx::GucSetting<bool> = pgrx::GucSetting::<bool>::new(true);
+
+/// GUC: comma-separated list of allowed path prefixes for copy_rdf_from() (v0.55.0).
+/// When set, copy_rdf_from() rejects paths that do not start with one of the listed
+/// prefixes (PT403).  When NULL/empty, superusers bypass the check; non-superusers
+/// are always restricted to this list.
+pub static COPY_RDF_ALLOWED_PATHS: pgrx::GucSetting<Option<std::ffi::CString>> =
+    pgrx::GucSetting::<Option<std::ffi::CString>>::new(None);
+
+/// GUC: DSN for the read replica to route read-only SPARQL queries to (v0.55.0).
+/// When set, SELECT/CONSTRUCT/ASK/DESCRIBE queries are routed to this replica.
+/// Falls back to primary on connection failure (PT530 WARNING emitted).
+pub static READ_REPLICA_DSN: pgrx::GucSetting<Option<std::ffi::CString>> =
+    pgrx::GucSetting::<Option<std::ffi::CString>>::new(None);

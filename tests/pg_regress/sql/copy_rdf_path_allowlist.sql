@@ -1,0 +1,30 @@
+-- pg_regress test: copy_rdf_from path allowlist (v0.55.0)
+-- Verifies that copy_rdf_allowed_paths GUC is registered and that
+-- copy_rdf_from() rejects paths outside the allowlist with PT403.
+
+SET client_min_messages = warning;
+CREATE EXTENSION IF NOT EXISTS pg_ripple;
+SET client_min_messages = DEFAULT;
+SET search_path TO pg_ripple, public;
+
+-- Verify copy_rdf_allowed_paths GUC is registered (empty by default).
+SELECT current_setting('pg_ripple.copy_rdf_allowed_paths', true) IS NOT NULL AS has_guc;
+
+-- Set an allowed path and verify it is stored.
+SET pg_ripple.copy_rdf_allowed_paths = '/data/rdf';
+SELECT current_setting('pg_ripple.copy_rdf_allowed_paths') AS allowed_paths;
+RESET pg_ripple.copy_rdf_allowed_paths;
+
+-- With an empty allowlist, copy_rdf_from() should reject any path with PT403.
+DO $$
+BEGIN
+  PERFORM pg_ripple.copy_rdf_from('/tmp/test.nt');
+  RAISE NOTICE 'ERROR: copy_rdf_from should have been blocked';
+EXCEPTION WHEN OTHERS THEN
+  IF SQLERRM LIKE '%PT403%' OR SQLERRM LIKE '%not allowed%' OR SQLERRM LIKE '%allowlist%' THEN
+    RAISE NOTICE 'OK: copy_rdf_from blocked by path allowlist';
+  ELSE
+    RAISE NOTICE 'BLOCKED: %', left(SQLERRM, 80);
+  END IF;
+END
+$$;
