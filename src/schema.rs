@@ -986,7 +986,7 @@ BEGIN
     END IF;
 
     FOR _obj IN
-        SELECT schema_name, object_name, command_tag
+        SELECT schema_name, object_name
         FROM pg_event_trigger_dropped_objects()
         WHERE object_type IN ('table', 'index')
           AND schema_name = '_pg_ripple'
@@ -995,7 +995,7 @@ BEGIN
         RAISE WARNING 'PT511: _pg_ripple relation % dropped outside pg_ripple maintenance function; '
                       'run pg_ripple.vacuum() to maintain consistent state', _obj.object_name;
         INSERT INTO _pg_ripple.catalog_events (op, objname, blocked_by_ripple)
-        VALUES (_obj.command_tag, _obj.schema_name || '.' || _obj.object_name, false);
+        VALUES (tg_tag, _obj.schema_name || '.' || _obj.object_name, false);
     END LOOP;
 END;
 $$;
