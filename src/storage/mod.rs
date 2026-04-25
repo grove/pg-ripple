@@ -28,6 +28,7 @@
 
 pub mod catalog;
 pub mod cdc_bridge;
+pub mod index_advisor;
 pub mod merge;
 
 use pgrx::datum::DatumWithOid;

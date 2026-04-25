@@ -36,6 +36,7 @@ mod framing;
 mod fts;
 mod graphrag_admin;
 mod gucs;
+mod kge;
 mod llm;
 mod maintenance_api;
 mod r2rml;
@@ -49,6 +50,7 @@ mod sparql_api;
 mod stats_admin;
 mod storage;
 pub(crate) mod telemetry;
+mod tenant;
 mod views;
 mod views_api;
 mod worker;
@@ -1768,6 +1770,67 @@ pub extern "C-unwind" fn _PG_init() {
         &crate::gucs::federation::FEDERATION_CIRCUIT_BREAKER_RESET_SECONDS,
         1,
         3600,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+
+    // ── v0.57.0 GUCs — OWL profiles, KGE, multi-tenant, columnar, adaptive index ──
+
+    pgrx::GucRegistry::define_string_guc(
+        c"pg_ripple.owl_profile",
+        c"Active OWL reasoning profile: 'RL' (default), 'EL', 'QL', or 'off'. (v0.57.0)",
+        c"",
+        &crate::gucs::datalog::OWL_PROFILE,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+
+    pgrx::GucRegistry::define_bool_guc(
+        c"pg_ripple.probabilistic_datalog",
+        c"Enable experimental probabilistic Datalog with @weight rule annotations. \
+          Preview quality; no stability guarantee. Default off. (v0.57.0)",
+        c"",
+        &crate::gucs::datalog::PROBABILISTIC_DATALOG,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+
+    pgrx::GucRegistry::define_bool_guc(
+        c"pg_ripple.kge_enabled",
+        c"Enable the knowledge-graph embedding background worker. Default off. (v0.57.0)",
+        c"",
+        &crate::gucs::llm::KGE_ENABLED,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+
+    pgrx::GucRegistry::define_string_guc(
+        c"pg_ripple.kge_model",
+        c"Knowledge-graph embedding model: 'transe' (default) or 'rotate'. (v0.57.0)",
+        c"",
+        &crate::gucs::llm::KGE_MODEL,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+
+    pgrx::GucRegistry::define_int_guc(
+        c"pg_ripple.columnar_threshold",
+        c"VP table triple count above which HTAP merge converts vp_main to columnar storage. \
+          -1 = disabled (default). Requires pg_columnar. (v0.57.0)",
+        c"",
+        &crate::gucs::storage::COLUMNAR_THRESHOLD,
+        -1,
+        1_000_000_000,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+
+    pgrx::GucRegistry::define_bool_guc(
+        c"pg_ripple.adaptive_indexing_enabled",
+        c"Enable adaptive B-tree index creation based on per-predicate query access patterns. \
+          Default off. (v0.57.0)",
+        c"",
+        &crate::gucs::storage::ADAPTIVE_INDEXING_ENABLED,
         GucContext::Userset,
         GucFlags::default(),
     );

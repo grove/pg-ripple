@@ -13,6 +13,38 @@ Versions correspond to the milestones in [ROADMAP.md](ROADMAP.md).
 
 ---
 
+## [0.57.0] — 2026-05-07 — Reasoning Platform & AI Integration
+
+**Implements the v0.57.0 roadmap: OWL 2 EL/QL reasoning profiles, Knowledge-Graph Embeddings (TransE/RotatE), entity alignment via HNSW ANN search, LLM-augmented SPARQL repair, automated ontology mapping, multi-tenant graph isolation, columnar VP storage guard, adaptive index advisor, and probabilistic Datalog GUC.**
+
+### What's new
+
+- **OWL 2 EL profile** (L-3.1): New built-in rule set `'owl-el'` with core EL rules (`prp-some`, `cls-int1/2`, `cls-uni`, `cls-svf1/avf`, subsumption propagation). New GUC `pg_ripple.owl_profile = 'EL'`. `load_rules_builtin('owl-el')` activates EL-profile reasoning.
+
+- **OWL 2 QL profile** (L-3.2): New built-in rule set `'owl-ql'` with DL-Lite rewriting rules (`SubClassOf`, `SubObjectPropertyOf`, `InverseOf`). New module `src/sparql/ql_rewrite.rs` rewrites SPARQL BGPs before SQL translation when `pg_ripple.owl_profile = 'QL'`.
+
+- **Knowledge-Graph Embeddings** (L-4.1): New GUCs `pg_ripple.kge_enabled` (bool, default off) and `pg_ripple.kge_model` (text, default `'transe'`). New table `_pg_ripple.kge_embeddings (entity_id BIGINT PRIMARY KEY, embedding vector(64), model TEXT, trained_at TIMESTAMPTZ)` with HNSW index. New SRF `pg_ripple.kge_stats()`.
+
+- **Entity alignment** (L-4.2): New function `pg_ripple.find_alignments(source_graph, target_graph, threshold, limit)` — uses cosine similarity over KGE embeddings to propose cross-graph `owl:sameAs` candidates.
+
+- **LLM SPARQL repair** (L-4.3): New function `pg_ripple.repair_sparql(query TEXT, error_message TEXT)` — sends broken query + schema digest to LLM endpoint and returns a suggested fix. Sanitizes input against null-bytes, 32 KiB cap, and prompt-injection markers.
+
+- **Automated ontology mapping** (L-4.4): New function `pg_ripple.suggest_mappings(source_graph, target_graph, method)` — `'lexical'` mode uses Jaccard similarity over tokenized `rdfs:label` values; `'embedding'` mode uses KGE cosine similarity.
+
+- **Multi-tenant graph isolation** (L-5.3): New table `_pg_ripple.tenants`. New functions `pg_ripple.create_tenant()`, `pg_ripple.drop_tenant()`, `pg_ripple.tenant_stats()`. Quota-enforcing triggers per tenant graph.
+
+- **Columnar VP storage guard** (L-2.1): New GUC `pg_ripple.columnar_threshold` (int, default -1 = disabled). When set, the merge worker can convert `vp_{id}_main` to columnar storage via `pg_columnar` when triple count exceeds the threshold. Raises PT534 if `pg_columnar` is unavailable.
+
+- **Adaptive index advisor** (L-2.2): New module `src/storage/index_advisor.rs` with `run_index_advisor_cycle()`. New GUC `pg_ripple.adaptive_indexing_enabled` (bool, default off). Tracks index creation events in `_pg_ripple.catalog_events` (new `predicate_id` column).
+
+- **Probabilistic Datalog GUC** (L-3.4): New GUC `pg_ripple.probabilistic_datalog` (bool, default off). Foundation for Markov-Logic-style soft rules with `@weight(FLOAT)` annotations.
+
+### Migration
+
+Run `ALTER EXTENSION pg_ripple UPDATE` or apply `sql/pg_ripple--0.56.0--0.57.0.sql`.
+
+---
+
 ## [0.56.0] — 2026-04-30 — Standards Completeness & Operational Depth
 
 **Implements the v0.56.0 roadmap: GeoSPARQL 1.1 geometry functions, federation circuit breaker, SPARQL audit log, DDL event trigger, BRIN re-summarize after merge, SID sequence runway monitor, incremental RDFS closure mode, R2RML direct mapping, lz4 dictionary compression, dead-code audit, and deprecated GUC removal.**

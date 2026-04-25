@@ -1,0 +1,19 @@
+-- pg_regress test: LLM SPARQL repair
+-- v0.57.0 Feature L-4.3
+
+SET search_path TO pg_ripple, public;
+
+-- Test: repair_sparql with mock endpoint.
+SET pg_ripple.llm_endpoint = 'mock';
+SET pg_ripple.llm_model = 'gpt-4o-mini';
+
+SELECT length(pg_ripple.repair_sparql(
+    'SELECT ?s WHERE { ?s rdf:type <http://example.org/Person>',
+    'SPARQL parse error: unexpected end of input'
+)) > 0 AS repair_returned_something;
+
+RESET pg_ripple.llm_endpoint;
+RESET pg_ripple.llm_model;
+
+-- Test: repair_sparql without endpoint returns empty string.
+SELECT pg_ripple.repair_sparql('SELECT ?s WHERE { ?s ?p ?o }', '') = '' AS empty_without_endpoint;

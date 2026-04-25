@@ -57,6 +57,16 @@ fn do_revoke_graph_access(graph_iri: &str, role: &str) {
     });
 }
 
+/// Public wrapper for `do_grant_graph_access` used by tenant management (v0.57.0).
+pub(crate) fn do_grant_graph_access_pub(graph_iri: &str, role: &str, privilege: &str) {
+    do_grant_graph_access(graph_iri, role, privilege);
+}
+
+/// Public wrapper for `do_revoke_graph_access` used by tenant management (v0.57.0).
+pub(crate) fn do_revoke_graph_access_pub(graph_iri: &str, role: &str) {
+    do_revoke_graph_access(graph_iri, role);
+}
+
 pub(crate) fn erase_subject_impl(iri: &str) -> i64 {
     use pgrx::datum::DatumWithOid;
 

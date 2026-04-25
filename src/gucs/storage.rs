@@ -131,3 +131,12 @@ pub static COPY_RDF_ALLOWED_PATHS: pgrx::GucSetting<Option<std::ffi::CString>> =
 /// Falls back to primary on connection failure (PT530 WARNING emitted).
 pub static READ_REPLICA_DSN: pgrx::GucSetting<Option<std::ffi::CString>> =
     pgrx::GucSetting::<Option<std::ffi::CString>>::new(None);
+
+// ─── v0.57.0 storage GUCs ────────────────────────────────────────────────────
+
+/// GUC: triple count threshold above which the HTAP merge converts vp_{id}_main
+/// from heap to columnar storage (via pg_columnar). -1 = disabled (default). (v0.57.0)
+pub static COLUMNAR_THRESHOLD: pgrx::GucSetting<i32> = pgrx::GucSetting::<i32>::new(-1);
+
+/// GUC: enable automatic adaptive index creation based on query access patterns (v0.57.0).
+pub static ADAPTIVE_INDEXING_ENABLED: pgrx::GucSetting<bool> = pgrx::GucSetting::<bool>::new(false);

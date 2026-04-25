@@ -1,9 +1,11 @@
 //! Built-in rule sets for the Datalog reasoning engine.
 //!
-//! Ships two pre-packaged rule sets:
+//! Ships four pre-packaged rule sets:
 //!
 //! - `"rdfs"` — W3C RDFS entailment (13 rules)
 //! - `"owl-rl"` — W3C OWL 2 RL profile (~30 core rules, stratifiable subset)
+//! - `"owl-el"` — W3C OWL 2 EL profile (existential restrictions, classification)
+//! - `"owl-ql"` — W3C OWL 2 QL / DL-Lite rewriting rules (query-rewriting mode)
 //!
 //! Rule text uses well-known prefixes (rdf:, rdfs:, owl:) that must be
 //! pre-registered in `_pg_ripple.prefixes` before loading.
@@ -35,13 +37,15 @@ pub fn register_standard_prefixes() {
 
 /// Return the Datalog text for the named built-in rule set.
 ///
-/// Supported names: `"rdfs"`, `"owl-rl"`.
+/// Supported names: `"rdfs"`, `"owl-rl"`, `"owl-el"`, `"owl-ql"`.
 pub fn get_builtin_rules(name: &str) -> Result<&'static str, String> {
     match name {
         "rdfs" => Ok(RDFS_RULES),
         "owl-rl" => Ok(OWL_RL_RULES),
+        "owl-el" => Ok(OWL_EL_RULES),
+        "owl-ql" => Ok(OWL_QL_RULES),
         _ => Err(format!(
-            "unknown built-in rule set '{name}'; valid values: rdfs, owl-rl"
+            "unknown built-in rule set '{name}'; valid values: rdfs, owl-rl, owl-el, owl-ql"
         )),
     }
 }
@@ -229,6 +233,88 @@ const OWL_RL_RULES: &str = r#"
 ?lt rdf:type xsd:short :- ?lt rdf:type xsd:byte .
 "#;
 
+// ─── OWL 2 EL Profile Rules (v0.57.0) ────────────────────────────────────────
+//
+// OWL 2 EL is optimised for large biomedical ontologies (SNOMED CT, GO, ChEBI).
+// It supports existential restrictions and polynomial-time reasoning.
+// This rule set implements the core EL+ reasoning algorithm:
+// classification via subsumption propagation + instance checking.
+
+const OWL_EL_RULES: &str = r#"
+# ── OWL 2 EL: subClassOf propagation ─────────────────────────────────────────
+# scm-sco: subClassOf is transitive
+?c rdfs:subClassOf ?e :- ?c rdfs:subClassOf ?d, ?d rdfs:subClassOf ?e .
+
+# cls-int1 (binary): instance of intersection is instance of each conjunct
+?x rdf:type ?c1 :- ?x rdf:type ?c, ?c owl:intersectionOf ?c1 .
+?x rdf:type ?c2 :- ?x rdf:type ?c, ?c owl:intersectionOf ?c2 .
+
+# cls-int2: instance of all conjuncts implies instance of intersection
+?x rdf:type ?c :- ?x rdf:type ?c1, ?x rdf:type ?c2, ?c owl:intersectionOf ?c1, ?c owl:intersectionOf ?c2 .
+
+# prp-some (cls-svf1): existential restriction — if x is of type C and C has
+# someValuesFrom restriction R on property p, and x has a value y via p, then y is of type B
+?y rdf:type ?b :- ?x rdf:type ?r, ?r owl:someValuesFrom ?b, ?r owl:onProperty ?p, ?x ?p ?y .
+
+# cls-avf: universal restriction — allValuesFrom with subclass propagation
+?y rdf:type ?b :- ?x rdf:type ?r, ?r owl:allValuesFrom ?b, ?r owl:onProperty ?p, ?x ?p ?y .
+
+# EL: equivalentClass bi-directional subsumption
+?c rdfs:subClassOf ?d :- ?c owl:equivalentClass ?d .
+?d rdfs:subClassOf ?c :- ?c owl:equivalentClass ?d .
+
+# EL: class membership from subClassOf
+?x rdf:type ?d :- ?x rdf:type ?c, ?c rdfs:subClassOf ?d .
+
+# EL: rdfs:subPropertyOf propagation (property hierarchy)
+?x ?q ?y :- ?x ?p ?y, ?p rdfs:subPropertyOf ?q .
+
+# cls-uni: union membership (existential check)
+?x rdf:type ?c :- ?x rdf:type ?c1, ?c owl:unionOf ?c1 .
+?x rdf:type ?c :- ?x rdf:type ?c2, ?c owl:unionOf ?c2 .
+
+# EL: someValuesFrom class membership (generate existential witness type)
+?x rdf:type ?r :- ?x ?p ?y, ?y rdf:type ?b, ?r owl:someValuesFrom ?b, ?r owl:onProperty ?p .
+"#;
+
+// ─── OWL 2 QL Profile Rules (v0.57.0) ────────────────────────────────────────
+//
+// OWL 2 QL (DL-Lite) enables ontology-mediated query answering via query
+// rewriting rather than materialisation. This rule set provides the
+// Datalog-expressible subset of OWL 2 QL axioms for in-database use.
+// Full QL query rewriting is implemented in src/sparql/ql_rewrite.rs.
+
+const OWL_QL_RULES: &str = r#"
+# ── OWL 2 QL: subClassOf axioms ──────────────────────────────────────────────
+# SubClassOf(:A :B) → if x is of type A, x is of type B
+?x rdf:type ?b :- ?x rdf:type ?a, ?a rdfs:subClassOf ?b .
+
+# QL: ObjectSomeValuesFrom (existential in superclass position)
+# SubClassOf(ObjectSomeValuesFrom(:r owl:Thing) :A) → if x has property r, x is of type A
+?x rdf:type ?a :- ?x ?r ?y, ?c owl:someValuesFrom owl:Thing, ?c owl:onProperty ?r, ?c rdfs:subClassOf ?a .
+
+# QL: subObjectPropertyOf
+?x ?q ?y :- ?x ?p ?y, ?p rdfs:subPropertyOf ?q .
+
+# QL: inverseOf — if p is inverse of q, q-triples imply p-triples and vice versa
+?y ?p ?x :- ?x ?q ?y, ?p owl:inverseOf ?q .
+?y ?q ?x :- ?x ?p ?y, ?p owl:inverseOf ?q .
+
+# QL: DisjointClasses — instances of disjoint classes are owl:Nothing members
+?x rdf:type owl:Nothing :- ?x rdf:type ?c1, ?x rdf:type ?c2, ?c1 owl:disjointWith ?c2 .
+
+# QL: equivalentClass bi-directional
+?c rdfs:subClassOf ?d :- ?c owl:equivalentClass ?d .
+?d rdfs:subClassOf ?c :- ?c owl:equivalentClass ?d .
+
+# QL: functional property — two values of a functional property are owl:sameAs
+?y1 owl:sameAs ?y2 :- ?x ?p ?y1, ?x ?p ?y2, ?p rdf:type owl:FunctionalProperty .
+
+# QL: sameAs symmetry and propagation
+?y owl:sameAs ?x :- ?x owl:sameAs ?y .
+?x rdf:type ?c :- ?x owl:sameAs ?y, ?y rdf:type ?c .
+"#;
+
 // ─── Tests ───────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -247,6 +333,22 @@ mod tests {
         let rules = get_builtin_rules("owl-rl").unwrap();
         assert!(!rules.is_empty());
         assert!(rules.contains("owl:TransitiveProperty"));
+    }
+
+    #[test]
+    fn test_owl_el_rules_not_empty() {
+        let rules = get_builtin_rules("owl-el").unwrap();
+        assert!(!rules.is_empty());
+        assert!(rules.contains("owl:someValuesFrom"));
+        assert!(rules.contains("owl:intersectionOf"));
+    }
+
+    #[test]
+    fn test_owl_ql_rules_not_empty() {
+        let rules = get_builtin_rules("owl-ql").unwrap();
+        assert!(!rules.is_empty());
+        assert!(rules.contains("owl:inverseOf"));
+        assert!(rules.contains("owl:disjointWith"));
     }
 
     #[test]

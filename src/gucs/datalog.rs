@@ -91,3 +91,12 @@ pub static DATALOG_MAX_DERIVED: pgrx::GucSetting<i32> = pgrx::GucSetting::<i32>:
 
 /// GUC: maximum `owl:sameAs` equivalence-class size before emitting PT550 WARNING (v0.42.0).
 pub static SAMEAS_MAX_CLUSTER_SIZE: pgrx::GucSetting<i32> = pgrx::GucSetting::<i32>::new(100_000);
+
+// ─── v0.57.0 Datalog / OWL profile GUCs ──────────────────────────────────────
+
+/// GUC: active OWL reasoning profile: `'RL'` (default), `'EL'`, `'QL'`, or `'off'` (v0.57.0).
+pub static OWL_PROFILE: pgrx::GucSetting<Option<std::ffi::CString>> =
+    pgrx::GucSetting::<Option<std::ffi::CString>>::new(None);
+
+/// GUC: enable experimental probabilistic Datalog with rule confidence weights (v0.57.0).
+pub static PROBABILISTIC_DATALOG: pgrx::GucSetting<bool> = pgrx::GucSetting::<bool>::new(false);
