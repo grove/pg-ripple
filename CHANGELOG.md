@@ -39,6 +39,14 @@ Versions correspond to the milestones in [ROADMAP.md](ROADMAP.md).
 
 - **Probabilistic Datalog GUC** (L-3.4): New GUC `pg_ripple.probabilistic_datalog` (bool, default off). Foundation for Markov-Logic-style soft rules with `@weight(FLOAT)` annotations.
 
+### New error codes
+
+| Code  | Level   | Meaning |
+|-------|---------|---------|
+| PT545 | ERROR   | Tenant quota exceeded: triple count for a named graph exceeds the per-tenant quota set by `create_tenant()`. |
+| PT560 | ERROR   | `repair_sparql`: input SPARQL query exceeds the 32 KiB maximum length limit. |
+| PT561 | ERROR   | `repair_sparql`: input error_message exceeds the 4 KiB maximum length limit. |
+
 ### Migration
 
 Run `ALTER EXTENSION pg_ripple UPDATE` or apply `sql/pg_ripple--0.56.0--0.57.0.sql`.

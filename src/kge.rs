@@ -112,17 +112,6 @@ pub fn run_kge_cycle() -> (i64, i64, f64) {
         .and_then(|s| s.to_str().ok().map(|v| v.to_lowercase()))
         .unwrap_or_else(|| "transe".to_string());
 
-    // Ensure the embeddings table exists.
-    let _ = Spi::run_with_args(
-        "CREATE TABLE IF NOT EXISTS _pg_ripple.kge_embeddings ( \
-           entity_id BIGINT PRIMARY KEY, \
-           embedding vector(64), \
-           model TEXT, \
-           trained_at TIMESTAMPTZ DEFAULT now() \
-         )",
-        &[],
-    );
-
     // Sample up to 10,000 triples from vp_rare for training.
     let triples: Vec<(i64, i64, i64)> = Spi::connect(|client| {
         let rows = client.select(
@@ -232,7 +221,7 @@ pub fn run_kge_cycle() -> (i64, i64, f64) {
     let n_entities_stored = entity_ids.len() as i64;
     for (&entity_id, emb) in &embeddings {
         let emb_str = format!(
-            "[{}]",
+            "{{{}}}",
             emb.iter()
                 .map(|x| format!("{x:.6}"))
                 .collect::<Vec<_>>()
@@ -240,7 +229,7 @@ pub fn run_kge_cycle() -> (i64, i64, f64) {
         );
         let _ = Spi::run_with_args(
             "INSERT INTO _pg_ripple.kge_embeddings (entity_id, embedding, model) \
-             VALUES ($1, $2::vector, $3) \
+             VALUES ($1, $2::double precision[], $3) \
              ON CONFLICT (entity_id) DO UPDATE SET \
                embedding = EXCLUDED.embedding, \
                model = EXCLUDED.model, \

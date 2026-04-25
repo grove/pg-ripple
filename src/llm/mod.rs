@@ -704,7 +704,7 @@ pub fn repair_sparql(query: &str, error_message: default!(&str, "''")) -> String
     // ── Schema digest: top-20 most-queried predicates ───────────────────────
     let schema_digest: String = Spi::connect(|client| {
         let rows = client.select(
-            "SELECT coalesce(d.expansion || p.id::text, p.id::text) \
+            "SELECT coalesce(d.value, p.id::text) \
              FROM _pg_ripple.predicates p \
              LEFT JOIN _pg_ripple.dictionary d ON d.id = p.id \
              ORDER BY p.triple_count DESC NULLS LAST \
