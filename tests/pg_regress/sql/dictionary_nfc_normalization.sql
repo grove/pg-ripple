@@ -15,9 +15,7 @@ SET pg_ripple.normalize_iris = off;
 SELECT current_setting('pg_ripple.normalize_iris') AS normalize_iris_off;
 RESET pg_ripple.normalize_iris;
 
--- With normalize_iris = on (default), two visually-identical IRIs that differ
--- only in NFC/NFD encoding should map to the same dictionary ID.
--- Use pg_ripple.dict_encode to test this directly.
+-- With normalize_iris = on (default), encoding an IRI with a non-ASCII
+-- character should succeed and return a positive dictionary ID.
 -- NFC form of "café": caf\u00e9 (precomposed e-acute)
--- NFD form of "café": cafe\u0301 (decomposed e + combining acute)
-SELECT length(pg_ripple.dict_encode('<http://example.org/caf\u00e9>')) > 0 AS nfc_encoded;
+SELECT pg_ripple.encode_term('<http://example.org/caf\u00e9>', 0::smallint) > 0 AS nfc_encoded;

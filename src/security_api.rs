@@ -61,7 +61,7 @@ fn erase_subject(iri: &str) -> i64 {
 
     // Delete from vp_rare.
     let rare_deleted: i64 = pgrx::Spi::get_one_with_args::<i64>(
-        "DELETE FROM _pg_ripple.vp_rare WHERE s = $1 RETURNING count(*)::bigint",
+        "WITH d AS (DELETE FROM _pg_ripple.vp_rare WHERE s = $1 RETURNING 1) SELECT count(*)::bigint FROM d",
         &[DatumWithOid::from(subject_id)],
     )
     .unwrap_or(None)

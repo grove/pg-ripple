@@ -42,12 +42,13 @@ CREATE SEQUENCE IF NOT EXISTS _pg_ripple.load_generation_seq
 
 -- Predicate catalog
 CREATE TABLE IF NOT EXISTS _pg_ripple.predicates (
-    id           BIGINT  NOT NULL PRIMARY KEY,
-    table_oid    OID,
-    triple_count BIGINT  NOT NULL DEFAULT 0,
-    htap         BOOLEAN NOT NULL DEFAULT false,
-    schema_name  TEXT,
-    table_name   TEXT
+    id                    BIGINT      NOT NULL PRIMARY KEY,
+    table_oid             OID,
+    triple_count          BIGINT      NOT NULL DEFAULT 0,
+    htap                  BOOLEAN     NOT NULL DEFAULT false,
+    schema_name           TEXT,
+    table_name            TEXT,
+    tombstones_cleared_at TIMESTAMPTZ
 );
 
 -- Rare-predicate consolidation table

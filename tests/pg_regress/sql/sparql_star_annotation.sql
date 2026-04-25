@@ -133,4 +133,4 @@ SELECT count(*) >= 1 AS construct_annotation_ok FROM pg_ripple.sparql(
 -- Cleanup
 -- ══════════════════════════════════════════════════════════════════════════════
 
-SELECT pg_ripple.admin_vacuum() IS NOT NULL AS cleanup_ok;
+SELECT pg_ripple.compact() >= 0 AS cleanup_ok;

@@ -34,7 +34,7 @@ FROM pg_ripple.sparql(
 (1 row)
 
 -- Trigger a merge cycle.
-SELECT pg_ripple.merge_predicates() >= 0 AS merge_ran;
+SELECT pg_ripple.compact() >= 0 AS merge_ran;
  merge_ran 
 -----------
  t

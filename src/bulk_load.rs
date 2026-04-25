@@ -302,8 +302,38 @@ pub fn load_trig(data: &str, _strict: bool) -> i64 {
 
 /// Read file content via PostgreSQL's `pg_read_file()` (superuser-only).
 fn read_file_content(path: &str) -> String {
+    // v0.55.0 C-2: path allowlist (default-deny).
+    // The allowlist check runs on the RAW path BEFORE canonicalize so that
+    // even non-existent paths get a clear PT403 error rather than a confusing
+    // "could not resolve path" message.
+    let allowed_paths = crate::COPY_RDF_ALLOWED_PATHS
+        .get()
+        .and_then(|c| c.to_str().ok().map(|s| s.to_owned()));
+    match allowed_paths.as_deref() {
+        None | Some("") => {
+            pgrx::error!(
+                "PT403: pg_ripple.copy_rdf_allowed_paths is not set; \
+                 all paths are denied by default. \
+                 Set this GUC to a comma-separated list of allowed path prefixes."
+            );
+        }
+        Some(prefixes_str) => {
+            let allowed = prefixes_str
+                .split(',')
+                .map(|p| p.trim())
+                .filter(|p| !p.is_empty())
+                .any(|prefix| path.starts_with(prefix));
+            if !allowed {
+                pgrx::error!(
+                    "PT403: path \"{path}\" is not in pg_ripple.copy_rdf_allowed_paths allowlist"
+                );
+            }
+        }
+    }
+
     // S-8: Resolve symlinks and verify the canonical path resides within the
     // PostgreSQL data directory, preventing path-traversal and symlink attacks.
+    // This secondary check guards against traversal even for allowlisted prefixes.
     let data_dir =
         Spi::get_one_with_args::<String>("SELECT current_setting('data_directory')", &[])
             .unwrap_or_else(|e| pgrx::error!("could not read data_directory: {e}"))
@@ -314,23 +344,6 @@ fn read_file_content(path: &str) -> String {
 
     if !canonical.starts_with(&data_dir) {
         pgrx::error!("permission denied: \"{path}\" is outside the database cluster directory");
-    }
-
-    // v0.55.0 C-2: additional per-path allowlist from COPY_RDF_ALLOWED_PATHS GUC.
-    // If the GUC is set, the path must also match one of the allowed prefixes.
-    let allowed_paths = crate::COPY_RDF_ALLOWED_PATHS
-        .get()
-        .and_then(|c| c.to_str().ok().map(|s| s.to_owned()));
-    if let Some(prefixes_str) = allowed_paths.filter(|s| !s.is_empty()) {
-        let canonical_str = canonical.to_string_lossy();
-        let allowed = prefixes_str
-            .split(',')
-            .map(|p| p.trim())
-            .filter(|p| !p.is_empty())
-            .any(|prefix| canonical_str.starts_with(prefix));
-        if !allowed {
-            pgrx::error!("PT480: path \"{path}\" is not in pg_ripple.copy_rdf_allowed_paths");
-        }
     }
 
     // pg_read_file() requires superuser or pg_monitor role; SPI propagates

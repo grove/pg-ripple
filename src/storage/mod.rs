@@ -298,6 +298,14 @@ pub fn initialize_schema() {
     )
     .unwrap_or_else(|e| pgrx::error!("predicates schema_name/table_name migration error: {e}"));
 
+    // v0.55.0 F-2: Add tombstones_cleared_at for tombstone GC tracking.
+    Spi::run_with_args(
+        "ALTER TABLE _pg_ripple.predicates \
+             ADD COLUMN IF NOT EXISTS tombstones_cleared_at TIMESTAMPTZ",
+        &[],
+    )
+    .unwrap_or_else(|e| pgrx::warning!("predicates tombstones_cleared_at migration: {e}"));
+
     // Create the rare predicates consolidation table.
     Spi::run_with_args(
         "CREATE TABLE IF NOT EXISTS _pg_ripple.vp_rare ( \

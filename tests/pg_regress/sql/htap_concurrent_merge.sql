@@ -24,7 +24,7 @@ FROM pg_ripple.sparql(
 );
 
 -- Trigger a merge cycle.
-SELECT pg_ripple.merge_predicates() >= 0 AS merge_ran;
+SELECT pg_ripple.compact() >= 0 AS merge_ran;
 
 -- Verify triples are still queryable after merge (no "relation does not exist").
 SELECT count(*) > 0 AS has_triples_after_merge

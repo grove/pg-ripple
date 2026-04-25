@@ -1726,8 +1726,8 @@ pub extern "C-unwind" fn _PG_init() {
     pgrx::GucRegistry::define_string_guc(
         c"pg_ripple.copy_rdf_allowed_paths",
         c"Comma-separated list of allowed path prefixes for copy_rdf_from(). \
-          When set, paths not matching a prefix are rejected with PT403. \
-          Empty = allow all paths for superusers. (v0.55.0)",
+          When set, only paths matching a listed prefix are permitted. \
+          When empty (default), ALL paths are denied (PT403 default-deny policy). (v0.55.0)",
         c"",
         &COPY_RDF_ALLOWED_PATHS,
         GucContext::Sighup,
