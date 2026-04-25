@@ -49,7 +49,7 @@ SELECT pg_ripple.insert_triple(
 SELECT count(*) >= 0 AS validate_ok
 FROM pg_ripple.validate();
 
--- ── 5. schema_version contains 0.56.0 ────────────────────────────────────────
+-- ── 5. schema_version contains 0.57.0 ────────────────────────────────────────
 SELECT version = '0.57.0' AS version_correct
 FROM _pg_ripple.schema_version
 ORDER BY installed_at DESC
