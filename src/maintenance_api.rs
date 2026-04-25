@@ -510,7 +510,7 @@ mod pg_ripple {
             .unwrap_or_else(|| "off".to_string());
         let valid_inference = matches!(
             inference_mode.as_str(),
-            "off" | "on_demand" | "materialized"
+            "off" | "on_demand" | "materialized" | "incremental_rdfs"
         );
         rows.push((
             "guc_inference_mode".to_string(),
@@ -599,5 +599,164 @@ mod pg_ripple {
     #[pg_extern]
     fn htap_migrate_predicate(pred_id: i64) {
         crate::storage::merge::migrate_flat_to_htap(pred_id);
+    }
+
+    /// Returns the estimated years remaining before `_pg_ripple.statement_id_seq`
+    /// wraps (i64::MAX ≈ 9.2 × 10^18).
+    ///
+    /// Runway is computed as:
+    ///   years_remaining = (max_value - current_value) / max(insert_rate_per_day, 1) / 365
+    ///
+    /// `insert_rate_per_day` is estimated from the sequence's `last_value` divided by
+    /// the extension's installed age in days (read from `_pg_ripple.schema_version`).
+    /// Returns a single row; returns NULL for years_remaining if the rate cannot be determined.
+    #[pg_extern]
+    fn sid_runway() -> TableIterator<
+        'static,
+        (
+            name!(current_value, i64),
+            name!(max_value, i64),
+            name!(insert_rate_per_day, i64),
+            name!(years_remaining, Option<pgrx::AnyNumeric>),
+        ),
+    > {
+        let row = Spi::connect(|c| {
+            // Get current sequence last_value.
+            let current: i64 = c
+                .select(
+                    "SELECT last_value FROM _pg_ripple.statement_id_seq",
+                    None,
+                    &[],
+                )
+                .ok()
+                .and_then(|mut r| r.next())
+                .and_then(|row| row.get::<i64>(1).ok().flatten())
+                .unwrap_or(1);
+
+            let max_val: i64 = i64::MAX;
+
+            // Estimate daily insert rate from extension age.
+            let days_installed: i64 = c
+                .select(
+                    "SELECT GREATEST(1, EXTRACT(EPOCH FROM (now() - MIN(installed_at))) / 86400)::bigint \
+                     FROM _pg_ripple.schema_version",
+                    None,
+                    &[],
+                )
+                .ok()
+                .and_then(|mut r| r.next())
+                .and_then(|row| row.get::<i64>(1).ok().flatten())
+                .unwrap_or(1);
+
+            let rate_per_day: i64 = (current / days_installed).max(1);
+            let remaining = max_val.saturating_sub(current);
+            let years: Option<pgrx::AnyNumeric> = if rate_per_day > 0 {
+                let years_f64 = (remaining as f64) / (rate_per_day as f64) / 365.0;
+                let s = format!("{:.2}", years_f64);
+                pgrx::AnyNumeric::try_from(s.as_str()).ok()
+            } else {
+                None
+            };
+
+            (current, max_val, rate_per_day, years)
+        });
+
+        TableIterator::new(vec![row])
+    }
+
+    /// Returns all rows from `_pg_ripple.audit_log` up to the configured limit.
+    ///
+    /// Only meaningful when `pg_ripple.audit_log_enabled = on`.
+    #[pg_extern]
+    fn audit_log() -> TableIterator<
+        'static,
+        (
+            name!(id, i64),
+            name!(ts, pgrx::datum::TimestampWithTimeZone),
+            name!(role, String),
+            name!(txid, i64),
+            name!(operation, String),
+            name!(query, String),
+        ),
+    > {
+        let rows: Vec<(
+            i64,
+            pgrx::datum::TimestampWithTimeZone,
+            String,
+            i64,
+            String,
+            String,
+        )> = Spi::connect(|c| {
+            let results = c.select(
+                "SELECT id, ts, role::text, txid, operation, query \
+                     FROM _pg_ripple.audit_log ORDER BY id DESC LIMIT 10000",
+                None,
+                &[],
+            );
+            match results {
+                Ok(tup) => {
+                    let mut out = Vec::new();
+                    for row in tup {
+                        let id = row.get::<i64>(1).ok().flatten().unwrap_or(0);
+                        let ts = match row
+                            .get::<pgrx::datum::TimestampWithTimeZone>(2)
+                            .ok()
+                            .flatten()
+                        {
+                            Some(t) => t,
+                            None => continue,
+                        };
+                        let role = row.get::<&str>(3).ok().flatten().unwrap_or("").to_owned();
+                        let txid = row.get::<i64>(4).ok().flatten().unwrap_or(0);
+                        let op = row.get::<&str>(5).ok().flatten().unwrap_or("").to_owned();
+                        let q = row.get::<&str>(6).ok().flatten().unwrap_or("").to_owned();
+                        out.push((id, ts, role, txid, op, q));
+                    }
+                    out
+                }
+                Err(_) => vec![],
+            }
+        });
+        TableIterator::new(rows)
+    }
+
+    /// Purge audit log entries older than `before`.
+    /// Returns the number of rows deleted.
+    #[pg_extern]
+    fn purge_audit_log(before: pgrx::datum::TimestampWithTimeZone) -> i64 {
+        Spi::connect(|c| {
+            c.select(
+                "WITH del AS (DELETE FROM _pg_ripple.audit_log WHERE ts < $1 RETURNING 1) \
+                 SELECT count(*)::bigint FROM del",
+                None,
+                &[pgrx::datum::DatumWithOid::from(before)],
+            )
+            .ok()
+            .and_then(|mut r| r.next())
+            .and_then(|row| row.get::<i64>(1).ok().flatten())
+            .unwrap_or(0)
+        })
+    }
+
+    // ── R2RML Direct Mapping (v0.56.0 L-7.3) ─────────────────────────────────
+
+    /// Execute an R2RML mapping document that has already been loaded into the
+    /// triple store (e.g., via `pg_ripple.load_turtle()`).
+    ///
+    /// Walks all `rr:TriplesMap` instances, queries the mapped PostgreSQL tables
+    /// via SPI, applies `rr:template`/`rr:column`/`rr:constant` rules, and
+    /// bulk-inserts the generated triples.
+    ///
+    /// Returns the number of triples inserted.
+    ///
+    /// ```sql
+    /// -- First load the mapping:
+    /// SELECT pg_ripple.load_turtle('<path_to_mapping.ttl>');
+    /// -- Then execute it:
+    /// SELECT pg_ripple.r2rml_load('http://example.org/mapping');
+    /// ```
+    #[pg_extern]
+    fn r2rml_load(mapping_iri: &str) -> i64 {
+        crate::r2rml::r2rml_load(mapping_iri)
     }
 }

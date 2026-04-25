@@ -1,4 +1,10 @@
-#![allow(dead_code)]
+// v0.56.0 dead-code audit (A-6):
+// All items in this module are live but reached only when tracing is enabled
+// at runtime.  Because the module is pub(crate) and items are called
+// conditionally, rustc reports them as dead.
+// Finding: start_span, is_enabled, SpanGuard — reachable via pub(crate) module;
+//           emit_span, emit_stdout — called by SpanGuard::drop; keep all.
+//           Replaced file-wide #![allow(dead_code)] with per-item annotations.
 
 //! OpenTelemetry tracing facade (v0.40.0).
 //!
@@ -28,6 +34,7 @@ use std::time::Instant;
 ///
 /// Created by `start_span()`.  When dropped, the elapsed time is emitted
 /// to the configured exporter.
+#[cfg_attr(not(test), allow(dead_code))]
 pub struct SpanGuard {
     name: &'static str,
     start: Instant,
@@ -58,6 +65,7 @@ impl Drop for SpanGuard {
 ///
 /// When `pg_ripple.tracing_enabled` is `false` (default), this is a no-op
 /// — the guard is created but the `Drop` impl exits immediately without I/O.
+#[cfg_attr(not(test), allow(dead_code))]
 #[inline]
 pub fn start_span(name: &'static str) -> SpanGuard {
     let enabled = crate::TRACING_ENABLED.get();
@@ -118,6 +126,7 @@ fn emit_stdout(name: &str, elapsed_us: u128) {
 }
 
 /// Return whether tracing is currently enabled.
+#[cfg_attr(not(test), allow(dead_code))]
 #[inline]
 pub fn is_enabled() -> bool {
     crate::TRACING_ENABLED.get()

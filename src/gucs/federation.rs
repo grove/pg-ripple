@@ -72,3 +72,13 @@ pub static FEDERATION_ENDPOINT_POLICY: pgrx::GucSetting<Option<std::ffi::CString
 /// Only consulted when `pg_ripple.federation_endpoint_policy = 'allowlist'`.
 pub static FEDERATION_ALLOWED_ENDPOINTS: pgrx::GucSetting<Option<std::ffi::CString>> =
     pgrx::GucSetting::<Option<std::ffi::CString>>::new(None);
+
+// ─── v0.56.0 federation GUCs — circuit breaker ──────────────────────────────
+
+/// GUC: consecutive failures before opening the federation circuit breaker (v0.56.0).
+pub static FEDERATION_CIRCUIT_BREAKER_THRESHOLD: pgrx::GucSetting<i32> =
+    pgrx::GucSetting::<i32>::new(5);
+
+/// GUC: seconds until a tripped circuit half-opens for a retry (v0.56.0).
+pub static FEDERATION_CIRCUIT_BREAKER_RESET_SECONDS: pgrx::GucSetting<i32> =
+    pgrx::GucSetting::<i32>::new(60);

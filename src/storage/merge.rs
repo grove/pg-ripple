@@ -337,6 +337,23 @@ pub fn merge_predicate(pred_id: i64) -> i64 {
     )
     .unwrap_or_else(|e| pgrx::error!("merge: rename main_new error: {e}"));
 
+    // F-7 (v0.56.0): Re-summarize BRIN index after rename so page-range summaries
+    // are valid immediately without waiting for the autovacuum BRIN worker.
+    let brin_sql = format!(
+        "SELECT brin_summarize_new_values(c.oid) \
+         FROM pg_class c \
+         JOIN pg_namespace n ON n.oid = c.relnamespace \
+         WHERE n.nspname = '_pg_ripple' \
+           AND c.relname = 'idx_vp_{pred_id}_main_i_brin' \
+           AND c.relkind = 'i'"
+    );
+    // Best-effort: failure to re-summarize is non-fatal (BRIN self-heals on next vacuum).
+    if let Err(e) = Spi::run_with_args(&brin_sql, &[]) {
+        pgrx::debug1!(
+            "merge: brin_summarize_new_values failed for vp_{pred_id}_main (non-fatal): {e}"
+        );
+    }
+
     // Recreate the VP view — DROP TABLE ... CASCADE above dropped it along
     // with the old main table.  The view must exist for find_triples / SPARQL
     // queries and for rebuild_subject/object_patterns() to work correctly.

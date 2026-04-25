@@ -304,6 +304,7 @@ pub(super) fn translate_function_filter(
         Function::Custom(name) => {
             let iri = name.as_str();
             // Map GeoSPARQL Simple Features topology predicates to PostGIS.
+            // Also supports geof:within and geof:intersects (v0.56.0 L-1.1).
             let postgis_fn = match iri {
                 "http://www.opengis.net/def/function/geosparql/sfIntersects" => {
                     Some("ST_Intersects")
@@ -321,6 +322,9 @@ pub(super) fn translate_function_filter(
                 "http://www.opengis.net/def/function/geosparql/ehContains" => Some("ST_Contains"),
                 "http://www.opengis.net/def/function/geosparql/ehCoveredBy" => Some("ST_CoveredBy"),
                 "http://www.opengis.net/def/function/geosparql/ehCovers" => Some("ST_Covers"),
+                // v0.56.0 L-1.1: geof:within and geof:intersects as boolean predicates.
+                "http://www.opengis.net/def/function/geosparql/within" => Some("ST_Within"),
+                "http://www.opengis.net/def/function/geosparql/intersects" => Some("ST_Intersects"),
                 _ => None,
             };
             if let Some(pg_fn) = postgis_fn {
@@ -1272,6 +1276,70 @@ pub(super) fn translate_function_value(
                     Some(encode_literal(format!(
                         "ST_AsText(ST_Boundary(ST_GeomFromText({a_wkt})))"
                     )))
+                }
+
+                // v0.56.0 L-1.1: geof:buffer, geof:convexHull, geof:envelope ──────
+                "http://www.opengis.net/def/function/geosparql/buffer" => {
+                    // geof:buffer(?geom, radius, units) → WKT of buffered geometry.
+                    if !postgis_available() {
+                        return Some(encode_literal("NULL".to_string()));
+                    }
+                    let a_col = translate_arg_value(args.first()?, bindings, ctx)?;
+                    let a_wkt = decode_lexical_sql(&a_col);
+                    // Radius arg: literal numeric or variable. Default 0.
+                    let radius_sql = args.get(1).map_or("0".to_string(), |e| {
+                        if let Expression::Literal(lit) = e {
+                            lit.value().to_owned()
+                        } else {
+                            translate_arg_value(e, bindings, ctx)
+                                .map(|c| decode_lexical_sql(&c))
+                                .unwrap_or_else(|| "0".to_string())
+                        }
+                    });
+                    Some(encode_literal(format!(
+                        "ST_AsText(ST_Buffer(ST_GeomFromText({a_wkt}), {radius_sql}))"
+                    )))
+                }
+
+                "http://www.opengis.net/def/function/geosparql/convexHull" => {
+                    // geof:convexHull(?geom) → WKT of convex hull.
+                    if !postgis_available() {
+                        return Some(encode_literal("NULL".to_string()));
+                    }
+                    let a_col = translate_arg_value(args.first()?, bindings, ctx)?;
+                    let a_wkt = decode_lexical_sql(&a_col);
+                    Some(encode_literal(format!(
+                        "ST_AsText(ST_ConvexHull(ST_GeomFromText({a_wkt})))"
+                    )))
+                }
+
+                "http://www.opengis.net/def/function/geosparql/envelope" => {
+                    // geof:envelope(?geom) → WKT of bounding box.
+                    if !postgis_available() {
+                        return Some(encode_literal("NULL".to_string()));
+                    }
+                    let a_col = translate_arg_value(args.first()?, bindings, ctx)?;
+                    let a_wkt = decode_lexical_sql(&a_col);
+                    Some(encode_literal(format!(
+                        "ST_AsText(ST_Envelope(ST_GeomFromText({a_wkt})))"
+                    )))
+                }
+
+                // v0.56.0 L-1.1: geo:asWKT and geo:hasSpatialAccuracy ─────────────
+                // geo:asWKT(iri) → the WKT literal stored as the object of geo:asWKT
+                // predicate for the given subject IRI. Returns the decoded lexical
+                // value of the WKT literal from the dictionary.
+                "http://www.opengis.net/ontology/spatialrelations/asWKT"
+                | "http://www.opengis.net/ont/geosparql#asWKT" => {
+                    // Decode the IRI column to its lexical string value.
+                    let col = translate_arg_value(args.first()?, bindings, ctx)?;
+                    Some(decode_lexical_sql(&col))
+                }
+
+                // geo:hasSpatialAccuracy(iri) → literal value of spatial accuracy.
+                "http://www.opengis.net/ont/geosparql#hasSpatialAccuracy" => {
+                    let col = translate_arg_value(args.first()?, bindings, ctx)?;
+                    Some(decode_lexical_sql(&col))
                 }
 
                 // ── pg:similar(?entity, "text", k) — pgvector cosine distance ──

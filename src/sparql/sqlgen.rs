@@ -537,9 +537,7 @@ pub(crate) fn translate_pattern(pattern: &GraphPattern, ctx: &mut Ctx) -> Fragme
             path,
             object,
         } => {
-            let max_depth = crate::MAX_PATH_DEPTH
-                .get()
-                .min(crate::PROPERTY_PATH_MAX_DEPTH.get());
+            let max_depth = crate::MAX_PATH_DEPTH.get();
             let mut path_ctx = PathCtx::new(ctx.path_counter);
             let s_const = bgp::ground_term_sql_for_path(subject, ctx);
             let o_const = bgp::ground_term_sql_for_path(object, ctx);
