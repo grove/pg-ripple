@@ -200,6 +200,8 @@ pub fn load_ntriples(data: &str, strict: bool) -> i64 {
 
     flush_batch(&mut by_predicate);
     post_load_cleanup(touched.into_iter().collect());
+    // v0.58.0: emit PROV-O provenance triples if enabled.
+    crate::prov::emit_load_provenance("ntriples:inline", total);
     total
 }
 
@@ -233,6 +235,8 @@ pub fn load_nquads(data: &str, _strict: bool) -> i64 {
 
     flush_batch(&mut by_predicate);
     post_load_cleanup(touched.into_iter().collect());
+    // v0.58.0: emit PROV-O provenance triples if enabled.
+    crate::prov::emit_load_provenance("nquads:inline", total);
     total
 }
 
@@ -262,6 +266,8 @@ pub fn load_turtle(data: &str, _strict: bool) -> i64 {
 
     flush_batch(&mut by_predicate);
     post_load_cleanup(touched.into_iter().collect());
+    // v0.58.0: emit PROV-O provenance triples if enabled.
+    crate::prov::emit_load_provenance("turtle:inline", total);
     total
 }
 

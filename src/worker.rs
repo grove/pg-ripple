@@ -199,6 +199,33 @@ fn run_merge_cycle_for_worker(worker_idx: u32, n_workers: u32) {
         return;
     }
 
+    // v0.58.0: Citus merge fence — when Citus sharding is enabled and a fence
+    // timeout is configured, try to acquire an advisory lock before merging.
+    // This prevents split-brain during shard rebalancing: pg-trickle holds the
+    // same advisory lock (key = 0x5052_5000 = "PRP\0") during apply.
+    let fence_timeout_ms = crate::gucs::storage::MERGE_FENCE_TIMEOUT_MS.get();
+    if fence_timeout_ms > 0 && crate::citus::is_citus_loaded() {
+        const FENCE_KEY: i64 = 0x5052_5000_i64; // "PRP\0"
+        let locked: bool = Spi::get_one_with_args::<bool>(
+            "SELECT pg_try_advisory_lock($1)",
+            &[pgrx::datum::DatumWithOid::from(FENCE_KEY)],
+        )
+        .unwrap_or(None)
+        .unwrap_or(false);
+        if !locked {
+            pgrx::log!(
+                "pg_ripple merge worker {worker_idx}: fence lock held by rebalancer, skipping cycle"
+            );
+            return;
+        }
+        // Emit NOTIFY for pg-trickle awareness.
+        let payload = format!("{{\"worker\":{worker_idx},\"pid\":{}}}", std::process::id());
+        let _ = Spi::run_with_args(
+            &format!("SELECT pg_notify('pg_ripple.merge_start', '{payload}')"),
+            &[],
+        );
+    }
+
     let threshold = get_merge_threshold();
 
     // Find predicates assigned to this worker (round-robin by pred_id % n_workers).
@@ -334,6 +361,20 @@ fn run_merge_cycle_for_worker(worker_idx: u32, n_workers: u32) {
         crate::shmem::reset_delta_count();
 
         pgrx::log!("pg_ripple merge worker: merge cycle complete");
+
+        // v0.58.0: Emit merge_end NOTIFY so pg-trickle can resume CDC apply.
+        if fence_timeout_ms > 0 && crate::citus::is_citus_loaded() {
+            let payload = format!("{{\"worker\":{worker_idx},\"pid\":{}}}", std::process::id());
+            let _ = Spi::run_with_args(
+                &format!("SELECT pg_notify('pg_ripple.merge_end', '{payload}')"),
+                &[],
+            );
+            const FENCE_KEY: i64 = 0x5052_5000_i64;
+            let _ = Spi::run_with_args(
+                "SELECT pg_advisory_unlock($1)",
+                &[pgrx::datum::DatumWithOid::from(FENCE_KEY)],
+            );
+        }
     }
 
     // Only worker 0 runs housekeeping tasks to avoid duplicate work.

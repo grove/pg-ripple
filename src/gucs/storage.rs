@@ -140,3 +140,21 @@ pub static COLUMNAR_THRESHOLD: pgrx::GucSetting<i32> = pgrx::GucSetting::<i32>::
 
 /// GUC: enable automatic adaptive index creation based on query access patterns (v0.57.0).
 pub static ADAPTIVE_INDEXING_ENABLED: pgrx::GucSetting<bool> = pgrx::GucSetting::<bool>::new(false);
+
+// ─── v0.58.0 storage GUCs ────────────────────────────────────────────────────
+
+/// GUC: enable Citus horizontal sharding of VP tables (v0.58.0).
+/// When on, new VP tables get `REPLICA IDENTITY FULL` + `create_distributed_table(s)`.
+pub static CITUS_SHARDING_ENABLED: pgrx::GucSetting<bool> = pgrx::GucSetting::<bool>::new(false);
+
+/// GUC: when on, create_distributed_table uses `colocate_with = 'none'` for
+/// pg-trickle / CDC compatibility — prevents cross-shard tombstone deletes (v0.58.0).
+pub static CITUS_TRICKLE_COMPAT: pgrx::GucSetting<bool> = pgrx::GucSetting::<bool>::new(false);
+
+/// GUC: milliseconds the merge worker waits for an advisory fence lock before
+/// proceeding with a merge cycle during Citus rebalancing (v0.58.0).
+/// 0 = no fence (default non-Citus behaviour).
+pub static MERGE_FENCE_TIMEOUT_MS: pgrx::GucSetting<i32> = pgrx::GucSetting::<i32>::new(0);
+
+/// GUC: when on, emit PROV-O provenance triples for all ingest operations (v0.58.0).
+pub static PROV_ENABLED: pgrx::GucSetting<bool> = pgrx::GucSetting::<bool>::new(false);
