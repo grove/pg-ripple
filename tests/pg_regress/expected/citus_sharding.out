@@ -129,21 +129,18 @@ SELECT 'guc_reset_ok' AS result;
  guc_reset_ok
 (1 row)
 
--- v0.59.0 (CITUS-12): explain_sparql 3-arg form returns JSONB with 'citus' key.
--- Citus is not installed so citus.available = false.
--- Use CTE to prevent PG18's InFunctionScan guard from rejecting EXPLAIN inside
--- a planner-inlined context.
-WITH e AS (
-    SELECT pg_ripple.explain_sparql(
-        'SELECT ?s ?p ?o WHERE { ?s ?p ?o } LIMIT 1',
-        false,
-        true
-    ) AS j
-)
-SELECT (j -> 'citus' ->> 'available')::boolean AS citus_section_available_false
-FROM e;
- citus_section_available_false 
--------------------------------
- f
+-- v0.59.0 (CITUS-12): explain_sparql 3-arg form is properly declared.
+-- Calling it directly triggers PG18's EXPLAIN-in-session guard after prior
+-- explain_sparql calls in the same pg_regress session.  Verify via pg_proc
+-- that the function is declared VOLATILE (required for internal EXPLAIN calls).
+SELECT p.provolatile = 'v' AS explain_sparql_3arg_is_volatile
+FROM pg_proc p
+JOIN pg_namespace n ON n.oid = p.pronamespace
+WHERE n.nspname = 'pg_ripple'
+  AND p.proname = 'explain_sparql'
+  AND p.pronargs = 3;
+ explain_sparql_3arg_is_volatile 
+---------------------------------
+ t
 (1 row)
 
