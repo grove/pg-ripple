@@ -93,10 +93,69 @@ The merge worker emits PostgreSQL `NOTIFY` messages on two channels:
 |---------|------|---------|
 | `pg_ripple.merge_start` | Before a merge cycle with fence enabled | `{"worker":N,"pid":PID}` |
 | `pg_ripple.merge_end` | After a successful merge cycle with fence | `{"worker":N,"pid":PID}` |
-| `pg_ripple.vp_promoted` | When a VP table is distributed | `{"predicate_id":N,"pid":PID}` |
+| `pg_ripple.vp_promoted` | When a VP table is distributed | `{"table":"_pg_ripple.vp_N_delta","shard_count":N,"shard_table_prefix":"_pg_ripple.vp_N_delta_","predicate_id":N}` |
 
-pg-trickle subscribes to `pg_ripple.merge_end` to resume CDC apply after a
-merge cycle completes.
+These notifications are **best-effort observability hints**, not correctness
+mechanisms.  Because the TRUNCATE+INSERT merge is executed inside a single
+2PC transaction, each per-worker WAL decoder receives the delta TRUNCATE and
+main INSERT as one atomic committed batch — there is no intermediate
+inconsistent state visible to downstream consumers even without the notification.
+
+pg-trickle v0.33.0 uses `pgtrickle.pgt_st_locks` (catalog-based mutual
+exclusion) for cross-node refresh scheduling and does **not** rely on
+`pg_ripple.merge_start` / `merge_end` for coordination.  Operators and
+monitoring tools may LISTEN to these channels for operational visibility.
+
+## Coordination with pg-trickle `pgt_st_locks`
+
+pg-trickle v0.33.0 uses a catalog-based lock table (`pgtrickle.pgt_st_locks`)
+for cross-node refresh scheduling.  Each distributed stream table refresh
+acquires a lease with a configurable expiry before touching worker slots.
+
+**Important:** the `pgt_st_locks` lease expiry must be **≥**
+`pg_ripple.merge_fence_timeout_ms`.  If the lease expires while a pg_ripple
+merge is still in progress, pg-trickle may resume slot polling against a
+partially-merged delta table.  The recommended configuration:
+
+```sql
+-- pg_ripple: fence timeout (how long merge_worker waits before giving up)
+SET pg_ripple.merge_fence_timeout_ms = 30000;   -- 30 seconds
+
+-- pg-trickle: stream table refresh lease expiry must be at least as long
+-- (set via the pgt_st_locks entry created at refresh time)
+SET pg_trickle.st_lock_lease_ms = 45000;        -- 45 seconds (≥ 30s fence)
+```
+
+Monitor both sides together:
+
+```sql
+SELECT
+    r.predicate_id,
+    r.cycle_duration_ms,
+    c.stream_table,
+    c.worker_frontier
+FROM pg_ripple.merge_status()    AS r
+JOIN pgtrickle.citus_status       AS c
+  ON c.source_stable_name LIKE '_pg_ripple_vp_' || r.predicate_id || '_%';
+```
+
+## VP Promotion Notifications
+
+When `enable_citus_sharding()` distributes a VP delta table it emits a
+`pg_ripple.vp_promoted` notification.  Consumers (e.g., pg-trickle tooling,
+monitoring scripts) can LISTEN for this channel from a regular backend session:
+
+```sql
+LISTEN "pg_ripple.vp_promoted";
+
+-- Payload example (after promote):
+-- {"table":"_pg_ripple.vp_42_delta","shard_count":32,
+--  "shard_table_prefix":"_pg_ripple.vp_42_delta_","predicate_id":42}
+```
+
+The `shard_count` and `shard_table_prefix` fields allow listeners to enumerate
+all physical shard tables (`{prefix}{shard_id}`) without querying
+`pg_dist_shard`.
 
 ## Limitations (v0.58.0)
 

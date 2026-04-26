@@ -81,11 +81,28 @@ pub fn distribute_vp_delta(pred_id: i64, colocate_with: &str) {
     )
     .unwrap_or_else(|e| pgrx::warning!("create_distributed_table {delta}: {e}"));
 
+    // Query the shard count so listeners can enumerate worker-level shard tables.
+    let shard_count: i64 = Spi::get_one_with_args::<i64>(
+        "SELECT count(*)::bigint FROM pg_dist_shard WHERE logicalrelid = $1::regclass",
+        &[delta.as_str().into()],
+    )
+    .unwrap_or(Some(0))
+    .unwrap_or(0);
+
     // Notify pg-trickle and other listeners that a VP table has been promoted
-    // to distributed (payload includes predicate_id and worker pid).
+    // to distributed.  The payload follows the agreed contract (C-4):
+    //   table             — fully-qualified logical table name
+    //   shard_count       — number of shards created by Citus (for slot setup)
+    //   shard_table_prefix — prefix used by Citus for physical shard tables
+    //   predicate_id      — pg_ripple predicate integer ID
+    //
+    // pg-trickle uses `shard_count` and `shard_table_prefix` to enumerate
+    // per-worker shard names when creating logical replication slots without
+    // querying `pg_dist_shard` directly.
+    let shard_table_prefix = format!("{delta}_");
     let payload = format!(
-        "{{\"predicate_id\":{pred_id},\"pid\":{}}}",
-        std::process::id()
+        "{{\"table\":\"{delta}\",\"shard_count\":{shard_count},\
+          \"shard_table_prefix\":\"{shard_table_prefix}\",\"predicate_id\":{pred_id}}}",
     );
     Spi::run_with_args(
         &format!("SELECT pg_notify('pg_ripple.vp_promoted', '{payload}')"),
@@ -127,6 +144,10 @@ pub fn enable_citus_sharding() -> TableIterator<
     // Convert reference tables (idempotent via Citus's own checks).
     make_reference_table("_pg_ripple.dictionary");
     make_reference_table("_pg_ripple.predicates");
+    // `vp_rare` cannot be straightforwardly distributed by `s` because its
+    // primary selectivity column is `p`; promote it to a reference table so
+    // that every worker has a full copy and coordinator fan-out is avoided.
+    make_reference_table("_pg_ripple.vp_rare");
 
     // Collect predicate IDs that have promoted VP tables.
     let pred_ids: Vec<i64> = Spi::connect(|c| {
