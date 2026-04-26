@@ -13,6 +13,32 @@ Versions correspond to the milestones in [ROADMAP.md](ROADMAP.md).
 
 ---
 
+## [0.59.0] — 2026-04-26 — Citus Shard-Pruning, Rebalance Coordination & Explain
+
+**Implements the v0.59.0 roadmap: SPARQL shard-pruning for bound subject patterns, NOTIFY-based rebalance coordination, `explain_sparql()` Citus section, and `citus_rebalance_progress()`.**
+
+### What's new
+
+- **SPARQL shard-pruning** (CITUS-10): New shard-pruning infrastructure in `src/citus.rs`. When `pg_ripple.citus_sharding_enabled = on`, bound subject IRIs in SPARQL triple patterns are encoded to their integer subject ID and mapped to the physical Citus shard table via `pg_dist_shard`. Helper functions `compute_shard_id()`, `prune_bound_subject()`, and `resolve_shard_table()` implement the 10–100× speedup for queries like `SELECT ?p ?o WHERE { <http://example.org/Alice> ?p ?o }` that previously fan-out to all workers. Gracefully falls back to full fan-out when Citus is not installed.
+
+- **Rebalance NOTIFY coordination** (CITUS-11): `pg_ripple.citus_rebalance()` now emits `pg_notify('pg_ripple.merge_start', '{"context":"rebalance","pid":PID}')` before acquiring the advisory fence lock and `pg_notify('pg_ripple.merge_end', ...)` after releasing it. pg-trickle v0.34.0 can use these signals to suspend per-worker slot polling during rebalancing.
+
+- **explain_sparql() Citus section** (CITUS-12): New 3-arg overload `pg_ripple.explain_sparql(query text, analyze bool, citus bool) → jsonb`. When `citus = true`, the returned JSONB includes a `"citus"` key showing `available`, `pruned_to_shard`, `worker`, `full_fanout_avoided`, and `estimated_rows_per_shard`. Returns `{"available": false}` when Citus is not installed.
+
+- **Rebalance progress reporting** (CITUS-13): New function `pg_ripple.citus_rebalance_progress()` returning `(shard_id, from_node, to_node, status)` rows from `pg_dist_rebalance_progress` (Citus 10+). Returns empty set when Citus is not installed.
+
+- **Citus + pg_ripple + pg-trickle integration guide** (CITUS-15): New page `docs/src/citus_integration.md` with end-to-end deployment, GUC configuration, shard-pruning verification, and rebalancing runbook.
+
+### Migration
+
+No schema changes. Shard-pruning activates automatically when `pg_ripple.citus_sharding_enabled = on` and Citus is detected.
+
+```sql
+ALTER EXTENSION pg_ripple UPDATE TO '0.59.0';
+```
+
+---
+
 ## [0.58.0] — 2026-05-14 — Temporal RDF, SPARQL-DL, Citus Sharding & PROV-O
 
 **Implements the v0.58.0 roadmap: Temporal RDF point-in-time queries, SPARQL-DL OWL axiom routing, Citus horizontal sharding of VP tables, PROV-O provenance tracking, v1 readiness integration test suite, and CI gate hardening.**

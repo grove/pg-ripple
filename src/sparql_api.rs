@@ -234,7 +234,26 @@ mod pg_ripple {
     /// When `analyze` is `true`, runs `EXPLAIN (ANALYZE, FORMAT JSON, BUFFERS true)`.
     #[pg_extern(name = "explain_sparql", volatile)]
     fn explain_sparql_jsonb(query: &str, analyze: bool) -> pgrx::JsonB {
-        crate::sparql::explain::explain_sparql_jsonb(query, analyze)
+        crate::sparql::explain::explain_sparql_jsonb(query, analyze, false)
+    }
+
+    /// Explain a SPARQL query with optional Citus shard-pruning section (v0.59.0).
+    ///
+    /// Same as `explain_sparql(query, analyze)` but adds a `"citus"` key when
+    /// `citus` is `true`, showing which shard was targeted, the worker node, and
+    /// whether full fan-out was avoided.
+    ///
+    /// Example:
+    /// ```sql
+    /// SELECT pg_ripple.explain_sparql(
+    ///   'SELECT ?p ?o WHERE { <http://example.org/Alice> ?p ?o }',
+    ///   false,
+    ///   true
+    /// );
+    /// ```
+    #[pg_extern(name = "explain_sparql", volatile)]
+    fn explain_sparql_jsonb_citus(query: &str, analyze: bool, citus: bool) -> pgrx::JsonB {
+        crate::sparql::explain::explain_sparql_jsonb(query, analyze, citus)
     }
 
     // ── v0.40.0: cache_stats / reset_cache_stats ──────────────────────────────

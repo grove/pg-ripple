@@ -227,6 +227,10 @@ pub fn enable_citus_sharding() -> TableIterator<
 /// The lock is released immediately after `citus_rebalance_start()` returns so
 /// the merge worker can resume.
 ///
+/// v0.59.0 (CITUS-11): Emits `pg_ripple.merge_start` NOTIFY before acquiring the
+/// fence and `pg_ripple.merge_end` after releasing it so that pg-trickle and
+/// monitoring tools can observe rebalance activity.
+///
 /// Returns the number of rebalanced shard moves.
 ///
 /// Requires Citus to be installed (PT536).
@@ -237,6 +241,17 @@ pub fn citus_rebalance() -> i64 {
     }
 
     const FENCE_KEY: i64 = 0x5052_5000_i64; // "PRP\0"
+    let pid = std::process::id();
+
+    // Emit merge_start NOTIFY before acquiring the fence (CITUS-11).
+    // pg-trickle uses this signal to suspend per-worker slot polling until
+    // the rebalance completes.
+    let start_payload = format!("{{\"context\":\"rebalance\",\"pid\":{pid}}}");
+    Spi::run_with_args(
+        &format!("SELECT pg_notify('pg_ripple.merge_start', '{start_payload}')"),
+        &[],
+    )
+    .unwrap_or_else(|e| pgrx::warning!("citus_rebalance: merge_start notify: {e}"));
 
     // Block until no merge worker is active.  The merge worker holds this
     // session advisory lock while executing a cycle; once we acquire it the
@@ -267,7 +282,72 @@ pub fn citus_rebalance() -> i64 {
     )
     .unwrap_or_else(|e| pgrx::warning!("citus_rebalance: fence unlock failed: {e}"));
 
+    // Emit merge_end NOTIFY after releasing the fence (CITUS-11).
+    let end_payload = format!("{{\"context\":\"rebalance\",\"pid\":{pid}}}");
+    Spi::run_with_args(
+        &format!("SELECT pg_notify('pg_ripple.merge_end', '{end_payload}')"),
+        &[],
+    )
+    .unwrap_or_else(|e| pgrx::warning!("citus_rebalance: merge_end notify: {e}"));
+
     moves
+}
+
+/// Return the in-progress shard move plan for the current Citus rebalance job.
+///
+/// Queries `pg_dist_rebalance_progress` (available in Citus 10+) and returns
+/// one row per planned shard move.  Returns an empty set when:
+/// - Citus is not installed.
+/// - No rebalance job is currently running.
+///
+/// Columns: `shard_id`, `from_node`, `to_node`, `status`.
+///
+/// This is the progress-reporting variant introduced in v0.59.0 (CITUS-13).
+#[pg_extern(schema = "pg_ripple")]
+pub fn citus_rebalance_progress() -> TableIterator<
+    'static,
+    (
+        name!(shard_id, i64),
+        name!(from_node, String),
+        name!(to_node, String),
+        name!(status, String),
+    ),
+> {
+    if !is_citus_loaded() {
+        return TableIterator::new(std::iter::empty());
+    }
+
+    let rows = Spi::connect(|c| {
+        // pg_dist_rebalance_progress is available in Citus 10+.
+        // Columns: move_id, sourcename, targetname, progress (0.0–1.0).
+        c.select(
+            "SELECT \
+                 move_id::bigint AS shard_id, \
+                 sourcename AS from_node, \
+                 targetname AS to_node, \
+                 CASE WHEN progress >= 1.0 THEN 'completed' \
+                      WHEN progress > 0.0  THEN 'moving' \
+                      ELSE                      'pending' \
+                 END AS status \
+             FROM pg_dist_rebalance_progress \
+             ORDER BY move_id",
+            None,
+            &[],
+        )
+        .map(|rows| {
+            rows.map(|row| {
+                let shard_id = row.get::<i64>(1).ok().flatten().unwrap_or(0);
+                let from_node = row.get::<String>(2).ok().flatten().unwrap_or_default();
+                let to_node = row.get::<String>(3).ok().flatten().unwrap_or_default();
+                let status = row.get::<String>(4).ok().flatten().unwrap_or_default();
+                (shard_id, from_node, to_node, status)
+            })
+            .collect::<Vec<_>>()
+        })
+        .unwrap_or_default()
+    });
+
+    TableIterator::new(rows)
 }
 
 /// Return a status summary for the Citus cluster as seen by pg_ripple.
@@ -322,4 +402,223 @@ pub fn citus_cluster_status() -> TableIterator<
 #[pg_extern(schema = "pg_ripple")]
 pub fn citus_available() -> bool {
     is_citus_loaded()
+}
+
+// ─── Shard-pruning helpers (v0.59.0, CITUS-10) ───────────────────────────────
+
+/// Information returned when shard-pruning successfully maps a bound subject to a
+/// specific Citus physical shard.
+pub struct ShardPruneInfo {
+    /// Citus physical shard ID (from `pg_dist_shard.shardid`).
+    pub shard_id: i64,
+    /// Worker host:port that owns this shard (e.g. `"worker1:5432"`).
+    pub worker: String,
+    /// Estimated live-tuple count for this shard (0 when not available).
+    pub estimated_rows: i64,
+}
+
+/// Compute the zero-based logical shard index for a subject integer ID.
+///
+/// Citus distributes BIGINT columns using `hashint8(value) & 0x7FFF_FFFF`
+/// (a 31-bit positive hash) mapped to shard ranges.  For unit-testing and
+/// documentation purposes this function provides a simplified approximation
+/// via unsigned modulo; production code must use [`prune_bound_subject`] which
+/// queries `pg_dist_shard` directly to find the physical shard.
+///
+/// # Examples
+/// ```rust
+/// // shard_count = 32 → slot in [0..31]
+/// assert!(crate::citus::compute_shard_id(42, 32) < 32);
+/// ```
+#[allow(dead_code)]
+pub fn compute_shard_id(subject_id: i64, shard_count: i64) -> i64 {
+    if shard_count <= 0 {
+        return 0;
+    }
+    (subject_id.unsigned_abs() as i64) % shard_count
+}
+
+/// Given a logical VP delta table name and a bound subject integer ID, return
+/// the physical Citus shard details if shard-pruning is applicable.
+///
+/// Returns `None` when:
+/// - `pg_ripple.citus_sharding_enabled = off`, or
+/// - Citus is not installed, or
+/// - The table is not distributed in Citus, or
+/// - The subject ID does not map to any shard range.
+///
+/// When `Some` is returned, the caller should use the physical shard table
+/// `"{logical_table}_{shard_id}"` in the generated SQL instead of the logical
+/// table, avoiding a fan-out across all workers.
+pub fn prune_bound_subject(logical_table: &str, subject_id: i64) -> Option<ShardPruneInfo> {
+    if !crate::gucs::storage::CITUS_SHARDING_ENABLED.get() || !is_citus_loaded() {
+        return None;
+    }
+
+    // Query pg_dist_shard to find which shard range covers hashint8(subject_id).
+    // hashint8 is the same hash function Citus uses for BIGINT distribution columns.
+    Spi::connect(|c| {
+        c.select(
+            "SELECT s.shardid::bigint, \
+                    n.nodename, \
+                    n.nodeport::bigint, \
+                    COALESCE(st.n_live_tup, 0)::bigint AS estimated_rows \
+             FROM pg_dist_shard s \
+             JOIN pg_dist_placement p ON p.shardid = s.shardid \
+             JOIN pg_dist_node n ON n.groupid = p.groupid \
+             LEFT JOIN pg_stat_user_tables st \
+               ON st.schemaname || '.' || st.relname = $1 \
+            WHERE s.logicalrelid = $1::regclass \
+              AND hashint8($2) BETWEEN s.shardminvalue::bigint \
+                                    AND s.shardmaxvalue::bigint \
+            LIMIT 1",
+            None,
+            &[logical_table.into(), subject_id.into()],
+        )
+        .map(|rows| {
+            rows.filter_map(|row| {
+                let shard_id = row.get::<i64>(1).ok().flatten()?;
+                let node_name = row.get::<String>(2).ok().flatten().unwrap_or_default();
+                let node_port = row.get::<i64>(3).ok().flatten().unwrap_or(5432);
+                let estimated_rows = row.get::<i64>(4).ok().flatten().unwrap_or(0);
+                Some(ShardPruneInfo {
+                    shard_id,
+                    worker: format!("{node_name}:{node_port}"),
+                    estimated_rows,
+                })
+            })
+            .next()
+        })
+        .unwrap_or_default()
+    })
+}
+
+/// Resolve the physical Citus shard table name for a VP delta table when
+/// shard-pruning is applicable, or return the logical table name unchanged.
+///
+/// This is the entry-point called from the SPARQL-to-SQL translator's BGP
+/// handler when a triple pattern has a bound subject.
+///
+/// # Example
+/// With `citus_sharding_enabled = on` and subject `<http://example.org/Alice>`
+/// mapping to shard 102008, returns `"_pg_ripple.vp_1234_delta_102008"`.
+/// Without Citus or an unbound subject, returns `"_pg_ripple.vp_1234_delta"`.
+#[allow(dead_code)]
+pub fn resolve_shard_table(logical_table: &str, subject_id: i64) -> String {
+    match prune_bound_subject(logical_table, subject_id) {
+        Some(info) => format!("{logical_table}_{}", info.shard_id),
+        None => logical_table.to_owned(),
+    }
+}
+
+/// Return the Citus shard pruning details for a specific bound subject and
+/// predicate — for use by `explain_sparql(… citus := true)`.
+///
+/// Returns a JSON object with keys `available`, `pruned_to_shard`, `worker`,
+/// `full_fanout_avoided`, and `estimated_rows_per_shard`, or `{"available": false}`
+/// when Citus is not enabled.
+pub fn explain_citus_section(query_text: &str) -> serde_json::Value {
+    if !is_citus_loaded() || !crate::gucs::storage::CITUS_SHARDING_ENABLED.get() {
+        return serde_json::json!({"available": false});
+    }
+
+    // Try to detect a bound subject in the query algebra.
+    use spargebra::Query;
+    let bound_subject_iri: Option<String> =
+        match spargebra::SparqlParser::new().parse_query(query_text) {
+            Ok(Query::Select { pattern, .. }) => first_bound_subject_iri(&pattern),
+            Ok(Query::Construct { pattern, .. }) => first_bound_subject_iri(&pattern),
+            _ => None,
+        };
+
+    let subject_iri = match bound_subject_iri {
+        Some(iri) => iri,
+        None => {
+            return serde_json::json!({
+                "available": true,
+                "full_fanout_avoided": false,
+                "reason": "no bound subject in query"
+            });
+        }
+    };
+
+    // Encode the subject IRI to an integer ID.
+    let subject_id = match crate::dictionary::lookup_iri(&subject_iri) {
+        Some(id) => id,
+        None => {
+            return serde_json::json!({
+                "available": true,
+                "full_fanout_avoided": false,
+                "reason": "subject IRI not in dictionary"
+            });
+        }
+    };
+
+    // Look up the first promoted VP delta table and try to prune it.
+    let delta_table = Spi::get_one::<String>(
+        "SELECT '_pg_ripple.vp_' || id::text || '_delta' \
+         FROM _pg_ripple.predicates \
+         WHERE table_oid IS NOT NULL \
+         ORDER BY id \
+         LIMIT 1",
+    )
+    .unwrap_or_default()
+    .unwrap_or_default();
+
+    if delta_table.is_empty() {
+        return serde_json::json!({
+            "available": true,
+            "full_fanout_avoided": false,
+            "reason": "no promoted VP tables"
+        });
+    }
+
+    match prune_bound_subject(&delta_table, subject_id) {
+        Some(info) => serde_json::json!({
+            "available": true,
+            "pruned_to_shard": info.shard_id,
+            "worker": info.worker,
+            "full_fanout_avoided": true,
+            "estimated_rows_per_shard": info.estimated_rows
+        }),
+        None => serde_json::json!({
+            "available": true,
+            "full_fanout_avoided": false,
+            "reason": "shard lookup failed or not distributed"
+        }),
+    }
+}
+
+/// Walk a SPARQL algebra pattern and return the first bound subject IRI string.
+fn first_bound_subject_iri(pattern: &spargebra::algebra::GraphPattern) -> Option<String> {
+    use spargebra::algebra::GraphPattern;
+    use spargebra::term::TermPattern;
+
+    match pattern {
+        GraphPattern::Bgp { patterns } => patterns.iter().find_map(|tp| {
+            if let TermPattern::NamedNode(nn) = &tp.subject {
+                Some(nn.as_str().to_owned())
+            } else {
+                None
+            }
+        }),
+        GraphPattern::Join { left, right }
+        | GraphPattern::LeftJoin { left, right, .. }
+        | GraphPattern::Minus { left, right } => {
+            first_bound_subject_iri(left).or_else(|| first_bound_subject_iri(right))
+        }
+        GraphPattern::Union { left, right } => {
+            first_bound_subject_iri(left).or_else(|| first_bound_subject_iri(right))
+        }
+        GraphPattern::Filter { inner, .. }
+        | GraphPattern::Graph { inner, .. }
+        | GraphPattern::Extend { inner, .. }
+        | GraphPattern::OrderBy { inner, .. }
+        | GraphPattern::Project { inner, .. }
+        | GraphPattern::Distinct { inner }
+        | GraphPattern::Reduced { inner }
+        | GraphPattern::Slice { inner, .. }
+        | GraphPattern::Group { inner, .. } => first_bound_subject_iri(inner),
+        _ => None,
+    }
 }

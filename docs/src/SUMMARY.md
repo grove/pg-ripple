@@ -46,6 +46,7 @@
 - [CloudNativePG](operations/cloudnativepg.md)
 - [High Availability](operations/high-availability.md)
 - [Logical Replication](operations/replication.md)
+- [Citus + pg-trickle Integration](operations/citus-integration.md)
 - [Configuration and Tuning](operations/configuration.md)
 - [Monitoring and Observability](operations/monitoring.md)
 - [Performance Tuning](operations/performance.md)

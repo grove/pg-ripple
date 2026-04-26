@@ -1,6 +1,6 @@
-//! JSONB explain output for SPARQL queries (v0.40.0 + v0.50.0).
+//! JSONB explain output for SPARQL queries (v0.40.0 + v0.50.0 + v0.59.0).
 //!
-//! `explain_sparql_jsonb(query, analyze)` returns a JSONB document with keys:
+//! `explain_sparql_jsonb(query, analyze, citus)` returns a JSONB document with keys:
 //!
 //! - `"algebra"` — spargebra algebra tree as a JSON string
 //! - `"sql"` — the generated SQL with IRI-decoded predicate names
@@ -9,6 +9,7 @@
 //! - `"cache_status"` — `"hit"` / `"miss"` / `"bypass"` cache state
 //! - `"encode_calls"` — number of dictionary encode lookups during translation
 //! - `"actual_rows"` — flat list of per-operator actual row counts (only when analyze=true)
+//! - `"citus"` — Citus shard-pruning details (only when citus=true, v0.59.0)
 
 use pgrx::prelude::*;
 use spargebra::Query;
@@ -104,7 +105,10 @@ fn extract_buffers(plan: &serde_json::Value) -> serde_json::Value {
 ///
 /// When `analyze` is `true`, runs `EXPLAIN (ANALYZE, FORMAT JSON, BUFFERS true)`;
 /// when `false`, runs `EXPLAIN (FORMAT JSON)` only.
-pub fn explain_sparql_jsonb(query_text: &str, analyze: bool) -> pgrx::JsonB {
+///
+/// When `citus` is `true` (v0.59.0, CITUS-12), an additional `"citus"` key is
+/// included in the output showing shard-pruning details for the query.
+pub fn explain_sparql_jsonb(query_text: &str, analyze: bool, citus: bool) -> pgrx::JsonB {
     let query = crate::sparql::SparqlParser::new()
         .parse_query(query_text)
         .unwrap_or_else(|e| pgrx::error!("SPARQL parse error: {e}"));
@@ -198,6 +202,11 @@ pub fn explain_sparql_jsonb(query_text: &str, analyze: bool) -> pgrx::JsonB {
     if analyze {
         result["actual_rows"] = actual_rows_json;
         result["buffers"] = buffers_json;
+    }
+
+    // v0.59.0 (CITUS-12): add Citus shard-pruning section when citus=true.
+    if citus {
+        result["citus"] = crate::citus::explain_citus_section(query_text);
     }
 
     pgrx::JsonB(result)
