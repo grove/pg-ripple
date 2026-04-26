@@ -123,7 +123,7 @@ SET pg_ripple.merge_fence_timeout_ms = 30000;   -- 30 seconds
 
 -- pg-trickle: stream table refresh lease expiry must be at least as long
 -- (set via the pgt_st_locks entry created at refresh time)
-SET pg_trickle.st_lock_lease_ms = 45000;        -- 45 seconds (≥ 30s fence)
+SET pg_trickle.citus_st_lock_lease_ms = 45000;  -- 45 seconds (≥ 30s fence)
 ```
 
 Monitor both sides together:

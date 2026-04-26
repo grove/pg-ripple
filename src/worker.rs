@@ -177,10 +177,39 @@ fn run_validation_cycle() {
     }
 }
 
-/// Run one merge cycle inside an open SPI transaction.
-/// Delegates to `run_merge_cycle_for_worker(0, 1)` for backward compatibility.
-#[allow(dead_code)]
-fn run_merge_cycle() {
+/// RAII guard that holds the Citus merge fence advisory lock.
+///
+/// The guard emits `pg_ripple.merge_end` NOTIFY and releases the session
+/// advisory lock in its `Drop` impl, ensuring cleanup happens even if the
+/// merge cycle panics.  This satisfies the L-5.4 spec requirement:
+/// "wrap the merge fencing in a Rust struct implementing `Drop` so that
+/// `pg_notify('pg_ripple.merge_end', ...)` is emitted even on panic or error".
+struct MergeFenceGuard {
+    worker_idx: u32,
+}
+
+impl Drop for MergeFenceGuard {
+    fn drop(&mut self) {
+        const FENCE_KEY: i64 = 0x5052_5000_i64;
+        let payload = format!(
+            "{{\"worker\":{},\"pid\":{}}}",
+            self.worker_idx,
+            std::process::id()
+        );
+        // Best-effort: emit merge_end so listeners can resume CDC apply.
+        let _ = Spi::run_with_args(
+            &format!("SELECT pg_notify('pg_ripple.merge_end', '{payload}')"),
+            &[],
+        );
+        // Release the session-level advisory lock unconditionally.
+        let _ = Spi::run_with_args(
+            "SELECT pg_advisory_unlock($1)",
+            &[pgrx::datum::DatumWithOid::from(FENCE_KEY)],
+        );
+    }
+}
+
+
     run_merge_cycle_for_worker(0, 1);
 }
 
@@ -203,8 +232,12 @@ fn run_merge_cycle_for_worker(worker_idx: u32, n_workers: u32) {
     // timeout is configured, try to acquire an advisory lock before merging.
     // This prevents split-brain during shard rebalancing: pg-trickle holds the
     // same advisory lock (key = 0x5052_5000 = "PRP\0") during apply.
+    //
+    // We use a MergeFenceGuard RAII guard so that the lock is *always* released
+    // and merge_end is *always* emitted — even if the cycle panics or exits
+    // early with nothing to merge (fixes session lock leak).
     let fence_timeout_ms = crate::gucs::storage::MERGE_FENCE_TIMEOUT_MS.get();
-    if fence_timeout_ms > 0 && crate::citus::is_citus_loaded() {
+    let _fence_guard = if fence_timeout_ms > 0 && crate::citus::is_citus_loaded() {
         const FENCE_KEY: i64 = 0x5052_5000_i64; // "PRP\0"
         let locked: bool = Spi::get_one_with_args::<bool>(
             "SELECT pg_try_advisory_lock($1)",
@@ -218,13 +251,17 @@ fn run_merge_cycle_for_worker(worker_idx: u32, n_workers: u32) {
             );
             return;
         }
-        // Emit NOTIFY for pg-trickle awareness.
+        // Emit merge_start NOTIFY for observability.
         let payload = format!("{{\"worker\":{worker_idx},\"pid\":{}}}", std::process::id());
         let _ = Spi::run_with_args(
             &format!("SELECT pg_notify('pg_ripple.merge_start', '{payload}')"),
             &[],
         );
-    }
+        // Guard will emit merge_end and release the lock in Drop.
+        Some(MergeFenceGuard { worker_idx })
+    } else {
+        None
+    };
 
     let threshold = get_merge_threshold();
 
@@ -362,19 +399,8 @@ fn run_merge_cycle_for_worker(worker_idx: u32, n_workers: u32) {
 
         pgrx::log!("pg_ripple merge worker: merge cycle complete");
 
-        // v0.58.0: Emit merge_end NOTIFY so pg-trickle can resume CDC apply.
-        if fence_timeout_ms > 0 && crate::citus::is_citus_loaded() {
-            let payload = format!("{{\"worker\":{worker_idx},\"pid\":{}}}", std::process::id());
-            let _ = Spi::run_with_args(
-                &format!("SELECT pg_notify('pg_ripple.merge_end', '{payload}')"),
-                &[],
-            );
-            const FENCE_KEY: i64 = 0x5052_5000_i64;
-            let _ = Spi::run_with_args(
-                "SELECT pg_advisory_unlock($1)",
-                &[pgrx::datum::DatumWithOid::from(FENCE_KEY)],
-            );
-        }
+        // merge_end NOTIFY and fence lock release are handled automatically
+        // by MergeFenceGuard::drop() when _fence_guard goes out of scope.
     }
 
     // Only worker 0 runs housekeeping tasks to avoid duplicate work.

@@ -109,6 +109,25 @@ pub fn distribute_vp_delta(pred_id: i64, colocate_with: &str) {
         &[],
     )
     .unwrap_or_else(|e| pgrx::warning!("pg_notify vp_promoted: {e}"));
+
+    // Step 3: Distribute the tombstones table co-located with delta so that
+    // the HTAP query path `(main EXCEPT tombstones) UNION ALL delta` stays
+    // shard-local and is not re-routed through the coordinator.
+    //
+    // Tombstones have `s BIGINT` (added since v0.6.0), making co-location
+    // straightforward.  `colocate_with` uses the delta table name so Citus
+    // assigns tombstones to the same colocation group (same shard count and
+    // distribution).
+    let tombs = format!("_pg_ripple.vp_{pred_id}_tombstones");
+    Spi::run_with_args(
+        &format!(
+            "SELECT create_distributed_table( \
+                 '{tombs}', 's', colocate_with => '{delta}' \
+             )"
+        ),
+        &[],
+    )
+    .unwrap_or_else(|e| pgrx::warning!("create_distributed_table {tombs}: {e}"));
 }
 
 // ─── SQL API ─────────────────────────────────────────────────────────────────
@@ -167,8 +186,25 @@ pub fn enable_citus_sharding() -> TableIterator<
 
     for pred_id in pred_ids {
         let delta_name = format!("_pg_ripple.vp_{pred_id}_delta");
-        distribute_vp_delta(pred_id, colocate);
-        results.push((pred_id, delta_name, "distributed".to_string()));
+
+        // Idempotency check: skip tables already registered in pg_dist_partition.
+        // `partmethod IS NOT NULL` means Citus already knows this table.
+        let already_distributed = Spi::get_one_with_args::<bool>(
+            "SELECT EXISTS( \
+                 SELECT 1 FROM pg_dist_partition \
+                 WHERE logicalrelid = $1::regclass \
+             )",
+            &[delta_name.as_str().into()],
+        )
+        .unwrap_or(Some(false))
+        .unwrap_or(false);
+
+        if already_distributed {
+            results.push((pred_id, delta_name, "skip".to_string()));
+        } else {
+            distribute_vp_delta(pred_id, colocate);
+            results.push((pred_id, delta_name, "distributed".to_string()));
+        }
     }
 
     // Notify merge worker to re-fence.
