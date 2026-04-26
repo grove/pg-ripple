@@ -132,6 +132,27 @@ pub fn initialize_timeline_schema() {
         &[],
     )
     .unwrap_or_else(|e| pgrx::warning!("statement timeline trigger function: {e}"));
+
+    // Also attach the trigger to vp_rare so that non-promoted predicates are
+    // tracked too (the trigger is idempotent via CREATE ... IF NOT EXISTS).
+    Spi::run_with_args(
+        "DO $$ BEGIN \
+           IF NOT EXISTS ( \
+             SELECT 1 FROM pg_trigger t \
+             JOIN pg_class c ON c.oid = t.tgrelid \
+             JOIN pg_namespace n ON n.oid = c.relnamespace \
+             WHERE n.nspname = '_pg_ripple' AND c.relname = 'vp_rare' \
+               AND t.tgname = 'trg_timeline_vp_rare' \
+           ) THEN \
+             EXECUTE 'CREATE TRIGGER trg_timeline_vp_rare \
+                      AFTER INSERT ON _pg_ripple.vp_rare \
+                      FOR EACH ROW \
+                      EXECUTE FUNCTION _pg_ripple.record_statement_timestamp()'; \
+           END IF; \
+         END $$",
+        &[],
+    )
+    .unwrap_or_else(|e| pgrx::warning!("vp_rare timeline trigger: {e}"));
 }
 
 /// Attach the `record_statement_timestamp` trigger to a VP delta table.

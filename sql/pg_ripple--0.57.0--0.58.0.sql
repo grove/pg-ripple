@@ -89,3 +89,21 @@ BEGIN
     END LOOP;
 END
 $$;
+
+-- Also attach the trigger to vp_rare for non-promoted predicates.
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_trigger t
+        JOIN pg_class c ON c.oid = t.tgrelid
+        JOIN pg_namespace n ON n.oid = c.relnamespace
+        WHERE n.nspname = '_pg_ripple' AND c.relname = 'vp_rare'
+          AND t.tgname = 'trg_timeline_vp_rare'
+    ) THEN
+        EXECUTE 'CREATE TRIGGER trg_timeline_vp_rare '
+                'AFTER INSERT ON _pg_ripple.vp_rare '
+                'FOR EACH ROW '
+                'EXECUTE FUNCTION _pg_ripple.record_statement_timestamp()';
+    END IF;
+END
+$$;
