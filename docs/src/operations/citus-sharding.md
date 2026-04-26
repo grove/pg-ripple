@@ -9,7 +9,7 @@ as the distribution column, co-locating star-pattern triples on the same shard.
 
 - **Citus 12+** installed in the same PostgreSQL 18 cluster.
 - **pg_ripple ≥ 0.58.0**.
-- **pg-trickle ≥ 0.32.0** (for CDC / pg-trickle compatibility mode).
+- **pg-trickle ≥ 0.33.0** (for CDC / pg-trickle compatibility mode).
 
 > **PT536** — Raised when a Citus API function (`enable_citus_sharding`, `citus_rebalance`, `enable_citus_sharding`) is called but the Citus extension is not installed. Install Citus or use `pg_ripple.citus_available()` to check before calling.
 
@@ -164,8 +164,8 @@ all physical shard tables (`{prefix}{shard_id}`) without querying
   before shard routing.
 - `pg_ripple.enable_citus_sharding()` must be called once after Citus is
   activated.  It is idempotent (safe to call multiple times).
-- `vp_{id}_main` and `vp_{id}_tombstones` are not distributed; only the delta
-  table is.  The merge worker reads from main and delta and writes back to main
+- `vp_{id}_main` is not distributed; only the delta and tombstones tables
+  are.  The merge worker reads from main and delta and writes back to main
   via the coordinator.
 - Cross-shard SPARQL federation is not automatically optimised in v0.58.0.
   A future release will add shard-pruning for bound subject patterns.
