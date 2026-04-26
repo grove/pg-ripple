@@ -159,6 +159,13 @@ all physical shard tables (`{prefix}{shard_id}`) without querying
 
 ## Limitations (v0.58.0)
 
+- **pg-trickle scheduler integration** (v0.33.0): When using pg-trickle for CDC on
+  distributed VP tables, the scheduler does not yet automatically poll per-worker
+  WAL slots. The infrastructure is in place (`handle_vp_promoted`, `pgt_st_locks`),
+  but operators must manually invoke `LISTEN "pg_ripple.vp_promoted" +
+  handle_vp_promoted()` or implement custom application logic. Automated scheduler
+  integration is planned for a future release.
+
 - The `_pg_ripple.statement_id_timeline` table is coordinator-local; SID
   recording is done via the VP delta trigger which fires on the coordinator
   before shard routing.
