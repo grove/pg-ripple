@@ -93,10 +93,14 @@ FROM pg_ripple.prov_stats();
 
 -- Disable provenance.
 SET pg_ripple.prov_enabled = off;
+
 -- After disabling, new loads should not create prov entries.
--- (snapshot the count first)
-SELECT count(*) AS prov_count_before INTO TEMP TABLE _prov_before FROM pg_ripple.prov_stats();
-SELECT 1
+-- Count before the no-prov load.
+SELECT count(*) AS prov_count_before_no_prov_load FROM pg_ripple.prov_stats();
+ prov_count_before_no_prov_load 
+--------------------------------
+                              1
+(1 row)
 
 SELECT pg_ripple.load_ntriples(
     '<urn:prov_test:no_prov:a> <urn:prov_test:no_prov:p> <urn:prov_test:no_prov:o> .',
@@ -107,9 +111,9 @@ SELECT pg_ripple.load_ntriples(
  t
 (1 row)
 
--- Count must not have grown.
-SELECT (SELECT count(*) FROM pg_ripple.prov_stats()) = (SELECT prov_count_before FROM _prov_before)
-AS prov_count_stable;
+-- Count must still be exactly 1 (only the first load when prov was on).
+SELECT count(*) = 1 AS prov_count_stable
+FROM pg_ripple.prov_stats();
  prov_count_stable 
 -------------------
  t
@@ -117,4 +121,3 @@ AS prov_count_stable;
 
 -- Reset.
 RESET pg_ripple.prov_enabled;
-DROP TABLE IF EXISTS _prov_before;

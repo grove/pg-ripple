@@ -57,18 +57,17 @@ FROM pg_ripple.prov_stats();
 SET pg_ripple.prov_enabled = off;
 
 -- After disabling, new loads should not create prov entries.
--- (snapshot the count first)
-SELECT count(*) AS prov_count_before INTO TEMP TABLE _prov_before FROM pg_ripple.prov_stats();
+-- Count before the no-prov load.
+SELECT count(*) AS prov_count_before_no_prov_load FROM pg_ripple.prov_stats();
 
 SELECT pg_ripple.load_ntriples(
     '<urn:prov_test:no_prov:a> <urn:prov_test:no_prov:p> <urn:prov_test:no_prov:o> .',
     false
 ) >= 1 AS loaded_no_prov;
 
--- Count must not have grown.
-SELECT (SELECT count(*) FROM pg_ripple.prov_stats()) = (SELECT prov_count_before FROM _prov_before)
-AS prov_count_stable;
+-- Count must still be exactly 1 (only the first load when prov was on).
+SELECT count(*) = 1 AS prov_count_stable
+FROM pg_ripple.prov_stats();
 
 -- Reset.
 RESET pg_ripple.prov_enabled;
-DROP TABLE IF EXISTS _prov_before;
