@@ -1,5 +1,4 @@
 -- pg_regress test: PROV-O provenance tracking (v0.58.0)
-
 -- Verify PROV-O API functions exist.
 SELECT EXISTS (
     SELECT 1 FROM pg_proc
@@ -94,7 +93,6 @@ FROM pg_ripple.prov_stats();
 
 -- Disable provenance.
 SET pg_ripple.prov_enabled = off;
-
 -- After disabling, new loads should not create prov entries.
 -- Count before the no-prov load.
 SELECT count(*) AS prov_count_before_no_prov_load FROM pg_ripple.prov_stats();
