@@ -27,6 +27,11 @@ CREATE TABLE IF NOT EXISTS _pg_ripple.rag_cache (
 CREATE INDEX IF NOT EXISTS idx_rag_cache_cached_at
     ON _pg_ripple.rag_cache (cached_at);
 
+-- Ensure a unique index exists on version so ON CONFLICT (version) works.
+-- The table was originally created without one (v0.37.0); this backfills it.
+CREATE UNIQUE INDEX IF NOT EXISTS schema_version_version_key
+    ON _pg_ripple.schema_version (version);
+
 INSERT INTO _pg_ripple.schema_version (version, upgraded_from, installed_at)
 VALUES ('0.53.0', '0.52.0', clock_timestamp())
 ON CONFLICT (version) DO NOTHING;
