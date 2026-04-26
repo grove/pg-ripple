@@ -11,6 +11,8 @@ as the distribution column, co-locating star-pattern triples on the same shard.
 - **pg_ripple ≥ 0.58.0**.
 - **pg-trickle ≥ 0.32.0** (for CDC / pg-trickle compatibility mode).
 
+> **PT536** — Raised when a Citus API function (`enable_citus_sharding`, `citus_rebalance`, `enable_citus_sharding`) is called but the Citus extension is not installed. Install Citus or use `pg_ripple.citus_available()` to check before calling.
+
 ## Activation
 
 1. Install Citus on all nodes and add it to `shared_preload_libraries`:
