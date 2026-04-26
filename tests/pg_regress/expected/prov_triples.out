@@ -1,4 +1,5 @@
 -- pg_regress test: PROV-O provenance tracking (v0.58.0)
+
 -- Verify PROV-O API functions exist.
 SELECT EXISTS (
     SELECT 1 FROM pg_proc

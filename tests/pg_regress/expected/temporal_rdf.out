@@ -1,4 +1,5 @@
 -- pg_regress test: temporal RDF point-in-time queries (v0.58.0)
+
 -- Verify the temporal API functions exist.
 SELECT pg_get_function_identity_arguments(oid) AS sig
 FROM pg_proc
