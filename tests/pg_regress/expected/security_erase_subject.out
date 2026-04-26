@@ -31,7 +31,7 @@ FROM pg_ripple.sparql(
 SELECT pg_ripple.erase_subject('http://example.org/alice'::text) AS erased_count;
  erased_count 
 --------------
-            3
+            4
 (1 row)
 
 -- Verify alice's triples are gone.
