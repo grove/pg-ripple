@@ -15,9 +15,10 @@
 //! - `REPLICA IDENTITY FULL` is set **before** `create_distributed_table()` so
 //!   that the logical replication slot used by pg-trickle captures full row
 //!   images from the very first write.
-//! - The merge worker fence uses `pg_try_advisory_xact_lock(pid)` on the
-//!   coordinator before executing the merge to prevent split-brain during shard
-//!   rebalancing.
+//! - The merge worker fence uses `pg_try_advisory_lock(0x5052_5000)` (session-
+//!   level, key = `"PRP\0"`) on the coordinator before executing a merge cycle.
+//!   `pg_ripple.citus_rebalance()` acquires the same lock (blocking form) before
+//!   calling `citus_rebalance_start()` to prevent split-brain.
 //!
 //! # Error codes
 //!
@@ -220,7 +221,12 @@ pub fn enable_citus_sharding() -> TableIterator<
 
 /// Trigger a Citus shard rebalance.
 ///
-/// Wraps `citus_rebalance_start()` and waits for it to complete.
+/// Acquires the merge fence advisory lock (`0x5052_5000`) in **blocking** mode
+/// before calling `citus_rebalance_start()`.  This ensures no merge cycle is
+/// running mid-rebalance (the merge worker holds the same lock while merging).
+/// The lock is released immediately after `citus_rebalance_start()` returns so
+/// the merge worker can resume.
+///
 /// Returns the number of rebalanced shard moves.
 ///
 /// Requires Citus to be installed (PT536).
@@ -229,8 +235,19 @@ pub fn citus_rebalance() -> i64 {
     if !is_citus_loaded() {
         pgrx::error!("citus_rebalance: Citus extension is not installed (PT536)");
     }
-    // citus_rebalance_start returns a job_id; we call citus_rebalance which is
-    // the blocking version if available, else fall back to start+wait pattern.
+
+    const FENCE_KEY: i64 = 0x5052_5000_i64; // "PRP\0"
+
+    // Block until no merge worker is active.  The merge worker holds this
+    // session advisory lock while executing a cycle; once we acquire it the
+    // worker is idle and we can safely start the Citus rebalance.
+    Spi::run_with_args(
+        "SELECT pg_advisory_lock($1)",
+        &[pgrx::datum::DatumWithOid::from(FENCE_KEY)],
+    )
+    .unwrap_or_else(|e| pgrx::warning!("citus_rebalance: fence lock failed: {e}"));
+
+    // Start the rebalance (non-blocking Citus API; the rebalancer runs async).
     let moves: i64 = Spi::get_one::<i64>(
         "SELECT COALESCE( \
              (SELECT count(*) FROM citus_rebalance_start()), \
@@ -242,6 +259,14 @@ pub fn citus_rebalance() -> i64 {
         None
     })
     .unwrap_or(0);
+
+    // Release the fence lock so the merge worker can resume.
+    Spi::run_with_args(
+        "SELECT pg_advisory_unlock($1)",
+        &[pgrx::datum::DatumWithOid::from(FENCE_KEY)],
+    )
+    .unwrap_or_else(|e| pgrx::warning!("citus_rebalance: fence unlock failed: {e}"));
+
     moves
 }
 
