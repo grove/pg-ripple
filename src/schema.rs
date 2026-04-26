@@ -1046,3 +1046,69 @@ pgrx::extension_sql!(
     name = "v057_schema_version_stamp",
     requires = ["v057_kge_tenants_setup"]
 );
+
+// ─── v0.58.0 schema additions ─────────────────────────────────────────────────
+
+pgrx::extension_sql!(
+    r#"
+-- Temporal RDF statement ID timeline (v0.58.0 L-1.3).
+-- Maps statement IDs to wall-clock insertion timestamps for point-in-time
+-- queries.  An AFTER INSERT trigger on vp_rare and every VP delta table
+-- keeps this table current.
+CREATE TABLE IF NOT EXISTS _pg_ripple.statement_id_timeline (
+    sid         BIGINT      NOT NULL PRIMARY KEY,
+    inserted_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_statement_id_timeline_ts
+    ON _pg_ripple.statement_id_timeline USING BRIN (inserted_at);
+
+-- Trigger function that records each new SID with its insertion timestamp.
+CREATE OR REPLACE FUNCTION _pg_ripple.record_statement_timestamp()
+RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+    INSERT INTO _pg_ripple.statement_id_timeline (sid, inserted_at)
+    VALUES (NEW.i, now())
+    ON CONFLICT (sid) DO NOTHING;
+    RETURN NEW;
+END;
+$$;
+
+-- Attach to vp_rare so non-promoted predicates are also tracked.
+DO $do$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_trigger t
+        JOIN pg_class c ON c.oid = t.tgrelid
+        JOIN pg_namespace n ON n.oid = c.relnamespace
+        WHERE n.nspname = '_pg_ripple' AND c.relname = 'vp_rare'
+          AND t.tgname = 'trg_timeline_vp_rare'
+    ) THEN
+        EXECUTE 'CREATE TRIGGER trg_timeline_vp_rare
+                 AFTER INSERT ON _pg_ripple.vp_rare
+                 FOR EACH ROW
+                 EXECUTE FUNCTION _pg_ripple.record_statement_timestamp()';
+    END IF;
+END
+$do$;
+
+-- PROV-O provenance catalog (v0.58.0 L-8.4).
+-- Tracks the source, activity IRI and triple count for every bulk ingest
+-- operation when pg_ripple.prov_enabled = on.
+CREATE TABLE IF NOT EXISTS _pg_ripple.prov_catalog (
+    source        TEXT        NOT NULL PRIMARY KEY,
+    activity_iri  TEXT        NOT NULL,
+    triple_count  BIGINT      NOT NULL DEFAULT 0,
+    last_updated  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+"#,
+    name = "v058_temporal_prov_setup",
+    requires = ["v057_schema_version_stamp"]
+);
+
+pgrx::extension_sql!(
+    "INSERT INTO _pg_ripple.schema_version (version, upgraded_from, installed_at) \
+     VALUES ('0.58.0', '0.57.0', clock_timestamp());",
+    name = "v058_schema_version_stamp",
+    requires = ["v058_temporal_prov_setup"]
+);

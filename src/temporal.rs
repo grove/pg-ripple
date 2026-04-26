@@ -75,7 +75,7 @@ pub fn point_in_time_info() -> TableIterator<
 > {
     // Read the current threshold from the session GUC.
     let threshold: i64 = Spi::get_one::<i64>(
-        "SELECT COALESCE(current_setting('_pg_ripple.pit_threshold', true)::bigint, 0)",
+        "SELECT COALESCE(NULLIF(current_setting('_pg_ripple.pit_threshold', true), '')::bigint, 0)",
     )
     .unwrap_or(None)
     .unwrap_or(0);

@@ -21,11 +21,12 @@ SELECT EXISTS (
       AND c.relname = 'prov_catalog'
 ) AS prov_catalog_exists;
 
--- Verify GUC exists and defaults to off.
-SELECT current_setting('pg_ripple.prov_enabled') = 'off' AS prov_guc_off;
-
 -- prov_enabled() returns false by default.
+-- This call also ensures the library is loaded (GUC registration happens in _PG_init).
 SELECT pg_ripple.prov_enabled() = false AS prov_disabled_by_default;
+
+-- Verify GUC exists and defaults to off (library now loaded via prov_enabled() above).
+SELECT current_setting('pg_ripple.prov_enabled') = 'off' AS prov_guc_off;
 
 -- prov_stats() should return empty set when no provenance has been emitted.
 SELECT count(*) = 0 AS no_prov_without_load

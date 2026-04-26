@@ -25,7 +25,8 @@ SELECT EXISTS (
 ) AS timeline_table_exists;
 
 -- clear_point_in_time should succeed without error.
-SELECT pg_ripple.clear_point_in_time() IS NULL AS clear_ok;
+DO $$ BEGIN PERFORM pg_ripple.clear_point_in_time(); END $$;
+SELECT TRUE AS clear_ok;
 
 -- point_in_time_info with no threshold should return (0, NULL).
 SELECT threshold_sid = 0 AS threshold_is_zero
@@ -50,14 +51,16 @@ SELECT pg_ripple.insert_triple(
 ) > 0 AS inserted_charlie;
 
 -- Set point_in_time to current timestamp.
-SELECT pg_ripple.point_in_time(now()) IS NULL AS pit_set_ok;
+DO $$ BEGIN PERFORM pg_ripple.point_in_time(now()); END $$;
+SELECT TRUE AS pit_set_ok;
 
 -- point_in_time_info should now return a non-zero threshold.
 SELECT threshold_sid >= 0 AS threshold_nonneg
 FROM pg_ripple.point_in_time_info();
 
 -- clear_point_in_time resets threshold to 0.
-SELECT pg_ripple.clear_point_in_time() IS NULL AS cleared;
+DO $$ BEGIN PERFORM pg_ripple.clear_point_in_time(); END $$;
+SELECT TRUE AS cleared;
 
 SELECT threshold_sid = 0 AS threshold_cleared
 FROM pg_ripple.point_in_time_info();

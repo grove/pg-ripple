@@ -4,9 +4,9 @@ SELECT pg_get_function_identity_arguments(oid) AS sig
 FROM pg_proc
 WHERE proname = 'point_in_time'
   AND pronamespace = (SELECT oid FROM pg_namespace WHERE nspname = 'pg_ripple');
-           sig            
---------------------------
- timestamp with time zone
+             sig             
+-----------------------------
+ ts timestamp with time zone
 (1 row)
 
 SELECT pg_get_function_identity_arguments(oid) AS sig
@@ -40,7 +40,8 @@ SELECT EXISTS (
 (1 row)
 
 -- clear_point_in_time should succeed without error.
-SELECT pg_ripple.clear_point_in_time() IS NULL AS clear_ok;
+DO $$ BEGIN PERFORM pg_ripple.clear_point_in_time(); END $$;
+SELECT TRUE AS clear_ok;
  clear_ok 
 ----------
  t
@@ -85,7 +86,8 @@ SELECT pg_ripple.insert_triple(
 (1 row)
 
 -- Set point_in_time to current timestamp.
-SELECT pg_ripple.point_in_time(now()) IS NULL AS pit_set_ok;
+DO $$ BEGIN PERFORM pg_ripple.point_in_time(now()); END $$;
+SELECT TRUE AS pit_set_ok;
  pit_set_ok 
 ------------
  t
@@ -100,7 +102,8 @@ FROM pg_ripple.point_in_time_info();
 (1 row)
 
 -- clear_point_in_time resets threshold to 0.
-SELECT pg_ripple.clear_point_in_time() IS NULL AS cleared;
+DO $$ BEGIN PERFORM pg_ripple.clear_point_in_time(); END $$;
+SELECT TRUE AS cleared;
  cleared 
 ---------
  t

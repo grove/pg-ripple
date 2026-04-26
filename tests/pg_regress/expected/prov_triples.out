@@ -32,17 +32,18 @@ SELECT EXISTS (
  t
 (1 row)
 
--- Verify GUC exists and defaults to off.
-SELECT current_setting('pg_ripple.prov_enabled') = 'off' AS prov_guc_off;
- prov_guc_off 
---------------
- t
-(1 row)
-
 -- prov_enabled() returns false by default.
+-- This call also ensures the library is loaded (GUC registration happens in _PG_init).
 SELECT pg_ripple.prov_enabled() = false AS prov_disabled_by_default;
  prov_disabled_by_default 
 --------------------------
+ t
+(1 row)
+
+-- Verify GUC exists and defaults to off (library now loaded via prov_enabled() above).
+SELECT current_setting('pg_ripple.prov_enabled') = 'off' AS prov_guc_off;
+ prov_guc_off 
+--------------
  t
 (1 row)
 
