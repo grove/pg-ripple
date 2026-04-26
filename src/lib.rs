@@ -54,6 +54,10 @@ mod tenant;
 mod views;
 mod views_api;
 mod worker;
+// v0.58.0 modules
+mod citus;
+mod prov;
+mod temporal;
 
 // Re-export all GUC statics at the crate root so that `crate::SOME_GUC` paths
 // in existing code continue to work after the split.
@@ -1831,6 +1835,48 @@ pub extern "C-unwind" fn _PG_init() {
           Default off. (v0.57.0)",
         c"",
         &crate::gucs::storage::ADAPTIVE_INDEXING_ENABLED,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+
+    // ── v0.58.0 GUCs — Citus sharding, merge fence, PROV-O ──────────────────
+    pgrx::GucRegistry::define_bool_guc(
+        c"pg_ripple.citus_sharding_enabled",
+        c"Enable Citus horizontal sharding of VP tables on predicate promotion. \
+          Requires the Citus extension. Default off. (v0.58.0)",
+        c"",
+        &crate::gucs::storage::CITUS_SHARDING_ENABLED,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+
+    pgrx::GucRegistry::define_bool_guc(
+        c"pg_ripple.citus_trickle_compat",
+        c"When on, VP delta tables use colocate_with='none' for pg-trickle CDC compatibility. \
+          Default off. (v0.58.0)",
+        c"",
+        &crate::gucs::storage::CITUS_TRICKLE_COMPAT,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+
+    pgrx::GucRegistry::define_int_guc(
+        c"pg_ripple.merge_fence_timeout_ms",
+        c"Milliseconds the merge worker waits for an advisory fence lock during Citus rebalancing. \
+          0 = no fence. (v0.58.0)",
+        c"",
+        &crate::gucs::storage::MERGE_FENCE_TIMEOUT_MS,
+        0,
+        300_000,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+
+    pgrx::GucRegistry::define_bool_guc(
+        c"pg_ripple.prov_enabled",
+        c"Emit PROV-O provenance triples for all bulk ingest operations. Default off. (v0.58.0)",
+        c"",
+        &crate::gucs::storage::PROV_ENABLED,
         GucContext::Userset,
         GucFlags::default(),
     );

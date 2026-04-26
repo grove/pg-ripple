@@ -13,6 +13,34 @@ Versions correspond to the milestones in [ROADMAP.md](ROADMAP.md).
 
 ---
 
+## [0.58.0] — 2026-05-14 — Temporal RDF, SPARQL-DL, Citus Sharding & PROV-O
+
+**Implements the v0.58.0 roadmap: Temporal RDF point-in-time queries, SPARQL-DL OWL axiom routing, Citus horizontal sharding of VP tables, PROV-O provenance tracking, v1 readiness integration test suite, and CI gate hardening.**
+
+### What's new
+
+- **Temporal RDF** (L-1.3): New functions `pg_ripple.point_in_time(ts TIMESTAMPTZ)`, `pg_ripple.clear_point_in_time()`, and `pg_ripple.point_in_time_info()`. A new `_pg_ripple.statement_id_timeline` table (SID → TIMESTAMPTZ, BRIN-indexed) is populated by an AFTER INSERT trigger on every VP delta table. Calling `point_in_time()` sets a session-local `_pg_ripple.pit_threshold` GUC that restricts SPARQL queries to triples inserted before the given timestamp.
+
+- **SPARQL-DL** (L-1.4): New functions `pg_ripple.sparql_dl_subclasses(TEXT)` and `pg_ripple.sparql_dl_superclasses(TEXT)` route OWL vocabulary BGPs (`owl:subClassOf`, `owl:equivalentClass`, `owl:disjointWith`, `owl:inverseOf`) to the VP table T-Box data rather than synthesising a separate in-memory index. New module `src/sparql/sparqldl.rs`.
+
+- **Citus horizontal sharding** (L-5.4): New GUCs `pg_ripple.citus_sharding_enabled` (bool, default off), `pg_ripple.citus_trickle_compat` (bool, default off), and `pg_ripple.merge_fence_timeout_ms` (int, default 0). New functions `pg_ripple.enable_citus_sharding()`, `pg_ripple.citus_rebalance()`, `pg_ripple.citus_cluster_status()`, and `pg_ripple.citus_available()`. When `citus_sharding_enabled = on`, VP tables get `REPLICA IDENTITY FULL` before `create_distributed_table()` (C-9 fix). Dictionary and predicates catalog become reference tables. Merge worker acquires an advisory fence lock during rebalancing and emits `pg_ripple.merge_start`/`merge_end` NOTIFYs.
+
+- **PROV-O provenance** (L-8.4): New GUC `pg_ripple.prov_enabled` (bool, default off). When enabled, every bulk-load operation (`load_ntriples`, `load_turtle`, `load_nquads`) emits PROV-O `prov:Activity` + `prov:Entity` triples into the named graph `<urn:pg_ripple:prov>` and updates `_pg_ripple.prov_catalog`. New functions `pg_ripple.prov_stats()` and `pg_ripple.prov_enabled()`.
+
+- **v1 readiness integration test suite** (J-6): New `tests/integration/v1_readiness/` directory with four shell test scripts: `crash_recovery.sh`, `concurrent_writes.sh`, `upgrade_chain.sh`, and `regress_mismatch_audit.sh`. Run via `tests/integration/v1_readiness/run_all.sh`.
+
+- **CI gate hardening** (J-5): Four new pg_regress test files: `temporal_rdf`, `sparql_dl`, `citus_sharding`, `prov_triples`. All new tests pass in CI without Citus installed.
+
+### Migration
+
+New tables and trigger function are installed automatically on first use of `_PG_init`. For existing installations, run:
+
+```sql
+ALTER EXTENSION pg_ripple UPDATE TO '0.58.0';
+```
+
+---
+
 ## [0.57.0] — 2026-05-07 — Reasoning Platform & AI Integration
 
 **Implements the v0.57.0 roadmap: OWL 2 EL/QL reasoning profiles, Knowledge-Graph Embeddings (TransE/RotatE), entity alignment via HNSW ANN search, LLM-augmented SPARQL repair, automated ontology mapping, multi-tenant graph isolation, columnar VP storage guard, adaptive index advisor, and probabilistic Datalog GUC.**

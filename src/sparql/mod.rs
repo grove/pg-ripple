@@ -31,6 +31,7 @@ mod optimizer;
 mod plan_cache;
 mod property_path;
 pub(crate) mod ql_rewrite;
+pub(crate) mod sparqldl;
 pub(crate) mod sqlgen;
 pub mod translate;
 pub(crate) mod wcoj;

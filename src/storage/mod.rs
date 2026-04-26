@@ -373,6 +373,12 @@ pub fn initialize_schema() {
     // v0.52.0: CDC bridge triggers catalog.
     cdc_bridge::initialize_cdc_bridge_schema();
 
+    // v0.58.0: Temporal RDF timeline table.
+    crate::temporal::initialize_timeline_schema();
+
+    // v0.58.0: PROV-O provenance catalog.
+    crate::prov::initialize_prov_schema();
+
     // Note: the predicate_stats view is created via extension_sql in lib.rs,
     // not here, to avoid deadlocks when initialize_schema() is called from
     // concurrent test transactions.
@@ -515,6 +521,19 @@ fn promote_predicate(p_id: i64) {
         &[DatumWithOid::from(p_id)],
     )
     .unwrap_or_else(|e| pgrx::error!("predicate promotion count update SPI error: {e}"));
+
+    // v0.58.0: Attach the statement timeline trigger to the new delta table.
+    crate::temporal::attach_timeline_trigger(p_id);
+
+    // v0.58.0: If Citus sharding is enabled, distribute the new VP table.
+    if crate::gucs::storage::CITUS_SHARDING_ENABLED.get() {
+        let colocate = if crate::gucs::storage::CITUS_TRICKLE_COMPAT.get() {
+            "none"
+        } else {
+            "default"
+        };
+        crate::citus::distribute_vp_delta(p_id, colocate);
+    }
 }
 
 /// Promote all rare predicates that have reached the promotion threshold.
