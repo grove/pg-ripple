@@ -86,36 +86,25 @@ pub fn execute_dl_pattern(pattern: &DlPattern) -> Vec<(String, String)> {
     let pred_id = crate::dictionary::encode(pred_iri, crate::dictionary::KIND_IRI);
 
     // Build the query based on bound/unbound subject and object.
+    // OWL axiom predicates are almost always in vp_rare (rarely promoted to their
+    // own VP table).  We query vp_rare only.
+    let base = "SELECT ds.value AS subj, do_.value AS obj \
+         FROM _pg_ripple.vp_rare vr \
+         JOIN _pg_ripple.dictionary ds ON ds.id = vr.s \
+         JOIN _pg_ripple.dictionary do_ ON do_.id = vr.o";
+
     let sql = match (&pattern.subject, &pattern.object) {
         (DlTerm::Variable(_), DlTerm::Variable(_)) => {
             format!(
-                "SELECT ds.value AS subj, do_.value AS obj \
-                 FROM _pg_ripple.vp_rare vr \
-                 JOIN _pg_ripple.dictionary ds ON ds.id = vr.s \
-                 JOIN _pg_ripple.dictionary do_ ON do_.id = vr.o \
+                "{base} \
                  WHERE vr.p = {pred_id} \
-                 UNION ALL \
-                 SELECT ds.value, do_.value \
-                 FROM _pg_ripple.predicates pred \
-                 JOIN _pg_ripple.dictionary dv ON dv.value = pred.table_name \
-                 CROSS JOIN LATERAL ( \
-                     SELECT s, o FROM _pg_ripple.vp_{pred_id}_delta \
-                     UNION ALL \
-                     SELECT s, o FROM _pg_ripple.vp_{pred_id}_main \
-                 ) vp \
-                 JOIN _pg_ripple.dictionary ds ON ds.id = vp.s \
-                 JOIN _pg_ripple.dictionary do_ ON do_.id = vp.o \
-                 WHERE pred.id = {pred_id} AND pred.table_oid IS NOT NULL \
                  LIMIT 10000"
             )
         }
         (DlTerm::BoundIri(s_iri), DlTerm::Variable(_)) => {
             let s_id = crate::dictionary::encode(s_iri, crate::dictionary::KIND_IRI);
             format!(
-                "SELECT ds.value AS subj, do_.value AS obj \
-                 FROM _pg_ripple.vp_rare vr \
-                 JOIN _pg_ripple.dictionary ds ON ds.id = vr.s \
-                 JOIN _pg_ripple.dictionary do_ ON do_.id = vr.o \
+                "{base} \
                  WHERE vr.p = {pred_id} AND vr.s = {s_id} \
                  LIMIT 1000"
             )
@@ -123,10 +112,7 @@ pub fn execute_dl_pattern(pattern: &DlPattern) -> Vec<(String, String)> {
         (DlTerm::Variable(_), DlTerm::BoundIri(o_iri)) => {
             let o_id = crate::dictionary::encode(o_iri, crate::dictionary::KIND_IRI);
             format!(
-                "SELECT ds.value AS subj, do_.value AS obj \
-                 FROM _pg_ripple.vp_rare vr \
-                 JOIN _pg_ripple.dictionary ds ON ds.id = vr.s \
-                 JOIN _pg_ripple.dictionary do_ ON do_.id = vr.o \
+                "{base} \
                  WHERE vr.p = {pred_id} AND vr.o = {o_id} \
                  LIMIT 1000"
             )
@@ -135,10 +121,7 @@ pub fn execute_dl_pattern(pattern: &DlPattern) -> Vec<(String, String)> {
             let s_id = crate::dictionary::encode(s_iri, crate::dictionary::KIND_IRI);
             let o_id = crate::dictionary::encode(o_iri, crate::dictionary::KIND_IRI);
             format!(
-                "SELECT ds.value AS subj, do_.value AS obj \
-                 FROM _pg_ripple.vp_rare vr \
-                 JOIN _pg_ripple.dictionary ds ON ds.id = vr.s \
-                 JOIN _pg_ripple.dictionary do_ ON do_.id = vr.o \
+                "{base} \
                  WHERE vr.p = {pred_id} AND vr.s = {s_id} AND vr.o = {o_id} \
                  LIMIT 1"
             )

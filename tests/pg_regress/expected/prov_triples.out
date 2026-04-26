@@ -97,7 +97,6 @@ SET pg_ripple.prov_enabled = off;
 -- (snapshot the count first)
 SELECT count(*) AS prov_count_before INTO TEMP TABLE _prov_before FROM pg_ripple.prov_stats();
 SELECT 1
-(1 row)
 
 SELECT pg_ripple.load_ntriples(
     '<urn:prov_test:no_prov:a> <urn:prov_test:no_prov:p> <urn:prov_test:no_prov:o> .',
