@@ -209,10 +209,6 @@ impl Drop for MergeFenceGuard {
     }
 }
 
-
-    run_merge_cycle_for_worker(0, 1);
-}
-
 /// Run one merge cycle for the given worker in a parallel pool (v0.42.0).
 ///
 /// `worker_idx`: zero-based index of this worker.
