@@ -1,0 +1,25 @@
+-- Migration 0.58.0 → 0.59.0: Citus SPARQL shard-pruning & rebalance coordination
+--
+-- Goals delivered:
+--   CITUS-10  Shard-pruning for bound subject patterns in the SPARQL-to-SQL translator.
+--             Activates automatically when pg_ripple.citus_sharding_enabled = on and
+--             Citus is detected.  No SQL changes — pure Rust query-planner logic.
+--   CITUS-11  pg_ripple.citus_rebalance() now emits pg_ripple.merge_start /
+--             pg_ripple.merge_end NOTIFY signals around the advisory-lock fence so
+--             pg-trickle and monitoring tools can observe rebalance activity.
+--   CITUS-12  pg_ripple.explain_sparql(query, analyze, citus) — new 3-arg overload
+--             that adds a "citus" section to the JSONB output when citus = true,
+--             showing pruned shard, worker node, and estimated rows per shard.
+--   CITUS-13  pg_ripple.citus_rebalance_progress() — new function returning per-shard
+--             move status from pg_dist_rebalance_progress (Citus 10+).
+--   CITUS-15  End-to-end integration guide added to docs/src/citus_integration.md.
+--
+-- Schema changes: NONE
+--   All new behaviour is compiled into the Rust shared library.
+--   The new 3-arg explain_sparql overload (text, bool, bool) does not conflict with
+--   the existing 2-arg overload (text, bool) → text or (text, bool) → jsonb because
+--   pgrx creates a new, separate SQL function for the additional signature.
+--
+-- GUC changes: NONE
+--   Existing GUCs (citus_sharding_enabled, citus_trickle_compat,
+--   merge_fence_timeout_ms) are unchanged.

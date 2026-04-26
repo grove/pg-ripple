@@ -1112,3 +1112,15 @@ pgrx::extension_sql!(
     name = "v058_schema_version_stamp",
     requires = ["v058_temporal_prov_setup"]
 );
+
+// ─── v0.59.0 schema additions ─────────────────────────────────────────────────
+// v0.59.0 adds no new tables or columns.  All new behaviour (shard-pruning,
+// rebalance NOTIFY, explain_sparql citus section, citus_rebalance_progress) is
+// compiled into the Rust shared library.  We only stamp the schema_version table.
+
+pgrx::extension_sql!(
+    "INSERT INTO _pg_ripple.schema_version (version, upgraded_from, installed_at) \
+     VALUES ('0.59.0', '0.58.0', clock_timestamp());",
+    name = "v059_schema_version_stamp",
+    requires = ["v058_schema_version_stamp"]
+);
