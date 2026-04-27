@@ -3,7 +3,7 @@
 pg_ripple scales vertically within a single PostgreSQL instance and horizontally for read traffic via streaming replication. This page covers how to allocate resources, tune the merge worker, set up read replicas, and understand current limitations.
 
 ```admonish info title="Current scaling model"
-pg_ripple runs entirely within PostgreSQL. It inherits PostgreSQL's single-writer architecture: one primary handles all writes, and read replicas serve read-only SPARQL queries. Cross-node sharding is not yet supported.
+pg_ripple runs entirely within PostgreSQL. It inherits PostgreSQL's single-writer architecture: one primary handles all writes, and read replicas serve read-only SPARQL queries. Horizontal sharding across multiple workers is available via the [Citus integration](citus-sharding.md) (v0.58.0+).
 ```
 
 ---
@@ -236,12 +236,12 @@ default_pool_size = 20
 | Concurrent SPARQL queries | Hundreds (with pooler) | Bound by `max_connections` and CPU |
 | Write throughput | ~50K–200K triples/sec (bulk load) | Single-writer architecture |
 | Read replicas | Unlimited | Standard PG replication |
-| Cross-node sharding | **Not supported** | No distributed query planner |
+| Cross-node sharding | **Supported** (Citus 12+, v0.58.0+) | Subject-hash distribution; see [Citus sharding](citus-sharding.md) |
 | Multi-primary writes | **Not supported** | PostgreSQL limitation |
 | Federation | Supported (SERVICE clause) | Remote endpoints add latency |
 
-```admonish warning title="Sharding is not available"
-pg_ripple does not support sharding VP tables across multiple PostgreSQL instances. If your dataset exceeds what a single instance can handle, consider: (1) vertical scaling with larger hardware, (2) federation via `SERVICE` clauses to distribute queries across multiple pg_ripple instances, each holding a subset of graphs, or (3) archiving cold graphs to separate instances.
+```admonish tip title="Horizontal sharding with Citus"
+pg_ripple v0.58.0+ supports distributing VP tables across Citus worker nodes. Triples are hash-sharded by subject ID so star-pattern queries co-locate on a single worker. v0.59.0 adds SPARQL shard-pruning (10–100× speedup for bound-subject queries). See [Citus Horizontal Sharding](citus-sharding.md) for setup instructions.
 ```
 
 ---
