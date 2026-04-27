@@ -16,8 +16,8 @@ FROM information_schema.columns
 WHERE table_schema = '_pg_ripple'
   AND table_name   = 'dictionary'
 ORDER BY ordinal_position;
- column_name 
--------------
+ column_name  
+--------------
  id
  hash
  value
@@ -27,7 +27,8 @@ ORDER BY ordinal_position;
  qt_s
  qt_p
  qt_o
-(9 rows)
+ access_count
+(10 rows)
 
 -- ── Columns introduced by 0.3.0 → 0.4.0 migration ───────────────────────────
 -- qt_s, qt_p, qt_o must all exist and be nullable BIGINTs
