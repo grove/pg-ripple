@@ -23,7 +23,7 @@ use std::time::Instant;
 use axum::body::Body;
 use axum::extract::{Path, State};
 use axum::http::{HeaderMap, StatusCode};
-use axum::response::{IntoResponse, Response};
+use axum::response::Response;
 use serde::Deserialize;
 
 use crate::common::{AppState, check_auth, check_auth_write, redacted_error};
@@ -35,7 +35,14 @@ async fn read_body(body: Body) -> Result<String, Response> {
     let bytes = match axum::body::to_bytes(body, 10 * 1024 * 1024).await {
         Ok(b) => b,
         Err(_) => {
-            return Err((StatusCode::PAYLOAD_TOO_LARGE, "request body too large").into_response());
+            // v0.61.0 H7-6: wrap 413 in a JSON envelope with PT404 error code.
+            return Err(json_response(
+                StatusCode::PAYLOAD_TOO_LARGE,
+                serde_json::json!({
+                    "error": "PT404",
+                    "message": "request body exceeds maximum allowed size (10 MiB)"
+                }),
+            ));
         }
     };
     Ok(String::from_utf8_lossy(&bytes).into_owned())

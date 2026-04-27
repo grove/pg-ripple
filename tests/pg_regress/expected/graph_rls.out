@@ -21,9 +21,9 @@ SELECT pg_ripple.insert_triple(
 (1 row)
 
 -- grant_graph: add access for a role (even if it does not exist yet — just tests the function)
-SELECT pg_ripple.grant_graph('postgres', '<https://rls.test/secret_graph>', 'read');
- grant_graph 
--------------
+SELECT pg_ripple.grant_graph_permission('postgres', '<https://rls.test/secret_graph>', 'read');
+ grant_graph_permission 
+------------------------
  
 (1 row)
 
@@ -37,9 +37,9 @@ WHERE entry->>'permission' = 'read';
 (1 row)
 
 -- grant admin permission
-SELECT pg_ripple.grant_graph('postgres', '<https://rls.test/secret_graph>', 'admin');
- grant_graph 
--------------
+SELECT pg_ripple.grant_graph_permission('postgres', '<https://rls.test/secret_graph>', 'admin');
+ grant_graph_permission 
+------------------------
  
 (1 row)
 
@@ -52,9 +52,9 @@ FROM jsonb_array_elements(pg_ripple.list_graph_access()) AS entry;
 (1 row)
 
 -- revoke single permission
-SELECT pg_ripple.revoke_graph('postgres', '<https://rls.test/secret_graph>', 'read');
- revoke_graph 
---------------
+SELECT pg_ripple.revoke_graph_permission('postgres', '<https://rls.test/secret_graph>', 'read');
+ revoke_graph_permission 
+-------------------------
  
 (1 row)
 
@@ -66,9 +66,9 @@ FROM jsonb_array_elements(pg_ripple.list_graph_access()) AS entry;
 (1 row)
 
 -- revoke all permissions for role+graph
-SELECT pg_ripple.revoke_graph('postgres', '<https://rls.test/secret_graph>');
- revoke_graph 
---------------
+SELECT pg_ripple.revoke_graph_permission('postgres', '<https://rls.test/secret_graph>');
+ revoke_graph_permission 
+-------------------------
  
 (1 row)
 
@@ -87,9 +87,9 @@ SELECT pg_ripple.enable_graph_rls() AS rls_enabled;
 (1 row)
 
 -- After RLS is enabled, grant read again
-SELECT pg_ripple.grant_graph('postgres', '<https://rls.test/secret_graph>', 'read');
- grant_graph 
--------------
+SELECT pg_ripple.grant_graph_permission('postgres', '<https://rls.test/secret_graph>', 'read');
+ grant_graph_permission 
+------------------------
  
 (1 row)
 
@@ -111,9 +111,9 @@ SELECT current_setting('pg_ripple.rls_bypass') = 'on' AS bypass_guc_works;
 
 SET pg_ripple.rls_bypass = off;
 -- Clean up
-SELECT pg_ripple.revoke_graph('postgres', '<https://rls.test/secret_graph>', 'read');
- revoke_graph 
---------------
+SELECT pg_ripple.revoke_graph_permission('postgres', '<https://rls.test/secret_graph>', 'read');
+ revoke_graph_permission 
+-------------------------
  
 (1 row)
 

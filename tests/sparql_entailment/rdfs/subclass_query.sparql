@@ -1,0 +1,1 @@
+SELECT ?x WHERE { ?x a <https://example.org/Agent> }

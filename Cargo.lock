@@ -1687,7 +1687,7 @@ dependencies = [
 
 [[package]]
 name = "pg_ripple"
-version = "0.59.0"
+version = "0.61.0"
 dependencies = [
  "chrono",
  "crossbeam-channel",

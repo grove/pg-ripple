@@ -62,6 +62,16 @@ pub fn initialize_pattern_tables() {
         &[],
     )
     .unwrap_or_else(|e| pgrx::error!("predicates.htap column migration error: {e}"));
+
+    // v0.61.0: add `brin_summarize_failures` counter to predicates catalog (idempotent).
+    Spi::run_with_args(
+        "ALTER TABLE _pg_ripple.predicates \
+         ADD COLUMN IF NOT EXISTS brin_summarize_failures INT NOT NULL DEFAULT 0",
+        &[],
+    )
+    .unwrap_or_else(|e| {
+        pgrx::warning!("predicates.brin_summarize_failures column migration (non-fatal): {e}")
+    });
 }
 
 // ─── HTAP table creation ──────────────────────────────────────────────────────
@@ -407,8 +417,31 @@ pub fn merge_predicate(pred_id: i64) -> i64 {
     );
     // Best-effort: failure to re-summarize is non-fatal (BRIN self-heals on next vacuum).
     if let Err(e) = Spi::run_with_args(&brin_sql, &[]) {
-        pgrx::debug1!(
-            "merge: brin_summarize_new_values failed for vp_{pred_id}_main (non-fatal): {e}"
+        // v0.61.0 F7-3: increment failure counter and promote to NOTICE after 2nd failure.
+        let failure_count: i64 = Spi::get_one_with_args::<i64>(
+            "UPDATE _pg_ripple.predicates \
+             SET brin_summarize_failures = COALESCE(brin_summarize_failures, 0) + 1 \
+             WHERE id = $1 \
+             RETURNING brin_summarize_failures",
+            &[DatumWithOid::from(pred_id)],
+        )
+        .unwrap_or(None)
+        .unwrap_or(1);
+
+        if failure_count >= 2 {
+            pgrx::notice!(
+                "merge: brin_summarize_new_values failed for vp_{pred_id}_main (consecutive failure #{failure_count}): {e}"
+            );
+        } else {
+            pgrx::debug1!(
+                "merge: brin_summarize_new_values failed for vp_{pred_id}_main (non-fatal): {e}"
+            );
+        }
+    } else {
+        // Reset failure counter on success.
+        let _ = Spi::run_with_args(
+            "UPDATE _pg_ripple.predicates SET brin_summarize_failures = 0 WHERE id = $1",
+            &[DatumWithOid::from(pred_id)],
         );
     }
 

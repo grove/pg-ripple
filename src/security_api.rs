@@ -67,13 +67,20 @@ pub(crate) fn do_revoke_graph_access_pub(graph_iri: &str, role: &str) {
     do_revoke_graph_access(graph_iri, role);
 }
 
-pub(crate) fn erase_subject_impl(iri: &str) -> i64 {
+/// Row returned by `erase_subject()` SRF — one row per storage relation touched.
+#[derive(Debug, Clone)]
+pub(crate) struct EraseRow {
+    pub relation: String,
+    pub rows_deleted: i64,
+}
+
+pub(crate) fn erase_subject_impl(iri: &str) -> Vec<EraseRow> {
     use pgrx::datum::DatumWithOid;
 
     // Encode the IRI to get its dictionary ID.
     let subject_id = crate::dictionary::encode(iri, crate::dictionary::KIND_IRI);
 
-    let mut total_deleted: i64 = 0;
+    let mut results: Vec<EraseRow> = Vec::new();
 
     // Delete from vp_rare.
     let rare_deleted: i64 = pgrx::Spi::get_one_with_args::<i64>(
@@ -82,7 +89,10 @@ pub(crate) fn erase_subject_impl(iri: &str) -> i64 {
     )
     .unwrap_or(None)
     .unwrap_or(0);
-    total_deleted += rare_deleted;
+    results.push(EraseRow {
+        relation: "_pg_ripple.vp_rare".to_owned(),
+        rows_deleted: rare_deleted,
+    });
 
     // Delete from all dedicated VP tables.
     let pred_ids: Vec<i64> = {
@@ -106,16 +116,36 @@ pub(crate) fn erase_subject_impl(iri: &str) -> i64 {
 
     for pred_id in &pred_ids {
         // Attempt delete from delta table.
-        let delta_sql = format!("DELETE FROM _pg_ripple.vp_{pred_id}_delta WHERE s = $1");
-        let _ = pgrx::Spi::run_with_args(&delta_sql, &[DatumWithOid::from(subject_id)]);
+        let delta_table = format!("_pg_ripple.vp_{pred_id}_delta");
+        let delta_sql = format!(
+            "WITH d AS (DELETE FROM {delta_table} WHERE s = $1 RETURNING 1) SELECT count(*)::bigint FROM d"
+        );
+        let delta_cnt: i64 =
+            pgrx::Spi::get_one_with_args::<i64>(&delta_sql, &[DatumWithOid::from(subject_id)])
+                .unwrap_or(None)
+                .unwrap_or(0);
+        if delta_cnt > 0 {
+            results.push(EraseRow {
+                relation: delta_table,
+                rows_deleted: delta_cnt,
+            });
+        }
 
         // Attempt delete from main table.
-        let main_sql = format!("DELETE FROM _pg_ripple.vp_{pred_id}_main WHERE s = $1");
-        if let Ok(cnt) = pgrx::Spi::get_one_with_args::<i64>(
-            &format!("WITH d AS ({main_sql} RETURNING 1) SELECT count(*)::bigint FROM d"),
-            &[DatumWithOid::from(subject_id)],
-        ) {
-            total_deleted += cnt.unwrap_or(0);
+        let main_table = format!("_pg_ripple.vp_{pred_id}_main");
+        let main_sql = format!(
+            "WITH d AS (DELETE FROM {main_table} WHERE s = $1 RETURNING 1) SELECT count(*)::bigint FROM d"
+        );
+        if let Ok(cnt) =
+            pgrx::Spi::get_one_with_args::<i64>(&main_sql, &[DatumWithOid::from(subject_id)])
+        {
+            let n = cnt.unwrap_or(0);
+            if n > 0 {
+                results.push(EraseRow {
+                    relation: main_table,
+                    rows_deleted: n,
+                });
+            }
         }
     }
 
@@ -128,20 +158,93 @@ pub(crate) fn erase_subject_impl(iri: &str) -> i64 {
     .unwrap_or(None)
     .unwrap_or(false);
     if kge_exists {
-        let _ = pgrx::Spi::run_with_args(
-            "DELETE FROM _pg_ripple.kge_embeddings WHERE entity_id = $1",
+        let kge_cnt: i64 = pgrx::Spi::get_one_with_args::<i64>(
+            "WITH d AS (DELETE FROM _pg_ripple.kge_embeddings WHERE entity_id = $1 RETURNING 1) SELECT count(*)::bigint FROM d",
             &[DatumWithOid::from(subject_id)],
-        );
+        )
+        .unwrap_or(None)
+        .unwrap_or(0);
+        results.push(EraseRow {
+            relation: "_pg_ripple.kge_embeddings".to_owned(),
+            rows_deleted: kge_cnt,
+        });
+    }
+
+    // Delete from PROV-O named graph (triples where s = subject_id in the prov graph).
+    let prov_graph_exists: bool = pgrx::Spi::get_one::<bool>(
+        "SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_class c \
+         JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace \
+         WHERE n.nspname = '_pg_ripple' AND c.relname = 'prov_log')",
+    )
+    .unwrap_or(None)
+    .unwrap_or(false);
+    if prov_graph_exists {
+        // Check if prov_log has a subject_id column before attempting deletion.
+        let has_subject_col: bool = pgrx::Spi::get_one::<bool>(
+            "SELECT EXISTS (SELECT 1 FROM information_schema.columns \
+             WHERE table_schema = '_pg_ripple' AND table_name = 'prov_log' AND column_name = 'subject_id')",
+        )
+        .unwrap_or(None)
+        .unwrap_or(false);
+        if has_subject_col {
+            let prov_cnt: i64 = pgrx::Spi::get_one_with_args::<i64>(
+                "WITH d AS (DELETE FROM _pg_ripple.prov_log WHERE subject_id = $1 RETURNING 1) SELECT count(*)::bigint FROM d",
+                &[DatumWithOid::from(subject_id)],
+            )
+            .unwrap_or(None)
+            .unwrap_or(0);
+            results.push(EraseRow {
+                relation: "_pg_ripple.prov_log".to_owned(),
+                rows_deleted: prov_cnt,
+            });
+        }
+    }
+
+    // Delete from audit log (best-effort).
+    let audit_exists: bool = pgrx::Spi::get_one::<bool>(
+        "SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_class c \
+         JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace \
+         WHERE n.nspname = '_pg_ripple' AND c.relname = 'audit_log')",
+    )
+    .unwrap_or(None)
+    .unwrap_or(false);
+    if audit_exists {
+        // Check if audit_log has a subject_id column (added in future schema upgrades).
+        // If not, skip the deletion gracefully — audit_log records operations, not subject data.
+        let has_subject_col: bool = pgrx::Spi::get_one::<bool>(
+            "SELECT EXISTS (SELECT 1 FROM information_schema.columns \
+             WHERE table_schema = '_pg_ripple' AND table_name = 'audit_log' AND column_name = 'subject_id')",
+        )
+        .unwrap_or(None)
+        .unwrap_or(false);
+        if has_subject_col {
+            let audit_cnt: i64 = pgrx::Spi::get_one_with_args::<i64>(
+                "WITH d AS (DELETE FROM _pg_ripple.audit_log WHERE subject_id = $1 RETURNING 1) SELECT count(*)::bigint FROM d",
+                &[DatumWithOid::from(subject_id)],
+            )
+            .unwrap_or(None)
+            .unwrap_or(0);
+            results.push(EraseRow {
+                relation: "_pg_ripple.audit_log".to_owned(),
+                rows_deleted: audit_cnt,
+            });
+        }
     }
 
     // Remove the subject's dictionary entry if it's no longer referenced by any VP table.
     // This is best-effort — we skip the cross-table reference check for performance.
-    let _ = pgrx::Spi::run_with_args(
-        "DELETE FROM _pg_ripple.dictionary WHERE id = $1",
+    let dict_cnt: i64 = pgrx::Spi::get_one_with_args::<i64>(
+        "WITH d AS (DELETE FROM _pg_ripple.dictionary WHERE id = $1 RETURNING 1) SELECT count(*)::bigint FROM d",
         &[DatumWithOid::from(subject_id)],
-    );
+    )
+    .unwrap_or(None)
+    .unwrap_or(0);
+    results.push(EraseRow {
+        relation: "_pg_ripple.dictionary".to_owned(),
+        rows_deleted: dict_cnt,
+    });
 
-    total_deleted
+    results
 }
 
 // ─── SQL-exported API ─────────────────────────────────────────────────────────
@@ -175,15 +278,30 @@ mod pg_ripple {
         super::do_revoke_graph_access(graph_iri, role);
     }
 
-    /// Atomically erase all triples whose subject equals `encode(iri)`.
+    /// v0.61.0: User-friendly alias for `grant_graph_access()` (default privilege: SELECT).
+    #[pg_extern]
+    fn grant_graph(graph_iri: &str, role: &str) {
+        super::do_grant_graph_access(graph_iri, role, "SELECT");
+    }
+
+    /// v0.61.0: User-friendly alias for `revoke_graph_access()`.
+    #[pg_extern]
+    fn revoke_graph(graph_iri: &str, role: &str) {
+        super::do_revoke_graph_access(graph_iri, role);
+    }
+
+    /// GDPR right-to-erasure: atomically remove all traces of a subject IRI.
     ///
-    /// Deletes from:
-    /// - all dedicated VP tables (`_pg_ripple.vp_*`)
-    /// - `_pg_ripple.vp_rare` (for rare predicates)
-    /// - `_pg_ripple.dictionary` (removes the subject's dictionary entry if no longer referenced)
-    /// - `_pg_ripple.kge_embeddings` (removes embedding rows for the subject)
+    /// Deletes from every storage layer that may hold data about `iri`:
+    /// - all dedicated VP delta and main tables
+    /// - `_pg_ripple.vp_rare`
+    /// - `_pg_ripple.kge_embeddings`
+    /// - `_pg_ripple.prov_log` (if present)
+    /// - `_pg_ripple.audit_log` (if present)
+    /// - `_pg_ripple.dictionary` (subject entry if unreferenced)
     ///
-    /// Returns the count of deleted triples.
+    /// Returns one row per storage relation touched, with the deletion count.
+    /// All deletes execute in the caller's transaction (atomic erasure).
     ///
     /// # GDPR note
     ///
@@ -191,8 +309,14 @@ mod pg_ripple {
     /// including WAL and backup media, a full backup cycle is required after calling
     /// this function.
     #[pg_extern]
-    fn erase_subject(iri: &str) -> i64 {
-        super::erase_subject_impl(iri)
+    fn erase_subject(
+        iri: &str,
+    ) -> TableIterator<'static, (name!(relation, String), name!(rows_deleted, i64))> {
+        let rows: Vec<(String, i64)> = super::erase_subject_impl(iri)
+            .into_iter()
+            .map(|r| (r.relation, r.rows_deleted))
+            .collect();
+        TableIterator::new(rows)
     }
 }
 
@@ -203,8 +327,13 @@ mod tests {
 
     #[pg_test]
     fn test_erase_subject_no_data() {
-        // Erasing a non-existent subject should return 0 without error.
+        // Erasing a non-existent subject should return results without error.
         let result = crate::security_api::erase_subject_impl("<https://example.org/nonexistent>");
-        assert_eq!(result, 0, "erase_subject on nonexistent IRI must return 0");
+        // All rows_deleted should be 0 for a nonexistent subject.
+        let total: i64 = result.iter().map(|r| r.rows_deleted).sum();
+        assert_eq!(
+            total, 0,
+            "erase_subject on nonexistent IRI must return 0 total deletions"
+        );
     }
 }

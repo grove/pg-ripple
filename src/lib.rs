@@ -1754,6 +1754,17 @@ pub extern "C-unwind" fn _PG_init() {
         GucFlags::default(),
     );
 
+    pgrx::GucRegistry::define_string_guc(
+        c"pg_ripple.tracing_traceparent",
+        c"W3C traceparent header value forwarded from pg_ripple_http. \
+          Set via SET LOCAL by the HTTP service before each SPARQL/Datalog query. \
+          Enables end-to-end distributed tracing. (v0.61.0)",
+        c"",
+        &crate::gucs::observability::TRACING_TRACEPARENT,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+
     pgrx::GucRegistry::define_int_guc(
         c"pg_ripple.federation_circuit_breaker_threshold",
         c"Consecutive endpoint failures before the federation circuit breaker opens (default: 5). \

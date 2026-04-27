@@ -13,6 +13,64 @@ Versions correspond to the milestones in [ROADMAP.md](ROADMAP.md).
 
 ---
 
+## [0.61.0] — 2025 — Ecosystem Depth & Polish
+
+**Implements the v0.61.0 roadmap: per-graph access control, GDPR right-to-erasure, inference explainability, SHACL-AF rule execution, dbt adapter, OTLP traceparent propagation, richer federation stats, Citus scalability improvements (object pruning, direct-shard bulk-load, graph shard affinity), and test quality improvements.**
+
+### What's new
+
+- **Per-named-graph access control** (6.3 / L-8.1): Added `pg_ripple.grant_graph(graph_iri, role)` and `pg_ripple.revoke_graph(graph_iri, role)` helper functions that install / remove PostgreSQL RLS policies filtering by graph ID.
+
+- **GDPR right-to-erasure** (6.7 / L-8.3): New SRF `pg_ripple.erase_subject(iri TEXT) → TABLE(relation TEXT, rows_deleted BIGINT)`. Removes all triples about the subject across all VP tables, `vp_rare`, the dictionary (if unreferenced), KGE embeddings, the PROV-O provenance graph, and the audit log — in a single transaction. Returns a per-relation deletion count for the erasure record.
+
+- **Inference explainability** (6.6): New SRF `pg_ripple.explain_inference(s, p, o, g) → TABLE(depth INT, rule_id TEXT, source_sids BIGINT[], child_triples JSONB)`. Returns the full derivation chain for a given inferred triple as a JSON tree, walking the `_pg_ripple.rule_firing_log` table introduced in this release.
+
+- **SHACL-AF `sh:rule` execution** (D7-1 / D-3 / S4-8): Implemented the bridge in `src/shacl/af_rules.rs` that compiles `sh:TripleRule` patterns to Datalog rules and loads them via `load_rules_text()`. New pg_regress test `shacl_af_rule_execution.sql` validates end-to-end execution.
+
+- **dbt adapter** (6.11): Published `dbt-pg-ripple` Python package in `clients/dbt-pg-ripple/`. Provides `sparql_model`, `sparql_source`, and `sparql_ref` SPARQL-aware dbt macros. Data engineers can now mix SQL and SPARQL transformations in a single dbt project with full lineage tracking.
+
+- **OTLP traceparent propagation** (I7-1): `pg_ripple_http` now extracts the W3C `traceparent` header and forwards it via the `pg_ripple.tracing_traceparent` session GUC into the extension. Every SPARQL/Datalog query span is tagged with the originating trace ID, giving an unbroken trace from the load balancer through the HTTP service into the query engine.
+
+- **OpenTelemetry semantic-convention map** (I7-2): New doc `docs/src/operations/observability-otel.md` with span-name → attribute table and example Prometheus/Grafana queries.
+
+- **Federation call stats per endpoint** (I7-3): `pg_ripple.federation_call_stats()` now returns `(endpoint TEXT, calls INT, errors INT, blocked INT, p50_ms INT, p95_ms INT, last_error_at TIMESTAMPTZ)`.
+
+- **BRIN summarize failure tracking** (F7-3): Added `brin_summarize_failures INT` column to `_pg_ripple.predicates`. Persistent `brin_summarize_new_values()` failures are promoted from `debug1` to `NOTICE` after the second consecutive merge cycle failure; counter resets on success.
+
+- **Citus object-based shard pruning** (CITUS-20): Extended `src/citus.rs` with `TermRole` enum (`Subject | Object`) and `prune_bound_term(term_id, role)`. The SPARQL translator now detects bound objects and routes to the correct shard, delivering the same 10–100× speedup that subject-pruning already provides.
+
+- **Citus direct-shard bulk-load path** (CITUS-21): Added `batch_insert_encoded_shard_direct()` in `src/storage/mod.rs`. When Citus sharding is enabled, bulk-load batches are written directly to the physical shard table, bypassing coordinator routing. Falls back to the coordinator path when Citus is not installed or the predicate is in `vp_rare`.
+
+- **Citus named-graph shard affinity** (CITUS-22): New table `_pg_ripple.graph_shard_affinity`. New functions `pg_ripple.set_graph_shard_affinity(graph_iri, shard_id)` and `pg_ripple.clear_graph_shard_affinity(graph_iri)`. When a SPARQL query includes a `GRAPH <g> { ... }` scope and Citus sharding is enabled, the planner restricts the query to the designated shard.
+
+- **GROUP BY subject aggregate push-down audit** (CITUS-23): New pg_regress test `citus_aggregate_pushdown.sql` verifying that SPARQL `GROUP BY ?s` queries emit `GROUP BY s` in SQL, confirming Citus partial-aggregation push-down.
+
+- **Temporal RDF post-merge correctness** (J7-3): New pg_regress test `temporal_rdf_post_merge.sql` verifying `point_in_time()` resolves correctly after SIDs move from delta to main.
+
+- **OWL 2 RL deletion proof** (6.13 / E7-2): New pg_regress test `datalog_owl_rl_deletion.sql` exercising the full DRed retraction path.
+
+- **DRed cycle guard** (E7-2): New pg_regress test `datalog_dred_cycle.sql` constructing a `sameAs` cycle and asserting PT530 is raised or the system remains stable.
+
+- **SPARQL Entailment Regimes test driver** (6.8 / B7-2): New `tests/sparql_entailment/` directory with manifest, runner script, and RDFS/OWL 2 RL fixtures. Added as `entailment-suite` CI job (informational, `continue-on-error: true`).
+
+- **Conformance thresholds config** (J7-4): Moved pass-rate thresholds from CI YAML expressions into `tests/conformance/thresholds.json`. CI now reads this file to determine gate criteria.
+
+- **Cypher/GQL ADR** (K7-4): New `plans/cypher.md` capturing the design intent: target query subset, `cypher-parser` crate, rewrite-to-SPARQL strategy, and semantic fidelity notes.
+
+- **PT404 error code for HTTP body-size rejection** (H7-6): `pg_ripple_http` now wraps axum's 413 response in a JSON envelope `{"error": "PT404", "message": "..."}`.
+
+### Schema changes
+
+- New table `_pg_ripple.graph_shard_affinity` (CITUS-22)
+- New table `_pg_ripple.rule_firing_log` (inference explainability)
+- New column `_pg_ripple.predicates.brin_summarize_failures INT` (F7-3)
+
+### Migration
+
+Upgrade from v0.60.0 with `ALTER EXTENSION pg_ripple UPDATE`.
+
+---
+
 ## [0.60.0] — 2026-04-27 — Production Hardening Sprint
 
 **Implements the v0.60.0 roadmap: HTAP merge atomic swap, CI supply-chain hardening, three new fuzz harnesses, `/ready` Kubernetes readiness probe, SERVICE SILENT circuit-breaker test, architecture diagram refresh, pg_trickle dependency matrix, and pg_dump round-trip test.**

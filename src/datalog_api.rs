@@ -700,4 +700,44 @@ mod pg_ripple {
     fn explain_datalog(rule_set_name: &str) -> pgrx::JsonB {
         crate::datalog::explain::explain_datalog(rule_set_name)
     }
+
+    // ── v0.61.0: explain_inference ────────────────────────────────────────────
+
+    /// Return the rule-firing provenance chain for a given inferred triple.
+    ///
+    /// Each row in the returned table represents one step in the derivation:
+    /// - `depth INT`           — depth in the derivation tree (0 = the queried triple)
+    /// - `rule_id TEXT`        — identifier of the Datalog rule that fired
+    /// - `source_sids BIGINT[]`— statement IDs of the source triples that triggered this rule
+    /// - `child_triples JSONB[]` — child derivation nodes (recursive)
+    ///
+    /// Implemented by inspecting the `source` column (0 = explicit, 1 = inferred)
+    /// and walking the Datalog rule-firing log.  Returns an empty set when the
+    /// triple is not inferred (i.e., its `source = 0`) or when provenance logging
+    /// is disabled.
+    ///
+    /// # Arguments
+    ///
+    /// - `s` — subject IRI
+    /// - `p` — predicate IRI
+    /// - `o` — object IRI or literal
+    /// - `g` — named graph IRI (`NULL` for the default graph)
+    #[pg_extern]
+    fn explain_inference(
+        s: &str,
+        p: &str,
+        o: &str,
+        g: default!(Option<&str>, "NULL"),
+    ) -> TableIterator<
+        'static,
+        (
+            name!(depth, i32),
+            name!(rule_id, String),
+            name!(source_sids, Vec<i64>),
+            name!(child_triples, pgrx::JsonB),
+        ),
+    > {
+        let rows = crate::datalog::explain::explain_inference_impl(s, p, o, g);
+        TableIterator::new(rows)
+    }
 }

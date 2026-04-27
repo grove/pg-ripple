@@ -776,6 +776,109 @@ pub fn batch_insert_encoded(p_id: i64, rows: &[(i64, i64, i64)]) -> i64 {
     rows.len() as i64
 }
 
+/// Direct-shard bulk-load path (v0.61.0 CITUS-21).
+///
+/// When `citus_sharding_enabled = on` and Citus is installed, bypasses the
+/// coordinator routing by writing triples directly to the physical Citus shard
+/// tables (`vp_{pred_id}_delta_{shard_id}`).
+///
+/// Triples are grouped by shard before emitting SQL to minimise round trips.
+/// Falls back to `batch_insert_encoded` (coordinator path) when:
+/// - Citus is not installed or sharding is disabled
+/// - The predicate is in `vp_rare` (reference table — no sharding)
+/// - The shard count cannot be determined
+///
+/// # Safety
+///
+/// All values are `i64` integers; no string-format interpolation of user data.
+#[allow(dead_code)]
+pub fn batch_insert_encoded_shard_direct(p_id: i64, rows: &[(i64, i64, i64)]) -> i64 {
+    if rows.is_empty() {
+        return 0;
+    }
+
+    // Check if Citus sharding is enabled and applicable.
+    if !crate::gucs::storage::CITUS_SHARDING_ENABLED.get() || !crate::citus::is_citus_loaded() {
+        return batch_insert_encoded(p_id, rows);
+    }
+
+    // Only dedicated VP tables support direct-shard writes (vp_rare is a reference table).
+    let table_opt = get_dedicated_vp_table(p_id);
+    if table_opt.is_none() {
+        return batch_insert_encoded(p_id, rows);
+    }
+
+    let delta = format!("_pg_ripple.vp_{p_id}_delta");
+
+    // Determine the shard count from pg_dist_shard.
+    let shard_count: i64 = Spi::get_one_with_args::<i64>(
+        "SELECT count(*)::bigint FROM pg_dist_shard WHERE logicalrelid = $1::regclass",
+        &[pgrx::datum::DatumWithOid::from(delta.as_str())],
+    )
+    .unwrap_or(None)
+    .unwrap_or(0);
+
+    if shard_count <= 0 {
+        // Not yet distributed — fall back to coordinator path.
+        return batch_insert_encoded(p_id, rows);
+    }
+
+    // Group triples by physical shard.
+    use std::collections::HashMap;
+    let mut by_shard: HashMap<i64, Vec<(i64, i64, i64)>> = HashMap::new();
+    for &(s, o, g) in rows {
+        // Look up the actual Citus shard ID from pg_dist_shard.
+        let physical_shard: i64 = Spi::get_one_with_args::<i64>(
+            "SELECT s.shardid::bigint \
+             FROM pg_dist_shard s \
+             WHERE s.logicalrelid = $1::regclass \
+               AND hashint8($2) BETWEEN s.shardminvalue::bigint AND s.shardmaxvalue::bigint \
+             LIMIT 1",
+            &[
+                pgrx::datum::DatumWithOid::from(delta.as_str()),
+                pgrx::datum::DatumWithOid::from(s),
+            ],
+        )
+        .unwrap_or(None)
+        .unwrap_or_else(|| crate::citus::compute_shard_id(s, shard_count));
+        by_shard.entry(physical_shard).or_default().push((s, o, g));
+    }
+
+    let mut total: i64 = 0;
+    for (shard_id, shard_rows) in &by_shard {
+        let shard_table = format!("{delta}_{shard_id}");
+        let values: Vec<String> = shard_rows
+            .iter()
+            .map(|(s, o, g)| format!("({},{},{})", s, o, g))
+            .collect();
+        let sql = format!(
+            "INSERT INTO {shard_table} (s, o, g) VALUES {} ON CONFLICT (s, o, g) DO NOTHING",
+            values.join(","),
+        );
+        if let Err(e) = Spi::run_with_args(&sql, &[]) {
+            pgrx::warning!("direct-shard insert failed for shard {shard_id} (falling back): {e}");
+            // Fall back individual rows via coordinator.
+            batch_insert_encoded(p_id, shard_rows);
+        } else {
+            total += shard_rows.len() as i64;
+        }
+    }
+
+    // Update predicate counter once for the whole batch.
+    Spi::run_with_args(
+        "UPDATE _pg_ripple.predicates SET triple_count = triple_count + $2 WHERE id = $1",
+        &[
+            pgrx::datum::DatumWithOid::from(p_id),
+            pgrx::datum::DatumWithOid::from(total),
+        ],
+    )
+    .unwrap_or_else(|e| pgrx::error!("predicate count batch update SPI error: {e}"));
+
+    crate::shmem::record_delta_inserts(total);
+    crate::shmem::set_predicate_delta_bit(p_id);
+    total
+}
+
 /// Delete a triple.  Returns the number of rows removed.
 pub fn delete_triple(s: &str, p: &str, o: &str, g: i64) -> i64 {
     let s_id = encode_rdf_term(s);

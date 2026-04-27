@@ -53,8 +53,8 @@ FROM information_schema.columns
 WHERE table_schema = '_pg_ripple'
   AND table_name   = 'predicates'
 ORDER BY ordinal_position;
-      column_name      
------------------------
+       column_name       
+-------------------------
  id
  table_oid
  triple_count
@@ -62,9 +62,10 @@ ORDER BY ordinal_position;
  schema_name
  table_name
  tombstones_cleared_at
+ brin_summarize_failures
  derived
  rule_set
-(9 rows)
+(10 rows)
 
 -- ── vp_rare table (including source column from v0.1.0 base) ─────────────────
 SELECT column_name

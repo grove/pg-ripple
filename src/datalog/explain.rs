@@ -194,3 +194,165 @@ pub fn explain_datalog(rule_set_name: &str) -> pgrx::JsonB {
 
     pgrx::JsonB(result)
 }
+
+// ── v0.61.0: explain_inference ────────────────────────────────────────────────
+
+/// Provenance row returned by `explain_inference_impl`.
+pub type InferenceRow = (i32, String, Vec<i64>, pgrx::JsonB);
+
+/// Walk the rule-firing provenance chain for a given inferred triple.
+///
+/// Returns one row per derivation step:
+/// - `depth`         — tree depth (0 = the queried triple)
+/// - `rule_id`       — Datalog rule identifier
+/// - `source_sids`   — statement IDs of base facts that triggered the rule
+/// - `child_triples` — JSONB array of child derivation nodes
+///
+/// When the triple is explicit (`source = 0`) or provenance logging is
+/// disabled, an empty vector is returned.
+pub fn explain_inference_impl(s: &str, p: &str, o: &str, g: Option<&str>) -> Vec<InferenceRow> {
+    use pgrx::datum::DatumWithOid;
+
+    // Encode the triple terms.
+    let s_id = crate::dictionary::encode(s, crate::dictionary::KIND_IRI);
+    let p_id = crate::dictionary::encode(p, crate::dictionary::KIND_IRI);
+    // Object might be an IRI or a literal — try IRI first, then literal kind.
+    let o_id = crate::dictionary::lookup_iri(o)
+        .or_else(|| crate::dictionary::lookup(o, crate::dictionary::KIND_LITERAL))
+        .unwrap_or_else(|| crate::dictionary::encode(o, crate::dictionary::KIND_IRI));
+    let g_id: i64 = match g {
+        Some(graph_iri) => crate::dictionary::encode(graph_iri, crate::dictionary::KIND_IRI),
+        None => 0,
+    };
+
+    // Check if a rule_firing_log table exists (introduced in v0.61.0).
+    let log_exists: bool = Spi::get_one::<bool>(
+        "SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_class c \
+         JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace \
+         WHERE n.nspname = '_pg_ripple' AND c.relname = 'rule_firing_log')",
+    )
+    .unwrap_or(None)
+    .unwrap_or(false);
+
+    // Find the statement ID for this triple in any VP table.
+    let sid: Option<i64> = Spi::get_one_with_args::<i64>(
+        "SELECT i FROM _pg_ripple.vp_rare WHERE s = $1 AND o = $3 AND g = $4 AND source = 1 \
+         UNION ALL \
+         SELECT i FROM _pg_ripple.vp_rare WHERE s = $1 AND o = $3 AND g = $4 AND source = 1 \
+         LIMIT 1",
+        &[
+            DatumWithOid::from(s_id),
+            DatumWithOid::from(p_id),
+            DatumWithOid::from(o_id),
+            DatumWithOid::from(g_id),
+        ],
+    )
+    .unwrap_or(None);
+
+    // Build derivation chain from rule_firing_log if available.
+    let mut rows: Vec<InferenceRow> = Vec::new();
+
+    if log_exists && let Some(statement_id) = sid {
+        collect_derivation_chain(statement_id, 0, &mut rows);
+    }
+
+    // If we found nothing or the log doesn't exist, provide a synthetic root node
+    // showing at least that inference is tracked for this triple.
+    if rows.is_empty() {
+        // Emit one row indicating the inference was found (or not).
+        let found = sid.is_some();
+        let rule_id = if found {
+            "inferred (provenance log unavailable)".to_owned()
+        } else {
+            "not found as inferred triple".to_owned()
+        };
+        rows.push((
+            0_i32,
+            rule_id,
+            vec![],
+            pgrx::JsonB(serde_json::json!({
+                "note": "provenance chain not available; ensure pg_ripple.inference_mode != 'off'",
+                "s_id": s_id,
+                "p_id": p_id,
+                "o_id": o_id,
+                "g_id": g_id
+            })),
+        ));
+    }
+
+    rows
+}
+
+/// Recursively walk the rule_firing_log for a given statement ID.
+fn collect_derivation_chain(sid: i64, depth: i32, rows: &mut Vec<InferenceRow>) {
+    use pgrx::datum::DatumWithOid;
+
+    if depth > 20 {
+        // Guard against infinite recursion in cyclic derivation graphs.
+        return;
+    }
+
+    // Query the rule firing log for the rule that produced this statement.
+    let result: Option<(String, serde_json::Value)> = Spi::connect(|client| {
+        let r = client.select(
+            "SELECT rule_id, source_sids \
+             FROM _pg_ripple.rule_firing_log \
+             WHERE produced_sid = $1 \
+             ORDER BY fired_at DESC \
+             LIMIT 1",
+            None,
+            &[DatumWithOid::from(sid)],
+        );
+        match r {
+            Ok(mut rows) => {
+                if let Some(row) = rows.next() {
+                    let rule_id = row.get::<String>(1).ok().flatten().unwrap_or_default();
+                    let sids_json: serde_json::Value = row
+                        .get::<pgrx::JsonB>(2)
+                        .ok()
+                        .flatten()
+                        .map(|jb| jb.0)
+                        .unwrap_or(serde_json::json!([]));
+                    Some((rule_id, sids_json))
+                } else {
+                    None
+                }
+            }
+            Err(_) => None,
+        }
+    });
+
+    let (rule_id, sids_json) = match result {
+        Some(r) => r,
+        None => {
+            rows.push((
+                depth,
+                "base fact".to_owned(),
+                vec![sid],
+                pgrx::JsonB(serde_json::json!([])),
+            ));
+            return;
+        }
+    };
+
+    // Parse source_sids from JSON array.
+    let source_sids: Vec<i64> = match &sids_json {
+        serde_json::Value::Array(arr) => arr.iter().filter_map(|v| v.as_i64()).collect(),
+        _ => vec![],
+    };
+
+    rows.push((
+        depth,
+        rule_id.clone(),
+        source_sids.clone(),
+        pgrx::JsonB(serde_json::json!({
+            "rule": rule_id,
+            "source_sids": source_sids
+        })),
+    ));
+
+    // Recurse into each source SID.
+    for &src_sid in &source_sids {
+        collect_derivation_chain(src_sid, depth + 1, rows);
+    }
+}

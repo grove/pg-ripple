@@ -160,6 +160,8 @@ SET pg_ripple.federation_timeout = 50;
 SET pg_ripple.circuit_breaker_threshold = 1;
 
 -- First call (non-SILENT) — trips the circuit-breaker.
+-- Suppress WARNING (DNS error message is OS-specific: macOS vs Linux).
+SET client_min_messages = 'error';
 DO $$
 BEGIN
     BEGIN
@@ -177,6 +179,7 @@ END $$;
 SELECT pg_ripple.sparql(
     'SELECT ?s WHERE { SERVICE SILENT <http://cb-silent.test/sparql> { ?s ?p ?o } }'
 ) AS silent_cb_result;
+RESET client_min_messages;
 
 SELECT 'SERVICE SILENT swallows PT605 circuit-breaker-open' AS b7_4_check;
 
