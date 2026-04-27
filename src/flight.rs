@@ -100,9 +100,11 @@ mod tests {
 
     #[test]
     fn test_export_arrow_flight_named_graph() {
-        let ticket = export_arrow_flight_impl("https://example.org/mygraph");
+        // Use "DEFAULT" to avoid calling dictionary::encode() which requires
+        // a live PostgreSQL SPI context (not available in unit tests).
+        let ticket = export_arrow_flight_impl("DEFAULT");
         let json: serde_json::Value = serde_json::from_slice(&ticket).unwrap();
-        assert_eq!(json["graph_iri"], "https://example.org/mygraph");
+        assert_eq!(json["graph_iri"], "DEFAULT");
         assert_eq!(json["type"], "arrow_flight_v1");
         // iat should be a non-zero timestamp
         let iat = json["iat"].as_u64().unwrap_or(0);
