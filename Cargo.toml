@@ -35,7 +35,7 @@ oxrdf = "0.3"
 libc = "0.2"
 unicode-normalization = "0.1"
 ureq = { version = "2", features = ["tls"] }
-parquet = { version = "53", default-features = false, features = ["snap"] }
+parquet = { version = "58", default-features = false, features = ["snap"] }
 
 [dev-dependencies]
 pgrx-tests = { version = "=0.18.0", default-features = false }
