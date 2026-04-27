@@ -112,6 +112,47 @@
 | [v0.62.0](roadmap/v0.62.0.md) | Query frontier: Apache Arrow Flight bulk export, WCOJ planner integration, visual graph explorer in `pg_ripple_http`, `clippy --deny warnings` CI gate; Citus property-path push-down, `vp_rare` cold-entry archival, tiered dictionary cache, distributed inference dispatch, live shard rebalance, multi-hop pruning carry-forward | Released ✅ | Very Large | [Full details](roadmap/v0.62.0-full.md) |
 | [v0.63.0](roadmap/v0.63.0.md) | SPARQL CONSTRUCT writeback rules (raw-to-canonical pipelines, incremental delta maintenance, Delete-Rederive, pipeline stratification); Citus scalability: SERVICE result shard pruning, streaming fan-out cursor, HyperLogLog `COUNT(DISTINCT)`, batched dictionary encoding, per-worker SID tables, non-blocking VP promotion, per-graph RLS CI gate, per-worker BRIN summarise | Released ✅ | Large | [Full details](roadmap/v0.63.0-full.md) |
 
+### Assessment Remediation & Release Trust (v0.64.0 – v0.67.0)
+
+| Version | Theme | Status | Scope | Full details |
+|---------|-------|--------|-------|--------------|
+| [v0.64.0](roadmap/v0.64.0.md) | Release truth and safety freeze: feature-status API, deep readiness, immutable GitHub Actions, digest-scanned Docker releases, documentation truth pass, release evidence dashboard foundation | Planned | Large | [Full details](roadmap/v0.64.0-full.md) |
+| [v0.65.0](roadmap/v0.65.0.md) | CONSTRUCT writeback correctness closure: real delta maintenance, HTAP-aware retraction, exact provenance capture, parameterized rule catalog writes, full CWB behavior test matrix | Planned | Very Large | [Full details](roadmap/v0.65.0-full.md) |
+| [v0.66.0](roadmap/v0.66.0.md) | Streaming and distributed reality: true SPARQL cursors, signed Arrow IPC export, explainable WCOJ mode, integrated Citus pruning/HLL/BRIN/RLS/promotion paths | Planned | Very Large | [Full details](roadmap/v0.66.0-full.md) |
+| [v0.67.0](roadmap/v0.67.0.md) | Production evidence and world-class hardening: soak testing, security audit or threat-model closure, public benchmark baselines, upgrade and backup acceptance, release evidence gate | Planned | Large | [Full details](roadmap/v0.67.0-full.md) |
+
+#### PLAN_OVERALL_ASSESSMENT_8 coverage map
+
+Every finding and recommendation from [plans/PLAN_OVERALL_ASSESSMENT_8.md](plans/PLAN_OVERALL_ASSESSMENT_8.md) is assigned to one or more post-v0.63.0 roadmap milestones:
+
+| Assessment area | Roadmap coverage |
+|---|---|
+| C1: CONSTRUCT writeback is not incremental | v0.65.0 CWB-FIX-01, CWB-FIX-02, CWB-FIX-08 |
+| C2: promoted HTAP predicate retraction can fail | v0.65.0 CWB-FIX-03, CWB-FIX-06, TEST-3 |
+| C3 and S1: mutable GitHub Actions / missing SHA pinning | v0.64.0 TRUTH-03, TEST-1 |
+| C4, S2, P5: Arrow Flight is stubbed and tickets are unsigned | v0.66.0 FLIGHT-01, FLIGHT-02, OBS-01 |
+| H1, P4, SC4: WCOJ is planner guidance, not true triejoin | v0.64.0 TRUTH-05, v0.66.0 WCOJ-01 |
+| H2, P2, P3, S4: v0.63 Citus claims are not fully wired | v0.64.0 TRUTH-01/TRUTH-05, v0.66.0 CITUS-01 through CITUS-06 |
+| H3: SPARQL cursors materialize full result sets | v0.66.0 STREAM-01, STREAM-02, TEST-1 |
+| H4 and SC1: SHACL-SPARQL rule support is overstated | v0.64.0 TRUTH-05, v0.65.0 CWB-FIX-09 |
+| H5: Docker release continues after build/push failure | v0.64.0 TRUTH-04, TEST-4 |
+| P1: construct-rule provenance over-attributes target triples | v0.65.0 CWB-FIX-04, PERF-1 |
+| S3 and A2: construct-rule catalog SQL uses manual escaping | v0.65.0 CWB-FIX-05 |
+| SC2: v0.63 CWB test matrix is not implemented | v0.65.0 CWB-FIX-08, TEST-1 |
+| SC3: version/date/API narrative drift | v0.64.0 TRUTH-05, TRUTH-07 |
+| A1, A3, A4: release claims need evidence, degradation semantics, and no dead-helper claims | v0.64.0 TRUTH-01, TRUTH-06, TRUTH-10 |
+| Operational and observability gaps | v0.65.0 CWB-FIX-07, CWB-FIX-10; v0.66.0 OBS-01; v0.67.0 PROD-07 |
+| Documentation and developer-experience gaps | v0.64.0 TRUTH-05, TRUTH-07, TRUTH-08, UX-1 through UX-4 |
+| Test coverage and validation gaps | v0.64.0 TEST-1 through TEST-4; v0.65.0 TEST-1 through TEST-4; v0.66.0 TEST-1 through TEST-4; v0.67.0 TEST-1 through TEST-4 |
+| Roadmap gap: Release Truth Gate | v0.64.0 TRUTH-06, TRUTH-09 |
+| Roadmap gap: Feature Status SQL API and deep readiness | v0.64.0 TRUTH-01, TRUTH-02 |
+| Roadmap gap: Incremental Maintenance Unification | v0.65.0 CWB-FIX-01, CWB-FIX-09 |
+| Roadmap gap: Distributed Execution Contract | v0.66.0 CITUS-01 through CITUS-06, OBS-01 |
+| Roadmap gap: Streaming Contract | v0.66.0 STREAM-01, STREAM-02, FLIGHT-02 |
+| Roadmap gap: Security Hardening Track | v0.64.0 TRUTH-03/TRUTH-04, v0.66.0 FLIGHT-01, v0.67.0 PROD-02 |
+| Recommended feature: Release Evidence Dashboard | v0.64.0 TRUTH-09, v0.67.0 PROD-05 |
+| Recommended feature: Canonical Graph Pipeline UI/API foundation | v0.65.0 CWB-FIX-07, CWB-FIX-10 |
+
 ### Stable Release & Ecosystem (v1.0.0 – v1.1.0)
 
 | Version | Theme | Status | Scope | Full details |
@@ -156,6 +197,18 @@ v0.63          ─── SPARQL CONSTRUCT writeback rules: raw-to-canonical pipe
                │   Citus: SERVICE shard pruning, streaming fan-out, HyperLogLog COUNT(DISTINCT),
                │   batched dict encoding, per-worker SID tables, non-blocking VP promotion
        │
+v0.64          ─── Release truth and safety freeze: feature_status, deep readiness,
+               │   immutable GitHub Actions, digest-scanned Docker release, documentation truth pass
+       │
+v0.65          ─── CONSTRUCT writeback correctness closure: real delta maintenance,
+               │   HTAP-aware retraction, exact provenance, full behavior test matrix
+       │
+v0.66          ─── Streaming and distributed reality: true cursors, signed Arrow IPC export,
+               │   explainable WCOJ mode, integrated Citus pruning/HLL/BRIN/RLS/promotion paths
+       │
+v0.67          ─── Production evidence hardening: soak tests, security audit/threat model,
+               │   public benchmarks, upgrade/backup acceptance, mandatory release evidence dashboard
+       │
 v1.0.0         ─── Stable release: 72-hour continuous load test, third-party security audit, documentation freeze, public benchmarks
        │
 v1.1           ─── Post-stable: Cypher/GQL transpiler (read-only + write ops), Jupyter kernel, LangChain/LlamaIndex tools, Kafka CDC sink, materialized SPARQL views, dbt adapter
@@ -194,9 +247,20 @@ v0.63.0 also delivers eight Citus scalability improvements (CITUS-30–37): SERV
 result shard pruning, streaming coordinator fan-out via SPARQL cursor, approximate
 `COUNT(DISTINCT)` via HyperLogLog, batched dictionary encoding, per-worker statement-ID
 local tables, non-blocking VP promotion via shadow-table pattern, per-graph RLS
-propagation CI gate, and per-worker BRIN summarise after merge. v1.0.0 is the
-stable release: a 72-hour continuous load test, a third-party security audit,
-documentation final audit and freeze, an API stability guarantee, and public BSBM/WatDiv benchmark results. v1.1.0 delivers
+propagation CI gate, and per-worker BRIN summarise after merge. v0.64.0 through
+v0.67.0 convert the findings from PLAN_OVERALL_ASSESSMENT_8 into explicit
+roadmap work: v0.64.0 adds the truth-in-release guardrails (feature status,
+deep readiness, immutable CI actions, release digest scanning, and documentation
+correction); v0.65.0 closes CONSTRUCT writeback correctness (delta maintenance,
+HTAP-aware retraction, exact provenance, and the full behavior test matrix);
+v0.66.0 makes the streaming and distributed claims real or explicitly labels
+them as planner hints/stubs/helpers (true SPARQL cursors, signed Arrow IPC export,
+explainable WCOJ mode, and integrated Citus pruning/HLL/BRIN/RLS/promotion paths);
+and v0.67.0 gathers production evidence (soak tests, audit or threat-model closure,
+public benchmarks, upgrade/backup acceptance, and mandatory release evidence
+artifacts). v1.0.0 is the stable release: a 72-hour continuous load test, a
+third-party security audit, documentation final audit and freeze, an API stability
+guarantee, and public BSBM/WatDiv benchmark results. v1.1.0 delivers
 post-stable improvements: Cypher/GQL transpiler (read-only and write operations),
 Jupyter SPARQL kernel, LangChain/LlamaIndex tool packages, Kafka CDC sink,
 materialized SPARQL views, and a dbt adapter.
