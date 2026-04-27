@@ -388,15 +388,15 @@ echo
 info "=== J7-2: data round-trip verification ==="
 
 # Load a small representative dataset.
-RUN_SQL "INSERT INTO _pg_ripple.dictionary (hash, value, kind) VALUES (12345678901234, 'https://example.org/Alice', 'iri') ON CONFLICT DO NOTHING"
-RUN_SQL "INSERT INTO _pg_ripple.dictionary (hash, value, kind) VALUES (98765432109876, 'https://example.org/name',  'iri') ON CONFLICT DO NOTHING"
-RUN_SQL "INSERT INTO _pg_ripple.dictionary (hash, value, kind) VALUES (11111111111111, 'Alice',                     'lit') ON CONFLICT DO NOTHING"
-RUN_SQL "INSERT INTO _pg_ripple.vp_rare (p, s, o, g, source) VALUES (98765432109876, 12345678901234, 11111111111111, 0, 0)"
+run_sql -c "INSERT INTO _pg_ripple.dictionary (hash, value, kind) VALUES (12345678901234, 'https://example.org/Alice', 'iri') ON CONFLICT DO NOTHING"
+run_sql -c "INSERT INTO _pg_ripple.dictionary (hash, value, kind) VALUES (98765432109876, 'https://example.org/name',  'iri') ON CONFLICT DO NOTHING"
+run_sql -c "INSERT INTO _pg_ripple.dictionary (hash, value, kind) VALUES (11111111111111, 'Alice',                     'lit') ON CONFLICT DO NOTHING"
+run_sql -c "INSERT INTO _pg_ripple.vp_rare (p, s, o, g, source) VALUES (98765432109876, 12345678901234, 11111111111111, 0, 0)"
 
 ok "J7-2: seed data inserted"
 
 # Verify the triple is readable.
-COUNT=$(RUN_SQL_RESULT "SELECT count(*) FROM _pg_ripple.vp_rare WHERE p = 98765432109876 AND s = 12345678901234")
+COUNT=$(run_sql -c "SELECT count(*) FROM _pg_ripple.vp_rare WHERE p = 98765432109876 AND s = 12345678901234")
 if [[ "${COUNT}" -eq 1 ]]; then
     ok "J7-2: triple count after seed = 1 (correct)"
 else
@@ -409,7 +409,7 @@ if [[ -f "${SQL_DIR}/pg_ripple--0.60.0--0.61.0.sql" ]]; then
     ok "J7-2: 0.60.0→0.61.0 migration applied"
 
     # Triple must still be readable after migration.
-    COUNT2=$(RUN_SQL_RESULT "SELECT count(*) FROM _pg_ripple.vp_rare WHERE p = 98765432109876 AND s = 12345678901234")
+    COUNT2=$(run_sql -c "SELECT count(*) FROM _pg_ripple.vp_rare WHERE p = 98765432109876 AND s = 12345678901234")
     if [[ "${COUNT2}" -eq 1 ]]; then
         ok "J7-2: triple count after 0.61.0 migration = 1 (data survived migration)"
     else

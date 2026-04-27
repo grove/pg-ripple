@@ -77,8 +77,13 @@ pub(crate) struct EraseRow {
 pub(crate) fn erase_subject_impl(iri: &str) -> Vec<EraseRow> {
     use pgrx::datum::DatumWithOid;
 
-    // Encode the IRI to get its dictionary ID.
-    let subject_id = crate::dictionary::encode(iri, crate::dictionary::KIND_IRI);
+    // Look up the IRI in the dictionary.  If it doesn't exist there are no
+    // triples to erase, so return an empty result set immediately rather than
+    // inserting the IRI via encode() and then deleting the fresh entry.
+    let subject_id = match crate::dictionary::lookup_iri(iri) {
+        Some(id) => id,
+        None => return Vec::new(),
+    };
 
     let mut results: Vec<EraseRow> = Vec::new();
 
