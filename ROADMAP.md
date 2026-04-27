@@ -108,9 +108,9 @@
 | Version | Theme | Status | Scope | Full details |
 |---------|-------|--------|-------|--------------|
 | [v0.60.0](roadmap/v0.60.0.md) | Close all v1.0.0 blockers: HTAP cutover atomic swap, Actions SHA pinning, SECURITY DEFINER CI lint, new fuzz targets (GeoSPARQL WKT, R2RML, LLM prompt), `/ready` endpoint, `geof:distance`, merge-throughput trend artifact, pg_dump round-trip CI test, LangChain tool package | Planned | Large | [Full details](roadmap/v0.60.0-full.md) |
-| [v0.61.0](roadmap/v0.61.0.md) | Ecosystem depth: per-named-graph RLS, `explain_inference()` derivation tree, GDPR `erase_subject()`, SPARQL Entailment Regimes test driver, dbt adapter, Kafka CDC sink, SHACL-AF rule execution, OTLP traceparent propagation, SBOM diff, OWL 2 RL deletion proof test | Planned | Large | [Full details](roadmap/v0.61.0-full.md) |
-| [v0.62.0](roadmap/v0.62.0.md) | Query frontier: Apache Arrow Flight bulk export, WCOJ planner integration, visual graph explorer in `pg_ripple_http`, `clippy --deny warnings` CI gate | Planned | Large | [Full details](roadmap/v0.62.0-full.md) |
-| [v0.63.0](roadmap/v0.63.0.md) | SPARQL CONSTRUCT writeback rules: register a CONSTRUCT query to write derived triples back into a target named graph and maintain them incrementally (insert/delete delta paths, Delete-Rederive), enabling raw-to-canonical model pipelines that self-update on every source write | Planned | Large | [Full details](roadmap/v0.63.0-full.md) |
+| [v0.61.0](roadmap/v0.61.0.md) | Ecosystem depth: per-named-graph RLS, `explain_inference()` derivation tree, GDPR `erase_subject()`, dbt adapter, Kafka CDC sink, SHACL-AF rule execution, OTLP traceparent propagation; Citus object-based shard pruning and direct-shard bulk-load path | Planned | Large | [Full details](roadmap/v0.61.0-full.md) |
+| [v0.62.0](roadmap/v0.62.0.md) | Query frontier: Apache Arrow Flight bulk export, WCOJ planner integration, visual graph explorer in `pg_ripple_http`, `clippy --deny warnings` CI gate; Citus property-path push-down, `vp_rare` cold-entry archival, tiered dictionary cache | Planned | Very Large | [Full details](roadmap/v0.62.0-full.md) |
+| [v0.63.0](roadmap/v0.63.0.md) | SPARQL CONSTRUCT writeback rules (raw-to-canonical pipelines, incremental delta maintenance, Delete-Rederive, pipeline stratification); Citus scalability: SERVICE result shard pruning, streaming fan-out cursor, HyperLogLog `COUNT(DISTINCT)`, batched dictionary encoding, per-worker SID tables, non-blocking VP promotion, per-graph RLS CI gate, per-worker BRIN summarise | Planned | Large | [Full details](roadmap/v0.63.0-full.md) |
 
 ### Stable Release & Ecosystem (v1.0.0 – v1.1.0)
 
@@ -143,13 +143,16 @@ v0.57–v0.59    ─── Reasoning & sharding: OWL 2 EL/QL, KG embeddings, tem
 v0.60          ─── Production hardening sprint: HTAP atomic swap, Actions SHA pinning, SECURITY DEFINER lint,
                │   new fuzz targets, geof:distance, LangChain tool, pg_dump round-trip CI test
        │
-v0.61          ─── Ecosystem depth: per-graph RLS, explain_inference, GDPR erasure, Entailment Regimes,
-               │   dbt, Kafka CDC, SHACL-AF execution, OTLP traceparent propagation, SBOM diff
+v0.61          ─── Ecosystem depth: per-graph RLS, explain_inference, GDPR erasure, dbt, Kafka CDC,
+               │   SHACL-AF execution, OTLP traceparent; Citus object shard pruning, direct bulk-load
        │
-v0.62          ─── Query frontier: Arrow Flight export, WCOJ planner integration, visual graph explorer
+v0.62          ─── Query frontier: Arrow Flight export, WCOJ planner integration, visual graph explorer;
+               │   Citus property-path push-down, vp_rare cold-entry archival, tiered dictionary cache
        │
 v0.63          ─── SPARQL CONSTRUCT writeback rules: raw-to-canonical pipelines,
-               │   incremental delta maintenance, Delete-Rederive, pipeline stratification
+               │   incremental delta maintenance, Delete-Rederive, pipeline stratification;
+               │   Citus: SERVICE shard pruning, streaming fan-out, HyperLogLog COUNT(DISTINCT),
+               │   batched dict encoding, per-worker SID tables, non-blocking VP promotion
        │
 v1.0.0         ─── Stable release: 30-day soak, third-party security audit, documentation freeze, public benchmarks
        │
@@ -177,12 +180,18 @@ PLAN_OVERALL_ASSESSMENT_7 (HTAP atomic swap, CI supply-chain hardening, fuzz tar
 gaps, `geof:distance`); v0.61.0 delivers ecosystem depth (per-graph RLS, inference
 explainability, GDPR erasure, dbt adapter, Kafka CDC sink, SHACL-AF execution);
 v0.62.0 delivers the query frontier (Arrow Flight bulk export, WCOJ planner
-integration, visual graph explorer). v0.63.0 introduces
+integration, visual graph explorer) plus Citus scalability improvements (property-path
+push-down, `vp_rare` cold-entry archival, tiered dictionary cache). v0.63.0 introduces
 SPARQL CONSTRUCT writeback rules: any CONSTRUCT query can be registered as a persistent
 rule that writes its derived triples directly into a target named graph inside the VP
 storage layer and maintains them incrementally — inserts trigger a delta derivation path,
 deletes trigger Delete-Rederive retraction — enabling raw-to-canonical model pipelines
-where the canonical graph is always consistent with the latest raw data. v1.0.0 is the
+where the canonical graph is always consistent with the latest raw data.
+v0.63.0 also delivers eight Citus scalability improvements (CITUS-30–37): SERVICE
+result shard pruning, streaming coordinator fan-out via SPARQL cursor, approximate
+`COUNT(DISTINCT)` via HyperLogLog, batched dictionary encoding, per-worker statement-ID
+local tables, non-blocking VP promotion via shadow-table pattern, per-graph RLS
+propagation CI gate, and per-worker BRIN summarise after merge. v1.0.0 is the
 stable release: a 30-day continuous-merge soak test, a third-party security audit,
 documentation freeze, and public BSBM/WatDiv benchmark results. v1.1.0 delivers
 post-stable improvements: Jupyter SPARQL kernel, OpenTelemetry semantic-convention
