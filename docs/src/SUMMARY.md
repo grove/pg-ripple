@@ -7,6 +7,9 @@
 # Evaluate
 
 - [When to Use pg_ripple](evaluate/when-to-use.md)
+- [Architecture at a Glance](evaluate/architecture-glance.md)
+- [Comparison vs Alternatives](evaluate/comparison.md)
+- [Performance & Conformance Results](evaluate/performance-results.md)
 
 ---
 
@@ -16,6 +19,7 @@
 - [Hello World — Five-Minute Walkthrough](getting-started/hello-world.md)
 - [Guided Tutorial — Build a Knowledge Graph in 30 Minutes](getting-started/tutorial.md)
 - [Key Concepts — RDF for PostgreSQL Users](getting-started/key-concepts.md)
+- [Playground — Try Without Installing](user-guide/playground.md)
 
 ---
 
@@ -24,16 +28,51 @@
 - [Storing Knowledge](features/storing-knowledge.md)
 - [Loading Data](features/loading-data.md)
 - [Querying with SPARQL](features/querying-with-sparql.md)
-- [Validating Data Quality](features/validating-data-quality.md)
-- [Reasoning and Inference](features/reasoning-and-inference.md)
+- [Validating Data Quality (SHACL)](features/validating-data-quality.md)
+- [Reasoning and Inference (Datalog)](features/reasoning-and-inference.md)
 - [Exporting and Sharing](features/exporting-and-sharing.md)
-- [AI Retrieval & Graph RAG](features/ai-retrieval-graph-rag.md)
+- [Live Views and Subscriptions](features/live-views-and-subscriptions.md)
+- [Geospatial (GeoSPARQL)](features/geospatial.md)
+- [Full-Text Search](features/full-text-search.md)
+- [Temporal & Provenance](features/temporal-and-provenance.md)
+- [Multi-Tenant Graphs](features/multi-tenant-graphs.md)
+- [OWL 2 Profiles (RL / EL / QL)](features/owl-profiles.md)
+- [SHACL-SPARQL Rules](features/shacl-sparql-rules.md)
+- [R2RML — Relational to RDF](features/r2rml.md)
+
+---
+
+# AI, RAG & Record Linkage
+
+- [AI Overview — Decision Tree](features/ai-overview.md)
+- [Vector & Hybrid Search](features/vector-and-hybrid-search.md)
+- [RAG Pipeline — `rag_context()`](user-guide/rag-pipeline.md)
 - [Natural Language to SPARQL](features/nl-to-sparql.md)
-- [Entity Alignment with owl:sameAs](features/entity-alignment.md)
-- [RAG Pipeline — rag_context()](user-guide/rag-pipeline.md)
-- [SPARQL Query Debugger — EXPLAIN SPARQL](user-guide/explain-sparql.md)
-- [APIs and Integration](features/apis-and-integration.md)
-- [CDC Subscriptions](features/cdc-subscriptions.md)
+- [Knowledge-Graph Embeddings (KGE)](features/knowledge-graph-embeddings.md)
+- [Record Linkage & Entity Resolution](features/record-linkage.md)
+- [GraphRAG (Microsoft)](features/graphrag.md)
+- [Vector Federation](user-guide/vector-federation.md)
+
+---
+
+# Use-Case Cookbook
+
+- [Index of Recipes](cookbook/index.md)
+- [Knowledge Graph from a Relational Catalogue](cookbook/relational-to-rdf.md)
+- [Chatbot Grounded in a Knowledge Graph](cookbook/grounded-chatbot.md)
+- [Deduplicate Customer Records](cookbook/dedupe-customers.md)
+- [Audit Trail with PROV-O & Temporal Queries](cookbook/audit-trail.md)
+- [CDC → Kafka via JSON-LD Outbox](cookbook/cdc-to-kafka.md)
+- [Probabilistic Rules for Soft Constraints](cookbook/probabilistic-rules.md)
+- [SPARQL Repair Workflow](cookbook/sparql-repair.md)
+- [Ontology Mapping and Alignment](cookbook/ontology-mapping.md)
+
+---
+
+# APIs & Integration
+
+- [APIs and Integration Overview](features/apis-and-integration.md)
+- [SPARQL Query Debugger — `EXPLAIN SPARQL`](user-guide/explain-sparql.md)
 
 ---
 
@@ -46,8 +85,10 @@
 - [CloudNativePG](operations/cloudnativepg.md)
 - [High Availability](operations/high-availability.md)
 - [Logical Replication](operations/replication.md)
+- [CDC Operations](operations/cdc.md)
 - [Citus + pg-trickle Integration](operations/citus-integration.md)
-- [Configuration and Tuning](operations/configuration.md)
+- [Configuration](operations/configuration.md)
+- [Tuning](operations/tuning.md)
 - [Monitoring and Observability](operations/monitoring.md)
 - [Performance Tuning](operations/performance.md)
 - [Parallel Merge Workers](operations/merge-workers.md)
@@ -59,21 +100,77 @@
 
 ---
 
+# Best Practices
+
+- [Index](user-guide/best-practices/index.md)
+- [Bulk Loading](user-guide/best-practices/bulk-loading.md)
+- [Data Modeling](user-guide/best-practices/data-modeling.md)
+- [SPARQL Patterns](user-guide/best-practices/sparql-patterns.md)
+- [SPARQL Performance](user-guide/best-practices/sparql-performance.md)
+- [SHACL Patterns](user-guide/best-practices/shacl-patterns.md)
+- [Datalog Optimization](user-guide/best-practices/datalog-optimization.md)
+- [Update Patterns](user-guide/best-practices/update-patterns.md)
+- [Federation Performance](user-guide/best-practices/federation-performance.md)
+- [Query Planning](user-guide/performance/query-planning.md)
+
+---
+
 # Reference
 
 - [SQL Function Reference](reference/sql-functions.md)
-- [Architecture](reference/architecture.md)
+- [SQL Reference Index](user-guide/sql-reference/index.md)
+- [Triple CRUD](user-guide/sql-reference/triple-crud.md)
+- [Bulk Load](user-guide/sql-reference/bulk-load.md)
+- [SPARQL Query](user-guide/sql-reference/sparql-query.md)
+- [SPARQL Update](user-guide/sql-reference/sparql-update.md)
+- [Datalog](user-guide/sql-reference/datalog.md)
+- [SHACL](user-guide/sql-reference/shacl.md)
+- [RDF-star](user-guide/sql-reference/rdf-star.md)
+- [Named Graphs](user-guide/sql-reference/named-graphs.md)
+- [Federation](user-guide/sql-reference/federation.md)
+- [Full-Text Search](user-guide/sql-reference/fts.md)
+- [Cursor API](user-guide/sql-reference/cursor-api.md)
+- [Views](user-guide/sql-reference/views.md)
+- [Framing Views](user-guide/sql-reference/framing-views.md)
+- [Serialization](user-guide/sql-reference/serialization.md)
+- [HTTP Endpoint](user-guide/sql-reference/http-endpoint.md)
+- [Dictionary](user-guide/sql-reference/dictionary.md)
+- [Prefixes](user-guide/sql-reference/prefix.md)
+- [Admin](user-guide/sql-reference/admin.md)
+- [Explain](user-guide/sql-reference/explain.md)
+- [Architecture (Internals)](reference/architecture.md)
 - [GUC Reference](reference/guc-reference.md)
+- [Audit Log](reference/audit-log.md)
+- [Embedding Functions](reference/embedding-functions.md)
+- [GraphRAG Functions](reference/graphrag-functions.md)
+- [GraphRAG Ontology](reference/graphrag-ontology.md)
+- [GeoSPARQL Functions](reference/geosparql.md)
+- [Lattice-Based Datalog](reference/lattice-datalog.md)
+- [HTTP API Reference](reference/http-api.md)
+- [API Stability Guarantees](reference/api-stability.md)
 - [SPARQL Compliance Matrix](reference/sparql-compliance.md)
 - [W3C Conformance](reference/w3c-conformance.md)
-- [OWL 2 RL Conformance Results](reference/owl2rl-results.md)
-- [WatDiv Benchmark Results](reference/watdiv-results.md)
+- [OWL 2 RL Results](reference/owl2rl-results.md)
+- [WatDiv Results](reference/watdiv-results.md)
+- [LUBM Results](reference/lubm-results.md)
 - [Vector Index Trade-offs](reference/vector-index-tradeoffs.md)
 - [Running Conformance Tests](reference/running-conformance-tests.md)
-- [Error Message Catalog](reference/error-catalog.md)
-- [Lattice-Based Datalog (Datalog^L)](reference/lattice-datalog.md)
+- [Error Catalog](reference/error-catalog.md)
 - [FAQ](reference/faq.md)
 - [Glossary](reference/glossary.md)
 - [Release Notes](reference/changelog.md)
 - [Roadmap](reference/roadmap.md)
-- [Contributing](reference/contributing.md)
+
+---
+
+# Research
+
+- [Research Index](research/index.md)
+- [PostgreSQL Triple-Store Deep Dive](research/postgresql-deepdive.md)
+
+---
+
+# Contributing
+
+- [How to Contribute](reference/contributing.md)
+- [Release Process](reference/release-process.md)
