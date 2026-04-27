@@ -325,41 +325,40 @@ pub fn merge_predicate(pred_id: i64) -> i64 {
             .unwrap_or_else(|e| pgrx::error!("merge: count main_new error: {e}"))
             .unwrap_or(0);
 
-    // Step 3: atomic rename — drop old main, rename new → main.
-    // Use lock_timeout to avoid blocking query path for too long.
-    // (maintenance_mode was already set at the start of this function.)
+    // Step 3: F7-1 (v0.60.0) — atomic rename-swap that never leaves the backing
+    // relation non-existent.  The sequence:
+    //   a. Rename old main → main_old  (view OID still resolves to the old table)
+    //   b. Rename main_new → main      (view OID still resolves to old; queries work)
+    //   c. CREATE OR REPLACE VIEW      (atomically repoints the view to new main)
+    //   d. DROP old main_old           (removes old data; old index dropped with it)
+    //   e. Rename new BRIN index to canonical name
+    //
+    // There is no window where the VP view lacks a backing relation.
+    // Use lock_timeout to avoid blocking the query path for too long.
     Spi::run_with_args("SET LOCAL lock_timeout = '5s'", &[])
         .unwrap_or_else(|e| pgrx::error!("merge: set lock_timeout error: {e}"));
 
-    Spi::run_with_args(&format!("DROP TABLE IF EXISTS {main} CASCADE"), &[])
-        .unwrap_or_else(|e| pgrx::error!("merge: drop old main error: {e}"));
+    let main_old = format!("_pg_ripple.vp_{pred_id}_main_old");
 
+    // a. Rename current main → main_old (keeps the old OID in the view working).
+    // If main_old already exists from a previously aborted merge, drop it first.
+    Spi::run_with_args(&format!("DROP TABLE IF EXISTS {main_old}"), &[])
+        .unwrap_or_else(|e| pgrx::error!("merge: drop stale main_old error: {e}"));
+    Spi::run_with_args(
+        &format!("ALTER TABLE {main} RENAME TO vp_{pred_id}_main_old"),
+        &[],
+    )
+    .unwrap_or_else(|e| pgrx::error!("merge: rename main → main_old error: {e}"));
+
+    // b. Rename main_new → main (backing table for the refreshed view).
     Spi::run_with_args(
         &format!("ALTER TABLE {main_new} RENAME TO vp_{pred_id}_main"),
         &[],
     )
-    .unwrap_or_else(|e| pgrx::error!("merge: rename main_new error: {e}"));
+    .unwrap_or_else(|e| pgrx::error!("merge: rename main_new → main error: {e}"));
 
-    // F-7 (v0.56.0): Re-summarize BRIN index after rename so page-range summaries
-    // are valid immediately without waiting for the autovacuum BRIN worker.
-    let brin_sql = format!(
-        "SELECT brin_summarize_new_values(c.oid) \
-         FROM pg_class c \
-         JOIN pg_namespace n ON n.oid = c.relnamespace \
-         WHERE n.nspname = '_pg_ripple' \
-           AND c.relname = 'idx_vp_{pred_id}_main_i_brin' \
-           AND c.relkind = 'i'"
-    );
-    // Best-effort: failure to re-summarize is non-fatal (BRIN self-heals on next vacuum).
-    if let Err(e) = Spi::run_with_args(&brin_sql, &[]) {
-        pgrx::debug1!(
-            "merge: brin_summarize_new_values failed for vp_{pred_id}_main (non-fatal): {e}"
-        );
-    }
-
-    // Recreate the VP view — DROP TABLE ... CASCADE above dropped it along
-    // with the old main table.  The view must exist for find_triples / SPARQL
-    // queries and for rebuild_subject/object_patterns() to work correctly.
+    // c. CREATE OR REPLACE VIEW — atomically repoints to new main OID.
+    // The view must exist for find_triples / SPARQL queries to work correctly.
     let view = format!("_pg_ripple.vp_{pred_id}");
     Spi::run_with_args(
         &format!(
@@ -379,6 +378,39 @@ pub fn merge_predicate(pred_id: i64) -> i64 {
         &[],
     )
     .unwrap_or_else(|e| pgrx::error!("merge: recreate view error: {e}"));
+
+    // d. Drop the old main table now that the view points to the new one.
+    Spi::run_with_args(&format!("DROP TABLE IF EXISTS {main_old}"), &[])
+        .unwrap_or_else(|e| pgrx::error!("merge: drop main_old error: {e}"));
+
+    // e. Rename the BRIN index on the new main to the canonical name.
+    //    The old index was dropped with main_old; the new one was created as
+    //    idx_vp_{pred_id}_main_new_i_brin and needs to be renamed.
+    Spi::run_with_args(
+        &format!(
+            "ALTER INDEX IF EXISTS _pg_ripple.idx_vp_{pred_id}_main_new_i_brin \
+             RENAME TO idx_vp_{pred_id}_main_i_brin"
+        ),
+        &[],
+    )
+    .unwrap_or_else(|e| pgrx::warning!("merge: rename BRIN index error (non-fatal): {e}"));
+
+    // Re-summarize BRIN index so page-range summaries are valid immediately
+    // without waiting for the autovacuum BRIN worker.
+    let brin_sql = format!(
+        "SELECT brin_summarize_new_values(c.oid) \
+         FROM pg_class c \
+         JOIN pg_namespace n ON n.oid = c.relnamespace \
+         WHERE n.nspname = '_pg_ripple' \
+           AND c.relname = 'idx_vp_{pred_id}_main_i_brin' \
+           AND c.relkind = 'i'"
+    );
+    // Best-effort: failure to re-summarize is non-fatal (BRIN self-heals on next vacuum).
+    if let Err(e) = Spi::run_with_args(&brin_sql, &[]) {
+        pgrx::debug1!(
+            "merge: brin_summarize_new_values failed for vp_{pred_id}_main (non-fatal): {e}"
+        );
+    }
 
     // v0.37.0: Atomically update _pg_ripple.statements SID-range catalog in the
     // same transaction as the VP table swap. This prevents a race where the merge

@@ -266,6 +266,7 @@ async fn main() {
         datalog_write_token,
         trust_proxy,
         metrics: metrics::Metrics::new(),
+        ever_connected: std::sync::atomic::AtomicBool::new(false),
     });
 
     // CORS layer — wildcard "*" requires explicit opt-in; empty means deny all cross-origin.
@@ -293,6 +294,8 @@ async fn main() {
         .route("/sparql/stream", post(sparql_stream_post))
         .route("/rag", post(rag_post))
         .route("/health", get(health))
+        // v0.60.0 H7-5: Kubernetes readiness probe — 503 until first PG connection.
+        .route("/ready", get(ready))
         .route("/metrics", get(metrics_endpoint))
         // v0.55.0 L-7.2: VoID dataset description
         .route("/void", get(void_endpoint))
@@ -590,8 +593,7 @@ async fn sparql_stream_post(
         }
     });
 
-    let stream =
-        ReceiverStream::new(rx).map(|chunk| chunk.map(|bytes| axum::body::Bytes::from(bytes)));
+    let stream = ReceiverStream::new(rx).map(|chunk| chunk.map(axum::body::Bytes::from));
 
     Response::builder()
         .status(StatusCode::OK)
@@ -1298,6 +1300,10 @@ async fn health(State(state): State<Arc<AppState>>) -> Response {
         Ok(client) => match client.query_one("SELECT version()", &[]).await {
             Ok(row) => {
                 let v: String = row.get(0);
+                // v0.60.0 H7-5: Mark the service as ready on first successful connection.
+                state
+                    .ever_connected
+                    .store(true, std::sync::atomic::Ordering::Relaxed);
                 (true, Some(v))
             }
             Err(_) => (false, None),
@@ -1335,6 +1341,42 @@ async fn health(State(state): State<Arc<AppState>>) -> Response {
         .header("content-type", "application/json")
         .body(Body::from(body.to_string()))
         .unwrap_or_else(|_| (StatusCode::INTERNAL_SERVER_ERROR, "build error").into_response())
+}
+
+// ─── Readiness endpoint (v0.60.0 H7-5) ───────────────────────────────────────
+//
+// GET /ready — Kubernetes readiness probe.
+//
+// Returns 200 OK once the service has successfully connected to PostgreSQL at
+// least once.  Returns 503 Service Unavailable until then so the Kubernetes
+// load-balancer withholds traffic from a pod that is still starting up.
+//
+// Distinct from /health (liveness probe):
+//   /health  — is the process alive and can reach PostgreSQL right now?
+//   /ready   — has the process EVER reached PostgreSQL (safe to route traffic)?
+async fn ready(State(state): State<Arc<AppState>>) -> Response {
+    let is_ready = state
+        .ever_connected
+        .load(std::sync::atomic::Ordering::Relaxed);
+
+    if is_ready {
+        let body = serde_json::json!({ "status": "ready" });
+        Response::builder()
+            .status(StatusCode::OK)
+            .header("content-type", "application/json")
+            .body(Body::from(body.to_string()))
+            .unwrap_or_else(|_| (StatusCode::INTERNAL_SERVER_ERROR, "build error").into_response())
+    } else {
+        let body = serde_json::json!({
+            "status": "not_ready",
+            "reason": "waiting for first successful PostgreSQL connection"
+        });
+        Response::builder()
+            .status(StatusCode::SERVICE_UNAVAILABLE)
+            .header("content-type", "application/json")
+            .body(Body::from(body.to_string()))
+            .unwrap_or_else(|_| (StatusCode::INTERNAL_SERVER_ERROR, "build error").into_response())
+    }
 }
 
 // ─── Metrics endpoint ────────────────────────────────────────────────────────

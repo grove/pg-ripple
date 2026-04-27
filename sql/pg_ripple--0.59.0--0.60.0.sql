@@ -1,0 +1,28 @@
+-- Migration 0.59.0 → 0.60.0: Production Hardening Sprint
+--
+-- Schema changes: None.
+--
+-- All v0.60.0 changes are:
+--   - F7-1: HTAP merge worker uses atomic rename-swap (pure Rust, no DDL change)
+--   - J7-1: New concurrent chaos test (shell script, no DDL)
+--   - F7-2: New promotion-race concurrent test (shell script, no DDL)
+--   - F7-4: merge_throughput_history.csv benchmark artifact (non-schema)
+--   - H7-1: GitHub Actions SHA pinning (CI workflow, no DDL)
+--   - H7-2: SECURITY DEFINER CI lint step (CI workflow, no DDL)
+--   - H7-3: Security documentation update (docs, no DDL)
+--   - N7-1: rust-toolchain.toml added (toolchain pin, no DDL)
+--   - N7-4: Trivy Docker CVE scan added to release workflow (no DDL)
+--   - A7-1: Three new fuzz harnesses (fuzz/, no DDL)
+--   - A7-2: Removed false-positive #[allow(dead_code)] in parallel.rs (no DDL)
+--   - A7-4: cargo clippy -D warnings CI gate (already in CI from v0.47.0, confirmed)
+--   - B7-3: geof:distance already implemented in v0.55.0 (no DDL)
+--   - B7-4: SERVICE SILENT + circuit-breaker pg_regress test (no DDL)
+--   - H7-5: /ready Kubernetes readiness endpoint in pg_ripple_http (HTTP service, no DDL)
+--   - K7-1: Architecture diagram updated (docs, no DDL)
+--   - K7-2: pg_trickle dependency matrix added to README (docs, no DDL)
+--   - K7-3: citus_rebalance_with_trickle.sql example added (examples/, no DDL)
+--   - 6.14: tests/integration/dump_restore.sh added (tests, no DDL)
+--
+-- No SQL schema changes are required for this upgrade.
+-- Upgrading from v0.59.0 requires no changes to queries, schemas,
+-- or application code.

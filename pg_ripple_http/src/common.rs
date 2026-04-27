@@ -6,6 +6,7 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use constant_time_eq::constant_time_eq;
 use deadpool_postgres::Pool;
+use std::sync::atomic::AtomicBool;
 use uuid::Uuid;
 
 use crate::metrics::Metrics;
@@ -24,6 +25,10 @@ pub struct AppState {
     /// `X-Forwarded-For`. `None` means X-Forwarded-For is not trusted.
     pub trust_proxy: Option<String>,
     pub metrics: Metrics,
+    /// v0.60.0 H7-5: Set to `true` after the first successful PostgreSQL
+    /// connection.  Used by the `/ready` Kubernetes readiness probe — the
+    /// pod is only added to the load-balancer once this is true.
+    pub ever_connected: AtomicBool,
 }
 
 // ─── Configuration ────────────────────────────────────────────────────────────

@@ -195,7 +195,7 @@ REVOKE ALL ON ALL TABLES IN SCHEMA _pg_ripple FROM PUBLIC;
 REVOKE ALL ON ALL SEQUENCES IN SCHEMA _pg_ripple FROM PUBLIC;
 ```
 
-Unprivileged roles cannot read `_pg_ripple.dictionary`, `_pg_ripple.vp_*`, or any internal table directly. The public `pg_ripple.*` API functions (which are `SECURITY DEFINER`) continue to work as before.
+Unprivileged roles cannot read `_pg_ripple.dictionary`, `_pg_ripple.vp_*`, or any internal table directly. The public `pg_ripple.*` API functions run as the invoking role (`SECURITY INVOKER`, which is the PostgreSQL default). The only exception is the DDL event-trigger guard function `_pg_ripple.ddl_guard_vp_tables()`, which uses `SECURITY DEFINER` because it must inspect `pg_event_trigger_dropped_objects()` — a system function that requires elevated privilege. No other function in the extension uses `SECURITY DEFINER`. The CI lint step `scripts/check_no_security_definer.sh` enforces this invariant on every commit.
 
 **Checklist (all items: mitigated)**
 

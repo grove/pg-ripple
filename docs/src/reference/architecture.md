@@ -1,6 +1,6 @@
 # Architecture
 
-This page describes the internal architecture of pg_ripple as of v0.53.0.
+This page describes the internal architecture of pg_ripple as of v0.60.0.
 
 ## Overview
 
@@ -14,12 +14,14 @@ tables and VP (Vertical Partitioning) tables live in the `_pg_ripple` schema.
 ```mermaid
 graph TD
     Client["SQL client / SPARQL tool"]
-    HTTP["pg_ripple_http\n(Axum companion service)"]
+    HTTP["pg_ripple_http\n(Axum companion service)\n/health · /ready · /metrics"]
     RAG["RAG / LLM pipeline\nllm/mod.rs + rag_cache"]
 
     subgraph Extension["pg_ripple extension (Rust + pgrx 0.18)"]
         API["SQL API layer\nlib.rs + *_api.rs"]
         SPARQL["SPARQL engine\nsparql/mod.rs"]
+        SPARQLDL["SPARQL-DL engine\nsparql/sparqldl.rs"]
+        QLRW["OWL 2 QL rewrite\nsparql/ql_rewrite.rs"]
         TRANS["Algebra → SQL\nsparql/translate/\nfilter_dispatch + filter_expr"]
         SQLGEN["SQL generator\nsparql/sqlgen.rs"]
         DICT["Dictionary\ndictionary/mod.rs\n(XXH3-128 + LRU cache)"]
@@ -27,11 +29,15 @@ graph TD
         DL["Datalog engine\ndatalog/\nseminaive + coordinator\nmagic_sets + demand"]
         EXP["Serialisers\nexport/mod.rs\n(Turtle/JSON-LD/N-Triples)"]
         STOR["Storage layer\nstorage/mod.rs\n(HTAP delta/main/tombstones)"]
-        MERGE["Merge worker\nstorage/merge.rs\n(CDC lifecycle NOTIFY)"]
+        MERGE["Merge worker\nstorage/merge.rs\n(atomic rename-swap, v0.60.0)"]
         CAT["Predicate catalog\nstorage/catalog.rs"]
         HINTS["SHACL hints\nshacl/hints.rs"]
         FED["Federation planner\nsparql/federation.rs\n(cost-based, parallel)"]
         CDC["CDC bridge\nstorage/cdc_bridge.rs"]
+        CITUS["Citus integration\nsrc/citus.rs\n(shard-pruning, rebalance)"]
+        TENANT["Multi-tenant isolation\nsrc/tenant.rs"]
+        KGE["KG embeddings\nsrc/kge.rs"]
+        TEMPORAL["Temporal RDF\nsrc/temporal.rs"]
         GUCS["GUC subsystem\ngucs/{sparql, datalog, shacl,\nfederation, llm, storage,\nobservability}.rs"]
     end
 
@@ -50,12 +56,19 @@ graph TD
     HTTP --> RAG
     RAG --> RAG_CACHE
     API --> SPARQL
+    API --> SPARQLDL
     API --> SHACL
     API --> DL
     API --> EXP
     API --> FED
     API --> CDC
+    API --> CITUS
+    API --> TENANT
+    API --> KGE
+    API --> TEMPORAL
     SPARQL --> TRANS
+    SPARQLDL --> SPARQL
+    QLRW --> SPARQL
     TRANS --> SQLGEN
     SQLGEN --> CAT
     CAT --> HINTS

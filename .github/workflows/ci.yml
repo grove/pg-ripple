@@ -76,6 +76,11 @@ jobs:
       - name: Clippy
         run: cargo clippy --features pg18 -- -D warnings
 
+      # v0.60.0 H7-2: Gate on no unapproved SECURITY DEFINER in SQL migration
+      # scripts.  The allowlist in the script covers the two intentional uses.
+      - name: SECURITY DEFINER lint
+        run: bash scripts/check_no_security_definer.sh
+
       - name: Run pg_test suite
         env:
           RUST_TEST_THREADS: "1"

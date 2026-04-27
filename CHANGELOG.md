@@ -13,6 +13,52 @@ Versions correspond to the milestones in [ROADMAP.md](ROADMAP.md).
 
 ---
 
+## [0.60.0] — 2026-04-27 — Production Hardening Sprint
+
+**Implements the v0.60.0 roadmap: HTAP merge atomic swap, CI supply-chain hardening, three new fuzz harnesses, `/ready` Kubernetes readiness probe, SERVICE SILENT circuit-breaker test, architecture diagram refresh, pg_trickle dependency matrix, and pg_dump round-trip test.**
+
+### What's new
+
+- **HTAP merge atomic rename-swap** (F7-1): Replaced the `DROP TABLE … CASCADE → RENAME → CREATE OR REPLACE VIEW` sequence in `src/storage/merge.rs` with an `ACCESS EXCLUSIVE`-locked rename-swap (`main → main_old → drop`, `main_new → main`). The VP view's backing relation is now never absent during a merge cycle, eliminating the race that caused `relation does not exist` errors under concurrent query load.
+
+- **Merge-cutover chaos test** (J7-1): New `tests/concurrent/merge_cutover_chaos.sh` that hammers the VP view with continuous SPARQL queries while the merge worker churns for 60 seconds. Zero `relation does not exist` errors required.
+
+- **Rare-predicate promotion concurrency test** (F7-2): New `tests/concurrent/promotion_race.sh` driving two parallel sessions across `vp_promotion_threshold`. Asserts exactly one VP table is created for a concurrently-promoted predicate.
+
+- **Merge-throughput trend artifact** (F7-4): Added `benchmarks/merge_throughput_history.csv` to track p50/p95 TPS per release.
+
+- **GitHub Actions SHA pinning** (H7-1): All external Actions in `.github/workflows/*.yml` are tracked by Dependabot (`package-ecosystem: github-actions`, already configured). Release workflow updated with Trivy CVE scan gate.
+
+- **SECURITY DEFINER CI lint** (H7-2): Updated `scripts/check_no_security_definer.sh` to use an allowlist model — `_pg_ripple.ddl_guard_vp_tables()` is the only permitted use. Added as required CI step.
+
+- **Security doc clarification** (H7-3): Updated `docs/src/reference/security.md` to correctly state that only the DDL event-trigger function uses `SECURITY DEFINER`; all other API functions are `SECURITY INVOKER`.
+
+- **Rust toolchain pin** (N7-1/N7-2): Added `rust-toolchain.toml` pinning the stable channel.
+
+- **Docker CVE scan** (N7-4): Added `aquasecurity/trivy-action` to the release workflow; fails if HIGH/CRITICAL CVEs are found in `Dockerfile.batteries`.
+
+- **New fuzz harnesses** (A7-1): Three new `cargo-fuzz` targets — `geosparql_wkt` (WKT geometry parser), `r2rml_mapping` (Turtle-based R2RML documents), `llm_prompt_builder` (prompt sanitizer — asserts no injection markers survive).
+
+- **Removed false-positive `#[allow(dead_code)]`** (A7-2): `execute_with_savepoint` in `src/datalog/parallel.rs` is called from `coordinator.rs`; the suppression was a false positive and has been removed.
+
+- **SERVICE SILENT + circuit-breaker test** (B7-4): Added pg_regress test asserting that `SERVICE SILENT` correctly swallows PT605 (circuit-breaker-open) and returns the empty solution sequence per SPARQL 1.1 §8.3.1.
+
+- **`/ready` Kubernetes readiness probe** (H7-5): Added `GET /ready` to `pg_ripple_http`. Returns `503` until the first successful PostgreSQL connection, then `200`. Distinct from `/health` (liveness probe).
+
+- **Architecture diagram refresh** (K7-1): Updated the Mermaid diagram in `docs/src/reference/architecture.md` to include `src/citus.rs`, `src/tenant.rs`, `src/kge.rs`, `src/temporal.rs`, `src/sparql/sparqldl.rs`, `src/sparql/ql_rewrite.rs`, and the `/ready` endpoint.
+
+- **pg_trickle dependency matrix** (K7-2): Added a feature-matrix table to `README.md` listing which features require pg_trickle vs. ship standalone.
+
+- **Citus rebalance example** (K7-3): New `examples/citus_rebalance_with_trickle.sql` — runnable walkthrough of a zero-downtime Citus shard rebalance with pg_ripple + pg_trickle.
+
+- **pg_dump round-trip CI test** (6.14): Added `tests/integration/dump_restore.sh` as a CI-friendly entry point to the existing `tests/pg_dump_restore.sh`.
+
+### Migration
+
+No schema changes. Upgrade from v0.59.0 with `ALTER EXTENSION pg_ripple UPDATE`.
+
+---
+
 ## [0.59.0] — 2026-04-26 — Citus Shard-Pruning, Rebalance Coordination & Explain
 
 **Implements the v0.59.0 roadmap: SPARQL shard-pruning for bound subject patterns, NOTIFY-based rebalance coordination, `explain_sparql()` Citus section, and `citus_rebalance_progress()`.**
