@@ -58,6 +58,8 @@ mod worker;
 mod citus;
 mod prov;
 mod temporal;
+// v0.62.0 modules
+mod flight;
 
 // Re-export all GUC statics at the crate root so that `crate::SOME_GUC` paths
 // in existing code continue to work after the split.
@@ -1888,6 +1890,43 @@ pub extern "C-unwind" fn _PG_init() {
         c"Emit PROV-O provenance triples for all bulk ingest operations. Default off. (v0.58.0)",
         c"",
         &crate::gucs::storage::PROV_ENABLED,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+
+    // ── v0.62.0 GUCs — Arrow Flight, Citus scalability ──────────────────────
+    pgrx::GucRegistry::define_int_guc(
+        c"pg_ripple.dictionary_tier_threshold",
+        c"Dictionary tier threshold for Citus cold-entry offload (v0.62.0). \
+          Terms with access_count < N are eligible for cold tier. \
+          -1 = disabled (default); only active when citus_sharding_enabled = on.",
+        c"",
+        &crate::gucs::storage::DICTIONARY_TIER_THRESHOLD,
+        -1,
+        1_000_000_000,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+
+    pgrx::GucRegistry::define_int_guc(
+        c"pg_ripple.citus_prune_carry_max",
+        c"Maximum carry-forward set size for multi-hop shard pruning (v0.62.0 CITUS-29). \
+          Above this threshold, falls back to full fan-out. Default 1000.",
+        c"",
+        &crate::gucs::storage::CITUS_PRUNE_CARRY_MAX,
+        0,
+        1_000_000,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+
+    pgrx::GucRegistry::define_bool_guc(
+        c"pg_ripple.datalog_citus_dispatch",
+        c"When on, wrap Datalog stratum-iteration INSERT…SELECT in \
+          run_command_on_all_nodes for parallel worker execution (v0.62.0 CITUS-27). \
+          Requires citus_sharding_enabled = on. Default off.",
+        c"",
+        &crate::gucs::datalog::DATALOG_CITUS_DISPATCH,
         GucContext::Userset,
         GucFlags::default(),
     );

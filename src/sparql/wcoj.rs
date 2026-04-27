@@ -145,13 +145,14 @@ fn has_cycle_dfs(
 
 /// Result of WCOJ analysis for a BGP.
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 pub struct WcojAnalysis {
     /// Whether this BGP should use the WCOJ execution path.
     pub use_wcoj: bool,
     /// Number of VP table joins in this BGP.
+    #[allow(dead_code)]
     pub table_count: usize,
     /// Whether the pattern was detected as cyclic.
+    #[allow(dead_code)]
     pub is_cyclic: bool,
 }
 
@@ -160,7 +161,6 @@ pub struct WcojAnalysis {
 /// Returns a `WcojAnalysis` describing the decision. Call this before
 /// generating SQL for a BGP; when `use_wcoj` is true, wrap the generated
 /// SQL with `apply_wcoj_hints()`.
-#[allow(dead_code)]
 pub fn analyse_bgp(pattern_vars: &[Vec<String>]) -> WcojAnalysis {
     let table_count = pattern_vars.len();
     let min_tables = crate::WCOJ_MIN_TABLES.get() as usize;
@@ -190,7 +190,6 @@ pub fn analyse_bgp(pattern_vars: &[Vec<String>]) -> WcojAnalysis {
 /// 2. Wraps the query in a CTE to ensure the planner uses the sorted execution plan.
 ///
 /// The returned SQL is safe to execute directly via SPI.
-#[allow(dead_code)]
 pub fn apply_wcoj_hints(inner_sql: &str) -> String {
     // Wrap in a CTE and set merge-join hints via a local SET.
     // The SET LOCAL applies only to this statement's planning scope.
@@ -206,7 +205,6 @@ pub fn apply_wcoj_hints(inner_sql: &str) -> String {
 ///
 /// Returns a SQL string suitable for execution before the main cyclic query.
 /// Callers should execute this in the same SPI connection as the main query.
-#[allow(dead_code)]
 pub fn wcoj_session_preamble() -> &'static str {
     "SET LOCAL enable_hashjoin = off; \
      SET LOCAL enable_mergejoin = on; \

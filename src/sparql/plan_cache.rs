@@ -18,7 +18,7 @@ use std::cell::RefCell;
 use std::num::NonZeroUsize;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-/// Cached translation: generated SQL + projected variable names + raw numeric variable names + raw text variable names + raw IRI variable names + raw double variable names.
+/// Cached translation: generated SQL + projected variable names + raw numeric variable names + raw text variable names + raw IRI variable names + raw double variable names + wcoj_preamble flag.
 pub type CacheEntry = (
     String,
     Vec<String>,
@@ -26,6 +26,7 @@ pub type CacheEntry = (
     std::collections::HashSet<String>,
     std::collections::HashSet<String>,
     std::collections::HashSet<String>,
+    bool,
 );
 
 const DEFAULT_CAPACITY: usize = 256;

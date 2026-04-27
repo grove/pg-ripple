@@ -158,3 +158,14 @@ pub static MERGE_FENCE_TIMEOUT_MS: pgrx::GucSetting<i32> = pgrx::GucSetting::<i3
 
 /// GUC: when on, emit PROV-O provenance triples for all ingest operations (v0.58.0).
 pub static PROV_ENABLED: pgrx::GucSetting<bool> = pgrx::GucSetting::<bool>::new(false);
+
+// ─── v0.62.0 storage GUCs ────────────────────────────────────────────────────
+
+/// GUC: dictionary tier threshold for Citus cold-entry offload (v0.62.0).
+/// Terms with access_count < N are eligible for the cold tier.
+/// -1 = disabled (default); only active when citus_sharding_enabled = on.
+pub static DICTIONARY_TIER_THRESHOLD: pgrx::GucSetting<i32> = pgrx::GucSetting::<i32>::new(-1);
+
+/// GUC: maximum number of subject IDs to carry forward for multi-hop shard
+/// pruning (v0.62.0 CITUS-29). Above this threshold, falls back to full fan-out.
+pub static CITUS_PRUNE_CARRY_MAX: pgrx::GucSetting<i32> = pgrx::GucSetting::<i32>::new(1000);

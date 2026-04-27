@@ -258,6 +258,32 @@ pub(crate) fn translate_bgp(
     let reordered = crate::sparql::optimizer::reorder_bgp(patterns, &mut |iri| ctx.encode_iri(iri));
     let patterns = reordered.as_slice();
 
+    // v0.62.0: WCOJ planner integration — analyse the BGP for cyclic patterns
+    // before translating. If cyclic, set ctx.wcoj_preamble so the executor
+    // runs the Leapfrog-Triejoin SET LOCAL preamble before the query.
+    if patterns.len() >= 3 {
+        let pattern_vars: Vec<Vec<String>> = patterns
+            .iter()
+            .map(|tp| {
+                let mut vars: Vec<String> = Vec::new();
+                if let spargebra::term::TermPattern::Variable(v) = &tp.subject {
+                    vars.push(v.as_str().to_owned());
+                }
+                if let spargebra::term::NamedNodePattern::Variable(v) = &tp.predicate {
+                    vars.push(v.as_str().to_owned());
+                }
+                if let spargebra::term::TermPattern::Variable(v) = &tp.object {
+                    vars.push(v.as_str().to_owned());
+                }
+                vars
+            })
+            .collect();
+        let analysis = crate::sparql::wcoj::analyse_bgp(&pattern_vars);
+        if analysis.use_wcoj {
+            ctx.wcoj_preamble = true;
+        }
+    }
+
     let mut frag = Fragment::empty();
     let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
 

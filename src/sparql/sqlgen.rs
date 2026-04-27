@@ -258,6 +258,10 @@ pub(crate) struct Ctx {
     /// the outer query.  The SERVICE inner patterns still scope to their graph
     /// via `ctx.graph_filter = Some(gid)`.
     service_graph_exclude: Vec<i64>,
+    /// Set to `true` by `translate_bgp` when a cyclic BGP is detected and
+    /// WCOJ optimisation is activated (v0.62.0).  When set, the query executor
+    /// runs the WCOJ SET LOCAL preamble before the main query.
+    pub(crate) wcoj_preamble: bool,
 }
 
 impl Ctx {
@@ -275,6 +279,7 @@ impl Ctx {
             variable_graph: false,
             base_iri: None,
             service_graph_exclude: federation::get_service_graph_ids(),
+            wcoj_preamble: false,
         }
     }
 
@@ -629,6 +634,10 @@ pub struct Translation {
     /// True when TopN push-down (v0.46.0) was applied: `ORDER BY … LIMIT N`
     /// was emitted directly in SQL rather than post-decode truncation.
     pub topn_applied: bool,
+    /// True when the WCOJ planner (v0.62.0) detected a cyclic BGP and
+    /// activated the Leapfrog-Triejoin execution path.  The query executor
+    /// must run `wcoj_session_preamble()` before executing the SQL.
+    pub wcoj_preamble: bool,
 }
 
 /// Translate a SPARQL SELECT query pattern to SQL.
@@ -741,6 +750,15 @@ pub fn translate_select(pattern: &GraphPattern, base_iri: Option<&str>) -> Trans
         }
     );
 
+    // v0.62.0: if a cyclic BGP was detected during translation, wrap the SQL
+    // with the WCOJ materialized-CTE hint so the planner uses sort-merge joins.
+    let wcoj_preamble = ctx.wcoj_preamble;
+    let sql = if wcoj_preamble {
+        crate::sparql::wcoj::apply_wcoj_hints(&sql)
+    } else {
+        sql
+    };
+
     Translation {
         sql,
         variables,
@@ -749,6 +767,7 @@ pub fn translate_select(pattern: &GraphPattern, base_iri: Option<&str>) -> Trans
         raw_iri_vars: ctx.raw_iri_vars,
         raw_double_vars: ctx.raw_double_vars,
         topn_applied,
+        wcoj_preamble,
     }
 }
 

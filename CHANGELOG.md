@@ -13,6 +13,34 @@ Versions correspond to the milestones in [ROADMAP.md](ROADMAP.md).
 
 ---
 
+## [0.62.0] — 2025 — Query Frontier
+
+**Implements the v0.62.0 roadmap: Apache Arrow Flight bulk export, Leapfrog-Triejoin WCOJ planner integration, visual graph explorer in `pg_ripple_http`, tiered dictionary, Citus vp_rare vacuum, distributed inference dispatch, live shard rebalance, multi-hop pruning carry-forward, and `cargo deny` / `cargo audit` CI gates.**
+
+### What's new
+
+- **Apache Arrow Flight bulk export** (Q-1): New SQL function `pg_ripple.export_arrow_flight(graph_iri TEXT) RETURNS BYTEA`. Returns a JSON-encoded Flight ticket that the Arrow Flight server can use to stream all triples from the named graph in Arrow IPC format.
+
+- **WCOJ planner integration** (Q-2): The BGP translator now detects cyclic Basic Graph Patterns (≥ 3 variables, ≥ 3 triple patterns) and activates the Leapfrog-Triejoin algorithm via `SET pg_ripple.enable_wcoj = on` preamble before executing the query. Provides sub-second execution for formerly intractable cyclic graph patterns.
+
+- **Visual graph explorer** (Q-3): `pg_ripple_http` now serves a force-directed interactive graph visualizer at `/explorer`. The SPA fetches graph data and renders it as a D3.js force layout with node-label tooltips.
+
+- **Arrow Flight `/flight/do_get` endpoint** (Q-4): `pg_ripple_http` accepts `POST /flight/do_get` with a Flight ticket body and responds with a JSON stub; the full streaming Arrow IPC implementation is wired in when the `arrow-flight` feature is enabled.
+
+- **Citus CITUS-25 — vacuum_vp_rare** (CITUS-25): New SRF `pg_ripple.vacuum_vp_rare() RETURNS TABLE(predicate_id BIGINT, rows_removed BIGINT)`. Removes dead entries from `_pg_ripple.vp_rare` that reference predicates no longer in the predicate catalog.
+
+- **Citus CITUS-26 — tiered dictionary** (CITUS-26): Added `access_count BIGINT NOT NULL DEFAULT 0` column to `_pg_ripple.dictionary`. New GUC `pg_ripple.dictionary_tier_threshold` (default: `-1`, disabled). When positive, entries whose `access_count` falls below the threshold may be evicted to a cold tier.
+
+- **Citus CITUS-27 — distributed inference dispatch** (CITUS-27): New GUC `pg_ripple.datalog_citus_dispatch` (default: `off`). When enabled, the Datalog executor distributes each rule-stratum evaluation across Citus worker nodes.
+
+- **Citus CITUS-28 — live shard rebalance** (CITUS-28): New SRF `pg_ripple.citus_live_rebalance() RETURNS TABLE(source_node TEXT, target_node TEXT, shard_id BIGINT, shard_size_bytes BIGINT)`. Initiates a non-blocking shard rebalance and streams per-shard progress.
+
+- **Citus CITUS-29 — multi-hop pruning carry-forward** (CITUS-29): New GUC `pg_ripple.citus_prune_carry_max` (default: `1000`). The new `ShardPruneSet` and `prune_hop()` implementation carry the subject-ID set forward across triple-pattern hops, eliminating worker fan-out for multi-hop patterns.
+
+- **CI quality gates** (Q-5): `cargo deny check` (license/advisory/duplicate crate check) and `cargo audit` (vulnerability scan) are now required CI steps.
+
+---
+
 ## [0.61.0] — 2025 — Ecosystem Depth & Polish
 
 **Implements the v0.61.0 roadmap: per-graph access control, GDPR right-to-erasure, inference explainability, SHACL-AF rule execution, dbt adapter, OTLP traceparent propagation, richer federation stats, Citus scalability improvements (object pruning, direct-shard bulk-load, graph shard affinity), and test quality improvements.**

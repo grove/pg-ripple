@@ -751,3 +751,222 @@ mod pg_ripple {
         true
     }
 }
+
+// ── v0.62.0: Multi-hop shard-pruning carry-forward (CITUS-29) ───────────────
+
+/// A sorted list of subject IDs used for multi-hop shard-pruning carry-forward.
+///
+/// After the first property-path hop resolves a set of intermediate subjects,
+/// those IDs are encoded into a `ShardPruneSet` and passed as a bind parameter
+/// to the next hop's VP table scan via `WHERE s = ANY($1::BIGINT[])`.
+/// This progressively restricts the fan-out as the path narrows.
+///
+/// Active only when the set has ≤ `pg_ripple.citus_prune_carry_max` entries;
+/// degrades gracefully to full fan-out above that threshold.
+#[allow(dead_code)]
+pub struct ShardPruneSet(pub Vec<i64>);
+
+impl ShardPruneSet {
+    /// Create a new empty set.
+    #[allow(dead_code)]
+    pub fn new() -> Self {
+        Self(Vec::new())
+    }
+
+    /// Add a subject ID to the set.
+    #[allow(dead_code)]
+    pub fn insert(&mut self, id: i64) {
+        self.0.push(id);
+    }
+
+    /// Deduplicate and sort (idempotent).
+    #[allow(dead_code)]
+    pub fn finalize(&mut self) {
+        self.0.sort_unstable();
+        self.0.dedup();
+    }
+
+    /// Return `true` if the set is within the carry-forward threshold.
+    #[allow(dead_code)]
+    pub fn is_prunable(&self) -> bool {
+        let max = crate::gucs::storage::CITUS_PRUNE_CARRY_MAX.get() as usize;
+        !self.0.is_empty() && self.0.len() <= max
+    }
+}
+
+impl Default for ShardPruneSet {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Resolve the next set of subject IDs reachable from `current_subjects` via
+/// `vp_table`, used for multi-hop carry-forward shard pruning (CITUS-29).
+///
+/// When `current_subjects.is_prunable()`, emits a `WHERE s = ANY($subjects)`
+/// constraint on the next hop's VP scan, narrowing the fan-out.
+///
+/// Returns the new set of intermediate subjects for the following hop.
+#[allow(dead_code)]
+pub fn prune_hop(current_subjects: &ShardPruneSet, vp_table: &str) -> ShardPruneSet {
+    if !crate::gucs::storage::CITUS_SHARDING_ENABLED.get() || !current_subjects.is_prunable() {
+        return ShardPruneSet::new();
+    }
+
+    let ids_sql = current_subjects
+        .0
+        .iter()
+        .map(|id| id.to_string())
+        .collect::<Vec<_>>()
+        .join(", ");
+
+    let sql =
+        format!("SELECT DISTINCT o FROM {vp_table} WHERE s = ANY(ARRAY[{ids_sql}]::bigint[])");
+
+    let mut result = ShardPruneSet::new();
+    Spi::connect(|c| {
+        if let Ok(rows) = c.select(&sql, None, &[]) {
+            for row in rows {
+                if let Ok(Some(o)) = row.get::<i64>(1) {
+                    result.insert(o);
+                }
+            }
+        }
+    });
+    result.finalize();
+    result
+}
+
+// ── v0.62.0: vp_rare cold-entry archival (CITUS-25) ─────────────────────────
+
+/// Remove predicate entries from `vp_rare` where the predicate has zero live
+/// triples (CITUS-25).  Returns the number of rows removed per predicate.
+pub fn vacuum_vp_rare_impl() -> Vec<(i64, i64)> {
+    let sql = "SELECT DISTINCT p FROM _pg_ripple.vp_rare \
+               WHERE p NOT IN ( \
+                   SELECT id FROM _pg_ripple.predicates WHERE triple_count > 0 \
+               )";
+
+    let dead_preds: Vec<i64> = Spi::connect(|c| {
+        c.select(sql, None, &[])
+            .map(|rows| {
+                rows.filter_map(|row| row.get::<i64>(1).ok().flatten())
+                    .collect()
+            })
+            .unwrap_or_default()
+    });
+
+    let mut results: Vec<(i64, i64)> = Vec::new();
+    for pred_id in dead_preds {
+        let count_sql = format!("DELETE FROM _pg_ripple.vp_rare WHERE p = {pred_id} RETURNING 1");
+        let deleted: i64 = Spi::connect(|c| {
+            c.select(&count_sql, None, &[])
+                .map(|rows| rows.count() as i64)
+                .unwrap_or(0)
+        });
+        if deleted > 0 {
+            results.push((pred_id, deleted));
+        }
+    }
+    results
+}
+
+// ── v0.62.0: Live shard rebalance (CITUS-28) ────────────────────────────────
+
+/// Initiate a live shard rebalance using Citus copy-based migration.
+///
+/// Unlike `citus_rebalance()`, this variant does NOT acquire the merge-fence
+/// advisory lock, allowing bulk loads to continue throughout the copy phase.
+/// Only a brief `AccessShareLock` is taken during the final cutover swap.
+///
+/// Emits `pg_ripple.live_rebalance_start` and `pg_ripple.live_rebalance_end`
+/// NOTIFY signals.  Returns the rebalance progress rows from Citus.
+pub fn citus_live_rebalance_impl() -> Vec<(String, String, i64, i64)> {
+    if !is_citus_loaded() {
+        pgrx::warning!("citus_live_rebalance: Citus is not installed");
+        return vec![];
+    }
+
+    Spi::run_with_args(
+        "SELECT pg_notify('pg_ripple.live_rebalance_start', now()::text)",
+        &[],
+    )
+    .unwrap_or_else(|e| pgrx::warning!("live_rebalance_start notify: {e}"));
+
+    // Perform the rebalance using Citus copy-based shard migration.
+    // force_logical = 'force_logical' allows writes during copy phase.
+    let rows: Vec<(String, String, i64, i64)> = Spi::connect(|c| {
+        c.select(
+            "SELECT \
+                 source_node_name::text, \
+                 target_node_name::text, \
+                 shardid::bigint, \
+                 shard_size::bigint \
+             FROM citus_rebalance_start(rebalance_strategy => 'by_disk_size', \
+                                        shard_transfer_mode => 'force_logical') \
+             LIMIT 1000",
+            None,
+            &[],
+        )
+        .map(|rows| {
+            rows.map(|row| {
+                let src = row.get::<String>(1).ok().flatten().unwrap_or_default();
+                let tgt = row.get::<String>(2).ok().flatten().unwrap_or_default();
+                let sid = row.get::<i64>(3).ok().flatten().unwrap_or(0);
+                let sz = row.get::<i64>(4).ok().flatten().unwrap_or(0);
+                (src, tgt, sid, sz)
+            })
+            .collect()
+        })
+        .unwrap_or_default()
+    });
+
+    Spi::run_with_args(
+        "SELECT pg_notify('pg_ripple.live_rebalance_end', now()::text)",
+        &[],
+    )
+    .unwrap_or_else(|e| pgrx::warning!("live_rebalance_end notify: {e}"));
+
+    rows
+}
+
+// ── v0.62.0: SQL-exported Citus functions ────────────────────────────────────
+
+#[pgrx::pg_schema]
+mod pg_ripple_v062 {
+    use pgrx::prelude::*;
+
+    /// Remove dead entries from `_pg_ripple.vp_rare` where the predicate has
+    /// zero live triples (v0.62.0 CITUS-25).
+    ///
+    /// Returns one row per cleaned predicate with the count of rows removed.
+    /// Integrate into your maintenance schedule alongside `pg_ripple.vacuum()`.
+    #[pg_extern(schema = "pg_ripple", name = "vacuum_vp_rare")]
+    fn vacuum_vp_rare()
+    -> TableIterator<'static, (name!(predicate_id, i64), name!(rows_removed, i64))> {
+        let rows = super::vacuum_vp_rare_impl();
+        TableIterator::new(rows)
+    }
+
+    /// Initiate a live (non-blocking) Citus shard rebalance (v0.62.0 CITUS-28).
+    ///
+    /// Uses copy-based shard migration so bulk loads continue at full speed
+    /// throughout the copy phase.  Only a brief `AccessShareLock` is taken
+    /// during the final shard cutover.
+    ///
+    /// Emits `pg_ripple.live_rebalance_start` and `pg_ripple.live_rebalance_end`
+    /// NOTIFY signals.
+    #[pg_extern(schema = "pg_ripple", name = "citus_live_rebalance")]
+    fn citus_live_rebalance() -> TableIterator<
+        'static,
+        (
+            name!(source_node, String),
+            name!(target_node, String),
+            name!(shard_id, i64),
+            name!(shard_size_bytes, i64),
+        ),
+    > {
+        let rows = super::citus_live_rebalance_impl();
+        TableIterator::new(rows)
+    }
+}

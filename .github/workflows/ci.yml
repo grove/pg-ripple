@@ -76,6 +76,26 @@ jobs:
       - name: Clippy
         run: cargo clippy --features pg18 -- -D warnings
 
+      # v0.62.0 N7-5: cargo deny — licence, duplicate and advisory checks.
+      - name: Install cargo-deny
+        run: |
+          if ! cargo deny --version 2>/dev/null; then
+            cargo install cargo-deny --locked
+          fi
+
+      - name: cargo deny check
+        run: cargo deny check
+
+      # v0.62.0 N7-5: cargo audit — known CVE advisory database scan.
+      - name: Install cargo-audit
+        run: |
+          if ! cargo audit --version 2>/dev/null; then
+            cargo install cargo-audit --locked
+          fi
+
+      - name: cargo audit
+        run: cargo audit
+
       # v0.60.0 H7-2: Gate on no unapproved SECURITY DEFINER in SQL migration
       # scripts.  The allowlist in the script covers the two intentional uses.
       - name: SECURITY DEFINER lint

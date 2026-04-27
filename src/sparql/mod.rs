@@ -301,7 +301,7 @@ fn utf8_char_len(b: u8) -> usize {
 // ─── Query execution helpers ──────────────────────────────────────────────────
 
 /// Parse the query, optimize, translate to SQL, and cache the result.
-/// Returns `(sql, variables, raw_numeric_vars, raw_text_vars, raw_iri_vars, raw_double_vars)`.
+/// Returns `(sql, variables, raw_numeric_vars, raw_text_vars, raw_iri_vars, raw_double_vars, wcoj_preamble)`.
 #[allow(clippy::type_complexity)]
 fn prepare_select(
     query_text: &str,
@@ -312,6 +312,7 @@ fn prepare_select(
     std::collections::HashSet<String>,
     std::collections::HashSet<String>,
     std::collections::HashSet<String>,
+    bool,
 ) {
     if let Some(cached) = plan_cache::get(query_text) {
         return cached;
@@ -344,6 +345,7 @@ fn prepare_select(
         trans.raw_text_vars,
         trans.raw_iri_vars,
         trans.raw_double_vars,
+        trans.wcoj_preamble,
     );
     // Skip plan cache for queries that contain SERVICE clauses — remote results
     // are baked into the generated SQL as VALUES literals; caching would return
@@ -365,6 +367,7 @@ fn execute_select(
     raw_text_vars: &std::collections::HashSet<String>,
     raw_iri_vars: &std::collections::HashSet<String>,
     raw_double_vars: &std::collections::HashSet<String>,
+    wcoj_preamble: bool,
 ) -> Vec<pgrx::JsonB> {
     let mut all_ids: Vec<i64> = Vec::new();
     // First pass: collect result rows.
@@ -379,6 +382,13 @@ fn execute_select(
         if crate::BGP_REORDER.get() {
             let _ = client.update("SET LOCAL join_collapse_limit = 1", None, &[]);
             let _ = client.update("SET LOCAL enable_mergejoin = on", None, &[]);
+        }
+
+        // v0.62.0: WCOJ Leapfrog-Triejoin preamble for cyclic BGPs.
+        // When a cyclic BGP was detected, force sort-merge joins to exploit
+        // the (s,o) B-tree indices on VP tables.
+        if wcoj_preamble {
+            let _ = client.update(crate::sparql::wcoj::wcoj_session_preamble(), None, &[]);
         }
 
         // v0.13.0: Enable parallel query for queries that join multiple VP tables.
@@ -485,9 +495,17 @@ pub fn sparql(query_text: &str) -> Vec<pgrx::JsonB> {
 
     match query {
         spargebra::Query::Select { .. } => {
-            let (sql, vars, raw_numeric, raw_text, raw_iri, raw_double) =
+            let (sql, vars, raw_numeric, raw_text, raw_iri, raw_double, wcoj) =
                 prepare_select(query_text);
-            execute_select(&sql, &vars, &raw_numeric, &raw_text, &raw_iri, &raw_double)
+            execute_select(
+                &sql,
+                &vars,
+                &raw_numeric,
+                &raw_text,
+                &raw_iri,
+                &raw_double,
+                wcoj,
+            )
         }
         spargebra::Query::Ask { pattern, .. } => {
             let sql = sqlgen::translate_ask(&pattern);

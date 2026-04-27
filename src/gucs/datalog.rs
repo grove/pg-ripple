@@ -100,3 +100,10 @@ pub static OWL_PROFILE: pgrx::GucSetting<Option<std::ffi::CString>> =
 
 /// GUC: enable experimental probabilistic Datalog with rule confidence weights (v0.57.0).
 pub static PROBABILISTIC_DATALOG: pgrx::GucSetting<bool> = pgrx::GucSetting::<bool>::new(false);
+
+// ─── v0.62.0 Datalog GUCs ────────────────────────────────────────────────────
+
+/// GUC: when on, wrap Datalog stratum-iteration INSERT…SELECT in
+/// `run_command_on_all_nodes` for parallel worker execution (v0.62.0 CITUS-27).
+/// Requires `citus_sharding_enabled = on`. Default off.
+pub static DATALOG_CITUS_DISPATCH: pgrx::GucSetting<bool> = pgrx::GucSetting::<bool>::new(false);
