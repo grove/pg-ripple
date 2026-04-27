@@ -1,13 +1,14 @@
-# cargo deny configuration (v0.47.0)
+# cargo deny configuration (updated for cargo-deny >= 0.16 format)
 #
 # https://embarkstudios.github.io/cargo-deny/
+# Migration from old format: see https://github.com/EmbarkStudios/cargo-deny/pull/611
 
 [advisories]
-# Emit an error on any unpatched security advisory.
-vulnerability = "deny"
+# "all" checks both workspace and transitive crates; "none" disables.
+# vulnerability, notice fields were removed in cargo-deny 0.16 — vuln checking
+# is always active and controlled by the ignore list below.
 unmaintained = "none"
 yanked = "deny"
-notice = "warn"
 
 # Pre-existing advisories not introduced by pg_ripple — triaged and tracked.
 # Review before each release to ensure no new vulnerabilities are silently ignored.
@@ -22,6 +23,8 @@ ignore = [
 
 [licenses]
 # Allow OSI-approved and widely-used permissive / weak-copyleft licences.
+# Licenses not in this list will be denied (cargo-deny default behaviour).
+# NOTE: deny[], copyleft, allow-osi-fsf-free removed in cargo-deny 0.16.
 allow = [
     "MIT",
     "Apache-2.0",
@@ -33,19 +36,8 @@ allow = [
     "CC0-1.0",
     "Zlib",
     "OpenSSL",
+    "MPL-2.0",
 ]
-# Deny GPL/AGPL in the dependency tree.
-deny = [
-    "GPL-2.0",
-    "GPL-3.0",
-    "AGPL-3.0",
-    "LGPL-2.0",
-    "LGPL-2.1",
-    "LGPL-3.0",
-]
-copyleft = "warn"
-# Allow the MPL-2.0 (file-level copyleft, compatible with Apache-2.0 extension).
-allow-osi-fsf-free = "neither"
 confidence-threshold = 0.8
 
 [bans]
