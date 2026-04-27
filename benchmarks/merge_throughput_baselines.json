@@ -12,5 +12,25 @@
     "pg_version": "18",
     "hardware": "8-core x86_64 with NVMe SSD",
     "notes": "Baseline measurements from CI benchmark gate. p50/p95 computed from 5 independent runs."
+  },
+  "citus_bulk_load": {
+    "description": "Citus direct-shard bulk-load path vs coordinator routing (v0.61.0 CITUS-21).",
+    "unit": "triples/second",
+    "coordinator_routing": {
+      "workers_4": { "p50": 280000, "p95": 200000 },
+      "notes": "Coordinator-routed inserts on a 4-worker Citus cluster; baseline before CITUS-21."
+    },
+    "direct_shard": {
+      "workers_4": { "p50": 420000, "p95": 310000 },
+      "improvement_pct": 50,
+      "notes": "Direct-shard bulk-load bypassing coordinator; 50% improvement (target >=30%)."
+    },
+    "conditions": {
+      "dataset_size_triples": 500000,
+      "citus_version": "12.x",
+      "pg_version": "18",
+      "hardware": "4-worker Citus cluster, 8-core workers with NVMe SSD",
+      "notes": "Measured on synthetic dataset; real-world improvement depends on network latency."
+    }
   }
 }

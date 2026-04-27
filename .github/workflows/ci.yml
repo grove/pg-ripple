@@ -789,6 +789,71 @@ jobs:
         if: always()
         run: cargo pgrx stop pg18
 
+  # v0.61.0: SPARQL Entailment Regime test suite (informational; blocking in v1.0.0)
+  entailment-suite:
+    name: SPARQL Entailment Regime suite (informational, v0.61.0)
+    runs-on: ubuntu-latest
+    needs: [test]
+    continue-on-error: true
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo registry
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: ${{ runner.os }}-cargo-entailment-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Install PostgreSQL 18 from PGDG
+        run: |
+          sudo apt-get install -y --no-install-recommends curl ca-certificates lsb-release
+          sudo install -d /usr/share/postgresql-common/pgdg
+          curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+            | sudo tee /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc >/dev/null
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            build-essential pkg-config libssl-dev libclang-dev clang lld \
+            postgresql-18 postgresql-server-dev-18
+          sudo chown -R "$USER" \
+            /usr/share/postgresql/18/extension \
+            /usr/lib/postgresql/18/lib
+
+      - name: Install pgrx CLI
+        run: cargo install cargo-pgrx --version "=0.18.0" --locked
+
+      - name: Initialise pgrx for PostgreSQL 18
+        run: cargo pgrx init --pg18 /usr/lib/postgresql/18/bin/pg_config
+
+      - name: Build and install pg_ripple for PG18
+        run: cargo pgrx install --pg-config /usr/lib/postgresql/18/bin/pg_config
+
+      - name: Start pgrx PostgreSQL 18
+        run: cargo pgrx start pg18
+
+      - name: Create test database
+        run: |
+          psql -h /tmp -p 28818 -U runner -d pg_ripple \
+            -c "SET client_min_messages = warning;" || true
+
+      - name: Run SPARQL entailment regime suite
+        continue-on-error: true
+        run: |
+          PGDATABASE=pg_ripple PGHOST=/tmp PGPORT=28818 PGUSER=runner \
+            bash tests/sparql_entailment/runner.sh || true
+          echo "Entailment suite complete (non-blocking)"
+
+      - name: Stop pgrx PostgreSQL 18
+        if: always()
+        run: cargo pgrx stop pg18
+
   datalog-convergence:
     name: Datalog convergence suite (v0.46.0)
     runs-on: ubuntu-latest

@@ -120,6 +120,7 @@ Errors from the Datalog rule parser, stratifier, and rule management.
 | PT440 | SPARQL query exceeds algebra depth or pattern limit | The query is too complex: its algebra tree is deeper than `pg_ripple.sparql_max_algebra_depth` or contains more triple patterns than `pg_ripple.sparql_max_triple_patterns` | Simplify the query, break it into smaller queries, or increase the limits |
 | PT480 | SHACL-AF sh:rule not compiled | `sh:rule` triples were found in the shapes but Datalog inference is disabled or the bridge failed | Enable inference with `pg_ripple.datalog_inference = 'on'`, or remove `sh:rule` triples |
 | PT481 | SHACL-SPARQL constraint query failed | A `sh:sparql` constraint's embedded SPARQL query could not be executed | Check the embedded SPARQL syntax and that all prefixes are declared in the shapes document |
+| PT482 | SHACL-AF sh:rule compilation failed | A `sh:rule` body could not be compiled into a Datalog rule and was skipped | Review the rule body for unsupported constructs; the rule was not registered |
 
 ---
 

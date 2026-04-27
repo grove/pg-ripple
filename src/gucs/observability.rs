@@ -23,3 +23,14 @@ pub static TRACING_OTLP_ENDPOINT: pgrx::GucSetting<Option<std::ffi::CString>> =
 
 /// GUC: enable SPARQL write-operation audit logging into `_pg_ripple.audit_log` (v0.56.0).
 pub static AUDIT_LOG_ENABLED: pgrx::GucSetting<bool> = pgrx::GucSetting::<bool>::new(false);
+
+// ─── v0.61.0 observability GUCs — OTLP traceparent ──────────────────────────
+
+/// GUC: W3C traceparent header value forwarded from the HTTP layer (v0.61.0 I7-1).
+///
+/// Set via `SET LOCAL pg_ripple.tracing_traceparent = '...'` by `pg_ripple_http`
+/// before executing each SPARQL or Datalog query.  The extension attaches this
+/// trace ID to its OpenTelemetry spans, enabling end-to-end distributed traces
+/// from the load balancer through the HTTP service into the query engine.
+pub static TRACING_TRACEPARENT: pgrx::GucSetting<Option<std::ffi::CString>> =
+    pgrx::GucSetting::<Option<std::ffi::CString>>::new(None);

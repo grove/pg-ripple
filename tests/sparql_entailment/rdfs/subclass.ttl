@@ -1,0 +1,5 @@
+@prefix ex: <https://example.org/> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+
+ex:Person rdfs:subClassOf ex:Agent .
+ex:Alice a ex:Person .

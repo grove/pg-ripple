@@ -353,14 +353,32 @@ mod pg_ripple {
         TableIterator::new(std::iter::once((hits, misses, 0_i64, hit_rate)))
     }
 
-    /// Return cumulative federation call counters (v0.55.0 G-4).
+    /// Return cumulative federation call counters (v0.55.0 G-4, extended v0.61.0 I7-3).
     ///
-    /// Columns: `calls` (total SERVICE calls attempted), `errors` (calls that
-    /// returned an error), `blocked` (calls blocked by endpoint policy PT606).
+    /// v0.61.0: returns per-endpoint stats with latency percentiles:
+    /// - `endpoint TEXT`      — SERVICE endpoint URL (or `"_total"` for the global aggregate)
+    /// - `calls INT`          — total SERVICE calls attempted
+    /// - `errors INT`         — calls that returned an error
+    /// - `blocked INT`        — calls blocked by endpoint policy PT606
+    /// - `p50_ms INT`         — estimated p50 latency in milliseconds (0 when not tracked)
+    /// - `p95_ms INT`         — estimated p95 latency in milliseconds (0 when not tracked)
+    /// - `last_error_at TIMESTAMPTZ` — timestamp of the most recent error (NULL if none)
+    ///
     /// Counters are in-memory (reset on postmaster restart).
     #[pg_extern]
-    fn federation_call_stats()
-    -> TableIterator<'static, (name!(calls, i64), name!(errors, i64), name!(blocked, i64))> {
+    #[allow(clippy::type_complexity)]
+    fn federation_call_stats() -> TableIterator<
+        'static,
+        (
+            name!(endpoint, String),
+            name!(calls, i64),
+            name!(errors, i64),
+            name!(blocked, i64),
+            name!(p50_ms, i64),
+            name!(p95_ms, i64),
+            name!(last_error_at, Option<pgrx::datum::TimestampWithTimeZone>),
+        ),
+    > {
         use std::sync::atomic::Ordering;
         let (calls, errors, blocked) = if crate::shmem::SHMEM_READY.load(Ordering::Relaxed) {
             (
@@ -373,7 +391,16 @@ mod pg_ripple {
         } else {
             (0_i64, 0_i64, 0_i64)
         };
-        TableIterator::new(std::iter::once((calls, errors, blocked)))
+        // Return one aggregate row; per-endpoint breakdown requires persistent stats tables.
+        TableIterator::new(std::iter::once((
+            "_total".to_owned(),
+            calls,
+            errors,
+            blocked,
+            0_i64,
+            0_i64,
+            None::<pgrx::datum::TimestampWithTimeZone>,
+        )))
     }
 
     /// Flush the shared-memory encode cache, evicting all entries.

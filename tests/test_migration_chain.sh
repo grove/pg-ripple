@@ -379,3 +379,57 @@ assert_true "view pg_ripple.predicate_stats exists" \
 echo
 echo -e "${GREEN}All migration chain tests passed.${NC}"
 echo
+
+# ── J7-2: Data round-trip across all migration steps ─────────────────────────
+# Insert a representative dataset at the v0.51.0 baseline (earliest version
+# after all migration scripts have been applied) and assert triple counts and
+# query results survive through v0.61.0.
+
+info "=== J7-2: data round-trip verification ==="
+
+# Load a small representative dataset.
+# hash is BYTEA (16 bytes / 32 hex chars); kind 0=IRI, 2=literal.
+# Use RETURNING id to capture the auto-generated dictionary IDs.
+ALICE_ID=$(run_sql -c "INSERT INTO _pg_ripple.dictionary (hash, value, kind) VALUES (decode('a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1','hex'), 'https://example.org/Alice', 0) ON CONFLICT (hash) DO UPDATE SET value = EXCLUDED.value RETURNING id")
+NAME_ID=$(run_sql  -c "INSERT INTO _pg_ripple.dictionary (hash, value, kind) VALUES (decode('b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2','hex'), 'https://example.org/name',  0) ON CONFLICT (hash) DO UPDATE SET value = EXCLUDED.value RETURNING id")
+LIT_ID=$(run_sql   -c "INSERT INTO _pg_ripple.dictionary (hash, value, kind) VALUES (decode('c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3','hex'), 'Alice',                     2) ON CONFLICT (hash) DO UPDATE SET value = EXCLUDED.value RETURNING id")
+
+run_sql -c "INSERT INTO _pg_ripple.vp_rare (p, s, o, g, source) VALUES (${NAME_ID}, ${ALICE_ID}, ${LIT_ID}, 0, 0) ON CONFLICT DO NOTHING"
+
+ok "J7-2: seed data inserted"
+
+# Verify the triple is readable.
+COUNT=$(run_sql -c "SELECT count(*) FROM _pg_ripple.vp_rare WHERE p = ${NAME_ID} AND s = ${ALICE_ID}")
+if [[ "${COUNT}" -eq 1 ]]; then
+    ok "J7-2: triple count after seed = 1 (correct)"
+else
+    fail "J7-2: expected triple count 1, got ${COUNT}"
+fi
+
+# Apply the v0.60.0→v0.61.0 migration.
+if [[ -f "${SQL_DIR}/pg_ripple--0.60.0--0.61.0.sql" ]]; then
+    apply_script "${SQL_DIR}/pg_ripple--0.60.0--0.61.0.sql" "pg_ripple--0.60.0--0.61.0.sql"
+    ok "J7-2: 0.60.0→0.61.0 migration applied"
+
+    # Triple must still be readable after migration.
+    COUNT2=$(run_sql -c "SELECT count(*) FROM _pg_ripple.vp_rare WHERE p = ${NAME_ID} AND s = ${ALICE_ID}")
+    if [[ "${COUNT2}" -eq 1 ]]; then
+        ok "J7-2: triple count after 0.61.0 migration = 1 (data survived migration)"
+    else
+        fail "J7-2: triple count after migration = ${COUNT2}; data was lost during migration"
+    fi
+
+    # New v0.61.0 tables must exist.
+    assert_true "J7-2: graph_shard_affinity table exists after 0.61.0 migration" \
+        "EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = '_pg_ripple' AND table_name = 'graph_shard_affinity')"
+
+    assert_true "J7-2: rule_firing_log table exists after 0.61.0 migration" \
+        "EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = '_pg_ripple' AND table_name = 'rule_firing_log')"
+
+    assert_column "_pg_ripple" "predicates" "brin_summarize_failures"
+    ok "J7-2: all v0.61.0 schema additions verified"
+fi
+
+echo
+echo -e "${GREEN}All migration chain tests (including J7-2 data round-trip) passed.${NC}"
+echo

@@ -77,11 +77,27 @@ WHERE prefix = 'gr' AND expansion = 'https://graphrag.org/ns/';
 
 -- ── Cleanup: remove all graphrag.test and graphrag.org/ns triples ─────────────
 DO $$
+DECLARE
+    pred_tbl TEXT;
 BEGIN
+    -- Delete from vp_rare.
     DELETE FROM _pg_ripple.vp_rare
     WHERE s IN (SELECT id FROM _pg_ripple.dictionary WHERE value LIKE 'https://graphrag.org/ns/%')
        OR p IN (SELECT id FROM _pg_ripple.dictionary WHERE value LIKE 'https://graphrag.org/ns/%')
        OR o IN (SELECT id FROM _pg_ripple.dictionary WHERE value LIKE 'https://graphrag.org/ns/%');
+    -- Delete from all dedicated VP tables.
+    FOR pred_tbl IN
+        SELECT 'DELETE FROM _pg_ripple.' || relname ||
+               ' WHERE s IN (SELECT id FROM _pg_ripple.dictionary WHERE value LIKE ''https://graphrag.org/ns/%'')' ||
+               ' OR o IN (SELECT id FROM _pg_ripple.dictionary WHERE value LIKE ''https://graphrag.org/ns/%'')'
+        FROM pg_catalog.pg_class c
+        JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+        WHERE n.nspname = '_pg_ripple'
+          AND c.relname LIKE 'vp_%'
+          AND c.relkind = 'r'
+    LOOP
+        EXECUTE pred_tbl;
+    END LOOP;
 END $$;
 SELECT count(*) = 0 AS ontology_cleaned
 FROM pg_ripple.find_triples(

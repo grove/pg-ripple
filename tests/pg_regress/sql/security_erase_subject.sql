@@ -22,7 +22,7 @@ FROM pg_ripple.sparql(
 );
 
 -- Erase all triples for alice.
-SELECT pg_ripple.erase_subject('http://example.org/alice'::text) >= 3 AS erased_ok;
+SELECT (SELECT COALESCE(SUM(rows_deleted), 0) FROM pg_ripple.erase_subject('http://example.org/alice'::text)) >= 3 AS erased_ok;
 
 -- Verify alice's triples are gone.
 SELECT count(*) AS alice_triples_after

@@ -48,7 +48,8 @@ CREATE TABLE IF NOT EXISTS _pg_ripple.predicates (
     htap                  BOOLEAN     NOT NULL DEFAULT false,
     schema_name           TEXT,
     table_name            TEXT,
-    tombstones_cleared_at TIMESTAMPTZ
+    tombstones_cleared_at TIMESTAMPTZ,
+    brin_summarize_failures INT       NOT NULL DEFAULT 0
 );
 
 -- Rare-predicate consolidation table
@@ -1123,4 +1124,36 @@ pgrx::extension_sql!(
      VALUES ('0.59.0', '0.58.0', clock_timestamp());",
     name = "v059_schema_version_stamp",
     requires = ["v058_schema_version_stamp"]
+);
+
+// ─── v0.61.0 schema additions ─────────────────────────────────────────────────
+// New tables: graph_shard_affinity (CITUS-22), rule_firing_log (inference explainability)
+// Note: brin_summarize_failures column is already in the predicates CREATE TABLE above.
+
+pgrx::extension_sql!(
+    "-- v0.61.0: Citus named-graph shard affinity reference table (CITUS-22).
+     CREATE TABLE IF NOT EXISTS _pg_ripple.graph_shard_affinity (
+         graph_id    BIGINT      NOT NULL PRIMARY KEY,
+         shard_id    INT         NOT NULL DEFAULT 0,
+         worker_node TEXT        NOT NULL DEFAULT '',
+         created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+     );
+
+     -- v0.61.0: Datalog rule-firing log for inference explainability (6.6).
+     CREATE TABLE IF NOT EXISTS _pg_ripple.rule_firing_log (
+         id          BIGSERIAL   PRIMARY KEY,
+         fired_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+         rule_id     TEXT        NOT NULL,
+         rule_set    TEXT        NOT NULL DEFAULT '',
+         output_sid  BIGINT,
+         source_sids BIGINT[]    NOT NULL DEFAULT '{}',
+         session_pid INT         NOT NULL DEFAULT pg_backend_pid()
+     );
+     CREATE INDEX IF NOT EXISTS rule_firing_log_output_sid_idx
+         ON _pg_ripple.rule_firing_log (output_sid);
+
+     INSERT INTO _pg_ripple.schema_version (version, upgraded_from, installed_at)
+         VALUES ('0.61.0', '0.59.0', clock_timestamp());",
+    name = "v061_schema_additions",
+    requires = ["v059_schema_version_stamp"]
 );

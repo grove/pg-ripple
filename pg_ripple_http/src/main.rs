@@ -421,7 +421,11 @@ async fn sparql_get(
     };
 
     let accept = negotiate_accept(&headers, &query);
-    execute_sparql(&state, &query, false, &accept).await
+    let traceparent = headers
+        .get("traceparent")
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.to_owned());
+    execute_sparql_with_traceparent(&state, &query, false, &accept, traceparent.as_deref()).await
 }
 
 // ─── SPARQL POST handler ─────────────────────────────────────────────────────
@@ -444,30 +448,70 @@ async fn sparql_post(
     let body_bytes = match axum::body::to_bytes(body, 10 * 1024 * 1024).await {
         Ok(b) => b,
         Err(_) => {
-            return (StatusCode::PAYLOAD_TOO_LARGE, "request body too large").into_response();
+            // v0.61.0 H7-6: PT404 JSON envelope for body-size rejection.
+            return json_response_http(
+                StatusCode::PAYLOAD_TOO_LARGE,
+                serde_json::json!({
+                    "error": "PT404",
+                    "message": "request body exceeds maximum allowed size (10 MiB)"
+                }),
+            );
         }
     };
     let body_str = String::from_utf8_lossy(&body_bytes).to_string();
 
+    let traceparent = headers
+        .get("traceparent")
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.to_owned());
+
     if content_type.starts_with(CT_SPARQL_QUERY) {
         let accept = negotiate_accept(&headers, &body_str);
-        return execute_sparql(&state, &body_str, false, &accept).await;
+        return execute_sparql_with_traceparent(
+            &state,
+            &body_str,
+            false,
+            &accept,
+            traceparent.as_deref(),
+        )
+        .await;
     }
 
     if content_type.starts_with(CT_SPARQL_UPDATE) {
         let accept = negotiate_accept(&headers, &body_str);
-        return execute_sparql(&state, &body_str, true, &accept).await;
+        return execute_sparql_with_traceparent(
+            &state,
+            &body_str,
+            true,
+            &accept,
+            traceparent.as_deref(),
+        )
+        .await;
     }
 
     if content_type.starts_with(CT_FORM) {
         let params: SparqlParams = serde_urlencoded::from_str(&body_str).unwrap_or_default();
         if let Some(update) = params.update {
             let accept = negotiate_accept(&headers, &update);
-            return execute_sparql(&state, &update, true, &accept).await;
+            return execute_sparql_with_traceparent(
+                &state,
+                &update,
+                true,
+                &accept,
+                traceparent.as_deref(),
+            )
+            .await;
         }
         if let Some(query) = params.query {
             let accept = negotiate_accept(&headers, &query);
-            return execute_sparql(&state, &query, false, &accept).await;
+            return execute_sparql_with_traceparent(
+                &state,
+                &query,
+                false,
+                &accept,
+                traceparent.as_deref(),
+            )
+            .await;
         }
         return (
             StatusCode::BAD_REQUEST,
@@ -605,6 +649,15 @@ async fn sparql_stream_post(
 
 // ─── Content negotiation ─────────────────────────────────────────────────────
 
+/// Build a JSON response with the given status code (used in main.rs handlers).
+fn json_response_http(status: StatusCode, body: serde_json::Value) -> Response {
+    Response::builder()
+        .status(status)
+        .header("content-type", "application/json")
+        .body(Body::from(body.to_string()))
+        .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())
+}
+
 fn negotiate_accept(headers: &HeaderMap, query: &str) -> String {
     let accept = headers
         .get("accept")
@@ -636,11 +689,21 @@ fn negotiate_accept(headers: &HeaderMap, query: &str) -> String {
 
 // ─── SPARQL execution ────────────────────────────────────────────────────────
 
-async fn execute_sparql(
+/// Validate a W3C traceparent header value.
+///
+/// A valid traceparent has the form: `00-{32hex}-{16hex}-{2hex}`
+/// e.g. `00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01`
+fn is_valid_traceparent(tp: &str) -> bool {
+    // Total length: 2 + 1 + 32 + 1 + 16 + 1 + 2 = 55 characters
+    tp.len() == 55 && tp.starts_with("00-") && tp.chars().all(|c| c.is_ascii_hexdigit() || c == '-')
+}
+
+async fn execute_sparql_with_traceparent(
     state: &AppState,
     query_text: &str,
     is_update: bool,
     accept: &str,
+    traceparent: Option<&str>,
 ) -> Response {
     let start = Instant::now();
 
@@ -655,6 +718,16 @@ async fn execute_sparql(
             );
         }
     };
+
+    // v0.61.0 I7-1: propagate traceparent header into the extension tracing context.
+    if let Some(tp) = traceparent {
+        // Validate traceparent format before setting (must be 55-char W3C format).
+        if is_valid_traceparent(tp) {
+            let _ = client
+                .execute("SET LOCAL pg_ripple.tracing_traceparent = $1", &[&tp])
+                .await;
+        }
+    }
 
     if is_update {
         match client

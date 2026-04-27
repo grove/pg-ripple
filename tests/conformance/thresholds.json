@@ -1,0 +1,36 @@
+{
+  "_comment": "Conformance pass-rate thresholds for pg_ripple CI gates (v0.61.0 J7-4).",
+  "_doc": "Each key maps a suite name to its minimum pass-rate (0.0-1.0). CI jobs fail if the actual rate drops below the threshold.",
+  "suites": {
+    "w3c_sparql11": {
+      "threshold": 0.95,
+      "blocking": true,
+      "description": "W3C SPARQL 1.1 test suite (smoke subset required; full suite informational)"
+    },
+    "jena": {
+      "threshold": 0.95,
+      "blocking": false,
+      "description": "Apache Jena ~1000 tests; non-blocking until >=95% pass rate achieved"
+    },
+    "watdiv": {
+      "threshold": 0.90,
+      "blocking": false,
+      "description": "WatDiv 100 query templates; non-blocking correctness + performance"
+    },
+    "lubm": {
+      "threshold": 1.0,
+      "blocking": true,
+      "description": "LUBM 14 OWL RL queries; required (all must pass)"
+    },
+    "owl2_rl": {
+      "threshold": 0.95,
+      "blocking": false,
+      "description": "OWL 2 RL conformance; informational until >=95% pass rate"
+    },
+    "entailment_regimes": {
+      "threshold": 0.90,
+      "blocking": false,
+      "description": "SPARQL Entailment Regime suite; informational in v0.61.0, blocking in v1.0.0"
+    }
+  }
+}

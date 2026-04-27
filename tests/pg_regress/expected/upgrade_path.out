@@ -65,9 +65,9 @@ SELECT pg_ripple.enable_graph_rls() AS rls_api_available;
  t
 (1 row)
 
-SELECT pg_ripple.grant_graph('postgres', '<https://upgrade.test/g>', 'read');
- grant_graph 
--------------
+SELECT pg_ripple.grant_graph_permission('postgres', '<https://upgrade.test/g>', 'read');
+ grant_graph_permission 
+------------------------
  
 (1 row)
 
@@ -78,9 +78,9 @@ FROM jsonb_array_elements(pg_ripple.list_graph_access());
  t
 (1 row)
 
-SELECT pg_ripple.revoke_graph('postgres', '<https://upgrade.test/g>');
- revoke_graph 
---------------
+SELECT pg_ripple.revoke_graph_permission('postgres', '<https://upgrade.test/g>');
+ revoke_graph_permission 
+-------------------------
  
 (1 row)
 

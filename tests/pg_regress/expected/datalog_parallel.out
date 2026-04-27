@@ -173,9 +173,6 @@ SET pg_ripple.datalog_parallel_threshold = 0;
 -- parallel_groups field exists and is a non-negative integer.
 SELECT (pg_ripple.infer_with_stats('owl-rl')->>'parallel_groups')::int >= 0
     AS has_parallel_groups;
-WARNING:  semi-naive rule compile error: variable predicate in rule body not supported
-WARNING:  semi-naive rule compile error: variable predicate in rule body not supported
-WARNING:  semi-naive compile error: variable predicate in body not supported
  has_parallel_groups 
 ---------------------
  t
@@ -184,9 +181,6 @@ WARNING:  semi-naive compile error: variable predicate in body not supported
 -- max_concurrent field exists and is a non-negative integer.
 SELECT (pg_ripple.infer_with_stats('owl-rl')->>'max_concurrent')::int >= 0
     AS has_max_concurrent;
-WARNING:  semi-naive rule compile error: variable predicate in rule body not supported
-WARNING:  semi-naive rule compile error: variable predicate in rule body not supported
-WARNING:  semi-naive compile error: variable predicate in body not supported
  has_max_concurrent 
 --------------------
  t
@@ -195,9 +189,6 @@ WARNING:  semi-naive compile error: variable predicate in body not supported
 -- OWL RL has many independent rules → parallel_groups > 1.
 SELECT (pg_ripple.infer_with_stats('owl-rl')->>'parallel_groups')::int > 1
     AS owl_rl_has_multiple_groups;
-WARNING:  semi-naive rule compile error: variable predicate in rule body not supported
-WARNING:  semi-naive rule compile error: variable predicate in rule body not supported
-WARNING:  semi-naive compile error: variable predicate in body not supported
  owl_rl_has_multiple_groups 
 ----------------------------
  t

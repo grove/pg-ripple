@@ -270,12 +270,16 @@ mod pg_ripple {
     /// `permission` must be `'read'`, `'write'`, or `'admin'`.
     /// The graph IRI is encoded in the dictionary automatically.
     /// Granting `'admin'` implies read and write.
+    ///
+    /// Note: renamed from `grant_graph` to `grant_graph_permission` in v0.61.0
+    /// to avoid a symbol conflict with the new RLS-based `grant_graph()` in
+    /// `pg_ripple.security_api` (`grant_graph(graph_iri, role)`).
     #[pg_extern]
-    fn grant_graph(role: &str, graph: &str, permission: &str) {
+    fn grant_graph_permission(role: &str, graph: &str, permission: &str) {
         let valid = matches!(permission, "read" | "write" | "admin");
         if !valid {
             pgrx::error!(
-                "grant_graph: permission must be 'read', 'write', or 'admin'; got '{permission}'"
+                "grant_graph_permission: permission must be 'read', 'write', or 'admin'; got '{permission}'"
             );
         }
 
@@ -294,14 +298,22 @@ mod pg_ripple {
                 pgrx::datum::DatumWithOid::from(permission),
             ],
         )
-        .unwrap_or_else(|e| pgrx::error!("grant_graph: insert error: {e}"));
+        .unwrap_or_else(|e| pgrx::error!("grant_graph_permission: insert error: {e}"));
     }
 
     /// Revoke a permission on a named graph from a PostgreSQL role.
     ///
     /// Pass NULL for `permission` to revoke all permissions for the role on that graph.
+    ///
+    /// Note: renamed from `revoke_graph` to `revoke_graph_permission` in v0.61.0
+    /// to avoid a symbol conflict with the new RLS-based `revoke_graph()` in
+    /// `pg_ripple.security_api` (`revoke_graph(graph_iri, role)`).
     #[pg_extern]
-    fn revoke_graph(role: &str, graph: &str, permission: default!(Option<&str>, "NULL")) {
+    fn revoke_graph_permission(
+        role: &str,
+        graph: &str,
+        permission: default!(Option<&str>, "NULL"),
+    ) {
         let graph_id = crate::dictionary::encode(
             crate::storage::strip_angle_brackets_pub(graph),
             crate::dictionary::KIND_IRI,
@@ -317,7 +329,7 @@ mod pg_ripple {
                     pgrx::datum::DatumWithOid::from(perm),
                 ],
             )
-            .unwrap_or_else(|e| pgrx::error!("revoke_graph: delete error: {e}"));
+            .unwrap_or_else(|e| pgrx::error!("revoke_graph_permission: delete error: {e}"));
         } else {
             pgrx::Spi::run_with_args(
                 "DELETE FROM _pg_ripple.graph_access \
@@ -327,7 +339,7 @@ mod pg_ripple {
                     pgrx::datum::DatumWithOid::from(graph_id),
                 ],
             )
-            .unwrap_or_else(|e| pgrx::error!("revoke_graph: delete error: {e}"));
+            .unwrap_or_else(|e| pgrx::error!("revoke_graph_permission: delete error: {e}"));
         }
     }
 

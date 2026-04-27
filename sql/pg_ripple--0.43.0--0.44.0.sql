@@ -15,9 +15,25 @@ USING _pg_ripple.vp_rare b
 WHERE a.i > b.i
   AND a.p = b.p AND a.s = b.s AND a.o = b.o AND a.g = b.g;
 
--- Add the UNIQUE constraint.
-ALTER TABLE _pg_ripple.vp_rare
-    ADD CONSTRAINT vp_rare_psoq_unique UNIQUE (p, s, o, g);
+-- Add the UNIQUE constraint (idempotent: the 0.41→0.42 migration may have already
+-- created a unique index under a slightly different name; skip if any unique index
+-- on (p,s,o,g) already covers vp_rare).
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM   pg_index i
+        JOIN   pg_class c ON c.oid = i.indrelid
+        JOIN   pg_namespace n ON n.oid = c.relnamespace
+        WHERE  n.nspname = '_pg_ripple'
+          AND  c.relname = 'vp_rare'
+          AND  i.indisunique
+    ) THEN
+        CREATE UNIQUE INDEX vp_rare_psoq_unique
+            ON _pg_ripple.vp_rare (p, s, o, g);
+    END IF;
+END;
+$$;
 
 INSERT INTO _pg_ripple.schema_version (version, upgraded_from)
 VALUES ('0.44.0', '0.43.0')

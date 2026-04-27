@@ -27,10 +27,10 @@ SELECT (pg_ripple.dictionary_stats() ? 'total_entries') AS dict_stats_available;
 
 -- 5. Graph RLS API available (v0.14.0)
 SELECT pg_ripple.enable_graph_rls() AS rls_api_available;
-SELECT pg_ripple.grant_graph('postgres', '<https://upgrade.test/g>', 'read');
+SELECT pg_ripple.grant_graph_permission('postgres', '<https://upgrade.test/g>', 'read');
 SELECT count(*) >= 0 AS list_access_available
 FROM jsonb_array_elements(pg_ripple.list_graph_access());
-SELECT pg_ripple.revoke_graph('postgres', '<https://upgrade.test/g>');
+SELECT pg_ripple.revoke_graph_permission('postgres', '<https://upgrade.test/g>');
 
 -- 6. schema_summary() available
 SELECT jsonb_typeof(pg_ripple.schema_summary()) = 'array' AS schema_summary_available;

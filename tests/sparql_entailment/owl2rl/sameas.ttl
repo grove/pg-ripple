@@ -1,0 +1,5 @@
+@prefix ex: <https://example.org/> .
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+
+ex:Alice owl:sameAs ex:Bob .
+ex:Bob a ex:Person .
