@@ -1918,7 +1918,13 @@ async fn flight_do_get(
     // Stream triples for the requested graph as NDJSON.
     let client = match state.pool.get().await {
         Ok(c) => c,
-        Err(e) => return redacted_error("flight_do_get pool", &e.to_string(), StatusCode::INTERNAL_SERVER_ERROR),
+        Err(e) => {
+            return redacted_error(
+                "flight_do_get pool",
+                &e.to_string(),
+                StatusCode::INTERNAL_SERVER_ERROR,
+            );
+        }
     };
 
     let graph_filter = if graph_iri.eq_ignore_ascii_case("DEFAULT") {
