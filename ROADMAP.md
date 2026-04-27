@@ -103,12 +103,20 @@
 | [v0.58.0](roadmap/v0.58.0.md) | Temporal RDF queries (`point_in_time`), SPARQL-DL, Citus horizontal sharding, PROV-O graph provenance, v1.0.0 readiness integration suite | ✅ Released | Large | [Full details](roadmap/v0.58.0-full.md) |
 | [v0.59.0](roadmap/v0.59.0.md) | Citus SPARQL shard-pruning for bound subjects (10–100× speedup), rebalance NOTIFY coordination, `explain_sparql()` Citus section | ✅ Released | Medium | [Full details](roadmap/v0.59.0-full.md) |
 
+### Pre-1.0 Hardening & Ecosystem (v0.60.0 – v0.62.0)
+
+| Version | Theme | Status | Scope | Full details |
+|---------|-------|--------|-------|--------------|
+| [v0.60.0](roadmap/v0.60.0.md) | Close all v1.0.0 blockers: HTAP cutover atomic swap, Actions SHA pinning, SECURITY DEFINER CI lint, new fuzz targets (GeoSPARQL WKT, R2RML, LLM prompt), `/ready` endpoint, `geof:distance`, merge-throughput trend artifact, pg_dump round-trip CI test, LangChain tool package | Planned | Large | [Full details](roadmap/v0.60.0-full.md) |
+| [v0.61.0](roadmap/v0.61.0.md) | Ecosystem depth: per-named-graph RLS, `explain_inference()` derivation tree, GDPR `erase_subject()`, SPARQL Entailment Regimes test driver, dbt adapter, Kafka CDC sink, SHACL-AF rule execution, OTLP traceparent propagation, SBOM diff, OWL 2 RL deletion proof test | Planned | Large | [Full details](roadmap/v0.61.0-full.md) |
+| [v0.62.0](roadmap/v0.62.0.md) | Query frontier: Cypher/openCypher/GQL transpiler (read-only MATCH/WHERE/RETURN), native IVM for SPARQL CONSTRUCT/DESCRIBE views, Apache Arrow Flight bulk export, WCOJ planner integration, visual graph explorer in `pg_ripple_http`, `clippy --deny warnings` CI gate | Planned | Very Large | [Full details](roadmap/v0.62.0-full.md) |
+
 ### Stable Release & Ecosystem (v1.0.0 – v1.1.0)
 
 | Version | Theme | Status | Scope | Full details |
 |---------|-------|--------|-------|-------------- |
-| [v1.0.0](roadmap/v1.0.0-full.md) | Production hardening, stress testing, security audit | Planned | Medium | [Full details](roadmap/v1.0.0-full.md) |
-| [v1.1.0](roadmap/v1.1.0.md) | Ecosystem integration: Jupyter SPARQL kernel, LangChain / LlamaIndex tool packages, Kafka CDC sink, materialized SPARQL views, dbt adapter | Planned | Medium | [Full details](roadmap/v1.1.0-full.md) |
+| [v1.0.0](roadmap/v1.0.0-full.md) | Production hardening: 30-day continuous-merge soak test, third-party security audit, Docker CVE scanning, migration acceptance test from v0.59.0, documentation freeze, public BSBM/WatDiv benchmark results published | Planned | Medium | [Full details](roadmap/v1.0.0-full.md) |
+| [v1.1.0](roadmap/v1.1.0.md) | Post-1.0 ecosystem: Jupyter SPARQL kernel, OpenTelemetry semantic-convention map, federation per-endpoint call stats, materialized SPARQL views (native IVM improvements), Cypher write operations (`CREATE`/`SET`/`DELETE`) | Planned | Medium | [Full details](roadmap/v1.1.0-full.md) |
 
 ## How these versions fit together
 
@@ -123,17 +131,26 @@ v0.21–v0.32    ─── Correctness & Datalog: built-in functions, SHACL comp
        │
 v0.33–v0.46    ─── Scale & ecosystem: docs site, parallel stratum eval, WCO joins, full conformance suites (SPARQL 1.1, WatDiv, Jena, LUBM, OWL 2 RL)
        │
-v0.47–v0.51    ─── Architecture hardening: dead-code wiring, SHACL completeness, streaming results, AI/LLM integration, security hardening (released)
+v0.47–v0.51    ─── Architecture hardening: dead-code wiring, SHACL completeness, streaming results, AI/LLM integration, security hardening
        │
 v0.52–v0.54    ─── Integration: pg-trickle relay, OpenAPI, logical replication, Helm chart
        │
-v0.55–v0.56    ─── Quality & security: SSRF allowlist, HTAP race fix, error-catalog, GeoSPARQL, Arrow/Flight, dbt, audit log
+v0.55–v0.56    ─── Quality & security: SSRF allowlist, error-catalog, GeoSPARQL, Arrow/Flight, audit log
        │
-v0.57–v0.58    ─── Reasoning & sharding: OWL 2 EL/QL, KG embeddings, entity alignment, temporal queries, Citus, PROV-O
+v0.57–v0.59    ─── Reasoning & sharding: OWL 2 EL/QL, KG embeddings, temporal queries, Citus sharding & shard-pruning, PROV-O
        │
-v1.0.0         ─── Stable release: production hardening, stress tests, security audit
+v0.60          ─── Production hardening sprint: HTAP atomic swap, Actions SHA pinning, SECURITY DEFINER lint,
+               │   new fuzz targets, geof:distance, LangChain tool, pg_dump round-trip CI test
        │
-v1.1           ─── Ecosystem integration: Jupyter kernel, LangChain/LlamaIndex, Kafka CDC, materialized SPARQL views
+v0.61          ─── Ecosystem depth: per-graph RLS, explain_inference, GDPR erasure, Entailment Regimes,
+               │   dbt, Kafka CDC, SHACL-AF execution, OTLP traceparent propagation, SBOM diff
+       │
+v0.62          ─── Query frontier: Cypher/GQL transpiler (read-only), native IVM,
+               │   Arrow Flight export, WCOJ planner integration, visual graph explorer
+       │
+v1.0.0         ─── Stable release: 30-day soak, third-party security audit, documentation freeze, public benchmarks
+       │
+v1.1           ─── Post-stable: Jupyter kernel, OTel semantic conventions, federation per-endpoint stats, Cypher write ops
 ```
 
 v0.1.0 through v0.5.1 build the complete core storage and query engine.
@@ -147,12 +164,19 @@ worst-case optimal joins, full conformance suites, and the AI/LLM integration la
 v0.47.0 through v0.51.0 complete the architecture refactor and shipping hardening
 required for a production release. v0.52.0 through v0.54.0 deliver the pg-trickle
 relay integration and high-availability story. v0.55.0 through v0.56.0 address all
-open security findings from PLAN_OVERALL_ASSESSMENT_6 (SSRF allowlist, HTAP merge
-race, error-catalog drift) and add GeoSPARQL 1.1, Arrow/Flight export, and a dbt
-adapter. v0.57.0 through v0.58.0 extend the reasoning platform to OWL 2 EL/QL,
-add KG embeddings, entity alignment, temporal RDF queries, Citus sharding, and
-PROV-O provenance. v1.0.0 is the stable release: production hardening, stress
-testing, and a full security audit. v1.1.0 delivers the ecosystem integration
-layer: a Jupyter SPARQL kernel, LangChain / LlamaIndex tool packages, a Kafka
-CDC sink, and materialized SPARQL views.
+open security findings from PLAN_OVERALL_ASSESSMENT_6 (SSRF allowlist, error-catalog
+drift) and add GeoSPARQL 1.1, federation circuit breaker, and the SPARQL audit log.
+v0.57.0 through v0.59.0 extend the reasoning platform to OWL 2 EL/QL, add KG
+embeddings, entity alignment, temporal RDF queries, Citus sharding with shard-pruning,
+and PROV-O provenance. v0.60.0 through v0.62.0 are the pre-1.0 hardening and
+ecosystem sprint: v0.60.0 closes the remaining v1.0.0 blockers identified in
+PLAN_OVERALL_ASSESSMENT_7 (HTAP atomic swap, CI supply-chain hardening, fuzz target
+gaps, `geof:distance`); v0.61.0 delivers ecosystem depth (per-graph RLS, inference
+explainability, GDPR erasure, dbt adapter, Kafka CDC sink, SHACL-AF execution);
+v0.62.0 delivers the query frontier (Cypher/GQL read-only transpiler, native IVM for
+SPARQL views, Apache Arrow Flight export, WCOJ planner integration). v1.0.0 is the
+stable release: a 30-day continuous-merge soak test, a third-party security audit,
+documentation freeze, and public BSBM/WatDiv benchmark results. v1.1.0 delivers
+post-stable improvements: Jupyter SPARQL kernel, OpenTelemetry semantic-convention
+documentation, per-endpoint federation call stats, and Cypher write operations.
 
