@@ -109,7 +109,7 @@
 |---------|-------|--------|-------|--------------|
 | [v0.60.0](roadmap/v0.60.0.md) | Close all v1.0.0 blockers: HTAP cutover atomic swap, Actions SHA pinning, SECURITY DEFINER CI lint, new fuzz targets (GeoSPARQL WKT, R2RML, LLM prompt), `/ready` endpoint, `geof:distance`, merge-throughput trend artifact, pg_dump round-trip CI test, LangChain tool package | Planned | Large | [Full details](roadmap/v0.60.0-full.md) |
 | [v0.61.0](roadmap/v0.61.0.md) | Ecosystem depth: per-named-graph RLS, `explain_inference()` derivation tree, GDPR `erase_subject()`, SPARQL Entailment Regimes test driver, dbt adapter, Kafka CDC sink, SHACL-AF rule execution, OTLP traceparent propagation, SBOM diff, OWL 2 RL deletion proof test | Planned | Large | [Full details](roadmap/v0.61.0-full.md) |
-| [v0.62.0](roadmap/v0.62.0.md) | Query frontier: Cypher/openCypher/GQL transpiler (read-only MATCH/WHERE/RETURN), native IVM for SPARQL CONSTRUCT/DESCRIBE views, Apache Arrow Flight bulk export, WCOJ planner integration, visual graph explorer in `pg_ripple_http`, `clippy --deny warnings` CI gate | Planned | Very Large | [Full details](roadmap/v0.62.0-full.md) |
+| [v0.62.0](roadmap/v0.62.0.md) | Query frontier: Apache Arrow Flight bulk export, WCOJ planner integration, visual graph explorer in `pg_ripple_http`, `clippy --deny warnings` CI gate | Planned | Large | [Full details](roadmap/v0.62.0-full.md) |
 | [v0.63.0](roadmap/v0.63.0.md) | SPARQL CONSTRUCT writeback rules: register a CONSTRUCT query to write derived triples back into a target named graph and maintain them incrementally (insert/delete delta paths, Delete-Rederive), enabling raw-to-canonical model pipelines that self-update on every source write | Planned | Large | [Full details](roadmap/v0.63.0-full.md) |
 
 ### Stable Release & Ecosystem (v1.0.0 – v1.1.0)
@@ -117,7 +117,7 @@
 | Version | Theme | Status | Scope | Full details |
 |---------|-------|--------|-------|-------------- |
 | [v1.0.0](roadmap/v1.0.0-full.md) | Production hardening: 30-day continuous-merge soak test, third-party security audit, Docker CVE scanning, migration acceptance test from v0.59.0, documentation freeze, public BSBM/WatDiv benchmark results published | Planned | Medium | [Full details](roadmap/v1.0.0-full.md) |
-| [v1.1.0](roadmap/v1.1.0.md) | Post-1.0 ecosystem: Jupyter SPARQL kernel, OpenTelemetry semantic-convention map, federation per-endpoint call stats, materialized SPARQL views (native IVM improvements), Cypher write operations (`CREATE`/`SET`/`DELETE`) | Planned | Medium | [Full details](roadmap/v1.1.0-full.md) |
+| [v1.1.0](roadmap/v1.1.0.md) | Post-1.0 ecosystem: Cypher/GQL read-only transpiler (`MATCH … RETURN`) + write operations (`CREATE`/`SET`/`DELETE`), Jupyter SPARQL kernel, OpenTelemetry semantic-convention map, federation per-endpoint call stats, materialized SPARQL views (native IVM improvements) | Planned | Large | [Full details](roadmap/v1.1.0-full.md) |
 
 ## How these versions fit together
 
@@ -146,15 +146,14 @@ v0.60          ─── Production hardening sprint: HTAP atomic swap, Actions 
 v0.61          ─── Ecosystem depth: per-graph RLS, explain_inference, GDPR erasure, Entailment Regimes,
                │   dbt, Kafka CDC, SHACL-AF execution, OTLP traceparent propagation, SBOM diff
        │
-v0.62          ─── Query frontier: Cypher/GQL transpiler (read-only), native IVM,
-               │   Arrow Flight export, WCOJ planner integration, visual graph explorer
+v0.62          ─── Query frontier: Arrow Flight export, WCOJ planner integration, visual graph explorer
        │
 v0.63          ─── SPARQL CONSTRUCT writeback rules: raw-to-canonical pipelines,
                │   incremental delta maintenance, Delete-Rederive, pipeline stratification
        │
 v1.0.0         ─── Stable release: 30-day soak, third-party security audit, documentation freeze, public benchmarks
        │
-v1.1           ─── Post-stable: Jupyter kernel, OTel semantic conventions, federation per-endpoint stats, Cypher write ops
+v1.1           ─── Post-stable: Cypher/GQL transpiler (read-only + write ops), Jupyter kernel, OTel semantic conventions, federation per-endpoint stats
 ```
 
 v0.1.0 through v0.5.1 build the complete core storage and query engine.
@@ -177,8 +176,8 @@ ecosystem sprint: v0.60.0 closes the remaining v1.0.0 blockers identified in
 PLAN_OVERALL_ASSESSMENT_7 (HTAP atomic swap, CI supply-chain hardening, fuzz target
 gaps, `geof:distance`); v0.61.0 delivers ecosystem depth (per-graph RLS, inference
 explainability, GDPR erasure, dbt adapter, Kafka CDC sink, SHACL-AF execution);
-v0.62.0 delivers the query frontier (Cypher/GQL read-only transpiler, native IVM for
-SPARQL views, Apache Arrow Flight export, WCOJ planner integration). v0.63.0 introduces
+v0.62.0 delivers the query frontier (Arrow Flight bulk export, WCOJ planner
+integration, visual graph explorer). v0.63.0 introduces
 SPARQL CONSTRUCT writeback rules: any CONSTRUCT query can be registered as a persistent
 rule that writes its derived triples directly into a target named graph inside the VP
 storage layer and maintains them incrementally — inserts trigger a delta derivation path,
@@ -187,5 +186,5 @@ where the canonical graph is always consistent with the latest raw data. v1.0.0 
 stable release: a 30-day continuous-merge soak test, a third-party security audit,
 documentation freeze, and public BSBM/WatDiv benchmark results. v1.1.0 delivers
 post-stable improvements: Jupyter SPARQL kernel, OpenTelemetry semantic-convention
-documentation, per-endpoint federation call stats, and Cypher write operations.
+documentation, per-endpoint federation call stats, and full Cypher/GQL support (read-only transpiler and write operations).
 
