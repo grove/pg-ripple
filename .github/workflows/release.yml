@@ -260,7 +260,7 @@ jobs:
 
       # v0.60.0 N7-4: Docker CVE scan — fail release if HIGH/CRITICAL CVEs found.
       - name: Run Trivy vulnerability scan
-        uses: aquasecurity/trivy-action@v0.30.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: ghcr.io/grove/pg-ripple:${{ steps.version.outputs.version }}
           format: table
