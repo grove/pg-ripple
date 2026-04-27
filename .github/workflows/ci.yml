@@ -76,6 +76,9 @@ jobs:
       - name: Clippy
         run: cargo clippy --features pg18 -- -D warnings
 
+      - name: Check pg_ripple_http compiles
+        run: cargo check -p pg_ripple_http
+
       # v0.62.0 N7-5: cargo deny — licence, duplicate and advisory checks.
       - name: Install cargo-deny
         run: |
