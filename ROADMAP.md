@@ -103,13 +103,14 @@
 | [v0.58.0](roadmap/v0.58.0.md) | Temporal RDF queries (`point_in_time`), SPARQL-DL, Citus horizontal sharding, PROV-O graph provenance, v1.0.0 readiness integration suite | ✅ Released | Large | [Full details](roadmap/v0.58.0-full.md) |
 | [v0.59.0](roadmap/v0.59.0.md) | Citus SPARQL shard-pruning for bound subjects (10–100× speedup), rebalance NOTIFY coordination, `explain_sparql()` Citus section | ✅ Released | Medium | [Full details](roadmap/v0.59.0-full.md) |
 
-### Pre-1.0 Hardening & Ecosystem (v0.60.0 – v0.62.0)
+### Pre-1.0 Hardening & Ecosystem (v0.60.0 – v0.63.0)
 
 | Version | Theme | Status | Scope | Full details |
 |---------|-------|--------|-------|--------------|
 | [v0.60.0](roadmap/v0.60.0.md) | Close all v1.0.0 blockers: HTAP cutover atomic swap, Actions SHA pinning, SECURITY DEFINER CI lint, new fuzz targets (GeoSPARQL WKT, R2RML, LLM prompt), `/ready` endpoint, `geof:distance`, merge-throughput trend artifact, pg_dump round-trip CI test, LangChain tool package | Planned | Large | [Full details](roadmap/v0.60.0-full.md) |
 | [v0.61.0](roadmap/v0.61.0.md) | Ecosystem depth: per-named-graph RLS, `explain_inference()` derivation tree, GDPR `erase_subject()`, SPARQL Entailment Regimes test driver, dbt adapter, Kafka CDC sink, SHACL-AF rule execution, OTLP traceparent propagation, SBOM diff, OWL 2 RL deletion proof test | Planned | Large | [Full details](roadmap/v0.61.0-full.md) |
 | [v0.62.0](roadmap/v0.62.0.md) | Query frontier: Cypher/openCypher/GQL transpiler (read-only MATCH/WHERE/RETURN), native IVM for SPARQL CONSTRUCT/DESCRIBE views, Apache Arrow Flight bulk export, WCOJ planner integration, visual graph explorer in `pg_ripple_http`, `clippy --deny warnings` CI gate | Planned | Very Large | [Full details](roadmap/v0.62.0-full.md) |
+| [v0.63.0](roadmap/v0.63.0.md) | SPARQL CONSTRUCT writeback rules: register a CONSTRUCT query to write derived triples back into a target named graph and maintain them incrementally (insert/delete delta paths, Delete-Rederive), enabling raw-to-canonical model pipelines that self-update on every source write | Planned | Large | [Full details](roadmap/v0.63.0-full.md) |
 
 ### Stable Release & Ecosystem (v1.0.0 – v1.1.0)
 
@@ -148,6 +149,9 @@ v0.61          ─── Ecosystem depth: per-graph RLS, explain_inference, GDPR
 v0.62          ─── Query frontier: Cypher/GQL transpiler (read-only), native IVM,
                │   Arrow Flight export, WCOJ planner integration, visual graph explorer
        │
+v0.63          ─── SPARQL CONSTRUCT writeback rules: raw-to-canonical pipelines,
+               │   incremental delta maintenance, Delete-Rederive, pipeline stratification
+       │
 v1.0.0         ─── Stable release: 30-day soak, third-party security audit, documentation freeze, public benchmarks
        │
 v1.1           ─── Post-stable: Jupyter kernel, OTel semantic conventions, federation per-endpoint stats, Cypher write ops
@@ -174,7 +178,12 @@ PLAN_OVERALL_ASSESSMENT_7 (HTAP atomic swap, CI supply-chain hardening, fuzz tar
 gaps, `geof:distance`); v0.61.0 delivers ecosystem depth (per-graph RLS, inference
 explainability, GDPR erasure, dbt adapter, Kafka CDC sink, SHACL-AF execution);
 v0.62.0 delivers the query frontier (Cypher/GQL read-only transpiler, native IVM for
-SPARQL views, Apache Arrow Flight export, WCOJ planner integration). v1.0.0 is the
+SPARQL views, Apache Arrow Flight export, WCOJ planner integration). v0.63.0 introduces
+SPARQL CONSTRUCT writeback rules: any CONSTRUCT query can be registered as a persistent
+rule that writes its derived triples directly into a target named graph inside the VP
+storage layer and maintains them incrementally — inserts trigger a delta derivation path,
+deletes trigger Delete-Rederive retraction — enabling raw-to-canonical model pipelines
+where the canonical graph is always consistent with the latest raw data. v1.0.0 is the
 stable release: a 30-day continuous-merge soak test, a third-party security audit,
 documentation freeze, and public BSBM/WatDiv benchmark results. v1.1.0 delivers
 post-stable improvements: Jupyter SPARQL kernel, OpenTelemetry semantic-convention
