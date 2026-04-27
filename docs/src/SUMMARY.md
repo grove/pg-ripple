@@ -39,6 +39,9 @@
 - [OWL 2 Profiles (RL / EL / QL)](features/owl-profiles.md)
 - [SHACL-SPARQL Rules](features/shacl-sparql-rules.md)
 - [R2RML — Relational to RDF](features/r2rml.md)
+- [Lattice Datalog — When and Why](features/lattice-datalog.md)
+- [Advanced Inference: WCOJ, DRed & Tabling](features/advanced-inference.md)
+- [Cypher / LPG → RDF Mapping](features/lpg-mapping.md)
 
 ---
 
@@ -52,6 +55,7 @@
 - [Record Linkage & Entity Resolution](features/record-linkage.md)
 - [GraphRAG (Microsoft)](features/graphrag.md)
 - [Vector Federation](user-guide/vector-federation.md)
+- [AI Agent Integration (LangChain, LlamaIndex)](features/ai-agent-integration.md)
 
 ---
 
@@ -66,6 +70,9 @@
 - [Probabilistic Rules for Soft Constraints](cookbook/probabilistic-rules.md)
 - [SPARQL Repair Workflow](cookbook/sparql-repair.md)
 - [Ontology Mapping and Alignment](cookbook/ontology-mapping.md)
+- [LLM Workflow — NL to Knowledge Graph Answer](cookbook/llm-workflow.md)
+- [Federation with Wikidata and DBpedia](cookbook/federation-wikidata.md)
+- [SHACL + Datalog Data Quality Pipeline](cookbook/shacl-datalog-quality.md)
 
 ---
 
