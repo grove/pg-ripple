@@ -19,10 +19,12 @@
 #   For production deployments, use password-based authentication instead.
 
 # ── Build stage ───────────────────────────────────────────────────────────────
-# Build a fresh gosu binary from source using the latest Go to eliminate
-# the stdlib CVEs shipped in the postgres:18-bookworm base image's gosu.
-FROM golang:latest AS gosu-builder
-RUN go install github.com/tianon/gosu@v1.17
+# Build a fresh gosu binary from source using Go 1.26 (fixes all gosu stdlib
+# CVEs: CVE-2025-68121 CRITICAL + CVE-2026-32280/32281/32283 HIGH which are
+# only fixed in Go ≥1.25.9/1.26.2). CGO_ENABLED=0 produces a static binary
+# that is fully portable on any glibc/musl system.
+FROM golang:1.26-bookworm AS gosu-builder
+RUN CGO_ENABLED=0 go install github.com/tianon/gosu@latest
 
 # pgrx 0.18 requires Rust stable. Use rust:1-bookworm which tracks the latest
 # stable 1.x release.
