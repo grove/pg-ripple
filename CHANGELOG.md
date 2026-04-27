@@ -25,7 +25,7 @@ Versions correspond to the milestones in [ROADMAP.md](ROADMAP.md).
 
 - **Inference explainability** (6.6): New SRF `pg_ripple.explain_inference(s, p, o, g) → TABLE(depth INT, rule_id TEXT, source_sids BIGINT[], child_triples JSONB)`. Returns the full derivation chain for a given inferred triple as a JSON tree, walking the `_pg_ripple.rule_firing_log` table introduced in this release.
 
-- **SHACL-AF `sh:rule` execution** (D7-1 / D-3 / S4-8): Implemented the bridge in `src/shacl/af_rules.rs` that compiles `sh:TripleRule` patterns to Datalog rules and loads them via `load_rules_text()`. New pg_regress test `shacl_af_rule_execution.sql` validates end-to-end execution.
+- **SHACL-AF `sh:rule` execution** (D7-1 / D-3 / S4-8): Implemented the bridge in `src/shacl/af_rules.rs` that compiles `sh:TripleRule` patterns to Datalog rules and loads them via `load_rules_text()`. New pg_regress test `shacl_af_rule_execution.sql` validates end-to-end execution. Emits **PT482** when a `sh:rule` body cannot be compiled into a Datalog rule and is skipped.
 
 - **dbt adapter** (6.11): Published `dbt-pg-ripple` Python package in `clients/dbt-pg-ripple/`. Provides `sparql_model`, `sparql_source`, and `sparql_ref` SPARQL-aware dbt macros. Data engineers can now mix SQL and SPARQL transformations in a single dbt project with full lineage tracking.
 

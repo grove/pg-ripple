@@ -309,7 +309,11 @@ mod pg_ripple {
     /// to avoid a symbol conflict with the new RLS-based `revoke_graph()` in
     /// `pg_ripple.security_api` (`revoke_graph(graph_iri, role)`).
     #[pg_extern]
-    fn revoke_graph_permission(role: &str, graph: &str, permission: default!(Option<&str>, "NULL")) {
+    fn revoke_graph_permission(
+        role: &str,
+        graph: &str,
+        permission: default!(Option<&str>, "NULL"),
+    ) {
         let graph_id = crate::dictionary::encode(
             crate::storage::strip_angle_brackets_pub(graph),
             crate::dictionary::KIND_IRI,

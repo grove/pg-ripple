@@ -43,8 +43,8 @@ CREATE TABLE IF NOT EXISTS _pg_ripple.subscriptions (
 
 -- Add UNIQUE constraint on vp_rare(p, s, o, g) required for ON CONFLICT idempotent inserts.
 -- Safe to run on existing data (duplicate quads are not possible in a correctly-built store).
-ALTER TABLE _pg_ripple.vp_rare
-    ADD CONSTRAINT IF NOT EXISTS vp_rare_psog_unique UNIQUE (p, s, o, g);
+-- Use CREATE UNIQUE INDEX IF NOT EXISTS (ALTER TABLE ADD CONSTRAINT has no IF NOT EXISTS).
+CREATE UNIQUE INDEX IF NOT EXISTS vp_rare_psog_unique ON _pg_ripple.vp_rare (p, s, o, g);
 
 INSERT INTO _pg_ripple.schema_version (version, upgraded_from)
 VALUES ('0.42.0', '0.41.0')
