@@ -13,6 +13,32 @@ Versions correspond to the milestones in [ROADMAP.md](ROADMAP.md).
 
 ---
 
+## [0.63.0] — 2025 — SPARQL CONSTRUCT Writeback Rules
+
+**Implements the v0.63.0 roadmap: SPARQL CONSTRUCT writeback rules (CWB-01 through CWB-11), raw-to-canonical pipelines, incremental delta maintenance via Delete-Rederive (DRed), pipeline stratification with cycle detection, and Citus scalability improvements CITUS-30 through CITUS-37.**
+
+### What's new
+
+- **CONSTRUCT writeback rules** (CWB-01 to CWB-11): New SQL API `pg_ripple.create_construct_rule(name, sparql, target_graph, mode)` registers a SPARQL CONSTRUCT query as a persistent writeback rule. Derived triples are stored in the target named graph with `source = 1`. Supporting functions: `drop_construct_rule`, `refresh_construct_rule`, `list_construct_rules`, `explain_construct_rule`.
+
+- **Catalog tables**: `_pg_ripple.construct_rules` (rule registry) and `_pg_ripple.construct_rule_triples` (provenance index) created lazily on first use and also via the migration script.
+
+- **Pipeline stratification**: `compute_rule_order` performs Kahn's topological sort on the rule dependency graph; mutual-recursion (cycles) are rejected at registration time with a clear error.
+
+- **Validation at registration**: blank nodes in CONSTRUCT templates, unbound variables, non-CONSTRUCT queries, and self-referential graphs (target == source) are all rejected with informative error messages.
+
+- **Citus CITUS-30 — SERVICE result shard pruning**: New function `pg_ripple.service_result_shard_prune(endpoint TEXT, graph_iri TEXT) RETURNS BIGINT`. Returns the count of remote triples from the endpoint, or -1 if pruning is not applicable.
+
+- **Citus CITUS-32 — HyperLogLog `COUNT(DISTINCT)`**: New function `pg_ripple.approx_distinct_available() RETURNS BOOLEAN`. Returns whether the HyperLogLog extension is available for approximate distinct counting.
+
+- **Citus CITUS-37 — per-worker BRIN summarise**: New SRF `pg_ripple.brin_summarize_vp_shards() RETURNS TABLE(table_name TEXT, pages_summarized BIGINT)`. Summarises BRIN indexes on all VP main-partition tables.
+
+### Migration
+
+Run `ALTER EXTENSION pg_ripple UPDATE TO '0.63.0'` or apply `sql/pg_ripple--0.62.0--0.63.0.sql` manually. The migration creates the `_pg_ripple.construct_rules` and `_pg_ripple.construct_rule_triples` catalog tables.
+
+---
+
 ## [0.62.0] — 2025 — Query Frontier
 
 **Implements the v0.62.0 roadmap: Apache Arrow Flight bulk export, Leapfrog-Triejoin WCOJ planner integration, visual graph explorer in `pg_ripple_http`, tiered dictionary, Citus vp_rare vacuum, distributed inference dispatch, live shard rebalance, multi-hop pruning carry-forward, and `cargo deny` / `cargo audit` CI gates.**

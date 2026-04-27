@@ -969,4 +969,165 @@ mod pg_ripple_v062 {
         let rows = super::citus_live_rebalance_impl();
         TableIterator::new(rows)
     }
+
+    // ── v0.63.0: Citus scalability improvements (CITUS-30 through CITUS-37) ──
+
+    /// Encode SERVICE result bindings and prune VP joins to matching shards
+    /// (CITUS-30).
+    ///
+    /// After a federated `SERVICE` sub-query returns subject IRIs, this
+    /// function encodes each subject via the dictionary and returns the
+    /// distinct set of Citus shard IDs that cover those subjects.  An empty
+    /// vec indicates full fan-out (Citus not enabled or result too large).
+    #[pg_extern(schema = "pg_ripple", name = "service_result_shard_prune")]
+    fn service_result_shard_prune(subject_iris: Vec<String>) -> Vec<i64> {
+        super::service_result_shard_prune_impl(&subject_iris)
+    }
+
+    /// Approximate `COUNT(DISTINCT)` via HyperLogLog for Citus (CITUS-32).
+    ///
+    /// Returns `true` when the `pg_hll` extension is installed and
+    /// `pg_ripple.approx_distinct = on` (enabling HLL-based aggregation in
+    /// the SPARQL translator for `COUNT(DISTINCT ?x)` expressions).
+    #[pg_extern(schema = "pg_ripple", name = "approx_distinct_available")]
+    fn approx_distinct_available() -> bool {
+        super::approx_distinct_available_impl()
+    }
+
+    /// Run BRIN summarise on every worker shard for a given VP table (CITUS-37).
+    ///
+    /// After the merge worker completes a merge cycle it should call this
+    /// function to ensure BRIN indexes on each Citus worker shard are current.
+    /// Internally issues `run_command_on_shards` to invoke
+    /// `brin_summarize_new_values` on every worker.
+    ///
+    /// Returns the number of shards updated (0 when Citus is not installed).
+    #[pg_extern(schema = "pg_ripple", name = "brin_summarize_vp_shards")]
+    fn brin_summarize_vp_shards(pred_id: i64) -> i64 {
+        super::brin_summarize_vp_shards_impl(pred_id)
+    }
+}
+
+// ── v0.63.0: CITUS-30 SERVICE result shard pruning ───────────────────────────
+
+/// Encode SERVICE result subject IRIs and return the set of Citus shard IDs
+/// that cover those subjects (CITUS-30).
+///
+/// Falls back to an empty vec (full fan-out) when:
+/// - Citus is not enabled.
+/// - The result set exceeds `pg_ripple.citus_prune_carry_max` unique subjects.
+/// - Any subject IRI is not in the dictionary.
+#[allow(dead_code)]
+pub fn service_result_shard_prune_impl(subject_iris: &[String]) -> Vec<i64> {
+    if !crate::gucs::storage::CITUS_SHARDING_ENABLED.get() || !is_citus_loaded() {
+        return Vec::new();
+    }
+
+    let max = crate::gucs::storage::CITUS_PRUNE_CARRY_MAX.get() as usize;
+    if subject_iris.len() > max {
+        return Vec::new();
+    }
+
+    // Encode subject IRIs to integer IDs.
+    let subject_ids: Vec<i64> = subject_iris
+        .iter()
+        .filter_map(|iri| crate::dictionary::lookup_iri(iri))
+        .collect();
+
+    if subject_ids.is_empty() {
+        return Vec::new();
+    }
+
+    // Find a promoted VP delta table to use for shard lookup.
+    let delta_table = Spi::get_one::<String>(
+        "SELECT '_pg_ripple.vp_' || id::text || '_delta' \
+         FROM _pg_ripple.predicates WHERE table_oid IS NOT NULL ORDER BY id LIMIT 1",
+    )
+    .unwrap_or_default()
+    .unwrap_or_default();
+
+    if delta_table.is_empty() {
+        return Vec::new();
+    }
+
+    let mut shard_ids: std::collections::HashSet<i64> = std::collections::HashSet::new();
+    for subject_id in &subject_ids {
+        if let Some(info) = prune_bound_subject(&delta_table, *subject_id) {
+            shard_ids.insert(info.shard_id);
+        }
+    }
+
+    let mut result: Vec<i64> = shard_ids.into_iter().collect();
+    result.sort_unstable();
+    result
+}
+
+// ── v0.63.0: CITUS-32 Approximate COUNT(DISTINCT) via HyperLogLog ────────────
+
+/// Return `true` when `pg_hll` is installed and the `approx_distinct` GUC is on.
+pub fn approx_distinct_available_impl() -> bool {
+    let hll_installed =
+        Spi::get_one::<bool>("SELECT EXISTS(SELECT 1 FROM pg_extension WHERE extname = 'hll')")
+            .unwrap_or(Some(false))
+            .unwrap_or(false);
+
+    if !hll_installed {
+        return false;
+    }
+
+    // Check the approx_distinct GUC via current_setting (tolerant of absence).
+    Spi::get_one::<bool>(
+        "SELECT COALESCE( \
+             current_setting('pg_ripple.approx_distinct', true), \
+             'off' \
+         ) = 'on'",
+    )
+    .unwrap_or(Some(false))
+    .unwrap_or(false)
+}
+
+// ── v0.63.0: CITUS-37 Per-worker BRIN summarise after merge ─────────────────
+
+/// Issue `brin_summarize_new_values` on every shard of a VP main-partition
+/// table (CITUS-37).
+///
+/// After a HTAP merge cycle the BRIN indexes on Citus worker shards may be
+/// stale.  This function uses `run_command_on_shards` to invoke
+/// `brin_summarize_new_values` on every worker shard, keeping first-scan
+/// performance consistent.
+///
+/// Returns the number of shards updated (0 when Citus is not installed or the
+/// table is not distributed).
+pub fn brin_summarize_vp_shards_impl(pred_id: i64) -> i64 {
+    if !is_citus_loaded() {
+        return 0;
+    }
+
+    let main_table = format!("_pg_ripple.vp_{pred_id}_main");
+
+    // Check whether the main table is distributed.
+    let is_distributed = Spi::get_one_with_args::<bool>(
+        "SELECT EXISTS( \
+             SELECT 1 FROM pg_dist_partition \
+             WHERE logicalrelid = $1::regclass \
+         )",
+        &[main_table.as_str().into()],
+    )
+    .unwrap_or(Some(false))
+    .unwrap_or(false);
+
+    if !is_distributed {
+        return 0;
+    }
+
+    // run_command_on_shards returns a table with a `success` column.
+    let sql = format!(
+        "SELECT count(*)::bigint \
+         FROM run_command_on_shards( \
+             '{main_table}', \
+             $$SELECT brin_summarize_new_values('%s')$$ \
+         ) WHERE success"
+    );
+
+    Spi::get_one::<i64>(&sql).unwrap_or(Some(0)).unwrap_or(0)
 }

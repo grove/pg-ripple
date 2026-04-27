@@ -60,6 +60,9 @@ mod prov;
 mod temporal;
 // v0.62.0 modules
 mod flight;
+// v0.63.0 modules
+mod construct_rules;
+mod construct_rules_api;
 
 // Re-export all GUC statics at the crate root so that `crate::SOME_GUC` paths
 // in existing code continue to work after the split.

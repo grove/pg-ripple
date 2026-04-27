@@ -1172,3 +1172,42 @@ pgrx::extension_sql!(
     name = "v062_schema_additions",
     requires = ["v061_schema_additions"]
 );
+
+// ─── v0.63.0 schema additions ─────────────────────────────────────────────────
+// New tables: construct_rules (CWB-07), construct_rule_triples (CWB-11).
+// All CITUS-30–37 improvements are pure Rust (no schema changes).
+
+pgrx::extension_sql!(
+    "-- v0.63.0: SPARQL CONSTRUCT writeback rules catalog (CWB-07).
+     CREATE TABLE IF NOT EXISTS _pg_ripple.construct_rules (
+         name            TEXT PRIMARY KEY,
+         sparql          TEXT NOT NULL,
+         generated_sql   TEXT,
+         target_graph    TEXT NOT NULL,
+         target_graph_id BIGINT NOT NULL,
+         mode            TEXT NOT NULL DEFAULT 'incremental',
+         source_graphs   TEXT[],
+         rule_order      INT,
+         created_at      TIMESTAMPTZ DEFAULT now(),
+         last_refreshed  TIMESTAMPTZ
+     );
+     COMMENT ON TABLE _pg_ripple.construct_rules IS
+         'Registered SPARQL CONSTRUCT writeback rules (v0.63.0+)';
+
+     -- v0.63.0: Per-rule provenance for derived triples (CWB-11).
+     CREATE TABLE IF NOT EXISTS _pg_ripple.construct_rule_triples (
+         rule_name TEXT   NOT NULL,
+         pred_id   BIGINT NOT NULL,
+         s         BIGINT NOT NULL,
+         o         BIGINT NOT NULL,
+         g         BIGINT NOT NULL,
+         PRIMARY KEY (rule_name, pred_id, s, o, g)
+     );
+     COMMENT ON TABLE _pg_ripple.construct_rule_triples IS
+         'Per-rule provenance for derived triples; enables safe multi-rule shared target graphs (v0.63.0+)';
+
+     INSERT INTO _pg_ripple.schema_version (version, upgraded_from, installed_at)
+         VALUES ('0.63.0', '0.62.0', clock_timestamp());",
+    name = "v063_schema_additions",
+    requires = ["v062_schema_additions"]
+);
