@@ -8,7 +8,7 @@
 --   - F7-2: New promotion-race concurrent test (shell script, no DDL)
 --   - F7-4: merge_throughput_history.csv benchmark artifact (non-schema)
 --   - H7-1: GitHub Actions SHA pinning (CI workflow, no DDL)
---   - H7-2: SECURITY DEFINER CI lint step (CI workflow, no DDL)
+--   - H7-2: SDEF privilege-audit CI lint step (CI workflow, no DDL)
 --   - H7-3: Security documentation update (docs, no DDL)
 --   - N7-1: rust-toolchain.toml added (toolchain pin, no DDL)
 --   - N7-4: Trivy Docker CVE scan added to release workflow (no DDL)
