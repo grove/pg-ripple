@@ -2,13 +2,13 @@
 
 ## 1. Project Overview
 
-**pg_ripple** is a PostgreSQL 18 extension written in Rust using pgrx 0.17 that implements a high-performance, scalable RDF triple store. It brings native SPARQL query capability, dictionary-encoded storage with vertical partitioning, HTAP architecture, SHACL validation, and optional distributed execution—all within PostgreSQL.
+**pg_ripple** is a PostgreSQL 18 extension written in Rust using pgrx 0.18 that implements a high-performance, scalable RDF triple store. It brings native SPARQL query capability, dictionary-encoded storage with vertical partitioning, HTAP architecture, SHACL validation, and optional distributed execution—all within PostgreSQL.
 
 ### Design Principles
 
 - **Performance first**: Dictionary-encoded integers, vertical partitioning, zero-copy Rust data paths
 - **PostgreSQL-native**: Leverage the optimizer, MVCC, WAL, parallel query, AIO (PG18), and skip scan
-- **Safe Rust**: Use pgrx 0.17's safe abstractions; `unsafe` only at FFI boundaries where required
+- **Safe Rust**: Use pgrx 0.18's safe abstractions; `unsafe` only at FFI boundaries where required
 - **Incremental adoption**: Usable from the first release; advanced features layered progressively
 - **Standards compliance**: W3C RDF 1.1, SPARQL 1.1, SHACL Core
 
@@ -88,7 +88,7 @@
 - **Error taxonomy module** (`src/error.rs`, v0.1.0): `thiserror`-based error types with PT error code constants. Initial ranges: dictionary errors (PT001–PT099) and storage errors (PT100–PT199). PostgreSQL-style formatting: lowercase first word, no trailing period. Extended in subsequent milestones as new subsystems are added (see §13.6 for the complete range table).
 - **Dictionary cache phasing**: v0.1.0–v0.5.1 use a **backend-local** `lru::LruCache` for the dictionary cache — no `shared_preload_libraries` required. The shared-memory dictionary cache, bloom filters, slot versioning, and `pg_ripple.shared_memory_size` startup GUC are all introduced in v0.6.0 when the HTAP architecture requires cross-backend coordination. This significantly simplifies the first 6 releases and defers the most complex pgrx API surface to when it is actually needed.
 - **Shared-memory slot versioning** (v0.6.0+): the first 16 bytes of every `PgSharedMem` slot are a fixed magic number followed by a 4-byte layout version integer. On startup the extension checks both; a mismatch (e.g. after an in-place upgrade) triggers a controlled re-initialization rather than a silent crash.
-- **pgrx 0.17 shared memory API** (v0.6.0+): the shared memory surface in pgrx 0.17 uses the `PgSharedObject` trait and `PgSharedMem::new_array` / `PgSharedMem::new_object` constructors — a substantial redesign from the `PgSharedMem` API used in pgrx ≤0.14. The implementation must follow the [pgrx 0.17 shared memory examples](https://github.com/pgcentralfoundation/pgrx/tree/develop/pgrx-examples/shmem) and declare all allocation sizes at `_PG_init` time via the `pg_shmem_init!` macro. Shared memory block size is determined at postmaster start by the `pg_ripple.shared_memory_size` GUC (a startup GUC in `postgresql.conf`); it cannot be grown at runtime. The `pg_ripple.cache_budget` GUC is a utilization cap enforced in Rust, not a re-allocation signal.
+- **pgrx 0.18 shared memory API** (v0.6.0+): the shared memory surface in pgrx 0.18 uses the `PgSharedObject` trait and `PgSharedMem::new_array` / `PgSharedMem::new_object` constructors — a substantial redesign from the `PgSharedMem` API used in pgrx ≤0.14. The implementation must follow the [pgrx 0.18 shared memory examples](https://github.com/pgcentralfoundation/pgrx/tree/develop/pgrx-examples/shmem) and declare all allocation sizes at `_PG_init` time via the `pg_shmem_init!` macro. Shared memory block size is determined at postmaster start by the `pg_ripple.shared_memory_size` GUC (a startup GUC in `postgresql.conf`); it cannot be grown at runtime. The `pg_ripple.cache_budget` GUC is a utilization cap enforced in Rust, not a re-allocation signal.
 - Extension SQL: `CREATE EXTENSION pg_ripple` creates core schema and catalog tables
 
 ### 4.2 Dictionary Encoder (`src/dictionary/`)
@@ -1358,7 +1358,7 @@ pg_ripple/                             # Cargo workspace root
 
 ```bash
 # Prerequisites
-rustup update stable        # Rust 1.88+ required for pgrx 0.17
+rustup update stable        # Rust 1.88+ required for pgrx 0.18
 cargo install cargo-pgrx --version 0.17.0 --locked
 cargo pgrx init --pg18 download  # Download and compile PG18
 

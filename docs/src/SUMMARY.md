@@ -164,6 +164,7 @@
 - [Running Conformance Tests](reference/running-conformance-tests.md)
 - [Error Catalog](reference/error-catalog.md)
 - [FAQ](reference/faq.md)
+- [Optional-Feature Degradation](reference/degradation.md)
 - [Glossary](reference/glossary.md)
 - [Release Notes](reference/changelog.md)
 - [Roadmap](reference/roadmap.md)

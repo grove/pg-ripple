@@ -1,0 +1,105 @@
+-- pg_regress test: feature_status() catalog (v0.64.0, TRUTH-01)
+-- Verifies that pg_ripple.feature_status() returns honest status values
+-- for all partial features identified in PLAN_OVERALL_ASSESSMENT_8.
+SET client_min_messages = warning;
+CREATE EXTENSION IF NOT EXISTS pg_ripple;
+SET client_min_messages = DEFAULT;
+SET search_path TO pg_ripple, public;
+-- The function must return a table with the required columns.
+SELECT count(*) > 0 AS has_rows FROM pg_ripple.feature_status();
+ has_rows 
+----------
+ t
+(1 row)
+
+-- All returned status values must be from the approved taxonomy.
+SELECT count(*) AS invalid_statuses
+FROM pg_ripple.feature_status()
+WHERE status NOT IN (
+    'implemented',
+    'experimental',
+    'planner_hint',
+    'manual_refresh',
+    'stub',
+    'degraded',
+    'planned'
+);
+ invalid_statuses 
+------------------
+                0
+(1 row)
+
+-- arrow_flight must not claim to be implemented (it is a stub).
+SELECT status AS arrow_flight_status
+FROM pg_ripple.feature_status()
+WHERE feature_name = 'arrow_flight';
+ arrow_flight_status 
+---------------------
+ stub
+(1 row)
+
+-- wcoj must be planner_hint (not a full triejoin executor).
+SELECT status AS wcoj_status
+FROM pg_ripple.feature_status()
+WHERE feature_name = 'wcoj';
+ wcoj_status  
+--------------
+ planner_hint
+(1 row)
+
+-- shacl_sparql_rule must not be implemented yet.
+SELECT status NOT IN ('implemented') AS shacl_rule_not_implemented
+FROM pg_ripple.feature_status()
+WHERE feature_name = 'shacl_sparql_rule';
+ shacl_rule_not_implemented 
+----------------------------
+ t
+(1 row)
+
+-- construct_writeback must be manual_refresh (not implemented).
+SELECT status AS construct_writeback_status
+FROM pg_ripple.feature_status()
+WHERE feature_name = 'construct_writeback';
+ construct_writeback_status 
+----------------------------
+ manual_refresh
+(1 row)
+
+-- citus_service_pruning must be planned (not wired into translator yet).
+SELECT status NOT IN ('implemented') AS citus_pruning_not_implemented
+FROM pg_ripple.feature_status()
+WHERE feature_name = 'citus_service_pruning';
+ citus_pruning_not_implemented 
+-------------------------------
+ t
+(1 row)
+
+-- sparql_select and sparql_update must be implemented.
+SELECT feature_name, status
+FROM pg_ripple.feature_status()
+WHERE feature_name IN ('sparql_select', 'sparql_update')
+ORDER BY feature_name;
+ feature_name  |   status    
+---------------+-------------
+ sparql_select | implemented
+ sparql_update | implemented
+(2 rows)
+
+-- shacl_sparql_constraint must be implemented (distinct from shacl_sparql_rule).
+SELECT status AS shacl_constraint_status
+FROM pg_ripple.feature_status()
+WHERE feature_name = 'shacl_sparql_constraint';
+ shacl_constraint_status 
+-------------------------
+ implemented
+(1 row)
+
+-- Every row must have a non-null feature_name and status.
+SELECT count(*) AS null_feature_names
+FROM pg_ripple.feature_status()
+WHERE feature_name IS NULL OR status IS NULL;
+ null_feature_names 
+--------------------
+                  0
+(1 row)
+

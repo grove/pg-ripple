@@ -1,0 +1,17 @@
+-- Migration 0.63.0 → 0.64.0: Release Truth and Safety Freeze
+--
+-- Changes in this release:
+--   - TRUTH-01: pg_ripple.feature_status() — feature status catalog SQL API
+--     (pure Rust computed function; no DDL schema changes required)
+--   - TRUTH-02: pg_ripple_http /ready deep readiness (HTTP service; no DDL)
+--   - TRUTH-03: GitHub Actions SHA pinning (CI infrastructure; no DDL)
+--   - TRUTH-04: Docker release digest integrity (CI; no DDL)
+--   - TRUTH-05: Documentation truth pass (docs; no DDL)
+--   - TRUTH-06: Roadmap status taxonomy script (scripts; no DDL)
+--   - TRUTH-07: Docs/API signature drift check (scripts; no DDL)
+--   - TRUTH-08: just assess-release quality gate (justfile; no DDL)
+--   - TRUTH-09: Release evidence dashboard (scripts + CI; no DDL)
+--   - TRUTH-10: Degradation semantics guide (docs; no DDL)
+--
+-- All changes are compiled from Rust (#[pg_extern]) or are infrastructure/docs
+-- updates.  No DDL schema changes are required for this migration.

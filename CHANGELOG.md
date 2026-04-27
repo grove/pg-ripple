@@ -13,6 +13,36 @@ Versions correspond to the milestones in [ROADMAP.md](ROADMAP.md).
 
 ---
 
+## [0.64.0] — 2026-04-27 — Release Truth and Safety Freeze
+
+**Implements the v0.64.0 roadmap: feature-status SQL API, deep /ready readiness, GitHub Actions SHA pinning, Docker release digest integrity, documentation truth pass, roadmap evidence scripts, API drift checks, `just assess-release`, release evidence dashboard, and optional-feature degradation semantics guide.**
+
+### What's new
+
+- **`pg_ripple.feature_status()`** (TRUTH-01): New SQL function returning one row per major capability with an honest status value. Status taxonomy: `implemented`, `experimental`, `planner_hint`, `manual_refresh`, `stub`, `degraded`, `planned`. Reports honest statuses for Arrow Flight (`stub`), WCOJ (`planner_hint`), SHACL-SPARQL rules (`planned`), CONSTRUCT writeback (`manual_refresh`), Citus SERVICE pruning (`planned`), and all other major features.
+
+- **Deep `/ready` readiness** (TRUTH-02): Extended `pg_ripple_http /ready` to include PostgreSQL version, extension version, and a feature-status snapshot. The response body now includes `partial_features` (all non-`implemented` features) and `degraded_features` (features with `stub` or `degraded` status).
+
+- **GitHub Actions SHA pinning** (TRUTH-03): All third-party `uses:` references in `.github/workflows/` are now pinned to full 40-character commit SHAs with the human-readable tag as a comment. New CI step `scripts/check_github_actions_pinned.sh` rejects mutable refs (`@v6`, `@stable`, branch names) — zero mutable refs permitted.
+
+- **Docker release digest integrity** (TRUTH-04): Removed `continue-on-error: true` from Docker build/push. Release job now captures the immutable image digest from the build step, fails if no digest is produced, and scans `ghcr.io/grove/pg-ripple@sha256:...` (the immutable digest) instead of a mutable tag.
+
+- **Documentation truth pass** (TRUTH-05): Corrected `plans/implementation_plan.md` pgrx 0.17 → 0.18 throughout. Updated README "What works today" to reflect v0.63.0. Added "Known limitations in v0.63.0" section to README covering Arrow Flight, WCOJ, SHACL rules, CONSTRUCT writeback, Citus pruning, and optional dependencies.
+
+- **Roadmap evidence check script** (TRUTH-06): `scripts/check_roadmap_evidence.sh` — advisory lint that flags completion-claim bullet points in CHANGELOG without evidence markers (CI test name, docs path, SQL function reference). Advisory-only in v0.64.0; will be enforced in v0.67.0.
+
+- **API drift check script** (TRUTH-07): `scripts/check_api_drift.sh` — extracts exported function names from `#[pg_extern]` annotations in `src/` and checks that each appears in at least one documentation file. Advisory-only; catches the v0.63 Citus signature drift pattern.
+
+- **`just assess-release`** (TRUTH-08): One-command release quality gate that runs migration headers lint, GitHub Actions pinning lint, SECURITY DEFINER lint, roadmap evidence check, API drift check, and version sync check. Optionally generates a release evidence report with `just assess-release VERSION`.
+
+- **Release evidence dashboard** (TRUTH-09): `scripts/generate_release_evidence.sh` generates `target/release-evidence/<version>/summary.json` and `summary.md`. Release workflow uploads the artifact to GitHub Actions and attaches it to the GitHub release.
+
+- **Degradation semantics guide** (TRUTH-10): New documentation page `docs/src/reference/degradation.md` documents expected degraded behavior, return values, warning codes, readiness behavior, and planned implementation milestones for every optional feature.
+
+- **pg_regress test** `feature_status.sql`: Asserts that `feature_status()` returns rows, all statuses are from the approved taxonomy, and specific partial features report honest status values.
+
+---
+
 ## [0.63.0] — 2025 — SPARQL CONSTRUCT Writeback Rules
 
 **Implements the v0.63.0 roadmap: SPARQL CONSTRUCT writeback rules (CWB-01 through CWB-11), raw-to-canonical pipelines, incremental delta maintenance via Delete-Rederive (DRed), pipeline stratification with cycle detection, and Citus scalability improvements CITUS-30 through CITUS-37.**
