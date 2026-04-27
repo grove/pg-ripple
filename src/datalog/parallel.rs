@@ -337,7 +337,8 @@ pub fn preallocate_sid_ranges(
 /// function with the compiled SQL for that group.  A failed group's delta
 /// tables are left empty for this iteration (the group will be retried next
 /// round), while successful groups commit their results immediately.
-#[allow(dead_code)] // called from coordinator::execute_stratum_batch
+// v0.60.0 A7-2: removed #[allow(dead_code)] — function is actively called
+// from coordinator::execute_stratum_batch.
 pub fn execute_with_savepoint(stmts: &[String], savepoint_name: &str) -> bool {
     use pgrx::Spi;
 

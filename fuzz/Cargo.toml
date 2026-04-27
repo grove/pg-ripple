@@ -73,3 +73,22 @@ name = "http_request"
 path = "fuzz_targets/http_request.rs"
 test = false
 doc = false
+
+# v0.60.0 A7-1 — new fuzz targets: GeoSPARQL WKT, R2RML, LLM prompt sanitizer
+[[bin]]
+name = "geosparql_wkt"
+path = "fuzz_targets/geosparql_wkt.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "r2rml_mapping"
+path = "fuzz_targets/r2rml_mapping.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "llm_prompt_builder"
+path = "fuzz_targets/llm_prompt_builder.rs"
+test = false
+doc = false

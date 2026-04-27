@@ -1,0 +1,6 @@
+[toolchain]
+# v0.60.0 N7-1: Pin Rust toolchain to a stable release for reproducible builds.
+# Dependabot (package-ecosystem: github-actions) will open a PR when a new
+# stable version is available.
+channel = "stable"
+components = ["rustfmt", "clippy"]

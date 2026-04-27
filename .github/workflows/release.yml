@@ -258,19 +258,13 @@ jobs:
           provenance: true
           sbom: true
 
-      # Retry once on transient GHCR 5xx / network errors (e.g. 502 layer-blob write)
-      - name: Build and push (retry)
-        if: steps.docker_push.outcome == 'failure'
-        uses: docker/build-push-action@v7
+      # v0.60.0 N7-4: Docker CVE scan — fail release if HIGH/CRITICAL CVEs found.
+      - name: Run Trivy vulnerability scan
+        uses: aquasecurity/trivy-action@v0.30.0
         with:
-          context: .
-          push: true
-          build-args: |
-            PGRX_VERSION=${{ env.PGRX_VERSION }}
-          tags: |
-            ghcr.io/grove/pg-ripple:${{ steps.version.outputs.version }}
-            ghcr.io/grove/pg-ripple:latest
-          cache-from: type=gha
-          cache-to:   type=gha,mode=max
-          provenance: true
-          sbom: true
+          image-ref: ghcr.io/grove/pg-ripple:${{ steps.version.outputs.version }}
+          format: table
+          exit-code: '1'
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+

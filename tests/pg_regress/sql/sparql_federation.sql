@@ -145,3 +145,42 @@ SELECT pg_ripple.remove_endpoint('http://127.0.0.1:19999/sparql');
 
 SELECT COUNT(*) AS endpoints_after_cleanup
 FROM _pg_ripple.federation_endpoints;
+
+-- ─── B7-4: SERVICE SILENT + circuit-breaker interaction ──────────────────────
+-- v0.60.0: SERVICE SILENT must correctly swallow PT605 (circuit-breaker-open)
+-- and return the empty solution sequence per SPARQL 1.1 §8.3.1.
+
+-- Register a fresh endpoint so the circuit-breaker starts in the closed state.
+SELECT pg_ripple.register_endpoint('http://cb-silent.test/sparql');
+
+-- Trip the circuit-breaker by forcing an error threshold.
+-- Set a very short timeout so a connection to a non-existent host fails fast
+-- and the circuit-breaker trips after one failure.
+SET pg_ripple.federation_timeout = 50;
+SET pg_ripple.circuit_breaker_threshold = 1;
+
+-- First call (non-SILENT) — trips the circuit-breaker.
+DO $$
+BEGIN
+    BEGIN
+        PERFORM pg_ripple.sparql(
+            'SELECT ?s WHERE { SERVICE <http://cb-silent.test/sparql> { ?s ?p ?o } }'
+        );
+    EXCEPTION WHEN OTHERS THEN
+        -- Expected failure — circuit-breaker now trips after threshold=1 failure.
+        NULL;
+    END;
+END $$;
+
+-- Second call with SERVICE SILENT — circuit-breaker is open (PT605).
+-- SILENT must return empty results, not raise an error.
+SELECT pg_ripple.sparql(
+    'SELECT ?s WHERE { SERVICE SILENT <http://cb-silent.test/sparql> { ?s ?p ?o } }'
+) AS silent_cb_result;
+
+SELECT 'SERVICE SILENT swallows PT605 circuit-breaker-open' AS b7_4_check;
+
+-- Reset circuit-breaker GUCs and cleanup.
+RESET pg_ripple.federation_timeout;
+RESET pg_ripple.circuit_breaker_threshold;
+SELECT pg_ripple.remove_endpoint('http://cb-silent.test/sparql');

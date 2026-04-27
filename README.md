@@ -298,6 +298,34 @@ pg_ripple is built from the ground up for performance inside PostgreSQL.
 
 ---
 
+## pg_trickle dependency matrix
+
+[pg_trickle](https://github.com/grove/pg-trickle) is an optional companion extension.
+The table below shows which pg_ripple features require pg_trickle and which ship standalone.
+
+| Feature | Ships standalone | Requires pg_trickle |
+|---|---|---|
+| SPARQL SELECT / ASK / CONSTRUCT / DESCRIBE | ✓ | — |
+| SPARQL UPDATE (INSERT/DELETE/CLEAR/LOAD) | ✓ | — |
+| Property paths (ZeroOrMorePath, InversePath, …) | ✓ | — |
+| Federation (SERVICE, parallel, cost-based) | ✓ | — |
+| SHACL validation (Core + SPARQL constraints) | ✓ | — |
+| Datalog rules (RDFS/OWL RL, seminaïve, magic sets) | ✓ | — |
+| HTAP merge worker | ✓ | — |
+| Bulk load (Turtle / N-Triples / RDF-XML) | ✓ | — |
+| GeoSPARQL 1.1 (geof:distance, ST_DWithin, …) | ✓ | — |
+| Full-text search (RDF-FTS) | ✓ | — |
+| Vector + SPARQL hybrid search | ✓ | — |
+| pg_dump / pg_restore round-trip | ✓ | — |
+| CDC subscriptions (NOTIFY on triple changes) | ✓ | — |
+| Incremental SPARQL views (IVM) | — | ✓ required |
+| ExtVP materialised statistics | — | ✓ required |
+| Live auto-updating CONSTRUCT views | — | ✓ required |
+| Citus rebalance pause/resume during CDC | ✓ (NOTIFY signal) | ✓ (pause/resume logic) |
+| Read-replica routing for federation | ✓ | — |
+
+---
+
 ## Getting Started
 
 ### Prerequisites
