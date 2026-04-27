@@ -108,7 +108,7 @@
 | Version | Theme | Status | Scope | Full details |
 |---------|-------|--------|-------|--------------|
 | [v0.60.0](roadmap/v0.60.0.md) | Close all v1.0.0 blockers: HTAP cutover atomic swap, Actions SHA pinning, SECURITY DEFINER CI lint, new fuzz targets (GeoSPARQL WKT, R2RML, LLM prompt), `/ready` endpoint, `geof:distance`, merge-throughput trend artifact, pg_dump round-trip CI test, LangChain tool package | Planned | Large | [Full details](roadmap/v0.60.0-full.md) |
-| [v0.61.0](roadmap/v0.61.0.md) | Ecosystem depth: per-named-graph RLS, `explain_inference()` derivation tree, GDPR `erase_subject()`, dbt adapter, Kafka CDC sink, SHACL-AF rule execution, OTLP traceparent propagation; Citus object-based shard pruning and direct-shard bulk-load path | Planned | Large | [Full details](roadmap/v0.61.0-full.md) |
+| [v0.61.0](roadmap/v0.61.0.md) | Ecosystem depth: per-named-graph RLS, `explain_inference()` derivation tree, GDPR `erase_subject()`, dbt adapter, SHACL-AF rule execution, OTLP traceparent propagation; Citus object-based shard pruning and direct-shard bulk-load path | Planned | Large | [Full details](roadmap/v0.61.0-full.md) |
 | [v0.62.0](roadmap/v0.62.0.md) | Query frontier: Apache Arrow Flight bulk export, WCOJ planner integration, visual graph explorer in `pg_ripple_http`, `clippy --deny warnings` CI gate; Citus property-path push-down, `vp_rare` cold-entry archival, tiered dictionary cache | Planned | Very Large | [Full details](roadmap/v0.62.0-full.md) |
 | [v0.63.0](roadmap/v0.63.0.md) | SPARQL CONSTRUCT writeback rules (raw-to-canonical pipelines, incremental delta maintenance, Delete-Rederive, pipeline stratification); Citus scalability: SERVICE result shard pruning, streaming fan-out cursor, HyperLogLog `COUNT(DISTINCT)`, batched dictionary encoding, per-worker SID tables, non-blocking VP promotion, per-graph RLS CI gate, per-worker BRIN summarise | Planned | Large | [Full details](roadmap/v0.63.0-full.md) |
 
@@ -143,7 +143,7 @@ v0.57–v0.59    ─── Reasoning & sharding: OWL 2 EL/QL, KG embeddings, tem
 v0.60          ─── Production hardening sprint: HTAP atomic swap, Actions SHA pinning, SECURITY DEFINER lint,
                │   new fuzz targets, geof:distance, LangChain tool, pg_dump round-trip CI test
        │
-v0.61          ─── Ecosystem depth: per-graph RLS, explain_inference, GDPR erasure, dbt, Kafka CDC,
+v0.61          ─── Ecosystem depth: per-graph RLS, explain_inference, GDPR erasure, dbt,
                │   SHACL-AF execution, OTLP traceparent; Citus object shard pruning, direct bulk-load
        │
 v0.62          ─── Query frontier: Arrow Flight export, WCOJ planner integration, visual graph explorer;
@@ -178,7 +178,7 @@ and PROV-O provenance. v0.60.0 through v0.62.0 are the pre-1.0 hardening and
 ecosystem sprint: v0.60.0 closes the remaining v1.0.0 blockers identified in
 PLAN_OVERALL_ASSESSMENT_7 (HTAP atomic swap, CI supply-chain hardening, fuzz target
 gaps, `geof:distance`); v0.61.0 delivers ecosystem depth (per-graph RLS, inference
-explainability, GDPR erasure, dbt adapter, Kafka CDC sink, SHACL-AF execution);
+explainability, GDPR erasure, dbt adapter, SHACL-AF execution);
 v0.62.0 delivers the query frontier (Arrow Flight bulk export, WCOJ planner
 integration, visual graph explorer) plus Citus scalability improvements (property-path
 push-down, `vp_rare` cold-entry archival, tiered dictionary cache). v0.63.0 introduces
