@@ -93,7 +93,7 @@
 | [v0.53.0](roadmap/v0.53.0.md) | SHACL-SPARQL, `COPY rdf FROM`, RAG hardening, CDC lifecycle events, architecture module splits, OpenAPI spec | ✅ Released | Medium | [Full details](roadmap/v0.53.0-full.md) |
 | [v0.54.0](roadmap/v0.54.0.md) | PG18 logical-decoding RDF replication, Helm chart, CloudNativePG image volume, merge/vector-index performance baselines | ✅ Released | Medium | [Full details](roadmap/v0.54.0-full.md) |
 
-### Quality, Security & Ecosystem (v0.55.0 – v0.58.0)
+### Quality, Security & Ecosystem (v0.55.0 – v0.59.0)
 
 | Version | Theme | Status | Scope | Full details |
 |---------|-------|--------|-------|--------------|
