@@ -19,6 +19,11 @@
 #   For production deployments, use password-based authentication instead.
 
 # ── Build stage ───────────────────────────────────────────────────────────────
+# Build a fresh gosu binary from source using the latest Go to eliminate
+# the stdlib CVEs shipped in the postgres:18-bookworm base image's gosu.
+FROM golang:latest AS gosu-builder
+RUN go install github.com/tianon/gosu@v1.17
+
 # pgrx 0.18 requires Rust stable. Use rust:1-bookworm which tracks the latest
 # stable 1.x release.
 FROM rust:1-bookworm AS builder
@@ -80,6 +85,10 @@ FROM postgres:18-bookworm
 LABEL org.opencontainers.image.source="https://github.com/grove/pg-ripple"
 LABEL org.opencontainers.image.description="PostgreSQL 18 with pg_ripple RDF/SPARQL extension"
 LABEL org.opencontainers.image.licenses="Apache-2.0"
+
+# Replace the base image's gosu (compiled with old Go stdlib) with our freshly
+# built version to eliminate HIGH/CRITICAL stdlib CVEs (CVE-2025-68121 et al.).
+COPY --from=gosu-builder /go/bin/gosu /usr/local/bin/gosu
 
 # Copy shared library
 COPY --from=builder \
