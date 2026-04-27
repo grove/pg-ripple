@@ -1157,3 +1157,18 @@ pgrx::extension_sql!(
     name = "v061_schema_additions",
     requires = ["v059_schema_version_stamp"]
 );
+
+// ─── v0.62.0 schema additions ─────────────────────────────────────────────────
+// Schema change: access_count column on _pg_ripple.dictionary (CITUS-26 tiered dict).
+// All other v0.62.0 changes are pure Rust (WCOJ planner, Arrow Flight, Citus SRFs).
+
+pgrx::extension_sql!(
+    "-- v0.62.0: Tiered dictionary — access_count column (CITUS-26).
+     ALTER TABLE _pg_ripple.dictionary
+         ADD COLUMN IF NOT EXISTS access_count BIGINT NOT NULL DEFAULT 0;
+
+     INSERT INTO _pg_ripple.schema_version (version, upgraded_from, installed_at)
+         VALUES ('0.62.0', '0.61.0', clock_timestamp());",
+    name = "v062_schema_additions",
+    requires = ["v061_schema_additions"]
+);

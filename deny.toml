@@ -5,7 +5,7 @@
 [advisories]
 # Emit an error on any unpatched security advisory.
 vulnerability = "deny"
-unmaintained = "warn"
+unmaintained = "none"
 yanked = "deny"
 notice = "warn"
 

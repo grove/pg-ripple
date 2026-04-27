@@ -19,7 +19,7 @@ SET search_path TO pg_ripple, public;
 -- 1a. dictionary_tier_threshold default = -1 (disabled).
 SHOW pg_ripple.dictionary_tier_threshold;
  pg_ripple.dictionary_tier_threshold 
---------------------------------------
+-------------------------------------
  -1
 (1 row)
 
@@ -41,7 +41,7 @@ SHOW pg_ripple.datalog_citus_dispatch;
 SET pg_ripple.dictionary_tier_threshold = 100;
 SHOW pg_ripple.dictionary_tier_threshold;
  pg_ripple.dictionary_tier_threshold 
---------------------------------------
+-------------------------------------
  100
 (1 row)
 
@@ -68,8 +68,8 @@ SELECT (convert_from(
     pg_ripple.export_arrow_flight('DEFAULT'),
     'UTF8'
 )::jsonb)->>'type' AS ticket_type;
-   ticket_type    
-------------------
+   ticket_type   
+-----------------
  arrow_flight_v1
 (1 row)
 
@@ -80,7 +80,7 @@ SELECT EXISTS (
     WHERE n.nspname = 'pg_ripple' AND p.proname = 'export_arrow_flight'
 ) AS export_arrow_flight_exists;
  export_arrow_flight_exists 
------------------------------
+----------------------------
  t
 (1 row)
 
