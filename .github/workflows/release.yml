@@ -208,17 +208,7 @@ jobs:
       - name: Verify SBOM version matches Cargo.toml (v0.67.0 SBOM-01)
         run: |
           CARGO_VERSION=$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')
-          SBOM_VERSION=$(python3 -c "
-import json, sys
-with open('sbom.json') as f:
-    sbom = json.load(f)
-# CycloneDX 1.4+ stores version under metadata.component.version
-version = sbom.get('metadata', {}).get('component', {}).get('version', '')
-if not version:
-    # fallback: check top-level version field
-    version = sbom.get('version', '')
-print(version.lstrip('v'))
-")
+          SBOM_VERSION=$(jq -r '(.metadata.component.version // .version // "") | ltrimstr("v")' sbom.json)
           echo "Cargo.toml version: $CARGO_VERSION"
           echo "SBOM component version: $SBOM_VERSION"
           if [ "$CARGO_VERSION" != "$SBOM_VERSION" ]; then
