@@ -128,35 +128,30 @@ field `"temp"` but mean very different things. By converting to RDF we attach
 well-defined, globally unique meanings to each field — in this case using the
 [SAREF IoT ontology](https://saref.etsi.org/).
 
-A trigger on `sensor_inbox` fires for every inserted row and calls
-`pg_ripple.load_ntriples()` to store the event as a set of typed RDF triples:
+The `pg_ripple.json_to_ntriples_and_load()` function (v0.52.0+) does this in one
+call. Its `context` parameter works like a JSON-LD `@context`: it maps the incoming
+JSON field names to the full predicate IRIs you want to store. The relay delivers
+plain JSON; the IRI mapping is applied at load time inside PostgreSQL, so the
+original message is never modified.
+
+A trigger on `sensor_inbox` fires for every inserted row:
 
 ```sql
 CREATE OR REPLACE FUNCTION transform_sensor_to_rdf()
 RETURNS TRIGGER LANGUAGE plpgsql AS $$
-DECLARE
-    device_iri TEXT;
-    obs_iri    TEXT;
-    ntriples   TEXT;
 BEGIN
-    -- Mint stable IRIs from the source identifiers
-    device_iri := '<https://example.org/device/' || (NEW.payload->>'device') || '>';
-    obs_iri    := '<https://example.org/observation/' || NEW.event_id || '>';
-
-    -- Build N-Triples: one statement per fact
-    ntriples :=
-        obs_iri || ' <http://www.w3.org/1999/02/22-rdf-syntax-ns#type>'
-                || ' <https://saref.etsi.org/core/Measurement> .' || E'\n'
-     || obs_iri || ' <https://saref.etsi.org/core/measurementMadeBy> '
-                || device_iri || ' .' || E'\n'
-     || obs_iri || ' <https://saref.etsi.org/core/hasValue> "'
-                || (NEW.payload->>'temp')
-                || '"^^<http://www.w3.org/2001/XMLSchema#decimal> .' || E'\n'
-     || obs_iri || ' <https://saref.etsi.org/core/hasTimestamp> "'
-                || (NEW.payload->>'ts')
-                || '"^^<http://www.w3.org/2001/XMLSchema#dateTime> .';
-
-    PERFORM pg_ripple.load_ntriples(data => ntriples, strict => false);
+    PERFORM pg_ripple.json_to_ntriples_and_load(
+        payload     => NEW.payload,
+        subject_iri => 'https://example.org/observation/' || NEW.event_id,
+        type_iri    => 'https://saref.etsi.org/core/Measurement',
+        context     => '{
+            "@vocab":  "https://saref.etsi.org/core/",
+            "device":  "https://saref.etsi.org/core/measurementMadeBy",
+            "temp":    "https://saref.etsi.org/core/hasValue",
+            "ts":      "https://saref.etsi.org/core/hasTimestamp",
+            "unit":    "https://qudt.org/schema/qudt/unit"
+        }'::jsonb
+    );
     RETURN NEW;
 END;
 $$;
@@ -165,6 +160,19 @@ CREATE TRIGGER sensor_to_rdf
 AFTER INSERT ON sensor_inbox
 FOR EACH ROW EXECUTE FUNCTION transform_sensor_to_rdf();
 ```
+
+The `context` object supports two resolution mechanisms:
+
+- **`@vocab`** — a default IRI prefix applied to every unmapped key. Any field
+  not explicitly listed gets expanded to `https://saref.etsi.org/core/{field}`.
+- **Explicit entries** — override specific keys with the exact IRI you want,
+  regardless of the `@vocab` default.
+
+Nested JSON objects become blank nodes. Arrays produce one triple per element.
+`null` values are silently skipped. This means you can point the relay at an
+arbitrary third-party JSON event and describe the entire mapping in one JSONB
+literal — no code changes needed when a vendor renames a field, only a context
+update.
 
 After the trigger fires, those four facts exist in the triplestore. If you
 queried them back as JSON-LD immediately after load, you would see:
@@ -420,40 +428,59 @@ SELECT pg_ripple.create_subscription(
 );
 ```
 
-Combine this with a SPARQL `CONSTRUCT` view to shape the outbound payload into
-any structure the downstream consumer expects, rather than forwarding raw
-subject/predicate/object tuples:
+Combine this with `export_jsonld_framed()` to shape the outbound payload into
+exactly the JSON structure the downstream consumer expects. A JSON-LD **frame**
+is a template you write once that describes the desired nesting and field names.
+pg_ripple translates it to a SPARQL CONSTRUCT query internally, executes it,
+applies the W3C embedding algorithm, and compacts the result with your `@context`:
 
 ```sql
-SELECT pg_ripple.sparql('
-    CONSTRUCT {
-        ?device ex:alertLevel "HIGH" ;
-                schema:name   ?name ;
-                ex:latestTemp ?temp .
-    }
-    WHERE {
-        ?obs ex:tempAlert ?device ;
-             saref:hasValue ?temp .
-        OPTIONAL { ?device schema:name ?name }
-    }
-');
+SELECT pg_ripple.export_jsonld_framed(
+    frame => '{
+        "@context": {
+            "ex":     "https://example.org/",
+            "schema": "https://schema.org/",
+            "saref":  "https://saref.etsi.org/core/",
+            "xsd":    "http://www.w3.org/2001/XMLSchema#",
+            "alertLevel": "ex:alertLevel",
+            "name":       "schema:name",
+            "latestTemp": "ex:latestTemp"
+        },
+        "@type": "ex:Alert",
+        "alertLevel": {},
+        "name": {},
+        "latestTemp": {}
+    }'::jsonb
+);
 ```
 
-The JSON-LD output from this view is rich and ready to consume:
+The framed output is a clean, nested JSON-LD document ready to drop straight
+into the pg-trickle outbox:
 
 ```json
 {
   "@context": {
     "ex":     "https://example.org/",
     "schema": "https://schema.org/",
-    "xsd":    "http://www.w3.org/2001/XMLSchema#"
+    "xsd":    "http://www.w3.org/2001/XMLSchema#",
+    "alertLevel": "ex:alertLevel",
+    "name":       "schema:name",
+    "latestTemp": "ex:latestTemp"
   },
-  "@id": "https://example.org/device/sensor-7",
-  "ex:alertLevel": "HIGH",
-  "schema:name":   "Boiler Room Sensor 7",
-  "ex:latestTemp": { "@value": "45.2", "@type": "xsd:decimal" }
+  "@graph": [
+    {
+      "@id":       "https://example.org/device/sensor-7",
+      "@type":     "ex:Alert",
+      "alertLevel": "HIGH",
+      "name":       "Boiler Room Sensor 7",
+      "latestTemp": { "@value": "45.2", "@type": "xsd:decimal" }
+    }
+  ]
 }
 ```
+
+Use `jsonld_frame_to_sparql(frame => ...)` to inspect the generated CONSTRUCT
+query before running the full export — this is useful for performance tuning.
 
 **Best for**: Complex SPARQL-shaped payloads, scheduled reports, ad-hoc shapes.  
 **Trade-off**: Polling-based unless combined with a LISTEN/NOTIFY wake-up.
@@ -545,6 +572,144 @@ The `owl:sameAs` array shows the entity resolution result — this one record
 links the CRM, ERP, and support-ticket identities together. The `ex:riskScore`
 was derived by a Datalog rule from order history data. The `_relay_dedup_key`
 ensures the relay can handle restarts safely.
+
+---
+
+## JSON-LD mapping: inbound context and outbound framing
+
+JSON-LD mapping is the mechanism that lets pg_ripple act as a true semantic
+bridge: arbitrary JSON goes in, canonicalised knowledge graph triples are stored,
+and shaped JSON-LD comes out. The inbound and outbound sides each have a dedicated
+function.
+
+### Inbound — `json_to_ntriples_and_load()` with a context map
+
+When the relay delivers a raw JSON event, `pg_ripple.json_to_ntriples_and_load()`
+converts it to RDF triples in one step. The `context` parameter is a JSONB object
+that works like a JSON-LD `@context`:
+
+```
+Incoming JSON                    context map                     stored triples
+─────────────                    ───────────                     ──────────────
+{ "temp": 45.2, "device": ... }  "temp"  → saref:hasValue   →   <obs> saref:hasValue "45.2"^^xsd:decimal
+                                 "device"→ saref:madeby      →   <obs> saref:madeby <device-7>
+                                 @vocab  → saref:             →   unmapped keys get saref: prefix
+```
+
+It supports:
+- **`@vocab`** — default IRI prefix for all keys not explicitly listed.
+- **Explicit key-to-IRI mappings** — override specific fields with exact predicate IRIs.
+- **Nested objects** — become blank nodes with their own predicates resolved through the same context.
+- **Arrays** — produce one triple per element.
+- **`null` values** — silently skipped.
+
+The context is stored only in the trigger definition, not in the triplestore. When
+a source vendor renames a field, you update the context JSONB; no triples need to
+change.
+
+```sql
+-- Full context example for a heterogeneous event shape
+PERFORM pg_ripple.json_to_ntriples_and_load(
+    payload     => NEW.payload,
+    subject_iri => 'https://example.org/event/' || NEW.event_id,
+    type_iri    => 'https://schema.org/Event',
+    context     => '{
+        "@vocab":      "https://schema.org/",
+        "ts":          "https://schema.org/startDate",
+        "location":    "https://schema.org/location",
+        "description": "https://schema.org/description",
+        "external_id": "https://example.org/externalId"
+    }'::jsonb
+);
+```
+
+### Outbound — `export_jsonld_framed()` with a frame template
+
+On the way out, `pg_ripple.export_jsonld_framed()` (v0.17.0+) shapes the flat
+RDF into whatever nested JSON structure the downstream consumer expects. A
+**frame** is a JSON template that describes the desired structure; pg_ripple
+handles everything else:
+
+1. Translates the frame into a SPARQL CONSTRUCT query.
+2. Executes the query against the triplestore.
+3. Applies the W3C JSON-LD 1.1 embedding algorithm to produce nested nodes.
+4. Compacts IRI strings using the frame's `@context`.
+
+```
+stored triples               frame template                  outbound JSON-LD
+──────────────               ──────────────                  ───────────────
+<device> schema:name "X"     "@type": "schema:Device"        { "@type": "Device",
+<device> ex:temp 45.2        "name": {},                →      "name": "X",
+<device> ex:alert "HIGH"     "temp": {},                       "temp": 45.2,
+                             "alert": {}                        "alert": "HIGH" }
+```
+
+Use this inside the outbox bridge trigger to produce consumer-ready JSON-LD:
+
+```sql
+-- Write a framed JSON-LD event to the outbox every time an alert triple lands
+CREATE OR REPLACE FUNCTION bridge_alert_to_outbox()
+RETURNS TRIGGER LANGUAGE plpgsql AS $$
+DECLARE
+    framed JSONB;
+BEGIN
+    framed := pg_ripple.export_jsonld_framed(
+        frame => '{
+            "@context": {
+                "schema": "https://schema.org/",
+                "ex":     "https://example.org/",
+                "xsd":    "http://www.w3.org/2001/XMLSchema#",
+                "name":       "schema:name",
+                "latestTemp": "ex:latestTemp",
+                "alertLevel": "ex:alertLevel"
+            },
+            "@type": "ex:Alert",
+            "name": {},
+            "latestTemp": {},
+            "alertLevel": {}
+        }'::jsonb
+    );
+
+    INSERT INTO enriched_events (event_type, payload)
+    VALUES ('alert', framed);
+
+    RETURN NEW;
+END;
+$$;
+```
+
+The downstream consumer receives a document shaped exactly to the frame — with
+short, readable property names from the `@context`, nested objects where the
+frame requests them, and a self-describing `@context` block so it can be parsed
+without any knowledge of pg_ripple's internals.
+
+### Debugging the frame translation
+
+Before running `export_jsonld_framed()` in production, use
+`jsonld_frame_to_sparql()` to see the SPARQL CONSTRUCT query that will be
+generated. This is useful for verifying that the frame matches your stored
+triple shapes and for identifying any missing patterns before they cause
+silent empty results:
+
+```sql
+SELECT pg_ripple.jsonld_frame_to_sparql(
+    frame => '{
+        "@context": { "schema": "https://schema.org/" },
+        "@type":    "schema:Device",
+        "schema:name": {}
+    }'::jsonb
+);
+```
+
+### Symmetric round-trip
+
+The two functions form a symmetric pair: `json_to_ntriples_and_load()` maps
+field names from the source JSON vocabulary to RDF predicates on the way in;
+`export_jsonld_framed()` maps those same predicates back to the field names and
+nested structure the consumer needs on the way out. You can use different
+`@context` definitions for different consumers — the triplestore is the stable
+canonical representation in the middle, and the vocabularies at each edge are
+entirely configurable.
 
 ---
 
