@@ -82,60 +82,63 @@ jobs:
             RESULT_FILE=benchmark_results.json \
             bash benchmarks/ci_benchmark.sh
 
-      # F-5 (v0.55.0): Merge throughput baseline gate — fails if merge rate
-      # drops below the p95 floor recorded in merge_throughput_baselines.json.
+      # F-5 (v0.55.0, fixed v0.67.0 BENCH-01): Merge throughput baseline gate.
+      # Fails if merge rate drops below the p95 floor in merge_throughput_baselines.json.
       - name: Run merge throughput benchmark (F-5)
+        continue-on-error: false
         run: |
           PGHOST=localhost PGPORT=28818 PGUSER="$USER" PGDATABASE=postgres \
-            bash benchmarks/merge_throughput.sql | tee merge_throughput_raw.txt || true
+            pgbench -h localhost -p 28818 -U "$USER" -d postgres \
+            -f benchmarks/merge_throughput.sql -t 1 | tee merge_throughput_raw.txt
           python3 - <<'PYEOF'
-          import json, sys, re, pathlib
-          baselines = json.loads(pathlib.Path("benchmarks/merge_throughput_baselines.json").read_text())
-          raw = pathlib.Path("merge_throughput_raw.txt").read_text()
-          # parse lines like: workers=1 throughput=500000
-          results = {}
-          for line in raw.splitlines():
-              m = re.search(r"workers=(\d+)\s+throughput=(\d+)", line)
-              if m:
-                  results[m.group(1)] = int(m.group(2))
-          if not results:
-              print("No merge throughput results found — skipping gate")
-              sys.exit(0)
-          failed = False
-          for workers, measured in results.items():
-              b = baselines.get("merge_workers", {}).get(workers)
-              if not b:
-                  continue
-              floor = int(b.get("p95", 0))
-              if measured < floor:
-                  print(f"FAIL workers={workers}: {measured} < p95 floor {floor} triples/s")
-                  failed = True
-              else:
-                  print(f"PASS workers={workers}: {measured} >= p95 floor {floor} triples/s")
-          sys.exit(1 if failed else 0)
-          PYEOF
+import json, sys, re, pathlib
+baselines = json.loads(pathlib.Path("benchmarks/merge_throughput_baselines.json").read_text())
+raw = pathlib.Path("merge_throughput_raw.txt").read_text()
+# parse lines like: workers=1 throughput=500000
+results = {}
+for line in raw.splitlines():
+    m = re.search(r"workers=(\d+)\s+throughput=(\d+)", line)
+    if m:
+        results[m.group(1)] = int(m.group(2))
+if not results:
+    print("ERROR: no merge throughput results found — benchmark output could not be parsed", file=sys.stderr)
+    sys.exit(1)
+failed = False
+for workers, measured in results.items():
+    b = baselines.get("merge_workers", {}).get(workers)
+    if not b:
+        continue
+    floor = int(b.get("p95", 0))
+    if measured < floor:
+        print(f"FAIL workers={workers}: {measured} < p95 floor {floor} triples/s")
+        failed = True
+    else:
+        print(f"PASS workers={workers}: {measured} >= p95 floor {floor} triples/s")
+sys.exit(1 if failed else 0)
+PYEOF
 
-      # F-6 (v0.55.0): Vector index build/recall baseline gate.
+      # F-6 (v0.55.0, fixed v0.67.0 BENCH-01): Vector index build/recall baseline gate.
       - name: Run vector index baseline benchmark (F-6)
+        continue-on-error: false
         run: |
           PGHOST=localhost PGPORT=28818 PGUSER="$USER" PGDATABASE=postgres \
             psql -d postgres -f benchmarks/vector_index_compare.sql \
-            | tee vector_bench_raw.txt || true
+            | tee vector_bench_raw.txt
           python3 - <<'PYEOF'
-          import re, sys, pathlib
-          raw = pathlib.Path("vector_bench_raw.txt").read_text()
-          # expect a line like: recall=0.95 build_sec=12.3
-          recall_m = re.search(r"recall=([\d.]+)", raw)
-          if not recall_m:
-              print("No vector recall result found — skipping gate")
-              sys.exit(0)
-          recall = float(recall_m.group(1))
-          if recall < 0.90:
-              print(f"FAIL vector recall {recall:.3f} < 0.90 floor")
-              sys.exit(1)
-          print(f"PASS vector recall {recall:.3f} >= 0.90 floor")
-          sys.exit(0)
-          PYEOF
+import re, sys, pathlib
+raw = pathlib.Path("vector_bench_raw.txt").read_text()
+# expect a line like: recall=0.95 build_sec=12.3
+recall_m = re.search(r"recall=([\d.]+)", raw)
+if not recall_m:
+    print("ERROR: no vector recall result found in benchmark output", file=sys.stderr)
+    sys.exit(1)
+recall = float(recall_m.group(1))
+if recall < 0.90:
+    print(f"FAIL vector recall {recall:.3f} < 0.90 floor")
+    sys.exit(1)
+print(f"PASS vector recall {recall:.3f} >= 0.90 floor")
+sys.exit(0)
+PYEOF
 
       - name: Upload benchmark results
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7

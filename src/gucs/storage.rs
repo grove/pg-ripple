@@ -181,3 +181,15 @@ pub static ARROW_FLIGHT_SECRET: pgrx::GucSetting<Option<std::ffi::CString>> =
 /// GUC: Arrow Flight ticket validity in seconds (v0.66.0 FLIGHT-01).
 /// Default: 3600 (1 hour).
 pub static ARROW_FLIGHT_EXPIRY_SECS: pgrx::GucSetting<i32> = pgrx::GucSetting::<i32>::new(3600);
+
+// ─── v0.67.0 Arrow Flight GUCs ───────────────────────────────────────────────
+
+/// GUC: when `on`, unsigned Arrow Flight tickets (sig = "unsigned") are accepted
+/// for local development. Default `off` — production must have a signed secret.
+/// (v0.67.0 FLIGHT-SEC-01)
+pub static ARROW_UNSIGNED_TICKETS_ALLOWED: pgrx::GucSetting<bool> =
+    pgrx::GucSetting::<bool>::new(false);
+
+/// GUC: number of rows per Arrow record batch when streaming export.
+/// Default: 1000. (v0.67.0 FLIGHT-SEC-02)
+pub static ARROW_BATCH_SIZE: pgrx::GucSetting<i32> = pgrx::GucSetting::<i32>::new(1000);

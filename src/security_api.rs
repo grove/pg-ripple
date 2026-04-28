@@ -5,6 +5,12 @@
 //! - `grant_graph_access()` — create an RLS policy granting a role access to a named graph.
 //! - `revoke_graph_access()` — drop an RLS policy revoking a role's access to a named graph.
 //! - `erase_subject()` — GDPR-style erasure: atomically delete all triples with `s = encode(iri)`.
+//!
+//! # v0.67.0 RLS-01: VP table RLS coverage
+//!
+//! RLS is now applied to dedicated VP tables (delta, main) at creation time,
+//! on promotion, and when grant/revoke is called.  Previously only `vp_rare`
+//! was covered.
 
 // ─── Internal helpers ─────────────────────────────────────────────────────────
 
@@ -12,6 +18,89 @@ fn graph_iri_to_policy_suffix(graph_iri: &str) -> String {
     // Create a stable short suffix from the IRI for use in policy names.
     use xxhash_rust::xxh3::xxh3_64;
     format!("{:016x}", xxh3_64(graph_iri.as_bytes()))
+}
+
+/// Returns `true` if graph-level RLS has been enabled (the sentinel row exists).
+fn is_rls_enabled() -> bool {
+    pgrx::Spi::get_one::<bool>(
+        "SELECT EXISTS( \
+           SELECT 1 FROM _pg_ripple.graph_access \
+           WHERE role_name = '__rls_enabled__' AND graph_id = -1 \
+         )",
+    )
+    .unwrap_or(Some(false))
+    .unwrap_or(false)
+}
+
+/// Apply graph-level RLS policies to a dedicated VP table (delta or main).
+///
+/// Enables row-level security on the table and creates policies for every
+/// `(role, graph_id, privilege)` pair currently in `_pg_ripple.graph_access`.
+/// Called from `ensure_htap_tables` and `promote_predicate` (RLS-01).
+pub(crate) fn apply_rls_to_vp_table(table: &str) {
+    if !is_rls_enabled() {
+        return;
+    }
+
+    // Enable RLS on the table.
+    let _ = pgrx::Spi::run_with_args(
+        &format!("ALTER TABLE {table} ENABLE ROW LEVEL SECURITY"),
+        &[],
+    );
+
+    // Enumerate existing grants and create matching policies.
+    let rows: Vec<(String, i64, String)> = pgrx::Spi::connect(|client| {
+        let tbl = client
+            .select(
+                "SELECT role_name, graph_id, permission \
+                 FROM _pg_ripple.graph_access \
+                 WHERE role_name != '__rls_enabled__' AND graph_id > 0",
+                None,
+                &[],
+            )
+            .unwrap_or_else(|e| pgrx::error!("apply_rls_to_vp_table SPI error: {e}"));
+        tbl.map(|row| {
+            let role: String = row
+                .get_datum_by_ordinal(1)
+                .unwrap_or_else(|e| pgrx::error!("apply_rls: role read error: {e}"))
+                .value()
+                .unwrap_or_default()
+                .unwrap_or_default();
+            let gid: i64 = row
+                .get_datum_by_ordinal(2)
+                .unwrap_or_else(|e| pgrx::error!("apply_rls: gid read error: {e}"))
+                .value()
+                .unwrap_or_default()
+                .unwrap_or(0);
+            let perm: String = row
+                .get_datum_by_ordinal(3)
+                .unwrap_or_else(|e| pgrx::error!("apply_rls: perm read error: {e}"))
+                .value()
+                .unwrap_or_default()
+                .unwrap_or_default();
+            (role, gid, perm)
+        })
+        .collect()
+    });
+
+    for (role, graph_id, permission) in rows {
+        let pg_privilege = if permission.eq_ignore_ascii_case("SELECT") {
+            "SELECT"
+        } else {
+            "ALL"
+        };
+        // Use a hash of (table, role, graph_id) for a unique policy name.
+        use xxhash_rust::xxh3::xxh3_64;
+        let key = format!("{table}:{role}:{graph_id}");
+        let suffix = format!("{:016x}", xxh3_64(key.as_bytes()));
+        let policy_name = format!("pg_ripple_vp_{role}_{suffix}");
+        let policy_sql = format!(
+            "CREATE POLICY IF NOT EXISTS {policy_name} ON {table} \
+             AS PERMISSIVE FOR {pg_privilege} TO {role} \
+             USING (g = {graph_id})"
+        );
+        let _ = pgrx::Spi::run_with_args(&policy_sql, &[]);
+    }
 }
 
 fn do_grant_graph_access(graph_iri: &str, role: &str, privilege: &str) {
@@ -45,9 +134,55 @@ fn do_grant_graph_access(graph_iri: &str, role: &str, privilege: &str) {
     pgrx::Spi::run_with_args(&policy_sql, &[]).unwrap_or_else(|e| {
         pgrx::warning!("grant_graph_access: policy creation failed: {e}");
     });
+
+    // RLS-01: also apply to all existing dedicated VP tables (delta + main).
+    apply_rls_policy_to_all_dedicated_tables(graph_id, role, &pg_privilege);
+}
+
+/// Apply an RLS policy for (graph_id, role, privilege) to every dedicated VP table.
+/// Called when grant_graph_access is invoked after promoted VP tables exist.
+fn apply_rls_policy_to_all_dedicated_tables(graph_id: i64, role: &str, pg_privilege: &str) {
+    let pred_ids: Vec<i64> = pgrx::Spi::connect(|client| {
+        let tbl = client
+            .select(
+                "SELECT id FROM _pg_ripple.predicates WHERE table_oid IS NOT NULL ORDER BY id",
+                None,
+                &[],
+            )
+            .unwrap_or_else(|e| pgrx::error!("grant_graph: enumerate predicates error: {e}"));
+        tbl.map(|row| {
+            row.get_datum_by_ordinal(1)
+                .unwrap_or_else(|e| pgrx::error!("grant_graph: pred_id read error: {e}"))
+                .value::<i64>()
+                .unwrap_or_default()
+                .unwrap_or(0)
+        })
+        .collect()
+    });
+
+    for pred_id in pred_ids {
+        for table_suffix in &["_delta", "_main"] {
+            let table = format!("_pg_ripple.vp_{pred_id}{table_suffix}");
+            let _ = pgrx::Spi::run_with_args(
+                &format!("ALTER TABLE {table} ENABLE ROW LEVEL SECURITY"),
+                &[],
+            );
+            use xxhash_rust::xxh3::xxh3_64;
+            let key = format!("{table}:{role}:{graph_id}");
+            let suffix = format!("{:016x}", xxh3_64(key.as_bytes()));
+            let pname = format!("pg_ripple_vp_{role}_{suffix}");
+            let psql = format!(
+                "CREATE POLICY IF NOT EXISTS {pname} ON {table} \
+                 AS PERMISSIVE FOR {pg_privilege} TO {role} \
+                 USING (g = {graph_id})"
+            );
+            let _ = pgrx::Spi::run_with_args(&psql, &[]);
+        }
+    }
 }
 
 fn do_revoke_graph_access(graph_iri: &str, role: &str) {
+    let graph_id = crate::dictionary::encode(graph_iri, crate::dictionary::KIND_IRI);
     let suffix = graph_iri_to_policy_suffix(graph_iri);
     let policy_name = format!("pg_ripple_graph_{role}_{suffix}");
 
@@ -55,6 +190,37 @@ fn do_revoke_graph_access(graph_iri: &str, role: &str) {
     pgrx::Spi::run_with_args(&drop_sql, &[]).unwrap_or_else(|e| {
         pgrx::warning!("revoke_graph_access: policy drop failed: {e}");
     });
+
+    // RLS-01: also revoke from all dedicated VP tables.
+    let pred_ids: Vec<i64> = pgrx::Spi::connect(|client| {
+        let tbl = client
+            .select(
+                "SELECT id FROM _pg_ripple.predicates WHERE table_oid IS NOT NULL ORDER BY id",
+                None,
+                &[],
+            )
+            .unwrap_or_else(|e| pgrx::error!("revoke_graph: enumerate predicates error: {e}"));
+        tbl.map(|row| {
+            row.get_datum_by_ordinal(1)
+                .unwrap_or_else(|e| pgrx::error!("revoke_graph: pred_id read error: {e}"))
+                .value::<i64>()
+                .unwrap_or_default()
+                .unwrap_or(0)
+        })
+        .collect()
+    });
+
+    for pred_id in pred_ids {
+        for table_suffix in &["_delta", "_main"] {
+            let table = format!("_pg_ripple.vp_{pred_id}{table_suffix}");
+            use xxhash_rust::xxh3::xxh3_64;
+            let key = format!("{table}:{role}:{graph_id}");
+            let vsuffix = format!("{:016x}", xxh3_64(key.as_bytes()));
+            let pname = format!("pg_ripple_vp_{role}_{vsuffix}");
+            let _ =
+                pgrx::Spi::run_with_args(&format!("DROP POLICY IF EXISTS {pname} ON {table}"), &[]);
+        }
+    }
 }
 
 /// Public wrapper for `do_grant_graph_access` used by tenant management (v0.57.0).

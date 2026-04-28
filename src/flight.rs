@@ -1,4 +1,5 @@
-//! Apache Arrow Flight bulk-export API (v0.62.0, signed tickets v0.66.0 FLIGHT-01).
+//! Apache Arrow Flight bulk-export API (v0.62.0, signed tickets v0.66.0 FLIGHT-01,
+//! security hardening v0.67.0 FLIGHT-SEC-01/02).
 //!
 //! Provides `pg_ripple.export_arrow_flight(graph_iri TEXT)` which returns an
 //! opaque Flight ticket (BYTEA) that can be redeemed against the
@@ -13,6 +14,14 @@
 //! - `nonce` — replay guard (random UUID from `gen_random_uuid()` via SPI)
 //! - `sig`   — HMAC-SHA256(canonical_payload, `pg_ripple.arrow_flight_secret`),
 //!   hex-encoded
+//!
+//! # v0.67.0 changes (FLIGHT-SEC-01)
+//!
+//! - Unsigned tickets (`sig = "unsigned"`) are rejected by default.
+//!   Set GUC `pg_ripple.arrow_unsigned_tickets_allowed = on` (or env var
+//!   `ARROW_UNSIGNED_TICKETS_ALLOWED=true`) for local development only.
+//! - `build_signed_ticket` errors when the secret is empty and unsigned
+//!   tickets are not explicitly allowed.
 //!
 //! The `pg_ripple_http` service validates the HMAC, expiry, and audience
 //! before serving any data.
@@ -32,6 +41,9 @@ type HmacSha256 = Hmac<Sha256>;
 /// - `secret`     — HMAC signing secret; use `pg_ripple.arrow_flight_secret`.
 /// - `expiry_secs`— ticket validity in seconds (default from GUC).
 /// - `nonce`      — replay-guard value (random UUID from SPI, or a test value).
+/// - `allow_unsigned` — when `true`, an empty secret produces an unsigned ticket
+///   (for local development only).  When `false` (default in production), an
+///   empty secret is a hard error.
 ///
 /// # Returns
 ///
@@ -42,6 +54,7 @@ pub fn build_signed_ticket(
     secret: &str,
     expiry_secs: u64,
     nonce: &str,
+    allow_unsigned: bool,
 ) -> Vec<u8> {
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -58,8 +71,15 @@ pub fn build_signed_ticket(
     );
 
     let sig = if secret.is_empty() {
-        // No secret configured: ticket is unsigned.  pg_ripple_http will reject
-        // signed-mode requests; pass --allow-unsigned to accept these.
+        if !allow_unsigned {
+            // FLIGHT-SEC-01: reject unsigned tickets unless explicitly enabled.
+            pgrx::error!(
+                "Arrow Flight ticket cannot be issued: pg_ripple.arrow_flight_secret is not set \
+                 and pg_ripple.arrow_unsigned_tickets_allowed is off. \
+                 Set a signing secret or enable unsigned tickets for development."
+            );
+        }
+        // Local development mode: produce an unsigned ticket.
         "unsigned".to_owned()
     } else {
         let mut mac = HmacSha256::new_from_slice(secret.as_bytes())
@@ -87,11 +107,14 @@ pub fn build_signed_ticket(
 /// Returns `Ok(graph_id)` when the ticket is valid.
 /// Returns `Err(reason)` when validation fails.
 /// Used by `pg_ripple_http` to verify tickets before streaming.
+///
+/// `allow_unsigned` should be `false` in production (FLIGHT-SEC-01).
 #[allow(dead_code)]
 pub fn validate_ticket(
     ticket: &serde_json::Value,
     secret: &str,
     now_secs: u64,
+    allow_unsigned: bool,
 ) -> Result<i64, String> {
     // Type check.
     if ticket.get("type").and_then(|v| v.as_str()) != Some("arrow_flight_v2") {
@@ -109,13 +132,23 @@ pub fn validate_ticket(
     if now_secs > exp {
         return Err(format!("ticket expired at {exp}, now {now_secs}"));
     }
-    // Signature check (skip if unsigned).
+    // Signature check.
     let sig = ticket
         .get("sig")
         .and_then(|v| v.as_str())
         .ok_or_else(|| "missing sig field".to_owned())?;
 
-    if sig != "unsigned" && !secret.is_empty() {
+    if sig == "unsigned" {
+        // FLIGHT-SEC-01: reject unsigned tickets in production mode.
+        if !allow_unsigned {
+            return Err(
+                "unsigned Arrow Flight ticket rejected — set ARROW_UNSIGNED_TICKETS_ALLOWED=true \
+                 for local development or configure a signing secret"
+                    .to_owned(),
+            );
+        }
+        // allow_unsigned = true: skip HMAC check for local development.
+    } else if !secret.is_empty() {
         let graph_iri = ticket
             .get("graph_iri")
             .and_then(|v| v.as_str())
@@ -161,20 +194,28 @@ pub fn export_arrow_flight_impl(graph_iri: &str) -> Vec<u8> {
         crate::dictionary::encode(graph_iri, crate::dictionary::KIND_IRI)
     };
 
-    // Read secret and expiry from GUCs.
+    // Read secret, expiry, and allow_unsigned from GUCs.
     let secret = crate::gucs::storage::ARROW_FLIGHT_SECRET
         .get()
         .as_ref()
         .and_then(|s| s.to_str().ok().map(str::to_owned))
         .unwrap_or_default();
     let expiry_secs = crate::gucs::storage::ARROW_FLIGHT_EXPIRY_SECS.get().max(1) as u64;
+    let allow_unsigned = crate::gucs::storage::ARROW_UNSIGNED_TICKETS_ALLOWED.get();
 
     // Generate a nonce via PostgreSQL's gen_random_uuid() for replay prevention.
     let nonce: String = pgrx::Spi::get_one::<String>("SELECT gen_random_uuid()::text")
         .unwrap_or(None)
         .unwrap_or_else(uuid_fallback);
 
-    build_signed_ticket(graph_iri, graph_id, &secret, expiry_secs, &nonce)
+    build_signed_ticket(
+        graph_iri,
+        graph_id,
+        &secret,
+        expiry_secs,
+        &nonce,
+        allow_unsigned,
+    )
 }
 
 /// Fallback nonce when SPI is unavailable (unit tests).
@@ -219,7 +260,8 @@ mod tests {
 
     #[test]
     fn test_signed_ticket_valid() {
-        let ticket_bytes = build_signed_ticket("DEFAULT", 0, "test-secret", 3600, "test-nonce-1");
+        let ticket_bytes =
+            build_signed_ticket("DEFAULT", 0, "test-secret", 3600, "test-nonce-1", false);
         let ticket: serde_json::Value = serde_json::from_slice(&ticket_bytes).unwrap();
         assert_eq!(ticket["graph_id"], 0i64);
         assert_eq!(ticket["type"], "arrow_flight_v2");
@@ -230,20 +272,22 @@ mod tests {
 
     #[test]
     fn test_signed_ticket_validate_ok() {
-        let ticket_bytes = build_signed_ticket("DEFAULT", 0, "test-secret", 3600, "test-nonce-2");
+        let ticket_bytes =
+            build_signed_ticket("DEFAULT", 0, "test-secret", 3600, "test-nonce-2", false);
         let ticket: serde_json::Value = serde_json::from_slice(&ticket_bytes).unwrap();
         let iat = ticket["iat"].as_u64().unwrap_or(0);
-        let result = validate_ticket(&ticket, "test-secret", iat + 1);
+        let result = validate_ticket(&ticket, "test-secret", iat + 1, false);
         assert!(result.is_ok(), "validation should succeed: {:?}", result);
         assert_eq!(result.unwrap(), 0i64);
     }
 
     #[test]
     fn test_signed_ticket_expired() {
-        let ticket_bytes = build_signed_ticket("DEFAULT", 0, "test-secret", 1, "test-nonce-3");
+        let ticket_bytes =
+            build_signed_ticket("DEFAULT", 0, "test-secret", 1, "test-nonce-3", false);
         let ticket: serde_json::Value = serde_json::from_slice(&ticket_bytes).unwrap();
         let exp = ticket["exp"].as_u64().unwrap_or(0);
-        let result = validate_ticket(&ticket, "test-secret", exp + 100);
+        let result = validate_ticket(&ticket, "test-secret", exp + 100, false);
         assert!(result.is_err(), "should reject expired ticket");
         assert!(result.unwrap_err().contains("expired"));
     }
@@ -251,24 +295,42 @@ mod tests {
     #[test]
     fn test_signed_ticket_wrong_secret() {
         let ticket_bytes =
-            build_signed_ticket("DEFAULT", 0, "correct-secret", 3600, "test-nonce-4");
+            build_signed_ticket("DEFAULT", 0, "correct-secret", 3600, "test-nonce-4", false);
         let ticket: serde_json::Value = serde_json::from_slice(&ticket_bytes).unwrap();
         let iat = ticket["iat"].as_u64().unwrap_or(0);
-        let result = validate_ticket(&ticket, "wrong-secret", iat + 1);
+        let result = validate_ticket(&ticket, "wrong-secret", iat + 1, false);
         assert!(result.is_err(), "should reject tampered signature");
         assert!(result.unwrap_err().contains("HMAC"));
     }
 
     #[test]
-    fn test_unsigned_ticket() {
-        // Empty secret produces unsigned ticket.
-        let ticket_bytes = build_signed_ticket("DEFAULT", 0, "", 3600, "test-nonce-5");
+    fn test_unsigned_ticket_allowed() {
+        // Empty secret + allow_unsigned = true produces unsigned ticket.
+        let ticket_bytes = build_signed_ticket("DEFAULT", 0, "", 3600, "test-nonce-5", true);
         let ticket: serde_json::Value = serde_json::from_slice(&ticket_bytes).unwrap();
         assert_eq!(ticket["sig"], "unsigned");
-        // Validate with any secret still works if ticket is unsigned.
+        // Validate with allow_unsigned = true passes.
         let iat = ticket["iat"].as_u64().unwrap_or(0);
-        let result = validate_ticket(&ticket, "any-secret", iat + 1);
-        // Unsigned tickets pass HMAC check (sig == "unsigned" skips verification).
-        assert!(result.is_ok());
+        let result = validate_ticket(&ticket, "any-secret", iat + 1, true);
+        assert!(
+            result.is_ok(),
+            "unsigned ticket should be allowed in dev mode"
+        );
+    }
+
+    #[test]
+    fn test_unsigned_ticket_rejected_in_production() {
+        // Build an unsigned ticket with allow_unsigned = true (dev mode).
+        let ticket_bytes = build_signed_ticket("DEFAULT", 0, "", 3600, "test-nonce-6", true);
+        let ticket: serde_json::Value = serde_json::from_slice(&ticket_bytes).unwrap();
+        assert_eq!(ticket["sig"], "unsigned");
+        // But validate with allow_unsigned = false (production mode) should reject.
+        let iat = ticket["iat"].as_u64().unwrap_or(0);
+        let result = validate_ticket(&ticket, "any-secret", iat + 1, false);
+        assert!(
+            result.is_err(),
+            "unsigned ticket must be rejected in production mode"
+        );
+        assert!(result.unwrap_err().contains("unsigned"));
     }
 }

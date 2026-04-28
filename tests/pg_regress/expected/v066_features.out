@@ -34,6 +34,8 @@ SHOW pg_ripple.arrow_flight_expiry_secs;
 
 SET pg_ripple.arrow_flight_expiry_secs = 3600;
 -- ── Part 2: Arrow Flight v2 ticket ───────────────────────────────────────────
+-- Allow unsigned tickets so the test works without a signing secret.
+SET pg_ripple.arrow_unsigned_tickets_allowed = on;
 -- 2a. export_arrow_flight() returns non-empty BYTEA.
 SELECT length(pg_ripple.export_arrow_flight('DEFAULT')) > 0
     AS ticket_nonempty;

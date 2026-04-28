@@ -430,9 +430,10 @@ mod pg_ripple {
         let clean_iri = crate::storage::strip_angle_brackets_pub(graph_iri);
         let g_id = crate::dictionary::encode(clean_iri, crate::dictionary::KIND_IRI);
         let deleted = crate::storage::delete_triple(s, p, o, g_id);
-        // ── v0.65.0: CONSTRUCT writeback DRed maintenance ──────────────────
+        // ── v0.67.0 MJOURNAL-02: route through mutation journal ────────────
         if deleted > 0 {
-            crate::construct_rules::on_graph_delete(clean_iri);
+            crate::storage::mutation_journal::record_delete(g_id);
+            crate::storage::mutation_journal::flush();
         }
         deleted
     }

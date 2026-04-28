@@ -30,6 +30,7 @@ pub mod catalog;
 pub mod cdc_bridge;
 pub mod index_advisor;
 pub mod merge;
+pub mod mutation_journal;
 
 use pgrx::datum::DatumWithOid;
 use pgrx::prelude::*;
@@ -412,6 +413,12 @@ fn ensure_vp_table(predicate_id: i64) -> String {
     // Create the HTAP split (delta + main + tombstones + view).
     let view = merge::ensure_htap_tables(predicate_id);
 
+    // RLS-01: apply graph RLS policies to the new delta and main tables.
+    let delta = format!("_pg_ripple.vp_{predicate_id}_delta");
+    let main = format!("_pg_ripple.vp_{predicate_id}_main");
+    crate::security_api::apply_rls_to_vp_table(&delta);
+    crate::security_api::apply_rls_to_vp_table(&main);
+
     // Install CDC trigger on the new delta table.
     crate::cdc::install_trigger(predicate_id);
 
@@ -483,8 +490,15 @@ fn promote_predicate(p_id: i64) {
     .unwrap_or_else(|e| pgrx::error!("promote_predicate: advisory lock error: {e}"));
 
     // ensure_vp_table creates the HTAP split (delta + main + tombstones + view).
+    // RLS-01: apply_rls_to_vp_table is called inside ensure_vp_table for new tables.
+    // For promotions, ensure_vp_table may return early if the table already exists;
+    // call apply_rls explicitly here to handle that path.
     ensure_vp_table(p_id);
     let delta = format!("_pg_ripple.vp_{p_id}_delta");
+    let main_table = format!("_pg_ripple.vp_{p_id}_main");
+    // RLS-01: apply graph RLS to the promoted delta + main tables.
+    crate::security_api::apply_rls_to_vp_table(&delta);
+    crate::security_api::apply_rls_to_vp_table(&main_table);
 
     // Atomically move all rows for this predicate from vp_rare to the dedicated
     // delta table in a single CTE — eliminates the window between SELECT and DELETE
@@ -1773,7 +1787,11 @@ fn decode_sog(s_id: i64, p_id: i64, o_id: i64, g_id: i64) -> (String, String, St
 /// Insert a triple by pre-encoded dictionary IDs.
 /// Alias for `insert_encoded_triple` for use from the SPARQL Update executor.
 pub fn insert_triple_by_ids(s_id: i64, p_id: i64, o_id: i64, g_id: i64) -> i64 {
-    insert_encoded_triple(s_id, p_id, o_id, g_id)
+    let sid = insert_encoded_triple(s_id, p_id, o_id, g_id);
+    // MJOURNAL-01/02: record in mutation journal so CWB hooks fire.
+    mutation_journal::record_write(g_id);
+    mutation_journal::flush();
+    sid
 }
 
 /// Delete a triple by pre-encoded dictionary IDs.  Returns the number of deleted rows.
@@ -1864,6 +1882,12 @@ pub fn delete_triple_by_ids(s_id: i64, p_id: i64, o_id: i64, g_id: i64) -> i64 {
         )
         .unwrap_or_else(|e| pgrx::error!("predicate count update SPI error: {e}"));
         deleted += d;
+    }
+
+    // MJOURNAL-01/02: record deletion in mutation journal so CWB hooks fire.
+    if deleted > 0 {
+        mutation_journal::record_delete(g_id);
+        mutation_journal::flush();
     }
 
     deleted

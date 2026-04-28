@@ -239,7 +239,7 @@ fn compute_rule_order(
         for (rule, preds) in &predecessors {
             if preds.contains(&n) {
                 let deg = in_degree.get_mut(rule).unwrap_or_else(|| {
-                    panic!("in_degree missing for {rule}");
+                    pgrx::error!("construct rule stratification error: in_degree entry missing for rule \"{rule}\" — internal invariant violated");
                 });
                 *deg -= 1;
                 if *deg == 0 {
@@ -950,12 +950,49 @@ fn retract_exclusive_triples(rule_name: &str) {
 
 // ─── CWB-FIX-02: Delta maintenance kernel (source graph write hooks) ──────────
 
+// Trigger incremental construct-rule maintenance after inserts into `graph_iri`.
+//
+// Called by `insert_triple` and `sparql_update` after modifying a named
+// graph that may be a source graph for registered construct rules.
+//
+// For each affected rule (in `rule_order`):
+// - Re-runs the INSERT SQL with `ON CONFLICT DO NOTHING RETURNING` to add new
+//   derived triples.
+// - Records exact provenance via CTE (CWB-FIX-04).
+// - Updates health counters (CWB-FIX-07).
+
+/// Quick check: returns `true` when there are no construct rules registered.
+///
+/// Allows the mutation journal to skip accumulation entirely (zero overhead).
+/// (v0.67.0 MJOURNAL-01)
+pub(crate) fn has_no_rules() -> bool {
+    // Check if the catalog table even exists first.
+    let table_exists = Spi::get_one_with_args::<bool>(
+        "SELECT EXISTS(SELECT 1 FROM information_schema.tables \
+          WHERE table_schema = '_pg_ripple' AND table_name = 'construct_rules')",
+        &[],
+    )
+    .unwrap_or(Some(false))
+    .unwrap_or(false);
+
+    if !table_exists {
+        return true;
+    }
+
+    let has_rules = Spi::get_one::<bool>("SELECT EXISTS(SELECT 1 FROM _pg_ripple.construct_rules)")
+        .unwrap_or(Some(false))
+        .unwrap_or(false);
+
+    !has_rules
+}
+
 /// Trigger incremental construct-rule maintenance after inserts into `graph_iri`.
 ///
 /// Called by `insert_triple` and `sparql_update` after modifying a named
 /// graph that may be a source graph for registered construct rules.
 ///
 /// For each affected rule (in `rule_order`):
+///
 /// - Re-runs the INSERT SQL with `ON CONFLICT DO NOTHING RETURNING` to add new
 ///   derived triples.
 /// - Records exact provenance via CTE (CWB-FIX-04).

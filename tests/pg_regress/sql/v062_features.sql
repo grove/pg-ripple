@@ -33,6 +33,8 @@ SHOW pg_ripple.citus_prune_carry_max;
 SET pg_ripple.citus_prune_carry_max = 1000;
 
 -- ── Part 2: Arrow Flight ticket ───────────────────────────────────────────────
+-- Allow unsigned tickets so the test works without a signing secret.
+SET pg_ripple.arrow_unsigned_tickets_allowed = on;
 
 -- 2a. export_arrow_flight() returns non-empty BYTEA.
 SELECT length(pg_ripple.export_arrow_flight('<https://mygraph.example.org/>')) > 0
