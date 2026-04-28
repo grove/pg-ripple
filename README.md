@@ -21,7 +21,7 @@ No separate graph database. No data pipelines. No extra infrastructure.
 
 ## What works today (v0.67.0)
 
-pg_ripple passes **100% of the W3C SPARQL 1.1, SHACL Core, and OWL 2 RL conformance test suites** — the industry benchmarks for correctness in knowledge graph systems. After 59 releases it covers the full feature set described below.
+pg_ripple passes **100% of the W3C SPARQL 1.1, SHACL Core, and OWL 2 RL conformance test suites** — the industry benchmarks for correctness in knowledge graph systems. After 67 releases it covers the full feature set described below.
 
 | What you can do | How it works |
 |---|---|
@@ -31,9 +31,9 @@ pg_ripple passes **100% of the W3C SPARQL 1.1, SHACL Core, and OWL 2 RL conforma
 | **Microsoft GraphRAG** | Export entities and relationships in GraphRAG's BYOG (Bring Your Own Graph) Parquet format. Enrich the graph with Datalog rules. Validate export quality with SHACL. Connect your knowledge graph to Microsoft's GraphRAG pipeline with a single SQL call. |
 | **Validate data quality** | Define quality rules with SHACL: *"every Person must have exactly one name"*, *"age must be a positive integer"*. Violations are caught on insert (immediate feedback) or checked in the background. Full SHACL Core conformance, including `sh:equals`, `sh:disjoint`, and complex property path traversal (inverse, alternative, sequence, zero-or-more, one-or-more). Violation reports include decoded focus-node IRIs for easy debugging. |
 | **Infer new facts automatically** | Write Datalog rules to derive conclusions from what you already know — *"if Alice manages Bob and Bob manages Carol, then Alice indirectly manages Carol"*. Includes built-in support for standard RDFS and OWL reasoning. Goal-directed mode (`infer_goal()`) and demand-filtered mode (`infer_demand()`) derive only the facts relevant to your query, reducing inference work by 50–90% on large programs. `owl:sameAs` entity canonicalization is applied automatically before inference, so equivalent entities are treated as one. Well-founded semantics (`infer_wfs()`) handles non-stratifiable programs with mutual negation. Tabling caches repeated inference sub-goals (2–5× speedup). Parallel stratum evaluation runs independent rule groups concurrently. Worst-case optimal joins accelerate cyclic graph queries. Incremental retraction (DRed) keeps derived predicates consistent after deletions without full recomputation. |
-| **Stream and inspect queries** | Use `sparql_cursor()` to stream large result sets batch-by-batch without materializing them in memory. Export results as W3C CSV or TSV via `sparql_csv()` / `sparql_tsv()`. Use `explain_sparql()` and `explain_datalog()` to introspect query plans and rule compilation. Pass `citus := true` to `explain_sparql()` for a Citus shard-pruning section showing which shard the query was pruned to and how many rows were avoided. OpenTelemetry span tracing is available, with a configurable OTLP endpoint (`pg_ripple.tracing_otlp_endpoint`). |
+| **Stream and inspect queries** | Use `sparql_cursor()` to stream large result sets page-by-page via the PostgreSQL portal API — peak memory is bounded by `pg_ripple.export_batch_size`, not the full result set. Export results as W3C CSV or TSV via `sparql_csv()` / `sparql_tsv()`. Use `explain_sparql()` and `explain_datalog()` to introspect query plans and rule compilation. Pass `citus := true` to `explain_sparql()` for a Citus shard-pruning section showing which shard the query was pruned to and how many rows were avoided. `streaming_metrics()` returns live atomic counters for cursor pages, Arrow batches, and ticket rejections. OpenTelemetry span tracing is available, with a configurable OTLP endpoint (`pg_ripple.tracing_otlp_endpoint`). |
 | **Live change notifications** | Subscribe to graph changes with `pg_ripple.create_subscription(name, filter_sparql)`. pg_ripple notifies your application via a PostgreSQL NOTIFY channel (`pg_ripple_cdc_{name}`) whenever matching triples are added or removed — no polling required. CDC lifecycle events (`pg_ripple.cdc_lifecycle_events`) record subscription creation, deletion, and error events. |
-| **Export and share** | Export your graph as Turtle, N-Triples, JSON-LD, or RDF/XML. Use JSON-LD framing to produce nested documents shaped for REST APIs or LLM prompts. `COPY rdf FROM` loads bulk RDF files directly via PostgreSQL's COPY protocol. Arrow/Flight bulk export available via `pg_ripple_http`. |
+| **Export and share** | Export your graph as Turtle, N-Triples, JSON-LD, or RDF/XML. Use JSON-LD framing to produce nested documents shaped for REST APIs or LLM prompts. `COPY rdf FROM` loads bulk RDF files directly via PostgreSQL's COPY protocol. Arrow IPC bulk export via `pg_ripple_http` (experimental): HMAC-SHA256 signed tickets, binary IPC stream over `POST /flight/do_get`, authenticated endpoint. |
 | **Standard HTTP endpoint** | The companion `pg_ripple_http` service exposes a W3C SPARQL Protocol endpoint over HTTP/HTTPS. Supports JSON, XML, CSV, Turtle, and JSON-LD responses; authentication; Prometheus metrics; Docker Compose for easy deployment; full OpenAPI 3.1 specification; and an Arrow/Flight bulk-export endpoint. |
 | **Query remote graph services** | Use the SPARQL `SERVICE` keyword to query external SPARQL endpoints as part of a single query — your local data and a remote public dataset in one request. Includes connection pooling, result caching, safe timeouts, and a circuit breaker (`pg_ripple.federation_circuit_breaker_threshold`) that stops retrying failed endpoints. |
 | **Horizontal scaling with Citus** | Enable `pg_ripple.citus_sharding_enabled` to distribute VP tables across Citus worker nodes. Bound-subject SPARQL patterns are automatically pruned to the correct shard (10–100× speedup). `citus_rebalance()` emits NOTIFY signals so pg-trickle can pause CDC during rebalancing. `citus_rebalance_progress()` reports live shard-move status. |
@@ -157,23 +157,13 @@ Token budgets matter. `sparql_construct_jsonld()` takes a SPARQL CONSTRUCT query
 
 ## Where we're headed
 
-Four releases remain on the path to v1.0.0.
+One release remains on the path to v1.0.0.
 
-### v0.60.0 — Production Hardening Sprint
-
-Closes all remaining v1.0.0 blockers: HTAP cutover atomic swap, GitHub Actions SHA pinning, `SECURITY DEFINER` CI lint, new fuzz targets (GeoSPARQL WKT, R2RML, LLM prompt injection), `/ready` endpoint in `pg_ripple_http`, `geof:distance` function, merge-throughput trend artifact, `pg_dump` round-trip CI test, and a LangChain tool package for Python.
-
-### v0.61.0 — Ecosystem Depth
-
-Per-named-graph RLS automation, `explain_inference()` derivation tree, GDPR `erase_subject()`, SPARQL Entailment Regimes test driver, dbt adapter, Kafka CDC sink, SHACL-AF rule execution, OTLP `traceparent` propagation, SBOM diff, and OWL 2 RL deletion proof test.
-
-### v0.62.0 — Query Frontier
-
-Cypher/openCypher/GQL read-only transpiler (`MATCH/WHERE/RETURN`), Apache Arrow Flight bulk export, WCOJ planner integration, visual graph explorer in `pg_ripple_http`, and `clippy --deny warnings` CI gate.
+The v0.64.0–v0.67.0 Assessment Remediation & Release Trust sequence is complete: honest feature-status SQL API (`feature_status()`), GitHub Actions SHA pinning and Docker release digest integrity, CONSTRUCT writeback incremental delta maintenance, true portal-based SPARQL cursor streaming (bounded memory), HMAC-SHA256 signed Arrow Flight tickets, real Arrow IPC streaming in `pg_ripple_http`, 72-hour soak test artifacts, security audit closure, public benchmark baselines, upgrade and backup acceptance tests, operator runbooks, and a mandatory release evidence dashboard.
 
 ### v1.0.0 — Production Release
 
-With 100% W3C conformance achieved, GraphRAG integration complete, vector + SPARQL hybrid search in place, entity resolution, demand-filtered Datalog, parallel merge, cost-based federation, live CDC subscriptions, Citus horizontal sharding, temporal RDF queries, and PROV-O provenance all delivered, the final release focuses on production hardening: a 30-day continuous-merge soak test, third-party security audit, Docker CVE scanning, documentation freeze, migration acceptance test from v0.59.0, and public BSBM/WatDiv benchmark results. This is the version intended for production deployments.
+The final milestone: full API and documentation freeze, long-term support commitment, and public production dossier. All conformance suites (SPARQL 1.1, SHACL Core, OWL 2 RL, LUBM) remain required gates; performance regression CI and the release evidence dashboard are mandatory artifacts.
 
 ---
 
@@ -190,7 +180,7 @@ This means you get:
 
 ### How it compares
 
-> **Note**: pg_ripple features marked "Yes" in the table below are implemented across v0.1.0–v0.59.0. W3C SPARQL 1.1 Query, Update, SHACL Core, and OWL 2 RL conformance is 100%. Competitor capabilities reflect publicly documented feature sets.
+> **Note**: pg_ripple features marked "Yes" in the table below are implemented across v0.1.0–v0.67.0. W3C SPARQL 1.1 Query, Update, SHACL Core, and OWL 2 RL conformance is 100%. Competitor capabilities reflect publicly documented feature sets.
 
 | Capability | pg_ripple | Blazegraph | Virtuoso | Apache Fuseki |
 |---|---|---|---|---|
@@ -366,16 +356,14 @@ The following features are available but have documented limitations in the curr
 
 | Feature | Status | Detail |
 |---|---|---|
-| **Arrow Flight bulk export** | Implemented | `/flight/do_get` streams tombstone-excluded Arrow IPC record batches (v0.67.0 FLIGHT-SEC-02). |
+| **Arrow Flight bulk export** | Implemented | `/flight/do_get` streams tombstone-excluded Arrow IPC record batches with HMAC-SHA256 signed tickets (v0.67.0 FLIGHT-SEC-02). |
 | **WCOJ (Worst-Case Optimal Joins)** | Planner hint | WCOJ re-orders cyclic BGP joins at plan time. A true Leapfrog Triejoin executor is not implemented. |
-| **SHACL-SPARQL rules (`sh:SPARQLRule`)** | Planned | `sh:SPARQLRule` is stored in the catalog but not executed through the derivation kernel. Targeted for v0.65.0. |
-| **CONSTRUCT writeback** | Manual refresh | Rules run on manual invocation only; incremental delta maintenance is planned for v0.65.0. |
-| **Citus SERVICE pruning** | Planned | Shard pruning for SERVICE results is not yet integrated into the SPARQL translator. Targeted for v0.68.0. |
-| **Citus HLL COUNT(DISTINCT)** | Planned | HyperLogLog COUNT(DISTINCT) aggregate is not yet emitted by SQL generation. Targeted for v0.68.0. |
-| **SPARQL cursor streaming** | Partial | The `/sparql/stream` endpoint cursor infrastructure is in place; true incremental streaming targeted for v0.68.0. |
+| **SHACL-SPARQL rules (`sh:SPARQLRule`)** | Experimental | The derivation kernel foundation is in place. Full end-to-end `sh:SPARQLRule` routing is targeted for v1.0.0. |
+| **Citus SERVICE pruning** | Planned | Shard pruning for SERVICE results is not yet integrated into the SPARQL translator. Targeted for v1.0.0. |
+| **Citus HLL COUNT(DISTINCT)** | Planned | HyperLogLog COUNT(DISTINCT) aggregate is not yet emitted by SQL generation. Targeted for v1.0.0. |
 | **Citus, pgvector, pg_trickle** | Optional | Citus, pgvector, and pg_trickle are optional dependencies. Dependent features degrade gracefully when these extensions are not installed. |
 
-These are not bugs — they are known partial implementations that will be closed in the v0.68–v0.69 remediation sequence. All limitations are surfaced in `pg_ripple.feature_status()`.
+These are not bugs — they are known partial implementations. All limitations are surfaced in `pg_ripple.feature_status()`.
 
 ---
 
@@ -393,8 +381,10 @@ pg_ripple is built to production-grade standards:
 - **Security testing** — resistance to injection attacks, malformed inputs, and resource exhaustion
 - **Fuzz testing** — the federation result decoder and query pipeline are continuously fuzz-tested; arbitrary XML/JSON from remote SERVICE endpoints cannot cause a crash or panic (v0.51.0)
 - **Performance regression CI** — BSBM benchmark (1M-triple product dataset, 12 explore queries) and automated throughput benchmarks fail the build if performance drops by more than 10% (v0.51.0)
-- **Security CI** — `cargo audit --deny warnings` runs on every pull request; SBOM (CycloneDX) generated and attached to every release
-- **Stability** — 72-hour soak test, memory leak detection, and crash recovery testing
+- **Security CI** — `cargo audit --deny warnings` runs on every pull request; SBOM (CycloneDX) generated and attached to every release; GitHub Actions refs pinned to full SHA; Docker release images scanned via Trivy with immutable digest
+- **Stability** — 72-hour soak test with published artifacts (memory trend, merge latency, query p50/p95/p99, error counts), memory leak detection, and crash recovery testing (v0.67.0)
+- **Upgrade and backup acceptance** — migration chain from all supported 0.x versions, `pg_dump`/restore round trip, and rollback guidance tested in CI (v0.67.0)
+- **Public benchmark baselines** — BSBM, WatDiv, LUBM, bulk N-Triples/Turtle load, HTAP merge throughput, construct-rule incremental maintenance, Datalog DRed, vector hybrid search, Arrow IPC export, and Citus fan-out benchmarks published with hardware, dataset size, and raw output (v0.67.0)
 
 ---
 
