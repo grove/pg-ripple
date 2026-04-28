@@ -18,5 +18,9 @@
 --     `grant_graph_access()` now apply RLS policies to VP delta/main tables at
 --     creation and promotion time. Existing tables are covered when the
 --     functions are next called. No schema migration is required.
+
+-- Stamp the schema_version so diagnostic_report() reflects the upgrade.
+INSERT INTO _pg_ripple.schema_version (version, upgraded_from, installed_at)
+VALUES ('0.67.0', '0.66.0', clock_timestamp());
 --
 -- All other changes in v0.67.0 are pure Rust function or workflow updates.

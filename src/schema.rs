@@ -1248,3 +1248,13 @@ pgrx::extension_sql!(
     name = "v066_schema_version_stamp",
     requires = ["v065_schema_additions"]
 );
+
+// v0.67.0: Production Hardening and Assessment 9 Remediation.
+// No schema DDL changes — stamp only so that diagnostic_report() returns
+// schema_version = '0.67.0' on a fresh CREATE EXTENSION.
+pgrx::extension_sql!(
+    "INSERT INTO _pg_ripple.schema_version (version, upgraded_from, installed_at) \
+     VALUES ('0.67.0', '0.66.0', clock_timestamp());",
+    name = "v067_schema_version_stamp",
+    requires = ["v066_schema_version_stamp"]
+);
