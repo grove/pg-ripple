@@ -104,6 +104,12 @@ SELECT pgtrickle.set_relay_inbox(
 );
 ```
 
+The `${env:KAFKA_BROKERS}` syntax tells the relay to expand an environment variable
+at runtime. Pipeline configs are stored in the database as JSONB, but sensitive
+values like broker addresses can reference environment variables this way —
+the actual value stays in the relay process's environment and never needs to be
+stored in plaintext in the database.
+
 Each time the relay receives a message from Kafka, it inserts a row into
 `sensor_inbox`. The original Kafka message payload arrives as a `JSONB` column.
 A typical row looks like this:
@@ -174,8 +180,10 @@ arbitrary third-party JSON event and describe the entire mapping in one JSONB
 literal — no code changes needed when a vendor renames a field, only a context
 update.
 
-After the trigger fires, those four facts exist in the triplestore. If you
-queried them back as JSON-LD immediately after load, you would see:
+After the trigger fires, those five triples exist in the triplestore — one
+`rdf:type` triple (from `type_iri`) and one for each of the four data fields in
+the source JSON. If you queried them back as JSON-LD immediately after load, you
+would see:
 
 ```json
 {
@@ -250,6 +258,11 @@ validation and be flagged rather than silently forwarded to downstream consumers
 
 ```sql
 SELECT pg_ripple.load_shacl($$
+    @prefix sh:    <http://www.w3.org/ns/shacl#> .
+    @prefix saref: <https://saref.etsi.org/core/> .
+    @prefix xsd:   <http://www.w3.org/2001/XMLSchema#> .
+    @prefix ex:    <https://example.org/> .
+
     ex:ObservationShape a sh:NodeShape ;
         sh:targetClass saref:Measurement ;
         sh:property [
@@ -336,9 +349,12 @@ SELECT pgtrickle.set_relay_outbox(
 );
 ```
 
-The rows that land in downstream consumers look like this — a self-contained
-JSON-LD document that any system can parse without knowing anything about
-pg_ripple's internal storage:
+When paired with a framing trigger — as shown in the
+[JSON-LD mapping section](#json-ld-mapping-inbound-context-and-outbound-framing)
+below — the payload that lands in downstream consumers is a self-contained
+JSON-LD document. The framing trigger queries back the full set of triples for
+the alert's subject, so the output includes all the observation data, not just
+the alert predicate that triggered it:
 
 ```json
 {
@@ -368,12 +384,11 @@ and replays the outbox, downstream consumers can detect and discard duplicates.
 
 ## Choosing a CDC bridge approach
 
-The five steps above describe the logical flow, but there is a question of
-*when* exactly enriched triples get written to the `enriched_events` bridge
-table. pg_ripple's CDC system fires a PostgreSQL `NOTIFY` whenever new triples
-are inserted (including inferred triples from Datalog). Three approaches bridge
-that notification to a pg-trickle outbox row, each with different latency and
-throughput trade-offs.
+Step 5 used `enable_cdc_bridge_trigger` (Approach A below) — the simplest
+option, with latency under 10 ms. Two other approaches offer different
+trade-offs for different data paths in the same hub. All three write to the
+same `enriched_events` outbox table; only the *mechanism* that detects new
+triples and writes outbox rows differs.
 
 ### Approach A — Trigger bridge (lowest latency, < 10 ms)
 
@@ -401,6 +416,12 @@ BEGIN
 END;
 $$;
 ```
+
+The `pg_ripple.enable_cdc_bridge_trigger()` call in Step 5 installs exactly
+this pattern automatically — you do not need to write the trigger function by
+hand. To produce a richer shaped payload instead of a raw decoded triple,
+replace the default function with a custom one that calls `export_jsonld_framed()`
+(see [Outbound framing](#json-ld-mapping-inbound-context-and-outbound-framing)).
 
 **Best for**: High-priority alerts, strict transactional guarantees.  
 **Trade-off**: `decode_id()` is called once per row, which adds overhead on high-volume
@@ -434,7 +455,7 @@ forward:
 -- Only bridge the final alert triples, not intermediate inference steps
 SELECT pg_ripple.create_subscription(
     name          => 'alerts',
-    filter_sparql => 'FILTER(?p = <https://example.org/alert>)'
+    filter_sparql => 'FILTER(?p = <https://example.org/tempAlert>)'
 );
 ```
 
@@ -736,12 +757,15 @@ PostgreSQL database. PostgreSQL advisory locks elect exactly one owner per
 pipeline — if one instance dies, another acquires its pipelines on the next
 discovery interval.
 
-The relay only needs one environment variable: the database URL. All pipeline
-configuration — broker addresses, topic names, subject templates, poll
-intervals — is stored in the database and set via SQL
-(`pgtrickle.set_relay_outbox()` / `pgtrickle.set_relay_inbox()`). The relay
-reads this on startup and hot-reloads it whenever you change it without
-restart.
+The relay only needs one environment variable to start: the database URL.
+All pipeline configuration is registered in the database via SQL
+(`pgtrickle.set_relay_outbox()` / `pgtrickle.set_relay_inbox()`), and the relay
+reads it on startup and hot-reloads it when you make changes — no restart
+required.
+
+Sensitive values like broker addresses can use `${env:VAR}` placeholders inside
+the JSONB config. The relay expands them from its own process environment at
+runtime, so credentials never need to be stored in the database.
 
 ```yaml
 # docker-compose.yml sketch
@@ -754,8 +778,11 @@ services:
     image: ghcr.io/grove/pgtrickle-relay:0.29.0
     environment:
       PGTRICKLE_RELAY_POSTGRES_URL: postgres://relay:pw@postgres/hub
-      # All other config (broker URLs, topics, etc.) comes from the database.
-      # Set it with pgtrickle.set_relay_outbox() / set_relay_inbox().
+      # All pipeline config (topics, subjects, poll intervals) lives in the DB.
+      # Broker addresses can use ${env:VAR} refs — set them here as env vars.
+      # Register pipelines with pgtrickle.set_relay_outbox() / set_relay_inbox().
+      KAFKA_BROKERS: kafka:9092   # expanded by ${env:KAFKA_BROKERS} in pipeline config
+      NATS_URL: nats://nats:4222  # similarly available via ${env:NATS_URL}
     ports:
       - "9090:9090"   # Prometheus metrics + /health endpoint
 
@@ -791,8 +818,9 @@ accumulate rows faster than the relay drains them. Three controls help:
 
 - Use **pg-trickle's retention drain** to cap outbox size and drop the oldest
   rows once a maximum depth is reached.
-- Use the relay's `/health/drained` endpoint as a Kubernetes readiness signal
-  so the cluster can apply back-pressure to inbound relay pods.
+- Use the relay's `/health` endpoint as a Kubernetes readiness probe. When the
+  relay falls behind, it signals not-ready, letting the cluster apply
+  back-pressure to inbound sources.
 - Use pg_ripple's `source` column to bridge only explicit triples (`source = 0`)
   and suppress inferred triples (`source = 1`) from a particular outbox, reducing
   volume without changing the inference rules.
