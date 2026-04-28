@@ -1225,17 +1225,17 @@ jobs:
         run: |
           PG_CONFIG=/usr/lib/postgresql/18/bin/pg_config
           cargo pgrx init --pg18 "$PG_CONFIG"
-          cargo pgrx install --pg-config "$PG_CONFIG" --release
-
-      - name: Start PostgreSQL and load extension
-        run: |
-          sudo -u postgres pg_ctlcluster 18 main start || true
-          sudo -u postgres psql -c "CREATE USER \"$USER\" SUPERUSER;" 2>/dev/null || true
-          sudo -u postgres psql -c "CREATE DATABASE \"$USER\" OWNER \"$USER\";" 2>/dev/null || true
-          psql -c "CREATE EXTENSION IF NOT EXISTS pg_ripple;"
+          cargo pgrx start pg18 --postgresql-conf "allow_system_table_mods=on"
+          cargo pgrx install --pg-config "$PG_CONFIG"
 
       - name: Verify feature_status() evidence paths exist
+        env:
+          PGHOST: localhost
+          PGPORT: "28818"
+          PGDATABASE: postgres
+          PGUSER: runner
         run: |
+          psql -c "CREATE EXTENSION IF NOT EXISTS pg_ripple;" 2>&1
           psql -t -A -c "SELECT evidence_path FROM pg_ripple.feature_status() WHERE evidence_path IS NOT NULL;" \
             | while IFS= read -r path; do
                 if [ -n "$path" ] && [ ! -e "$path" ]; then
@@ -1261,6 +1261,6 @@ jobs:
 
       - name: Stop pgrx PostgreSQL 18
         if: always()
-        run: sudo -u postgres pg_ctlcluster 18 main stop 2>/dev/null || true
+        run: cargo pgrx stop pg18 2>/dev/null || true
 
 
