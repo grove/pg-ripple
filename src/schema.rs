@@ -1211,3 +1211,13 @@ pgrx::extension_sql!(
     name = "v063_schema_additions",
     requires = ["v062_schema_additions"]
 );
+
+// v0.64.0: Release Truth and Safety Freeze.
+// No schema DDL changes — stamp only so that diagnostic_report() returns
+// schema_version = '0.64.0' on a fresh CREATE EXTENSION.
+pgrx::extension_sql!(
+    "INSERT INTO _pg_ripple.schema_version (version, upgraded_from, installed_at) \
+     VALUES ('0.64.0', '0.63.0', clock_timestamp());",
+    name = "v064_schema_version_fresh_install_stamp",
+    requires = ["v063_schema_additions"]
+);

@@ -10,7 +10,7 @@ Vertical Partitioning (one table per predicate) means a query for `<ex:knows>` t
 
 ### Why PostgreSQL 18?
 
-pg_ripple uses the `CYCLE` clause in `WITH RECURSIVE` CTEs for hash-based cycle detection in property path queries. The `CYCLE` clause was introduced in PostgreSQL 14 but the hash-based variant (as opposed to array-based) first became performant in PG 17/18. PG 18 is also the first version where pgrx 0.17 has stable support.
+pg_ripple uses the `CYCLE` clause in `WITH RECURSIVE` CTEs for hash-based cycle detection in property path queries. The `CYCLE` clause was introduced in PostgreSQL 14 but the hash-based variant (as opposed to array-based) first became performant in PG 17/18. PG 18 is also the first version where pgrx 0.18 has stable support.
 
 ### Is pg_ripple compatible with LPG tools?
 

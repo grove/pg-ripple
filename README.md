@@ -19,7 +19,7 @@ No separate graph database. No data pipelines. No extra infrastructure.
 
 ---
 
-## What works today (v0.59.0)
+## What works today (v0.63.0)
 
 pg_ripple passes **100% of the W3C SPARQL 1.1, SHACL Core, and OWL 2 RL conformance test suites** — the industry benchmarks for correctness in knowledge graph systems. After 59 releases it covers the full feature set described below.
 
@@ -357,6 +357,25 @@ CREATE EXTENSION pg_ripple;
 ```
 
 
+
+---
+
+## Known limitations in v0.63.0
+
+The following features are available but have documented limitations in the current release. Use `SELECT feature_name, status, degraded_reason FROM pg_ripple.feature_status() WHERE status != 'implemented'` for a machine-readable summary.
+
+| Feature | Status | Detail |
+|---|---|---|
+| **Arrow Flight bulk export** | Stub | `/flight/do_get` returns a JSON stub. Real Arrow IPC streaming is planned for v0.66.0. |
+| **WCOJ (Worst-Case Optimal Joins)** | Planner hint | WCOJ re-orders cyclic BGP joins at plan time. A true Leapfrog Triejoin executor is not implemented. |
+| **SHACL-SPARQL rules (`sh:SPARQLRule`)** | Planned | `sh:SPARQLRule` is stored in the catalog but not executed through the derivation kernel. Targeted for v0.65.0. |
+| **CONSTRUCT writeback** | Manual refresh | Rules run on manual invocation only; incremental delta maintenance is planned for v0.65.0. |
+| **Citus SERVICE pruning** | Planned | Shard pruning for SERVICE results is planned but not yet integrated into the SPARQL translator. Targeted for v0.66.0. |
+| **Citus HLL COUNT(DISTINCT)** | Planned | HyperLogLog COUNT(DISTINCT) aggregate is not yet emitted by SQL generation. Targeted for v0.66.0. |
+| **SPARQL cursor streaming** | Planned | The `/sparql/stream` endpoint fully materializes results before streaming. True incremental streaming is planned for v0.66.0. |
+| **Citus, pgvector, pg_trickle** | Optional | Citus, pgvector, and pg_trickle are optional dependencies. Dependent features degrade gracefully when these extensions are not installed. |
+
+These are not bugs — they are known partial implementations that will be closed in the v0.65–v0.67 remediation sequence. All limitations are surfaced in `pg_ripple.feature_status()`.
 
 ---
 

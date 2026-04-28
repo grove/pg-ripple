@@ -190,3 +190,44 @@ release VERSION:
     @echo "  2. Update CHANGELOG.md"
     @echo "  3. git add -A && git commit -m 'v{{VERSION}}: prepare release'"
     @echo "  4. git tag v{{VERSION}} && git push --tags"
+
+# ── Release Quality Gate ──────────────────────────────────────────────────
+
+# Run the full release assessment quality gate (v0.64.0 TRUTH-08).
+# Checks: migration continuity, GitHub Actions pinning, SECURITY DEFINER lint,
+# roadmap evidence, docs/API drift, feature-status smoke, release evidence dry run.
+# Usage: just assess-release [VERSION]
+[group: "release"]
+assess-release VERSION="":
+    @echo "=== pg_ripple release assessment ==="
+    @echo ""
+    @echo "--- Migration headers lint ---"
+    bash scripts/check_migration_headers.sh
+    @echo ""
+    @echo "--- GitHub Actions pinning lint ---"
+    bash scripts/check_github_actions_pinned.sh
+    @echo ""
+    @echo "--- SECURITY DEFINER lint ---"
+    bash scripts/check_no_security_definer.sh
+    @echo ""
+    @echo "--- Roadmap evidence check ---"
+    bash scripts/check_roadmap_evidence.sh
+    @echo ""
+    @echo "--- API drift check ---"
+    bash scripts/check_api_drift.sh
+    @echo ""
+    @echo "--- Version sync check ---"
+    @CARGO_VER=$(grep '^version = ' Cargo.toml | head -1 | grep -oP '"\\K[^"]+'); \
+     CTRL_VER=$(grep '^default_version' pg_ripple.control | grep -oP "'\\K[^']+"); \
+     if [ "$$CARGO_VER" = "$$CTRL_VER" ]; then \
+       echo "OK: Cargo.toml and pg_ripple.control both at v$$CARGO_VER"; \
+     else \
+       echo "FAIL: version mismatch — Cargo.toml=$$CARGO_VER control=$$CTRL_VER"; exit 1; \
+     fi
+    @if [ -n "{{VERSION}}" ]; then \
+       echo ""; \
+       echo "--- Release evidence dry run ---"; \
+       bash scripts/generate_release_evidence.sh {{VERSION}}; \
+     fi
+    @echo ""
+    @echo "=== Assessment complete ==="

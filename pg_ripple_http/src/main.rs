@@ -1422,11 +1422,15 @@ async fn health(State(state): State<Arc<AppState>>) -> Response {
 
 // ─── Readiness endpoint (v0.60.0 H7-5) ───────────────────────────────────────
 //
-// GET /ready — Kubernetes readiness probe.
+// GET /ready — Kubernetes readiness probe (v0.64.0: deep readiness).
 //
 // Returns 200 OK once the service has successfully connected to PostgreSQL at
 // least once.  Returns 503 Service Unavailable until then so the Kubernetes
 // load-balancer withholds traffic from a pod that is still starting up.
+//
+// v0.64.0 TRUTH-02: deep /ready includes PostgreSQL connectivity, extension
+// version, migration version, and a feature-status snapshot so operators know
+// whether optional features are active or degraded.
 //
 // Distinct from /health (liveness probe):
 //   /health  — is the process alive and can reach PostgreSQL right now?
@@ -1436,24 +1440,89 @@ async fn ready(State(state): State<Arc<AppState>>) -> Response {
         .ever_connected
         .load(std::sync::atomic::Ordering::Relaxed);
 
-    if is_ready {
-        let body = serde_json::json!({ "status": "ready" });
-        Response::builder()
-            .status(StatusCode::OK)
-            .header("content-type", "application/json")
-            .body(Body::from(body.to_string()))
-            .unwrap_or_else(|_| (StatusCode::INTERNAL_SERVER_ERROR, "build error").into_response())
-    } else {
+    if !is_ready {
         let body = serde_json::json!({
             "status": "not_ready",
             "reason": "waiting for first successful PostgreSQL connection"
         });
-        Response::builder()
+        return Response::builder()
             .status(StatusCode::SERVICE_UNAVAILABLE)
             .header("content-type", "application/json")
             .body(Body::from(body.to_string()))
-            .unwrap_or_else(|_| (StatusCode::INTERNAL_SERVER_ERROR, "build error").into_response())
+            .unwrap_or_else(|_| {
+                (StatusCode::INTERNAL_SERVER_ERROR, "build error").into_response()
+            });
     }
+
+    // v0.64.0 TRUTH-02: deep readiness — query pg_ripple for version, migration,
+    // and feature-status snapshot.
+    let (pg_version, extension_version, feature_snapshot, degraded_features) =
+        match state.pool.get().await {
+            Ok(client) => {
+                let pg_ver: Option<String> = client
+                    .query_one("SELECT version()", &[])
+                    .await
+                    .ok()
+                    .map(|r| r.get(0));
+
+                let ext_ver: Option<String> = client
+                    .query_one(
+                        "SELECT installed_version FROM pg_available_extensions \
+                         WHERE name = 'pg_ripple'",
+                        &[],
+                    )
+                    .await
+                    .ok()
+                    .and_then(|r| r.get(0));
+
+                // Collect partial/degraded features from feature_status().
+                let mut features: Vec<serde_json::Value> = Vec::new();
+                let mut degraded: Vec<String> = Vec::new();
+
+                if let Ok(rows) = client
+                    .query(
+                        "SELECT feature_name, status, degraded_reason \
+                         FROM pg_ripple.feature_status() \
+                         WHERE status != 'implemented' \
+                         ORDER BY feature_name",
+                        &[],
+                    )
+                    .await
+                {
+                    for row in &rows {
+                        let name: String = row.get(0);
+                        let status: String = row.get(1);
+                        let reason: Option<String> = row.get(2);
+                        if matches!(status.as_str(), "degraded" | "stub") {
+                            degraded.push(name.clone());
+                        }
+                        features.push(serde_json::json!({
+                            "feature": name,
+                            "status": status,
+                            "degraded_reason": reason,
+                        }));
+                    }
+                }
+
+                (pg_ver, ext_ver, features, degraded)
+            }
+            Err(_) => (None, None, vec![], vec![]),
+        };
+
+    let body = serde_json::json!({
+        "status": "ready",
+        "service_version": env!("CARGO_PKG_VERSION"),
+        "postgres_version": pg_version,
+        "extension_version": extension_version,
+        "partial_features": feature_snapshot,
+        "degraded_features": degraded_features,
+    });
+
+    Response::builder()
+        .status(StatusCode::OK)
+        .header("content-type", "application/json")
+        .body(Body::from(body.to_string()))
+        .unwrap_or_else(|_| (StatusCode::INTERNAL_SERVER_ERROR, "build error").into_response())
 }
 
 // ─── Metrics endpoint ────────────────────────────────────────────────────────

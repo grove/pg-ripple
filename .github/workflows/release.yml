@@ -19,15 +19,15 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6
 
       - name: Install Rust (stable)
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8  # stable
         with:
           components: rustfmt, clippy
 
       - name: Cache Cargo registry
-        uses: actions/cache@v5
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae  # v5
         with:
           path: |
             ~/.cargo/registry
@@ -37,7 +37,7 @@ jobs:
           restore-keys: ${{ runner.os }}-cargo-
 
       - name: Cache cargo-pgrx binary
-        uses: actions/cache@v5
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae  # v5
         with:
           path: ~/.cargo/bin/cargo-pgrx
           key: ${{ runner.os }}-cargo-pgrx-${{ env.PGRX_VERSION }}
@@ -85,13 +85,13 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6
 
       - name: Install Rust (stable)
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8  # stable
 
       - name: Cache Cargo registry
-        uses: actions/cache@v5
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae  # v5
         with:
           path: |
             ~/.cargo/registry
@@ -101,7 +101,7 @@ jobs:
           restore-keys: ${{ runner.os }}-cargo-
 
       - name: Cache cargo-pgrx binary
-        uses: actions/cache@v5
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae  # v5
         with:
           path: ~/.cargo/bin/cargo-pgrx
           key: ${{ runner.os }}-cargo-pgrx-${{ env.PGRX_VERSION }}
@@ -143,7 +143,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6
 
       - name: Extract version from tag
         id: version
@@ -212,6 +212,20 @@ jobs:
           TAG="${GITHUB_REF_NAME}"
           gh release upload "${TAG}" sbom.json --clobber
 
+      # v0.64.0 TRUTH-09: Generate release evidence dashboard artifact.
+      - name: Generate release evidence dashboard
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          bash scripts/generate_release_evidence.sh "$VERSION" || true
+
+      - name: Upload release evidence artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
+        if: always()
+        with:
+          name: release-evidence-${{ steps.version.outputs.version }}
+          path: target/release-evidence/
+          if-no-files-found: warn
+
   # ── 4. Build and publish Docker image ────────────────────────────────────────
   docker:
     name: Docker image (ghcr.io)
@@ -223,26 +237,25 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6
 
       - name: Extract version from tag
         id: version
         run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
 
       - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v4
+        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121  # v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
+        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd  # v4
 
       - name: Build and push
         id: docker_push
-        continue-on-error: true
-        uses: docker/build-push-action@v7
+        uses: docker/build-push-action@bcafcacb16a39f128d818304e6c9c0c18556b85f  # v7
         with:
           context: .
           push: true
@@ -258,11 +271,25 @@ jobs:
           provenance: true
           sbom: true
 
-      # v0.60.0 N7-4: Docker CVE scan — fail release if HIGH/CRITICAL CVEs found.
+      # v0.64.0 TRUTH-04: Capture the immutable image digest and verify it
+      # matches the scanned digest so the release cannot continue on build failure.
+      - name: Capture image digest
+        id: digest
+        run: |
+          DIGEST="${{ steps.docker_push.outputs.digest }}"
+          if [[ -z "$DIGEST" ]]; then
+            echo "ERROR: docker build/push did not produce a digest — build may have failed" >&2
+            exit 1
+          fi
+          echo "digest=$DIGEST" >> "$GITHUB_OUTPUT"
+          echo "Image digest: $DIGEST"
+
+      # v0.60.0 N7-4 / v0.64.0 TRUTH-04: Docker CVE scan — fail release if
+      # HIGH/CRITICAL CVEs found. Scan the immutable digest, not the mutable tag.
       - name: Run Trivy vulnerability scan
-        uses: aquasecurity/trivy-action@v0.36.0
+        uses: aquasecurity/trivy-action@a9c7b0f06e461e9d4b4d1711f154ee024b8d7ab8  # v0.36.0
         with:
-          image-ref: ghcr.io/grove/pg-ripple:${{ steps.version.outputs.version }}
+          image-ref: ghcr.io/grove/pg-ripple@${{ steps.digest.outputs.digest }}
           format: table
           exit-code: '1'
           severity: HIGH,CRITICAL
