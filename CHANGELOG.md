@@ -13,6 +13,34 @@ Versions correspond to the milestones in [ROADMAP.md](ROADMAP.md).
 
 ---
 
+## [0.66.0] — 2026-04-29 — Streaming and Distributed Reality
+
+**Implements the v0.66.0 roadmap: true paged SPARQL cursors via PostgreSQL portal API, HMAC-SHA256 signed Arrow Flight v2 tickets, real Arrow IPC streaming in pg_ripple_http, WCOJ explain metadata, streaming observability metrics, and Citus BRIN summarise SQL API.**
+
+### What's new
+
+- **True SPARQL cursor streaming** (STREAM-01): `sparql_cursor()` now uses the PostgreSQL portal API (`SpiCursor::detach_into_name()` + `SpiClient::find_cursor()`) for memory-bounded paged streaming. Peak memory is proportional to `pg_ripple.export_batch_size`, not the full result size. The cursor survives across SPI sessions within the same transaction.
+
+- **HMAC-SHA256 signed Arrow Flight tickets** (FLIGHT-01): `export_arrow_flight()` now generates signed, expiring JSON tickets (`type = "arrow_flight_v2"`). Tickets include `iat`, `exp`, `aud`, `nonce`, and an HMAC-SHA256 signature over a canonical string. New GUCs: `pg_ripple.arrow_flight_secret` (signing key, `SIGHUP`-level) and `pg_ripple.arrow_flight_expiry_secs` (default: 3600).
+
+- **Real Arrow IPC streaming in pg_ripple_http** (FLIGHT-02): `POST /flight/do_get` now validates the HMAC-SHA256 ticket signature, expiry, and audience, then streams all VP main, delta, and rare tables for the requested graph as a binary Arrow IPC stream (`application/vnd.apache.arrow.stream`). Schema: `s Int64, p Int64, o Int64, g Int64`. The `ARROW_FLIGHT_SECRET` environment variable must match `pg_ripple.arrow_flight_secret`.
+
+- **WCOJ explain metadata** (WCOJ-01): `explain_sparql_jsonb()` output now includes a `"wcoj"` block reporting `cyclic_bgp_detected`, `wcoj_mode` (`"planner_hint"`, `"disabled"`, or `"not_applicable"`), `planner_settings`, and `fallback_reason`.
+
+- **Streaming observability metrics** (OBS-01): New `pg_ripple.streaming_metrics() → JSONB` function returns live atomic counters: `cursor_pages_opened`, `cursor_pages_fetched`, `cursor_rows_streamed`, `arrow_batches_sent`, `arrow_ticket_rejections`, `citus_brin_summarise_completed`.
+
+- **Citus BRIN summarise SQL API** (CITUS-04): New `pg_ripple.citus_brin_summarise_all() → BIGINT` function runs `brin_summarize_new_values` on every promoted VP main-partition table. On Citus deployments uses `run_command_on_shards`; on non-Citus deployments runs locally. Returns total shards/tables updated.
+
+- **Feature status updated**: `arrow_flight` moves from `stub` to `experimental` in `pg_ripple.feature_status()`.
+
+### Dependencies added
+
+- `hmac = "0.12"`, `sha2 = "0.10"`, `hex = "0.4"` (in pg_ripple extension for ticket signing)
+- `arrow = "55"` (in pg_ripple_http for Arrow IPC serialization)
+- `hmac = "0.12"`, `sha2 = "0.10"`, `hex = "0.4"` (in pg_ripple_http for ticket validation)
+
+---
+
 ## [0.65.0] — 2026-04-28 — CONSTRUCT Writeback Correctness Closure
 
 **Implements the v0.65.0 roadmap: real delta maintenance, HTAP-aware retraction, exact provenance capture, parameterized rule catalog writes, observability, pipeline status API, and the full CWB behavior test matrix.**

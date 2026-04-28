@@ -65,6 +65,8 @@ mod construct_rules;
 mod construct_rules_api;
 // v0.64.0 modules
 mod feature_status;
+// v0.66.0 modules
+mod stats;
 
 // Re-export all GUC statics at the crate root so that `crate::SOME_GUC` paths
 // in existing code continue to work after the split.
@@ -1921,6 +1923,28 @@ pub extern "C-unwind" fn _PG_init() {
         &crate::gucs::storage::CITUS_PRUNE_CARRY_MAX,
         0,
         1_000_000,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+
+    // v0.66.0 Arrow Flight GUCs (FLIGHT-01).
+    pgrx::GucRegistry::define_string_guc(
+        c"pg_ripple.arrow_flight_secret",
+        c"HMAC-SHA256 secret for signing Arrow Flight tickets (v0.66.0 FLIGHT-01). \
+          Empty = unsigned tickets (rejected by default in pg_ripple_http).",
+        c"",
+        &crate::gucs::storage::ARROW_FLIGHT_SECRET,
+        GucContext::Sighup,
+        GucFlags::default(),
+    );
+
+    pgrx::GucRegistry::define_int_guc(
+        c"pg_ripple.arrow_flight_expiry_secs",
+        c"Arrow Flight ticket validity in seconds (v0.66.0 FLIGHT-01). Default: 3600.",
+        c"",
+        &crate::gucs::storage::ARROW_FLIGHT_EXPIRY_SECS,
+        60,
+        86400,
         GucContext::Userset,
         GucFlags::default(),
     );

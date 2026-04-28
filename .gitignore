@@ -5,3 +5,5 @@
 *.dylib
 *.dll
 docs/book/
+/pg_regress_results/
+/w3c_report/

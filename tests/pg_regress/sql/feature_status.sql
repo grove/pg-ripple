@@ -23,7 +23,7 @@ WHERE status NOT IN (
     'planned'
 );
 
--- arrow_flight must not claim to be implemented (it is a stub).
+-- arrow_flight is experimental (HMAC signing + Arrow IPC added in v0.66.0).
 SELECT status AS arrow_flight_status
 FROM pg_ripple.feature_status()
 WHERE feature_name = 'arrow_flight';

@@ -3,7 +3,7 @@ members = [".", "pg_ripple_http"]
 
 [package]
 name = "pg_ripple"
-version = "0.65.0"
+version = "0.66.0"
 edition = "2024"
 description = "High-performance RDF triple store with native SPARQL query execution for PostgreSQL 18"
 license = "Apache-2.0"
@@ -36,6 +36,9 @@ libc = "0.2"
 unicode-normalization = "0.1"
 ureq = { version = "2", features = ["tls"] }
 parquet = { version = "58", default-features = false, features = ["snap"] }
+hmac = "0.12"
+sha2 = "0.10"
+hex = "0.4"
 
 [dev-dependencies]
 pgrx-tests = { version = "=0.18.0", default-features = false }

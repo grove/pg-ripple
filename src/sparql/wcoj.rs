@@ -49,6 +49,68 @@
 
 use std::collections::{HashMap, HashSet};
 
+// ─── BGP variable extraction ──────────────────────────────────────────────────
+
+/// Walk a `spargebra` `GraphPattern` and collect the variable names that appear
+/// together in each triple pattern of any BGP.
+///
+/// Returns one `Vec<String>` per triple pattern containing the names of all
+/// variables that appear in subject, predicate, or object position.  The outer
+/// Vec may contain duplicates (one entry per triple pattern across all BGPs
+/// in the query, including nested ones).
+///
+/// Used by `explain_sparql_jsonb` (WCOJ-01) to compute cyclic-BGP status
+/// without re-running SQL translation.
+pub fn extract_bgp_pattern_vars(pattern: &spargebra::algebra::GraphPattern) -> Vec<Vec<String>> {
+    use spargebra::algebra::GraphPattern;
+    use spargebra::term::{NamedNodePattern, TermPattern};
+
+    let mut out: Vec<Vec<String>> = Vec::new();
+
+    fn walk(p: &GraphPattern, out: &mut Vec<Vec<String>>) {
+        match p {
+            GraphPattern::Bgp { patterns } => {
+                for tp in patterns {
+                    let mut vars = Vec::new();
+                    if let TermPattern::Variable(v) = &tp.subject {
+                        vars.push(v.as_str().to_owned());
+                    }
+                    if let NamedNodePattern::Variable(v) = &tp.predicate {
+                        vars.push(v.as_str().to_owned());
+                    }
+                    if let TermPattern::Variable(v) = &tp.object {
+                        vars.push(v.as_str().to_owned());
+                    }
+                    if !vars.is_empty() {
+                        out.push(vars);
+                    }
+                }
+            }
+            GraphPattern::Join { left, right }
+            | GraphPattern::Union { left, right }
+            | GraphPattern::LeftJoin { left, right, .. } => {
+                walk(left, out);
+                walk(right, out);
+            }
+            GraphPattern::Filter { inner, .. }
+            | GraphPattern::Graph { inner, .. }
+            | GraphPattern::Extend { inner, .. }
+            | GraphPattern::OrderBy { inner, .. }
+            | GraphPattern::Project { inner, .. }
+            | GraphPattern::Distinct { inner }
+            | GraphPattern::Reduced { inner }
+            | GraphPattern::Slice { inner, .. }
+            | GraphPattern::Group { inner, .. } => {
+                walk(inner, out);
+            }
+            _ => {}
+        }
+    }
+
+    walk(pattern, &mut out);
+    out
+}
+
 // ─── Cycle detection ──────────────────────────────────────────────────────────
 
 /// Detect whether a Basic Graph Pattern (BGP) contains a cyclic join.
