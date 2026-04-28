@@ -1224,6 +1224,7 @@ jobs:
       - name: Build and install extension
         run: |
           PG_CONFIG=/usr/lib/postgresql/18/bin/pg_config
+          cargo pgrx init --pg18 "$PG_CONFIG"
           cargo pgrx install --pg-config "$PG_CONFIG" --release
 
       - name: Start PostgreSQL and load extension
