@@ -18,7 +18,9 @@ its relay CLI pulls data in from any source (Kafka, NATS, webhooks) and pushes
 enriched data out to any sink. **pg_ripple** acts as the intelligent hub in the
 middle: it turns the incoming JSON into a knowledge graph, runs inference rules to
 derive new facts, validates data quality with SHACL, and serializes the enriched
-results as JSON-LD for downstream consumers.
+results back to JSON or JSON-LD for downstream consumers. The output format is
+flexible — simple decoded JSON (via raw CDC triggers) or shaped JSON-LD (via
+framing triggers) — depending on what each downstream consumer needs.
 
 The whole pipeline runs inside a single PostgreSQL database. Both extensions share
 the same transaction context, so data moves from inbox to triplestore to outbox
