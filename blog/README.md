@@ -34,6 +34,7 @@
 | [Datalog Inside PostgreSQL](datalog-inside-postgresql.md) | Automatic fact derivation from rules — RDFS subclass inference, OWL RL reasoning, transitive closure, all running as SQL inside your database. Semi-naive evaluation, stratified negation, and why Datalog is the query language your ontology already speaks. |
 | [Magic Sets: Ask a Question, Infer Only What You Need](magic-sets-goal-directed.md) | Full materialization computes every possible inference. Magic sets rewrite rules so that only facts reachable from your query are derived. The difference between 2 million inferred triples and 47. |
 | [owl:sameAs Without the Explosion](owl-sameas-entity-resolution.md) | Entity canonicalization at query time: union-find over `owl:sameAs` chains, canonical ID rewriting in the dictionary, and why naive `owl:sameAs` handling turns a 1-second query into a 10-minute one. |
+| [The Four Built-in Rule Sets](builtin-reasoning-rules-explained.md) | What RDFS, OWL RL, OWL EL, and OWL QL actually do — every rule explained with examples, use cases, and a comparison matrix. When to use each profile, how to layer them, and why the right choice depends on whether you have 500 classes or 500,000. |
 
 ### Data Quality & Validation
 
