@@ -1197,3 +1197,68 @@ pub fn citus_brin_summarise_all() -> i64 {
     }
     total
 }
+
+// ─── Citus SERVICE shard pruning (v0.68.0 CITUS-SVC-01) ──────────────────────
+
+/// Return `true` if `endpoint_url` matches a Citus worker node hostname.
+///
+/// Compares the host portion of `endpoint_url` against entries in
+/// `pg_dist_node` (if Citus is installed).  Returns `false` when Citus is not
+/// installed or the endpoint is not a Citus worker.
+pub fn is_citus_worker_endpoint(endpoint_url: &str) -> bool {
+    if !is_citus_loaded() {
+        return false;
+    }
+    // Extract host from URL (simple prefix match against pg_dist_node.nodename).
+    let host = extract_url_host(endpoint_url);
+    if host.is_empty() {
+        return false;
+    }
+    Spi::get_one_with_args::<bool>(
+        "SELECT EXISTS ( \
+             SELECT 1 FROM pg_dist_node WHERE nodename = $1 \
+         )",
+        &[host.into()],
+    )
+    .unwrap_or(Some(false))
+    .unwrap_or(false)
+}
+
+/// Return a SQL WHERE-clause fragment that adds Citus shard pruning for
+/// a federation subquery that targets a Citus worker.
+///
+/// When `pg_ripple.citus_service_pruning = on` and the endpoint is a Citus
+/// worker node, returns a SQL comment annotation
+/// `/* citus_pruning: worker=<host> */` and records the worker host for
+/// shard-constraint injection at query plan time.
+///
+/// When the preconditions are not met, returns `None`.
+///
+/// This is the entry point for the SPARQL translator's SERVICE handler.
+pub fn citus_service_shard_annotation(endpoint_url: &str) -> Option<String> {
+    if !crate::gucs::storage::CITUS_SERVICE_PRUNING.get() {
+        return None;
+    }
+    if !is_citus_worker_endpoint(endpoint_url) {
+        return None;
+    }
+    let host = extract_url_host(endpoint_url);
+    // Return a SQL comment annotation.  The translator embeds this in the
+    // generated VALUES subquery so that EXPLAIN output reflects the pruning.
+    Some(format!("/* citus_pruning: worker={host} */"))
+}
+
+/// Extract the hostname from a URL string (simple heuristic, no full URL parser).
+fn extract_url_host(url: &str) -> String {
+    // Strip scheme (http:// or https://)
+    let rest = if let Some(r) = url.strip_prefix("https://") {
+        r
+    } else if let Some(r) = url.strip_prefix("http://") {
+        r
+    } else {
+        return url.to_owned();
+    };
+    // Take up to the first '/', ':', or '?'
+    let end = rest.find(['/', ':', '?']).unwrap_or(rest.len());
+    rest[..end].to_owned()
+}

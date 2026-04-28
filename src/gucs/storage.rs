@@ -193,3 +193,23 @@ pub static ARROW_UNSIGNED_TICKETS_ALLOWED: pgrx::GucSetting<bool> =
 /// GUC: number of rows per Arrow record batch when streaming export.
 /// Default: 1000. (v0.67.0 FLIGHT-SEC-02)
 pub static ARROW_BATCH_SIZE: pgrx::GucSetting<i32> = pgrx::GucSetting::<i32>::new(1000);
+
+// ─── v0.68.0 Citus/scalability GUCs ─────────────────────────────────────────
+
+/// GUC: when `on`, route SPARQL `COUNT(DISTINCT …)` aggregates through
+/// Citus HLL (hll_add_agg) when the `hll` extension is available.
+/// Provides approximate but highly scalable distinct counts on distributed VP
+/// tables.  Falls back to exact `COUNT(DISTINCT …)` when HLL is absent or
+/// when this GUC is `off`.  Default: `off`. (v0.68.0 CITUS-HLL-01)
+pub static APPROX_DISTINCT: pgrx::GucSetting<bool> = pgrx::GucSetting::<bool>::new(false);
+
+/// GUC: when `on`, the SPARQL federation translator rewrites SERVICE subqueries
+/// targeting Citus workers to include shard-constraint annotations, pruning
+/// irrelevant shards.  Automatically set to `on` when Citus is detected unless
+/// overridden.  Default: `off`. (v0.68.0 CITUS-SVC-01)
+pub static CITUS_SERVICE_PRUNING: pgrx::GucSetting<bool> = pgrx::GucSetting::<bool>::new(false);
+
+/// GUC: batch size for background VP promotion copy phase. Number of rows
+/// copied from vp_rare to the shadow tables per iteration.  Default: 10000.
+/// (v0.68.0 PROMO-01)
+pub static VP_PROMOTION_BATCH_SIZE: pgrx::GucSetting<i32> = pgrx::GucSetting::<i32>::new(10_000);

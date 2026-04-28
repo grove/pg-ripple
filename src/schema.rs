@@ -49,7 +49,8 @@ CREATE TABLE IF NOT EXISTS _pg_ripple.predicates (
     schema_name           TEXT,
     table_name            TEXT,
     tombstones_cleared_at TIMESTAMPTZ,
-    brin_summarize_failures INT       NOT NULL DEFAULT 0
+    brin_summarize_failures INT       NOT NULL DEFAULT 0,
+    promotion_status      TEXT
 );
 
 -- Rare-predicate consolidation table
@@ -1257,4 +1258,14 @@ pgrx::extension_sql!(
      VALUES ('0.67.0', '0.66.0', clock_timestamp());",
     name = "v067_schema_version_stamp",
     requires = ["v066_schema_version_stamp"]
+);
+
+// v0.68.0: STREAM-01, CITUS-HLL-01, CITUS-SVC-01, PROMO-01, FUZZ-01.
+// predicates.promotion_status column is already in the CREATE TABLE above
+// so no ALTER TABLE needed here for fresh installs.
+pgrx::extension_sql!(
+    "INSERT INTO _pg_ripple.schema_version (version, upgraded_from, installed_at) \
+     VALUES ('0.68.0', '0.67.0', clock_timestamp());",
+    name = "v068_schema_version_stamp",
+    requires = ["v067_schema_version_stamp"]
 );

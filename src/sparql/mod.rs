@@ -356,6 +356,134 @@ pub(crate) fn prepare_select(
     entry
 }
 
+// ─── CONSTRUCT cursor helpers (v0.68.0 STREAM-01) ───────────────────────────
+
+/// One slot in a CONSTRUCT template triple: either a constant encoded ID
+/// or a reference to a WHERE-clause variable by index.
+#[derive(Clone)]
+pub(crate) enum TemplateSlot {
+    Constant(i64),
+    Var(usize),
+}
+
+/// A CONSTRUCT template: one entry per template triple.
+pub(crate) type ConstructTemplate = Vec<(TemplateSlot, TemplateSlot, TemplateSlot)>;
+
+/// Prepare a SPARQL CONSTRUCT query for cursor-based streaming (STREAM-01).
+///
+/// Returns:
+/// - `sql`: the WHERE-clause SQL whose columns are the bound variable IDs.
+/// - `variables`: the variable names (same order as SQL result columns).
+/// - `template`: the CONSTRUCT template expressed as (TemplateSlot, TemplateSlot,
+///   TemplateSlot) triples.
+pub(crate) fn prepare_construct(query_text: &str) -> (String, Vec<String>, ConstructTemplate) {
+    let query = SparqlParser::new()
+        .parse_query(query_text)
+        .unwrap_or_else(|e| pgrx::error!("SPARQL parse error: {}", e));
+
+    let (template, pattern) = match query {
+        spargebra::Query::Construct {
+            template, pattern, ..
+        } => (template, pattern),
+        _ => pgrx::error!("prepare_construct() requires a CONSTRUCT query"),
+    };
+
+    check_query_complexity(&pattern);
+
+    let trans = sqlgen::translate_select(&pattern, None);
+    let sql = trans.sql;
+    let variables = trans.variables;
+
+    // Pre-encode constant IRIs/literals in the template to i64 once.
+    let ct: ConstructTemplate = template
+        .iter()
+        .map(|triple| {
+            let s_slot = match &triple.subject {
+                spargebra::term::TermPattern::NamedNode(nn) => {
+                    TemplateSlot::Constant(dictionary::encode(nn.as_str(), dictionary::KIND_IRI))
+                }
+                spargebra::term::TermPattern::Variable(v) => {
+                    let idx = variables
+                        .iter()
+                        .position(|var| var == v.as_str())
+                        .unwrap_or(usize::MAX);
+                    TemplateSlot::Var(idx)
+                }
+                _ => TemplateSlot::Var(usize::MAX), // blank node or unsupported → skip
+            };
+            let p_slot = match &triple.predicate {
+                spargebra::term::NamedNodePattern::NamedNode(nn) => {
+                    TemplateSlot::Constant(dictionary::encode(nn.as_str(), dictionary::KIND_IRI))
+                }
+                spargebra::term::NamedNodePattern::Variable(v) => {
+                    let idx = variables
+                        .iter()
+                        .position(|var| var == v.as_str())
+                        .unwrap_or(usize::MAX);
+                    TemplateSlot::Var(idx)
+                }
+            };
+            let o_slot = match &triple.object {
+                spargebra::term::TermPattern::NamedNode(nn) => {
+                    TemplateSlot::Constant(dictionary::encode(nn.as_str(), dictionary::KIND_IRI))
+                }
+                spargebra::term::TermPattern::Literal(lit) => {
+                    let lang = lit.language();
+                    let dt = lit.datatype().as_str();
+                    let id = if let Some(l) = lang {
+                        dictionary::encode_lang_literal(lit.value(), l)
+                    } else {
+                        dictionary::encode_typed_literal(lit.value(), dt)
+                    };
+                    TemplateSlot::Constant(id)
+                }
+                spargebra::term::TermPattern::Variable(v) => {
+                    let idx = variables
+                        .iter()
+                        .position(|var| var == v.as_str())
+                        .unwrap_or(usize::MAX);
+                    TemplateSlot::Var(idx)
+                }
+                _ => TemplateSlot::Var(usize::MAX), // blank node, RDF-star → skip
+            };
+            (s_slot, p_slot, o_slot)
+        })
+        .collect();
+
+    (sql, variables, ct)
+}
+
+/// Apply a CONSTRUCT template to a row of variable bindings, returning
+/// `(s_id, p_id, o_id)` for each template triple that is fully bound.
+///
+/// `row_vals` must be indexed by the same variable order as `template` was built from.
+pub(crate) fn apply_construct_template(
+    template: &ConstructTemplate,
+    row_vals: &[Option<i64>],
+) -> Vec<(i64, i64, i64)> {
+    let resolve = |slot: &TemplateSlot| -> Option<i64> {
+        match slot {
+            TemplateSlot::Constant(id) => Some(*id),
+            TemplateSlot::Var(idx) => {
+                if *idx == usize::MAX {
+                    return None;
+                }
+                row_vals.get(*idx).copied().flatten()
+            }
+        }
+    };
+
+    template
+        .iter()
+        .filter_map(|(s_slot, p_slot, o_slot)| {
+            let s = resolve(s_slot)?;
+            let p = resolve(p_slot)?;
+            let o = resolve(o_slot)?;
+            Some((s, p, o))
+        })
+        .collect()
+}
+
 /// Run a SELECT SQL and return rows as JSONB.
 ///
 /// `raw_numeric_vars` lists variables that hold raw SQL numbers (aggregates)

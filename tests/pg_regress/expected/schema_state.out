@@ -64,9 +64,10 @@ ORDER BY ordinal_position;
  table_name
  tombstones_cleared_at
  brin_summarize_failures
+ promotion_status
  derived
  rule_set
-(10 rows)
+(11 rows)
 
 -- ── vp_rare table (including source column from v0.1.0 base) ─────────────────
 SELECT column_name
