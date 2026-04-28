@@ -191,13 +191,13 @@ mod pg_ripple {
 
     /// Stream SPARQL SELECT results one batch at a time.
     ///
-    /// Unlike `sparql()`, this function pages through results in 1024-row
-    /// batches, avoiding full materialisation for large result sets.
+    /// Unlike `sparql()`, this function pages through results one portal-page
+    /// at a time (bounded by `pg_ripple.export_batch_size`), keeping Rust-side
+    /// memory proportional to the page size rather than the full result size.
     /// Respects `pg_ripple.sparql_max_rows` if set.
     #[pg_extern]
     fn sparql_cursor(query: &str) -> TableIterator<'static, (name!(result, pgrx::JsonB),)> {
-        let rows = crate::sparql::cursor::sparql_cursor(query);
-        TableIterator::new(rows.into_iter().map(|r| (r,)))
+        TableIterator::new(crate::sparql::cursor::sparql_cursor(query))
     }
 
     /// Stream a SPARQL CONSTRUCT query result as Turtle text chunks.

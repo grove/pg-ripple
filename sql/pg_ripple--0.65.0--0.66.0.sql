@@ -1,0 +1,34 @@
+-- Migration 0.65.0 → 0.66.0: Streaming SPARQL cursors, Arrow IPC Flight,
+-- WCOJ explain metadata, streaming observability metrics, and Citus BRIN.
+--
+-- New SQL-level additions (compiled from Rust; no DDL changes required):
+--
+--   pg_ripple.streaming_metrics()             → JSONB
+--     Returns live counters for cursor pages, rows, Arrow batches, ticket
+--     rejections, and BRIN summarise completions (OBS-01).
+--
+--   pg_ripple.citus_brin_summarise_all()      → BIGINT
+--     Runs brin_summarize_new_values on every promoted VP main-partition
+--     table (Citus shards or local). Returns total shards updated (CITUS-04).
+--
+--   pg_ripple.export_arrow_flight(graph_iri TEXT) → BYTEA
+--     Generates an HMAC-SHA256 signed JSON ticket (type = arrow_flight_v2)
+--     for the named graph. Present the ticket to the pg_ripple_http
+--     POST /flight/do_get endpoint to receive an Arrow IPC stream (FLIGHT-01).
+--
+-- New GUC parameters:
+--   pg_ripple.arrow_flight_secret   (string, default: '')
+--     HMAC-SHA256 signing secret for Arrow Flight tickets. Set in
+--     postgresql.conf (requires reload). Keep identical to the
+--     ARROW_FLIGHT_SECRET env-var on the pg_ripple_http service.
+--
+--   pg_ripple.arrow_flight_expiry_secs  (integer, default: 3600)
+--     Ticket validity window in seconds (60–86400).
+--
+-- Behaviour changes:
+--   • sparql_cursor() now uses PostgreSQL portal API for memory-bounded
+--     paged streaming instead of materialising all rows into memory (STREAM-01).
+--   • explain_sparql_jsonb() output now includes a "wcoj" metadata block
+--     describing the WCOJ planner hint status (WCOJ-01).
+--
+-- Schema changes: None.

@@ -29,6 +29,10 @@ pub struct AppState {
     /// connection.  Used by the `/ready` Kubernetes readiness probe — the
     /// pod is only added to the load-balancer once this is true.
     pub ever_connected: AtomicBool,
+    /// v0.66.0 FLIGHT-01: HMAC-SHA256 secret for Arrow Flight ticket validation.
+    /// Read from the `ARROW_FLIGHT_SECRET` environment variable at startup.
+    /// `None` means unsigned tickets are accepted (insecure; dev only).
+    pub arrow_flight_secret: Option<String>,
 }
 
 // ─── Configuration ────────────────────────────────────────────────────────────

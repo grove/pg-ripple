@@ -169,3 +169,15 @@ pub static DICTIONARY_TIER_THRESHOLD: pgrx::GucSetting<i32> = pgrx::GucSetting::
 /// GUC: maximum number of subject IDs to carry forward for multi-hop shard
 /// pruning (v0.62.0 CITUS-29). Above this threshold, falls back to full fan-out.
 pub static CITUS_PRUNE_CARRY_MAX: pgrx::GucSetting<i32> = pgrx::GucSetting::<i32>::new(1000);
+
+// ─── v0.66.0 Arrow Flight GUCs ───────────────────────────────────────────────
+
+/// GUC: HMAC-SHA256 secret for signing Arrow Flight tickets (v0.66.0 FLIGHT-01).
+/// Empty string = tickets are unsigned (rejected by default in pg_ripple_http).
+/// Set to a long random value in production.
+pub static ARROW_FLIGHT_SECRET: pgrx::GucSetting<Option<std::ffi::CString>> =
+    pgrx::GucSetting::<Option<std::ffi::CString>>::new(None);
+
+/// GUC: Arrow Flight ticket validity in seconds (v0.66.0 FLIGHT-01).
+/// Default: 3600 (1 hour).
+pub static ARROW_FLIGHT_EXPIRY_SECS: pgrx::GucSetting<i32> = pgrx::GucSetting::<i32>::new(3600);

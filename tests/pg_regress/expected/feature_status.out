@@ -35,7 +35,7 @@ FROM pg_ripple.feature_status()
 WHERE feature_name = 'arrow_flight';
  arrow_flight_status 
 ---------------------
- stub
+ experimental
 (1 row)
 
 -- wcoj must be planner_hint (not a full triejoin executor).

@@ -70,7 +70,7 @@ SELECT (convert_from(
 )::jsonb)->>'type' AS ticket_type;
    ticket_type   
 -----------------
- arrow_flight_v1
+ arrow_flight_v2
 (1 row)
 
 -- 2c. Function exists in pg_ripple schema.

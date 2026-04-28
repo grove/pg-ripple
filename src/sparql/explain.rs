@@ -209,5 +209,76 @@ pub fn explain_sparql_jsonb(query_text: &str, analyze: bool, citus: bool) -> pgr
         result["citus"] = crate::citus::explain_citus_section(query_text);
     }
 
+    // v0.66.0 (WCOJ-01): add WCOJ metadata — always present so callers can rely on it.
+    let wcoj_metadata = build_wcoj_metadata(&query);
+    result["wcoj"] = wcoj_metadata;
+
     pgrx::JsonB(result)
+}
+
+/// Build the WCOJ metadata block for the explain output.
+///
+/// Reports whether a cyclic BGP was detected, the current WCOJ mode
+/// (planner_hint or executor), the planner settings that will be applied,
+/// and the fallback reason when WCOJ cannot be used.
+fn build_wcoj_metadata(query: &Query) -> serde_json::Value {
+    use crate::sparql::wcoj;
+
+    let wcoj_enabled = crate::gucs::WCOJ_ENABLED.get();
+    let wcoj_min_tables = crate::gucs::WCOJ_MIN_TABLES.get() as usize;
+
+    // Detect cyclic BGP from the query pattern variables.
+    let pattern_vars: Vec<Vec<String>> = match query {
+        Query::Select { pattern, .. } | Query::Construct { pattern, .. } => {
+            wcoj::extract_bgp_pattern_vars(pattern)
+        }
+        Query::Ask { pattern, .. } => wcoj::extract_bgp_pattern_vars(pattern),
+        _ => Vec::new(),
+    };
+
+    let cyclic_bgp_detected = wcoj::detect_cyclic_bgp(&pattern_vars);
+    let join_count = pattern_vars.len();
+
+    let (wcoj_mode, fallback_reason, planner_settings): (&str, Option<String>, Vec<String>) =
+        if !wcoj_enabled {
+            (
+                "disabled",
+                Some("pg_ripple.wcoj_enabled is off".to_owned()),
+                Vec::new(),
+            )
+        } else if !cyclic_bgp_detected {
+            (
+                "not_applicable",
+                Some("no cyclic join pattern detected in BGP".to_owned()),
+                Vec::new(),
+            )
+        } else if join_count < wcoj_min_tables {
+            (
+                "not_applicable",
+                Some(format!(
+                    "join count {} < wcoj_min_tables {}",
+                    join_count, wcoj_min_tables
+                )),
+                Vec::new(),
+            )
+        } else {
+            // WCOJ planner-hint mode: we reorder joins and force sort-merge joins.
+            // A true Leapfrog Triejoin executor is not implemented; this is honest
+            // labeling per WCOJ-01.
+            let settings = vec![
+                "SET LOCAL join_collapse_limit = 1".to_owned(),
+                "SET LOCAL enable_hashjoin = off".to_owned(),
+                "SET LOCAL enable_mergejoin = on".to_owned(),
+            ];
+            ("planner_hint", None, settings)
+        };
+
+    serde_json::json!({
+        "cyclic_bgp_detected": cyclic_bgp_detected,
+        "wcoj_mode": wcoj_mode,
+        "planner_settings": planner_settings,
+        "fallback_reason": fallback_reason,
+        "note": "WCOJ is implemented as a cyclic-BGP planner hint; \
+                 a true Leapfrog Triejoin executor is not implemented in this version"
+    })
 }

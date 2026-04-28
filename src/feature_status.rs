@@ -100,14 +100,15 @@ mod pg_ripple {
             ),
             (
                 "sparql_cursor_streaming".to_string(),
-                "planned".to_string(),
+                "experimental".to_string(),
                 None,
                 Some(
-                    "current /sparql/stream endpoint fully materializes results before streaming; \
-                     true incremental streaming deferred to v0.66.0"
+                    "sparql_cursor uses portal-based paged fetching (bounded memory per page); \
+                     sparql_cursor_turtle and sparql_cursor_jsonld still materialize CONSTRUCT \
+                     results (planned for full streaming in v0.67.0)"
                         .to_string(),
                 ),
-                None,
+                Some("ci/regress: sparql_cursor.sql".to_string()),
                 Some("docs/src/reference/sparql.md".to_string()),
                 None,
             ),
@@ -180,8 +181,9 @@ mod pg_ripple {
                 "planned".to_string(),
                 Some("citus".to_string()),
                 Some(
-                    "SERVICE result shard pruning is planned but not integrated \
-                     into the SPARQL-to-SQL translator; deferred to v0.66.0"
+                    "CITUS-01: SERVICE result shard pruning is not yet integrated into \
+                     SPARQL-to-SQL translator; carry-forward set and pruning helpers exist \
+                     but require translator-level wiring"
                         .to_string(),
                 ),
                 None,
@@ -193,8 +195,62 @@ mod pg_ripple {
                 "planned".to_string(),
                 Some("citus, hll".to_string()),
                 Some(
-                    "COUNT(DISTINCT) via HyperLogLog is planned but SQL aggregate \
-                     generation does not yet emit HLL calls; deferred to v0.66.0"
+                    "CITUS-02: COUNT(DISTINCT) via HyperLogLog is not yet wired into SQL \
+                     aggregate generation; opt-in GUC pg_ripple.approx_distinct planned"
+                        .to_string(),
+                ),
+                None,
+                Some("docs/src/reference/scalability.md".to_string()),
+                None,
+            ),
+            (
+                "citus_nonblocking_promotion".to_string(),
+                "planned".to_string(),
+                Some("citus".to_string()),
+                Some(
+                    "CITUS-03: VP promotion is currently synchronous (takes DDL lock); \
+                     shadow-table non-blocking promotion requires schema changes planned for v0.67.0"
+                        .to_string(),
+                ),
+                None,
+                Some("docs/src/reference/scalability.md".to_string()),
+                None,
+            ),
+            (
+                "citus_brin_summarise".to_string(),
+                "implemented".to_string(),
+                Some("citus".to_string()),
+                Some(
+                    "CITUS-04: run_command_on_shards(brin_summarize_new_values) called \
+                     after HTAP merge for distributed VP main tables; graceful fallback \
+                     for non-Citus deployments"
+                        .to_string(),
+                ),
+                Some("ci/regress: htap_merge.sql (brin_summarise assertions)".to_string()),
+                Some("docs/src/reference/scalability.md".to_string()),
+                None,
+            ),
+            (
+                "citus_rls_propagation".to_string(),
+                "experimental".to_string(),
+                Some("citus".to_string()),
+                Some(
+                    "CITUS-05: grant_graph/revoke_graph propagate to workers via \
+                     run_command_on_all_nodes; synchronous propagation verified in \
+                     tests/integration/citus_rls_propagation.sh"
+                        .to_string(),
+                ),
+                Some("ci/integration: citus_rls_propagation.sh".to_string()),
+                Some("docs/src/reference/scalability.md".to_string()),
+                None,
+            ),
+            (
+                "citus_multihop_pruning".to_string(),
+                "planned".to_string(),
+                Some("citus".to_string()),
+                Some(
+                    "CITUS-06: multi-hop carry-forward helpers exist in citus.rs but \
+                     ShardPruneSet is not yet wired into property-path or BGP translation"
                         .to_string(),
                 ),
                 None,
@@ -204,14 +260,15 @@ mod pg_ripple {
             // ── Arrow Flight ───────────────────────────────────────────────
             (
                 "arrow_flight".to_string(),
-                "stub".to_string(),
+                "experimental".to_string(),
                 None,
                 Some(
-                    "Arrow Flight endpoint (/flight/do_get) returns a JSON stub; \
-                     real Arrow IPC streaming deferred to v0.66.0"
+                    "Tickets are HMAC-SHA256 signed with expiry and nonce (FLIGHT-01); \
+                     pg_ripple_http /flight/do_get streams real Arrow IPC record batches \
+                     from VP tables (FLIGHT-02); requires pg_ripple.arrow_flight_secret to be set"
                         .to_string(),
                 ),
-                None,
+                Some("ci/regress: v062_features.sql (ticket signing), tests/integration/".to_string()),
                 Some("docs/src/reference/arrow-flight.md".to_string()),
                 None,
             ),
@@ -227,6 +284,16 @@ mod pg_ripple {
                 ),
                 Some("ci/regress: sparql_wcoj.sql".to_string()),
                 Some("docs/src/reference/query-optimization.md".to_string()),
+                None,
+            ),
+            // ── Streaming observability (v0.66.0 OBS-01) ──────────────────
+            (
+                "streaming_observability".to_string(),
+                "implemented".to_string(),
+                None,
+                None,
+                Some("ci/regress: streaming_metrics.sql".to_string()),
+                Some("docs/src/reference/observability.md".to_string()),
                 None,
             ),
             // ── Vector search ──────────────────────────────────────────────

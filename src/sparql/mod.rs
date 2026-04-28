@@ -303,7 +303,7 @@ fn utf8_char_len(b: u8) -> usize {
 /// Parse the query, optimize, translate to SQL, and cache the result.
 /// Returns `(sql, variables, raw_numeric_vars, raw_text_vars, raw_iri_vars, raw_double_vars, wcoj_preamble)`.
 #[allow(clippy::type_complexity)]
-fn prepare_select(
+pub(crate) fn prepare_select(
     query_text: &str,
 ) -> (
     String,
