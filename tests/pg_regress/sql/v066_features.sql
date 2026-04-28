@@ -64,14 +64,21 @@ SELECT pg_ripple.citus_brin_summarise_all() >= 0 AS brin_summarise_ok;
 -- ── Part 5: WCOJ explain metadata ────────────────────────────────────────────
 
 -- 5a. explain_sparql_jsonb() output includes a 'wcoj' block.
-SELECT (pg_ripple.explain_sparql(
-    'SELECT ?s ?p ?o WHERE { ?s ?p ?o }', false
-) -> 'wcoj') IS NOT NULL AS has_wcoj_block;
+-- Note: must use CTE to prevent planner inlining of STABLE function.
+WITH r AS (
+    SELECT pg_ripple.explain_sparql(
+        'SELECT ?s ?p ?o WHERE { ?s ?p ?o }', false
+    ) AS j
+)
+SELECT (j -> 'wcoj') IS NOT NULL AS has_wcoj_block FROM r;
 
 -- 5b. wcoj block includes wcoj_mode field.
-SELECT (pg_ripple.explain_sparql(
-    'SELECT ?s ?p ?o WHERE { ?s ?p ?o }', false
-) -> 'wcoj') ? 'wcoj_mode' AS has_wcoj_mode;
+WITH r AS (
+    SELECT pg_ripple.explain_sparql(
+        'SELECT ?s ?p ?o WHERE { ?s ?p ?o }', false
+    ) AS j
+)
+SELECT (j -> 'wcoj') ? 'wcoj_mode' AS has_wcoj_mode FROM r;
 
 -- ── Part 6: sparql_cursor() ──────────────────────────────────────────────────
 
