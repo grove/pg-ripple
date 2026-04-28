@@ -94,6 +94,7 @@
 - [Logical Replication](operations/replication.md)
 - [CDC Operations](operations/cdc.md)
 - [Citus + pg-trickle Integration](operations/citus-integration.md)
+- [pg-trickle Relay: Hub-and-Spoke](operations/pg-trickle-relay.md)
 - [Configuration](operations/configuration.md)
 - [Tuning](operations/tuning.md)
 - [Monitoring and Observability](operations/monitoring.md)
