@@ -59,7 +59,7 @@ The data flow through the hub has five stages:
 2. **Transform** — a trigger converts the JSON into RDF triples and loads them into the triplestore.
 3. **Enrich** — Datalog inference rules derive new facts (alerts, entity links, risk scores).
 4. **Validate** — SHACL shapes enforce data quality before anything leaves the hub.
-5. **Distribute** — pg-trickle relay forward mode pushes enriched, validated JSON-LD events to any number of sinks.
+5. **Distribute** — pg-trickle relay forward mode pushes enriched, validated JSON events to any number of sinks.
 
 ---
 
@@ -295,7 +295,7 @@ inferred alert triples, and configure relay forward pipelines to deliver them
 wherever they are needed.
 
 ```sql
--- The bridge table holds outbound events in JSON-LD format.
+-- The bridge table holds the outbound alert payloads.
 -- pg-trickle watches this table and relays its rows to external sinks.
 CREATE TABLE enriched_events (
     id         BIGSERIAL PRIMARY KEY,
@@ -320,6 +320,39 @@ SELECT pg_ripple.enable_cdc_bridge_trigger(
     predicate => 'https://example.org/tempAlert',
     outbox    => 'enriched_events'
 );
+
+-- Reformat the raw decoded triple into plain JSON before the row is committed.
+-- enable_cdc_bridge_trigger writes {subject, predicate, object, graph} with
+-- full IRI strings. This BEFORE INSERT trigger rewrites the payload back to
+-- the same field names the sensor originally sent, with the inferred "alert"
+-- field added. The subject IRI encodes the original event_id, so we can join
+-- straight back to sensor_inbox to recover the source values.
+CREATE OR REPLACE FUNCTION reformat_alert_payload()
+RETURNS TRIGGER LANGUAGE plpgsql AS $$
+DECLARE
+    src RECORD;
+BEGIN
+    SELECT payload INTO src
+    FROM sensor_inbox
+    WHERE event_id = split_part(NEW.payload ->> 'subject', '/observation/', 2)
+    LIMIT 1;
+
+    IF FOUND THEN
+        NEW.payload := jsonb_build_object(
+            'device', src.payload ->> 'device',
+            'temp',   (src.payload ->> 'temp')::numeric,
+            'ts',     src.payload ->> 'ts',
+            'alert',  'high_temperature'
+        );
+    END IF;
+
+    RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER reformat_alert
+BEFORE INSERT ON enriched_events
+FOR EACH ROW EXECUTE FUNCTION reformat_alert_payload();
 
 -- Tell pg-trickle to treat this table as an outbox so the relay can poll it.
 SELECT pgtrickle.enable_outbox('enriched_events');
@@ -362,36 +395,24 @@ SELECT pgtrickle.set_relay_outbox(
 );
 ```
 
-When paired with a framing trigger — as shown in the
-[JSON-LD mapping section](#json-ld-mapping-inbound-context-and-outbound-framing)
-below — the payload that lands in downstream consumers is a self-contained
-JSON-LD document. The framing trigger queries back the full set of triples for
-the alert's subject, so the output includes all the observation data, not just
-the alert predicate that triggered it:
+The `reformat_alert_payload` trigger rewrites the decoded triple back to the
+same field names the sensor originally sent, with the inferred `alert` field
+added. A consumer reading from `iot.alerts` sees a plain JSON document it can
+process without any knowledge of RDF or the triplestore:
 
 ```json
 {
-  "@context": {
-    "saref": "https://saref.etsi.org/core/",
-    "xsd":   "http://www.w3.org/2001/XMLSchema#",
-    "ex":    "https://example.org/"
-  },
-  "@id":   "https://example.org/observation/kafka:iot.sensors:0:99",
-  "@type": "saref:Measurement",
-  "saref:measurementMadeBy": { "@id": "https://example.org/device/sensor-7" },
-  "saref:hasValue": { "@value": "45.2", "@type": "xsd:decimal" },
-  "saref:hasTimestamp": {
-    "@value": "2026-04-28T11:32:00Z",
-    "@type":  "xsd:dateTime"
-  },
-  "ex:tempAlert": { "@id": "https://example.org/device/sensor-7" },
-  "_relay_dedup_key": "ripple:8301047"
+  "device": "sensor-7",
+  "temp":   45.2,
+  "ts":     "2026-04-28T10:00:00Z",
+  "alert":  "high_temperature"
 }
 ```
 
-The `_relay_dedup_key` field is derived from pg_ripple's internal statement ID
-(the `i` column in VP tables). This guarantees that even if the relay restarts
-and replays the outbox, downstream consumers can detect and discard duplicates.
+Compare this with the original inbound message from Step 1: same `device`,
+`temp`, and `ts` fields, one new `alert` field derived by the inference rules.
+The triplestore and Datalog engine are invisible to both the producer and the
+consumer — they see only ordinary JSON.
 
 ---
 
