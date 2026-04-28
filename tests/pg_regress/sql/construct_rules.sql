@@ -389,3 +389,8 @@ SELECT pg_ripple.apply_construct_rules_for_graph('https://cwb.test/esrc') >= 0
 -- ── Cleanup ────────────────────────────────────────────────────────────────────
 
 SELECT pg_ripple.drop_construct_rule('cwb_explain') AS explain_rule_dropped;
+
+-- Isolation: remove any source=1 triples left by CWB-09 (no-retract test) so
+-- subsequent tests (e.g. datalog_owl_rl_deletion) start with a clean vp_rare.
+DELETE FROM _pg_ripple.vp_rare WHERE source = 1;
+SELECT TRUE AS isolation_cleanup_done;

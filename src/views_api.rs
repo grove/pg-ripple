@@ -426,11 +426,13 @@ mod pg_ripple {
     /// Delete a specific triple from a named graph.  Returns 0 or 1.
     #[pg_extern]
     fn delete_triple_from_graph(s: &str, p: &str, o: &str, graph_iri: &str) -> i64 {
-        let g_id = crate::dictionary::encode(graph_iri, crate::dictionary::KIND_IRI);
+        // v0.65.0 fix: strip angle brackets to match insert_triple's encoding.
+        let clean_iri = crate::storage::strip_angle_brackets_pub(graph_iri);
+        let g_id = crate::dictionary::encode(clean_iri, crate::dictionary::KIND_IRI);
         let deleted = crate::storage::delete_triple(s, p, o, g_id);
         // ── v0.65.0: CONSTRUCT writeback DRed maintenance ──────────────────
         if deleted > 0 {
-            crate::construct_rules::on_graph_delete(graph_iri);
+            crate::construct_rules::on_graph_delete(clean_iri);
         }
         deleted
     }

@@ -272,16 +272,19 @@ fn compute_rule_order(
 
 // ─── CONSTRUCT SQL compilation ────────────────────────────────────────────────
 
-/// Parse a SPARQL CONSTRUCT query and generate INSERT SQL statements.
+/// Parse a SPARQL CONSTRUCT query and generate INSERT + provenance SQL plans.
 ///
-/// Returns `(insert_sqls, source_graphs)` where:
-/// - `insert_sqls` — `Vec<(pred_id, insert_sql)>`; pred_id is 0 for variable predicates
-/// - `source_graphs` — set of named-graph IRIs referenced in the WHERE pattern
+/// Returns `(insert_plans, source_graphs)` where each plan is
+/// `(pred_id, Option<plain_insert_sql>, prov_sql)`:
+/// - promoted VP: `(pred_id, None, combined_returning_cte)` — one CTE does INSERT + prov
+/// - vp_rare:     `(pred_id, Some(insert_sql), exists_prov_sql)` — two steps; prov uses
+///   an EXISTS join so that shared-target rules both record provenance even when the
+///   second rule's INSERT is a no-op due to ON CONFLICT (CWB-FIX-04 / CWB-10).
 #[allow(clippy::type_complexity)]
 fn compile_construct_to_inserts(
     query_text: &str,
     target_graph_id: i64,
-) -> Result<(Vec<(i64, String)>, Vec<String>), String> {
+) -> Result<(Vec<(i64, Option<String>, String)>, Vec<String>), String> {
     use spargebra::SparqlParser;
     use spargebra::term::{NamedNodePattern, TermPattern};
 
@@ -360,7 +363,7 @@ fn compile_construct_to_inserts(
     let inner_alias = "_cr_inner_";
     let var_col = |v: &str| -> String { format!("{inner_alias}.{v}") };
 
-    let mut results: Vec<(i64, String)> = Vec::new();
+    let mut results: Vec<(i64, Option<String>, String)> = Vec::new();
 
     for triple in &template {
         // Resolve subject expression.
@@ -416,30 +419,78 @@ fn compile_construct_to_inserts(
             .unwrap_or(false)
         };
 
-        let sql = if has_vp_table {
-            format!(
-                "INSERT INTO _pg_ripple.vp_{pred_id} (s, o, g, source) \
-                 SELECT DISTINCT {s_expr}, {o_expr}, {target_graph_id}::bigint, 1 \
-                 FROM ({clean_sql}) AS {inner_alias} \
-                 WHERE ({s_expr}) IS NOT NULL AND ({o_expr}) IS NOT NULL \
+        let (plain_insert, prov_sql) = if has_vp_table {
+            // Promoted VP table: one combined RETURNING CTE handles INSERT + provenance.
+            // The INSERT may be a no-op for the promoted-VP shared-target case, but
+            // promoted predicates are rarely shared across rules in practice.
+            let combined_cte = format!(
+                "WITH inserted AS ( \
+                     INSERT INTO _pg_ripple.vp_{pred_id} (s, o, g, source) \
+                     SELECT DISTINCT {s_expr}, {o_expr}, {target_graph_id}::bigint, 1 \
+                     FROM ({clean_sql}) AS {inner_alias} \
+                     WHERE ({s_expr}) IS NOT NULL AND ({o_expr}) IS NOT NULL \
+                     ON CONFLICT DO NOTHING \
+                     RETURNING s, o, g \
+                 ) \
+                 INSERT INTO _pg_ripple.construct_rule_triples (rule_name, pred_id, s, o, g) \
+                 SELECT $1, {pred_id}, s, o, g FROM inserted \
                  ON CONFLICT DO NOTHING"
-            )
+            );
+            (None, combined_cte)
         } else {
+            // vp_rare path (rare pred or variable pred).
+            // Step 1: plain INSERT (no $1 param needed — all values are inlined).
             let p_col = if pred_id != 0 {
                 format!("{pred_id}::bigint")
             } else {
-                p_expr
+                p_expr.clone()
             };
-            format!(
+            let insert_sql = format!(
                 "INSERT INTO _pg_ripple.vp_rare (p, s, o, g, source) \
                  SELECT DISTINCT {p_col}, {s_expr}, {o_expr}, {target_graph_id}::bigint, 1 \
                  FROM ({clean_sql}) AS {inner_alias} \
                  WHERE ({s_expr}) IS NOT NULL AND ({o_expr}) IS NOT NULL \
                  ON CONFLICT DO NOTHING"
-            )
+            );
+            // Step 2: EXISTS-based provenance INSERT (CWB-FIX-04 / CWB-10).
+            // Joins with vp_rare to record provenance for triples that now exist,
+            // even if this rule's INSERT was a no-op (shared-target race case).
+            let (prov_pred_col, prov_p_filter) = if pred_id != 0 {
+                (
+                    format!("{pred_id}::bigint"),
+                    format!("vr.p = {pred_id}"),
+                )
+            } else {
+                (
+                    format!("({p_expr})"),
+                    format!("vr.p = ({p_expr})"),
+                )
+            };
+            let p_is_not_null = if pred_id == 0 {
+                format!(" AND ({p_expr}) IS NOT NULL")
+            } else {
+                String::new()
+            };
+            let prov_sql = format!(
+                "INSERT INTO _pg_ripple.construct_rule_triples (rule_name, pred_id, s, o, g) \
+                 SELECT DISTINCT $1, {prov_pred_col}, ({s_expr}), ({o_expr}), \
+                        {target_graph_id}::bigint \
+                 FROM ({clean_sql}) AS {inner_alias} \
+                 WHERE ({s_expr}) IS NOT NULL AND ({o_expr}) IS NOT NULL{p_is_not_null} \
+                   AND EXISTS ( \
+                       SELECT 1 FROM _pg_ripple.vp_rare vr \
+                       WHERE {prov_p_filter} \
+                         AND vr.s = ({s_expr}) \
+                         AND vr.o = ({o_expr}) \
+                         AND vr.g = {target_graph_id} \
+                         AND vr.source = 1 \
+                   ) \
+                 ON CONFLICT DO NOTHING"
+            );
+            (Some(insert_sql), prov_sql)
         };
 
-        results.push((pred_id, sql));
+        results.push((pred_id, plain_insert, prov_sql));
     }
 
     Ok((results, source_graphs))
@@ -510,7 +561,10 @@ pub(crate) fn create_construct_rule(name: &str, sparql: &str, target_graph: &str
 
     let generated_sql = insert_sqls
         .iter()
-        .map(|(_, sql)| sql.as_str())
+        .map(|(_, plain, prov)| match plain {
+            Some(ins) => format!("{ins};\n{prov}"),
+            None => prov.clone(),
+        })
         .collect::<Vec<_>>()
         .join(";\n");
 
@@ -700,21 +754,30 @@ pub(crate) fn explain_construct_rule(name: &str) -> Vec<(String, String)> {
 
 // ─── Internal helpers ────────────────────────────────────────────────────────
 
-/// Execute the INSERT SQLs and record provenance in `construct_rule_triples`.
+/// Execute the INSERT SQL plans and record provenance in `construct_rule_triples`.
 ///
-/// CWB-FIX-04: uses `INSERT ... ON CONFLICT DO NOTHING RETURNING` wrapped in
-/// a CTE to capture only rows inserted by this run, not all source=1 rows.
+/// CWB-FIX-04/CWB-10: For vp_rare predicates, uses a two-step approach —
+/// plain INSERT (no params) then EXISTS-based provenance INSERT ($1=rule_name).
+/// This records provenance for ALL rules that derive a triple, even when the
+/// INSERT is a no-op because another rule already inserted the same triple.
+///
+/// For promoted VP tables, a single RETURNING CTE handles both INSERT and prov.
 ///
 /// Returns the total number of derived triples now owned by this rule.
 fn run_full_recompute(
     rule_name: &str,
-    insert_sqls: &[(i64, String)],
+    insert_sqls: &[(i64, Option<String>, String)],
     _target_graph_id: i64,
 ) -> i64 {
-    for (pred_id, sql) in insert_sqls {
-        let prov_cte_sql = build_insert_returning_cte(*pred_id, sql, rule_name);
-        Spi::run_with_args(&prov_cte_sql, &[DatumWithOid::from(rule_name)])
-            .unwrap_or_else(|e| pgrx::warning!("run_full_recompute insert: {e}"));
+    for (_pred_id, plain_insert, prov_sql) in insert_sqls {
+        if let Some(plain) = plain_insert {
+            // vp_rare step 1: plain INSERT (no rule_name param).
+            Spi::run(plain)
+                .unwrap_or_else(|e| pgrx::warning!("run_full_recompute insert (vp_rare): {e}"));
+        }
+        // Step 2 (or combined for promoted VP): provenance SQL with $1 = rule_name.
+        Spi::run_with_args(prov_sql, &[DatumWithOid::from(rule_name)])
+            .unwrap_or_else(|e| pgrx::warning!("run_full_recompute prov: {e}"));
     }
 
     // Return exact count of provenance rows for this rule.
@@ -737,40 +800,6 @@ fn run_full_recompute(
     .unwrap_or_else(|e| pgrx::warning!("run_full_recompute: update derived_triple_count: {e}"));
 
     final_count
-}
-
-/// Build a CTE that runs INSERT and records exact provenance via RETURNING.
-///
-/// CWB-FIX-04: The CTE captures exactly the rows inserted by this SQL run,
-/// preventing pre-existing `source=1` triples from being mis-attributed.
-fn build_insert_returning_cte(pred_id: i64, insert_sql: &str, _rule_name: &str) -> String {
-    // Determine if pred is in a promoted VP table or vp_rare.
-    let has_table = pred_id != 0
-        && Spi::get_one_with_args::<bool>(
-            "SELECT EXISTS(SELECT 1 FROM _pg_ripple.predicates \
-              WHERE id = $1 AND table_oid IS NOT NULL)",
-            &[DatumWithOid::from(pred_id)],
-        )
-        .unwrap_or(Some(false))
-        .unwrap_or(false);
-
-    if has_table {
-        // Promoted VP table path: pred_id is known, RETURNING s, o, g.
-        format!(
-            "WITH inserted AS ({insert_sql} RETURNING s, o, g) \
-             INSERT INTO _pg_ripple.construct_rule_triples (rule_name, pred_id, s, o, g) \
-             SELECT $1, {pred_id}, s, o, g FROM inserted \
-             ON CONFLICT DO NOTHING"
-        )
-    } else {
-        // vp_rare path (rare pred or variable pred): RETURNING p, s, o, g.
-        format!(
-            "WITH inserted AS ({insert_sql} RETURNING p, s, o, g) \
-             INSERT INTO _pg_ripple.construct_rule_triples (rule_name, pred_id, s, o, g) \
-             SELECT $1, p, s, o, g FROM inserted \
-             ON CONFLICT DO NOTHING"
-        )
-    }
 }
 
 /// Record a successful incremental run in health counters (CWB-FIX-07).
@@ -996,10 +1025,16 @@ pub(crate) fn on_graph_write(graph_iri: &str) {
         };
 
         let mut ok = true;
-        for (pred_id, sql) in &insert_sqls {
-            let prov_cte_sql = build_insert_returning_cte(*pred_id, sql, &rule_name);
+        for (_pred_id, plain_insert, prov_sql) in &insert_sqls {
+            if let Some(plain) = plain_insert
+                && let Err(e) = Spi::run(plain)
+            {
+                record_run_failure(&rule_name, &e.to_string());
+                ok = false;
+                break;
+            }
             if let Err(e) =
-                Spi::run_with_args(&prov_cte_sql, &[DatumWithOid::from(rule_name.as_str())])
+                Spi::run_with_args(prov_sql, &[DatumWithOid::from(rule_name.as_str())])
             {
                 record_run_failure(&rule_name, &e.to_string());
                 ok = false;

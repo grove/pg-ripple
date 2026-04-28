@@ -19,14 +19,16 @@ mod pg_ripple {
     /// - `mode`         — `'incremental'` (default) or `'full'`
     ///
     /// On success the rule is registered and an initial full recompute is run.
+    /// Returns `NULL` on success; throws on error.
     #[pg_extern]
     fn create_construct_rule(
         name: &str,
         sparql: &str,
         target_graph: &str,
         mode: default!(&str, "'incremental'"),
-    ) {
+    ) -> Option<String> {
         crate::construct_rules::create_construct_rule(name, sparql, target_graph, mode);
+        None // NULL = success; elog::Error propagates on failure
     }
 
     /// Drop a SPARQL CONSTRUCT writeback rule.
