@@ -341,6 +341,7 @@ BEGIN
         NEW.payload := jsonb_build_object(
             'device', src.payload ->> 'device',
             'temp',   (src.payload ->> 'temp')::numeric,
+            'unit',   src.payload ->> 'unit',
             'ts',     src.payload ->> 'ts',
             'alert',  'high_temperature'
         );
@@ -396,14 +397,16 @@ SELECT pgtrickle.set_relay_outbox(
 ```
 
 The `reformat_alert_payload` trigger rewrites the decoded triple back to the
-same field names the sensor originally sent, with the inferred `alert` field
-added. A consumer reading from `iot.alerts` sees a plain JSON document it can
-process without any knowledge of RDF or the triplestore:
+same field names the sensor originally sent (`device`, `temp`, `unit`, `ts`),
+with the inferred `alert` field added. A consumer reading from `iot.alerts` sees
+a plain JSON document it can process without any knowledge of RDF or the
+triplestore:
 
 ```json
 {
   "device": "sensor-7",
   "temp":   45.2,
+  "unit":   "°C",
   "ts":     "2026-04-28T10:00:00Z",
   "alert":  "high_temperature"
 }
