@@ -1957,7 +1957,7 @@ pub extern "C-unwind" fn _PG_init() {
           (v0.67.0 FLIGHT-SEC-01)",
         c"",
         &crate::gucs::storage::ARROW_UNSIGNED_TICKETS_ALLOWED,
-        GucContext::Sighup,
+        GucContext::Userset,
         GucFlags::default(),
     );
 

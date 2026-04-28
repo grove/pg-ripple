@@ -950,19 +950,20 @@ fn retract_exclusive_triples(rule_name: &str) {
 
 // ─── CWB-FIX-02: Delta maintenance kernel (source graph write hooks) ──────────
 
-/// Trigger incremental construct-rule maintenance after inserts into `graph_iri`.
-///
-/// Called by `insert_triple` and `sparql_update` after modifying a named
-/// graph that may be a source graph for registered construct rules.
-///
-/// For each affected rule (in `rule_order`):
-/// - Re-runs the INSERT SQL with `ON CONFLICT DO NOTHING RETURNING` to add new
-///   derived triples.
-/// - Records exact provenance via CTE (CWB-FIX-04).
-/// - Updates health counters (CWB-FIX-07).
+// Trigger incremental construct-rule maintenance after inserts into `graph_iri`.
+//
+// Called by `insert_triple` and `sparql_update` after modifying a named
+// graph that may be a source graph for registered construct rules.
+//
+// For each affected rule (in `rule_order`):
+// - Re-runs the INSERT SQL with `ON CONFLICT DO NOTHING RETURNING` to add new
+//   derived triples.
+// - Records exact provenance via CTE (CWB-FIX-04).
+// - Updates health counters (CWB-FIX-07).
 
-/// Quick check: returns `true` when there are no construct rules registered,
-/// allowing the mutation journal to skip accumulation entirely (zero overhead).
+/// Quick check: returns `true` when there are no construct rules registered.
+///
+/// Allows the mutation journal to skip accumulation entirely (zero overhead).
 /// (v0.67.0 MJOURNAL-01)
 pub(crate) fn has_no_rules() -> bool {
     // Check if the catalog table even exists first.
@@ -985,6 +986,17 @@ pub(crate) fn has_no_rules() -> bool {
     !has_rules
 }
 
+/// Trigger incremental construct-rule maintenance after inserts into `graph_iri`.
+///
+/// Called by `insert_triple` and `sparql_update` after modifying a named
+/// graph that may be a source graph for registered construct rules.
+///
+/// For each affected rule (in `rule_order`):
+///
+/// - Re-runs the INSERT SQL with `ON CONFLICT DO NOTHING RETURNING` to add new
+///   derived triples.
+/// - Records exact provenance via CTE (CWB-FIX-04).
+/// - Updates health counters (CWB-FIX-07).
 pub(crate) fn on_graph_write(graph_iri: &str) {
     // Fast path: skip if no rules registered or catalog not yet initialized.
     let has_rules = Spi::get_one_with_args::<bool>(
