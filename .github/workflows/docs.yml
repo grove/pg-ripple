@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - 'docs/**'
+      - 'blog/**'
       - 'CHANGELOG.md'
       - 'ROADMAP.md'
       - 'RELEASE.md'
@@ -46,9 +47,43 @@ jobs:
           cp CHANGELOG.md docs/src/reference/changelog.md
           cp ROADMAP.md docs/src/reference/roadmap.md
           cp RELEASE.md docs/src/reference/release-process.md
+          cp -r blog docs/src/blog
 
       - name: Build
         run: mdbook build docs
+
+      - name: Build blog posts as standalone pages
+        run: |
+          mkdir -p /tmp/blog-build/src
+          cp docs/src/blog/*.md /tmp/blog-build/src/
+          python3 - << 'PYEOF'
+          import os
+          src = '/tmp/blog-build/src'
+          files = sorted(f for f in os.listdir(src)
+                         if f.endswith('.md') and f not in ('README.md', 'SUMMARY.md'))
+          lines = ['# Summary\n', '\n', '[Blog Index](README.md)\n', '\n']
+          for f in files:
+              title = f
+              with open(os.path.join(src, f)) as fp:
+                  for line in fp:
+                      stripped = line.strip()
+                      if stripped.startswith('# '):
+                          title = stripped.lstrip('# ').strip()
+                          break
+              lines.append(f'- [{title}]({f})\n')
+          with open(os.path.join(src, 'SUMMARY.md'), 'w') as fp:
+              fp.writelines(lines)
+          PYEOF
+          cat > /tmp/blog-build/book.toml << 'EOF'
+          [book]
+          src = "src"
+          language = "en"
+          [output.html]
+          site-url = "/pg-ripple/blog/"
+          default-theme = "navy"
+          EOF
+          mdbook build /tmp/blog-build
+          cp -r /tmp/blog-build/book/. docs/book/blog/
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9  # v5
