@@ -3,8 +3,22 @@ name: CI
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'blog/**'
+      - 'plans/**'
+      - 'roadmap/**'
+      - 'charts/**'
   pull_request:
     branches: [main]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - 'blog/**'
+      - 'plans/**'
+      - 'roadmap/**'
+      - 'charts/**'
   workflow_dispatch:
 
 env:
