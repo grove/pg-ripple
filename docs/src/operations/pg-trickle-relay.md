@@ -716,10 +716,22 @@ entirely configurable.
 ## Deployment
 
 Both extensions run in the same PostgreSQL instance. The relay binary is a
-separate, stateless process that you deploy in as many copies as you need:
-separate pods for each inbound source, separate pods for each outbound sink.
-Advisory locks inside PostgreSQL prevent duplicate processing if you scale
-relay pods horizontally.
+separate, stateless process. A single relay instance handles **both directions**
+— inbound pipelines (external source → inbox table) and outbound pipelines
+(outbox table → external sink) run in the same process. You do not need separate
+relay binaries for each direction.
+
+For high availability, run two or three relay instances pointing at the same
+PostgreSQL database. PostgreSQL advisory locks elect exactly one owner per
+pipeline — if one instance dies, another acquires its pipelines on the next
+discovery interval.
+
+The relay only needs one environment variable: the database URL. All pipeline
+configuration — broker addresses, topic names, subject templates, poll
+intervals — is stored in the database and set via SQL
+(`pgtrickle.set_relay_outbox()` / `pgtrickle.set_relay_inbox()`). The relay
+reads this on startup and hot-reloads it whenever you change it without
+restart.
 
 ```yaml
 # docker-compose.yml sketch
@@ -728,18 +740,14 @@ services:
     image: postgres:18
     # Both pg_ripple and pg-trickle extensions installed
 
-  relay-inbound:
-    image: grove/pgtrickle-relay:0.25.0
+  relay:
+    image: ghcr.io/grove/pgtrickle-relay:0.29.0
     environment:
       PGTRICKLE_RELAY_POSTGRES_URL: postgres://relay:pw@postgres/hub
-      KAFKA_BROKERS: kafka:9092
-    # Handles all reverse (inbound) pipelines
-
-  relay-outbound:
-    image: grove/pgtrickle-relay:0.25.0
-    environment:
-      PGTRICKLE_RELAY_POSTGRES_URL: postgres://relay:pw@postgres/hub
-    # Handles all forward (outbound) pipelines
+      # All other config (broker URLs, topics, etc.) comes from the database.
+      # Set it with pgtrickle.set_relay_outbox() / set_relay_inbox().
+    ports:
+      - "9090:9090"   # Prometheus metrics + /health endpoint
 
   pg-ripple-http:
     image: pg-ripple-http:latest
@@ -757,8 +765,8 @@ services:
     command: ["-js"]   # JetStream enabled for durable subscriptions
 ```
 
-For Kubernetes deployments, the relay's `/health/drained` endpoint integrates
-with readiness probes. See [Kubernetes & Helm](kubernetes.md) for a full Helm
+For Kubernetes deployments, the relay's `/health` endpoint integrates with
+readiness probes. See [Kubernetes & Helm](kubernetes.md) for a full Helm
 chart example.
 
 ---
