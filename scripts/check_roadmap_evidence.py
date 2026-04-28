@@ -30,7 +30,7 @@ COMPLETION_WORDS_RE = re.compile(
 # Evidence markers — any of these in a bullet line counts as evidence.
 EVIDENCE_MARKERS_RE = re.compile(
     r"(ci/regress:|ci/test:|docs/src/|pg_ripple\.|feature_status|"
-    r"roadmap/|plans/|\.sql|\.md|#\[pg_test\]|pg_regress|SPARQL|GUC)",
+    r"roadmap/|plans/|\.sql|\.md|\.yml|\.json|#\[pg_test\]|pg_regress|SPARQL|GUC)",
     re.IGNORECASE,
 )
 

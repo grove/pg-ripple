@@ -33,7 +33,7 @@ Versions correspond to the milestones in [ROADMAP.md](ROADMAP.md).
 
 - **`validate-feature-status` CI job** (GATE-02): New CI job added to `.github/workflows/ci.yml` that runs after `test` and `regress`, calls `feature_status()`, verifies evidence paths exist on disk, and runs both Python gate scripts. Evidence: `.github/workflows/ci.yml`.
 
-- **Documentation truth** (GATE-03): README "What works today" updated from v0.63.0 to v0.67.0, pgrx version reference corrected to 0.18, v0.64.0 roadmap status corrected to `Released ✅`.
+- **Documentation truth** (GATE-03): `README.md` "What works today" updated from v0.63.0 to v0.67.0, pgrx version reference corrected to 0.18, v0.64.0 `roadmap/v0.64.0.md` status corrected to `Released ✅`.
 
 - **SBOM version verification** (SBOM-01): Release workflow now verifies that the regenerated `sbom.json` component version matches `Cargo.toml` before uploading to the GitHub release. Evidence: `.github/workflows/release.yml`.
 

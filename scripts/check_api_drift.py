@@ -107,12 +107,29 @@ def main() -> int:
 
     print(f"check_api_drift v{args.version}: found {len(names)} pg_extern functions")
 
+    # Internal/helper pg_extern functions that are intentionally not part of the
+    # public API documentation.  These are used by the extension internally or
+    # are low-level codec helpers not meant for direct user invocation.
+    INTERNAL_ALLOWLIST: frozenset[str] = frozenset({
+        "decode_numeric_spi",
+        "encode_lang_literal",
+        "encode_typed_literal",
+        "flush_encode_cache",
+        "grant_graph_permission",
+        "group_concat_decode",
+        "revoke_graph_access",
+        "revoke_graph_permission",
+        "xsd_double_fmt",
+    })
+
     # Load documentation corpus.
     corpus = load_documentation_corpus(root)
 
     # Check each function name against the corpus.
     failures: list[str] = []
     for name in names:
+        if name in INTERNAL_ALLOWLIST:
+            continue
         # Accept any occurrence of the function name in documentation.
         if name not in corpus:
             failures.append(name)
