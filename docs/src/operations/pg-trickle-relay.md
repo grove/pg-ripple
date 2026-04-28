@@ -87,16 +87,21 @@ WARNING: pg_trickle is not installed; CDC subscriptions are unavailable
 ## A worked example: IoT sensor hub
 
 The following walkthrough builds a complete hub that ingests temperature readings
-from IoT sensors via Kafka, detects anomalies using inference rules, and pushes
-alerts to NATS and Kafka consumers. Each step shows both the SQL to run and what
-the data looks like at that point.
+from IoT sensors on a Kafka topic (`iot.sensors`), detects anomalies using
+inference rules, and publishes enriched alerts back to Kafka on a separate topic
+(`iot.alerts`). The pipeline is intentionally symmetrical: the same broker and
+format convention on both ends, with pg_ripple doing the enrichment in the
+middle. Each step shows both the SQL to run and what the data looks like at that
+point.
 
 ### Step 1 — Pull sensor events from Kafka
 
 The relay process runs outside PostgreSQL and continuously polls configured
 sources. You tell it what to poll and where to write the results using
 `pgtrickle.set_relay_inbox()`. Here we subscribe to the `iot.sensors` Kafka
-topic and direct its events into a table called `sensor_inbox`:
+topic and direct its events into a table called `sensor_inbox`. Enriched alerts
+will flow back out on the `iot.alerts` topic on the same broker — same system,
+both ends:
 
 ```sql
 SELECT pgtrickle.set_relay_inbox(
@@ -320,30 +325,36 @@ SELECT pg_ripple.enable_cdc_bridge_trigger(
 SELECT pgtrickle.enable_outbox('enriched_events');
 ```
 
-Now configure where the relay should forward those events:
+Now configure the relay to forward those events back to Kafka on the `iot.alerts`
+topic — the same broker the raw sensor readings came from:
 
 ```sql
--- Push to NATS for real-time dashboard consumers
-SELECT pgtrickle.set_relay_outbox(
-    'enriched-to-nats',
-    outbox => 'enriched_events',
-    group  => 'nats-publisher',
-    sink   => '{"type":"nats","url":"nats://nats:4222",
-                "subject_template":"ripple.enriched.{event_type}"}'
-);
-
--- Push to Kafka for the analytics and ML pipeline
+-- Publish enriched alerts to iot.alerts on the same Kafka broker
 SELECT pgtrickle.set_relay_outbox(
     'alerts-to-kafka',
     outbox => 'enriched_events',
     group  => 'kafka-publisher',
     sink   => '{"type":"kafka","brokers":"${env:KAFKA_BROKERS}",
-                "topic":"ripple.alerts"}'
+                "topic":"iot.alerts"}'
+);
+```
+
+The same outbox can fan out to additional sinks without any changes to the
+pg_ripple side — just register extra `set_relay_outbox` pipelines:
+
+```sql
+-- Also push to NATS for real-time dashboard consumers (optional)
+SELECT pgtrickle.set_relay_outbox(
+    'alerts-to-nats',
+    outbox => 'enriched_events',
+    group  => 'nats-publisher',
+    sink   => '{"type":"nats","url":"nats://nats:4222",
+                "subject_template":"iot.alerts.{event_type}"}'
 );
 
--- Push to a partner API via webhook
+-- Or to a partner API via webhook (optional)
 SELECT pgtrickle.set_relay_outbox(
-    'enriched-to-partner',
+    'alerts-to-partner',
     outbox => 'enriched_events',
     group  => 'partner-publisher',
     sink   => '{"type":"http","url":"https://partner.example.com/events",
