@@ -601,13 +601,7 @@ pub fn recover_interrupted_promotions() -> i64 {
             None,
             &[],
         )
-        .map(|rows| {
-            rows.first()
-                .get::<bool>(1)
-                .ok()
-                .flatten()
-                .unwrap_or(false)
-        })
+        .map(|rows| rows.first().get::<bool>(1).ok().flatten().unwrap_or(false))
         .unwrap_or(false)
     });
 
