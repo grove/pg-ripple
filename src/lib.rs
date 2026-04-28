@@ -1973,6 +1973,43 @@ pub extern "C-unwind" fn _PG_init() {
         GucFlags::default(),
     );
 
+    // ── v0.68.0 Citus/scalability GUCs ───────────────────────────────────────
+
+    pgrx::GucRegistry::define_bool_guc(
+        c"pg_ripple.approx_distinct",
+        c"When on, route SPARQL COUNT(DISTINCT …) through Citus HLL when available. \
+          Falls back to exact COUNT(DISTINCT …) when hll extension is absent. \
+          Default off. (v0.68.0 CITUS-HLL-01)",
+        c"",
+        &crate::gucs::storage::APPROX_DISTINCT,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+
+    pgrx::GucRegistry::define_bool_guc(
+        c"pg_ripple.citus_service_pruning",
+        c"When on, the SPARQL federation translator rewrites SERVICE subqueries targeting \
+          Citus workers to include shard-constraint annotations to prune irrelevant shards. \
+          Default off. (v0.68.0 CITUS-SVC-01)",
+        c"",
+        &crate::gucs::storage::CITUS_SERVICE_PRUNING,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+
+    pgrx::GucRegistry::define_int_guc(
+        c"pg_ripple.vp_promotion_batch_size",
+        c"Batch size for nonblocking VP promotion background copy phase. \
+          Number of rows copied from vp_rare to shadow tables per iteration. \
+          Default: 10000. (v0.68.0 PROMO-01)",
+        c"",
+        &crate::gucs::storage::VP_PROMOTION_BATCH_SIZE,
+        1,
+        1_000_000,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+
     pgrx::GucRegistry::define_bool_guc(
         c"pg_ripple.datalog_citus_dispatch",
         c"When on, wrap Datalog stratum-iteration INSERT…SELECT in \
@@ -2057,6 +2094,11 @@ pub extern "C-unwind" fn _PG_init() {
     // Schema and base tables are created by the `schema_setup` extension_sql!
     // block, which runs inside the CREATE EXTENSION transaction where SPI and
     // DDL are available.  Nothing to do here.
+    //
+    // PROMO-01 crash recovery is exposed as pg_ripple.recover_interrupted_promotions()
+    // so users can call it after an unclean shutdown.  It is intentionally NOT called
+    // from _PG_init because SPI_connect inside _PG_init can corrupt the active
+    // snapshot context and break subsequent SQL in the same session.
 }
 
 // ─── Transaction callbacks (v0.22.0) ──────────────────────────────────────────

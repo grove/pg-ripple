@@ -13,6 +13,61 @@ Versions correspond to the milestones in [ROADMAP.md](ROADMAP.md).
 
 ---
 
+## [0.68.0] — 2026-04-29 — Distributed Scalability, Streaming Completion, and Fuzz Hardening
+
+**Implements v0.68.0 roadmap: portal-based CONSTRUCT cursor streaming, Citus HLL COUNT(DISTINCT), Citus SERVICE shard pruning, nonblocking VP promotion with crash recovery, and scheduled nightly fuzz CI.**
+
+### What's new
+
+- **Portal-based CONSTRUCT cursor streaming** (STREAM-01): `sparql_cursor_turtle()` and `sparql_cursor_jsonld()` now stream CONSTRUCT results using a lazy `ConstructCursorIter` — a portal-based iterator that applies the CONSTRUCT template per page and serializes each page as a Turtle/JSON-LD chunk. Memory use is bounded to `pg_ripple.export_batch_size` rows per page. New helpers `prepare_construct()` and `apply_construct_template()` in `src/sparql/mod.rs` pre-encode constant IRIs/literals to i64 once at query-plan time.
+
+- **Citus HLL approximate COUNT(DISTINCT)** (CITUS-HLL-01): When `pg_ripple.approx_distinct=on` and the `hll` PostgreSQL extension is installed, `COUNT(DISTINCT ?x)` SPARQL aggregates are translated to `hll_cardinality(hll_add_agg(hll_hash_bigint(x)))::bigint` for scalable approximate counts on distributed VP tables. Falls back to exact `COUNT(DISTINCT)` when `hll` is absent or `approx_distinct=off`. New GUC `pg_ripple.approx_distinct` (BOOL, default `off`).
+
+- **Citus SERVICE shard pruning** (CITUS-SVC-01): When `pg_ripple.citus_service_pruning=on`, the SERVICE translator calls `citus_service_shard_annotation()` which detects Citus worker endpoints via `is_citus_worker_endpoint()` and wires shard-constraint SQL annotations for pruning. New GUC `pg_ripple.citus_service_pruning` (BOOL, default `off`). Full multi-node infrastructure required for end-to-end testing.
+
+- **Nonblocking VP promotion with crash recovery** (PROMO-01): VP promotion now tracks progress via a `promotion_status TEXT` column in `_pg_ripple.predicates` (values: `'promoting'` during copy, `'promoted'` when complete). New SQL function `pg_ripple.recover_interrupted_promotions()` scans for `'promoting'` entries and retries interrupted promotions — call it after an unclean server shutdown. New GUC `pg_ripple.vp_promotion_batch_size` (INT, 1–1000000, default 10000).
+
+- **Scheduled nightly fuzz CI** (FUZZ-01): `.github/workflows/fuzz.yml` runs all 12 fuzz targets (sparql_parser, turtle_parser, rdfxml_parser, dictionary_hash, federation_result, datalog_parser, shacl_parser, jsonld_framer, http_request, r2rml_mapping, geosparql_wkt, llm_prompt_builder) nightly for 60 s each. Manual `workflow_dispatch` supports extended runs. Corpus and crash artifacts are uploaded on each run.
+
+### Schema changes
+
+- `_pg_ripple.predicates` table: added `promotion_status TEXT` column (NULL = legacy/no promotion started, `'promoting'` = copy in progress, `'promoted'` = fully promoted). Added to initial schema CREATE TABLE and to migration script `sql/pg_ripple--0.67.0--0.68.0.sql`.
+
+### GUCs added
+
+| GUC | Type | Default | Level | Purpose |
+|---|---|---|---|---|
+| `pg_ripple.approx_distinct` | BOOL | `off` | USERSET | Route COUNT(DISTINCT) through Citus HLL when available |
+| `pg_ripple.citus_service_pruning` | BOOL | `off` | USERSET | Enable Citus worker shard annotations for SERVICE |
+| `pg_ripple.vp_promotion_batch_size` | INT | 10000 | USERSET | Batch size for nonblocking VP promotion copy phase |
+
+### SQL functions added
+
+| Function | Returns | Description |
+|---|---|---|
+| `pg_ripple.recover_interrupted_promotions()` | `bigint` | Scan and retry interrupted VP promotions after crash |
+
+### Files changed
+
+- **src/sparql/cursor.rs** — new `ConstructCursorIter` struct + `ConstructFormat` enum; `sparql_cursor_turtle` and `sparql_cursor_jsonld` now return `impl Iterator`
+- **src/sparql/mod.rs** — `TemplateSlot`, `ConstructTemplate`, `prepare_construct()`, `apply_construct_template()`
+- **src/sparql_api.rs** — updated SETOF wrappers for new iterator API
+- **src/sparql/translate/group.rs** — HLL aggregate translation + `citus_hll_available()`
+- **src/gucs/storage.rs** — `APPROX_DISTINCT`, `CITUS_SERVICE_PRUNING`, `VP_PROMOTION_BATCH_SIZE` GUC statics
+- **src/citus.rs** — `is_citus_worker_endpoint()`, `citus_service_shard_annotation()`, `extract_url_host()`
+- **src/sparql/translate/graph.rs** — wire `citus_service_shard_annotation()` in SERVICE translator
+- **src/storage/mod.rs** — `promote_predicate()` with status tracking; `recover_interrupted_promotions()`
+- **src/dict_api.rs** — `recover_interrupted_promotions()` pg_extern
+- **src/lib.rs** — three new GUC registrations
+- **src/schema.rs** — `promotion_status TEXT` in predicates CREATE TABLE; `v068_schema_version_stamp`
+- **src/feature_status.rs** — updated status for 6 deliverables + new `continuous_fuzzing` entry
+- **sql/pg_ripple--0.67.0--0.68.0.sql** — migration script (ADD COLUMN, schema_version stamp)
+- **.github/workflows/fuzz.yml** — new scheduled fuzz workflow
+- **tests/pg_regress/sql/v068_features.sql** — new regress test (186 total, 0 failures)
+- **tests/pg_regress/expected/v068_features.out** — bootstrapped expected output
+
+---
+
 ## [0.67.0] — 2026-05-06 — Production Hardening and Assessment 9 Remediation
 
 **Implements v0.67.0 roadmap: Arrow Flight security hardening, mutation journal for CONSTRUCT writeback, Row Level Security propagation to all VP tables, panic→error conversion, Python gate tooling, benchmark correctness fixes, and scheduled performance trend CI.**

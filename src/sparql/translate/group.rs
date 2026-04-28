@@ -237,7 +237,16 @@ fn translate_aggregate(
             let arg = translate_agg_expr(expr, bindings, ctx).unwrap_or_else(|| "NULL".to_owned());
             match name {
                 AggregateFunction::Count => {
-                    let s = format!("COUNT({distinct_kw}{arg})");
+                    // CITUS-HLL-01 (v0.68.0): when approx_distinct=on and hll is available,
+                    // use hll_add_agg(hll_hash_bigint(x)) for scalable COUNT(DISTINCT).
+                    let s = if *distinct
+                        && crate::gucs::storage::APPROX_DISTINCT.get()
+                        && citus_hll_available()
+                    {
+                        format!("hll_cardinality(hll_add_agg(hll_hash_bigint({arg})))::bigint")
+                    } else {
+                        format!("COUNT({distinct_kw}{arg})")
+                    };
                     (s.clone(), s)
                 }
                 AggregateFunction::Sum => {
@@ -423,4 +432,20 @@ fn translate_agg_expr(
 
 pub(crate) fn quote_sql_string(s: &str) -> String {
     format!("'{}'", s.replace('\'', "''"))
+}
+
+// ─── Citus HLL helper (v0.68.0 CITUS-HLL-01) ─────────────────────────────────
+
+/// Return `true` if the `hll` PostgreSQL extension is installed and accessible.
+///
+/// Used by the aggregate translator to decide whether to use
+/// `hll_add_agg(hll_hash_bigint(x))` for approximate COUNT(DISTINCT) when
+/// `pg_ripple.approx_distinct = on`.
+pub(crate) fn citus_hll_available() -> bool {
+    let result = pgrx::Spi::get_one::<bool>(
+        "SELECT EXISTS ( \
+             SELECT 1 FROM pg_extension WHERE extname = 'hll' \
+         )",
+    );
+    matches!(result, Ok(Some(true)))
 }

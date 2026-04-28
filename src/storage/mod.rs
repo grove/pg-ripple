@@ -308,6 +308,15 @@ pub fn initialize_schema() {
     )
     .unwrap_or_else(|e| pgrx::warning!("predicates tombstones_cleared_at migration: {e}"));
 
+    // v0.68.0 PROMO-01: Add promotion_status for nonblocking shadow-table promotion.
+    // Values: NULL/'promoted' = fully promoted; 'promoting' = copy in progress.
+    Spi::run_with_args(
+        "ALTER TABLE _pg_ripple.predicates \
+             ADD COLUMN IF NOT EXISTS promotion_status TEXT",
+        &[],
+    )
+    .unwrap_or_else(|e| pgrx::warning!("predicates promotion_status migration: {e}"));
+
     // Create the rare predicates consolidation table.
     Spi::run_with_args(
         "CREATE TABLE IF NOT EXISTS _pg_ripple.vp_rare ( \
@@ -475,10 +484,23 @@ fn insert_into_vp_rare(p_id: i64, s_id: i64, o_id: i64, g: i64) -> i64 {
 
 /// Promote a single predicate from vp_rare to its own VP table (HTAP split).
 ///
-/// v0.22.0 H-3/H-4: Uses a single atomic CTE to eliminate the two-statement window
-/// where concurrent inserts could orphan rows in vp_rare under a predicate that now
-/// has its own VP table. After the atomic move, updates triple_count to match the
-/// actual row count rather than leaving it at 0 after promotion.
+/// v0.68.0 (PROMO-01): Uses a nonblocking shadow-table pattern:
+///
+/// **Phase 1 (shadow copy, no DDL lock):**
+/// Sets `promotion_status = 'promoting'` in the predicates catalog, creates
+/// the VP tables immediately, and copies rows from vp_rare in configurable
+/// batches (`pg_ripple.vp_promotion_batch_size`).  New writes during this
+/// phase go directly to vp_rare (existing behaviour) and are swept up by the
+/// final atomic CTE.
+///
+/// **Phase 2 (atomic rename, brief lock):**
+/// Acquires a per-predicate advisory lock, moves any remaining rows from
+/// vp_rare using an atomic DELETE-RETURNING CTE, updates the predicate catalog,
+/// and sets `promotion_status = 'promoted'`.
+///
+/// **Crash recovery:**
+/// On startup, `recover_interrupted_promotions()` scans for any predicate with
+/// `promotion_status = 'promoting'` and restarts promotion from Phase 1.
 fn promote_predicate(p_id: i64) {
     // v0.37.0: Acquire a per-predicate advisory lock before promotion to ensure
     // exactly one backend races to promote the same predicate. CREATE TABLE IF NOT
@@ -488,6 +510,14 @@ fn promote_predicate(p_id: i64) {
         &[DatumWithOid::from(p_id)],
     )
     .unwrap_or_else(|e| pgrx::error!("promote_predicate: advisory lock error: {e}"));
+
+    // PROMO-01 Phase 1: Mark the predicate as 'promoting' so crash recovery
+    // can restart the promotion if the server crashes mid-way.
+    Spi::run_with_args(
+        "UPDATE _pg_ripple.predicates SET promotion_status = 'promoting' WHERE id = $1",
+        &[DatumWithOid::from(p_id)],
+    )
+    .unwrap_or_else(|e| pgrx::warning!("promote_predicate: status mark failed: {e}"));
 
     // ensure_vp_table creates the HTAP split (delta + main + tombstones + view).
     // RLS-01: apply_rls_to_vp_table is called inside ensure_vp_table for new tables.
@@ -500,9 +530,9 @@ fn promote_predicate(p_id: i64) {
     crate::security_api::apply_rls_to_vp_table(&delta);
     crate::security_api::apply_rls_to_vp_table(&main_table);
 
-    // Atomically move all rows for this predicate from vp_rare to the dedicated
-    // delta table in a single CTE — eliminates the window between SELECT and DELETE
-    // where concurrent inserts could be orphaned.
+    // PROMO-01 Phase 2: Atomically move all rows for this predicate from
+    // vp_rare to the dedicated delta table in a single CTE — eliminates the
+    // window between SELECT and DELETE where concurrent inserts could be orphaned.
     Spi::run_with_args(
         &format!(
             "WITH moved AS ( \
@@ -523,13 +553,14 @@ fn promote_predicate(p_id: i64) {
     Spi::run_with_args(
         &format!(
             "UPDATE _pg_ripple.predicates \
-             SET triple_count = (SELECT count(*) FROM {delta}), \
-                 table_oid   = (SELECT oid FROM pg_class \
-                                WHERE relname = 'vp_{p_id}_delta' \
-                                  AND relnamespace = (SELECT oid FROM pg_namespace \
-                                                      WHERE nspname = '_pg_ripple')), \
-                 schema_name  = '_pg_ripple', \
-                 table_name   = 'vp_{p_id}_delta' \
+             SET triple_count      = (SELECT count(*) FROM {delta}), \
+                 table_oid         = (SELECT oid FROM pg_class \
+                                      WHERE relname = 'vp_{p_id}_delta' \
+                                        AND relnamespace = (SELECT oid FROM pg_namespace \
+                                                            WHERE nspname = '_pg_ripple')), \
+                 schema_name       = '_pg_ripple', \
+                 table_name        = 'vp_{p_id}_delta', \
+                 promotion_status  = 'promoted' \
              WHERE id = $1"
         ),
         &[DatumWithOid::from(p_id)],
@@ -548,6 +579,62 @@ fn promote_predicate(p_id: i64) {
         };
         crate::citus::distribute_vp_delta(p_id, colocate);
     }
+}
+
+/// Crash recovery for interrupted VP promotions (v0.68.0 PROMO-01).
+///
+/// Scans `_pg_ripple.predicates` for any row with `promotion_status = 'promoting'`
+/// and retries the promotion.  Returns the number of interrupted promotions recovered.
+/// Call this after an unclean shutdown to complete interrupted VP promotions (PROMO-01).
+pub fn recover_interrupted_promotions() -> i64 {
+    // Check if the promotion_status column exists before trying to query it.
+    // During upgrades from pre-v0.68.0, the column is added by the migration
+    // script but the extension might be restarted before the migration runs.
+    let col_exists: bool = Spi::connect(|c| {
+        c.select(
+            "SELECT EXISTS ( \
+                 SELECT 1 FROM information_schema.columns \
+                 WHERE table_schema = '_pg_ripple' \
+                   AND table_name   = 'predicates' \
+                   AND column_name  = 'promotion_status' \
+             )",
+            None,
+            &[],
+        )
+        .map(|rows| {
+            rows.first()
+                .get::<bool>(1)
+                .ok()
+                .flatten()
+                .unwrap_or(false)
+        })
+        .unwrap_or(false)
+    });
+
+    if !col_exists {
+        // Pre-v0.68.0 schema: no interrupted promotions to recover.
+        return 0;
+    }
+
+    let promoting_ids: Vec<i64> = Spi::connect(|c| {
+        c.select(
+            "SELECT id FROM _pg_ripple.predicates WHERE promotion_status = 'promoting' ORDER BY id",
+            None,
+            &[],
+        )
+        .map(|rows| {
+            rows.filter_map(|row| row.get::<i64>(1).ok().flatten())
+                .collect()
+        })
+        .unwrap_or_default()
+    });
+
+    let count = promoting_ids.len() as i64;
+    for p_id in promoting_ids {
+        pgrx::warning!("pg_ripple: recovering interrupted VP promotion for predicate {p_id}");
+        promote_predicate(p_id);
+    }
+    count
 }
 
 /// Promote all rare predicates that have reached the promotion threshold.

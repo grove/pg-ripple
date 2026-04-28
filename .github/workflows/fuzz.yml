@@ -1,0 +1,82 @@
+name: Scheduled Fuzz
+
+on:
+  schedule:
+    # Nightly fuzz run: each target runs for 60 seconds.
+    - cron: "0 2 * * *"
+  workflow_dispatch:
+    inputs:
+      duration:
+        description: "Fuzz duration in seconds per target"
+        required: false
+        default: "3600"
+
+permissions:
+  contents: read
+
+jobs:
+  fuzz:
+    name: Fuzz (${{ matrix.target }})
+    runs-on: ubuntu-22.04
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - sparql_parser
+          - turtle_parser
+          - rdfxml_parser
+          - dictionary_hash
+          - federation_result
+          - datalog_parser
+          - shacl_parser
+          - jsonld_framer
+          - http_request
+          - r2rml_mapping
+          - geosparql_wkt
+          - llm_prompt_builder
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Install Rust nightly (required for cargo-fuzz)
+        uses: dtolnay/rust-toolchain@b3b07ba8b418998c39fb3ed4247328f3a9a5e34e # stable channel resolves to nightly via toolchain
+        with:
+          toolchain: nightly
+          components: rust-src
+
+      - name: Cache cargo registry
+        uses: actions/cache@5a3ec84eff668545e1b2f9d0b2e2dc41cfda12df # v4.2.3
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: fuzz-cargo-${{ hashFiles('fuzz/Cargo.lock') }}
+          restore-keys: |
+            fuzz-cargo-
+
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz --locked
+
+      - name: Run fuzz target
+        working-directory: fuzz
+        env:
+          DURATION: ${{ github.event.inputs.duration || '60' }}
+        run: |
+          cargo fuzz run ${{ matrix.target }} -- \
+            -max_total_time=${DURATION} \
+            -max_len=65536
+        # cargo fuzz exits non-zero when it finds a crash or timeout is hit;
+        # treat non-zero exit as a failure (the job already fails on non-zero).
+
+      - name: Upload fuzz corpus and crash artifacts
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: fuzz-artifacts-${{ matrix.target }}-${{ github.run_id }}
+          path: |
+            fuzz/corpus/${{ matrix.target }}/
+            fuzz/artifacts/${{ matrix.target }}/
+          if-no-files-found: ignore
+          retention-days: 30

@@ -369,6 +369,15 @@ mod pg_ripple {
         crate::storage::promote_rare_predicates()
     }
 
+    /// Scan _pg_ripple.predicates for any predicate with promotion_status = 'promoting'
+    /// and retry the promotion.  Call this after an unclean server shutdown to
+    /// complete any VP promotions that were interrupted mid-copy (PROMO-01, v0.68.0).
+    /// Returns the number of interrupted promotions recovered.
+    #[pg_extern]
+    fn recover_interrupted_promotions() -> i64 {
+        crate::storage::recover_interrupted_promotions()
+    }
+
     // ── Bulk loaders ──────────────────────────────────────────────────────────
 
     /// Load N-Triples data from a text string.  Returns the number of triples loaded.

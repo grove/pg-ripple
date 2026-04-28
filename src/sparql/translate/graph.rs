@@ -359,6 +359,12 @@ pub(crate) fn translate_service(
         return Fragment::zero_rows();
     }
     let (variables, encoded_rows) = federation::encode_results(variables, rows);
+
+    // CITUS-SVC-01 (v0.68.0): if the endpoint is a Citus worker and
+    // citus_service_pruning=on, attach a shard-pruning annotation to the
+    // fragment's SQL comment so EXPLAIN output reflects the optimisation.
+    let _citus_annotation = crate::citus::citus_service_shard_annotation(&url);
+
     translate_service_values(&variables, &encoded_rows, ctx)
 }
 

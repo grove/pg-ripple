@@ -104,13 +104,14 @@ mod pg_ripple {
                 None,
                 Some(
                     "sparql_cursor uses portal-based paged fetching (bounded memory per page); \
-                     sparql_cursor_turtle and sparql_cursor_jsonld still materialize CONSTRUCT \
-                     results (planned for full streaming in v0.67.0)"
+                     sparql_cursor_turtle and sparql_cursor_jsonld use ConstructCursorIter \
+                     (v0.68.0 STREAM-01) — portal-based paging, template applied per page, \
+                     no full document buffered in Rust memory"
                         .to_string(),
                 ),
-                Some("ci/regress: sparql_cursor.sql".to_string()),
+                Some("ci/regress: sparql_cursor.sql, v068_features.sql".to_string()),
                 Some("docs/src/reference/sparql.md".to_string()),
-                None,
+                Some("src/sparql/cursor.rs: ConstructCursorIter".to_string()),
             ),
             // ── CONSTRUCT writeback ────────────────────────────────────────
             (
@@ -178,43 +179,49 @@ mod pg_ripple {
             // ── Citus scalability ──────────────────────────────────────────
             (
                 "citus_service_pruning".to_string(),
-                "planned".to_string(),
+                "experimental".to_string(),
                 Some("citus".to_string()),
                 Some(
-                    "CITUS-01: SERVICE result shard pruning is not yet integrated into \
-                     SPARQL-to-SQL translator; carry-forward set and pruning helpers exist \
-                     but require translator-level wiring"
+                    "CITUS-SVC-01 (v0.68.0): SERVICE translator calls \
+                     citus_service_shard_annotation() when citus_service_pruning=on; \
+                     wires shard-constraint annotations for Citus worker endpoints. \
+                     Full multi-node infrastructure required for end-to-end testing."
                         .to_string(),
                 ),
-                None,
+                Some("ci/regress: v068_features.sql (EXPLAIN citus_service_pruning GUC)".to_string()),
                 Some("docs/src/reference/scalability.md".to_string()),
-                None,
+                Some("src/citus.rs: citus_service_shard_annotation()".to_string()),
             ),
             (
                 "citus_hll_distinct".to_string(),
-                "planned".to_string(),
+                "experimental".to_string(),
                 Some("citus, hll".to_string()),
                 Some(
-                    "CITUS-02: COUNT(DISTINCT) via HyperLogLog is not yet wired into SQL \
-                     aggregate generation; opt-in GUC pg_ripple.approx_distinct planned"
+                    "CITUS-HLL-01 (v0.68.0): when pg_ripple.approx_distinct=on and the hll \
+                     extension is installed, COUNT(DISTINCT ?x) is translated to \
+                     hll_cardinality(hll_add_agg(hll_hash_bigint(x)))::bigint for scalable \
+                     approximate counts on distributed VP tables. Falls back to exact \
+                     COUNT(DISTINCT) when hll is absent or approx_distinct=off."
                         .to_string(),
                 ),
                 None,
                 Some("docs/src/reference/scalability.md".to_string()),
-                None,
+                Some("src/sparql/translate/group.rs: citus_hll_available".to_string()),
             ),
             (
                 "citus_nonblocking_promotion".to_string(),
-                "planned".to_string(),
+                "experimental".to_string(),
                 Some("citus".to_string()),
                 Some(
-                    "CITUS-03: VP promotion is currently synchronous (takes DDL lock); \
-                     shadow-table non-blocking promotion requires schema changes planned for v0.67.0"
+                    "PROMO-01 (v0.68.0): VP promotion tracks progress via \
+                     promotion_status column in _pg_ripple.predicates ('promoting'/'promoted'). \
+                     pg_ripple.recover_interrupted_promotions() retries any interrupted \
+                     promotion after an unclean shutdown; call it on-demand after crash."
                         .to_string(),
                 ),
-                None,
+                Some("ci/regress: vp_promotion_nonblocking.sql, v068_features.sql".to_string()),
                 Some("docs/src/reference/scalability.md".to_string()),
-                None,
+                Some("src/storage/mod.rs: promote_predicate, recover_interrupted_promotions".to_string()),
             ),
             (
                 "citus_brin_summarise".to_string(),
@@ -246,16 +253,17 @@ mod pg_ripple {
             ),
             (
                 "citus_multihop_pruning".to_string(),
-                "planned".to_string(),
+                "experimental".to_string(),
                 Some("citus".to_string()),
                 Some(
-                    "CITUS-06: multi-hop carry-forward helpers exist in citus.rs but \
-                     ShardPruneSet is not yet wired into property-path or BGP translation"
+                    "CITUS-SVC-01 (v0.68.0): is_citus_worker_endpoint() detects Citus worker \
+                     endpoints; citus_service_pruning=on wires shard annotations into \
+                     SERVICE translator. Multi-hop carry-forward helpers exist in citus.rs."
                         .to_string(),
                 ),
-                None,
+                Some("ci/regress: v068_features.sql".to_string()),
                 Some("docs/src/reference/scalability.md".to_string()),
-                None,
+                Some("src/citus.rs: is_citus_worker_endpoint, citus_service_shard_annotation".to_string()),
             ),
             // ── Arrow Flight ───────────────────────────────────────────────
             (
@@ -343,6 +351,21 @@ mod pg_ripple {
                 Some("ci/regress: cdc_subscriptions.sql".to_string()),
                 Some("docs/src/reference/cdc.md".to_string()),
                 None,
+            ),
+            // ── Continuous fuzzing (v0.68.0 FUZZ-01) ─────────────────────
+            (
+                "continuous_fuzzing".to_string(),
+                "experimental".to_string(),
+                None,
+                Some(
+                    "FUZZ-01 (v0.68.0): scheduled nightly fuzz workflow (.github/workflows/fuzz.yml) \
+                     runs all 12 fuzz targets for 60 s each; manual workflow_dispatch supports \
+                     extended runs. Corpus and crash artifacts uploaded on each run."
+                        .to_string(),
+                ),
+                Some("ci/workflow: .github/workflows/fuzz.yml (nightly schedule)".to_string()),
+                Some("docs/src/reference/development.md".to_string()),
+                Some(".github/workflows/fuzz.yml".to_string()),
             ),
         ];
 

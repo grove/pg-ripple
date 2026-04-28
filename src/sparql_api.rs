@@ -206,8 +206,7 @@ mod pg_ripple {
     /// Respects `pg_ripple.export_max_rows` if set.
     #[pg_extern]
     fn sparql_cursor_turtle(query: &str) -> TableIterator<'static, (name!(chunk, String),)> {
-        let chunks = crate::sparql::cursor::sparql_cursor_turtle(query);
-        TableIterator::new(chunks.into_iter().map(|c| (c,)))
+        TableIterator::new(crate::sparql::cursor::sparql_cursor_turtle(query))
     }
 
     /// Stream a SPARQL CONSTRUCT query result as JSON-LD chunks.
@@ -216,8 +215,7 @@ mod pg_ripple {
     /// Respects `pg_ripple.export_max_rows` if set.
     #[pg_extern]
     fn sparql_cursor_jsonld(query: &str) -> TableIterator<'static, (name!(chunk, String),)> {
-        let chunks = crate::sparql::cursor::sparql_cursor_jsonld(query);
-        TableIterator::new(chunks.into_iter().map(|c| (c,)))
+        TableIterator::new(crate::sparql::cursor::sparql_cursor_jsonld(query))
     }
 
     // ── v0.40.0: explain_sparql returning JSONB ───────────────────────────────
