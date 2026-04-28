@@ -196,7 +196,8 @@ would see:
 {
   "@context": {
     "saref": "https://saref.etsi.org/core/",
-    "xsd": "http://www.w3.org/2001/XMLSchema#"
+    "xsd": "http://www.w3.org/2001/XMLSchema#",
+    "qudt": "https://qudt.org/schema/qudt/"
   },
   "@id": "https://example.org/observation/kafka:iot.sensors:0:42",
   "@type": "saref:Measurement",
@@ -210,7 +211,8 @@ would see:
   "saref:hasTimestamp": {
     "@value": "2026-04-28T10:00:00Z",
     "@type": "xsd:dateTime"
-  }
+  },
+  "qudt:unit": "°C"
 }
 ```
 
@@ -412,10 +414,12 @@ triplestore:
 }
 ```
 
-Compare this with the original inbound message from Step 1: same `device`,
-`temp`, and `ts` fields, one new `alert` field derived by the inference rules.
-The triplestore and Datalog engine are invisible to both the producer and the
-consumer — they see only ordinary JSON.
+Compare this with the original inbound message from Step 1: same field names
+(`device`, `temp`, `unit`, `ts`), one new `alert` field derived by the inference
+rules. The values here come from a different observation (the 45.2°C reading
+that triggered the alert), but the shape is identical. The triplestore and
+Datalog engine are invisible to both the producer and the consumer — they see
+only ordinary JSON.
 
 ---
 
@@ -456,9 +460,15 @@ $$;
 
 The `pg_ripple.enable_cdc_bridge_trigger()` call in Step 5 installs exactly
 this pattern automatically — you do not need to write the trigger function by
-hand. To produce a richer shaped payload instead of a raw decoded triple,
-replace the default function with a custom one that calls `export_jsonld_framed()`
-(see [Outbound framing](#json-ld-mapping-inbound-context-and-outbound-framing)).
+hand. The raw `{subject, predicate, object, graph}` payload is useful on its
+own, but you can also reshape it before it leaves the outbox:
+
+- **Plain JSON** — add a `BEFORE INSERT` trigger that rewrites the payload to
+  match the original source field names, as Step 5 does with
+  `reformat_alert_payload()`.
+- **JSON-LD** — replace the default function with one that calls
+  `export_jsonld_framed()` (see
+  [Outbound framing](#json-ld-mapping-inbound-context-and-outbound-framing)).
 
 **Best for**: High-priority alerts, strict transactional guarantees.  
 **Trade-off**: `decode_id()` is called once per row, which adds overhead on high-volume
@@ -638,8 +648,15 @@ document is self-describing thanks to the `@context`:
 
 The `owl:sameAs` array shows the entity resolution result — this one record
 links the CRM, ERP, and support-ticket identities together. The `ex:riskScore`
-was derived by a Datalog rule from order history data. The `_relay_dedup_key`
-ensures the relay can handle restarts safely.
+was derived by a Datalog rule from order history data.
+
+The `_relay_dedup_key` is a convention for idempotent delivery: its value is
+derived from pg_ripple's internal statement ID (the `i` column in VP tables),
+so downstream consumers can detect and discard duplicates even if the relay
+restarts and replays part of the outbox. Including it is optional — the worked
+example above omits it because the plain-JSON reformat trigger does not add it,
+but it is straightforward to include via
+`'_relay_dedup_key', 'ripple:' || NEW.i` in the `jsonb_build_object` call.
 
 ---
 
