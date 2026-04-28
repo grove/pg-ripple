@@ -456,15 +456,9 @@ fn compile_construct_to_inserts(
             // Joins with vp_rare to record provenance for triples that now exist,
             // even if this rule's INSERT was a no-op (shared-target race case).
             let (prov_pred_col, prov_p_filter) = if pred_id != 0 {
-                (
-                    format!("{pred_id}::bigint"),
-                    format!("vr.p = {pred_id}"),
-                )
+                (format!("{pred_id}::bigint"), format!("vr.p = {pred_id}"))
             } else {
-                (
-                    format!("({p_expr})"),
-                    format!("vr.p = ({p_expr})"),
-                )
+                (format!("({p_expr})"), format!("vr.p = ({p_expr})"))
             };
             let p_is_not_null = if pred_id == 0 {
                 format!(" AND ({p_expr}) IS NOT NULL")
@@ -1033,8 +1027,7 @@ pub(crate) fn on_graph_write(graph_iri: &str) {
                 ok = false;
                 break;
             }
-            if let Err(e) =
-                Spi::run_with_args(prov_sql, &[DatumWithOid::from(rule_name.as_str())])
+            if let Err(e) = Spi::run_with_args(prov_sql, &[DatumWithOid::from(rule_name.as_str())])
             {
                 record_run_failure(&rule_name, &e.to_string());
                 ok = false;
