@@ -1238,3 +1238,13 @@ pgrx::extension_sql!(
     name = "v065_schema_additions",
     requires = ["v064_schema_version_fresh_install_stamp"]
 );
+
+// v0.66.0: Streaming and Distributed Reality.
+// No schema DDL changes — stamp only so that diagnostic_report() returns
+// schema_version = '0.66.0' on a fresh CREATE EXTENSION.
+pgrx::extension_sql!(
+    "INSERT INTO _pg_ripple.schema_version (version, upgraded_from, installed_at) \
+     VALUES ('0.66.0', '0.65.0', clock_timestamp());",
+    name = "v066_schema_version_stamp",
+    requires = ["v065_schema_additions"]
+);
