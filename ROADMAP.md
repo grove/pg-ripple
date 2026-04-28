@@ -112,14 +112,16 @@
 | [v0.62.0](roadmap/v0.62.0.md) | Query frontier: Apache Arrow Flight bulk export, WCOJ planner integration, visual graph explorer in `pg_ripple_http`, `clippy --deny warnings` CI gate; Citus property-path push-down, `vp_rare` cold-entry archival, tiered dictionary cache, distributed inference dispatch, live shard rebalance, multi-hop pruning carry-forward | Released ✅ | Very Large | [Full details](roadmap/v0.62.0-full.md) |
 | [v0.63.0](roadmap/v0.63.0.md) | SPARQL CONSTRUCT writeback rules (raw-to-canonical pipelines, incremental delta maintenance, Delete-Rederive, pipeline stratification); Citus scalability: SERVICE result shard pruning, streaming fan-out cursor, HyperLogLog `COUNT(DISTINCT)`, batched dictionary encoding, per-worker SID tables, non-blocking VP promotion, per-graph RLS CI gate, per-worker BRIN summarise | Released ✅ | Large | [Full details](roadmap/v0.63.0-full.md) |
 
-### Assessment Remediation & Release Trust (v0.64.0 – v0.67.0)
+### Assessment Remediation & Release Trust (v0.64.0 – v0.69.0)
 
 | Version | Theme | Status | Scope | Full details |
 |---------|-------|--------|-------|--------------|
 | [v0.64.0](roadmap/v0.64.0.md) | Release truth and safety freeze: feature-status API, deep readiness, immutable GitHub Actions, digest-scanned Docker releases, documentation truth pass, release evidence dashboard foundation | Released ✅ | Large | [Full details](roadmap/v0.64.0-full.md) |
 | [v0.65.0](roadmap/v0.65.0.md) | CONSTRUCT writeback correctness closure: real delta maintenance, HTAP-aware retraction, exact provenance capture, parameterized rule catalog writes, full CWB behavior test matrix | ✅ Released | Very Large | [Full details](roadmap/v0.65.0-full.md) |
 | [v0.66.0](roadmap/v0.66.0.md) | Streaming and distributed reality: true SPARQL cursors, signed Arrow IPC export, explainable WCOJ mode, integrated Citus pruning/HLL/BRIN/RLS/promotion paths | ✅ Released | Very Large | [Full details](roadmap/v0.66.0-full.md) |
-| [v0.67.0](roadmap/v0.67.0.md) | Production evidence and world-class hardening: soak testing, security audit or threat-model closure, public benchmark baselines, upgrade and backup acceptance, release evidence gate | Planned | Large | [Full details](roadmap/v0.67.0-full.md) |
+| [v0.67.0](roadmap/v0.67.0.md) | Assessment 9 critical remediation and production evidence: storage mutation journal, VP table RLS coverage, Arrow Flight security/correctness, fail-closed release-truth gates, soak tests, benchmark baselines, security audit | Planned | Very Large | [Full details](roadmap/v0.67.0-full.md) |
+| [v0.68.0](roadmap/v0.68.0.md) | Distributed scalability, streaming completion and fuzz hardening: CONSTRUCT cursor streaming, Citus HLL translation, SERVICE pruning, nonblocking VP promotion, scheduled fuzz CI | Planned | Large | [Full details](roadmap/v0.68.0-full.md) |
+| [v0.69.0](roadmap/v0.69.0.md) | Module architecture restructuring: split sparql/mod.rs, pg_ripple_http/main.rs, construct_rules.rs, and storage/mod.rs along single-responsibility boundaries | Planned | Large | [Full details](roadmap/v0.69.0-full.md) |
 
 #### PLAN_OVERALL_ASSESSMENT_8 coverage map
 
@@ -152,6 +154,37 @@ Every finding and recommendation from [plans/PLAN_OVERALL_ASSESSMENT_8.md](plans
 | Roadmap gap: Security Hardening Track | v0.64.0 TRUTH-03/TRUTH-04, v0.66.0 FLIGHT-01, v0.67.0 PROD-02 |
 | Recommended feature: Release Evidence Dashboard | v0.64.0 TRUTH-09, v0.67.0 PROD-05 |
 | Recommended feature: Canonical Graph Pipeline UI/API foundation | v0.65.0 CWB-FIX-07, CWB-FIX-10 |
+
+#### PLAN_OVERALL_ASSESSMENT_9 coverage map
+
+Every finding and recommendation from [plans/PLAN_OVERALL_ASSESSMENT_9.md](plans/PLAN_OVERALL_ASSESSMENT_9.md) is assigned to one or more post-v0.66.0 roadmap milestones:
+
+| Assessment finding | Roadmap coverage |
+|---|---|
+| CF-1: CONSTRUCT writeback bypasses SPARQL Update and bulk-load paths | v0.67.0 MJOURNAL-01, MJOURNAL-02, MJOURNAL-03 |
+| CF-2: Graph-level RLS protects only `_pg_ripple.vp_rare` | v0.67.0 RLS-01, RLS-02 |
+| CF-3: Arrow Flight accepts unsigned tickets and exports stale buffered data | v0.67.0 FLIGHT-SEC-01, FLIGHT-SEC-02, FLIGHT-SEC-03 |
+| CF-4: Release-truth gates can pass while checking nothing | v0.67.0 GATE-01, GATE-02 |
+| HF-1: Feature-status evidence contains stale or nonexistent references | v0.67.0 GATE-02, GATE-03 |
+| HF-2: Documentation and version narrative inconsistent at v0.66.0 | v0.67.0 GATE-03 |
+| HF-3: Benchmark workflow invocation broken, failures suppressed | v0.67.0 BENCH-01, BENCH-02 |
+| HF-4: Scheduled fuzz workflow absent | v0.68.0 FUZZ-01 |
+| HF-5: Streaming observability counters wired to dead-code stubs | v0.67.0 MJOURNAL-02 (stats wiring), FLIGHT-SEC-02 (HTTP Arrow metrics) |
+| HF-6: SBOM metadata stale by 15 releases | v0.67.0 SBOM-01 |
+| HF-7: `construct_rules.rs` contains a production `panic!` | v0.67.0 PANIC-01 |
+| HF-8: Architecture — side effects attached to wrappers, not storage contracts | v0.67.0 MJOURNAL-01/02; v0.69.0 ARCH-01 through ARCH-04 |
+| Action item 11 (S): README/CHANGELOG/ROADMAP/implementation_plan truth pass | v0.67.0 GATE-03 |
+| Action item 12 (M): SBOM regeneration in release CI | v0.67.0 SBOM-01 |
+| Action item 13 (M): Fix benchmark workflow | v0.67.0 BENCH-01 |
+| Action item 14 (L): Scheduled performance workflow with trend artifacts | v0.67.0 BENCH-02 |
+| Action item 15 (M): Replace `construct_rules.rs` panic | v0.67.0 PANIC-01 |
+| Action item 16 (L): Streaming CONSTRUCT Turtle/JSON-LD iterators | v0.68.0 STREAM-01 |
+| Action item 17 (L): Citus HLL aggregate translation with exact fallback | v0.68.0 CITUS-HLL-01 |
+| Action item 18 (L): Citus SERVICE and multihop pruning in SPARQL translator | v0.68.0 CITUS-SVC-01 |
+| Action item 19 (XL): Nonblocking VP promotion with shadow tables | v0.68.0 PROMO-01 |
+| Action item 20 (M): Scheduled fuzz workflows for all 12 targets | v0.68.0 FUZZ-01 |
+| Action item 21 (L): Split large modules along contract boundaries | v0.69.0 ARCH-01 through ARCH-05 |
+| Action item 22 (XL): Production release checklist artifacts | v1.0.0 PROD-01 through PROD-05 |
 
 ### Stable Release & Ecosystem (v1.0.0 – v1.1.0)
 
@@ -206,8 +239,16 @@ v0.65          ─── CONSTRUCT writeback correctness closure: real delta mai
 v0.66          ─── Streaming and distributed reality: true cursors, signed Arrow IPC export,
                │   explainable WCOJ mode, integrated Citus pruning/HLL/BRIN/RLS/promotion paths
        │
-v0.67          ─── Production evidence hardening: soak tests, security audit/threat model,
-               │   public benchmarks, upgrade/backup acceptance, mandatory release evidence dashboard
+v0.67          ─── Assessment 9 critical remediation: storage mutation journal,
+               │   VP table RLS coverage, Arrow Flight security/correctness,
+               │   fail-closed release-truth gates, soak tests, benchmark baselines
+       │
+v0.68          ─── Distributed scalability and streaming completion: CONSTRUCT cursor
+               │   streaming, Citus HLL translation, SERVICE pruning, nonblocking VP
+               │   promotion, scheduled fuzz CI for all 12 targets
+       │
+v0.69          ─── Module architecture restructuring: split sparql/mod.rs,
+               │   pg_ripple_http/main.rs, construct_rules.rs, storage/mod.rs
        │
 v1.0.0         ─── Stable release: 72-hour continuous load test, third-party security audit, documentation freeze, public benchmarks
        │
@@ -248,7 +289,8 @@ result shard pruning, streaming coordinator fan-out via SPARQL cursor, approxima
 `COUNT(DISTINCT)` via HyperLogLog, batched dictionary encoding, per-worker statement-ID
 local tables, non-blocking VP promotion via shadow-table pattern, per-graph RLS
 propagation CI gate, and per-worker BRIN summarise after merge. v0.64.0 through
-v0.67.0 convert the findings from PLAN_OVERALL_ASSESSMENT_8 into explicit
+v0.64.0 through
+v0.69.0 convert the findings from PLAN_OVERALL_ASSESSMENT_8 and PLAN_OVERALL_ASSESSMENT_9 into explicit
 roadmap work: v0.64.0 adds the truth-in-release guardrails (feature status,
 deep readiness, immutable CI actions, release digest scanning, and documentation
 correction); v0.65.0 closes CONSTRUCT writeback correctness (delta maintenance,
@@ -256,9 +298,18 @@ HTAP-aware retraction, exact provenance, and the full behavior test matrix);
 v0.66.0 makes the streaming and distributed claims real or explicitly labels
 them as planner hints/stubs/helpers (true SPARQL cursors, signed Arrow IPC export,
 explainable WCOJ mode, and integrated Citus pruning/HLL/BRIN/RLS/promotion paths);
-and v0.67.0 gathers production evidence (soak tests, audit or threat-model closure,
+v0.67.0 addresses all four Critical findings from Assessment 9 (storage mutation
+journal closing all CONSTRUCT writeback bypass paths, VP table RLS coverage,
+Arrow Flight ticket security and tombstone-aware export, fail-closed release-truth
+scripts) and gathers production evidence (soak tests, audit or threat-model closure,
 public benchmarks, upgrade/backup acceptance, and mandatory release evidence
-artifacts). v1.0.0 is the stable release: a 72-hour continuous load test, a
+artifacts); v0.68.0 completes the distributed execution and streaming contracts
+that were labelled partial or planned in v0.62–v0.66 (true CONSTRUCT streaming,
+Citus HLL aggregate translation, Citus SERVICE pruning, nonblocking VP promotion,
+and scheduled fuzz CI for all twelve targets); and v0.69.0 restructures the large
+source modules along single-responsibility boundaries to make the codebase
+maintainable for a v1.0.0 API freeze.
+v1.0.0 is the stable release: a 72-hour continuous load test, a
 third-party security audit, documentation final audit and freeze, an API stability
 guarantee, and public BSBM/WatDiv benchmark results. v1.1.0 delivers
 post-stable improvements: Cypher/GQL transpiler (read-only and write operations),
