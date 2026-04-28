@@ -26,13 +26,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
 
-    services:
-      postgres:
-        # We start PG via pgrx below, not as a service, but keep this
-        # placeholder to document that no external service is needed.
-        image: ""
-        options: "--health-cmd echo --health-interval 1s --health-timeout 1s --health-retries 1"
-
     env:
       PGHOST: localhost
       PGPORT: 28818
