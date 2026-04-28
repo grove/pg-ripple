@@ -55,6 +55,52 @@
 | [When Semantic Search Meets Knowledge Graphs](vector-sparql-hybrid-search.md) | pgvector finds things that *sound* similar. SPARQL finds things that *are* related. Combine them: `pg:similar()` in a SPARQL query, reciprocal rank fusion, graph-contextualized embeddings, and hybrid retrieval that outperforms either alone. |
 | [GraphRAG: Feeding LLMs with Structured Knowledge](graphrag-knowledge-export.md) | LLMs hallucinate when they don't have context. Knowledge graphs have context but no language model. GraphRAG bridges the gap: Parquet export, Datalog-enriched entity graphs, community detection, and the `rag_context()` pipeline that turns a question into grounded answers. |
 
+### Streaming & Integration
+
+| Post | Summary |
+|------|---------|
+| [CDC for Knowledge Graphs: React to Every Triple Change](cdc-knowledge-graphs.md) | Triple-level change data capture: subscribe to predicate changes, receive insert/delete events, and drive downstream systems in real time. The outbox pattern, exactly-once delivery, and why your knowledge graph should be an event source. |
+| [pg_ripple + pg_trickle: The Semantic Event Hub](semantic-hub-trickle-relay.md) | pg_trickle's relay delivers events from PostgreSQL to Kafka, Redis, and webhooks. pg_ripple's CDC emits triple-change events. Connect them: a semantic event bus that streams knowledge graph changes to any subscriber. Integration architecture, guaranteed delivery, and the topology that makes it work. |
+| [SPARQL CONSTRUCT Views: Live Materialized Graph Transformations](construct-views-live-transformations.md) | Derived graphs that update themselves when the source data changes. Vocabulary alignment, structural reshaping, and chained transformation pipelines — all maintained incrementally with DRed retraction. |
+| [R2RML: Your Relational Tables Are Already a Knowledge Graph](r2rml-relational-to-graph.md) | Map existing PostgreSQL tables to RDF without copying a single row. R2RML mappings, join conditions, SQL views as sources, and the migration path for teams that want knowledge graph features without rewriting their data layer. |
+
+### Reasoning & Inference (continued)
+
+| Post | Summary |
+|------|---------|
+| [Well-Founded Semantics: When Your Ontology Has Cycles](well-founded-semantics.md) | Three-valued logic for the real-world cases where true/false isn't enough. Negation cycles, the alternating fixpoint algorithm, and when pg_ripple automatically falls back from stratification to WFS. |
+| [Probabilistic Datalog: Soft Rules for Uncertain Knowledge](probabilistic-datalog.md) | Weighted rules, confidence propagation through inference chains, noisy-OR combination, and querying by confidence threshold. For NLP extractions, sensor fusion, and any domain where 95% is good enough. |
+
+### Observability & Query Engineering
+
+| Post | Summary |
+|------|---------|
+| [EXPLAIN for SPARQL: Reading pg_ripple Query Plans](explain-sparql-query-plans.md) | `pg_ripple.explain_sparql()` shows the full translation: algebra tree, SQL plan, cardinality estimates, and execution statistics. How to read it, what to look for, and how to fix the common performance problems it reveals. |
+| [Natural Language to SPARQL: When Users Don't Speak Graph](natural-language-to-sparql.md) | LLM-powered translation from English questions to SPARQL queries. Schema-grounded prompts, validation against SHACL shapes, and the feedback loop that turns failed queries into training data. |
+
+### Governance & Compliance
+
+| Post | Summary |
+|------|---------|
+| [GDPR Right-to-Erasure in a Knowledge Graph](gdpr-right-to-erasure.md) | Deleting a person across every VP table, every inference, every embedding — in one transaction. `erase_subject()`, DRed retraction of inferred triples, dictionary cleanup, and the audit tombstone that proves the erasure happened. |
+| [Multi-Tenant Knowledge Graphs with Quotas](multi-tenant-knowledge-graphs.md) | Per-tenant isolation using named graphs, quota enforcement with triple limits, row-level security on VP tables, and tenant-scoped inference. 200 tenants on one PostgreSQL instance. |
+| [Automatic Provenance Tracking with PROV-O](provenance-tracking-prov-o.md) | Every bulk load, every inference run, every source file — tracked as queryable RDF using the W3C PROV-O vocabulary. Data lineage for HIPAA, SOX, and GDPR compliance without application-level logging. |
+| [Time-Travel Queries for Knowledge Graphs](temporal-time-travel-queries.md) | Point-in-time graph snapshots using statement timelines. Compliance auditing, temporal diffs, and monthly headcount analytics from your knowledge graph's history. |
+
+### Spatial & Distributed
+
+| Post | Summary |
+|------|---------|
+| [GeoSPARQL on PostGIS: Spatial Queries Meet RDF](geosparql-postgis-spatial.md) | GeoSPARQL functions translated to PostGIS operations with GiST index support. Distance filters, spatial containment, and why pg_ripple delegates to PostGIS instead of implementing its own spatial engine. |
+| [SPARQL on Citus: Shard-Pruning for Distributed Knowledge Graphs](citus-shard-pruning-sparql.md) | Subject-based sharding of VP tables across Citus workers. Shard pruning for bound subjects, carry-forward for multi-hop traversals, and when distribution is worth the complexity. |
+
+### AI & Semantic Search (continued)
+
+| Post | Summary |
+|------|---------|
+| [Automated Ontology Mapping: Aligning Vocabularies Without Manual Labor](ontology-mapping-alignment.md) | Lexical and KGE-based alignment of vocabularies, pre-built mapping templates, and the pipeline from candidate suggestions to OWL equivalence assertions. Hours instead of weeks for vocabulary integration. |
+| [Neuro-Symbolic Entity Resolution](neuro-symbolic-entity-resolution.md) | Combining ML embedding similarity with SHACL constraint vetoes and Datalog transitivity propagation. High-recall candidate generation, high-precision logical filtering, and an auditable merge pipeline inside PostgreSQL. |
+
 ### Advanced
 
 | Post | Summary |
