@@ -1,10 +1,10 @@
-//! pg_ripple SQL API — SPARQL CONSTRUCT writeback rules (v0.63.0)
+//! pg_ripple SQL API — SPARQL CONSTRUCT writeback rules (v0.63.0, v0.65.0)
 
 #[pgrx::pg_schema]
 mod pg_ripple {
     use pgrx::prelude::*;
 
-    // ── v0.63.0: SPARQL CONSTRUCT Writeback Rules ────────────────────────────
+    // ── v0.63.0 + v0.65.0: SPARQL CONSTRUCT Writeback Rules ─────────────────
 
     /// Register a SPARQL CONSTRUCT writeback rule.
     ///
@@ -19,14 +19,16 @@ mod pg_ripple {
     /// - `mode`         — `'incremental'` (default) or `'full'`
     ///
     /// On success the rule is registered and an initial full recompute is run.
+    /// Returns `NULL` on success; throws on error.
     #[pg_extern]
     fn create_construct_rule(
         name: &str,
         sparql: &str,
         target_graph: &str,
         mode: default!(&str, "'incremental'"),
-    ) {
+    ) -> Option<String> {
         crate::construct_rules::create_construct_rule(name, sparql, target_graph, mode);
+        None // NULL = success; elog::Error propagates on failure
     }
 
     /// Drop a SPARQL CONSTRUCT writeback rule.
@@ -57,7 +59,8 @@ mod pg_ripple {
     /// List all registered SPARQL CONSTRUCT writeback rules.
     ///
     /// Returns a JSONB array of `{name, sparql, target_graph, mode, source_graphs,
-    /// rule_order, last_refreshed}` objects.
+    /// rule_order, last_refreshed, last_incremental_run, successful_run_count,
+    /// failed_run_count, derived_triple_count, last_error}` objects (v0.65.0).
     #[pg_extern]
     fn list_construct_rules() -> pgrx::JsonB {
         crate::construct_rules::list_construct_rules()
@@ -73,5 +76,30 @@ mod pg_ripple {
     ) -> TableIterator<'static, (name!(section, String), name!(content, String))> {
         let rows = crate::construct_rules::explain_construct_rule(name);
         TableIterator::new(rows)
+    }
+
+    /// Return the canonical pipeline status for all construct rules (v0.65.0).
+    ///
+    /// Returns a JSONB object with `rule_count` and a `rules` array containing
+    /// per-rule: dependency graph, last run state, pending deltas, derived
+    /// triple counts, failed run count, stale flag, and health observability.
+    ///
+    /// This is the API foundation for a future canonical graph pipeline UI.
+    #[pg_extern]
+    fn construct_pipeline_status() -> pgrx::JsonB {
+        crate::construct_rules::construct_pipeline_status()
+    }
+
+    /// Apply all construct rules that source from `graph_iri` (v0.65.0).
+    ///
+    /// Runs incremental maintenance for every registered rule whose
+    /// `source_graphs` list contains `graph_iri`.  This is called automatically
+    /// by the extension write path; it can also be called manually to trigger
+    /// maintenance without inserting new source triples.
+    ///
+    /// Returns the total number of newly derived triples.
+    #[pg_extern]
+    fn apply_construct_rules_for_graph(graph_iri: &str) -> i64 {
+        crate::construct_rules::apply_for_graph(graph_iri)
     }
 }

@@ -13,6 +13,36 @@ Versions correspond to the milestones in [ROADMAP.md](ROADMAP.md).
 
 ---
 
+## [0.65.0] — 2026-04-28 — CONSTRUCT Writeback Correctness Closure
+
+**Implements the v0.65.0 roadmap: real delta maintenance, HTAP-aware retraction, exact provenance capture, parameterized rule catalog writes, observability, pipeline status API, and the full CWB behavior test matrix.**
+
+### What's new
+
+- **Delta maintenance kernel** (CWB-FIX-01/02): Source graph inserts and deletes now automatically update dependent CONSTRUCT target graphs in the same transaction. `insert_triple()` triggers incremental derivation; `delete_triple_from_graph()` triggers DRed-style rederive-then-retract. Manual `refresh_construct_rule()` is no longer required for routine operation.
+
+- **HTAP-aware promoted-predicate retraction** (CWB-FIX-03): `retract_exclusive_triples()` now correctly handles VP tables in HTAP split mode (delta + main + tombstones). Delta-resident derived triples are deleted directly; main-resident derived triples receive tombstones — preventing silent retraction failures after merge.
+
+- **Exact provenance capture** (CWB-FIX-04): Provenance is recorded via `INSERT ... ON CONFLICT DO NOTHING RETURNING` CTEs, capturing only rows inserted by the current rule run. Pre-existing `source = 1` triples from other rules or manual inserts are no longer mis-attributed.
+
+- **Parameterized SPI and mode validation** (CWB-FIX-05): All catalog writes in `create_construct_rule` use `Spi::run_with_args` (parameterized) for scalar fields. Mode values are validated — only `'incremental'` and `'full'` are accepted.
+
+- **Shared-target reference-count semantics** (CWB-FIX-06): Two or more rules can write the same derived triple to the same graph. Dropping or refreshing one rule preserves triples still supported by another rule's provenance row.
+
+- **Observability columns** (CWB-FIX-07): `_pg_ripple.construct_rules` gains five new columns: `last_incremental_run`, `successful_run_count`, `failed_run_count`, `last_error`, `derived_triple_count`. `list_construct_rules()` exposes all health fields.
+
+- **Full CWB test matrix** (CWB-FIX-08): `tests/pg_regress/sql/construct_rules.sql` now covers: create/initial derivation, incremental insert, DRed delete, refresh from scratch, self-cycle rejection, two-rule pipeline stratification, mutual-cycle rejection, drop-with-retract, drop-without-retract, shared target preservation, explain output, pipeline status, and apply_for_graph.
+
+- **SHACL rule bridge foundation** (CWB-FIX-09): `feature_status()` for `shacl_sparql_rule` updated to note that the derivation kernel foundation is delivered; full routing deferred to v0.66.0.
+
+- **Pipeline introspection API** (CWB-FIX-10): New `pg_ripple.construct_pipeline_status() → JSONB` function returns dependency graph, rule order, last run state, derived triple counts, and failed/stale flags for all rules.
+
+- **`apply_construct_rules_for_graph(graph_iri TEXT) → BIGINT`**: New public function for manual incremental maintenance of all rules sourcing a given graph. Returns total derived triple count.
+
+- **Feature status promoted**: `construct_writeback` moves from `manual_refresh` to `implemented` in `pg_ripple.feature_status()`.
+
+---
+
 ## [0.64.0] — 2026-04-27 — Release Truth and Safety Freeze
 
 **Implements the v0.64.0 roadmap: feature-status SQL API, deep /ready readiness, GitHub Actions SHA pinning, Docker release digest integrity, documentation truth pass, roadmap evidence scripts, API drift checks, `just assess-release`, release evidence dashboard, and optional-feature degradation semantics guide.**
