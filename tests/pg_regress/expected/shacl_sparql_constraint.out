@@ -67,8 +67,8 @@ FROM pg_ripple.validate();
  t
 (1 row)
 
--- ── 5. schema_version contains 0.64.0 ────────────────────────────────────────
-SELECT version = '0.64.0' AS version_correct
+-- ── 5. schema_version contains 0.65.0 ────────────────────────────────────────
+SELECT version = '0.65.0' AS version_correct
 FROM _pg_ripple.schema_version
 ORDER BY installed_at DESC
 LIMIT 1;

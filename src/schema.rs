@@ -1221,3 +1221,20 @@ pgrx::extension_sql!(
     name = "v064_schema_version_fresh_install_stamp",
     requires = ["v063_schema_additions"]
 );
+
+// v0.65.0: CONSTRUCT Writeback Correctness Closure.
+// Schema changes: add v0.65.0 observability columns to _pg_ripple.construct_rules
+// (last_incremental_run, successful_run_count, failed_run_count, last_error,
+// derived_triple_count).  Added via IF NOT EXISTS for idempotency.
+pgrx::extension_sql!(
+    "ALTER TABLE IF EXISTS _pg_ripple.construct_rules
+       ADD COLUMN IF NOT EXISTS last_incremental_run  TIMESTAMPTZ,
+       ADD COLUMN IF NOT EXISTS successful_run_count  BIGINT NOT NULL DEFAULT 0,
+       ADD COLUMN IF NOT EXISTS failed_run_count      BIGINT NOT NULL DEFAULT 0,
+       ADD COLUMN IF NOT EXISTS last_error            TEXT,
+       ADD COLUMN IF NOT EXISTS derived_triple_count  BIGINT NOT NULL DEFAULT 0;
+     INSERT INTO _pg_ripple.schema_version (version, upgraded_from, installed_at)
+       VALUES ('0.65.0', '0.64.0', clock_timestamp());",
+    name = "v065_schema_additions",
+    requires = ["v064_schema_version_fresh_install_stamp"]
+);

@@ -427,7 +427,12 @@ mod pg_ripple {
     #[pg_extern]
     fn delete_triple_from_graph(s: &str, p: &str, o: &str, graph_iri: &str) -> i64 {
         let g_id = crate::dictionary::encode(graph_iri, crate::dictionary::KIND_IRI);
-        crate::storage::delete_triple(s, p, o, g_id)
+        let deleted = crate::storage::delete_triple(s, p, o, g_id);
+        // ── v0.65.0: CONSTRUCT writeback DRed maintenance ──────────────────
+        if deleted > 0 {
+            crate::construct_rules::on_graph_delete(graph_iri);
+        }
+        deleted
     }
 
     /// Delete all triples in a named graph without unregistering it.

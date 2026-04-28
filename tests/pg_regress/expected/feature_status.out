@@ -56,13 +56,13 @@ WHERE feature_name = 'shacl_sparql_rule';
  t
 (1 row)
 
--- construct_writeback must be manual_refresh (not implemented).
+-- construct_writeback must be implemented (v0.65.0 closes the delta maintenance gap).
 SELECT status AS construct_writeback_status
 FROM pg_ripple.feature_status()
 WHERE feature_name = 'construct_writeback';
  construct_writeback_status 
 ----------------------------
- manual_refresh
+ implemented
 (1 row)
 
 -- citus_service_pruning must be planned (not wired into translator yet).

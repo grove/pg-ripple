@@ -38,7 +38,7 @@ SELECT status NOT IN ('implemented') AS shacl_rule_not_implemented
 FROM pg_ripple.feature_status()
 WHERE feature_name = 'shacl_sparql_rule';
 
--- construct_writeback must be manual_refresh (not implemented).
+-- construct_writeback must be implemented (v0.65.0 closes the delta maintenance gap).
 SELECT status AS construct_writeback_status
 FROM pg_ripple.feature_status()
 WHERE feature_name = 'construct_writeback';

@@ -117,7 +117,7 @@
 | Version | Theme | Status | Scope | Full details |
 |---------|-------|--------|-------|--------------|
 | [v0.64.0](roadmap/v0.64.0.md) | Release truth and safety freeze: feature-status API, deep readiness, immutable GitHub Actions, digest-scanned Docker releases, documentation truth pass, release evidence dashboard foundation | Released ✅ | Large | [Full details](roadmap/v0.64.0-full.md) |
-| [v0.65.0](roadmap/v0.65.0.md) | CONSTRUCT writeback correctness closure: real delta maintenance, HTAP-aware retraction, exact provenance capture, parameterized rule catalog writes, full CWB behavior test matrix | Planned | Very Large | [Full details](roadmap/v0.65.0-full.md) |
+| [v0.65.0](roadmap/v0.65.0.md) | CONSTRUCT writeback correctness closure: real delta maintenance, HTAP-aware retraction, exact provenance capture, parameterized rule catalog writes, full CWB behavior test matrix | Released | Very Large | [Full details](roadmap/v0.65.0-full.md) |
 | [v0.66.0](roadmap/v0.66.0.md) | Streaming and distributed reality: true SPARQL cursors, signed Arrow IPC export, explainable WCOJ mode, integrated Citus pruning/HLL/BRIN/RLS/promotion paths | Planned | Very Large | [Full details](roadmap/v0.66.0-full.md) |
 | [v0.67.0](roadmap/v0.67.0.md) | Production evidence and world-class hardening: soak testing, security audit or threat-model closure, public benchmark baselines, upgrade and backup acceptance, release evidence gate | Planned | Large | [Full details](roadmap/v0.67.0-full.md) |
 

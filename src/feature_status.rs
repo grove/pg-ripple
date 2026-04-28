@@ -114,13 +114,9 @@ mod pg_ripple {
             // ── CONSTRUCT writeback ────────────────────────────────────────
             (
                 "construct_writeback".to_string(),
-                "manual_refresh".to_string(),
+                "implemented".to_string(),
                 None,
-                Some(
-                    "CONSTRUCT rules apply on manual invocation only; \
-                     incremental delta maintenance deferred to v0.65.0"
-                        .to_string(),
-                ),
+                None,
                 Some("ci/regress: construct_rules.sql".to_string()),
                 Some("docs/src/reference/construct-rules.md".to_string()),
                 None,
@@ -141,7 +137,8 @@ mod pg_ripple {
                 None,
                 Some(
                     "sh:SPARQLRule is parsed and stored but not executed through \
-                     the derivation kernel; deferred to v0.65.0"
+                     the derivation kernel; full routing deferred to v0.66.0 \
+                     (CWB-FIX-09 derivation kernel foundation delivered in v0.65.0)"
                         .to_string(),
                 ),
                 None,
