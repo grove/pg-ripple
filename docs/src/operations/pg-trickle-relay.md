@@ -284,14 +284,24 @@ CREATE TABLE enriched_events (
     created_at TIMESTAMPTZ DEFAULT now()
 );
 
--- Subscribe to exactly the inferred alert triples we care about.
--- Only triples where the predicate is ex:tempAlert will be bridged.
+-- Declare which triples the subscription should watch for.
+-- Only triples where the predicate is ex:tempAlert will pass through.
 SELECT pg_ripple.create_subscription(
     name          => 'high-temp-alerts',
     filter_sparql => 'FILTER(?p = <https://example.org/tempAlert>)'
 );
 
--- Tell pg-trickle to treat this table as an outbox.
+-- Wire the subscription to the outbox table.
+-- This installs a trigger on the VP delta table for ex:tempAlert; whenever a
+-- matching triple lands, the trigger decodes it and writes a row to
+-- enriched_events. That is the only writer to enriched_events in this pipeline.
+SELECT pg_ripple.enable_cdc_bridge_trigger(
+    name      => 'high-temp-alerts',
+    predicate => 'https://example.org/tempAlert',
+    outbox    => 'enriched_events'
+);
+
+-- Tell pg-trickle to treat this table as an outbox so the relay can poll it.
 SELECT pgtrickle.enable_outbox('enriched_events');
 ```
 
