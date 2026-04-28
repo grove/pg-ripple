@@ -13,7 +13,46 @@ Versions correspond to the milestones in [ROADMAP.md](ROADMAP.md).
 
 ---
 
-## [0.66.0] — 2026-04-29 — Streaming and Distributed Reality
+## [0.67.0] — 2026-05-06 — Production Hardening and Assessment 9 Remediation
+
+**Implements v0.67.0 roadmap: Arrow Flight security hardening, mutation journal for CONSTRUCT writeback, Row Level Security propagation to all VP tables, panic→error conversion, Python gate tooling, benchmark correctness fixes, and scheduled performance trend CI.**
+
+### What's new
+
+- **Arrow Flight unsigned-ticket hardening** (FLIGHT-SEC-01): Unsigned Arrow Flight tickets are now rejected by default. New GUC `pg_ripple.arrow_unsigned_tickets_allowed` (BOOL, default `off`) must be explicitly set to allow unsigned tickets. Corresponding `ARROW_UNSIGNED_TICKETS_ALLOWED` env var for `pg_ripple_http`. Ticket rejections are tracked in `streaming_metrics()`. Evidence: `pg_ripple.feature_status()`, `pg_ripple.streaming_metrics()`.
+
+- **Arrow Flight tombstone-exclusion and batch streaming** (FLIGHT-SEC-02): `POST /flight/do_get` now uses tombstone-exclusion query (`main EXCEPT tombstones UNION ALL delta`) to prevent serving deleted triples. Export is streamed in configurable batches via new GUC `pg_ripple.arrow_batch_size` (INT, 1–100000, default 1000). Response header `x-arrow-batches` reports batch count. `arrow_batches_sent` counter added to `streaming_metrics()`. Evidence: `pg_ripple.feature_status()`.
+
+- **Transaction-local mutation journal** (MJOURNAL-01/02/03): A Rust `thread_local!` mutation journal (`src/storage/mutation_journal.rs`) unifies CONSTRUCT writeback across all write paths: `insert_triple`, SPARQL INSERT DATA, `load_ntriples`, and `load_turtle`. Fast-path skips journal accumulation when no CONSTRUCT rules are defined. Evidence: `tests/pg_regress/sql/cwb_write_path_equivalence.sql`.
+
+- **Row Level Security on VP delta/main tables** (RLS-01/02): `enable_graph_rls()` and `grant_graph_access()` now apply RLS policies to dedicated VP `_delta` and `_main` tables at creation, promotion, and grant/revoke time. Evidence: `tests/pg_regress/sql/rls_promotion.sql`.
+
+- **Panic → pgrx::error conversion** (PANIC-01): `construct_rules.rs` topological-sort `panic!()` replaced with `pgrx::error!()` to ensure clean PostgreSQL error reporting under load. Evidence: `src/construct_rules.rs`.
+
+- **Python gate tooling** (GATE-01): `scripts/check_api_drift.sh` and `scripts/check_roadmap_evidence.sh` replaced with portable Python 3 equivalents (`scripts/check_api_drift.py`, `scripts/check_roadmap_evidence.py`) that require `--version X.Y.Z` to prevent stale invocations. Evidence: `scripts/check_api_drift.py`, `scripts/check_roadmap_evidence.py`.
+
+- **`validate-feature-status` CI job** (GATE-02): New CI job added to `.github/workflows/ci.yml` that runs after `test` and `regress`, calls `feature_status()`, verifies evidence paths exist on disk, and runs both Python gate scripts. Evidence: `.github/workflows/ci.yml`.
+
+- **Documentation truth** (GATE-03): README "What works today" updated from v0.63.0 to v0.67.0, pgrx version reference corrected to 0.18, v0.64.0 roadmap status corrected to `Released ✅`.
+
+- **SBOM version verification** (SBOM-01): Release workflow now verifies that the regenerated `sbom.json` component version matches `Cargo.toml` before uploading to the GitHub release. Evidence: `.github/workflows/release.yml`.
+
+- **Benchmark correctness** (BENCH-01): `.github/workflows/benchmark.yml` no longer uses `bash` to execute SQL files. Merge throughput and vector index benchmarks now use `pgbench -f` and `psql -f` respectively. `|| true` suppressors removed; `continue-on-error: false` added. Benchmark failures now fail the CI run.
+
+- **Scheduled performance trend CI** (BENCH-02): New weekly workflow `.github/workflows/performance_trend.yml` runs insert throughput, merge throughput, and hybrid search benchmarks, appends results to `benchmarks/*_history.csv`, and fails if any metric drops more than 10% below the 4-week rolling average.
+
+### GUCs added
+
+| GUC | Type | Default | Level | Purpose |
+|---|---|---|---|---|
+| `pg_ripple.arrow_unsigned_tickets_allowed` | BOOL | `off` | SIGHUP | Allow unsigned Arrow Flight tickets (dev-only) |
+| `pg_ripple.arrow_batch_size` | INT | 1000 | USERSET | Arrow IPC export batch size per record batch |
+
+### Dependencies added
+
+None — all v0.67.0 changes are implemented using already-present dependencies.
+
+
 
 **Implements the v0.66.0 roadmap: true paged SPARQL cursors via PostgreSQL portal API, HMAC-SHA256 signed Arrow Flight v2 tickets, real Arrow IPC streaming in pg_ripple_http, WCOJ explain metadata, streaming observability metrics, and Citus BRIN summarise SQL API.**
 

@@ -19,7 +19,7 @@
 | Layer | Technology |
 |---|---|
 | Language | Rust (Edition 2024) |
-| PG binding | `pgrx` 0.17 (`pg18` feature flag) |
+| PG binding | `pgrx` 0.18 (`pg18` feature flag) |
 | PostgreSQL | 18.x |
 | SPARQL parser | `spargebra` crate (W3C-compliant SPARQL 1.1 algebra) |
 | SPARQL optimizer | `sparopt` crate (Apache-2.0/MIT; first-pass algebra optimizer fed from `spargebra` output; adds filter pushdown, constant folding, empty-pattern elimination before pg_ripple's own pass; v0.3.0+) — **verify crates.io availability and API stability before v0.3.0 begins; fallback: inline these optimizations into `src/sparql/algebra.rs`** |
@@ -1359,7 +1359,7 @@ pg_ripple/                             # Cargo workspace root
 ```bash
 # Prerequisites
 rustup update stable        # Rust 1.88+ required for pgrx 0.18
-cargo install cargo-pgrx --version 0.17.0 --locked
+cargo install cargo-pgrx --version 0.18.0 --locked
 cargo pgrx init --pg18 download  # Download and compile PG18
 
 # Create extension (inside the pg_ripple/ workspace member folder)

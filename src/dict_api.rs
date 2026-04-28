@@ -222,12 +222,12 @@ mod pg_ripple {
             );
         }
 
-        // ── v0.65.0: CONSTRUCT writeback incremental maintenance ─────────────
-        if sid > 0
-            && let Some(graph_iri) = g
-        {
-            let graph_iri_clean = crate::storage::strip_angle_brackets_pub(graph_iri).to_owned();
-            crate::construct_rules::on_graph_write(&graph_iri_clean);
+        // ── v0.67.0 MJOURNAL-02: route through mutation journal ──────────────
+        // (Previously called on_graph_write directly; now uses the journal so
+        //  all write paths share a single flush path.)
+        if sid > 0 {
+            crate::storage::mutation_journal::record_write(g_id);
+            crate::storage::mutation_journal::flush();
         }
 
         sid

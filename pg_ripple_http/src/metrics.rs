@@ -1,6 +1,7 @@
 //! Prometheus-compatible metrics for pg_ripple_http.
 //!
 //! Tracks SPARQL queries, Datalog queries, errors, and cumulative duration.
+//! v0.67.0 FLIGHT-SEC-02: added Arrow Flight batch and rejection counters.
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
@@ -14,6 +15,10 @@ pub struct Metrics {
     total_duration_us: AtomicU64,
     /// Unix timestamp (seconds) of the last query, or 0 if no query yet.
     last_query_ts: AtomicU64,
+    /// v0.67.0 FLIGHT-SEC-02: total Arrow record batches sent.
+    arrow_batches_sent: AtomicU64,
+    /// v0.67.0 FLIGHT-SEC-01: total Arrow ticket rejections.
+    arrow_ticket_rejections: AtomicU64,
 }
 
 impl Default for Metrics {
@@ -30,6 +35,8 @@ impl Metrics {
             errors: AtomicU64::new(0),
             total_duration_us: AtomicU64::new(0),
             last_query_ts: AtomicU64::new(0),
+            arrow_batches_sent: AtomicU64::new(0),
+            arrow_ticket_rejections: AtomicU64::new(0),
         }
     }
 
@@ -56,6 +63,16 @@ impl Metrics {
         self.errors.fetch_add(1, Ordering::Relaxed);
     }
 
+    /// Record Arrow record batches sent (v0.67.0 FLIGHT-SEC-02).
+    pub fn record_arrow_batches_sent(&self, n: u64) {
+        self.arrow_batches_sent.fetch_add(n, Ordering::Relaxed);
+    }
+
+    /// Record an Arrow ticket rejection (v0.67.0 FLIGHT-SEC-01).
+    pub fn record_arrow_ticket_rejection(&self) {
+        self.arrow_ticket_rejections.fetch_add(1, Ordering::Relaxed);
+    }
+
     pub fn sparql_query_count(&self) -> u64 {
         self.sparql_queries.load(Ordering::Relaxed)
     }
@@ -80,5 +97,13 @@ impl Metrics {
     /// Unix timestamp (seconds) of the last query, or 0 if no query has been made.
     pub fn last_query_ts(&self) -> u64 {
         self.last_query_ts.load(Ordering::Relaxed)
+    }
+
+    pub fn arrow_batches_sent(&self) -> u64 {
+        self.arrow_batches_sent.load(Ordering::Relaxed)
+    }
+
+    pub fn arrow_ticket_rejections(&self) -> u64 {
+        self.arrow_ticket_rejections.load(Ordering::Relaxed)
     }
 }

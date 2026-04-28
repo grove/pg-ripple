@@ -1949,6 +1949,30 @@ pub extern "C-unwind" fn _PG_init() {
         GucFlags::default(),
     );
 
+    // v0.67.0 Arrow Flight GUCs (FLIGHT-SEC-01, FLIGHT-SEC-02).
+    pgrx::GucRegistry::define_bool_guc(
+        c"pg_ripple.arrow_unsigned_tickets_allowed",
+        c"When on, unsigned Arrow Flight tickets (sig=\"unsigned\") are accepted for \
+          local development. Default off — production must use a signed secret. \
+          (v0.67.0 FLIGHT-SEC-01)",
+        c"",
+        &crate::gucs::storage::ARROW_UNSIGNED_TICKETS_ALLOWED,
+        GucContext::Sighup,
+        GucFlags::default(),
+    );
+
+    pgrx::GucRegistry::define_int_guc(
+        c"pg_ripple.arrow_batch_size",
+        c"Number of rows per Arrow record batch when streaming export (v0.67.0 FLIGHT-SEC-02). \
+          Default: 1000.",
+        c"",
+        &crate::gucs::storage::ARROW_BATCH_SIZE,
+        1,
+        100_000,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+
     pgrx::GucRegistry::define_bool_guc(
         c"pg_ripple.datalog_citus_dispatch",
         c"When on, wrap Datalog stratum-iteration INSERT…SELECT in \

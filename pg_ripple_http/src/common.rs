@@ -33,6 +33,10 @@ pub struct AppState {
     /// Read from the `ARROW_FLIGHT_SECRET` environment variable at startup.
     /// `None` means unsigned tickets are accepted (insecure; dev only).
     pub arrow_flight_secret: Option<String>,
+    /// v0.67.0 FLIGHT-SEC-01: when `true`, unsigned Arrow Flight tickets are
+    /// accepted (local development only). Controlled by the env var
+    /// `ARROW_UNSIGNED_TICKETS_ALLOWED=true`. Default `false`.
+    pub arrow_unsigned_tickets_allowed: bool,
 }
 
 // ─── Configuration ────────────────────────────────────────────────────────────

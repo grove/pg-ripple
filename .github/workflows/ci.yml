@@ -1178,3 +1178,78 @@ jobs:
           print(f'All {len(data)} dependencies use allowed licences.')
           " $ALLOWED
 
+  # v0.67.0 GATE-02: Validate feature_status() evidence after each CI run.
+  validate-feature-status:
+    name: Validate feature status evidence (v0.67.0)
+    needs: [test, regress]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            libssl-dev pkg-config python3
+
+      - name: Set up Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry
+        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684  # v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/.cargo/bin/cargo-pgrx
+          key: ${{ runner.os }}-cargo-pgrx-gate02-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-pgrx-gate02-
+
+      - name: Install cargo-pgrx
+        run: |
+          if ! command -v cargo-pgrx &>/dev/null; then
+            cargo install cargo-pgrx --locked
+          fi
+
+      - name: Initialize pgrx for PostgreSQL 18
+        run: cargo pgrx init --pg18 download
+
+      - name: Build and start pgrx PostgreSQL 18
+        run: |
+          cargo pgrx install --pg-config ~/.pgrx/18.*/pgrx-install/bin/pg_config
+          cargo pgrx start pg18
+
+      - name: Verify feature_status() evidence paths exist
+        run: |
+          PGHOST=localhost PGPORT=28818 PGUSER="$USER" PGDATABASE=postgres \
+            psql -c "CREATE EXTENSION IF NOT EXISTS pg_ripple;" 2>&1
+          PGHOST=localhost PGPORT=28818 PGUSER="$USER" PGDATABASE=postgres \
+            psql -t -A -c "SELECT evidence_path FROM pg_ripple.feature_status() WHERE evidence_path IS NOT NULL;" \
+            | while IFS= read -r path; do
+                if [ -n "$path" ] && [ ! -e "$path" ]; then
+                  echo "MISSING evidence path: $path"
+                  echo "FAIL=1" >> "$GITHUB_ENV"
+                fi
+              done
+          if [ "${FAIL:-0}" = "1" ]; then
+            echo "Feature status evidence check failed — missing paths detected"
+            exit 1
+          fi
+          echo "All feature_status() evidence paths verified"
+
+      - name: Validate API drift (check_api_drift.py)
+        run: |
+          VERSION=$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')
+          python3 scripts/check_api_drift.py --version "$VERSION"
+
+      - name: Validate roadmap evidence (check_roadmap_evidence.py)
+        run: |
+          VERSION=$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')
+          python3 scripts/check_roadmap_evidence.py --version "$VERSION"
+
+      - name: Stop pgrx PostgreSQL 18
+        if: always()
+        run: cargo pgrx stop pg18 2>/dev/null || true
+
+

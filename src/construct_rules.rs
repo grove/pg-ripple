@@ -239,7 +239,7 @@ fn compute_rule_order(
         for (rule, preds) in &predecessors {
             if preds.contains(&n) {
                 let deg = in_degree.get_mut(rule).unwrap_or_else(|| {
-                    panic!("in_degree missing for {rule}");
+                    pgrx::error!("construct rule stratification error: in_degree entry missing for rule \"{rule}\" — internal invariant violated");
                 });
                 *deg -= 1;
                 if *deg == 0 {
@@ -960,6 +960,31 @@ fn retract_exclusive_triples(rule_name: &str) {
 ///   derived triples.
 /// - Records exact provenance via CTE (CWB-FIX-04).
 /// - Updates health counters (CWB-FIX-07).
+
+/// Quick check: returns `true` when there are no construct rules registered,
+/// allowing the mutation journal to skip accumulation entirely (zero overhead).
+/// (v0.67.0 MJOURNAL-01)
+pub(crate) fn has_no_rules() -> bool {
+    // Check if the catalog table even exists first.
+    let table_exists = Spi::get_one_with_args::<bool>(
+        "SELECT EXISTS(SELECT 1 FROM information_schema.tables \
+          WHERE table_schema = '_pg_ripple' AND table_name = 'construct_rules')",
+        &[],
+    )
+    .unwrap_or(Some(false))
+    .unwrap_or(false);
+
+    if !table_exists {
+        return true;
+    }
+
+    let has_rules = Spi::get_one::<bool>("SELECT EXISTS(SELECT 1 FROM _pg_ripple.construct_rules)")
+        .unwrap_or(Some(false))
+        .unwrap_or(false);
+
+    !has_rules
+}
+
 pub(crate) fn on_graph_write(graph_iri: &str) {
     // Fast path: skip if no rules registered or catalog not yet initialized.
     let has_rules = Spi::get_one_with_args::<bool>(

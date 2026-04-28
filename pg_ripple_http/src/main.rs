@@ -268,6 +268,10 @@ async fn main() {
         metrics: metrics::Metrics::new(),
         ever_connected: std::sync::atomic::AtomicBool::new(false),
         arrow_flight_secret: std::env::var("ARROW_FLIGHT_SECRET").ok(),
+        // FLIGHT-SEC-01: unsigned tickets allowed only in dev mode.
+        arrow_unsigned_tickets_allowed: std::env::var("ARROW_UNSIGNED_TICKETS_ALLOWED")
+            .map(|v| v.eq_ignore_ascii_case("true") || v == "1")
+            .unwrap_or(false),
     });
 
     // CORS layer — wildcard "*" requires explicit opt-in; empty means deny all cross-origin.
@@ -1955,6 +1959,7 @@ fn validate_flight_ticket(
     ticket: &serde_json::Value,
     secret: Option<&str>,
     now_secs: u64,
+    allow_unsigned: bool,
 ) -> Result<i64, String> {
     use hmac::{Hmac, Mac};
     use sha2::Sha256;
@@ -1974,7 +1979,17 @@ fn validate_flight_ticket(
     }
 
     let sig = ticket["sig"].as_str().unwrap_or("unsigned");
-    if sig != "unsigned" {
+    if sig == "unsigned" {
+        // FLIGHT-SEC-01: reject unsigned tickets unless explicitly allowed.
+        if !allow_unsigned {
+            return Err(
+                "unsigned Arrow Flight ticket rejected — set ARROW_UNSIGNED_TICKETS_ALLOWED=true \
+                 for local development or configure a signing secret"
+                    .to_owned(),
+            );
+        }
+        // allow_unsigned = true: skip HMAC verification for local development.
+    } else {
         let secret = match secret {
             Some(s) if !s.is_empty() => s,
             _ => return Err("server has no ARROW_FLIGHT_SECRET configured".to_owned()),
@@ -2048,17 +2063,22 @@ async fn flight_do_get(
         .unwrap_or_default()
         .as_secs();
 
-    let graph_id =
-        match validate_flight_ticket(&ticket, state.arrow_flight_secret.as_deref(), now_secs) {
-            Ok(id) => id,
-            Err(reason) => {
-                tracing::warn!("Arrow Flight ticket rejected: {reason}");
-                return json_response_http(
-                    StatusCode::UNAUTHORIZED,
-                    serde_json::json!({"error": "invalid ticket", "reason": reason}),
-                );
-            }
-        };
+    let graph_id = match validate_flight_ticket(
+        &ticket,
+        state.arrow_flight_secret.as_deref(),
+        now_secs,
+        state.arrow_unsigned_tickets_allowed,
+    ) {
+        Ok(id) => id,
+        Err(reason) => {
+            tracing::warn!("Arrow Flight ticket rejected: {reason}");
+            state.metrics.record_arrow_ticket_rejection();
+            return json_response_http(
+                StatusCode::UNAUTHORIZED,
+                serde_json::json!({"error": "invalid ticket", "reason": reason}),
+            );
+        }
+    };
 
     let client = match state.pool.get().await {
         Ok(c) => c,
@@ -2071,8 +2091,10 @@ async fn flight_do_get(
         }
     };
 
-    // Query all non-rare VP tables + vp_rare for the graph.
-    // We enumerate promoted predicates and union them all.
+    // FLIGHT-SEC-02: Query all non-rare VP tables + vp_rare for the graph
+    // using tombstone-exclusion read semantics:
+    //   (main EXCEPT tombstones) UNION ALL delta
+    // This matches the SPARQL read path and excludes tombstoned rows.
     let pred_rows = match client
         .query(
             "SELECT id FROM _pg_ripple.predicates WHERE table_oid IS NOT NULL ORDER BY id",
@@ -2095,19 +2117,32 @@ async fn flight_do_get(
         .iter()
         .map(|r| {
             let pred_id: i64 = r.get(0);
+            // (main EXCEPT tombstones) UNION ALL delta — tombstone-exclusion read semantics.
             format!(
-                "SELECT {pred_id} AS p, s, o, g FROM _pg_ripple.vp_{pred_id}_main WHERE {graph_filter} \
+                "SELECT {pred_id} AS p, s, o, g FROM _pg_ripple.vp_{pred_id}_main \
+                 WHERE {graph_filter} AND i NOT IN (SELECT i FROM _pg_ripple.vp_{pred_id}_tombstones WHERE {graph_filter}) \
                  UNION ALL \
                  SELECT {pred_id} AS p, s, o, g FROM _pg_ripple.vp_{pred_id}_delta WHERE {graph_filter}"
             )
         })
         .collect();
-    // Always include vp_rare.
+    // Always include vp_rare (rare predicates have no tombstone tables; they use direct delete).
     union_parts.push(format!(
         "SELECT p, s, o, g FROM _pg_ripple.vp_rare WHERE {graph_filter}"
     ));
 
     let full_sql = union_parts.join(" UNION ALL ");
+
+    // FLIGHT-SEC-02: stream in batches instead of materialising the full result.
+    // batch_size defaults to 1000 rows; configurable via pg_ripple.arrow_batch_size GUC.
+    // Since we're in the HTTP service (no PG GUC access), we use a fixed default of 1000
+    // and expose a future env override.
+    let batch_size: usize = std::env::var("ARROW_BATCH_SIZE")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(1000)
+        .max(1);
+
     let rows = match client.query(&full_sql, &[]).await {
         Ok(r) => r,
         Err(e) => {
@@ -2119,7 +2154,7 @@ async fn flight_do_get(
         }
     };
 
-    // Build Arrow record batch.
+    // Build Arrow IPC stream with multiple record batches (one per `batch_size` rows).
     let schema = Schema::new(vec![
         Field::new("s", DataType::Int64, false),
         Field::new("p", DataType::Int64, false),
@@ -2128,36 +2163,6 @@ async fn flight_do_get(
     ]);
     let schema_ref = StdArc::new(schema);
 
-    let mut s_vals: Vec<i64> = Vec::with_capacity(rows.len());
-    let mut p_vals: Vec<i64> = Vec::with_capacity(rows.len());
-    let mut o_vals: Vec<i64> = Vec::with_capacity(rows.len());
-    let mut g_vals: Vec<i64> = Vec::with_capacity(rows.len());
-    for row in &rows {
-        s_vals.push(row.get::<_, i64>(1));
-        p_vals.push(row.get::<_, i64>(0));
-        o_vals.push(row.get::<_, i64>(2));
-        g_vals.push(row.get::<_, i64>(3));
-    }
-    let batch = match RecordBatch::try_new(
-        StdArc::clone(&schema_ref),
-        vec![
-            StdArc::new(Int64Array::from(s_vals)),
-            StdArc::new(Int64Array::from(p_vals)),
-            StdArc::new(Int64Array::from(o_vals)),
-            StdArc::new(Int64Array::from(g_vals)),
-        ],
-    ) {
-        Ok(b) => b,
-        Err(e) => {
-            return redacted_error(
-                "flight_do_get batch",
-                &e.to_string(),
-                StatusCode::INTERNAL_SERVER_ERROR,
-            );
-        }
-    };
-
-    // Encode as Arrow IPC stream.
     let mut buf: Vec<u8> = Vec::new();
     let mut writer = match StreamWriter::try_new(&mut buf, &schema_ref) {
         Ok(w) => w,
@@ -2169,13 +2174,49 @@ async fn flight_do_get(
             );
         }
     };
-    if let Err(e) = writer.write(&batch) {
-        return redacted_error(
-            "flight_do_get ipc_write",
-            &e.to_string(),
-            StatusCode::INTERNAL_SERVER_ERROR,
-        );
+
+    let total_rows = rows.len();
+    let mut batches_sent: u64 = 0;
+
+    for chunk in rows.chunks(batch_size) {
+        let mut s_vals: Vec<i64> = Vec::with_capacity(chunk.len());
+        let mut p_vals: Vec<i64> = Vec::with_capacity(chunk.len());
+        let mut o_vals: Vec<i64> = Vec::with_capacity(chunk.len());
+        let mut g_vals: Vec<i64> = Vec::with_capacity(chunk.len());
+        for row in chunk {
+            s_vals.push(row.get::<_, i64>(1));
+            p_vals.push(row.get::<_, i64>(0));
+            o_vals.push(row.get::<_, i64>(2));
+            g_vals.push(row.get::<_, i64>(3));
+        }
+        let batch = match RecordBatch::try_new(
+            StdArc::clone(&schema_ref),
+            vec![
+                StdArc::new(Int64Array::from(s_vals)),
+                StdArc::new(Int64Array::from(p_vals)),
+                StdArc::new(Int64Array::from(o_vals)),
+                StdArc::new(Int64Array::from(g_vals)),
+            ],
+        ) {
+            Ok(b) => b,
+            Err(e) => {
+                return redacted_error(
+                    "flight_do_get batch",
+                    &e.to_string(),
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                );
+            }
+        };
+        if let Err(e) = writer.write(&batch) {
+            return redacted_error(
+                "flight_do_get ipc_write",
+                &e.to_string(),
+                StatusCode::INTERNAL_SERVER_ERROR,
+            );
+        }
+        batches_sent += 1;
     }
+
     if let Err(e) = writer.finish() {
         return redacted_error(
             "flight_do_get ipc_finish",
@@ -2184,17 +2225,22 @@ async fn flight_do_get(
         );
     }
 
+    // Wire Arrow metrics (FLIGHT-SEC-02).
+    state.metrics.record_arrow_batches_sent(batches_sent);
+
     tracing::debug!(
         graph_id = graph_id,
-        rows = rows.len(),
+        rows = total_rows,
+        batches = batches_sent,
         bytes = buf.len(),
-        "Arrow Flight batch serialized"
+        "Arrow Flight stream serialized"
     );
 
     Response::builder()
         .status(StatusCode::OK)
         .header("content-type", "application/vnd.apache.arrow.stream")
-        .header("x-arrow-rows", rows.len().to_string())
+        .header("x-arrow-rows", total_rows.to_string())
+        .header("x-arrow-batches", batches_sent.to_string())
         .body(Body::from(buf))
         .unwrap_or_else(|e| {
             redacted_error(

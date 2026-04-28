@@ -1,0 +1,22 @@
+-- Migration 0.66.0 → 0.67.0
+--
+-- v0.67.0 Assessment 9 remediation: MJOURNAL, RLS, FLIGHT-SEC, GATE, BENCH,
+-- PANIC fixes, Arrow Flight hardening, and production-quality gate tooling.
+--
+-- Schema changes:
+--   - No new tables or columns are added.
+--   - Arrow Flight security (FLIGHT-SEC-01): two new GUCs are registered at
+--     extension load time by the updated Rust binary:
+--       pg_ripple.arrow_unsigned_tickets_allowed (BOOL, default off)
+--       pg_ripple.arrow_batch_size (INT, 1–100000, default 1000)
+--     These GUCs take effect immediately after `ALTER EXTENSION pg_ripple UPDATE`.
+--     No manual SQL changes are required to activate them.
+--   - Mutation journal (MJOURNAL-01): the transaction-local journal is
+--     implemented entirely in Rust with thread_local! storage; no new SQL
+--     catalog tables are introduced.
+--   - Row Level Security (RLS-01): `enable_graph_rls()` and
+--     `grant_graph_access()` now apply RLS policies to VP delta/main tables at
+--     creation and promotion time. Existing tables are covered when the
+--     functions are next called. No schema migration is required.
+--
+-- All other changes in v0.67.0 are pure Rust function or workflow updates.
