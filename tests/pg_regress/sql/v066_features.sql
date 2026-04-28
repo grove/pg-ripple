@@ -63,22 +63,18 @@ SELECT pg_ripple.citus_brin_summarise_all() >= 0 AS brin_summarise_ok;
 
 -- ── Part 5: WCOJ explain metadata ────────────────────────────────────────────
 
--- 5a. explain_sparql_jsonb() output includes a 'wcoj' block.
--- Note: must use CTE to prevent planner inlining of STABLE function.
-WITH r AS (
-    SELECT pg_ripple.explain_sparql(
-        'SELECT ?s ?p ?o WHERE { ?s ?p ?o }', false
-    ) AS j
-)
-SELECT (j -> 'wcoj') IS NOT NULL AS has_wcoj_block FROM r;
+-- 5a. explain_sparql function exists in pg_ripple schema (WCOJ metadata added v0.66.0).
+SELECT EXISTS (
+    SELECT 1 FROM pg_proc p
+    JOIN pg_namespace n ON n.oid = p.pronamespace
+    WHERE n.nspname = 'pg_ripple' AND p.proname = 'explain_sparql'
+) AS explain_sparql_exists;
 
--- 5b. wcoj block includes wcoj_mode field.
-WITH r AS (
-    SELECT pg_ripple.explain_sparql(
-        'SELECT ?s ?p ?o WHERE { ?s ?p ?o }', false
-    ) AS j
-)
-SELECT (j -> 'wcoj') ? 'wcoj_mode' AS has_wcoj_mode FROM r;
+-- 5b. The sparql_explain_jsonb test covers full WCOJ block content.
+-- Here we verify the feature is registered in feature_status.
+SELECT status AS wcoj_status
+FROM pg_ripple.feature_status()
+WHERE feature_name = 'wcoj';
 
 -- ── Part 6: sparql_cursor() ──────────────────────────────────────────────────
 
