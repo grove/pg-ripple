@@ -51,33 +51,6 @@ without ever leaving the database process.
                           └────────────────────────────────┘
 ```
 
-```
-                          ┌────────────────────────────────┐
-                          │         pg-ripple hub           │
-                          │   (PostgreSQL + pg_ripple ext)  │
-    INBOUND               │                                │               OUTBOUND
-    ───────               │  ┌──────────┐  ┌───────────┐  │               ────────
-                          │  │ Datalog  │  │  SHACL    │  │
-  ┌──────────┐  relay     │  │ inference│  │ validation│  │     relay    ┌──────────┐
-  │  Kafka   │──reverse──▶│  └────┬─────┘  └─────┬─────┘  │──forward──▶│  NATS    │
-  │ (orders) │            │       │              │        │             │ (events) │
-  └──────────┘            │  ┌────▼──────────────▼─────┐  │             └──────────┘
-                          │  │                         │  │
-  ┌──────────┐  relay     │  │   RDF Triple Store      │  │     relay    ┌──────────┐
-  │  NATS    │──reverse──▶│  │   (VP tables, HTAP)     │──│──forward──▶│  Webhook  │
-  │(sensors) │            │  │                         │  │             │ (API)     │
-  └──────────┘            │  └────▲──────────────▲─────┘  │             └──────────┘
-                          │       │              │        │
-  ┌──────────┐  relay     │  ┌────┴─────┐  ┌────┴─────┐  │     relay    ┌──────────┐
-  │ Webhook  │──reverse──▶│  │owl:sameAs│  │ SPARQL   │  │──forward──▶│  Kafka    │
-  │ (CRM)    │            │  │ linking  │  │federation│  │             │(enriched)│
-  └──────────┘            │  └──────────┘  └──────────┘  │             └──────────┘
-                          │                                │
-                          │  pg-trickle stream tables      │
-                          │  (inbox → transform → outbox)  │
-                          └────────────────────────────────┘
-```
-
 The data flow through the hub has five stages:
 
 1. **Ingest** — pg-trickle relay reverse mode delivers raw JSON events into inbox tables.
@@ -183,7 +156,7 @@ BEGIN
                 || (NEW.payload->>'ts')
                 || '"^^<http://www.w3.org/2001/XMLSchema#dateTime> .';
 
-    PERFORM pg_ripple.load_ntriples(ntriples, false);
+    PERFORM pg_ripple.load_ntriples(data => ntriples, strict => false);
     RETURN NEW;
 END;
 $$;
@@ -232,21 +205,24 @@ The rules below fire an alert whenever a measurement exceeds 40°C and link
 devices across sources that share a serial number (entity resolution):
 
 ```sql
-SELECT pg_ripple.load_rules('sensor_enrichment', $$
-    % Derive an alert for any observation above the threshold.
-    % The inferred triple is: <obs> ex:tempAlert <device>
-    ex:tempAlert(Obs, Device) :-
-        saref:measurementMadeBy(Obs, Device),
-        saref:hasValue(Obs, Val),
-        Val > 40.0.
+SELECT pg_ripple.load_rules(
+    rules    => $$
+        % Derive an alert for any observation above the threshold.
+        % The inferred triple is: <obs> ex:tempAlert <device>
+        ex:tempAlert(Obs, Device) :-
+            saref:measurementMadeBy(Obs, Device),
+            saref:hasValue(Obs, Val),
+            Val > 40.0.
 
-    % Link two devices if they share a serial number, even if they
-    % appear under different identifiers in different source systems.
-    owl:sameAs(D1, D2) :-
-        schema:serialNumber(D1, SN),
-        schema:serialNumber(D2, SN),
-        D1 \= D2.
-$$);
+        % Link two devices if they share a serial number, even if they
+        % appear under different identifiers in different source systems.
+        owl:sameAs(D1, D2) :-
+            schema:serialNumber(D1, SN),
+            schema:serialNumber(D2, SN),
+            D1 \= D2.
+    $$,
+    rule_set => 'sensor_enrichment'
+);
 ```
 
 When a 45°C reading arrives from `sensor-7`, these rules materialise a new
@@ -302,10 +278,9 @@ CREATE TABLE enriched_events (
 
 -- Subscribe to exactly the inferred alert triples we care about.
 -- Only triples where the predicate is ex:tempAlert will be bridged.
-SELECT pg_ripple.create_named_subscription(
-    'high-temp-alerts',
-    'FILTER(?p = <https://example.org/tempAlert>)',
-    NULL
+SELECT pg_ripple.create_subscription(
+    name          => 'high-temp-alerts',
+    filter_sparql => 'FILTER(?p = <https://example.org/tempAlert>)'
 );
 
 -- Tell pg-trickle to treat this table as an outbox.
@@ -439,10 +414,9 @@ forward:
 
 ```sql
 -- Only bridge the final alert triples, not intermediate inference steps
-SELECT pg_ripple.create_named_subscription(
-    'alerts',
-    'FILTER(?p = <https://example.org/alert>)',
-    NULL
+SELECT pg_ripple.create_subscription(
+    name          => 'alerts',
+    filter_sparql => 'FILTER(?p = <https://example.org/alert>)'
 );
 ```
 
