@@ -1,0 +1,99 @@
+-- sparql_depth_limit.sql
+-- Test SPARQL query complexity limits (PT440) introduced in v0.51.0.
+SET client_min_messages = warning;
+CREATE EXTENSION IF NOT EXISTS pg_ripple;
+SET client_min_messages = DEFAULT;
+SET search_path TO pg_ripple, public;
+-- ── Test 1: GUCs are registered and accessible ──────────────────────────────
+-- Verify via SET/GET round-trip (pg_settings visibility is session-dependent).
+SET pg_ripple.sparql_max_algebra_depth = 256;
+SET pg_ripple.sparql_max_triple_patterns = 4096;
+SELECT (current_setting('pg_ripple.sparql_max_algebra_depth') = '256') AND
+       (current_setting('pg_ripple.sparql_max_triple_patterns') = '4096') AS both_gucs_present;
+ both_gucs_present 
+-------------------
+ t
+(1 row)
+
+RESET pg_ripple.sparql_max_algebra_depth;
+RESET pg_ripple.sparql_max_triple_patterns;
+-- ── Test 2: A simple query succeeds with default limits ───────────────────────
+SELECT pg_ripple.insert_triple(
+    '<http://t.example.org/a>',
+    '<http://t.example.org/p>',
+    '<http://t.example.org/b>'
+) > 0 AS triple_inserted;
+ triple_inserted 
+-----------------
+ t
+(1 row)
+
+SELECT count(*) >= 1 AS result_found
+FROM pg_ripple.sparql(
+    'SELECT ?s ?o WHERE { ?s <http://t.example.org/p> ?o }'
+);
+ result_found 
+--------------
+ t
+(1 row)
+
+-- ── Test 3: Disabling limits (0 = unlimited) works ────────────────────────────
+SET pg_ripple.sparql_max_algebra_depth = 0;
+SET pg_ripple.sparql_max_triple_patterns = 0;
+SELECT count(*) >= 1 AS result_found_unlimited
+FROM pg_ripple.sparql(
+    'SELECT ?s ?o WHERE { ?s <http://t.example.org/p> ?o }'
+);
+ result_found_unlimited 
+------------------------
+ t
+(1 row)
+
+RESET pg_ripple.sparql_max_algebra_depth;
+RESET pg_ripple.sparql_max_triple_patterns;
+-- ── Test 4: GUC round-trip via SET ───────────────────────────────────────────
+SET pg_ripple.sparql_max_algebra_depth = 128;
+SELECT current_setting('pg_ripple.sparql_max_algebra_depth') AS custom_depth;
+ custom_depth 
+--------------
+ 128
+(1 row)
+
+RESET pg_ripple.sparql_max_algebra_depth;
+-- ── Test 5: lowering algebra depth limit causes PT440 ────────────────────────
+SET pg_ripple.sparql_max_algebra_depth = 1;
+-- A SELECT with a FILTER (depth > 1) should now be rejected.
+DO $$
+BEGIN
+    PERFORM result FROM pg_ripple.sparql(
+        'SELECT ?s WHERE { ?s <http://example.org/p> ?o . FILTER(?o != <http://example.org/x>) }'
+    );
+    RAISE EXCEPTION 'expected PT440 error but query succeeded';
+EXCEPTION
+    WHEN OTHERS THEN
+        IF SQLERRM LIKE '%PT440%' THEN
+            RAISE NOTICE 'OK: PT440 depth error raised as expected';
+        ELSE
+            RAISE; -- unexpected error
+        END IF;
+END;
+$$;
+RESET pg_ripple.sparql_max_algebra_depth;
+-- ── Test 6: lowering triple-pattern limit causes PT440 ───────────────────────
+SET pg_ripple.sparql_max_triple_patterns = 1;
+DO $$
+BEGIN
+    PERFORM result FROM pg_ripple.sparql(
+        'SELECT ?s ?o WHERE { ?s <http://example.org/p> ?o . ?o <http://example.org/p> ?s }'
+    );
+    RAISE EXCEPTION 'expected PT440 error but query succeeded';
+EXCEPTION
+    WHEN OTHERS THEN
+        IF SQLERRM LIKE '%PT440%' THEN
+            RAISE NOTICE 'OK: PT440 pattern-limit error raised as expected';
+        ELSE
+            RAISE;
+        END IF;
+END;
+$$;
+RESET pg_ripple.sparql_max_triple_patterns;

@@ -1,0 +1,104 @@
+-- Test: Dictionary Cache Rollback (v0.22.0 critical fix C-2)
+-- Ensures that rolled-back dictionary entries do not persist in the
+-- backend-local cache, preventing phantom references in subsequent
+-- transactions (https://github.com/pg-ripple/pg_ripple/issues/C-2).
+-- Clean start
+DROP TABLE IF EXISTS test_dict_rollback CASCADE;
+CREATE TABLE test_dict_rollback (id BIGINT PRIMARY KEY, term TEXT);
+-- Test 1: Insert a new term, roll back, and verify cache is cleared
+BEGIN;
+  -- Insert a new term via encode_term
+  INSERT INTO test_dict_rollback VALUES (
+    pg_ripple.encode_term('http://example.org/test1', 0::int2),
+    'http://example.org/test1'
+  );
+ROLLBACK;
+-- The term should still be in the dictionary (INSERT succeeded at storage level
+-- during the transaction), but the cache should be cleared. On the next encode
+-- of the same term in a new transaction, it should get the same id.
+BEGIN;
+  -- Encode the same term again - should get the same id because it's in the
+  -- dictionary table, even though the cache was cleared by the rollback.
+  INSERT INTO test_dict_rollback VALUES (
+    pg_ripple.encode_term('http://example.org/test1', 0::int2),
+    'http://example.org/test1'
+  );
+COMMIT;
+-- Verify we got the same id both times
+SELECT COUNT(*) = 1 as same_id_both_times FROM test_dict_rollback;
+ same_id_both_times 
+--------------------
+ t
+(1 row)
+
+-- Test 2: Multiple inserts and partial rollback
+TRUNCATE TABLE test_dict_rollback;
+BEGIN;
+  INSERT INTO test_dict_rollback VALUES (
+    pg_ripple.encode_term('http://example.org/test2a', 0::int2),
+    'http://example.org/test2a'
+  );
+  INSERT INTO test_dict_rollback VALUES (
+    pg_ripple.encode_term('http://example.org/test2b', 0::int2),
+    'http://example.org/test2b'
+  );
+ROLLBACK;
+-- Now re-insert in a new transaction
+BEGIN;
+  INSERT INTO test_dict_rollback VALUES (
+    pg_ripple.encode_term('http://example.org/test2a', 0::int2),
+    'http://example.org/test2a'
+  );
+  INSERT INTO test_dict_rollback VALUES (
+    pg_ripple.encode_term('http://example.org/test2b', 0::int2),
+    'http://example.org/test2b'
+  );
+COMMIT;
+-- Verify both inserts succeeded
+SELECT COUNT(*) = 2 as both_terms_reinserted FROM test_dict_rollback;
+ both_terms_reinserted 
+-----------------------
+ t
+(1 row)
+
+-- Test 3: Different kinds of terms should have independent caches
+TRUNCATE TABLE test_dict_rollback;
+BEGIN;
+  -- Insert IRI, blank node, literal
+  INSERT INTO test_dict_rollback VALUES (
+    pg_ripple.encode_term('http://example.org/test3', 0::int2),
+    'iri'
+  );
+  INSERT INTO test_dict_rollback VALUES (
+    pg_ripple.encode_term('_:b1', 1::int2),
+    'blank'
+  );
+  INSERT INTO test_dict_rollback VALUES (
+    pg_ripple.encode_term('test string', 2::int2),
+    'literal'
+  );
+ROLLBACK;
+-- Re-insert in new transaction
+BEGIN;
+  INSERT INTO test_dict_rollback VALUES (
+    pg_ripple.encode_term('http://example.org/test3', 0::int2),
+    'iri'
+  );
+  INSERT INTO test_dict_rollback VALUES (
+    pg_ripple.encode_term('_:b1', 1::int2),
+    'blank'
+  );
+  INSERT INTO test_dict_rollback VALUES (
+    pg_ripple.encode_term('test string', 2::int2),
+    'literal'
+  );
+COMMIT;
+-- Verify all three terms were reinserted
+SELECT COUNT(*) = 3 as all_kinds_reinserted FROM test_dict_rollback;
+ all_kinds_reinserted 
+----------------------
+ t
+(1 row)
+
+-- Clean up
+DROP TABLE test_dict_rollback;

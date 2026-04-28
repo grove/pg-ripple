@@ -1,0 +1,131 @@
+-- pg_regress test: SPARQL DELETE/INSERT WHERE (v0.12.0)
+-- Namespace: https://update-where.test/
+DO $$
+BEGIN
+    DELETE FROM _pg_ripple.vp_rare
+    WHERE p IN (
+        SELECT id FROM _pg_ripple.dictionary
+        WHERE value LIKE 'https://update-where.test/%'
+    );
+END $$;
+-- Set up initial data.
+SELECT pg_ripple.sparql_update(
+    'INSERT DATA {
+       <https://update-where.test/alice> <https://update-where.test/status> <https://update-where.test/active> .
+       <https://update-where.test/bob>   <https://update-where.test/status> <https://update-where.test/active> .
+       <https://update-where.test/carol> <https://update-where.test/status> <https://update-where.test/inactive>
+     }'
+) = 3 AS setup_ok;
+ setup_ok 
+----------
+ t
+(1 row)
+
+-- Confirm initial state.
+SELECT count(*) = 2 AS two_active
+FROM pg_ripple.find_triples(NULL, '<https://update-where.test/status>', '<https://update-where.test/active>');
+ two_active 
+------------
+ t
+(1 row)
+
+-- DELETE WHERE: remove all active triples.
+SELECT pg_ripple.sparql_update(
+    'DELETE { ?s <https://update-where.test/status> <https://update-where.test/active> }
+     WHERE  { ?s <https://update-where.test/status> <https://update-where.test/active> }'
+) = 2 AS two_deleted;
+ two_deleted 
+-------------
+ t
+(1 row)
+
+-- Active triples are gone.
+SELECT count(*) = 0 AS no_active_left
+FROM pg_ripple.find_triples(NULL, '<https://update-where.test/status>', '<https://update-where.test/active>');
+ no_active_left 
+----------------
+ t
+(1 row)
+
+-- Inactive triple still present.
+SELECT count(*) = 1 AS carol_still_inactive
+FROM pg_ripple.find_triples('<https://update-where.test/carol>', '<https://update-where.test/status>', '<https://update-where.test/inactive>');
+ carol_still_inactive 
+----------------------
+ t
+(1 row)
+
+-- Reset for INSERT WHERE test.
+DO $$
+BEGIN
+    DELETE FROM _pg_ripple.vp_rare
+    WHERE p IN (
+        SELECT id FROM _pg_ripple.dictionary
+        WHERE value LIKE 'https://update-where.test/%'
+    );
+END $$;
+SELECT pg_ripple.sparql_update(
+    'INSERT DATA {
+       <https://update-where.test/p1> <https://update-where.test/label> <https://update-where.test/draft> .
+       <https://update-where.test/p2> <https://update-where.test/label> <https://update-where.test/draft>
+     }'
+) = 2 AS two_drafts;
+ two_drafts 
+------------
+ t
+(1 row)
+
+-- INSERT WHERE: for every draft, add a published status.
+SELECT pg_ripple.sparql_update(
+    'INSERT { ?s <https://update-where.test/status> <https://update-where.test/published> }
+     WHERE  { ?s <https://update-where.test/label> <https://update-where.test/draft> }'
+) = 2 AS two_published_added;
+ two_published_added 
+---------------------
+ t
+(1 row)
+
+SELECT count(*) = 2 AS both_published
+FROM pg_ripple.find_triples(NULL, '<https://update-where.test/status>', '<https://update-where.test/published>');
+ both_published 
+----------------
+ t
+(1 row)
+
+-- DELETE/INSERT WHERE: rename all draft → archived.
+SELECT pg_ripple.sparql_update(
+    'DELETE { ?s <https://update-where.test/label> <https://update-where.test/draft> }
+     INSERT { ?s <https://update-where.test/label> <https://update-where.test/archived> }
+     WHERE  { ?s <https://update-where.test/label> <https://update-where.test/draft> }'
+) = 4 AS four_affected;
+ four_affected 
+---------------
+ t
+(1 row)
+
+-- No drafts remain.
+SELECT count(*) = 0 AS no_drafts
+FROM pg_ripple.find_triples(NULL, '<https://update-where.test/label>', '<https://update-where.test/draft>');
+ no_drafts 
+-----------
+ t
+(1 row)
+
+-- Two archived entries now.
+SELECT count(*) = 2 AS two_archived
+FROM pg_ripple.find_triples(NULL, '<https://update-where.test/label>', '<https://update-where.test/archived>');
+ two_archived 
+--------------
+ t
+(1 row)
+
+-- WHERE clause returning no rows: zero affected.
+SELECT pg_ripple.sparql_update(
+    'DELETE { ?s <https://update-where.test/label> <https://update-where.test/draft> }
+     WHERE  { ?s <https://update-where.test/label> <https://update-where.test/draft> }'
+) = 0 AS zero_when_no_match;
+ zero_when_no_match 
+--------------------
+ t
+(1 row)
+

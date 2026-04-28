@@ -1,0 +1,47 @@
+-- pg_regress test: Multi-tenant graph isolation
+-- v0.57.0 Feature L-5.3
+SET search_path TO pg_ripple, public;
+-- Test: tenant_stats returns a table (empty initially).
+SELECT count(*) >= 0 AS tenant_stats_ok
+FROM pg_ripple.tenant_stats();
+ tenant_stats_ok 
+-----------------
+ t
+(1 row)
+
+-- Test: columnar_threshold GUC.
+SHOW pg_ripple.columnar_threshold;
+ pg_ripple.columnar_threshold 
+------------------------------
+ -1
+(1 row)
+
+-- Test: adaptive_indexing_enabled GUC.
+SHOW pg_ripple.adaptive_indexing_enabled;
+ pg_ripple.adaptive_indexing_enabled 
+-------------------------------------
+ off
+(1 row)
+
+-- Test: probabilistic_datalog GUC.
+SHOW pg_ripple.probabilistic_datalog;
+ pg_ripple.probabilistic_datalog 
+---------------------------------
+ off
+(1 row)
+
+-- Test: kge_enabled GUC defaults to off.
+SELECT current_setting('pg_ripple.kge_enabled') = 'off' AS kge_off_by_default;
+ kge_off_by_default 
+--------------------
+ t
+(1 row)
+
+-- Test: suggest_mappings can be called (returns empty when no ontologies loaded).
+SELECT count(*) >= 0 AS suggest_mappings_ok
+FROM pg_ripple.suggest_mappings('', '', 'lexical');
+ suggest_mappings_ok 
+---------------------
+ t
+(1 row)
+

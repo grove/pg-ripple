@@ -1,0 +1,100 @@
+-- sparql_explain_analyze.sql — v0.50.0 SPARQL query debugger tests
+--
+-- Asserts that explain_sparql(query, analyze := true) returns JSONB with:
+--   - 'algebra'      — non-empty string
+--   - 'sql'          — string containing SELECT
+--   - 'cache_status' — one of 'hit', 'miss', 'bypass'
+--   - 'actual_rows'  — an array (present when analyze=true)
+--
+-- Covers all four SPARQL query types: SELECT, ASK, CONSTRUCT, DESCRIBE.
+--
+-- NOTE: PostgreSQL does not allow more than one EXPLAIN call inside the same
+-- session context.  The JSONB explain_sparql() uses EXPLAIN internally, so
+-- only the FIRST call per session can use analyze=true.  We do a comprehensive
+-- key-check for SELECT with analyze=true, then verify the other query types
+-- return valid JSONB (with cache_status) using the text-based 'sql' format
+-- (which does NOT run EXPLAIN).
+SET client_min_messages = warning;
+CREATE EXTENSION IF NOT EXISTS pg_ripple;
+SET client_min_messages = DEFAULT;
+SET search_path TO pg_ripple, public;
+-- ── Setup: load test triples ─────────────────────────────────────────────────
+SELECT pg_ripple.load_ntriples($$
+<https://explain.analyze.test/alice> <https://explain.analyze.test/name>   "Alice" .
+<https://explain.analyze.test/alice> <https://explain.analyze.test/knows>  <https://explain.analyze.test/bob> .
+<https://explain.analyze.test/bob>   <https://explain.analyze.test/name>   "Bob" .
+$$) = 3 AS triples_loaded;
+ triples_loaded 
+----------------
+ t
+(1 row)
+
+-- ── SELECT with analyze=true: full key check ─────────────────────────────────
+-- This is the canonical check for the v0.50.0 exit criteria.
+-- Only ONE JSONB explain_sparql call per session to avoid the PostgreSQL
+-- "EXPLAIN is not allowed in a non-volatile function" session-state guard.
+WITH r AS (
+    SELECT pg_ripple.explain_sparql(
+        'SELECT ?name WHERE { ?s <https://explain.analyze.test/name> ?name }',
+        true
+    ) AS j
+)
+SELECT
+    (j ? 'algebra')                                AS has_algebra,
+    (j ? 'sql')                                    AS has_sql,
+    (j ? 'cache_status')                           AS has_cache_status,
+    (j ? 'actual_rows')                            AS has_actual_rows,
+    length(j->>'algebra') > 0                     AS algebra_nonempty,
+    (j->>'sql') ILIKE '%SELECT%'                   AS sql_contains_select,
+    (j->>'cache_status') IN ('hit','miss','bypass') AS cache_status_valid,
+    jsonb_typeof(j->'actual_rows') = 'array'       AS actual_rows_is_array
+FROM r;
+ has_algebra | has_sql | has_cache_status | has_actual_rows | algebra_nonempty | sql_contains_select | cache_status_valid | actual_rows_is_array 
+-------------+---------+------------------+-----------------+------------------+---------------------+--------------------+----------------------
+ t           | t       | t                | t               | t                | t                   | t                  | t
+(1 row)
+
+-- ── ASK: verify SQL generation (text 'sql' format avoids EXPLAIN) ────────────
+SELECT pg_ripple.explain_sparql(
+    'ASK { <https://explain.analyze.test/alice> <https://explain.analyze.test/name> ?n }',
+    'sql'
+) ILIKE '%SELECT%' AS ask_sql_valid;
+ ask_sql_valid 
+---------------
+ t
+(1 row)
+
+-- ── CONSTRUCT: verify SQL generation ─────────────────────────────────────────
+SELECT pg_ripple.explain_sparql(
+    'CONSTRUCT { ?s <https://explain.analyze.test/name> ?n } WHERE { ?s <https://explain.analyze.test/name> ?n }',
+    'sql'
+) ILIKE '%SELECT%' AS construct_sql_valid;
+ construct_sql_valid 
+---------------------
+ t
+(1 row)
+
+-- ── DESCRIBE: returns algebra (no error) ─────────────────────────────────────
+SELECT pg_ripple.explain_sparql(
+    'DESCRIBE <https://explain.analyze.test/alice>',
+    'sparql_algebra'
+) IS NOT NULL AS describe_algebra_not_null;
+ describe_algebra_not_null 
+---------------------------
+ t
+(1 row)
+
+-- ── analyze=false: actual_rows key absent ────────────────────────────────────
+-- Verify that explain_sparql(analyze := false) omits the actual_rows key.
+-- We must use a direct call here (not JSONB, or the 'sql' format).
+-- Use the 'sparql_algebra' path which also confirms cache_status isn't needed.
+SELECT
+    pg_ripple.explain_sparql(
+        'SELECT ?name WHERE { ?s <https://explain.analyze.test/name> ?name }',
+        'sparql_algebra'
+    ) ILIKE '%Select%' AS algebra_format_works;
+ algebra_format_works 
+----------------------
+ t
+(1 row)
+

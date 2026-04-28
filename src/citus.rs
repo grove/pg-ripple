@@ -1100,10 +1100,9 @@ pub fn approx_distinct_available_impl() -> bool {
 /// table is not distributed).
 pub fn brin_summarize_vp_shards_impl(pred_id: i64) -> i64 {
     if !is_citus_loaded() {
-        // Non-Citus path: run brin_summarize_new_values locally.
-        let main_table = format!("_pg_ripple.vp_{pred_id}_main");
-        let sql = format!("SELECT brin_summarize_new_values('{main_table}')");
-        return Spi::get_one::<i32>(&sql).unwrap_or(Some(0)).unwrap_or(0) as i64;
+        // Non-Citus path: find all BRIN indexes on the VP main table and summarize.
+        // Uses the pg_catalog to avoid erroring when the main table does not exist.
+        return local_brin_summarize(pred_id);
     }
 
     let main_table = format!("_pg_ripple.vp_{pred_id}_main");
@@ -1121,8 +1120,7 @@ pub fn brin_summarize_vp_shards_impl(pred_id: i64) -> i64 {
 
     if !is_distributed {
         // Table exists but is not distributed; run locally.
-        let sql = format!("SELECT brin_summarize_new_values('{main_table}')");
-        return Spi::get_one::<i32>(&sql).unwrap_or(Some(0)).unwrap_or(0) as i64;
+        return local_brin_summarize(pred_id);
     }
 
     // run_command_on_shards returns a table with a `success` column.
@@ -1139,6 +1137,27 @@ pub fn brin_summarize_vp_shards_impl(pred_id: i64) -> i64 {
         crate::stats::increment_citus_brin_summarise_completed(shards);
     }
     shards
+}
+
+/// Summarize all BRIN indexes on `_pg_ripple.vp_{pred_id}_main` locally.
+///
+/// Returns 0 when the main table does not exist or has no BRIN indexes.
+/// Uses the `pg_catalog` to enumerate indexes safely, so this never errors.
+fn local_brin_summarize(pred_id: i64) -> i64 {
+    // Enumerate BRIN indexes on the VP main table and call
+    // brin_summarize_new_values(index_oid) on each.
+    let sql = format!(
+        "SELECT COALESCE(SUM(brin_summarize_new_values(i.indexrelid)::bigint), 0) \
+         FROM pg_index i \
+         JOIN pg_class t  ON t.oid  = i.indrelid \
+         JOIN pg_namespace n ON n.oid = t.relnamespace \
+         JOIN pg_class ix ON ix.oid  = i.indexrelid \
+         JOIN pg_am    a  ON a.oid   = ix.relam \
+         WHERE n.nspname = '_pg_ripple' \
+           AND t.relname  = 'vp_{pred_id}_main' \
+           AND a.amname   = 'brin'"
+    );
+    Spi::get_one::<i64>(&sql).unwrap_or(Some(0)).unwrap_or(0)
 }
 
 // ─── v0.66.0: CITUS-04 SQL API — per-predicate BRIN summarise ────────────────

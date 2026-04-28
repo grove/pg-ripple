@@ -1,0 +1,79 @@
+-- shacl_sparql_constraint.sql — SHACL-SPARQL sh:SPARQLConstraintComponent tests (v0.53.0)
+--
+-- Covers:
+--   1. copy_rdf_from() dispatch (function exists, format dispatch)
+--   2. SHACL SparqlConstraint variant — load_shacl() accepts sh:sparql predicates
+--   3. validate() against a known graph returns expected constraint type
+--
+-- NOTE: The SPARQL constraint execution path requires pgvector embeddings to be
+-- absent — this test verifies the constraint plumbing only, not full execution.
+SET search_path TO pg_ripple, public;
+-- ── 1. copy_rdf_from() is callable ───────────────────────────────────────────
+-- The function must exist with the expected signature.
+SELECT proname AS fn_name
+FROM pg_proc p
+JOIN pg_namespace n ON n.oid = p.pronamespace
+WHERE n.nspname = 'pg_ripple'
+  AND p.proname = 'copy_rdf_from';
+    fn_name    
+---------------
+ copy_rdf_from
+(1 row)
+
+-- ── 2. load_shacl() accepts sh:sparql predicate without crashing ─────────────
+-- Loads a shape that contains a (simplified) sh:sparql IRI reference.
+-- The parser should store it as a SparqlConstraint variant.
+SELECT pg_ripple.load_shacl($SHACL$
+@prefix sh:  <http://www.w3.org/ns/shacl#> .
+@prefix ex:  <http://shacl-sparql.test/> .
+
+ex:SparqlTestShape
+    a sh:NodeShape ;
+    sh:targetClass ex:TestNode ;
+    sh:sparql "SELECT ?this WHERE { ?this ex:badProp ?v }" .
+$SHACL$) AS load_ok;
+ load_ok 
+---------
+       1
+(1 row)
+
+-- ── 3. shape loaded — can list it ────────────────────────────────────────────
+SELECT count(*) >= 1 AS shape_present
+FROM pg_ripple.list_shapes()
+WHERE shape_iri LIKE '%SparqlTestShape%';
+ shape_present 
+---------------
+ t
+(1 row)
+
+-- ── 4. insert a test triple and run validate() ────────────────────────────────
+-- Insert a node of type ex:TestNode — validate() must run without error even
+-- if the SPARQL constraint cannot be executed (pgvector disabled / PT481 path).
+SELECT pg_ripple.insert_triple(
+    '<http://shacl-sparql.test/node1>',
+    '<http://www.w3.org/1999/02/22-rdf-syntax-ns#type>',
+    '<http://shacl-sparql.test/TestNode>'
+) > 0 AS inserted;
+ inserted 
+----------
+ t
+(1 row)
+
+-- validate() must return a result without ERROR (may have 0 or more violations).
+SELECT count(*) >= 0 AS validate_ok
+FROM pg_ripple.validate();
+ validate_ok 
+-------------
+ t
+(1 row)
+
+-- ── 5. schema_version contains 0.65.0 ────────────────────────────────────────
+SELECT version = '0.65.0' AS version_correct
+FROM _pg_ripple.schema_version
+ORDER BY installed_at DESC
+LIMIT 1;
+ version_correct 
+-----------------
+ t
+(1 row)
+

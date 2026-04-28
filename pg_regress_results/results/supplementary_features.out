@@ -1,0 +1,115 @@
+-- pg_regress test: supplementary features (v0.25.0)
+-- Tests: apply_patch(), register_aggregate(), load_owl_ontology()
+SET client_min_messages = warning;
+CREATE EXTENSION IF NOT EXISTS pg_ripple;
+SET client_min_messages = DEFAULT;
+SET search_path TO pg_ripple, public;
+-- ── apply_patch(): add and delete triples via RDF Patch ────────────────────────
+-- Apply an Add patch.
+SELECT pg_ripple.apply_patch(
+    'H id <urn:patch:test>' || chr(10) ||
+    'TX' || chr(10) ||
+    'A <https://patch.example/s1> <https://patch.example/p1> <https://patch.example/o1> .' || chr(10) ||
+    'A <https://patch.example/s2> <https://patch.example/p1> <https://patch.example/o2> .' || chr(10) ||
+    'TC'
+) >= 0 AS patch_add_ok;
+ patch_add_ok 
+--------------
+ t
+(1 row)
+
+-- Verify the added triples exist.
+SELECT count(*) >= 1 AS patch_s1_found
+FROM pg_ripple.find_triples('<https://patch.example/s1>', NULL, NULL);
+ patch_s1_found 
+----------------
+ t
+(1 row)
+
+SELECT count(*) >= 1 AS patch_s2_found
+FROM pg_ripple.find_triples('<https://patch.example/s2>', NULL, NULL);
+ patch_s2_found 
+----------------
+ t
+(1 row)
+
+-- Apply a Delete patch to remove s2.
+SELECT pg_ripple.apply_patch(
+    'TX' || chr(10) ||
+    'D <https://patch.example/s2> <https://patch.example/p1> <https://patch.example/o2> .' || chr(10) ||
+    'TC'
+) >= -1 AS patch_delete_ok;
+ patch_delete_ok 
+-----------------
+ t
+(1 row)
+
+-- ── register_aggregate(): register a custom SPARQL aggregate ─────────────────
+-- Register a custom aggregate.
+SELECT pg_ripple.register_aggregate(
+    'https://agg.example/string_agg',
+    'string_agg'
+);
+ register_aggregate 
+--------------------
+ 
+(1 row)
+
+-- Verify it was recorded.
+SELECT count(*) = 1 AS aggregate_registered
+FROM _pg_ripple.custom_aggregates
+WHERE sparql_iri = 'https://agg.example/string_agg'
+  AND pg_function = 'string_agg';
+ aggregate_registered 
+----------------------
+ t
+(1 row)
+
+-- Re-register with different pg_function (upsert semantics).
+SELECT pg_ripple.register_aggregate(
+    'https://agg.example/string_agg',
+    'array_agg'
+);
+ register_aggregate 
+--------------------
+ 
+(1 row)
+
+SELECT pg_function = 'array_agg' AS aggregate_updated
+FROM _pg_ripple.custom_aggregates
+WHERE sparql_iri = 'https://agg.example/string_agg';
+ aggregate_updated 
+-------------------
+ t
+(1 row)
+
+-- ── load_owl_ontology(): format detection by extension ────────────────────────
+-- We can't test actual file loading without server-side files, but we can
+-- verify the function exists and has the right signature.
+SELECT count(*) = 1 AS load_owl_function_exists
+FROM pg_proc p
+JOIN pg_namespace n ON n.oid = p.pronamespace
+WHERE n.nspname = 'pg_ripple'
+  AND p.proname = 'load_owl_ontology';
+ load_owl_function_exists 
+--------------------------
+ t
+(1 row)
+
+-- ── apply_patch(): comment and blank line handling ────────────────────────────
+SELECT pg_ripple.apply_patch(
+    '# This is a comment' || chr(10) ||
+    '' || chr(10) ||
+    '# Another comment'
+) = 0 AS empty_patch_returns_zero;
+ empty_patch_returns_zero 
+--------------------------
+ t
+(1 row)
+
+SELECT TRUE AS supplementary_tests_complete;
+ supplementary_tests_complete 
+------------------------------
+ t
+(1 row)
+

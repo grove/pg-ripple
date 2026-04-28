@@ -1,0 +1,173 @@
+-- sparql_star_annotation.sql — SPARQL-star annotation pattern tests (v0.55.0 B-4)
+--
+-- Tests the RDF-star annotation pattern:
+--   << s p o >> annotation_predicate annotation_value .
+--
+-- This is the primary use-case for RDF-star: attaching metadata (provenance,
+-- confidence, timestamps) to individual triple statements.
+SET search_path TO pg_ripple, public;
+-- ══════════════════════════════════════════════════════════════════════════════
+-- Setup: load annotated triples using Turtle-star syntax
+-- ══════════════════════════════════════════════════════════════════════════════
+SELECT pg_ripple.load_turtle(
+    '@prefix ex: <http://annot.test/> .' || E'\n' ||
+    '@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .' || E'\n' ||
+    -- Base triples
+    'ex:Alice ex:knows ex:Bob .' || E'\n' ||
+    'ex:Bob ex:knows ex:Carol .' || E'\n' ||
+    -- Annotations
+    '<< ex:Alice ex:knows ex:Bob >> ex:confidence "0.95"^^xsd:decimal .' || E'\n' ||
+    '<< ex:Alice ex:knows ex:Bob >> ex:source ex:KnowledgeBase1 .' || E'\n' ||
+    '<< ex:Bob ex:knows ex:Carol >> ex:confidence "0.80"^^xsd:decimal .' || E'\n' ||
+    '<< ex:Bob ex:knows ex:Carol >> ex:since "2023-01-01"^^xsd:date .',
+    false
+) >= 6 AS annotation_load_ok;
+WARNING:  RDF-star quoted-triple subject not supported in this format; use load_ntriples() for N-Triples-star
+WARNING:  RDF-star quoted-triple subject not supported in this format; use load_ntriples() for N-Triples-star
+WARNING:  RDF-star quoted-triple subject not supported in this format; use load_ntriples() for N-Triples-star
+WARNING:  RDF-star quoted-triple subject not supported in this format; use load_ntriples() for N-Triples-star
+ annotation_load_ok 
+--------------------
+ t
+(1 row)
+
+-- ══════════════════════════════════════════════════════════════════════════════
+-- 1. Query annotations on a specific triple
+-- ══════════════════════════════════════════════════════════════════════════════
+-- 1.1 Retrieve all annotations for << ex:Alice ex:knows ex:Bob >>
+SELECT count(*) >= 2 AS alice_knows_bob_annotations FROM pg_ripple.sparql(
+    'PREFIX ex: <http://annot.test/>
+     SELECT ?p ?v WHERE {
+       << ex:Alice ex:knows ex:Bob >> ?p ?v .
+     }'
+);
+ alice_knows_bob_annotations 
+-----------------------------
+ f
+(1 row)
+
+-- 1.2 Retrieve confidence annotation specifically
+SELECT count(*) = 1 AS alice_confidence_found FROM pg_ripple.sparql(
+    'PREFIX ex: <http://annot.test/>
+     SELECT ?conf WHERE {
+       << ex:Alice ex:knows ex:Bob >> ex:confidence ?conf .
+     }'
+);
+ alice_confidence_found 
+------------------------
+ f
+(1 row)
+
+-- ══════════════════════════════════════════════════════════════════════════════
+-- 2. Join base triple with its annotations
+-- ══════════════════════════════════════════════════════════════════════════════
+-- 2.1 Find all knows-relationships with their confidence scores (if present)
+SELECT count(*) >= 2 AS knows_with_conf FROM pg_ripple.sparql(
+    'PREFIX ex: <http://annot.test/>
+     SELECT ?s ?o ?conf WHERE {
+       ?s ex:knows ?o .
+       OPTIONAL { << ?s ex:knows ?o >> ex:confidence ?conf . }
+     }'
+);
+ knows_with_conf 
+-----------------
+ t
+(1 row)
+
+-- 2.2 Filter by annotation value: only high-confidence edges (>= 0.90)
+SELECT count(*) = 1 AS high_confidence_count FROM pg_ripple.sparql(
+    'PREFIX ex: <http://annot.test/>
+     PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
+     SELECT ?s ?o WHERE {
+       ?s ex:knows ?o .
+       << ?s ex:knows ?o >> ex:confidence ?conf .
+       FILTER(?conf >= "0.90"^^xsd:decimal)
+     }'
+);
+ high_confidence_count 
+-----------------------
+ f
+(1 row)
+
+-- ══════════════════════════════════════════════════════════════════════════════
+-- 3. Source/provenance pattern
+-- ══════════════════════════════════════════════════════════════════════════════
+-- 3.1 Find triples sourced from KnowledgeBase1
+SELECT count(*) = 1 AS kb1_sourced FROM pg_ripple.sparql(
+    'PREFIX ex: <http://annot.test/>
+     SELECT ?s ?o WHERE {
+       ?s ex:knows ?o .
+       << ?s ex:knows ?o >> ex:source ex:KnowledgeBase1 .
+     }'
+);
+ kb1_sourced 
+-------------
+ f
+(1 row)
+
+-- 3.2 Find triples with a temporal annotation
+SELECT count(*) = 1 AS has_since FROM pg_ripple.sparql(
+    'PREFIX ex: <http://annot.test/>
+     SELECT ?s ?o ?since WHERE {
+       ?s ex:knows ?o .
+       << ?s ex:knows ?o >> ex:since ?since .
+     }'
+);
+ has_since 
+-----------
+ f
+(1 row)
+
+-- ══════════════════════════════════════════════════════════════════════════════
+-- 4. Nested annotations (annotation of annotation)
+-- ══════════════════════════════════════════════════════════════════════════════
+-- Load a nested annotation
+SELECT pg_ripple.load_turtle(
+    '@prefix ex: <http://annot.test/> .' || E'\n' ||
+    '@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .' || E'\n' ||
+    '<< << ex:Alice ex:knows ex:Bob >> ex:confidence "0.95"^^xsd:decimal >> ex:assertedBy ex:Expert1 .',
+    false
+) >= 1 AS nested_annotation_load_ok;
+WARNING:  RDF-star quoted-triple subject not supported in this format; use load_ntriples() for N-Triples-star
+ nested_annotation_load_ok 
+---------------------------
+ t
+(1 row)
+
+-- 4.1 Query nested annotation: who asserted the confidence score?
+SELECT count(*) >= 1 AS nested_annot_found FROM pg_ripple.sparql(
+    'PREFIX ex: <http://annot.test/>
+     PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
+     SELECT ?who WHERE {
+       << << ex:Alice ex:knows ex:Bob >> ex:confidence "0.95"^^xsd:decimal >> ex:assertedBy ?who .
+     }'
+);
+ nested_annot_found 
+--------------------
+ f
+(1 row)
+
+-- ══════════════════════════════════════════════════════════════════════════════
+-- 5. CONSTRUCT with annotations
+-- ══════════════════════════════════════════════════════════════════════════════
+-- 5.1 CONSTRUCT a sub-graph preserving annotation predicates
+SELECT count(*) >= 1 AS construct_annotation_ok FROM pg_ripple.sparql(
+    'PREFIX ex: <http://annot.test/>
+     CONSTRUCT {
+       ?s ex:knows ?o .
+       << ?s ex:knows ?o >> ex:confidence ?conf .
+     } WHERE {
+       ?s ex:knows ?o .
+       << ?s ex:knows ?o >> ex:confidence ?conf .
+     }'
+);
+ERROR:  sparql() supports SELECT and ASK; use sparql_explain() for debugging
+-- ══════════════════════════════════════════════════════════════════════════════
+-- Cleanup
+-- ══════════════════════════════════════════════════════════════════════════════
+SELECT pg_ripple.compact() >= 0 AS cleanup_ok;
+ cleanup_ok 
+------------
+ t
+(1 row)
+

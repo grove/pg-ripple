@@ -1,0 +1,86 @@
+-- pg_regress test: SPARQL federation timeout (v0.16.0)
+-- Verifies timeout and max_results GUC settings behaviour.
+-- Ensure the pg_ripple library is loaded (registers GUCs via _PG_init).
+-- In a fresh backend the library isn't loaded until a pg_ripple function runs.
+SELECT pg_ripple.triple_count() >= 0 AS library_loaded;
+ library_loaded 
+----------------
+ t
+(1 row)
+
+-- ─── Timeout GUC ─────────────────────────────────────────────────────────────
+-- Verify federation_timeout GUC is registered and has default 30.
+SELECT current_setting('pg_ripple.federation_timeout')::int AS default_timeout;
+ default_timeout 
+-----------------
+              30
+(1 row)
+
+-- Verify federation_max_results GUC is registered and has default 10000.
+SELECT current_setting('pg_ripple.federation_max_results')::int AS default_max_results;
+ default_max_results 
+---------------------
+               10000
+(1 row)
+
+-- Verify federation_on_error GUC is registered (default is empty = 'warning').
+SELECT COALESCE(
+    NULLIF(current_setting('pg_ripple.federation_on_error'), ''),
+    'warning'
+) AS default_on_error;
+ default_on_error 
+------------------
+ warning
+(1 row)
+
+-- ─── GUC boundary tests ───────────────────────────────────────────────────────
+-- Set timeout to minimum (1 second).
+SET pg_ripple.federation_timeout = 1;
+SELECT current_setting('pg_ripple.federation_timeout')::int AS min_timeout;
+ min_timeout 
+-------------
+           1
+(1 row)
+
+-- Set max_results to a custom value.
+SET pg_ripple.federation_max_results = 5000;
+SELECT current_setting('pg_ripple.federation_max_results')::int AS custom_max_results;
+ custom_max_results 
+--------------------
+               5000
+(1 row)
+
+-- Reset to defaults.
+RESET pg_ripple.federation_timeout;
+RESET pg_ripple.federation_max_results;
+SELECT current_setting('pg_ripple.federation_timeout')::int AS reset_timeout;
+ reset_timeout 
+---------------
+            30
+(1 row)
+
+SELECT current_setting('pg_ripple.federation_max_results')::int AS reset_max_results;
+ reset_max_results 
+-------------------
+             10000
+(1 row)
+
+-- ─── Timeout with unreachable endpoint ───────────────────────────────────────
+-- Register unreachable endpoint; short timeout; empty mode; check round-trip.
+SELECT pg_ripple.register_endpoint('http://127.0.0.1:19998/timeout-test');
+ERROR:  PT621: register_endpoint: endpoint URL 'http://127.0.0.1:19998/timeout-test' resolves to a private/loopback/link-local address (127.0.0.1); set pg_ripple.federation_allow_private = true to override
+SET pg_ripple.federation_timeout = 1;
+SET pg_ripple.federation_on_error = 'empty';
+SELECT COUNT(*) AS timeout_empty_count
+FROM pg_ripple.sparql(
+    'SELECT ?s WHERE { SERVICE <http://127.0.0.1:19998/timeout-test> { ?s ?p ?o } }'
+);
+ERROR:  PT606: SERVICE endpoint blocked by federation_endpoint_policy: http://127.0.0.1:19998/timeout-test
+RESET pg_ripple.federation_timeout;
+RESET pg_ripple.federation_on_error;
+SELECT pg_ripple.remove_endpoint('http://127.0.0.1:19998/timeout-test');
+ remove_endpoint 
+-----------------
+ 
+(1 row)
+

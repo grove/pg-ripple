@@ -1,0 +1,410 @@
+-- shacl_core_completion.sql — SHACL Core completion tests (v0.23.0)
+--
+-- Covers new constraints added in v0.23.0:
+--   1. sh:hasValue
+--   2. sh:nodeKind  (sh:IRI, sh:Literal, sh:BlankNode)
+--   3. sh:languageIn
+--   4. sh:uniqueLang
+--   5. sh:lessThan / sh:greaterThan
+--   6. sh:closed / sh:ignoredProperties
+--   7. Block comments (/* ... */) in Turtle SHACL documents
+--
+-- Uses unique IRIs (<http://shacl.core23.test/…>) to avoid interference.
+-- NOTE: setup.sql already does DROP/CREATE EXTENSION before this file.
+SET search_path TO pg_ripple, public;
+-- ─────────────────────────────────────────────────────────────────────────────
+-- 1.  sh:hasValue — focus node must have a specific fixed value
+-- ─────────────────────────────────────────────────────────────────────────────
+SELECT pg_ripple.load_shacl($SHACL$
+@prefix sh:  <http://www.w3.org/ns/shacl#> .
+@prefix ex:  <http://shacl.core23.test/> .
+
+ex:HasValueShape
+    a sh:NodeShape ;
+    sh:targetClass ex:Country ;
+    sh:property [
+        sh:path ex:continent ;
+        sh:hasValue ex:Europe ;
+    ] .
+$SHACL$);
+ load_shacl 
+------------
+          1
+(1 row)
+
+-- Conforming: continent = ex:Europe.
+SELECT pg_ripple.load_ntriples('
+<http://shacl.core23.test/Germany>   <http://www.w3.org/1999/02/22-rdf-syntax-ns#type>  <http://shacl.core23.test/Country> .
+<http://shacl.core23.test/Germany>   <http://shacl.core23.test/continent>               <http://shacl.core23.test/Europe> .
+');
+ load_ntriples 
+---------------
+             2
+(1 row)
+
+-- Non-conforming: continent = ex:Asia, not ex:Europe.
+SELECT pg_ripple.load_ntriples('
+<http://shacl.core23.test/Japan>     <http://www.w3.org/1999/02/22-rdf-syntax-ns#type>  <http://shacl.core23.test/Country> .
+<http://shacl.core23.test/Japan>     <http://shacl.core23.test/continent>               <http://shacl.core23.test/Asia> .
+');
+ load_ntriples 
+---------------
+             2
+(1 row)
+
+WITH r AS (SELECT pg_ripple.validate() AS rpt)
+SELECT
+    NOT jsonb_path_exists(rpt, '$.violations[*] ? (@.focusNode == $n)',
+        jsonb_build_object('n', 'http://shacl.core23.test/Germany'))  AS germany_conforms,
+    jsonb_path_exists(rpt, '$.violations[*] ? (@.focusNode == $n && @.shapeIRI == $s)',
+        jsonb_build_object('n', 'http://shacl.core23.test/Japan',
+                           's', 'http://shacl.core23.test/HasValueShape')) AS japan_violates
+FROM r;
+ germany_conforms | japan_violates 
+------------------+----------------
+ t                | t
+(1 row)
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- 2.  sh:nodeKind — value nodes must be of the specified kind
+-- ─────────────────────────────────────────────────────────────────────────────
+SELECT pg_ripple.load_shacl($SHACL$
+@prefix sh:  <http://www.w3.org/ns/shacl#> .
+@prefix ex:  <http://shacl.core23.test/> .
+
+ex:NodeKindShape
+    a sh:NodeShape ;
+    sh:targetClass ex:Book ;
+    sh:property [
+        sh:path ex:author ;
+        sh:nodeKind sh:IRI ;
+    ] .
+$SHACL$);
+ load_shacl 
+------------
+          1
+(1 row)
+
+-- Conforming: author is an IRI.
+SELECT pg_ripple.load_ntriples('
+<http://shacl.core23.test/Book1>     <http://www.w3.org/1999/02/22-rdf-syntax-ns#type>  <http://shacl.core23.test/Book> .
+<http://shacl.core23.test/Book1>     <http://shacl.core23.test/author>                  <http://shacl.core23.test/Author1> .
+');
+ load_ntriples 
+---------------
+             2
+(1 row)
+
+-- Non-conforming: author is a literal.
+SELECT pg_ripple.load_ntriples('
+<http://shacl.core23.test/Book2>     <http://www.w3.org/1999/02/22-rdf-syntax-ns#type>  <http://shacl.core23.test/Book> .
+<http://shacl.core23.test/Book2>     <http://shacl.core23.test/author>                  "Anonymous" .
+');
+ load_ntriples 
+---------------
+             2
+(1 row)
+
+WITH r AS (SELECT pg_ripple.validate() AS rpt)
+SELECT
+    NOT jsonb_path_exists(rpt, '$.violations[*] ? (@.focusNode == $n && @.shapeIRI == $s)',
+        jsonb_build_object('n', 'http://shacl.core23.test/Book1',
+                           's', 'http://shacl.core23.test/NodeKindShape'))  AS book1_conforms,
+    jsonb_path_exists(rpt, '$.violations[*] ? (@.focusNode == $n && @.shapeIRI == $s)',
+        jsonb_build_object('n', 'http://shacl.core23.test/Book2',
+                           's', 'http://shacl.core23.test/NodeKindShape'))  AS book2_violates
+FROM r;
+ book1_conforms | book2_violates 
+----------------+----------------
+ t              | t
+(1 row)
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- 3.  sh:languageIn — literal must have a language from the given list
+-- ─────────────────────────────────────────────────────────────────────────────
+SELECT pg_ripple.load_shacl($SHACL$
+@prefix sh:  <http://www.w3.org/ns/shacl#> .
+@prefix ex:  <http://shacl.core23.test/> .
+
+ex:LangShape
+    a sh:NodeShape ;
+    sh:targetClass ex:Article ;
+    sh:property [
+        sh:path ex:title ;
+        sh:languageIn ( "en" "de" ) ;
+    ] .
+$SHACL$);
+ load_shacl 
+------------
+          1
+(1 row)
+
+-- Conforming: title is in English.
+SELECT pg_ripple.load_ntriples('
+<http://shacl.core23.test/Article1>  <http://www.w3.org/1999/02/22-rdf-syntax-ns#type>  <http://shacl.core23.test/Article> .
+<http://shacl.core23.test/Article1>  <http://shacl.core23.test/title>                   "A title"@en .
+');
+ load_ntriples 
+---------------
+             2
+(1 row)
+
+-- Non-conforming: title is in French.
+SELECT pg_ripple.load_ntriples('
+<http://shacl.core23.test/Article2>  <http://www.w3.org/1999/02/22-rdf-syntax-ns#type>  <http://shacl.core23.test/Article> .
+<http://shacl.core23.test/Article2>  <http://shacl.core23.test/title>                   "Un titre"@fr .
+');
+ load_ntriples 
+---------------
+             2
+(1 row)
+
+WITH r AS (SELECT pg_ripple.validate() AS rpt)
+SELECT
+    NOT jsonb_path_exists(rpt, '$.violations[*] ? (@.focusNode == $n && @.shapeIRI == $s)',
+        jsonb_build_object('n', 'http://shacl.core23.test/Article1',
+                           's', 'http://shacl.core23.test/LangShape'))  AS article1_conforms,
+    jsonb_path_exists(rpt, '$.violations[*] ? (@.focusNode == $n && @.shapeIRI == $s)',
+        jsonb_build_object('n', 'http://shacl.core23.test/Article2',
+                           's', 'http://shacl.core23.test/LangShape'))  AS article2_violates
+FROM r;
+ article1_conforms | article2_violates 
+-------------------+-------------------
+ f                 | t
+(1 row)
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- 4.  sh:uniqueLang — no two values for the property may share a language tag
+-- ─────────────────────────────────────────────────────────────────────────────
+SELECT pg_ripple.load_shacl($SHACL$
+@prefix sh:  <http://www.w3.org/ns/shacl#> .
+@prefix ex:  <http://shacl.core23.test/> .
+
+ex:UniqueLangShape
+    a sh:NodeShape ;
+    sh:targetClass ex:Concept ;
+    sh:property [
+        sh:path ex:label ;
+        sh:uniqueLang true ;
+    ] .
+$SHACL$);
+ load_shacl 
+------------
+          1
+(1 row)
+
+-- Conforming: one English label, one German label.
+SELECT pg_ripple.load_ntriples('
+<http://shacl.core23.test/Concept1>  <http://www.w3.org/1999/02/22-rdf-syntax-ns#type>  <http://shacl.core23.test/Concept> .
+<http://shacl.core23.test/Concept1>  <http://shacl.core23.test/label>                   "Hello"@en .
+<http://shacl.core23.test/Concept1>  <http://shacl.core23.test/label>                   "Hallo"@de .
+');
+ load_ntriples 
+---------------
+             3
+(1 row)
+
+-- Non-conforming: two English labels.
+SELECT pg_ripple.load_ntriples('
+<http://shacl.core23.test/Concept2>  <http://www.w3.org/1999/02/22-rdf-syntax-ns#type>  <http://shacl.core23.test/Concept> .
+<http://shacl.core23.test/Concept2>  <http://shacl.core23.test/label>                   "Hello"@en .
+<http://shacl.core23.test/Concept2>  <http://shacl.core23.test/label>                   "Hi"@en .
+');
+ load_ntriples 
+---------------
+             3
+(1 row)
+
+WITH r AS (SELECT pg_ripple.validate() AS rpt)
+SELECT
+    NOT jsonb_path_exists(rpt, '$.violations[*] ? (@.focusNode == $n && @.shapeIRI == $s)',
+        jsonb_build_object('n', 'http://shacl.core23.test/Concept1',
+                           's', 'http://shacl.core23.test/UniqueLangShape'))  AS concept1_conforms,
+    jsonb_path_exists(rpt, '$.violations[*] ? (@.focusNode == $n && @.shapeIRI == $s)',
+        jsonb_build_object('n', 'http://shacl.core23.test/Concept2',
+                           's', 'http://shacl.core23.test/UniqueLangShape'))  AS concept2_violates
+FROM r;
+ concept1_conforms | concept2_violates 
+-------------------+-------------------
+ t                 | t
+(1 row)
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- 5.  sh:lessThan / sh:greaterThan — cross-property ordering constraints
+-- ─────────────────────────────────────────────────────────────────────────────
+SELECT pg_ripple.load_shacl($SHACL$
+@prefix sh:  <http://www.w3.org/ns/shacl#> .
+@prefix ex:  <http://shacl.core23.test/> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+
+ex:DateRangeShape
+    a sh:NodeShape ;
+    sh:targetClass ex:Event ;
+    sh:property [
+        sh:path ex:startDate ;
+        sh:lessThan ex:endDate ;
+    ] .
+$SHACL$);
+ load_shacl 
+------------
+          1
+(1 row)
+
+-- Conforming: start < end.
+SELECT pg_ripple.load_ntriples('
+<http://shacl.core23.test/Event1>   <http://www.w3.org/1999/02/22-rdf-syntax-ns#type>  <http://shacl.core23.test/Event> .
+<http://shacl.core23.test/Event1>   <http://shacl.core23.test/startDate>               "2024-01-01"^^<http://www.w3.org/2001/XMLSchema#date> .
+<http://shacl.core23.test/Event1>   <http://shacl.core23.test/endDate>                 "2024-12-31"^^<http://www.w3.org/2001/XMLSchema#date> .
+');
+ load_ntriples 
+---------------
+             3
+(1 row)
+
+-- Non-conforming: start > end.
+SELECT pg_ripple.load_ntriples('
+<http://shacl.core23.test/Event2>   <http://www.w3.org/1999/02/22-rdf-syntax-ns#type>  <http://shacl.core23.test/Event> .
+<http://shacl.core23.test/Event2>   <http://shacl.core23.test/startDate>               "2024-12-31"^^<http://www.w3.org/2001/XMLSchema#date> .
+<http://shacl.core23.test/Event2>   <http://shacl.core23.test/endDate>                 "2024-01-01"^^<http://www.w3.org/2001/XMLSchema#date> .
+');
+ load_ntriples 
+---------------
+             3
+(1 row)
+
+WITH r AS (SELECT pg_ripple.validate() AS rpt)
+SELECT
+    NOT jsonb_path_exists(rpt, '$.violations[*] ? (@.focusNode == $n && @.shapeIRI == $s)',
+        jsonb_build_object('n', 'http://shacl.core23.test/Event1',
+                           's', 'http://shacl.core23.test/DateRangeShape'))  AS event1_conforms,
+    jsonb_path_exists(rpt, '$.violations[*] ? (@.focusNode == $n && @.shapeIRI == $s)',
+        jsonb_build_object('n', 'http://shacl.core23.test/Event2',
+                           's', 'http://shacl.core23.test/DateRangeShape'))  AS event2_violates
+FROM r;
+ event1_conforms | event2_violates 
+-----------------+-----------------
+ t               | t
+(1 row)
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- 6.  sh:closed / sh:ignoredProperties
+-- ─────────────────────────────────────────────────────────────────────────────
+SELECT pg_ripple.load_shacl($SHACL$
+@prefix sh:  <http://www.w3.org/ns/shacl#> .
+@prefix ex:  <http://shacl.core23.test/> .
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+
+ex:ClosedShape
+    a sh:NodeShape ;
+    sh:targetClass ex:Strict ;
+    sh:closed true ;
+    sh:ignoredProperties ( rdf:type ) ;
+    sh:property [
+        sh:path ex:name ;
+        sh:minCount 1 ;
+    ] .
+$SHACL$);
+ load_shacl 
+------------
+          1
+(1 row)
+
+-- Conforming: only rdf:type and ex:name.
+SELECT pg_ripple.load_ntriples('
+<http://shacl.core23.test/S1>        <http://www.w3.org/1999/02/22-rdf-syntax-ns#type>  <http://shacl.core23.test/Strict> .
+<http://shacl.core23.test/S1>        <http://shacl.core23.test/name>                    "OK" .
+');
+ load_ntriples 
+---------------
+             2
+(1 row)
+
+-- Non-conforming: extra property ex:extra not in shape.
+SELECT pg_ripple.load_ntriples('
+<http://shacl.core23.test/S2>        <http://www.w3.org/1999/02/22-rdf-syntax-ns#type>  <http://shacl.core23.test/Strict> .
+<http://shacl.core23.test/S2>        <http://shacl.core23.test/name>                    "Also OK" .
+<http://shacl.core23.test/S2>        <http://shacl.core23.test/extra>                   "Not OK" .
+');
+ load_ntriples 
+---------------
+             3
+(1 row)
+
+WITH r AS (SELECT pg_ripple.validate() AS rpt)
+SELECT
+    NOT jsonb_path_exists(rpt, '$.violations[*] ? (@.focusNode == $n && @.shapeIRI == $s)',
+        jsonb_build_object('n', 'http://shacl.core23.test/S1',
+                           's', 'http://shacl.core23.test/ClosedShape'))  AS s1_conforms,
+    jsonb_path_exists(rpt, '$.violations[*] ? (@.focusNode == $n && @.shapeIRI == $s)',
+        jsonb_build_object('n', 'http://shacl.core23.test/S2',
+                           's', 'http://shacl.core23.test/ClosedShape'))  AS s2_violates
+FROM r;
+ s1_conforms | s2_violates 
+-------------+-------------
+ t           | t
+(1 row)
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- 7.  Block comments in Turtle SHACL documents should be stripped
+-- ─────────────────────────────────────────────────────────────────────────────
+-- This should parse successfully (block comment inside Turtle).
+SELECT pg_ripple.load_shacl($SHACL$
+/* This is a block comment — should be stripped before parsing */
+@prefix sh:  <http://www.w3.org/ns/shacl#> .
+@prefix ex:  <http://shacl.core23.test/> .
+/* Another block comment
+   spanning multiple lines */
+ex:CommentTestShape
+    a sh:NodeShape ;
+    sh:targetClass ex:CommentTest ;
+    sh:property [
+        sh:path ex:val ;
+        sh:minCount 1 ; /* inline comment */
+    ] .
+$SHACL$) IS NOT NULL AS block_comment_parse_ok;
+ block_comment_parse_ok 
+------------------------
+ t
+(1 row)
+
+-- ─────────────────────────────────────────────────────────────────────────────
+-- Cleanup: drop all shapes and data loaded by this test.
+-- Without this, lingering shapes (especially LangShape which has Article2
+-- violating sh:languageIn) cause cascading failures in subsequent SHACL tests.
+-- ─────────────────────────────────────────────────────────────────────────────
+DO $$
+DECLARE
+    s RECORD;
+BEGIN
+    FOR s IN SELECT shape_iri FROM _pg_ripple.shacl_shapes
+             WHERE shape_iri LIKE '%shacl.core23.test%'
+    LOOP
+        PERFORM pg_ripple.drop_shape(s.shape_iri);
+    END LOOP;
+END $$;
+-- Remove all triples in the shacl.core23.test namespace.
+DO $$
+DECLARE
+    core23_ids BIGINT[];
+    pred_id     BIGINT;
+BEGIN
+    SELECT array_agg(id) INTO core23_ids
+    FROM _pg_ripple.dictionary
+    WHERE value LIKE 'http://shacl.core23.test/%';
+    IF core23_ids IS NULL THEN RETURN; END IF;
+    DELETE FROM _pg_ripple.vp_rare
+    WHERE s = ANY(core23_ids) OR o = ANY(core23_ids) OR p = ANY(core23_ids);
+    FOR pred_id IN
+        SELECT id FROM _pg_ripple.predicates WHERE table_oid IS NOT NULL
+    LOOP
+        BEGIN
+            EXECUTE format(
+                'DELETE FROM _pg_ripple.vp_%s_delta WHERE s=ANY($1) OR o=ANY($1)',
+                pred_id) USING core23_ids;
+            EXECUTE format(
+                'DELETE FROM _pg_ripple.vp_%s_main  WHERE s=ANY($1) OR o=ANY($1)',
+                pred_id) USING core23_ids;
+        EXCEPTION WHEN undefined_table THEN NULL;
+        END;
+    END LOOP;
+END $$;

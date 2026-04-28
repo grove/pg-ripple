@@ -1,0 +1,207 @@
+-- pg_regress test: Parallel Stratum Evaluation & Incremental Rule Updates (v0.35.0)
+--
+-- Tests:
+-- 1. New GUCs exist with correct defaults.
+-- 2. GUCs can be set and read back.
+-- 3. OWL RL closure produces identical results with datalog_parallel_workers = 1 and = 4.
+-- 4. infer_with_stats() reports parallel_groups > 1 for OWL RL (many independent rules).
+-- 5. SPARQL materialization freshness: derived VP tables are visible after infer().
+-- NOTE: setup.sql already does DROP/CREATE EXTENSION before this file.
+CREATE EXTENSION IF NOT EXISTS pg_ripple;
+SELECT pg_ripple.triple_count() >= 0 AS library_loaded;
+ library_loaded 
+----------------
+ t
+(1 row)
+
+SET search_path TO pg_ripple, public;
+-- ── Part 1: GUC defaults ─────────────────────────────────────────────────────
+-- 1a. datalog_parallel_workers default = 4.
+SHOW pg_ripple.datalog_parallel_workers;
+ pg_ripple.datalog_parallel_workers 
+------------------------------------
+ 4
+(1 row)
+
+-- 1b. datalog_parallel_threshold default = 10000.
+SHOW pg_ripple.datalog_parallel_threshold;
+ pg_ripple.datalog_parallel_threshold 
+--------------------------------------
+ 10000
+(1 row)
+
+-- 1c. GUC can be set to 1 (serial path).
+SET pg_ripple.datalog_parallel_workers = 1;
+SHOW pg_ripple.datalog_parallel_workers;
+ pg_ripple.datalog_parallel_workers 
+------------------------------------
+ 1
+(1 row)
+
+-- 1d. GUC can be set back to 4.
+SET pg_ripple.datalog_parallel_workers = 4;
+SHOW pg_ripple.datalog_parallel_workers;
+ pg_ripple.datalog_parallel_workers 
+------------------------------------
+ 4
+(1 row)
+
+-- 1e. Threshold can be set to 0 (always analyse).
+SET pg_ripple.datalog_parallel_threshold = 0;
+SHOW pg_ripple.datalog_parallel_threshold;
+ pg_ripple.datalog_parallel_threshold 
+--------------------------------------
+ 0
+(1 row)
+
+-- Restore defaults.
+SET pg_ripple.datalog_parallel_workers = 4;
+SET pg_ripple.datalog_parallel_threshold = 10000;
+-- ── Part 2: Setup baseline ────────────────────────────────────────────────────
+-- Capture the baseline max statement ID before any inserts.
+CREATE TEMP TABLE _par_baseline AS
+    SELECT COALESCE(MAX(i), 0) AS max_i FROM _pg_ripple.vp_rare;
+-- Insert base triples for RDFS inference test.
+SELECT pg_ripple.insert_triple(
+    '<https://parallel.test/A>',
+    '<http://www.w3.org/2000/01/rdf-schema#subClassOf>',
+    '<https://parallel.test/B>'
+) IS NOT NULL AS a_sub_b;
+ a_sub_b 
+---------
+ t
+(1 row)
+
+SELECT pg_ripple.insert_triple(
+    '<https://parallel.test/B>',
+    '<http://www.w3.org/2000/01/rdf-schema#subClassOf>',
+    '<https://parallel.test/C>'
+) IS NOT NULL AS b_sub_c;
+ b_sub_c 
+---------
+ t
+(1 row)
+
+SELECT pg_ripple.insert_triple(
+    '<https://parallel.test/alice>',
+    '<http://www.w3.org/1999/02/22-rdf-syntax-ns#type>',
+    '<https://parallel.test/A>'
+) IS NOT NULL AS alice_type_a;
+ alice_type_a 
+--------------
+ t
+(1 row)
+
+-- Capture max_i AFTER base inserts so we can clean up only derived triples.
+CREATE TEMP TABLE _par_after_base AS
+    SELECT COALESCE(MAX(i), 0) AS max_i FROM _pg_ripple.vp_rare;
+-- ── Part 3: workers = 1 (serial path) ────────────────────────────────────────
+SET pg_ripple.datalog_parallel_workers = 1;
+SET pg_ripple.datalog_parallel_threshold = 0;
+SELECT pg_ripple.load_rules_builtin('rdfs') > 0 AS rdfs_loaded_w1;
+ rdfs_loaded_w1 
+----------------
+ t
+(1 row)
+
+SELECT (pg_ripple.infer_with_stats('rdfs')->>'derived')::bigint >= 0 AS derived_w1_nonneg;
+WARNING:  semi-naive rule compile error: variable predicate in rule body not supported
+ derived_w1_nonneg 
+-------------------
+ t
+(1 row)
+
+-- Capture total triple count after w=1 inference.
+CREATE TEMP TABLE _par_w1_result AS
+    SELECT COUNT(*) AS cnt FROM _pg_ripple.vp_rare
+    WHERE i > (SELECT max_i FROM _par_after_base);
+SELECT pg_ripple.drop_rules('rdfs') >= 0 AS rdfs_dropped_w1;
+ rdfs_dropped_w1 
+-----------------
+ t
+(1 row)
+
+-- Delete only derived triples (restore to base state).
+DELETE FROM _pg_ripple.vp_rare
+    WHERE i > (SELECT max_i FROM _par_after_base);
+-- ── Part 4: workers = 4 (parallel analysis enabled) ──────────────────────────
+SET pg_ripple.datalog_parallel_workers = 4;
+SET pg_ripple.datalog_parallel_threshold = 0;
+SELECT pg_ripple.load_rules_builtin('rdfs') > 0 AS rdfs_loaded_w4;
+ rdfs_loaded_w4 
+----------------
+ t
+(1 row)
+
+SELECT (pg_ripple.infer_with_stats('rdfs')->>'derived')::bigint >= 0 AS derived_w4_nonneg;
+WARNING:  semi-naive rule compile error: variable predicate in rule body not supported
+ derived_w4_nonneg 
+-------------------
+ t
+(1 row)
+
+-- Capture total triple count after w=4 inference.
+CREATE TEMP TABLE _par_w4_result AS
+    SELECT COUNT(*) AS cnt FROM _pg_ripple.vp_rare
+    WHERE i > (SELECT max_i FROM _par_after_base);
+-- Verify results are IDENTICAL between workers = 1 and = 4.
+SELECT w1.cnt = w4.cnt AS results_identical
+FROM _par_w1_result w1, _par_w4_result w4;
+ results_identical 
+-------------------
+ t
+(1 row)
+
+SELECT pg_ripple.drop_rules('rdfs') >= 0 AS rdfs_dropped_w4;
+ rdfs_dropped_w4 
+-----------------
+ t
+(1 row)
+
+-- ── Part 5: infer_with_stats() reports parallel fields ───────────────────────
+-- Delete derived triples before OWL RL test.
+DELETE FROM _pg_ripple.vp_rare
+    WHERE i > (SELECT max_i FROM _par_after_base);
+SELECT pg_ripple.load_rules_builtin('owl-rl') > 0 AS owl_rl_loaded;
+ owl_rl_loaded 
+---------------
+ t
+(1 row)
+
+SET pg_ripple.datalog_parallel_workers = 4;
+SET pg_ripple.datalog_parallel_threshold = 0;
+-- parallel_groups field exists and is a non-negative integer.
+SELECT (pg_ripple.infer_with_stats('owl-rl')->>'parallel_groups')::int >= 0
+    AS has_parallel_groups;
+ has_parallel_groups 
+---------------------
+ t
+(1 row)
+
+-- max_concurrent field exists and is a non-negative integer.
+SELECT (pg_ripple.infer_with_stats('owl-rl')->>'max_concurrent')::int >= 0
+    AS has_max_concurrent;
+ has_max_concurrent 
+--------------------
+ t
+(1 row)
+
+-- OWL RL has many independent rules → parallel_groups > 1.
+SELECT (pg_ripple.infer_with_stats('owl-rl')->>'parallel_groups')::int > 1
+    AS owl_rl_has_multiple_groups;
+ owl_rl_has_multiple_groups 
+----------------------------
+ t
+(1 row)
+
+SELECT pg_ripple.drop_rules('owl-rl') >= 0 AS owl_rl_dropped;
+ owl_rl_dropped 
+----------------
+ t
+(1 row)
+
+-- ── Part 6: Restore defaults and cleanup ─────────────────────────────────────
+SET pg_ripple.datalog_parallel_workers = 4;
+SET pg_ripple.datalog_parallel_threshold = 10000;
+DELETE FROM _pg_ripple.vp_rare
+    WHERE i > (SELECT max_i FROM _par_baseline);

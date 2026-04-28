@@ -1,0 +1,156 @@
+-- pg_regress test: SPARQL Graph Management (LOAD/CLEAR/DROP/CREATE) (v0.12.0)
+-- Namespace: https://graphmgmt.test/
+DO $$
+BEGIN
+    DELETE FROM _pg_ripple.vp_rare
+    WHERE p IN (
+        SELECT id FROM _pg_ripple.dictionary
+        WHERE value LIKE 'https://graphmgmt.test/%'
+    );
+END $$;
+-- ── CREATE GRAPH ─────────────────────────────────────────────────────────────
+-- CREATE GRAPH registers a named graph in the dictionary.
+SELECT pg_ripple.sparql_update(
+    'CREATE GRAPH <https://graphmgmt.test/g1>'
+) = 0 AS create_graph_ok;
+ create_graph_ok 
+-----------------
+ t
+(1 row)
+
+-- Creating an existing graph with SILENT is a no-op (does not error).
+SELECT pg_ripple.sparql_update(
+    'CREATE SILENT GRAPH <https://graphmgmt.test/g1>'
+) = 0 AS create_silent_ok;
+ create_silent_ok 
+------------------
+ t
+(1 row)
+
+-- ── CLEAR GRAPH ──────────────────────────────────────────────────────────────
+-- Insert triples into a named graph and the default graph.
+SELECT pg_ripple.sparql_update(
+    'INSERT DATA {
+       GRAPH <https://graphmgmt.test/g1> {
+         <https://graphmgmt.test/s1> <https://graphmgmt.test/p> <https://graphmgmt.test/o1> .
+         <https://graphmgmt.test/s2> <https://graphmgmt.test/p> <https://graphmgmt.test/o2>
+       }
+     }'
+) = 2 AS two_in_g1;
+ two_in_g1 
+-----------
+ t
+(1 row)
+
+SELECT pg_ripple.sparql_update(
+    'INSERT DATA {
+       <https://graphmgmt.test/s3> <https://graphmgmt.test/p> <https://graphmgmt.test/o3>
+     }'
+) = 1 AS one_in_default;
+ one_in_default 
+----------------
+ t
+(1 row)
+
+-- Named graph g1 has 2 triples.
+SELECT count(*) = 2 AS g1_has_two
+FROM pg_ripple.sparql(
+    'SELECT ?s WHERE { GRAPH <https://graphmgmt.test/g1> { ?s <https://graphmgmt.test/p> ?o } }'
+);
+ g1_has_two 
+------------
+ t
+(1 row)
+
+-- Default graph has 1 triple.
+SELECT count(*) = 1 AS default_has_one
+FROM pg_ripple.find_triples(NULL, '<https://graphmgmt.test/p>', NULL);
+ default_has_one 
+-----------------
+ t
+(1 row)
+
+-- CLEAR the named graph.
+SELECT pg_ripple.sparql_update(
+    'CLEAR GRAPH <https://graphmgmt.test/g1>'
+) = 2 AS cleared_two;
+ cleared_two 
+-------------
+ t
+(1 row)
+
+-- Named graph g1 is now empty.
+SELECT count(*) = 0 AS g1_empty
+FROM pg_ripple.sparql(
+    'SELECT ?s WHERE { GRAPH <https://graphmgmt.test/g1> { ?s <https://graphmgmt.test/p> ?o } }'
+);
+ g1_empty 
+----------
+ t
+(1 row)
+
+-- Default graph still has its triple.
+SELECT count(*) = 1 AS default_unchanged
+FROM pg_ripple.find_triples(NULL, '<https://graphmgmt.test/p>', NULL);
+ default_unchanged 
+-------------------
+ t
+(1 row)
+
+-- CLEAR DEFAULT removes triples from the default graph.
+SELECT pg_ripple.sparql_update(
+    'CLEAR DEFAULT'
+) >= 0 AS clear_default_ok;
+ clear_default_ok 
+------------------
+ t
+(1 row)
+
+SELECT count(*) = 0 AS default_empty
+FROM pg_ripple.find_triples('<https://graphmgmt.test/s3>', '<https://graphmgmt.test/p>', NULL);
+ default_empty 
+---------------
+ t
+(1 row)
+
+-- ── DROP GRAPH ────────────────────────────────────────────────────────────────
+-- Insert fresh triples into g1, then DROP it.
+SELECT pg_ripple.sparql_update(
+    'INSERT DATA {
+       GRAPH <https://graphmgmt.test/g1> {
+         <https://graphmgmt.test/a> <https://graphmgmt.test/b> <https://graphmgmt.test/c>
+       }
+     }'
+) = 1 AS one_in_g1_again;
+ one_in_g1_again 
+-----------------
+ t
+(1 row)
+
+SELECT pg_ripple.sparql_update(
+    'DROP GRAPH <https://graphmgmt.test/g1>'
+) = 1 AS drop_g1_deleted_one;
+ drop_g1_deleted_one 
+---------------------
+ t
+(1 row)
+
+-- After DROP, g1 has no triples.
+SELECT count(*) = 0 AS g1_dropped
+FROM pg_ripple.sparql(
+    'SELECT ?s WHERE { GRAPH <https://graphmgmt.test/g1> { ?s ?p ?o } }'
+);
+ g1_dropped 
+------------
+ t
+(1 row)
+
+-- DROP SILENT on non-existent graph is a no-op.
+SELECT pg_ripple.sparql_update(
+    'DROP SILENT GRAPH <https://graphmgmt.test/nonexistent>'
+) = 0 AS drop_silent_ok;
+ drop_silent_ok 
+----------------
+ t
+(1 row)
+

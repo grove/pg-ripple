@@ -1,0 +1,70 @@
+-- pg_regress test: SPARQL-star variable-inside-quoted-triple patterns (v0.48.0)
+-- Tests that << ?s ?p ?o >> patterns return rows via dictionary qt_s/qt_p/qt_o join.
+-- Setup: insert an RDF-star triple (quoted triple as subject)
+-- First insert the base triples
+SELECT pg_ripple.insert_triple(
+    '<http://example.org/alice>',
+    '<http://example.org/age>',
+    '"30"^^<http://www.w3.org/2001/XMLSchema#integer>'
+) > 0 AS insert_base;
+ insert_base 
+-------------
+ t
+(1 row)
+
+-- Insert a quoted-triple statement via SPARQL INSERT DATA (idiomatic path):
+-- << <alice> <age> "30" >> <assertedBy> <http://example.org/src1>
+SELECT pg_ripple.sparql_update(
+    'PREFIX ex: <http://example.org/>
+     PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
+     INSERT DATA {
+       << ex:alice ex:age "30"^^xsd:integer >> ex:assertedBy ex:src1 .
+     }'
+) >= 0 AS insert_quoted;
+ insert_quoted 
+---------------
+ t
+(1 row)
+
+-- Verify DB state: dictionary has the quoted triple with kind=5
+SELECT (
+    EXISTS(
+        SELECT 1 FROM _pg_ripple.dictionary
+        WHERE kind = 5
+          AND qt_s = (SELECT id FROM _pg_ripple.dictionary WHERE value = 'http://example.org/alice' AND kind = 0)
+          AND qt_p = (SELECT id FROM _pg_ripple.dictionary WHERE value = 'http://example.org/age' AND kind = 0)
+    )
+) AS quoted_triple_in_dict;
+ quoted_triple_in_dict 
+-----------------------
+ t
+(1 row)
+
+-- Query: SPARQL-star variable pattern should return at least one row
+-- (the variable ?s, ?p, ?o should be bound from the dictionary qt_s/qt_p/qt_o columns)
+SELECT count(*) >= 1 AS sparql_star_variable_query_works
+FROM (
+    SELECT pg_ripple.sparql(
+        'PREFIX ex: <http://example.org/>
+         SELECT ?who WHERE {
+           << ex:alice ex:age ?v >> ex:assertedBy ?who .
+         }'
+    )
+) AS q;
+ sparql_star_variable_query_works 
+----------------------------------
+ t
+(1 row)
+
+-- Verify the query result is not empty set (no silent FALSE)
+SELECT (pg_ripple.sparql(
+    'PREFIX ex: <http://example.org/>
+     SELECT ?who WHERE {
+       << ex:alice ex:age ?v >> ex:assertedBy ?who .
+     }'
+) IS NOT NULL) AS result_not_null;
+ result_not_null 
+-----------------
+ t
+(1 row)
+

@@ -1,0 +1,146 @@
+-- pg_regress test: Semi-naive Datalog evaluation (v0.24.0)
+--
+-- Tests the infer_with_stats() function which uses semi-naive evaluation to
+-- materialise derived triples.  The returned JSONB contains:
+--   "derived"    -- total triples derived (may be 0 in clean env; test >= 0)
+--   "iterations" -- number of fixpoint iterations (must be >= 1 on any invocation)
+--
+-- ISOLATION STRATEGY: snapshot the max(i) in vp_rare before the test, then
+-- delete all triples with i > snapshot at cleanup.  This removes ALL triples
+-- derived by infer_with_stats (including rdfs4a/4b rdf:type rdfs:Resource
+-- triples that affect the whole graph) without depending on namespace patterns.
+SET search_path TO pg_ripple, public;
+-- Pre-test snapshot: record the highest sequential ID currently in vp_rare so
+-- that cleanup can remove every triple inserted during this test.
+CREATE TEMP TABLE _sl_test_baseline AS
+    SELECT COALESCE(MAX(i), 0) AS max_i FROM _pg_ripple.vp_rare;
+-- Setup: load RDFS rule set.────
+SELECT pg_ripple.load_rules_builtin('rdfs') > 0 AS rdfs_loaded;
+ rdfs_loaded 
+-------------
+ t
+(1 row)
+
+-- 1. infer_with_stats returns JSONB with expected keys.
+SELECT jsonb_typeof(pg_ripple.infer_with_stats('rdfs')) = 'object' AS result_is_object;
+WARNING:  semi-naive rule compile error: variable predicate in rule body not supported
+ result_is_object 
+------------------
+ t
+(1 row)
+
+SELECT (pg_ripple.infer_with_stats('rdfs') ? 'derived')    AS has_derived_key;
+WARNING:  semi-naive rule compile error: variable predicate in rule body not supported
+ has_derived_key 
+-----------------
+ t
+(1 row)
+
+SELECT (pg_ripple.infer_with_stats('rdfs') ? 'iterations') AS has_iterations_key;
+WARNING:  semi-naive rule compile error: variable predicate in rule body not supported
+ has_iterations_key 
+--------------------
+ t
+(1 row)
+
+-- 2. derived count is a non-negative integer.
+SELECT (pg_ripple.infer_with_stats('rdfs')->>'derived')::bigint >= 0 AS derived_nonneg;
+WARNING:  semi-naive rule compile error: variable predicate in rule body not supported
+ derived_nonneg 
+----------------
+ t
+(1 row)
+
+-- 3. iterations count is >= 1.
+--   Semi-naive evaluation always performs at least one seeding pass.
+SELECT (pg_ripple.infer_with_stats('rdfs')->>'iterations')::int >= 1 AS iterations_at_least_one;
+WARNING:  semi-naive rule compile error: variable predicate in rule body not supported
+ iterations_at_least_one 
+-------------------------
+ t
+(1 row)
+
+-- 4. Insert a transitive chain and verify convergence.
+-- Insert a 3-hop subClassOf chain.
+SELECT pg_ripple.insert_triple(
+    '<https://example.org/sl/A>',
+    '<http://www.w3.org/2000/01/rdf-schema#subClassOf>',
+    '<https://example.org/sl/B>'
+) > 0 AS a_sub_b;
+ a_sub_b 
+---------
+ t
+(1 row)
+
+SELECT pg_ripple.insert_triple(
+    '<https://example.org/sl/B>',
+    '<http://www.w3.org/2000/01/rdf-schema#subClassOf>',
+    '<https://example.org/sl/C>'
+) > 0 AS b_sub_c;
+ b_sub_c 
+---------
+ t
+(1 row)
+
+SELECT pg_ripple.insert_triple(
+    '<https://example.org/sl/C>',
+    '<http://www.w3.org/2000/01/rdf-schema#subClassOf>',
+    '<https://example.org/sl/D>'
+) > 0 AS c_sub_d;
+ c_sub_d 
+---------
+ t
+(1 row)
+
+-- Run semi-naive inference; the transitive closure should derive A<=C, A<=D, B<=D.
+SELECT (pg_ripple.infer_with_stats('rdfs')->>'derived')::bigint >= 0 AS derived_after_chain;
+WARNING:  semi-naive rule compile error: variable predicate in rule body not supported
+ derived_after_chain 
+---------------------
+ t
+(1 row)
+
+-- 5. Verify infer_with_stats result type (robustness check).
+SELECT pg_typeof(pg_ripple.infer_with_stats('rdfs')) = 'jsonb'::regtype AS returns_jsonb;
+WARNING:  semi-naive rule compile error: variable predicate in rule body not supported
+ returns_jsonb 
+---------------
+ t
+(1 row)
+
+-- Cleanup: drop the rule set first.
+SELECT pg_ripple.drop_rules('rdfs') >= 0 AS cleanup_ok;
+ cleanup_ok 
+------------
+ t
+(1 row)
+
+-- Remove ALL triples added during this test (raw inserts + infer_with_stats
+-- materialisations, including rdfs4a/4b rdf:type rdfs:Resource triples for
+-- every node in the graph).  Uses the sequential i column for precise targeting.
+DO $$
+DECLARE
+    baseline_i BIGINT;
+    pred_id    BIGINT;
+BEGIN
+    SELECT max_i INTO baseline_i FROM _sl_test_baseline;
+
+    -- vp_rare: delete every triple inserted after the baseline snapshot.
+    DELETE FROM _pg_ripple.vp_rare WHERE i > baseline_i;
+
+    -- Dedicated VP tables: same approach where the table exists.
+    FOR pred_id IN
+        SELECT id FROM _pg_ripple.predicates WHERE table_oid IS NOT NULL
+    LOOP
+        BEGIN
+            EXECUTE format(
+                'DELETE FROM _pg_ripple.vp_%s_delta WHERE i > $1', pred_id)
+                USING baseline_i;
+            EXECUTE format(
+                'DELETE FROM _pg_ripple.vp_%s_main  WHERE i > $1', pred_id)
+                USING baseline_i;
+        EXCEPTION WHEN undefined_table THEN NULL;
+        END;
+    END LOOP;
+END $$;
+DROP TABLE IF EXISTS _sl_test_baseline;

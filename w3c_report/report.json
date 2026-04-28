@@ -1,0 +1,121 @@
+{
+  "categories": {
+    "aggregates": {
+      "fail": 0,
+      "pass": 46,
+      "skip": 0,
+      "timeout": 0,
+      "total": 47,
+      "xfail": 1,
+      "xpass": 0
+    },
+    "basic-update": {
+      "fail": 0,
+      "pass": 13,
+      "skip": 0,
+      "timeout": 0,
+      "total": 13,
+      "xfail": 0,
+      "xpass": 0
+    },
+    "bind": {
+      "fail": 0,
+      "pass": 10,
+      "skip": 0,
+      "timeout": 0,
+      "total": 10,
+      "xfail": 0,
+      "xpass": 0
+    },
+    "exists": {
+      "fail": 0,
+      "pass": 6,
+      "skip": 0,
+      "timeout": 0,
+      "total": 6,
+      "xfail": 0,
+      "xpass": 0
+    },
+    "functions": {
+      "fail": 8,
+      "pass": 67,
+      "skip": 0,
+      "timeout": 0,
+      "total": 75,
+      "xfail": 0,
+      "xpass": 0
+    },
+    "grouping": {
+      "fail": 0,
+      "pass": 6,
+      "skip": 0,
+      "timeout": 0,
+      "total": 6,
+      "xfail": 0,
+      "xpass": 0
+    },
+    "negation": {
+      "fail": 1,
+      "pass": 11,
+      "skip": 0,
+      "timeout": 0,
+      "total": 12,
+      "xfail": 0,
+      "xpass": 0
+    },
+    "project-expression": {
+      "fail": 0,
+      "pass": 7,
+      "skip": 0,
+      "timeout": 0,
+      "total": 7,
+      "xfail": 0,
+      "xpass": 0
+    },
+    "property-path": {
+      "fail": 0,
+      "pass": 33,
+      "skip": 0,
+      "timeout": 0,
+      "total": 33,
+      "xfail": 0,
+      "xpass": 0
+    },
+    "service": {
+      "fail": 0,
+      "pass": 7,
+      "skip": 0,
+      "timeout": 0,
+      "total": 7,
+      "xfail": 0,
+      "xpass": 0
+    },
+    "subquery": {
+      "fail": 3,
+      "pass": 11,
+      "skip": 0,
+      "timeout": 0,
+      "total": 14,
+      "xfail": 0,
+      "xpass": 0
+    },
+    "syntax-query": {
+      "fail": 0,
+      "pass": 94,
+      "skip": 0,
+      "timeout": 0,
+      "total": 94,
+      "xfail": 0,
+      "xpass": 0
+    }
+  },
+  "failed": 12,
+  "pass_rate_pct": "96.0",
+  "passed": 311,
+  "skipped": 0,
+  "timeout": 0,
+  "total": 324,
+  "version": "0.43.0",
+  "xfail": 1,
+  "xpass": 0
+}

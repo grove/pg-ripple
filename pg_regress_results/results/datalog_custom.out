@@ -1,0 +1,116 @@
+-- pg_regress test: Datalog custom rules
+-- Ensure extension is loaded.
+SET search_path TO pg_ripple, public;
+-- ── Setup: register prefixes ──────────────────────────────────────────────────
+SELECT pg_ripple.load_rules(
+    '# empty rule set to test catalog setup',
+    'test_empty'
+) >= 0 AS catalog_ok;
+ catalog_ok 
+------------
+ t
+(1 row)
+
+-- ── Load a simple custom rule ─────────────────────────────────────────────────
+-- First insert some base triples using raw IRIs.
+SELECT pg_ripple.insert_triple(
+    '<https://example.org/alice>',
+    '<https://example.org/manager>',
+    '<https://example.org/bob>'
+) > 0 AS manager_inserted;
+ manager_inserted 
+------------------
+ t
+(1 row)
+
+SELECT pg_ripple.insert_triple(
+    '<https://example.org/bob>',
+    '<https://example.org/manager>',
+    '<https://example.org/carol>'
+) > 0 AS manager2_inserted;
+ manager2_inserted 
+-------------------
+ t
+(1 row)
+
+-- Register a prefix.
+INSERT INTO _pg_ripple.prefixes (prefix, expansion)
+VALUES ('ex', 'https://example.org/')
+ON CONFLICT (prefix) DO NOTHING;
+-- Load a transitive rule (on-demand only; no materialization yet).
+SELECT pg_ripple.load_rules(
+    '<https://example.org/indirectManager> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.w3.org/1999/02/22-rdf-syntax-ns#Property> .',
+    'test_rule_meta'
+) >= 0 AS rule_meta_ok;
+ERROR:  rule parse error: line 1: missing ':-' in rule: <https://example.org/indirectManager> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <http://www.w3.org/1999/02/22-rdf-syntax-ns#Property>
+-- Verify rules are stored.
+SELECT count(*) >= 0 AS rules_present
+FROM (SELECT * FROM pg_ripple.list_rules()) r;
+ rules_present 
+---------------
+ t
+(1 row)
+
+-- ── Load RDFS built-in rule set ───────────────────────────────────────────────
+SELECT pg_ripple.load_rules_builtin('rdfs') > 0 AS rdfs_loaded;
+ rdfs_loaded 
+-------------
+ t
+(1 row)
+
+-- Verify RDFS rules are present.
+SELECT count(*) > 0 AS rdfs_rules_present
+FROM (SELECT * FROM pg_ripple.list_rules()) r
+WHERE (r::jsonb)->>'rule_set' = 'rdfs';
+ERROR:  cannot cast type record to jsonb at character 97
+-- ── Enable/disable rule sets ──────────────────────────────────────────────────
+SELECT pg_ripple.enable_rule_set('rdfs');
+ enable_rule_set 
+-----------------
+ 
+(1 row)
+
+SELECT pg_ripple.disable_rule_set('rdfs');
+ disable_rule_set 
+------------------
+ 
+(1 row)
+
+SELECT pg_ripple.enable_rule_set('rdfs');
+ enable_rule_set 
+-----------------
+ 
+(1 row)
+
+-- ── Drop a rule set ───────────────────────────────────────────────────────────
+SELECT pg_ripple.drop_rules('test_empty') >= 0 AS drop_ok;
+ drop_ok 
+---------
+ t
+(1 row)
+
+-- ── Constraint checking ───────────────────────────────────────────────────────
+-- Load a constraint rule: no resource can be its own manager.
+-- (This should not fire since alice and bob are different.)
+SELECT pg_ripple.check_constraints() IS NOT NULL AS constraints_ok;
+ constraints_ok 
+----------------
+ t
+(1 row)
+
+-- ── Hot dictionary ────────────────────────────────────────────────────────────
+SELECT pg_ripple.prewarm_dictionary_hot() >= 0 AS hot_prewarm_ok;
+ERROR:  function pg_prewarm(unknown) does not exist
+-- Cleanup.
+SELECT pg_ripple.drop_rules('rdfs') >= 0 AS rdfs_cleanup;
+ rdfs_cleanup 
+--------------
+ t
+(1 row)
+
+SELECT pg_ripple.drop_rules('test_rule_meta') >= 0 AS meta_cleanup;
+ meta_cleanup 
+--------------
+ t
+(1 row)
+

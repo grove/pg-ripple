@@ -1,0 +1,34 @@
+-- pg_regress test: Datalog OWL RL rule set
+SET search_path TO pg_ripple, public;
+-- Load OWL RL built-in rule set.
+SELECT pg_ripple.load_rules_builtin('owl-rl') > 0 AS owl_rl_rules_loaded;
+ owl_rl_rules_loaded 
+---------------------
+ t
+(1 row)
+
+-- Verify the rule set is present.
+SELECT count(*) > 10 AS owl_rl_has_many_rules
+FROM (SELECT * FROM pg_ripple.list_rules()) r
+WHERE (r::jsonb)->>'rule_set' = 'owl-rl';
+ERROR:  cannot cast type record to jsonb at character 101
+-- Enable and then disable.
+SELECT pg_ripple.disable_rule_set('owl-rl');
+ disable_rule_set 
+------------------
+ 
+(1 row)
+
+SELECT pg_ripple.enable_rule_set('owl-rl');
+ enable_rule_set 
+-----------------
+ 
+(1 row)
+
+-- Cleanup.
+SELECT pg_ripple.drop_rules('owl-rl') >= 0 AS cleanup_ok;
+ cleanup_ok 
+------------
+ t
+(1 row)
+

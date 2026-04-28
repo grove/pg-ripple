@@ -1,0 +1,87 @@
+diff -U3 /home/runner/work/pg-ripple/pg-ripple/tests/pg_regress/expected/construct_rules.out /home/runner/work/pg-ripple/pg-ripple/tests/pg_regress/results/construct_rules.out
+--- /home/runner/work/pg-ripple/pg-ripple/tests/pg_regress/expected/construct_rules.out	2026-04-28 12:13:36.176333820 +0000
++++ /home/runner/work/pg-ripple/pg-ripple/tests/pg_regress/results/construct_rules.out	2026-04-28 12:15:54.060430132 +0000
+@@ -170,11 +170,7 @@
+ 
+ -- ── Citus: brin_summarize_vp_shards without Citus returns 0 ─────────────────
+ SELECT pg_ripple.brin_summarize_vp_shards(1) = 0 AS brin_summarize_zero_without_citus;
+- brin_summarize_zero_without_citus 
+------------------------------------
+- t
+-(1 row)
+-
++ERROR:  relation "_pg_ripple.vp_1_main" does not exist
+ -- ─────────────────────────────────────────────────────────────────────────────
+ -- v0.65.0 CWB BEHAVIOR MATRIX (CWB-FIX-08)
+ -- ─────────────────────────────────────────────────────────────────────────────
+diff -U3 /home/runner/work/pg-ripple/pg-ripple/tests/pg_regress/expected/diagnostic_report.out /home/runner/work/pg-ripple/pg-ripple/tests/pg_regress/results/diagnostic_report.out
+--- /home/runner/work/pg-ripple/pg-ripple/tests/pg_regress/expected/diagnostic_report.out	2026-04-28 12:13:36.178156199 +0000
++++ /home/runner/work/pg-ripple/pg-ripple/tests/pg_regress/results/diagnostic_report.out	2026-04-28 12:15:56.371434168 +0000
+@@ -54,7 +54,7 @@
+     (SELECT value FROM pg_ripple.diagnostic_report() WHERE key = 'compiled_version') AS cv;
+    sv   |   cv   
+ --------+--------
+- 0.65.0 | 0.65.0
++ 0.65.0 | 0.66.0
+ (1 row)
+ 
+ -- GUC values should be valid
+diff -U3 /home/runner/work/pg-ripple/pg-ripple/tests/pg_regress/expected/feature_status.out /home/runner/work/pg-ripple/pg-ripple/tests/pg_regress/results/feature_status.out
+--- /home/runner/work/pg-ripple/pg-ripple/tests/pg_regress/expected/feature_status.out	2026-04-28 12:13:36.178156199 +0000
++++ /home/runner/work/pg-ripple/pg-ripple/tests/pg_regress/results/feature_status.out	2026-04-28 12:15:56.970435215 +0000
+@@ -29,7 +29,7 @@
+                 0
+ (1 row)
+ 
+--- arrow_flight must not claim to be implemented (it is a stub).
++-- arrow_flight is experimental (HMAC signing + Arrow IPC added in v0.66.0).
+ SELECT status AS arrow_flight_status
+ FROM pg_ripple.feature_status()
+ WHERE feature_name = 'arrow_flight';
+diff -U3 /home/runner/work/pg-ripple/pg-ripple/tests/pg_regress/expected/v066_features.out /home/runner/work/pg-ripple/pg-ripple/tests/pg_regress/results/v066_features.out
+--- /home/runner/work/pg-ripple/pg-ripple/tests/pg_regress/expected/v066_features.out	2026-04-28 12:13:36.184156202 +0000
++++ /home/runner/work/pg-ripple/pg-ripple/tests/pg_regress/results/v066_features.out	2026-04-28 12:16:03.565446706 +0000
+@@ -87,30 +87,18 @@
+ -- ── Part 4: citus_brin_summarise_all() ───────────────────────────────────────
+ -- 4a. Function is callable (returns 0 when no VP main tables exist yet).
+ SELECT pg_ripple.citus_brin_summarise_all() >= 0 AS brin_summarise_ok;
+- brin_summarise_ok 
+--------------------
+- t
+-(1 row)
+-
++ERROR:  "vp_541_main" is not an index
+ -- ── Part 5: WCOJ explain metadata ────────────────────────────────────────────
+ -- 5a. explain_sparql_jsonb() output includes a 'wcoj' block.
+ SELECT (pg_ripple.explain_sparql_jsonb(
+     'SELECT ?s ?p ?o WHERE { ?s ?p ?o }'
+ ) -> 'wcoj') IS NOT NULL AS has_wcoj_block;
+- has_wcoj_block 
+-----------------
+- t
+-(1 row)
+-
++ERROR:  function pg_ripple.explain_sparql_jsonb(unknown) does not exist at character 9
+ -- 5b. wcoj block includes wcoj_mode field.
+ SELECT (pg_ripple.explain_sparql_jsonb(
+     'SELECT ?s ?p ?o WHERE { ?s ?p ?o }'
+ ) -> 'wcoj') ? 'wcoj_mode' AS has_wcoj_mode;
+- has_wcoj_mode 
+----------------
+- t
+-(1 row)
+-
++ERROR:  function pg_ripple.explain_sparql_jsonb(unknown) does not exist at character 9
+ -- ── Part 6: sparql_cursor() ──────────────────────────────────────────────────
+ -- 6a. sparql_cursor exists in pg_ripple schema.
+ SELECT EXISTS (
+@@ -128,8 +116,4 @@
+ FROM pg_ripple.sparql_cursor(
+     'SELECT ?s WHERE { ?s <https://v066.test/nonexistent> ?o }'
+ ) AS t(result jsonb);
+- cursor_empty_ok 
+------------------
+- t
+-(1 row)
+-
++ERROR:  a column definition list is only allowed for functions returning "record" at character 142

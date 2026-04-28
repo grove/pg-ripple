@@ -1,0 +1,57 @@
+-- sparql_explain_jsonb.sql — JSONB explain_sparql() tests (v0.40.0)
+--
+-- Verifies that the new JSONB overload of explain_sparql(text, bool) works:
+--   1. Returns JSONB with required top-level keys
+--   2. 'algebra' key is non-empty
+--   3. 'sql' key contains a SELECT statement
+--   4. 'plan' key is non-empty (EXPLAIN output)
+--   5. 'cache_hit' is boolean
+--   6. Old text-based overload still works
+SET search_path TO pg_ripple, public;
+CREATE EXTENSION IF NOT EXISTS pg_ripple;
+-- ── Setup ─────────────────────────────────────────────────────────────────────
+SELECT pg_ripple.load_ntriples($$
+<https://explain.jsonb.test/a> <https://explain.jsonb.test/name>  "Alpha" .
+<https://explain.jsonb.test/a> <https://explain.jsonb.test/knows> <https://explain.jsonb.test/b> .
+<https://explain.jsonb.test/b> <https://explain.jsonb.test/name>  "Beta" .
+$$) = 3 AS triples_loaded;
+ triples_loaded 
+----------------
+ t
+(1 row)
+
+-- ── 1–5. All key checks via single CTE call ───────────────────────────────────
+-- Calling explain_sparql multiple times in the same session can trigger
+-- PostgreSQL's "EXPLAIN is not allowed in a non-volatile function" guard
+-- when the planner inlines a subquery marked stable.  One call avoids this.
+WITH r AS (
+    SELECT pg_ripple.explain_sparql(
+        'SELECT ?name WHERE { ?s <https://explain.jsonb.test/name> ?name }',
+        false
+    ) AS j
+)
+SELECT
+    (j ? 'algebra')                          AS has_algebra,
+    (j ? 'sql')                              AS has_sql,
+    (j ? 'plan')                             AS has_plan,
+    (j ? 'cache_hit')                        AS has_cache_hit,
+    length(j->>'algebra') > 0               AS algebra_nonempty,
+    (j->>'sql') ILIKE '%SELECT%'             AS sql_contains_select,
+    length(j->>'plan') > 0                  AS plan_nonempty,
+    jsonb_typeof(j->'cache_hit') = 'boolean' AS cache_hit_is_bool
+FROM r;
+ has_algebra | has_sql | has_plan | has_cache_hit | algebra_nonempty | sql_contains_select | plan_nonempty | cache_hit_is_bool 
+-------------+---------+----------+---------------+------------------+---------------------+---------------+-------------------
+ t           | t       | t        | t             | t                | t                   | t             | t
+(1 row)
+
+-- ── 6. Old text-based explain_sparql still works ──────────────────────────────
+SELECT pg_ripple.explain_sparql(
+    'SELECT ?name WHERE { ?s <https://explain.jsonb.test/name> ?name }',
+    'sql'
+) ILIKE '%SELECT%' AS old_text_overload_works;
+ old_text_overload_works 
+-------------------------
+ t
+(1 row)
+
