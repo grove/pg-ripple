@@ -1190,8 +1190,17 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends curl ca-certificates lsb-release
+          curl https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo apt-key add -
+          echo "deb http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
+            | sudo tee /etc/apt/sources.list.d/pgdg.list
+          sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends \
-            libssl-dev pkg-config python3
+            build-essential pkg-config libssl-dev libclang-dev clang lld python3 \
+            postgresql-18 postgresql-server-dev-18
+          sudo chown -R "$USER" \
+            /usr/share/postgresql/18/extension \
+            /usr/lib/postgresql/18/lib
 
       - name: Set up Rust toolchain
         uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8  # stable
@@ -1209,23 +1218,24 @@ jobs:
       - name: Install cargo-pgrx
         run: |
           if ! command -v cargo-pgrx &>/dev/null; then
-            cargo install cargo-pgrx --locked
+            cargo install cargo-pgrx --version "=${{ env.PGRX_VERSION }}" --locked
           fi
 
-      - name: Initialize pgrx for PostgreSQL 18
-        run: cargo pgrx init --pg18 download
-
-      - name: Build and start pgrx PostgreSQL 18
+      - name: Build and install extension
         run: |
-          cargo pgrx install --pg-config ~/.pgrx/18.*/pgrx-install/bin/pg_config
-          cargo pgrx start pg18
+          PG_CONFIG=/usr/lib/postgresql/18/bin/pg_config
+          cargo pgrx install --pg-config "$PG_CONFIG" --release
+
+      - name: Start PostgreSQL and load extension
+        run: |
+          sudo -u postgres pg_ctlcluster 18 main start || true
+          sudo -u postgres psql -c "CREATE USER \"$USER\" SUPERUSER;" 2>/dev/null || true
+          sudo -u postgres psql -c "CREATE DATABASE \"$USER\" OWNER \"$USER\";" 2>/dev/null || true
+          psql -c "CREATE EXTENSION IF NOT EXISTS pg_ripple;"
 
       - name: Verify feature_status() evidence paths exist
         run: |
-          PGHOST=localhost PGPORT=28818 PGUSER="$USER" PGDATABASE=postgres \
-            psql -c "CREATE EXTENSION IF NOT EXISTS pg_ripple;" 2>&1
-          PGHOST=localhost PGPORT=28818 PGUSER="$USER" PGDATABASE=postgres \
-            psql -t -A -c "SELECT evidence_path FROM pg_ripple.feature_status() WHERE evidence_path IS NOT NULL;" \
+          psql -t -A -c "SELECT evidence_path FROM pg_ripple.feature_status() WHERE evidence_path IS NOT NULL;" \
             | while IFS= read -r path; do
                 if [ -n "$path" ] && [ ! -e "$path" ]; then
                   echo "MISSING evidence path: $path"
@@ -1250,6 +1260,6 @@ jobs:
 
       - name: Stop pgrx PostgreSQL 18
         if: always()
-        run: cargo pgrx stop pg18 2>/dev/null || true
+        run: sudo -u postgres pg_ctlcluster 18 main stop 2>/dev/null || true
 
 
