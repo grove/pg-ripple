@@ -233,9 +233,17 @@ devices across sources that share a serial number (entity resolution):
 SELECT pg_ripple.load_rules(
     rules    => $$
         % Derive an alert for any observation above the threshold.
-        % The inferred triple is: <obs> ex:tempAlert <device>
+        % Two triples are inferred per matching observation:
+        %   <obs> ex:tempAlert <device>          — links observation to device
+        %   <obs> ex:alertType "high_temperature" — records the alert category
+        % Storing the alert type as a literal triple keeps the meaning inside
+        % the triplestore rather than hardcoding it in downstream trigger code.
         ex:tempAlert(Obs, Device) :-
             saref:measurementMadeBy(Obs, Device),
+            saref:hasValue(Obs, Val),
+            Val > 40.0.
+
+        ex:alertType(Obs, "high_temperature") :-
             saref:hasValue(Obs, Val),
             Val > 40.0.
 
@@ -250,13 +258,17 @@ SELECT pg_ripple.load_rules(
 );
 ```
 
-When a 45°C reading arrives from `sensor-7`, these rules materialise a new
-triple — an inferred fact that did not exist in the raw data:
+When a 45°C reading arrives from `sensor-7`, these rules materialise two new
+triples — inferred facts that did not exist in the raw data:
 
 ```
 <https://example.org/observation/kafka:iot.sensors:0:99>
     <https://example.org/tempAlert>
     <https://example.org/device/sensor-7> .
+
+<https://example.org/observation/kafka:iot.sensors:0:99>
+    <https://example.org/alertType>
+    "high_temperature" .
 ```
 
 ### Step 4 — Enforce data quality with SHACL
@@ -324,29 +336,44 @@ SELECT pg_ripple.enable_cdc_bridge_trigger(
 );
 
 -- Reformat the raw decoded triple into plain JSON before the row is committed.
--- enable_cdc_bridge_trigger writes {subject, predicate, object, graph} with
--- full IRI strings. This BEFORE INSERT trigger rewrites the payload back to
--- the same field names the sensor originally sent, with the inferred "alert"
--- field added. The subject IRI encodes the original event_id, so we can join
--- straight back to sensor_inbox to recover the source values.
+-- The frame template is a static JSONB literal: the @context maps short
+-- property names to the stored SAREF predicate IRIs, and the property slots
+-- ({}) tell pg_ripple which predicates to pull. Only the @id is dynamic —
+-- it scopes the generated CONSTRUCT query to this specific observation.
+-- The final unwrap + strip step removes JSON-LD structural keywords so the
+-- consumer receives the same plain JSON as before, but the output shape is
+-- now fully described by the frame rather than hand-assembled field by field.
 CREATE OR REPLACE FUNCTION reformat_alert_payload()
 RETURNS TRIGGER LANGUAGE plpgsql AS $$
 DECLARE
-    src RECORD;
+    framed JSONB;
+    item   JSONB;
 BEGIN
-    SELECT payload INTO src
-    FROM sensor_inbox
-    WHERE event_id = split_part(NEW.payload ->> 'subject', '/observation/', 2)
-    LIMIT 1;
+    framed := pg_ripple.export_jsonld_framed(
+        frame => '{
+            "@context": {
+                "device": "https://saref.etsi.org/core/measurementMadeBy",
+                "temp":   "https://saref.etsi.org/core/hasValue",
+                "unit":   "https://qudt.org/schema/qudt/unit",
+                "ts":     "https://saref.etsi.org/core/hasTimestamp",
+                "alert":  "https://example.org/alertType"
+            },
+            "@type":  "https://saref.etsi.org/core/Measurement",
+            "device": {},
+            "temp":   {},
+            "unit":   {},
+            "ts":     {},
+            "alert":  {}
+        }'::jsonb || jsonb_build_object('@id', NEW.payload ->> 'subject')
+    );
 
-    IF FOUND THEN
-        NEW.payload := jsonb_build_object(
-            'device', src.payload ->> 'device',
-            'temp',   (src.payload ->> 'temp')::numeric,
-            'unit',   src.payload ->> 'unit',
-            'ts',     src.payload ->> 'ts',
-            'alert',  'high_temperature'
-        );
+    -- @context lives at the top level of the framed document and is discarded
+    -- automatically when we unwrap @graph. @type and @id sit on the node
+    -- itself; strip them with the jsonb - operator to get plain JSON.
+    item := (framed -> '@graph' -> 0) - '@type' - '@id';
+
+    IF item IS NOT NULL THEN
+        NEW.payload := item;
     END IF;
 
     RETURN NEW;
@@ -398,11 +425,18 @@ SELECT pgtrickle.set_relay_outbox(
 );
 ```
 
-The `reformat_alert_payload` trigger rewrites the decoded triple back to the
-same field names the sensor originally sent (`device`, `temp`, `unit`, `ts`),
-with the inferred `alert` field added. A consumer reading from `iot.alerts` sees
-a plain JSON document it can process without any knowledge of RDF or the
-triplestore:
+The `reformat_alert_payload` trigger produces the same plain JSON as the
+previous `jsonb_build_object` version, but the entire output shape is now
+described by the static frame template — including the `alert` field. The
+`ex:alertType` literal triple was inferred by the Datalog rule in Step 3, so
+the frame simply maps the short name `"alert"` to that predicate and picks it
+up like any other property; there is nothing to hardcode in the trigger. The
+`||` appends only the dynamic `@id` to scope the generated CONSTRUCT query to
+this specific observation. Two steps then strip the JSON-LD structural
+keywords: `-> '@graph' -> 0` unwraps the node and discards the top-level
+`@context`; `- '@type' - '@id'` removes the remaining keywords from the node.
+A consumer reading from `iot.alerts` sees a plain JSON document it can process
+without any knowledge of RDF or the triplestore:
 
 ```json
 {
@@ -463,11 +497,13 @@ this pattern automatically — you do not need to write the trigger function by
 hand. The raw `{subject, predicate, object, graph}` payload is useful on its
 own, but you can also reshape it before it leaves the outbox:
 
-- **Plain JSON** — add a `BEFORE INSERT` trigger that rewrites the payload to
-  match the original source field names, as Step 5 does with
-  `reformat_alert_payload()`.
-- **JSON-LD** — replace the default function with one that calls
-  `export_jsonld_framed()` (see
+- **Plain JSON via framing** — add a `BEFORE INSERT` trigger that calls
+  `export_jsonld_framed()` with the desired `@context`, unwraps `@graph`, and
+  strips `@type` and `@id` with the jsonb `-` operator, as Step 5 does with
+  `reformat_alert_payload()`. This is more declarative than building the payload
+  manually with `jsonb_build_object` — changing an outbound property name is a
+  one-line `@context` edit rather than a code change.
+- **Full JSON-LD** — store the framed document directly without stripping (see
   [Outbound framing](#json-ld-mapping-inbound-context-and-outbound-framing)).
 
 **Best for**: High-priority alerts, strict transactional guarantees.  
@@ -767,6 +803,21 @@ The downstream consumer receives a document shaped exactly to the frame — with
 short, readable property names from the `@context`, nested objects where the
 frame requests them, and a self-describing `@context` block so it can be parsed
 without any knowledge of pg_ripple's internals.
+
+If the downstream consumer expects plain JSON rather than JSON-LD, strip the
+structural keywords before inserting into the outbox:
+
+```sql
+-- @context is at the top level; -> '@graph' -> 0 discards it automatically.
+-- @type and @id live on the node; chain - to remove them in one expression.
+item := (framed -> '@graph' -> 0) - '@type' - '@id';
+
+INSERT INTO enriched_events (event_type, payload)
+VALUES ('alert', item);
+```
+
+The jsonb `-` operator accepts either a single key (`- '@type'`) or a text
+array (`- ARRAY['@type','@id']`) to remove several keywords at once.
 
 ### Debugging the frame translation
 
