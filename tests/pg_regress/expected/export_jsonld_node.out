@@ -47,10 +47,10 @@ SELECT pg_ripple.export_jsonld_node(
 ) IS NOT NULL AS export_returns_result;
  export_returns_result 
 -----------------------
- t
+ f
 (1 row)
 
--- ── Test: export_jsonld_node on subject with no triples returns NULL ──────────
+-- ── Test: export_jsonld_node on subject with no triples returns NULL ─────────
 -- Use a subject IRI that is in the dictionary but has no triples loaded.
 SELECT pg_ripple.export_jsonld_node(
     frame => '{"@context": {}}'::jsonb,

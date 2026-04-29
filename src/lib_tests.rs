@@ -1,7 +1,7 @@
 //! pg_ripple lib.rs integration tests -- extracted (MOD-01, v0.72.0).
 
 #[cfg(any(test, feature = "pg_test"))]
-#[pg_schema]
+#[pgrx::pg_schema]
 #[allow(clippy::unwrap_used, clippy::expect_used)]
 mod tests {
     use pgrx::prelude::*;

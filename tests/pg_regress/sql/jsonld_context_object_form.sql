@@ -24,10 +24,9 @@ SELECT pg_ripple.json_to_ntriples_and_load(
 ) > 0 AS object_form_loaded;
 
 -- Verify the triple was stored with the correct predicate IRI.
-SELECT COUNT(*) > 0 AS object_form_triples_exist
-FROM   pg_ripple.sparql(
-    'SELECT * WHERE { <https://example.org/device1> <https://saref.etsi.org/core/hasValue> ?o }'
-);
+SELECT pg_ripple.sparql_ask(
+    'ASK { <https://example.org/device1> <https://saref.etsi.org/core/hasValue> ?o }'
+) AS object_form_triples_exist;
 
 -- ── Test 2: Backward compatibility — string-form context entry unchanged ─────
 
@@ -38,10 +37,9 @@ SELECT pg_ripple.json_to_ntriples_and_load(
     '{"@context": {"name": "https://schema.org/name"}}'::jsonb
 ) > 0 AS string_form_loaded;
 
-SELECT COUNT(*) > 0 AS string_form_triples_exist
-FROM   pg_ripple.sparql(
-    'SELECT * WHERE { <https://example.org/person1> <https://schema.org/name> ?o }'
-);
+SELECT pg_ripple.sparql_ask(
+    'ASK { <https://example.org/person1> <https://schema.org/name> ?o }'
+) AS string_form_triples_exist;
 
 -- ── Cleanup ───────────────────────────────────────────────────────────────────
 SELECT pg_ripple.sparql_update(

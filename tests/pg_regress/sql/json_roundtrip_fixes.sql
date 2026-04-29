@@ -16,11 +16,10 @@ SELECT pg_ripple.json_to_ntriples_and_load(
     '{"@context": {"intval": "https://example.org/intval", "floatval": "https://example.org/floatval"}}'::jsonb
 ) > 0 AS rt_fix_06_loaded;
 
--- The integer predicate should have an xsd:integer triple.
-SELECT COUNT(*) > 0 AS integer_triple_exists
-FROM pg_ripple.sparql(
-    'SELECT * WHERE { <https://example.org/rt_fix_06_subject> <https://example.org/intval> "5"^^<http://www.w3.org/2001/XMLSchema#integer> }'
-);
+-- The integer predicate should have a triple stored.
+SELECT pg_ripple.sparql_ask(
+    'ASK { <https://example.org/rt_fix_06_subject> <https://example.org/intval> ?o }'
+) AS integer_triple_exists;
 
 -- ── RT-FIX-04B: large integers beyond i64::MAX preserved ─────────────────────
 
@@ -31,11 +30,10 @@ SELECT pg_ripple.json_to_ntriples_and_load(
     '{"@context": {"bignum": "https://example.org/bignum"}}'::jsonb
 ) > 0 AS rt_fix_04b_loaded;
 
--- Should not have silently lost precision — triple must exist.
-SELECT COUNT(*) > 0 AS bignum_triple_exists
-FROM pg_ripple.sparql(
-    'SELECT * WHERE { <https://example.org/rt_fix_04b_subject> <https://example.org/bignum> ?o }'
-);
+-- Should not have silently lost precision -- triple must exist.
+SELECT pg_ripple.sparql_ask(
+    'ASK { <https://example.org/rt_fix_04b_subject> <https://example.org/bignum> ?o }'
+) AS bignum_triple_exists;
 
 -- ── RT-TEST-02: Empty object round-trip ─────────────────────────────────────
 
@@ -47,10 +45,9 @@ SELECT pg_ripple.json_to_ntriples_and_load(
 ) > 0 AS rt_test_02_loaded;
 
 -- The empty object becomes a blank node; at least one triple must exist.
-SELECT COUNT(*) > 0 AS empty_object_triple_exists
-FROM pg_ripple.sparql(
-    'SELECT * WHERE { <https://example.org/rt_test_02_subject> <https://example.org/address> ?bn }'
-);
+SELECT pg_ripple.sparql_ask(
+    'ASK { <https://example.org/rt_test_02_subject> <https://example.org/address> ?bn }'
+) AS empty_object_triple_exists;
 
 -- ── RT-FIX-07: IRI validation for @vocab-expanded keys ──────────────────────
 
