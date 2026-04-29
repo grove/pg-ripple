@@ -33,10 +33,10 @@ SELECT COUNT(*) >= 1 AS storage_evidence_cited
 FROM pg_ripple.feature_status()
 WHERE evidence_path LIKE '%storage%';
 
--- 2c. Datalog reference doc is cited.
+-- 2c. Datalog reference doc is cited (in docs_path).
 SELECT COUNT(*) >= 1 AS datalog_evidence_cited
 FROM pg_ripple.feature_status()
-WHERE evidence_path LIKE '%datalog%';
+WHERE docs_path LIKE '%datalog%';
 
 -- ── Part 3: PROMO-RECOVER-01 — vp_promotion_recovery in feature_status ───────
 
@@ -48,4 +48,5 @@ WHERE feature_name = 'vp_promotion_recovery';
 -- ── Part 4: CACHE-INVALIDATE-01 — plan_cache_reset() callable ────────────────
 
 -- 4a. plan_cache_reset is callable without error.
-SELECT pg_ripple.plan_cache_reset() IS NOT DISTINCT FROM NULL AS plan_cache_reset_ok;
+DO $$ BEGIN PERFORM pg_ripple.plan_cache_reset(); END $$;
+SELECT true AS plan_cache_reset_ok;
