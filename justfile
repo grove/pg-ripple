@@ -193,6 +193,20 @@ release VERSION:
 
 # ── Release Quality Gate ──────────────────────────────────────────────────
 
+# SBOM-03: Verify that sbom.json version matches Cargo.toml version.
+# Fails with exit 1 if they differ (prevents stale SBOM in releases).
+[group: "release"]
+check-sbom-version:
+    @CARGO_VER=$(grep '^version = ' Cargo.toml | head -1 | grep -oP '"\\K[^"]+'); \
+     SBOM_VER=$(python3 -c "import json; print(json.load(open('sbom.json'))['version'])"); \
+     if [ "$$CARGO_VER" = "$$SBOM_VER" ]; then \
+       echo "OK: sbom.json version matches Cargo.toml ($$CARGO_VER)"; \
+     else \
+       echo "FAIL: sbom.json version ($$SBOM_VER) != Cargo.toml version ($$CARGO_VER)"; \
+       echo "Regenerate sbom.json with: cargo cyclonedx --format json"; \
+       exit 1; \
+     fi
+
 # Run the full release assessment quality gate (v0.64.0 TRUTH-08).
 # Checks: migration continuity, GitHub Actions pinning, SECURITY DEFINER lint,
 # roadmap evidence, docs/API drift, feature-status smoke, release evidence dry run.
@@ -200,6 +214,9 @@ release VERSION:
 [group: "release"]
 assess-release VERSION="":
     @echo "=== pg_ripple release assessment ==="
+    @echo ""
+    @echo "--- SBOM version check ---"
+    @just check-sbom-version
     @echo ""
     @echo "--- Migration headers lint ---"
     bash scripts/check_migration_headers.sh

@@ -471,6 +471,26 @@ mod pg_ripple {
                 Some("docs/src/features/loading-data.md".to_string()),
                 Some("src/json_mapping.rs".to_string()),
             ),
+            // ── VP promotion recovery monitoring (v0.74.0 PROMO-RECOVER-01) ──
+            (
+                "vp_promotion_recovery".to_string(),
+                "implemented".to_string(),
+                None,
+                Some({
+                    let count = pgrx::Spi::get_one::<i64>(
+                        "SELECT COUNT(*) FROM _pg_ripple.predicates \
+                         WHERE promotion_status = 'promoting'"
+                    ).ok().flatten().unwrap_or(0);
+                    format!(
+                        "PROMO-RECOVER-01 (v0.74.0): recover_interrupted_promotions() is \
+                         auto-invoked by background worker 0 at startup. \
+                         Currently {count} predicate(s) stuck in 'promoting' state."
+                    )
+                }),
+                Some("ci/regress: v074_features.sql".to_string()),
+                Some("docs/src/reference/storage.md".to_string()),
+                Some("src/storage/promote.rs: recover_interrupted_promotions".to_string()),
+            ),
         ];
 
         TableIterator::new(rows)

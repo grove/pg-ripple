@@ -87,6 +87,29 @@ pub extern "C-unwind" fn pg_ripple_merge_worker_main(arg: pg_sys::Datum) {
 
     pgrx::log!("pg_ripple merge worker {worker_idx} started (database: {db_name})");
 
+    // PROMO-RECOVER-01: Worker 0 runs recover_interrupted_promotions() once at
+    // startup to resume any VP promotions that were interrupted by an unclean
+    // shutdown.  SPI is safe here because we're inside a background worker
+    // (not _PG_init).
+    if worker_idx == 0 {
+        let run_result = std::panic::catch_unwind(|| {
+            BackgroundWorker::transaction(|| {
+                let recovered = crate::storage::promote::recover_interrupted_promotions();
+                if recovered > 0 {
+                    pgrx::log!(
+                        "pg_ripple merge worker 0: recovered {recovered} interrupted VP promotion(s)"
+                    );
+                }
+            });
+        });
+        if let Err(e) = run_result {
+            unsafe {
+                pg_sys::FlushErrorState();
+            }
+            pgrx::log!("pg_ripple merge worker 0: recovery startup failed (non-fatal): {e:?}");
+        }
+    }
+
     // Main loop: wait for latch or timeout, then run a merge cycle.
     let interval_secs = get_merge_interval();
     let mut consecutive_errors: u32 = 0;

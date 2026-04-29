@@ -13,6 +13,60 @@ Versions correspond to the milestones in [ROADMAP.md](ROADMAP.md).
 
 ---
 
+## [0.74.0] — 2026-05-09 — Assessment 11 Critical/High Remediation
+
+**Implements v0.74.0 roadmap: evidence truthfulness for all 12 missing reference docs, mutation journal wired through Datalog inference and executor-end hook, VP promotion plan-cache invalidation, interrupted-promotion recovery, and comprehensive CI validation.**
+
+### What's new
+
+- **EVIDENCE-01** — Created 12 missing `docs/src/reference/` pages cited by `feature_status()`:
+  `sparql.md`, `datalog.md`, `shacl.md`, `storage.md`, `construct-rules.md`, `federation.md`,
+  `cdc.md`, `graphrag.md`, `observability.md`, `query-optimization.md`, `vector-search.md`,
+  `development.md`. SUMMARY.md updated with all new entries.
+
+- **GATE-05** — Fixed `validate-feature-status` CI job: replaced subshell-bypass pattern with
+  `missing=$(...)` variable capture so missing evidence paths cause a real non-zero exit.
+
+- **GATE-06** — Added `validate-feature-status-populated` CI job: installs extension, inserts sample
+  triples, then validates that `feature_status()` returns no `degraded` rows on a populated DB.
+
+- **JOURNAL-DATALOG-01** — Wired Datalog inference through the mutation journal (CF-D + HF-C fixes):
+  `run_inference_seminaive()` records affected graph IDs from `_dl_delta_*` tables after VP-rare
+  insertion and calls `mutation_journal::flush()`. `run_inference()` similarly flushes after
+  any triples are derived.
+
+- **SBOM-03** — SBOM regenerated to v0.74.0. Added `just check-sbom-version` target to the
+  justfile and wired it into `just assess-release` as the first check.
+
+- **HTTP-VERSION-01** — `pg_ripple_http` version bumped to 0.74.0; `COMPATIBLE_EXTENSION_MIN`
+  updated to "0.73.0".
+
+- **DOC-JOURNAL-01** — Updated `mutation_journal` module and `flush()` doc comments to accurately
+  list all wired call sites (bulk_load, dict_api, Datalog seminaive, executor-end hook); removed
+  false claim that SPARQL Update was wired.
+
+- **PROMO-RECOVER-01** — Background merge worker (worker 0) now calls
+  `recover_interrupted_promotions()` at startup inside a catch-unwind block. A new
+  `vp_promotion_recovery` row (status `implemented`) is added to `feature_status()`.
+
+- **CACHE-INVALIDATE-01** — `promote_predicate()` calls `crate::sparql::plan_cache_reset()` after
+  completing a VP promotion, so stale query plans that hard-coded `vp_rare` are evicted.
+
+- **TEST-04** — Added `tests/pg_regress/sql/v070_features.sql` regression test covering
+  construct_writeback status, evidence-path coverage, vp_promotion_recovery, and plan_cache_reset.
+
+- **FLUSH-DEFER-01** — Executor-end hook (`register_executor_end_hook`) calls
+  `mutation_journal::flush()` at the start of each hook invocation, providing per-statement
+  CWB rule firing even when dict_api is not used.
+
+### Schema changes
+
+None — all changes are in the Rust implementation only.
+
+- Migration: `sql/pg_ripple--0.73.0--0.74.0.sql`.
+
+---
+
 ## [0.73.0] — 2026-05-05 — SPARQL 1.2 Tracking, Live Subscriptions, and JSON Mapping Registry
 
 **Implements v0.73.0 roadmap: SPARQL 1.2 compatibility tracking, SPARQL live subscription API via SSE, named bidirectional JSON↔RDF mapping registry, multi-graph JSON-LD ingest, CONTRIBUTING.md, Helm chart sidecar image config, and feature-status taxonomy.**

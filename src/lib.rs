@@ -225,11 +225,13 @@ pub(crate) fn has_live_statistics() -> bool {
     .unwrap_or(false)
 }
 
-// ─── ExecutorEnd hook (v0.6.0) ────────────────────────────────────────────────
+// ─── ExecutorEnd hook (v0.6.0, updated v0.74.0 FLUSH-DEFER-01) ───────────────
 
-/// Register a PostgreSQL `ExecutorEnd_hook` that pokes the merge worker's latch
-/// whenever the accumulated unmerged delta row count crosses
-/// `pg_ripple.latch_trigger_threshold`.
+/// Register a PostgreSQL `ExecutorEnd_hook` that:
+/// 1. Pokes the merge worker's latch when accumulated delta rows exceed threshold.
+/// 2. Flushes the mutation journal at statement end (FLUSH-DEFER-01) so that
+///    single-triple inserts in a loop fire CWB rules once per statement, not
+///    once per triple (quadratic cost elimination).
 ///
 /// Must only be called from `_PG_init` inside the postmaster context
 /// (i.e. when loaded via `shared_preload_libraries`).
@@ -253,6 +255,11 @@ fn register_executor_end_hook() {
                     pg_sys::standard_ExecutorEnd(query_desc);
                 }
             }
+
+            // FLUSH-DEFER-01: flush the mutation journal at statement end.
+            // This converts per-triple CWB firing into per-statement firing.
+            // Safe to call here because the executor end runs in normal SPI context.
+            crate::storage::mutation_journal::flush();
 
             // If shmem is ready, check whether delta growth exceeds the threshold.
             if !crate::shmem::SHMEM_READY.load(std::sync::atomic::Ordering::Acquire) {

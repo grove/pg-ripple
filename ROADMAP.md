@@ -136,7 +136,7 @@
 
 | Version | Theme | Status | Scope | Full details |
 |---------|-------|--------|-------|-------------- |
-| [v0.74.0](roadmap/v0.74.0.md) | Assessment 11 critical/high remediation: evidence-path truthfulness (12 missing docs stubs, CI gate fix), mutation journal wiring for Datalog/R2RML/CDC, SBOM regeneration, HTTP companion version alignment, populated-DB CI validation, plan cache invalidation on VP promotion, per-statement flush deferral | Planned | Large | [Full details](roadmap/v0.74.0-full.md) |
+| [v0.74.0](roadmap/v0.74.0.md) | Assessment 11 critical/high remediation: evidence-path truthfulness (12 missing docs stubs, CI gate fix), mutation journal wiring for Datalog/R2RML/CDC, SBOM regeneration, HTTP companion version alignment, populated-DB CI validation, plan cache invalidation on VP promotion, per-statement flush deferral | Released ✅ | Large | [Full details](roadmap/v0.74.0-full.md) |
 | [v0.75.0](roadmap/v0.75.0.md) | Assessment 11 medium findings: unwrap/panic audit, Citus and Arrow integration test CI wiring, roadmap status validation, RLS error surfacing, role-name doc, property-path edge tests, fuzz duration increase, URL parser fuzz target, HTTP companion production docs, feature-status journal entry | Planned | Large | [Full details](roadmap/v0.75.0-full.md) |
 | [v0.76.0](roadmap/v0.76.0.md) | Assessment 11 low-severity and polish: rust-toolchain pin, RLS hash widening, Arrow dep pin, benchmark baseline refresh, test count growth, /metrics auth docs, xact SPI safety citation, log-hook audit, clippy gate verification | Planned | Medium | [Full details](roadmap/v0.76.0-full.md) |
 

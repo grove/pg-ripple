@@ -275,6 +275,34 @@ pub fn run_inference_seminaive(rule_set_name: &str) -> (i64, i32) {
         }
     }
 
+    // JOURNAL-DATALOG-01: collect affected graph IDs from delta tables before
+    // dropping them, then record writes for CONSTRUCT writeback rules (CF-D fix).
+    if total_derived > 0 {
+        let mut affected_graphs: std::collections::HashSet<i64> = std::collections::HashSet::new();
+        for &pred_id in &derived_pred_ids {
+            let rows = Spi::connect(|client| {
+                client
+                    .select(
+                        &format!("SELECT DISTINCT g FROM _dl_delta_{pred_id}"),
+                        None,
+                        &[],
+                    )
+                    .unwrap_or_else(|_| {
+                        pgrx::error!("DISTINCT g query failed on _dl_delta_{pred_id}")
+                    })
+                    .map(|row| row.get::<i64>(1).ok().flatten())
+                    .collect::<Vec<_>>()
+            });
+            for g in rows.into_iter().flatten() {
+                affected_graphs.insert(g);
+            }
+        }
+        for g in affected_graphs {
+            crate::storage::mutation_journal::record_write(g);
+        }
+        crate::storage::mutation_journal::flush();
+    }
+
     for &pred_id in &derived_pred_ids {
         let _ = Spi::run_with_args(&format!("DROP TABLE IF EXISTS _dl_delta_{pred_id}"), &[]);
         let _ = Spi::run_with_args(
@@ -390,6 +418,21 @@ pub fn run_inference(rule_set_name: &str) -> i64 {
                 }
             }
         }
+    }
+    // JOURNAL-DATALOG-01: flush mutation journal so CONSTRUCT writeback fires
+    // after simple (non-seminaive) inference (CF-D fix).
+    if total_derived > 0 {
+        let graph_rows = Spi::connect(|client| {
+            client
+                .select("SELECT DISTINCT g FROM _pg_ripple.vp_rare", None, &[])
+                .unwrap_or_else(|e| pgrx::error!("run_inference: graph query failed: {e}"))
+                .map(|row| row.get::<i64>(1).ok().flatten())
+                .collect::<Vec<_>>()
+        });
+        for g in graph_rows.into_iter().flatten() {
+            crate::storage::mutation_journal::record_write(g);
+        }
+        crate::storage::mutation_journal::flush();
     }
     total_derived
 }
