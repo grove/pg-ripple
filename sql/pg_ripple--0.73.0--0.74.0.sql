@@ -15,3 +15,9 @@
 -- * FLUSH-DEFER-01: executor-end hook flushes mutation journal per-statement.
 --
 -- Schema changes: None (all changes are in Rust implementation only).
+
+-- Bump schema version stamp.
+INSERT INTO _pg_ripple.schema_version (version, upgraded_from, installed_at)
+    VALUES ('0.74.0', '0.73.0', clock_timestamp());
+
+SELECT pg_ripple_version();

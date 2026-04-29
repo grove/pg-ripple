@@ -1351,3 +1351,10 @@ INSERT INTO _pg_ripple.schema_version (version, upgraded_from, installed_at)
     name = "v073_schema_additions",
     requires = ["v072_schema_version_stamp"]
 );
+
+pgrx::extension_sql!(
+    "INSERT INTO _pg_ripple.schema_version (version, upgraded_from, installed_at) \
+     VALUES ('0.74.0', '0.73.0', clock_timestamp());",
+    name = "v074_schema_version_stamp",
+    requires = ["v073_schema_additions"]
+);
