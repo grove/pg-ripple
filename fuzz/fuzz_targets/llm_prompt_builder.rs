@@ -35,25 +35,34 @@ const INJECTION_MARKERS: &[&str] = &[
 /// Minimal inline prompt sanitizer mirroring `src/llm/mod.rs`.
 ///
 /// Removes prompt-injection markers using a case-insensitive replacement pass.
-/// This is the same algorithm used in the production code; having it here
-/// ensures the fuzzer can exercise it without depending on the pgrx extension.
+/// Iterates to fixpoint: removing one marker may expose another (e.g.
+/// `###[SYSTEM]SYS` → strip `[SYSTEM]` → `###SYS`), so the loop repeats
+/// until a full pass over all markers produces no further changes.
 fn sanitize_prompt(input: &str) -> String {
     let mut result = input.to_owned();
-    for marker in INJECTION_MARKERS {
-        // Case-insensitive removal: collect indices of the marker in `result`.
-        let upper = result.to_uppercase();
-        let marker_upper = marker.to_uppercase();
-        let mut out = String::with_capacity(result.len());
-        let mut last = 0usize;
-        let mut search_from = 0usize;
-        while let Some(pos) = upper[search_from..].find(&marker_upper) {
-            let abs_pos = search_from + pos;
-            out.push_str(&result[last..abs_pos]);
-            search_from = abs_pos + marker.len();
-            last = search_from;
+    loop {
+        let mut changed = false;
+        for marker in INJECTION_MARKERS {
+            // Case-insensitive removal: rebuild `result` without the marker.
+            let upper = result.to_uppercase();
+            let marker_upper = marker.to_uppercase();
+            let mut out = String::with_capacity(result.len());
+            let mut last = 0usize;
+            let mut search_from = 0usize;
+            while let Some(pos) = upper[search_from..].find(&marker_upper) {
+                let abs_pos = search_from + pos;
+                out.push_str(&result[last..abs_pos]);
+                search_from = abs_pos + marker.len();
+                last = search_from;
+                changed = true;
+            }
+            out.push_str(&result[last..]);
+            result = out;
         }
-        out.push_str(&result[last..]);
-        result = out;
+        // If no marker was removed in this pass, the output is stable.
+        if !changed {
+            break;
+        }
     }
     result
 }
