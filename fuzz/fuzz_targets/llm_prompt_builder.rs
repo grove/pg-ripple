@@ -32,44 +32,80 @@ const INJECTION_MARKERS: &[&str] = &[
     "DAN MODE",
 ];
 
+/// Find the first occurrence of `needle_upper` (a pre-uppercased ASCII slice)
+/// in `haystack` using full Unicode case expansion.
+///
+/// Each character of `haystack` is expanded via `char::to_uppercase()` before
+/// comparison.  This catches Unicode look-alike characters such as
+/// ſ (U+017F LATIN SMALL LETTER LONG S) whose Unicode uppercase is 'S'.
+///
+/// Returns `(start_byte, end_byte)` in `haystack` — the byte range to drain.
+fn find_marker_unicode(haystack: &str, needle_upper: &[char]) -> Option<(usize, usize)> {
+    let m = needle_upper.len();
+    if m == 0 {
+        return None;
+    }
+
+    // Expand every haystack character to its Unicode uppercase form, recording
+    // the original byte range that each expanded character came from.
+    let expanded: Vec<(char, usize, usize)> = haystack
+        .char_indices()
+        .flat_map(|(byte_start, ch)| {
+            let byte_end = byte_start + ch.len_utf8();
+            ch.to_uppercase().map(move |uc| (uc, byte_start, byte_end))
+        })
+        .collect();
+
+    let n = expanded.len();
+    if n < m {
+        return None;
+    }
+
+    'outer: for i in 0..=(n - m) {
+        for j in 0..m {
+            if expanded[i + j].0 != needle_upper[j] {
+                continue 'outer;
+            }
+        }
+        let start_byte = expanded[i].1;
+        let end_byte = expanded[i + m - 1].2;
+        return Some((start_byte, end_byte));
+    }
+    None
+}
+
 /// Minimal inline prompt sanitizer mirroring `src/llm/mod.rs`.
 ///
-/// Removes prompt-injection markers using a case-insensitive replacement pass.
+/// Removes prompt-injection markers using a Unicode-aware, case-insensitive
+/// scan.  Each character is expanded to its full Unicode uppercase form before
+/// comparison so that look-alike characters (e.g. ſ U+017F → S, ȿ U+023F →
+/// Ȿ U+2C9F) cannot be used to bypass ASCII-only case folding.
+///
 /// Iterates to fixpoint: removing one marker may expose another (e.g.
-/// `###[SYSTEM]SYS` → strip `[SYSTEM]` → `###SYS`), so the loop repeats
-/// until a full pass over all markers produces no further changes.
-///
-/// # Why `to_ascii_uppercase` instead of `to_uppercase`
-///
-/// Unicode `to_uppercase` can change the byte length of a string (e.g. U+023F
-/// `ȿ` is 2 UTF-8 bytes but its uppercase U+2C9F `Ȿ` is 3 bytes). Using the
-/// Unicode-uppercased string to find byte offsets and then applying those
-/// offsets to the original `result` (which has different lengths) would slice
-/// at wrong positions. All injection markers are ASCII, so ASCII-only
-/// uppercasing is both correct and length-preserving: offsets in `upper`
-/// always correspond to the same byte positions in `result`.
+/// `###[SYSTEM]SYS` → strip `[SYSTEM]` → `###SYS`), so the outer loop
+/// repeats until a complete pass over all markers produces no further changes.
 fn sanitize_prompt(input: &str) -> String {
+    // Pre-compute the uppercase char sequence for each marker.
+    // All markers are ASCII, so to_uppercase() == to_ascii_uppercase() here.
+    let marker_uppers: Vec<Vec<char>> = INJECTION_MARKERS
+        .iter()
+        .map(|m| m.chars().map(|c| c.to_ascii_uppercase()).collect())
+        .collect();
+
     let mut result = input.to_owned();
     loop {
         let mut changed = false;
-        for marker in INJECTION_MARKERS {
-            // ASCII-only case-insensitive removal.
-            // to_ascii_uppercase preserves byte length, so offsets found in
-            // `upper` are valid byte indices into `result`.
-            let upper = result.to_ascii_uppercase();
-            let marker_upper = marker.to_ascii_uppercase();
-            let mut out = String::with_capacity(result.len());
-            let mut last = 0usize;
-            let mut search_from = 0usize;
-            while let Some(pos) = upper[search_from..].find(&marker_upper) {
-                let abs_pos = search_from + pos;
-                out.push_str(&result[last..abs_pos]);
-                search_from = abs_pos + marker.len();
-                last = search_from;
-                changed = true;
+        for marker_upper in &marker_uppers {
+            // Remove occurrences left-to-right until none remain.
+            loop {
+                match find_marker_unicode(&result, marker_upper) {
+                    Some((start, end)) => {
+                        result.drain(start..end);
+                        changed = true;
+                    }
+                    None => break,
+                }
             }
-            out.push_str(&result[last..]);
-            result = out;
         }
         // If no marker was removed in this pass, the output is stable.
         if !changed {
