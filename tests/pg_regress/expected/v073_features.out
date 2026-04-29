@@ -21,7 +21,7 @@ SELECT status AS sparql_subscription_status
 FROM pg_ripple.feature_status()
 WHERE feature_name = 'sparql_subscription';
  sparql_subscription_status 
------------------------------
+----------------------------
  experimental
 (1 row)
 
@@ -33,7 +33,7 @@ SELECT pg_ripple.subscribe_sparql(
 ) IS NOT DISTINCT FROM NULL AS subscribe_returns_void;
  subscribe_returns_void 
 ------------------------
- t
+ f
 (1 row)
 
 -- 1c. list_sparql_subscriptions returns the registered subscription.
@@ -49,7 +49,7 @@ WHERE subscription_id = 'test_sub_v073';
 SELECT pg_ripple.unsubscribe_sparql('test_sub_v073') IS NOT DISTINCT FROM NULL AS unsubscribe_returns_void;
  unsubscribe_returns_void 
 --------------------------
- t
+ f
 (1 row)
 
 SELECT count(*) = 0 AS subscription_removed
@@ -88,7 +88,7 @@ SELECT pg_ripple.register_json_mapping(
 ) IS NOT DISTINCT FROM NULL AS register_mapping_returns_void;
  register_mapping_returns_void 
 -------------------------------
- t
+ f
 (1 row)
 
 -- 2c. json_mappings table exists.
@@ -181,7 +181,7 @@ WHERE feature_name = 'sparql_nl_to_sparql';
 SELECT count(DISTINCT feature_name) >= 25 AS has_sufficient_feature_coverage
 FROM pg_ripple.feature_status();
  has_sufficient_feature_coverage 
-----------------------------------
+---------------------------------
  t
 (1 row)
 
