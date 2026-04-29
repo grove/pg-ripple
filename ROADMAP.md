@@ -132,6 +132,89 @@
 | [v0.72.0](roadmap/v0.72.0.md) | Architecture and protocol hardening: mutation journal SAVEPOINT safety, plan cache docs, continued module split, ConstructTemplate proptest, SPARQL Update fuzz, conformance gate promotion, Arrow Flight replay protection | Released | Large | [Full details](roadmap/v0.72.0-full.md) |
 | [v0.73.0](roadmap/v0.73.0.md) | SPARQL 1.2 tracking, live SPARQL subscription API (WebSocket/SSE), feature status taxonomy, CONTRIBUTING.md, Helm chart SHA pin, R2RML scope docs | Planned | Large | [Full details](roadmap/v0.73.0-full.md) |
 
+### Assessment 11 Remediation & Production Polish (v0.75.0 – v0.77.0)
+
+| Version | Theme | Status | Scope | Full details |
+|---------|-------|--------|-------|-------------- |
+| [v0.75.0](roadmap/v0.75.0.md) | Assessment 11 critical/high remediation: evidence-path truthfulness (12 missing docs stubs, CI gate fix), mutation journal wiring for Datalog/R2RML/CDC, SBOM regeneration, HTTP companion version alignment, populated-DB CI validation, plan cache invalidation on VP promotion, per-statement flush deferral | Planned | Large | [Full details](roadmap/v0.75.0-full.md) |
+| [v0.76.0](roadmap/v0.76.0.md) | Assessment 11 medium findings: unwrap/panic audit, Citus and Arrow integration test CI wiring, roadmap status validation, RLS error surfacing, role-name doc, property-path edge tests, fuzz duration increase, URL parser fuzz target, HTTP companion production docs, feature-status journal entry | Planned | Large | [Full details](roadmap/v0.76.0-full.md) |
+| [v0.77.0](roadmap/v0.77.0.md) | Assessment 11 low-severity and polish: rust-toolchain pin, RLS hash widening, Arrow dep pin, benchmark baseline refresh, test count growth, /metrics auth docs, xact SPI safety citation, log-hook audit, clippy gate verification | Planned | Medium | [Full details](roadmap/v0.77.0-full.md) |
+
+#### PLAN_OVERALL_ASSESSMENT_11 coverage map
+
+Every finding and recommendation from [plans/PLAN_OVERALL_ASSESSMENT_11.md](plans/PLAN_OVERALL_ASSESSMENT_11.md) is assigned to one or more roadmap milestones:
+
+| Assessment finding | Roadmap coverage |
+|---|---|
+| CF-A: `sparql_update()` never flushes the mutation journal | v0.74.0 (separate PR) |
+| CF-B: No `RegisterSubXactCallback`; SAVEPOINT rollback leaves stale journal | v0.72.0 XACT-01 |
+| CF-C: 12 missing `docs/src/reference/*.md`; `validate-feature-status` CI bypassed | v0.75.0 EVIDENCE-01, GATE-05 |
+| CF-D: Datalog/R2RML/CDC write paths bypass mutation journal entirely | v0.75.0 JOURNAL-DATALOG-01 |
+| HF-A: SBOM contains stale `pg_ripple@0.51.0`; top-level one release behind | v0.75.0 SBOM-03 |
+| HF-B: `pg_ripple_http` version frozen at 0.16.0 | v0.75.0 HTTP-VERSION-01 |
+| HF-C: Datalog/R2RML/CDC bypass all mutation-journal-driven side effects | v0.75.0 JOURNAL-DATALOG-01 |
+| HF-D: `validate-feature-status` runs on fresh DB, not populated | v0.75.0 GATE-06 |
+| HF-E: Mutation journal doc-comment misleads about caller contract | v0.75.0 DOC-JOURNAL-01 |
+| HF-F: Plan cache key omits current_role / GUCs (A10 HF-6 unchanged) | v0.72.0 CACHE-01 |
+| HF-G: `recover_interrupted_promotions()` not auto-invoked at startup | v0.75.0 PROMO-RECOVER-01 |
+| MF-A: Plan cache invalidation on VP promotion not implemented | v0.75.0 CACHE-INVALIDATE-01 |
+| MF-B: `pg_ripple_http` COMPATIBLE_EXTENSION_MIN stale | v0.75.0 HTTP-VERSION-01 |
+| MF-C: `merge_throughput_history.csv` still one row (A10 MF-5) | v0.72.0 BENCH-03 |
+| MF-D: `v070_features.sql` regression test missing | v0.75.0 TEST-04 |
+| MF-E: `src/lib.rs` and `src/storage/mod.rs` continued to grow (A10 MF-10) | v0.72.0 MOD-01 |
+| MF-F: Per-API flush in `dict_api.rs` quadratic on rule count | v0.75.0 FLUSH-DEFER-01 |
+| MF-G: 12 missing docs break operator UX for `feature_status()` | v0.75.0 EVIDENCE-01 |
+| MF-H: `unwrap()` outside `#[cfg(test)]` in dictionary/inline.rs, flight.rs, etc. | v0.76.0 UNWRAP-AUDIT-01 |
+| MF-I: Citus integration test not in any CI workflow | v0.76.0 CI-INTEGRATION-01 |
+| MF-J: Arrow export integration test not in CI | v0.76.0 CI-INTEGRATION-02 |
+| MF-K: Roadmap status not validated post-release | v0.76.0 ROADMAP-VALIDATE-01 |
+| MF-L: `mutation_journal::flush()` doc-comment contract inaccurate | v0.75.0 DOC-JOURNAL-01 |
+| MF-M: `apply_rls_to_vp_table` swallows errors via `let _ =` | v0.76.0 RLS-ERROR-01 |
+| MF-N: `is_safe_role_name` rejects non-ASCII identifiers | v0.76.0 ROLE-DOC-01 |
+| MF-O: Verify role quoting in `apply_rls_policy_to_all_dedicated_tables` | v0.76.0 RLS-AUDIT-01 |
+| MF-P: Property path inside OPTIONAL / GRAPH with vp_rare untested | v0.76.0 PROPPATH-TEST-01 |
+| MF-Q: No fuzz target for URL host parser | v0.76.0 FUZZ-URL-01 |
+| MF-R: HTTP companion skip-compat env var not documented for production | v0.76.0 COMPAT-DOC-01 |
+| MF-S: 60s/run fuzz duration inadequate | v0.76.0 FUZZ-DURATION-01 |
+| MF-T: `feature_status.rs` lacks mutation_journal entry | v0.76.0 FEATURE-STATUS-JOURNAL-01 |
+| Low: `rust-toolchain.toml` pins "stable" not specific version | v0.77.0 TOOLCHAIN-PIN-01 |
+| Low: Policy name 64-bit hash collision risk | v0.77.0 RLS-HASH-01 |
+| Low: `arrow` dep not pinned to minor | v0.77.0 ARROW-PIN-01 |
+| Low: `merge_throughput_baselines.json` baseline v0.53.0 | v0.77.0 BENCH-REFRESH-01 |
+| Low: Test count ~190 vs 300+ target | v0.77.0 TEST-GROWTH-01 |
+| Low: `/metrics` auth model undocumented | v0.77.0 METRICS-AUTH-DOC-01 |
+| Low: xact callback PRE_COMMIT SPI safety claim lacks citation | v0.77.0 XACT-SPI-DOC-01 |
+| Low: No `RegisterEmitLogHook` for secrets suppression | v0.77.0 LOG-HOOK-01 |
+| Low: `clippy --deny warnings` gate not re-verified | v0.77.0 CLIPPY-VERIFY-01 |
+| Low: `src/llm/` and `src/kge.rs` not in feature_status | v0.73.0 FEATURE-STATUS-02 (verify in v0.77.0) |
+| Low: Integration scripts not in CI workflows | v0.76.0 CI-INTEGRATION-01, CI-INTEGRATION-02 |
+| A10 MF-3: plan_cache_reset lacks docs | v0.72.0 CACHE-01 |
+| A10 MF-9: Decode of unknown dictionary IDs silently empty | v1.0.0 (tracked) |
+| A10 MF-11: No proptest for ConstructTemplate | v0.72.0 PROPTEST-01 |
+| A10 MF-12: Fuzz corpus may not exercise SPARQL Update | v0.72.0 FUZZ-02 |
+| A10 MF-13: Streaming counters not on `/metrics` | v0.72.0 OBS-02 |
+| A10 MF-14: Three batch-size GUCs undocumented | v0.72.0 GUC-DOC-01 |
+| A10 MF-15: `[Unreleased]` section lacks guidance | v0.73.0 CONTRIB-01 |
+| A10 MF-18: URL-host parser untested | v0.72.0 CITUS-URL-01, v0.76.0 FUZZ-URL-01 |
+| A10 MF-19: Arrow Flight ticket replay protection | v0.72.0 FLIGHT-NONCE-01 |
+| A10 MF-20: feature_status taxonomy undocumented | v0.73.0 TAXONOMY-01 |
+| Recommended action 1: flush at sparql_update/execute_delete_insert | v0.74.0 (separate PR) |
+| Recommended action 2: SubXact callback | v0.72.0 XACT-01 |
+| Recommended action 3: Datalog/R2RML/CDC mutation journal wiring | v0.75.0 JOURNAL-DATALOG-01 |
+| Recommended action 4: 12 missing docs or strip citations | v0.75.0 EVIDENCE-01 |
+| Recommended action 5: SBOM regeneration + deduplication | v0.75.0 SBOM-03 |
+| Recommended action 6: HTTP companion version alignment | v0.75.0 HTTP-VERSION-01 |
+| Recommended action 7: v070_features.sql | v0.75.0 TEST-04 |
+| Recommended action 8: Per-statement flush deferral | v0.75.0 FLUSH-DEFER-01 |
+| Recommended action 9: Integration tests in CI | v0.76.0 CI-INTEGRATION-01, CI-INTEGRATION-02 |
+| Recommended action 10: Plan cache reset on promotion | v0.75.0 CACHE-INVALIDATE-01 |
+| Maturity area: Correctness (C rating → target B) | v0.74.0 CF-A, v0.75.0 CF-C/CF-D |
+| Maturity area: Code Quality (C+ → target B) | v0.72.0 MOD-01, v0.76.0 UNWRAP-AUDIT-01 |
+| Maturity area: Documentation (C+ → target B) | v0.75.0 EVIDENCE-01, v0.77.0 METRICS-AUTH-DOC-01 |
+| Maturity area: Performance (C+ → target B) | v0.75.0 FLUSH-DEFER-01, CACHE-INVALIDATE-01 |
+| Positive developments (9 items) | Verified and documented in assessment; no roadmap action needed |
+| Appendix: Unchecked runtime items (16 items) | v1.0.0 PROD-01 through PROD-05 (soak tests, security audit, conformance) |
+
 #### PLAN_OVERALL_ASSESSMENT_10 coverage map
 
 Every finding and recommendation from [plans/PLAN_OVERALL_ASSESSMENT_10.md](plans/PLAN_OVERALL_ASSESSMENT_10.md) is assigned to one or more post-v0.69.0 roadmap milestones:
