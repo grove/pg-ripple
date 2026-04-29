@@ -20,6 +20,38 @@ fn graph_iri_to_policy_suffix(graph_iri: &str) -> String {
     format!("{:016x}", xxh3_64(graph_iri.as_bytes()))
 }
 
+/// Validate that a role name contains only safe PostgreSQL identifier characters.
+///
+/// Accepts `[A-Za-z_][A-Za-z0-9_$]*` — the subset of valid unquoted identifiers
+/// that cannot contain special SQL characters. This is the OWASP-recommended
+/// allowlist approach for DDL interpolation (RLS-SQL-01).
+fn is_safe_role_name(role: &str) -> bool {
+    if role.is_empty() {
+        return false;
+    }
+    let mut chars = role.chars();
+    // Safe: we already checked is_empty() above.
+    let first = match chars.next() {
+        Some(c) => c,
+        None => return false,
+    };
+    if !first.is_ascii_alphabetic() && first != '_' {
+        return false;
+    }
+    chars.all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '$')
+}
+
+/// Quote a role name for safe embedding in DDL using `quote_ident` semantics.
+///
+/// For role names that have already been validated by `is_safe_role_name`,
+/// wrapping in double-quotes ensures the role is treated as an identifier
+/// even if it happens to match an SQL keyword.
+fn quote_ident_safe(name: &str) -> String {
+    // Escape any embedded double-quote characters per SQL standard.
+    let escaped = name.replace('"', "\"\"");
+    format!("\"{escaped}\"")
+}
+
 /// Returns `true` if graph-level RLS has been enabled (the sentinel row exists).
 fn is_rls_enabled() -> bool {
     pgrx::Spi::get_one::<bool>(
@@ -89,6 +121,15 @@ pub(crate) fn apply_rls_to_vp_table(table: &str) {
         } else {
             "ALL"
         };
+        // RLS-SQL-01: skip invalid role names rather than injecting them into DDL.
+        if !is_safe_role_name(&role) {
+            pgrx::warning!(
+                "apply_rls_to_vp_table: skipping unsafe role name '{role}'; \
+                 this entry should be removed from _pg_ripple.graph_access"
+            );
+            continue;
+        }
+        let quoted_role = quote_ident_safe(&role);
         // Use a hash of (table, role, graph_id) for a unique policy name.
         use xxhash_rust::xxh3::xxh3_64;
         let key = format!("{table}:{role}:{graph_id}");
@@ -96,7 +137,7 @@ pub(crate) fn apply_rls_to_vp_table(table: &str) {
         let policy_name = format!("pg_ripple_vp_{role}_{suffix}");
         let policy_sql = format!(
             "CREATE POLICY IF NOT EXISTS {policy_name} ON {table} \
-             AS PERMISSIVE FOR {pg_privilege} TO {role} \
+             AS PERMISSIVE FOR {pg_privilege} TO {quoted_role} \
              USING (g = {graph_id})"
         );
         let _ = pgrx::Spi::run_with_args(&policy_sql, &[]);
@@ -104,6 +145,18 @@ pub(crate) fn apply_rls_to_vp_table(table: &str) {
 }
 
 fn do_grant_graph_access(graph_iri: &str, role: &str, privilege: &str) {
+    // RLS-SQL-01: validate role name to prevent SQL injection via DDL interpolation.
+    // Roles must match the PostgreSQL identifier pattern.
+    if !is_safe_role_name(role) {
+        pgrx::error!(
+            "PT711: grant_graph_access: invalid role name '{}'; \
+             role names must match [A-Za-z_][A-Za-z0-9_$]*",
+            role
+        );
+    }
+    // Use quote_ident to safely embed the role name in DDL.
+    let quoted_role = quote_ident_safe(role);
+
     let graph_id = crate::dictionary::encode(graph_iri, crate::dictionary::KIND_IRI);
     let suffix = graph_iri_to_policy_suffix(graph_iri);
     let policy_name = format!("pg_ripple_graph_{role}_{suffix}");
@@ -128,7 +181,7 @@ fn do_grant_graph_access(graph_iri: &str, role: &str, privilege: &str) {
     // Create the policy on vp_rare.
     let policy_sql = format!(
         "CREATE POLICY {policy_name} ON _pg_ripple.vp_rare \
-         AS PERMISSIVE FOR {pg_privilege} TO {role} \
+         AS PERMISSIVE FOR {pg_privilege} TO {quoted_role} \
          USING (g = {graph_id})"
     );
     pgrx::Spi::run_with_args(&policy_sql, &[]).unwrap_or_else(|e| {
@@ -171,9 +224,10 @@ fn apply_rls_policy_to_all_dedicated_tables(graph_id: i64, role: &str, pg_privil
             let key = format!("{table}:{role}:{graph_id}");
             let suffix = format!("{:016x}", xxh3_64(key.as_bytes()));
             let pname = format!("pg_ripple_vp_{role}_{suffix}");
+            let quoted = quote_ident_safe(role);
             let psql = format!(
                 "CREATE POLICY IF NOT EXISTS {pname} ON {table} \
-                 AS PERMISSIVE FOR {pg_privilege} TO {role} \
+                 AS PERMISSIVE FOR {pg_privilege} TO {quoted} \
                  USING (g = {graph_id})"
             );
             let _ = pgrx::Spi::run_with_args(&psql, &[]);

@@ -19,7 +19,7 @@ No separate graph database. No data pipelines. No extra infrastructure.
 
 ---
 
-## What works today (v0.67.0)
+## What works today (v0.70.0)
 
 pg_ripple passes **100% of the W3C SPARQL 1.1, SHACL Core, and OWL 2 RL conformance test suites** — the industry benchmarks for correctness in knowledge graph systems. After 67 releases it covers the full feature set described below.
 
@@ -159,7 +159,7 @@ Token budgets matter. `sparql_construct_jsonld()` takes a SPARQL CONSTRUCT query
 
 One release remains on the path to v1.0.0.
 
-The v0.64.0–v0.67.0 Assessment Remediation & Release Trust sequence is complete: honest feature-status SQL API (`feature_status()`), GitHub Actions SHA pinning and Docker release digest integrity, CONSTRUCT writeback incremental delta maintenance, true portal-based SPARQL cursor streaming (bounded memory), HMAC-SHA256 signed Arrow Flight tickets, real Arrow IPC streaming in `pg_ripple_http`, 72-hour soak test artifacts, security audit closure, public benchmark baselines, upgrade and backup acceptance tests, operator runbooks, and a mandatory release evidence dashboard.
+The v0.64.0–v0.69.0 Assessment Remediation & Release Trust sequence is complete: honest feature-status SQL API (`feature_status()`), GitHub Actions SHA pinning and Docker release digest integrity, CONSTRUCT writeback incremental delta maintenance, true portal-based SPARQL cursor streaming (bounded memory), HMAC-SHA256 signed Arrow Flight tickets, real Arrow IPC streaming in `pg_ripple_http`, 72-hour soak test artifacts, security audit closure, public benchmark baselines, upgrade and backup acceptance tests, operator runbooks, a mandatory release evidence dashboard, and a module restructuring that splits sparql/mod.rs, pg_ripple_http/main.rs, construct_rules.rs, and storage/mod.rs along single-responsibility boundaries (v0.69.0).
 
 ### v1.0.0 — Production Release
 
@@ -180,7 +180,7 @@ This means you get:
 
 ### How it compares
 
-> **Note**: pg_ripple features marked "Yes" in the table below are implemented across v0.1.0–v0.67.0. W3C SPARQL 1.1 Query, Update, SHACL Core, and OWL 2 RL conformance is 100%. Competitor capabilities reflect publicly documented feature sets.
+> **Note**: pg_ripple features marked "Yes" in the table below are implemented across v0.1.0–v0.70.0. W3C SPARQL 1.1 Query, Update, SHACL Core, and OWL 2 RL conformance is 100%. Competitor capabilities reflect publicly documented feature sets.
 
 | Capability | pg_ripple | Blazegraph | Virtuoso | Apache Fuseki |
 |---|---|---|---|---|
@@ -350,17 +350,16 @@ CREATE EXTENSION pg_ripple;
 
 ---
 
-## Known limitations in v0.67.0
+## Known limitations in v0.70.0
 
 The following features are available but have documented limitations in the current release. Use `SELECT feature_name, status, degraded_reason FROM pg_ripple.feature_status() WHERE status != 'implemented'` for a machine-readable summary.
 
 | Feature | Status | Detail |
 |---|---|---|
-| **Arrow Flight bulk export** | Implemented | `/flight/do_get` streams tombstone-excluded Arrow IPC record batches with HMAC-SHA256 signed tickets (v0.67.0 FLIGHT-SEC-02). |
+| **Arrow Flight bulk export** | Implemented | `/flight/do_get` streams tombstone-excluded Arrow IPC record batches with HMAC-SHA256 signed tickets (v0.67.0 FLIGHT-SEC-02). Streaming validation targeted for v0.71.0. |
 | **WCOJ (Worst-Case Optimal Joins)** | Planner hint | WCOJ re-orders cyclic BGP joins at plan time. A true Leapfrog Triejoin executor is not implemented. |
-| **SHACL-SPARQL rules (`sh:SPARQLRule`)** | Experimental | The derivation kernel foundation is in place. Full end-to-end `sh:SPARQLRule` routing is targeted for v1.0.0. |
-| **Citus SERVICE pruning** | Planned | Shard pruning for SERVICE results is not yet integrated into the SPARQL translator. Targeted for v1.0.0. |
-| **Citus HLL COUNT(DISTINCT)** | Planned | HyperLogLog COUNT(DISTINCT) aggregate is not yet emitted by SQL generation. Targeted for v1.0.0. |
+| **SHACL-SPARQL rules (`sh:SPARQLRule`)** | Not supported | When detected, the extension emits a WARNING (PT481) and skips the rule. Full `sh:SPARQLRule` support is targeted for v1.0.0. `sh:TripleRule` and `sh:SPARQLConstraint` are fully supported. |
+| **Citus multi-node integration test** | Planned | Citus integration test is planned for v0.71.0 (CITUS-INT-01). |
 | **Citus, pgvector, pg_trickle** | Optional | Citus, pgvector, and pg_trickle are optional dependencies. Dependent features degrade gracefully when these extensions are not installed. |
 
 These are not bugs — they are known partial implementations. All limitations are surfaced in `pg_ripple.feature_status()`.

@@ -2137,10 +2137,17 @@ unsafe extern "C-unwind" fn xact_callback_c(event: u32, _arg: *mut std::ffi::c_v
         // Transaction is being rolled back: evict shmem entries inserted in
         // this transaction so stale hash→id mappings cannot pollute later txns.
         crate::dictionary::clear_caches();
+        // Also clear any pending journal entries — they must not fire after rollback.
+        crate::storage::mutation_journal::clear();
     } else if event == 0 || event == 1 {
         // Transaction committed successfully: dictionary rows are durable, so
         // the shmem entries are correct — just clear the tracking list.
         crate::dictionary::commit_cleanup();
+    } else if event == 5 {
+        // XACT_EVENT_PRE_COMMIT: flush deferred mutation journal entries so
+        // that CWB writeback fires once per statement boundary rather than
+        // once per individual triple (FLUSH-01).
+        crate::storage::mutation_journal::flush();
     }
 }
 

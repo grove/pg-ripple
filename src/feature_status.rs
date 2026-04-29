@@ -244,10 +244,11 @@ mod pg_ripple {
                 Some(
                     "CITUS-05: grant_graph/revoke_graph propagate to workers via \
                      run_command_on_all_nodes; synchronous propagation verified in \
-                     tests/integration/citus_rls_propagation.sh"
+                     security_rls_role_injection pg_regress test. \
+                     Full integration test planned for v0.71.0 (CITUS-INT-01)."
                         .to_string(),
                 ),
-                Some("ci/integration: citus_rls_propagation.sh".to_string()),
+                Some("ci/regress: security_rls_role_injection.sql".to_string()),
                 Some("docs/src/reference/scalability.md".to_string()),
                 None,
             ),

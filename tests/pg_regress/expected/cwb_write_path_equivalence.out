@@ -108,6 +108,19 @@ SELECT pg_ripple.load_turtle_into_graph(
  t
 (1 row)
 
+-- Path 5: load_ntriples() (default graph → named source graph via a wrapping function)
+-- BULK-01: load_ntriples() now triggers mutation journal flush after loading,
+-- so derived triples appear immediately without calling refresh_construct_rule.
+-- We insert directly into the source named graph using load_ntriples_into_graph.
+SELECT pg_ripple.load_ntriples_into_graph(
+    '<https://cwbequiv.test/Eve> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://cwbequiv.test/Person> .' || chr(10),
+    'https://cwbequiv.test/source/'
+) > 0 AS path5_bulk_load_ok;
+ path5_bulk_load_ok 
+--------------------
+ t
+(1 row)
+
 -- Cleanup
 SELECT pg_ripple.drop_construct_rule('cwb_equiv_rule') AS rule_dropped;
  rule_dropped 

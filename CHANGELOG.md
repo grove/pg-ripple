@@ -13,6 +13,48 @@ Versions correspond to the milestones in [ROADMAP.md](ROADMAP.md).
 
 ---
 
+## [0.70.0] — 2026-04-29 — Assessment 10 Critical Remediation
+
+**Implements v0.70.0 roadmap: closes four Critical and seven High/Medium findings from Overall Assessment 10.**
+
+### What's new
+
+- **BULK-01** — Bulk-load functions (`load_ntriples`, `load_turtle`, `load_nquads`, `load_trig`, `load_rdfxml`, and their graph-aware variants) now wire into the mutation journal and call `flush()` after all batches. CONSTRUCT writeback rules fire automatically after every `load_*` call without requiring `refresh_construct_rule`.
+
+- **FLUSH-01** — SPARQL Update and single-triple API calls no longer flush the CWB pipeline once per individual triple. Journal flush is deferred to `XACT_EVENT_PRE_COMMIT` via the existing `xact_callback_c`, so CONSTRUCT writeback fires once per statement boundary regardless of how many triples the statement inserts or deletes.
+
+- **GATE-03** — `feature_status()` evidence paths cleaned up: stub pages created at `docs/src/reference/scalability.md` and `docs/src/reference/arrow-flight.md`; the non-existent `tests/integration/citus_rls_propagation.sh` reference replaced with the new `security_rls_role_injection.sql` test evidence path. The `validate-feature-status` CI job now fails hard when any cited evidence file is missing.
+
+- **SHACL-DOC-01** — `docs/src/features/shacl-sparql-rules.md` rewritten: `sh:SPARQLRule` is clearly documented as not supported (emits PT481 WARNING and skips). `sh:TripleRule` and `sh:SPARQLConstraint` remain fully supported.
+
+- **README-01/02** — README updated from v0.67.0 to v0.69.0 in "What works today" and "Known limitations" sections. `scripts/check_readme_version.sh` added and wired into `just assess-release`.
+
+- **RLS-SQL-01** — `grant_graph_access()` and `apply_rls_to_vp_table()` now validate role names against `[A-Za-z_][A-Za-z0-9_$]*` (PT711 error on mismatch) and use `quote_ident_safe()` in DDL. SQL injection test added: `tests/pg_regress/sql/security_rls_role_injection.sql`.
+
+- **SBOM-02** — `sbom.json` regenerated for v0.70.0. Release CI `release.yml` confirmed to include a blocking SBOM-version-match step.
+
+- **GATE-04** — Legacy `scripts/check_roadmap_evidence.sh` and `scripts/check_api_drift.sh` deleted. `justfile` `assess-release` target now calls `.py` versions exclusively.
+
+- **TEST-01** — `tests/pg_regress/sql/v067_features.sql` added (mutation journal smoke test, Arrow Flight GUC check, feature_status evidence path regression guard).
+
+- **TEST-02** — `tests/pg_regress/sql/v069_features.sql` added (module restructuring API stability regression guard, `construct_pipeline_status()` check, `feature_status()` coverage check).
+
+- **TEST-03** — `tests/pg_regress/sql/recover_promotions.sql` added (full `recover_interrupted_promotions()` regression test including simulated-interruption scenario).
+
+- **DOC-01** — `roadmap/v0.67.0.md` status already confirmed as Released ✅ (no change needed).
+
+- **CWB test extension** — `cwb_write_path_equivalence.sql` extended with a Path 5 bulk-load arm (`load_ntriples_into_graph`) that asserts derived triples appear immediately after a bulk load.
+
+### Schema changes
+
+None.
+
+### Exit criteria
+
+All 192+ pg_regress tests pass; `validate-feature-status` CI job exits non-zero when evidence file missing; bulk-load CWB arm in `cwb_write_path_equivalence.sql` passes.
+
+---
+
 ## [0.69.0] — 2026-05-06 — Module Architecture Restructuring
 
 **Implements v0.69.0 roadmap: splits four large source modules along single-responsibility boundaries with zero behavioral changes.**

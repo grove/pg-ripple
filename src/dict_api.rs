@@ -224,10 +224,10 @@ mod pg_ripple {
 
         // ── v0.67.0 MJOURNAL-02: route through mutation journal ──────────────
         // (Previously called on_graph_write directly; now uses the journal so
-        //  all write paths share a single flush path.)
+        //  all write paths share a single flush path. Flush is deferred to
+        //  XACT_EVENT_PRE_COMMIT via xact_callback_c (FLUSH-01).)
         if sid > 0 {
             crate::storage::mutation_journal::record_write(g_id);
-            crate::storage::mutation_journal::flush();
         }
 
         sid
