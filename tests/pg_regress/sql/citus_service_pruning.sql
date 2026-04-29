@@ -47,15 +47,13 @@ SELECT pg_ripple.citus_available() AS citus_not_available_in_ci;
 -- 3a. explain_sparql() works with citus_service_pruning = off.
 SET pg_ripple.citus_service_pruning = off;
 SELECT length(pg_ripple.explain_sparql(
-    'SELECT ?s ?p ?o WHERE { ?s ?p ?o } LIMIT 1',
-    false
+    'SELECT ?s ?p ?o WHERE { ?s ?p ?o } LIMIT 1'
 )) > 0 AS explain_works_pruning_off;
 
 -- 3b. explain_sparql() works with citus_service_pruning = on.
 SET pg_ripple.citus_service_pruning = on;
 SELECT length(pg_ripple.explain_sparql(
-    'SELECT ?s ?p ?o WHERE { ?s ?p ?o } LIMIT 1',
-    false
+    'SELECT ?s ?p ?o WHERE { ?s ?p ?o } LIMIT 1'
 )) > 0 AS explain_works_pruning_on;
 
 -- Reset GUC.

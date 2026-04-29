@@ -17,11 +17,7 @@ SET search_path TO pg_ripple, public;
 -- ── Part 1: GUC existence and toggle ─────────────────────────────────────────
 -- 1a. citus_service_pruning defaults to off.
 SHOW pg_ripple.citus_service_pruning;
- pg_ripple.citus_service_pruning 
----------------------------------
- off
-(1 row)
-
+ERROR:  unrecognized configuration parameter "pg_ripple.citus_service_pruning"
 -- 1b. Can be set on.
 SET pg_ripple.citus_service_pruning = on;
 SHOW pg_ripple.citus_service_pruning;
@@ -62,8 +58,7 @@ SELECT pg_ripple.citus_available() AS citus_not_available_in_ci;
 -- 3a. explain_sparql() works with citus_service_pruning = off.
 SET pg_ripple.citus_service_pruning = off;
 SELECT length(pg_ripple.explain_sparql(
-    'SELECT ?s ?p ?o WHERE { ?s ?p ?o } LIMIT 1',
-    false
+    'SELECT ?s ?p ?o WHERE { ?s ?p ?o } LIMIT 1'
 )) > 0 AS explain_works_pruning_off;
  explain_works_pruning_off 
 ---------------------------
@@ -73,8 +68,7 @@ SELECT length(pg_ripple.explain_sparql(
 -- 3b. explain_sparql() works with citus_service_pruning = on.
 SET pg_ripple.citus_service_pruning = on;
 SELECT length(pg_ripple.explain_sparql(
-    'SELECT ?s ?p ?o WHERE { ?s ?p ?o } LIMIT 1',
-    false
+    'SELECT ?s ?p ?o WHERE { ?s ?p ?o } LIMIT 1'
 )) > 0 AS explain_works_pruning_on;
  explain_works_pruning_on 
 --------------------------

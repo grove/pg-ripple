@@ -12,11 +12,7 @@ SET search_path TO pg_ripple, public;
 -- ── Part 1: GUC toggle ────────────────────────────────────────────────────────
 -- 1a. approx_distinct defaults to off.
 SHOW pg_ripple.approx_distinct;
- pg_ripple.approx_distinct 
----------------------------
- off
-(1 row)
-
+ERROR:  unrecognized configuration parameter "pg_ripple.approx_distinct"
 -- 1b. Can be set on.
 SET pg_ripple.approx_distinct = on;
 SHOW pg_ripple.approx_distinct;

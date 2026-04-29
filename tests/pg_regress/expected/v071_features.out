@@ -28,7 +28,7 @@ SELECT count(*) > 0 AS citus_rls_in_feature_status
 FROM pg_ripple.feature_status()
 WHERE feature_name = 'citus_rls_propagation';
  citus_rls_in_feature_status 
-------------------------------
+-----------------------------
  t
 (1 row)
 
@@ -54,7 +54,7 @@ SET pg_ripple.approx_distinct = on;
 SELECT count(*) = 1 AS hll_count_returns_aggregate
 FROM pg_ripple.sparql('SELECT (COUNT(DISTINCT ?s) AS ?n) WHERE { ?s ?p ?o }');
  hll_count_returns_aggregate 
-------------------------------
+-----------------------------
  t
 (1 row)
 
@@ -96,7 +96,7 @@ SELECT pg_ripple.sparql_update('INSERT DATA {}') IS NOT NULL AS sparql_update_ca
 SELECT count(DISTINCT feature_name) >= 20 AS has_sufficient_feature_coverage
 FROM pg_ripple.feature_status();
  has_sufficient_feature_coverage 
-----------------------------------
+---------------------------------
  t
 (1 row)
 
