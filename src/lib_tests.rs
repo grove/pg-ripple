@@ -249,5 +249,3 @@ mod tests {
         assert_eq!(rows.len(), 1, "bound subject must restrict to one row");
     }
 }
-
-
