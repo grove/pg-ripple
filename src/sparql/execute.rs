@@ -12,7 +12,6 @@ use spargebra::SparqlParser;
 use spargebra::term::{GraphName, NamedOrBlankNode, Term};
 
 use super::decode::batch_decode;
-use super::plan::prepare_select;
 use super::plan_cache;
 use super::sqlgen;
 use crate::dictionary;

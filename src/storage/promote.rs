@@ -7,8 +7,6 @@
 use pgrx::datum::DatumWithOid;
 use pgrx::prelude::*;
 
-use crate::dictionary;
-
 /// Get the current VP promotion threshold from the GUC.
 pub(super) fn vp_promotion_threshold() -> i64 {
     crate::VPP_THRESHOLD.get() as i64

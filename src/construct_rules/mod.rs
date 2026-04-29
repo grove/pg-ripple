@@ -255,18 +255,6 @@ pub(crate) fn explain_construct_rule(name: &str) -> Vec<(String, String)> {
     ]
 }
 
-// ─── Internal helpers ────────────────────────────────────────────────────────
-
-/// Execute the INSERT SQL plans and record provenance in `construct_rule_triples`.
-///
-/// CWB-FIX-04/CWB-10: For vp_rare predicates, uses a two-step approach —
-/// plain INSERT (no params) then EXISTS-based provenance INSERT ($1=rule_name).
-/// This records provenance for ALL rules that derive a triple, even when the
-/// INSERT is a no-op because another rule already inserted the same triple.
-///
-/// For promoted VP tables, a single RETURNING CTE handles both INSERT and prov.
-///
-/// Returns the total number of derived triples now owned by this rule.
 // ─── CWB-FIX-02: Delta maintenance kernel (source graph write hooks) ──────────
 
 // Trigger incremental construct-rule maintenance after inserts into `graph_iri`.

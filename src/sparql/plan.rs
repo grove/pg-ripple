@@ -3,7 +3,6 @@
 //! Provides `prepare_select` and `prepare_construct` which take SPARQL text,
 //! check complexity, translate to SQL, and populate the plan cache.
 
-use pgrx::prelude::*;
 use spargebra::SparqlParser;
 
 use super::parse::check_query_complexity;

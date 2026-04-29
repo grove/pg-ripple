@@ -52,9 +52,8 @@ pub(crate) use execute::{
     explain_sparql, plan_cache_reset, plan_cache_stats, sparql_construct, sparql_construct_rows,
     sparql_describe, sparql_update,
 };
-pub(crate) use parse::check_query_complexity;
 pub(crate) use plan::{
-    ConstructTemplate, TemplateSlot, apply_construct_template, prepare_construct, prepare_select,
+    ConstructTemplate, apply_construct_template, prepare_construct, prepare_select,
 };
 
 use pgrx::prelude::*;

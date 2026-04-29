@@ -3,8 +3,6 @@
 //! Provides query-complexity enforcement (algebra depth + triple-pattern count limits)
 //! and pre-processing of ARQ aggregate extensions before spargebra parsing.
 
-use pgrx::prelude::*;
-
 // ─── Algebra complexity helpers ───────────────────────────────────────────────
 
 /// Count the algebra tree depth of a SPARQL `GraphPattern`.
