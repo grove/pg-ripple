@@ -1,4 +1,4 @@
-# pg_ripple Helm chart — default values (v0.54.0)
+# pg_ripple Helm chart — default values (v0.73.0)
 # Override any of these in your values.yaml or via --set on the command line.
 
 # -- Number of PostgreSQL replica Pods.
@@ -7,7 +7,8 @@ replicaCount: 1
 image:
   # -- Batteries-included image (pg_ripple + PostGIS + pgvector).
   repository: ghcr.io/grove/pg_ripple
-  tag: "0.54.0"
+  # -- Pin to an explicit release tag. Never use "latest" in production.
+  tag: "0.73.0"
   pullPolicy: IfNotPresent
 
 nameOverride: ""
@@ -55,6 +56,14 @@ service:
 
 http:
   enabled: true
+  image:
+    # -- pg_ripple_http sidecar image.  Defaults to the same batteries-included
+    #    image as the PostgreSQL container (tag must match the extension version).
+    #    Override to use a standalone pg_ripple_http build.
+    # -- Pin to an explicit release tag. Never use "latest" in production.
+    repository: ghcr.io/grove/pg_ripple
+    tag: "0.73.0"
+    pullPolicy: IfNotPresent
   service:
     # -- SPARQL HTTP service type. Use LoadBalancer to expose externally.
     type: ClusterIP

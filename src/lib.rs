@@ -66,6 +66,9 @@ mod construct_rules_api;
 mod feature_status;
 // v0.66.0 modules
 mod stats;
+// v0.73.0 modules
+mod json_mapping;
+mod subscriptions;
 
 // Re-export all GUC statics at the crate root so that `crate::SOME_GUC` paths
 // in existing code continue to work after the split.

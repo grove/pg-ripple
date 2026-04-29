@@ -108,6 +108,28 @@ mod pg_ripple {
         crate::bulk_load::json_to_ntriples_and_load(&payload.0, subject_iri, type_iri, ctx_val)
     }
 
+    // ── v0.73.0: Multi-subject JSON-LD document ingest (JSONLD-INGEST-02) ─────
+
+    /// Ingest a full JSON-LD document that may contain multiple top-level subjects.
+    ///
+    /// Handles both the `@graph` form (multiple top-level nodes) and the
+    /// single-node form (object with `@id`).  Each top-level node must have an
+    /// `@id` key.
+    ///
+    /// - `document`      — JSONB value representing the JSON-LD document.
+    /// - `default_graph` — named graph IRI to use when the document has no outer
+    ///   named graph.  `NULL` means the default graph.
+    ///
+    /// Returns the total number of triples loaded.
+    ///
+    /// Use this function in relay triggers when the inbound JSON-LD payload
+    /// contains multiple subjects, instead of looping over
+    /// `json_to_ntriples_and_load()`.
+    #[pg_extern]
+    fn json_ld_load(document: pgrx::JsonB, default_graph: default!(Option<&str>, "NULL")) -> i64 {
+        crate::bulk_load::json_ld_load(&document.0, default_graph)
+    }
+
     // ── v0.52.0: Vocabulary template loader ───────────────────────────────────
 
     /// Load a named vocabulary alignment template from `sql/vocab/`.

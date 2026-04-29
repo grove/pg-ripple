@@ -1,0 +1,42 @@
+name: Helm Lint
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'charts/**'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'charts/**'
+  workflow_dispatch:
+
+jobs:
+  helm-lint:
+    name: Helm lint (no latest tag)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v4
+
+      - name: Install Helm
+        uses: azure/setup-helm@b9e51907a09c216f16ebe8536097933489208112  # v4
+        with:
+          version: v3.14.0
+
+      - name: Helm lint
+        run: helm lint charts/pg_ripple
+
+      - name: Assert no 'latest' image tag
+        run: |
+          echo "Checking for 'latest' image tags in charts/pg_ripple..."
+          # Check values.yaml and templates for any image tag set to 'latest'
+          if grep -rn "tag:.*latest\|:latest\"" charts/pg_ripple/; then
+            echo "ERROR: Found 'latest' image tag in Helm chart. Pin to an explicit release tag."
+            exit 1
+          fi
+          echo "OK: No 'latest' image tags found."
+
+      - name: Helm template (dry-run)
+        run: helm template test-release charts/pg_ripple > /dev/null

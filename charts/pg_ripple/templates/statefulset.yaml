@@ -58,8 +58,8 @@ spec:
               mountPath: /etc/postgresql/conf.d
         {{- if .Values.http.enabled }}
         - name: sparql-http
-          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
-          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          image: "{{ .Values.http.image.repository | default .Values.image.repository }}:{{ .Values.http.image.tag | default .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.http.image.pullPolicy | default .Values.image.pullPolicy }}
           command: ["/usr/local/bin/pg_ripple_http"]
           ports:
             - name: http
