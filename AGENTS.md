@@ -44,15 +44,24 @@ src/admin/                 — vacuum, reindex, prefix registry
 
 `pg_ripple_http/src/` layout (v0.69.0+):
 ```
-pg_ripple_http/src/main.rs          — startup code + main() (250 lines)
+pg_ripple_http/src/main.rs          — startup code + main() (250 lines); includes COMPAT-01 extension version check
 pg_ripple_http/src/routing.rs       — all HTTP handler functions, response formatters, build_router()
 pg_ripple_http/src/spi_bridge.rs    — execute_sparql_with_traceparent + execute_select/ask/construct/describe
-pg_ripple_http/src/arrow_encode.rs  — Arrow Flight bulk-export endpoint
+pg_ripple_http/src/arrow_encode.rs  — Arrow Flight bulk-export endpoint (streams via Body::from_stream since v0.71.0)
 pg_ripple_http/src/stream.rs        — SSE/chunked-transfer streaming placeholder
 pg_ripple_http/src/common.rs        — AppState, check_auth, env_or, redacted_error
 pg_ripple_http/src/datalog.rs       — Datalog REST API handlers
 pg_ripple_http/src/metrics.rs       — Prometheus metrics
 ```
+
+### HTTP companion versioning (COMPAT-01, v0.71.0)
+
+`pg_ripple_http` is versioned independently from the pg_ripple extension. The compatibility
+matrix is documented at `docs/src/operations/compatibility.md`. Key rules:
+
+- A `pg_ripple_http` build has a hard-coded `COMPATIBLE_EXTENSION_MIN` version.
+- At startup, it queries `pg_extension` for the installed extension version and warns if below the minimum.
+- `PG_RIPPLE_HTTP_SKIP_COMPAT_CHECK=1` disables the check (for testing).
 
 All user-visible objects live in the `pg_ripple` schema; internal tables and VP tables live in `_pg_ripple`.
 

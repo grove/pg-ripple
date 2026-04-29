@@ -25,6 +25,84 @@ pub mod stream;
 
 use common::{AppState, env_or};
 
+// ─── Compatibility constants (COMPAT-01, v0.71.0) ────────────────────────────
+
+/// The minimum pg_ripple extension version this HTTP companion supports.
+///
+/// Connections to older extension versions log a prominent warning.  The extension
+/// is still served (degraded mode) so that rolling upgrades do not hard-fail.
+const COMPATIBLE_EXTENSION_MIN: &str = "0.70.0";
+
+/// Check that the installed pg_ripple extension version is within the known-compatible
+/// range for this pg_ripple_http build.  Logs a warning if it is not; does NOT exit.
+async fn check_extension_compatibility(client: &deadpool_postgres::Object) {
+    if std::env::var("PG_RIPPLE_HTTP_SKIP_COMPAT_CHECK")
+        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+        .unwrap_or(false)
+    {
+        tracing::debug!(
+            "PG_RIPPLE_HTTP_SKIP_COMPAT_CHECK=1: skipping extension compatibility check"
+        );
+        return;
+    }
+
+    let ext_version = match client
+        .query_opt(
+            "SELECT extversion FROM pg_extension WHERE extname = 'pg_ripple'",
+            &[],
+        )
+        .await
+    {
+        Ok(Some(row)) => row.get::<_, String>(0),
+        Ok(None) => {
+            tracing::warn!(
+                "pg_ripple extension not found in pg_extension catalog — \
+                 compatibility check skipped"
+            );
+            return;
+        }
+        Err(e) => {
+            tracing::warn!("could not query pg_ripple extension version: {e}");
+            return;
+        }
+    };
+
+    tracing::info!(
+        ext_version = %ext_version,
+        min_supported = %COMPATIBLE_EXTENSION_MIN,
+        "pg_ripple extension compatibility check"
+    );
+
+    if semver_lt(&ext_version, COMPATIBLE_EXTENSION_MIN) {
+        tracing::warn!(
+            ext_version = %ext_version,
+            min_supported = %COMPATIBLE_EXTENSION_MIN,
+            "pg_ripple extension version is below the minimum supported by this pg_ripple_http \
+             build — some features may not work correctly. \
+             Upgrade the extension with: ALTER EXTENSION pg_ripple UPDATE; \
+             or set PG_RIPPLE_HTTP_SKIP_COMPAT_CHECK=1 to suppress this warning."
+        );
+    }
+}
+
+/// Returns `true` when `version` < `min` using simple major.minor.patch comparison.
+/// Falls back to `false` (no warning) if either string cannot be parsed.
+fn semver_lt(version: &str, min: &str) -> bool {
+    parse_semver(version)
+        .zip(parse_semver(min))
+        .map(|(v, m)| v < m)
+        .unwrap_or(false)
+}
+
+/// Parse a "major.minor.patch" string into a comparable tuple.
+fn parse_semver(s: &str) -> Option<(u32, u32, u32)> {
+    let mut parts = s.splitn(3, '.');
+    let major = parts.next()?.parse::<u32>().ok()?;
+    let minor = parts.next()?.parse::<u32>().ok()?;
+    let patch = parts.next()?.split('-').next()?.parse::<u32>().ok()?;
+    Some((major, minor, patch))
+}
+
 // ─── Main ────────────────────────────────────────────────────────────────────
 
 #[tokio::main]
@@ -173,6 +251,10 @@ async fn main() {
         tracing::info!(
             "connected to {pg_url} (port {port}), triple store contains {count} triples"
         );
+
+        // COMPAT-01 (v0.71.0): verify that the installed pg_ripple extension is within
+        // the compatible range for this pg_ripple_http build.
+        check_extension_compatibility(&client).await;
     }
 
     // rate_limit is consumed by the governor layer below; not stored in AppState.

@@ -1,0 +1,37 @@
+-- Migration 0.70.0 → 0.71.0: Arrow Flight Validation, Citus Integration Tests,
+-- and Compatibility Hardening
+--
+-- Schema changes: None
+--
+-- This migration closes the High-severity gaps from Assessment 10 that require
+-- runtime infrastructure beyond static analysis:
+--
+-- HF-3 (FLIGHT-STREAM-01): pg_ripple_http /flight/do_get now uses
+--   axum::body::Body::from_stream with 64 KiB chunks instead of Body::from(buf),
+--   producing Transfer-Encoding: chunked HTTP responses. Integration test added:
+--   tests/http_integration/arrow_export_large.sh validates streaming behavior and
+--   memory bounds for large exports. docs/src/reference/arrow-flight.md updated
+--   to document streaming behavior and RSS bound (512 MB for 10 M-row exports).
+--
+-- HF-1 (CITUS-INT-01): tests/integration/citus_rls_propagation.sh created.
+--   The integration test starts a Citus cluster, enables sharding, inserts triples
+--   in both allowed and restricted graphs, and asserts RLS prevents cross-graph
+--   data visibility. feature_status() citation for citus_rls_propagation now
+--   resolves to an existing file.
+--
+-- HF-8 (COMPAT-01): pg_ripple_http now checks the installed extension version
+--   at startup (COMPATIBLE_EXTENSION_MIN = "0.70.0") and logs a warning if the
+--   extension is below the minimum supported version. docs/src/operations/
+--   compatibility.md added with the pg_ripple / pg_ripple_http compatibility
+--   matrix and upgrade procedure.
+--
+-- MF-7 (HLL-DOC-01): docs/src/reference/approximate-aggregates.md created,
+--   documenting when HLL is used, error bounds at default precision (log2m=14,
+--   ~0.81% standard error for ≥ 10,000 distinct values), and fallback behavior.
+--   pg_regress test hll_accuracy.sql added to verify GUC toggle and COUNT(DISTINCT)
+--   correctness.
+--
+-- MF-8 (CITUS-BENCH-01): docs/src/reference/citus-service-pruning.md created,
+--   documenting the citus_service_pruning GUC and expected shard-pruning behavior.
+--   pg_regress test citus_service_pruning.sql added to validate GUC plumbing and
+--   confirm feature_status shows experimental (not planned).

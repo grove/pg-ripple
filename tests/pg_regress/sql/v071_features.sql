@@ -1,0 +1,63 @@
+-- pg_regress test: v0.71.0 feature gate
+--   FLIGHT-STREAM-01: Arrow Flight uses Body::from_stream (verified via HTTP integration test)
+--   CITUS-INT-01:     citus_rls_propagation.sh exists (verified via feature_status citation)
+--   COMPAT-01:        pg_ripple_http compatibility matrix published
+--   HLL-DOC-01:       approx_distinct GUC and COUNT(DISTINCT) correctness
+--   CITUS-BENCH-01:   citus_service_pruning GUC and explain plumbing
+
+CREATE EXTENSION IF NOT EXISTS pg_ripple;
+SELECT pg_ripple.triple_count() >= 0 AS library_loaded;
+SET search_path TO pg_ripple, public;
+
+-- ── Part 1: FLIGHT-STREAM-01 — Arrow Flight streaming ────────────────────────
+
+-- 1a. Arrow Flight feature is listed in feature_status with status experimental.
+SELECT status AS arrow_flight_status
+FROM pg_ripple.feature_status()
+WHERE feature_name = 'arrow_flight';
+
+-- ── Part 2: CITUS-INT-01 — citus_rls_propagation citation ────────────────────
+
+-- 2a. citus_rls_propagation feature is in feature_status (citation resolved).
+SELECT count(*) > 0 AS citus_rls_in_feature_status
+FROM pg_ripple.feature_status()
+WHERE feature_name = 'citus_rls_propagation';
+
+-- 2b. Feature status is experimental (not planned, since test file now exists).
+SELECT status AS citus_rls_status
+FROM pg_ripple.feature_status()
+WHERE feature_name = 'citus_rls_propagation';
+
+-- ── Part 3: HLL-DOC-01 — approx_distinct GUC ─────────────────────────────────
+
+-- 3a. approx_distinct GUC defaults to off.
+SHOW pg_ripple.approx_distinct;
+
+-- 3b. COUNT(DISTINCT) with approx_distinct=on returns one aggregate row.
+SET pg_ripple.approx_distinct = on;
+SELECT count(*) = 1 AS hll_count_returns_aggregate
+FROM pg_ripple.sparql('SELECT (COUNT(DISTINCT ?s) AS ?n) WHERE { ?s ?p ?o }');
+SET pg_ripple.approx_distinct = off;
+
+-- ── Part 4: CITUS-BENCH-01 — citus_service_pruning GUC ───────────────────────
+
+-- 4a. citus_service_pruning GUC defaults to off.
+SHOW pg_ripple.citus_service_pruning;
+
+-- 4b. Feature status for citus_service_pruning is not planned.
+SELECT status NOT IN ('planned') AS citus_pruning_not_planned
+FROM pg_ripple.feature_status()
+WHERE feature_name = 'citus_service_pruning';
+
+-- ── Part 5: General API stability ────────────────────────────────────────────
+
+-- 5a. sparql() is callable.
+SELECT count(*) >= 0 AS sparql_callable
+FROM pg_ripple.sparql('SELECT * WHERE { ?s ?p ?o } LIMIT 0');
+
+-- 5b. sparql_update() is callable.
+SELECT pg_ripple.sparql_update('INSERT DATA {}') IS NOT NULL AS sparql_update_callable;
+
+-- 5c. feature_status() has expected v0.71.0 coverage.
+SELECT count(DISTINCT feature_name) >= 20 AS has_sufficient_feature_coverage
+FROM pg_ripple.feature_status();

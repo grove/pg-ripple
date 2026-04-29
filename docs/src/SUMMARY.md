@@ -105,6 +105,7 @@
 - [Scaling](operations/scaling.md)
 - [Troubleshooting](operations/troubleshooting.md)
 - [Security](operations/security.md)
+- [Compatibility Matrix](operations/compatibility.md)
 
 ---
 
@@ -155,6 +156,9 @@
 - [GeoSPARQL Functions](reference/geosparql.md)
 - [Lattice-Based Datalog](reference/lattice-datalog.md)
 - [HTTP API Reference](reference/http-api.md)
+- [Approximate Aggregates (HLL)](reference/approximate-aggregates.md)
+- [Arrow Flight Reference](reference/arrow-flight.md)
+- [Citus SERVICE Shard Pruning](reference/citus-service-pruning.md)
 - [API Stability Guarantees](reference/api-stability.md)
 - [SPARQL Compliance Matrix](reference/sparql-compliance.md)
 - [W3C Conformance](reference/w3c-conformance.md)
