@@ -198,7 +198,7 @@ Every record-linkage action leaves a trail. Three GUCs enable the audit chain:
 
 | GUC | What it captures |
 |---|---|
-| `pg_ripple.audit_log_enabled = on` | All SPARQL UPDATEs (role, txid, query text) — see [Audit Log](audit-log.md) |
+| `pg_ripple.audit_log_enabled = on` | All SPARQL UPDATEs (role, txid, query text) — see [Audit Log](../reference/audit-log.md) |
 | `pg_ripple.prov_enabled = on` | A `prov:Activity` triple per bulk-load — see [Temporal & Provenance](temporal-and-provenance.md) |
 | (RDF-star quoted triples) | Per-fact confidence, source, timestamp — see [Storing Knowledge](storing-knowledge.md) |
 

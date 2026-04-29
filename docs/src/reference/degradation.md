@@ -230,4 +230,4 @@ Optional-feature degradation is visible through:
 ---
 
 *See also: [Feature Status SQL API](../reference/sql-functions.md#feature-status),
-[Known Limitations](../../README.md#known-limitations-in-v0630)*
+[Known Limitations](https://github.com/grove/pg-ripple/blob/main/README.md#known-limitations-in-v0630)*

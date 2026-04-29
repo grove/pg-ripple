@@ -584,6 +584,6 @@ may use significant memory. Switch to streaming variants or `COPY ... TO` with s
 
 ## Next Steps
 
-- **[§2.7 AI Retrieval and GraphRAG](../features/ai-retrieval-graph-rag.md)** — vector embeddings and RAG retrieval pipelines.
+- **[§2.7 AI Retrieval and GraphRAG](../features/graphrag.md)** — vector embeddings and RAG retrieval pipelines.
 - **[§2.8 APIs and Integration](../features/apis-and-integration.md)** — serve exported data via the HTTP endpoint.
 - **[§2.3 Querying with SPARQL](../features/querying-with-sparql.md)** — CONSTRUCT and DESCRIBE queries for selective export.

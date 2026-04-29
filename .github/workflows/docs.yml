@@ -49,6 +49,24 @@ jobs:
           cp RELEASE.md docs/src/reference/release-process.md
           cp -r blog docs/src/blog
 
+      - name: Fix relative links in mirrored files
+        run: |
+          # roadmap.md: version detail pages (roadmap/v*.md) live in the repo root
+          # but are not part of the mdBook source tree → point to GitHub.
+          sed -i 's|](roadmap/|](https://github.com/grove/pg-ripple/blob/main/roadmap/|g' \
+            docs/src/reference/roadmap.md
+          # roadmap.md: plans/ files also live outside the docs tree → GitHub.
+          sed -i 's|](plans/|](https://github.com/grove/pg-ripple/blob/main/plans/|g' \
+            docs/src/reference/roadmap.md
+          # changelog.md: ROADMAP.md (uppercase) → roadmap.md (the local docs page).
+          sed -i 's|](ROADMAP\.md)|](roadmap.md)|g' \
+            docs/src/reference/changelog.md
+          # release-process.md: ROADMAP.md → roadmap.md; AGENTS.md → GitHub.
+          sed -i 's|](ROADMAP\.md)|](roadmap.md)|g' \
+            docs/src/reference/release-process.md
+          sed -i 's|](AGENTS\.md|](https://github.com/grove/pg-ripple/blob/main/AGENTS.md|g' \
+            docs/src/reference/release-process.md
+
       - name: Build
         run: mdbook build docs
 

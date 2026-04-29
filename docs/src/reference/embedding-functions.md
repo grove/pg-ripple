@@ -169,7 +169,7 @@ When pgvector is **absent**, the `embedding` column is `BYTEA` and all similarit
 
 ## SPARQL Integration
 
-The `pg:similar()` function is callable from SPARQL `BIND` expressions. See [Hybrid Search](../user-guide/hybrid-search.md) for usage.
+The `pg:similar()` function is callable from SPARQL `BIND` expressions. See [Hybrid Search](../features/vector-and-hybrid-search.md) for usage.
 
 **Function IRI:** `http://pg-ripple.org/functions/similar`
 
@@ -226,7 +226,7 @@ pg_ripple.rag_retrieve(
 )
 ```
 
-End-to-end RAG retrieval: vector search → optional SPARQL filter → contextualization → structured output. See [RAG Retrieval](../user-guide/rag.md) for full documentation.
+End-to-end RAG retrieval: vector search → optional SPARQL filter → contextualization → structured output. See [RAG Retrieval](../user-guide/rag-pipeline.md) for full documentation.
 
 ---
 

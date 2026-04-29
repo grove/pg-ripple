@@ -4,7 +4,7 @@
 >
 > This guide covers deploying pg_ripple with Citus horizontal sharding and
 > pg-trickle CDC replication in a multi-worker environment.  It assumes you
-> have already read the [Citus Sharding](citus-sharding.md) page.
+> have already read the [Citus Integration](citus-integration.md) page.
 
 ---
 
@@ -153,4 +153,4 @@ Check that your pg-trickle version is ≥ 0.34.0, which processes `pg_ripple.mer
 
 ---
 
-*See also: [Citus Sharding](citus-sharding.md), [High Availability](high-availability.md)*
+*See also: [Citus Integration](citus-integration.md), [High Availability](high-availability.md)*

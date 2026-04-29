@@ -167,7 +167,7 @@ SELECT ?target WHERE { <ex:alice> (<ex:knows>|<ex:follows>) ?target }
 SELECT ?who WHERE { ?who ^<ex:knows> <ex:bob> }
 ```
 
-Property paths compile to PostgreSQL `WITH RECURSIVE` CTEs with the PG18 `CYCLE` clause for hash-based cycle detection. See [max_path_depth](../configuration.md#max_path_depth) to limit traversal depth.
+Property paths compile to PostgreSQL `WITH RECURSIVE` CTEs with the PG18 `CYCLE` clause for hash-based cycle detection. See [max_path_depth](../../operations/configuration.md#max_path_depth) to limit traversal depth.
 
 ### Named graphs
 
@@ -187,7 +187,7 @@ ASK { <ex:alice> <ex:knows> <ex:bob> }
 
 ## Plan cache
 
-Compiled SPARQL→SQL plans are cached per-backend in an LRU cache (configurable via [`pg_ripple.plan_cache_size`](../configuration.md#plan_cache_size)). Repeated identical queries skip recompilation.
+Compiled SPARQL→SQL plans are cached per-backend in an LRU cache (configurable via [`pg_ripple.plan_cache_size`](../../operations/configuration.md#plan_cache_size)). Repeated identical queries skip recompilation.
 
 The cache key includes the query text and the current value of `pg_ripple.max_path_depth`. Changing the GUC invalidates cached path query plans.
 

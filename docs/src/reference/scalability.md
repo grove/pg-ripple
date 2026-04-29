@@ -35,4 +35,4 @@ distributes VP tables across Citus worker nodes using the subject (`s`) column a
 - Citus multi-node integration tests are planned for v0.71.0 (CITUS-INT-01).
 - Cross-shard property-path queries may not benefit from shard pruning.
 
-See also: [Query Optimization](query-optimization.md), [Architecture](architecture.md).
+See also: [Performance Tuning](../operations/performance.md), [Architecture](architecture.md).

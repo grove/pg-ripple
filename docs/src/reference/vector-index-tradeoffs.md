@@ -86,4 +86,4 @@ the best recall-to-memory trade-off.
 
 - [Embedding Functions](../reference/embedding-functions.md) — full API reference
 - [GUC Reference](../reference/guc-reference.md) — `embedding_index_type`, `embedding_precision`
-- [Hybrid Vector Search example](../../examples/hybrid_vector_search.sql)
+- [Hybrid Vector Search example](https://github.com/grove/pg-ripple/blob/main/examples/hybrid_vector_search.sql)

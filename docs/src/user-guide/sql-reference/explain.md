@@ -112,5 +112,5 @@ SELECT jsonb_pretty(pg_ripple.explain_datalog('my_rules'));
 ## See also
 
 - [Streaming Cursor API](cursor-api.md) — stream large result sets
-- [Observability](../../reference/observability.md) — tracing and cache statistics
+- [Observability](../../operations/monitoring.md) — tracing and cache statistics
 - [GUC Reference](../../reference/guc-reference.md) — `pg_ripple.sparql_plan_cache`, `pg_ripple.rule_plan_cache`

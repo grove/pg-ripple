@@ -84,5 +84,5 @@ SELECT * FROM pg_ripple.sparql_cursor('SELECT ?s WHERE { ?s ?p ?o }');
 ## See also
 
 - [Explain API](explain.md) — introspect SPARQL query plans
-- [Observability](../../reference/observability.md) — tracing and cache statistics
-- [Error Reference](../../reference/error-reference.md) — PT640, PT641, PT642
+- [Observability](../../operations/monitoring.md) — tracing and cache statistics
+- [Error Reference](../../reference/error-catalog.md) — PT640, PT641, PT642

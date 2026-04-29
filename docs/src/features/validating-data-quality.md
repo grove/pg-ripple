@@ -369,7 +369,7 @@ SELECT * FROM _pg_ripple.violation_summary;
 
 ### Pattern: Embedding Completeness Check
 
-Ensure all entities have vector embeddings (see [§2.7](../features/ai-retrieval-graph-rag.md)):
+Ensure all entities have vector embeddings (see [§2.7](../features/graphrag.md)):
 
 ```sql
 SELECT pg_ripple.load_shacl('
@@ -502,4 +502,4 @@ FROM jsonb_array_elements(
 
 - **[§2.5 Reasoning and Inference](../features/reasoning-and-inference.md)** — derive new facts from rules; SHACL shapes interact with inference.
 - **[§2.6 Exporting and Sharing](../features/exporting-and-sharing.md)** — SHACL quality enforcement for GraphRAG exports.
-- **[§2.7 AI Retrieval and GraphRAG](../features/ai-retrieval-graph-rag.md)** — embedding completeness shapes.
+- **[§2.7 AI Retrieval and GraphRAG](../features/graphrag.md)** — embedding completeness shapes.

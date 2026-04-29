@@ -111,7 +111,7 @@ A **blank node** is a resource without a global IRI identity — it has identity
 
 A quoted triple `<< s p o >>` is a triple that can appear in subject or object position in another triple. It enables statements *about* triples — useful for provenance (`<< alice knows bob >> :assertedBy :carol`), temporal annotations, and confidence scores.
 
-pg_ripple stores quoted triples as dictionary entries of `kind = 5`. See [RDF-star](../sql-reference/rdf-star.md) for details.
+pg_ripple stores quoted triples as dictionary entries of `kind = 5`. See [RDF-star](../user-guide/sql-reference/rdf-star.md) for details.
 
 ---
 
@@ -141,7 +141,7 @@ shared_preload_libraries = 'pg_ripple'
 
 Without this, the extension still works for reads and writes — but all writes stay in delta tables and are never automatically merged into main. Queries on predicates with large deltas will be slower than expected.
 
-See the [Pre-Deployment Checklist](../user-guide/pre-deployment.md) for the complete setup sequence.
+See the [Pre-Deployment Checklist](../operations/deployment.md) for the complete setup sequence.
 
 ### What is the difference between compact() and the merge worker?
 

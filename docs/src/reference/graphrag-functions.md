@@ -99,6 +99,6 @@ Exports all `gr:TextUnit` instances.
 
 ## See also
 
-- [GraphRAG User Guide](../user-guide/graphrag.md)
+- [GraphRAG User Guide](../features/graphrag.md)
 - [GraphRAG Ontology](graphrag-ontology.md)
-- [GraphRAG Enrichment](../user-guide/graphrag-enrichment.md)
+- [GraphRAG Enrichment](../features/graphrag.md)

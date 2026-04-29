@@ -10,7 +10,7 @@ docker run --rm -p 5432:5432 \
   ghcr.io/grove/pg-ripple:latest
 ```
 
-> **Note**: The sandbox container is configured for development/testing and uses trust authentication for external TCP connections. For production use, see [Installation](installation.md) and [Security](../reference/security.md).
+> **Note**: The sandbox container is configured for development/testing and uses trust authentication for external TCP connections. For production use, see [Installation](../getting-started/installation.md) and [Security](../operations/security.md).
 
 Connect with any PostgreSQL client (no password required):
 
@@ -86,6 +86,6 @@ docker run --rm -p 5432:5432 -e POSTGRES_PASSWORD=ripple pg-ripple:local
 
 ## Next steps
 
-- [Installation](installation.md) — install pg_ripple into your own PostgreSQL instance
-- [Getting Started](getting-started.md) — five-minute tutorial
+- [Installation](../getting-started/installation.md) — install pg_ripple into your own PostgreSQL instance
+- [Getting Started](../getting-started/hello-world.md) — five-minute tutorial
 - [SPARQL Queries](sql-reference/sparql-query.md) — full SPARQL reference

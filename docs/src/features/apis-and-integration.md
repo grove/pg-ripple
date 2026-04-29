@@ -662,5 +662,5 @@ curl http://localhost:8080/health
 ## Next Steps
 
 - **[§2.3 Querying with SPARQL](../features/querying-with-sparql.md)** — SPARQL query reference for the queries you send via APIs.
-- **[§2.7 AI Retrieval and GraphRAG](../features/ai-retrieval-graph-rag.md)** — RAG endpoint details and LLM integration.
+- **[§2.7 AI Retrieval and GraphRAG](../features/graphrag.md)** — RAG endpoint details and LLM integration.
 - **[§2.6 Exporting and Sharing](../features/exporting-and-sharing.md)** — export formats returned by the HTTP endpoint.

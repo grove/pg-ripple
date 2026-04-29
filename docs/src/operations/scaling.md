@@ -3,7 +3,7 @@
 pg_ripple scales vertically within a single PostgreSQL instance and horizontally for read traffic via streaming replication. This page covers how to allocate resources, tune the merge worker, set up read replicas, and understand current limitations.
 
 ```admonish info title="Current scaling model"
-pg_ripple runs entirely within PostgreSQL. It inherits PostgreSQL's single-writer architecture: one primary handles all writes, and read replicas serve read-only SPARQL queries. Horizontal sharding across multiple workers is available via the [Citus integration](citus-sharding.md) (v0.58.0+).
+pg_ripple runs entirely within PostgreSQL. It inherits PostgreSQL's single-writer architecture: one primary handles all writes, and read replicas serve read-only SPARQL queries. Horizontal sharding across multiple workers is available via the [Citus integration](citus-integration.md) (v0.58.0+).
 ```
 
 ---
