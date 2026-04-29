@@ -1,0 +1,1 @@
+DELETE { ?s <http://example.org/p> ?o } WHERE { ?s <http://example.org/p> ?o }

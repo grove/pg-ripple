@@ -1,0 +1,44 @@
+-- Migration 0.71.0 → 0.72.0: Architecture and Protocol Hardening
+--
+-- Schema changes: None
+--
+-- This migration documents the v0.72.0 deliverables:
+--
+-- XACT-01 (SubXactCallback): Sub-transaction savepoint/rollback now registered
+--   via RegisterSubXactCallback so cwb_writer entries are cleaned up on
+--   ROLLBACK TO SAVEPOINT. New regression test:
+--   tests/pg_regress/cwb_savepoint_rollback.sql
+--
+-- BUG-JSONLD-CONTEXT-01: Object-form JSON-LD @context entries (e.g. term
+--   definitions with @id/@type) are now correctly preserved in bulk_load.rs
+--   instead of being silently dropped.
+--
+-- RT-FIX-04B: i64 overflow in JSON number → xsd:integer no longer panics;
+--   values exceeding i64::MAX are preserved as the xsd:integer string form.
+--
+-- RT-FIX-06: is_f64() checked before is_i64() in json_value_to_nt_term so
+--   JSON numbers like 1.5 are not misclassified as integers.
+--
+-- RT-FIX-07: IRI key validation added (validate_iri_key_or_error) before
+--   insert to prevent malformed IRIs from entering the triple store.
+--
+-- FLIGHT-NONCE-01: Arrow Flight nonce replay protection added in AppState
+--   (nonce_cache: DashMap<String, Instant> with 5-minute TTL). Arrow Flight
+--   requests with replayed nonces now return 401 Unauthorized.
+--
+-- OBS-02: /metrics/extension route added to pg_ripple_http, emitting
+--   Prometheus-format extension-level metrics (triple count, active graphs,
+--   GUC settings).
+--
+-- JSONLD-NODE-01: export_jsonld_node() SQL function added, returning the
+--   JSON-LD representation of all triples for a given subject IRI.
+--
+-- PROPTEST-01: Property-based tests for ConstructTemplate/apply_construct_template
+--   added in tests/proptest/construct_template.rs using the proptest 1 crate.
+--
+-- MOD-01: Source files exceeding 500 lines split into focused sub-modules:
+--   src/gucs/registration.rs, src/lib_tests.rs, src/storage/dictionary_io.rs,
+--   src/storage/vp_rare_io.rs, src/storage/ops.rs,
+--   pg_ripple_http/src/routing/{sparql_handlers,rag_handler,admin_handlers}.rs
+
+SELECT pg_ripple_version();

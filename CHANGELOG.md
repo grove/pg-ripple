@@ -13,6 +13,46 @@ Versions correspond to the milestones in [ROADMAP.md](ROADMAP.md).
 
 ---
 
+## [0.72.0] — 2026-05-01 — Architecture and Protocol Hardening
+
+**Implements v0.72.0 roadmap: sub-transaction safety, JSON-LD fixes, Flight nonce replay protection, observability, module splitting.**
+
+### What's new
+
+- **XACT-01** — Sub-transaction savepoint/rollback support: `RegisterSubXactCallback` registered in `_PG_init`; CWB writer entries are now cleaned up on `ROLLBACK TO SAVEPOINT`. Regression test: `tests/pg_regress/sql/cwb_savepoint_rollback.sql`.
+
+- **BUG-JSONLD-CONTEXT-01** — Object-form JSON-LD `@context` entries (term definitions with `@id`/`@type`) are now correctly preserved in `bulk_load.rs` instead of being silently dropped.
+
+- **RT-FIX-04B** — `i64` overflow in JSON number → `xsd:integer` no longer panics; values exceeding `i64::MAX` are preserved as the `xsd:integer` string form.
+
+- **RT-FIX-06** — `is_f64()` checked before `is_i64()` in `json_value_to_nt_term` so fractional JSON numbers (e.g. `1.5`) are not misclassified as integers.
+
+- **RT-FIX-07** — IRI key validation (`validate_iri_key_or_error`) added before triple insert to prevent malformed IRIs from entering the triple store.
+
+- **FLIGHT-NONCE-01** — Arrow Flight nonce replay protection: `AppState` gains a `nonce_cache: DashMap<String, Instant>` with 5-minute TTL. Replayed nonces return `401 Unauthorized`.
+
+- **OBS-02** — `/metrics/extension` route added to `pg_ripple_http`, emitting Prometheus-format extension-level metrics (triple count, active graphs, GUC settings).
+
+- **JSONLD-NODE-01** — `export_jsonld_node(iri TEXT) → jsonb` SQL function added, returning the JSON-LD representation of all triples for a given subject IRI. Regression test: `tests/pg_regress/sql/export_jsonld_node.sql`.
+
+- **PROPTEST-01** — Property-based tests for `ConstructTemplate` / `apply_construct_template` added in `tests/proptest/construct_template.rs` using the `proptest 1` crate. Self-contained (no pgrx dependency).
+
+- **MOD-01** — Source files exceeding 500 lines split into focused sub-modules:
+  - `src/gucs/registration.rs` — all GUC registrations extracted from `_PG_init`
+  - `src/lib_tests.rs` — pgrx integration tests extracted from `src/lib.rs`
+  - `src/storage/dictionary_io.rs` — RDF-term I/O helpers
+  - `src/storage/vp_rare_io.rs` — VP-table I/O helpers
+  - `src/storage/ops.rs` — storage operations (insert/delete/query/graph management)
+  - `pg_ripple_http/src/routing/sparql_handlers.rs` — SPARQL GET/POST/stream handlers
+  - `pg_ripple_http/src/routing/rag_handler.rs` — RAG endpoint handler
+  - `pg_ripple_http/src/routing/admin_handlers.rs` — admin/observability/explorer handlers
+
+### Schema changes
+
+None.
+
+---
+
 ## [0.71.0] — 2026-04-29 — Arrow Flight Validation, Citus Integration Tests, and Compatibility Hardening
 
 **Implements v0.71.0 roadmap: closes the High-severity Assessment 10 gaps requiring runtime infrastructure.**

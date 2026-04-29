@@ -1333,3 +1333,84 @@ pub fn triples_to_jsonld_by_subject(subject: i64) -> serde_json::Value {
 
     serde_json::Value::Object(node)
 }
+
+// ─── v0.72.0: export_jsonld_node() implementation (JSONLD-NODE-01) ────────────
+
+/// Recursively strip listed keys from every JSON object in `val`.
+fn strip_keys_recursive(val: &mut serde_json::Value, strip: &[String]) {
+    match val {
+        serde_json::Value::Object(map) => {
+            for key in strip {
+                map.remove(key.as_str());
+            }
+            for v in map.values_mut() {
+                strip_keys_recursive(v, strip);
+            }
+        }
+        serde_json::Value::Array(arr) => {
+            for item in arr.iter_mut() {
+                strip_keys_recursive(item, strip);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Core implementation for `pg_ripple.export_jsonld_node()`.
+///
+/// Returns:
+/// - `Ok(Some(Value))` — node found and serialised.
+/// - `Ok(None)`        — no triples match the subject; SQL NULL.
+/// - `Err(String)`     — invalid arguments or internal error.
+pub fn export_jsonld_node_impl(
+    mut frame: serde_json::Value,
+    subject_id: i64,
+    strip: Vec<String>,
+) -> Result<Option<serde_json::Value>, String> {
+    // Guard: frame must not already contain @id; we inject it.
+    if let serde_json::Value::Object(ref obj) = frame {
+        if obj.contains_key("@id") {
+            return Err("export_jsonld_node: frame must not contain '@id'; \
+                 subject_id provides the subject IRI"
+                .to_owned());
+        }
+    }
+
+    // Look up the IRI for subject_id.
+    let iri = crate::dictionary::decode(subject_id).ok_or_else(|| {
+        format!("export_jsonld_node: subject_id {subject_id} not found in dictionary")
+    })?;
+
+    // Inject @id into the frame.
+    if let serde_json::Value::Object(ref mut obj) = frame {
+        obj.insert("@id".to_owned(), serde_json::Value::String(iri));
+    }
+
+    // Execute framing — graph = None (all graphs).
+    let result = crate::framing::frame_and_execute(&frame, None, "@once", false, false)
+        .map_err(|e| format!("export_jsonld_node framing error: {e}"))?;
+
+    // Extract @graph[0].
+    let node_opt = match &result {
+        serde_json::Value::Object(obj) => obj.get("@graph").and_then(|g| {
+            if let serde_json::Value::Array(arr) = g {
+                arr.first().cloned()
+            } else {
+                None
+            }
+        }),
+        _ => None,
+    };
+
+    let mut node = match node_opt {
+        None => return Ok(None),
+        Some(n) => n,
+    };
+
+    // Recursively strip requested keys from the node tree.
+    if !strip.is_empty() {
+        strip_keys_recursive(&mut node, &strip);
+    }
+
+    Ok(Some(node))
+}

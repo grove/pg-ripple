@@ -20,6 +20,7 @@ pub mod datalog;
 pub mod federation;
 pub mod llm;
 pub mod observability;
+pub mod registration;
 pub mod shacl;
 pub mod sparql;
 pub mod storage;

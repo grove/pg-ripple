@@ -149,6 +149,7 @@
 - [Explain](user-guide/sql-reference/explain.md)
 - [Architecture (Internals)](reference/architecture.md)
 - [GUC Reference](reference/guc-reference.md)
+- [Plan Cache](reference/plan-cache.md)
 - [Audit Log](reference/audit-log.md)
 - [Embedding Functions](reference/embedding-functions.md)
 - [GraphRAG Functions](reference/graphrag-functions.md)

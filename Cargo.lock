@@ -2040,7 +2040,7 @@ dependencies = [
 
 [[package]]
 name = "pg_ripple"
-version = "0.71.0"
+version = "0.72.0"
 dependencies = [
  "chrono",
  "crossbeam-channel",
@@ -2075,6 +2075,7 @@ dependencies = [
  "arrow",
  "axum",
  "constant_time_eq",
+ "dashmap",
  "deadpool-postgres",
  "hex",
  "hmac 0.12.1",

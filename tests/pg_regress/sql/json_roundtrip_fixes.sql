@@ -1,0 +1,69 @@
+-- json_roundtrip_fixes.sql
+-- RT-FIX-04B, RT-FIX-06, RT-FIX-07, RT-TEST-02 (v0.72.0)
+-- Regression tests for JSON round-trip ingest fixes.
+
+SET client_min_messages = warning;
+CREATE EXTENSION IF NOT EXISTS pg_ripple;
+SET client_min_messages = DEFAULT;
+SET search_path TO pg_ripple, public;
+
+-- ── RT-FIX-06: float 5.0 stored as xsd:decimal, integer 5 as xsd:integer ────
+
+SELECT pg_ripple.json_to_ntriples_and_load(
+    '{"intval": 5, "floatval": 5.0}'::jsonb,
+    'https://example.org/rt_fix_06_subject',
+    NULL,
+    '{"@context": {"intval": "https://example.org/intval", "floatval": "https://example.org/floatval"}}'::jsonb
+) > 0 AS rt_fix_06_loaded;
+
+-- The integer predicate should have an xsd:integer triple.
+SELECT COUNT(*) > 0 AS integer_triple_exists
+FROM pg_ripple.sparql_select(
+    'SELECT * WHERE { <https://example.org/rt_fix_06_subject> <https://example.org/intval> "5"^^<http://www.w3.org/2001/XMLSchema#integer> }'
+);
+
+-- ── RT-FIX-04B: large integers beyond i64::MAX preserved ─────────────────────
+
+SELECT pg_ripple.json_to_ntriples_and_load(
+    '{"bignum": 9223372036854775808}'::jsonb,
+    'https://example.org/rt_fix_04b_subject',
+    NULL,
+    '{"@context": {"bignum": "https://example.org/bignum"}}'::jsonb
+) > 0 AS rt_fix_04b_loaded;
+
+-- Should not have silently lost precision — triple must exist.
+SELECT COUNT(*) > 0 AS bignum_triple_exists
+FROM pg_ripple.sparql_select(
+    'SELECT * WHERE { <https://example.org/rt_fix_04b_subject> <https://example.org/bignum> ?o }'
+);
+
+-- ── RT-TEST-02: Empty object round-trip ─────────────────────────────────────
+
+SELECT pg_ripple.json_to_ntriples_and_load(
+    '{"address": {}}'::jsonb,
+    'https://example.org/rt_test_02_subject',
+    NULL,
+    '{"@context": {"address": "https://example.org/address"}}'::jsonb
+) > 0 AS rt_test_02_loaded;
+
+-- The empty object becomes a blank node; at least one triple must exist.
+SELECT COUNT(*) > 0 AS empty_object_triple_exists
+FROM pg_ripple.sparql_select(
+    'SELECT * WHERE { <https://example.org/rt_test_02_subject> <https://example.org/address> ?bn }'
+);
+
+-- ── RT-FIX-07: IRI validation for @vocab-expanded keys ──────────────────────
+
+-- Valid Unicode key should succeed.
+SELECT pg_ripple.json_to_ntriples_and_load(
+    '{"föräldrar": "test"}'::jsonb,
+    'https://example.org/rt_fix_07_unicode_subject',
+    NULL,
+    '{"@context": {"@vocab": "https://example.org/"}}'::jsonb
+) > 0 AS valid_unicode_key_accepted;
+
+-- ── Cleanup ───────────────────────────────────────────────────────────────────
+SELECT pg_ripple.sparql_update('DELETE WHERE { <https://example.org/rt_fix_06_subject> ?p ?o }') >= 0 AS cleanup_06;
+SELECT pg_ripple.sparql_update('DELETE WHERE { <https://example.org/rt_fix_04b_subject> ?p ?o }') >= 0 AS cleanup_04b;
+SELECT pg_ripple.sparql_update('DELETE WHERE { <https://example.org/rt_test_02_subject> ?p ?o }') >= 0 AS cleanup_02;
+SELECT pg_ripple.sparql_update('DELETE WHERE { <https://example.org/rt_fix_07_unicode_subject> ?p ?o }') >= 0 AS cleanup_07;

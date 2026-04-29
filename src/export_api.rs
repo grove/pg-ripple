@@ -186,4 +186,36 @@ mod pg_ripple {
     fn triples_to_jsonld(subject: i64) -> pgrx::JsonB {
         pgrx::JsonB(crate::export::triples_to_jsonld_by_subject(subject))
     }
+
+    // ── v0.72.0: export_jsonld_node() convenience wrapper (JSONLD-NODE-01) ────
+
+    /// Export a single RDF subject as a plain JSON object by combining
+    /// `export_jsonld_framed()` with the three-step CDC bridge pattern:
+    ///
+    /// 1. Look up the IRI for `subject_id` in the dictionary.
+    /// 2. Append `{"@id": "<iri>"}` to `frame` and call `export_jsonld_framed`.
+    /// 3. Extract `@graph[0]`; return `NULL` if no triples match.
+    /// 4. Recursively remove each key in `strip` from every object node in the tree.
+    ///
+    /// This eliminates the boilerplate required in CDC bridge triggers when
+    /// producing plain JSON from framed JSON-LD.
+    ///
+    /// # Parameters
+    ///
+    /// - `frame` — Static frame template. Must contain `@context` and at least
+    ///   one property slot. Must **not** already contain `@id`.
+    /// - `subject_id` — Dictionary ID of the subject. Pass `NEW.s` in VP triggers.
+    /// - `strip` — JSON-LD keyword keys to strip recursively from every object
+    ///   in the output tree. Default: `ARRAY['@type','@id']`.
+    ///   Pass `ARRAY[]::TEXT[]` to keep all keywords.
+    #[pg_extern]
+    fn export_jsonld_node(
+        frame: pgrx::JsonB,
+        subject_id: i64,
+        strip: default!(Vec<String>, "ARRAY['@type','@id']::TEXT[]"),
+    ) -> Option<pgrx::JsonB> {
+        crate::export::export_jsonld_node_impl(frame.0, subject_id, strip)
+            .map(|opt| opt.map(pgrx::JsonB))
+            .unwrap_or_else(|e| pgrx::error!("{}", e))
+    }
 }

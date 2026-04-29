@@ -23,6 +23,8 @@
 #[path = "proptest/sqlgen_bridge.rs"]
 mod sqlgen_bridge;
 
+#[path = "proptest/construct_template.rs"]
+mod construct_template;
 #[path = "proptest/dictionary.rs"]
 mod dictionary;
 #[path = "proptest/jsonld_framing.rs"]

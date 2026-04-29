@@ -179,7 +179,7 @@ pub(crate) fn promote_rare_predicates() -> i64 {
     for p_id in pred_ids {
         promote_predicate(p_id);
         // v0.13.0: Create extended statistics on (s, o) for correlation-aware planning.
-        super::create_extended_statistics(p_id);
+        super::vp_rare_io::create_extended_statistics(p_id);
     }
 
     count

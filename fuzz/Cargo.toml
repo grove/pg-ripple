@@ -92,3 +92,10 @@ name = "llm_prompt_builder"
 path = "fuzz_targets/llm_prompt_builder.rs"
 test = false
 doc = false
+
+[[bin]]
+name = "sparql_update"
+path = "fuzz_targets/sparql_update.rs"
+test = false
+doc = false
+

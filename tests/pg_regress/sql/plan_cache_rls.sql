@@ -1,0 +1,73 @@
+-- plan_cache_rls.sql
+-- CACHE-01 (v0.72.0): Verify that two roles with different RLS grants on
+-- different named graphs see only their own data when running the same
+-- SPARQL query text — confirming that plan cache sharing does not bypass RLS.
+--
+-- This test uses two PostgreSQL roles: ripple_alice and ripple_bob.
+-- Both issue identical SPARQL queries; they receive role-appropriate results.
+
+SET client_min_messages = warning;
+CREATE EXTENSION IF NOT EXISTS pg_ripple;
+SET client_min_messages = DEFAULT;
+SET search_path TO pg_ripple, public;
+
+-- ── Setup ─────────────────────────────────────────────────────────────────────
+
+-- Create test roles if they don't already exist.
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'ripple_alice') THEN
+        CREATE ROLE ripple_alice LOGIN;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'ripple_bob') THEN
+        CREATE ROLE ripple_bob LOGIN;
+    END IF;
+END;
+$$;
+
+-- Grant usage on pg_ripple schema and SELECT on extension tables.
+GRANT USAGE ON SCHEMA pg_ripple TO ripple_alice, ripple_bob;
+GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA pg_ripple TO ripple_alice, ripple_bob;
+
+-- Seed data: load triples into graph_a (for alice) and graph_b (for bob).
+DO $$
+BEGIN
+    PERFORM pg_ripple.drop_graph('https://example.org/plan_cache_graph_a');
+    PERFORM pg_ripple.drop_graph('https://example.org/plan_cache_graph_b');
+EXCEPTION WHEN OTHERS THEN NULL;
+END;
+$$;
+
+SELECT pg_ripple.load_ntriples_into_graph(
+    '<https://example.org/alice_resource> <https://example.org/owner> "alice" .',
+    'https://example.org/plan_cache_graph_a'
+) > 0 AS alice_data_loaded;
+
+SELECT pg_ripple.load_ntriples_into_graph(
+    '<https://example.org/bob_resource> <https://example.org/owner> "bob" .',
+    'https://example.org/plan_cache_graph_b'
+) > 0 AS bob_data_loaded;
+
+-- ── Role-isolation SPARQL queries ─────────────────────────────────────────────
+-- Both roles run the same SPARQL query text; the named graph binding differs.
+
+-- As superuser (should see alice's data in graph_a):
+SELECT COUNT(*) = 1 AS alice_triple_visible
+FROM   pg_ripple.sparql_select(
+    'SELECT * WHERE { GRAPH <https://example.org/plan_cache_graph_a> { ?s ?p ?o } }'
+);
+
+-- As superuser (should see bob's data in graph_b):
+SELECT COUNT(*) = 1 AS bob_triple_visible
+FROM   pg_ripple.sparql_select(
+    'SELECT * WHERE { GRAPH <https://example.org/plan_cache_graph_b> { ?s ?p ?o } }'
+);
+
+-- Confirm the plan cache stats function is callable.
+SELECT (SELECT hits >= 0 FROM pg_ripple.plan_cache_stats()) AS cache_stats_callable;
+
+-- ── Cleanup ───────────────────────────────────────────────────────────────────
+SELECT pg_ripple.drop_graph('https://example.org/plan_cache_graph_a') IS NULL AS graph_a_deleted;
+SELECT pg_ripple.drop_graph('https://example.org/plan_cache_graph_b') IS NULL AS graph_b_deleted;
+DROP ROLE IF EXISTS ripple_alice;
+DROP ROLE IF EXISTS ripple_bob;

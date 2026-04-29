@@ -143,6 +143,39 @@ pub(crate) async fn flight_do_get(
         }
     };
 
+    // FLIGHT-NONCE-01 (v0.72.0): replay protection — reject reused nonces.
+    {
+        use std::time::Instant;
+        let nonce = ticket["nonce"].as_str().unwrap_or("").to_owned();
+        let expiry_secs = ticket["exp"].as_u64().unwrap_or(0).saturating_sub(now_secs);
+        if !nonce.is_empty() {
+            // Lazy eviction: remove expired entries to keep cache bounded.
+            if state.arrow_nonce_cache.len() > state.arrow_nonce_cache_max {
+                let now_instant = Instant::now();
+                state
+                    .arrow_nonce_cache
+                    .retain(|_, (accepted_at, exp)| accepted_at.elapsed().as_secs() < *exp);
+                let _ = now_instant; // suppress unused warning
+            }
+            // Check for replay.
+            if let Some(entry) = state.arrow_nonce_cache.get(&nonce) {
+                let (accepted_at, exp) = entry.value();
+                if accepted_at.elapsed().as_secs() < *exp {
+                    tracing::warn!(nonce = %nonce, "Arrow Flight ticket nonce replayed");
+                    state.metrics.record_arrow_ticket_rejection();
+                    return json_response_http(
+                        StatusCode::UNAUTHORIZED,
+                        serde_json::json!({"error": "invalid ticket", "reason": "nonce already used"}),
+                    );
+                }
+            }
+            // Record this nonce as seen.
+            state
+                .arrow_nonce_cache
+                .insert(nonce, (Instant::now(), expiry_secs));
+        }
+    }
+
     let client = match state.pool.get().await {
         Ok(c) => c,
         Err(e) => {

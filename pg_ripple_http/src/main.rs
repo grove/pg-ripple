@@ -270,6 +270,12 @@ async fn main() {
         arrow_unsigned_tickets_allowed: std::env::var("ARROW_UNSIGNED_TICKETS_ALLOWED")
             .map(|v| v.eq_ignore_ascii_case("true") || v == "1")
             .unwrap_or(false),
+        // FLIGHT-NONCE-01 (v0.72.0): nonce replay protection cache.
+        arrow_nonce_cache: dashmap::DashMap::new(),
+        arrow_nonce_cache_max: std::env::var("ARROW_NONCE_CACHE_MAX")
+            .ok()
+            .and_then(|v| v.parse::<usize>().ok())
+            .unwrap_or(10_000),
     });
 
     // CORS layer — wildcard "*" requires explicit opt-in; empty means deny all cross-origin.

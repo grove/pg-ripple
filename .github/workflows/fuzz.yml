@@ -35,6 +35,7 @@ jobs:
           - r2rml_mapping
           - geosparql_wkt
           - llm_prompt_builder
+          - sparql_update
 
     steps:
       - name: Checkout repository

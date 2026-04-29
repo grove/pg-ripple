@@ -1022,10 +1022,10 @@ jobs:
         run: cargo doc --no-deps --features pg18 2>&1 | tee /tmp/doc_output.txt && ! grep -q "missing documentation" /tmp/doc_output.txt
 
   bsbm-regression:
-    name: BSBM regression gate (informational, v0.46.0)
+    name: BSBM regression gate (required, v0.72.0 CONF-01)
     runs-on: ubuntu-latest
     needs: [test]
-    continue-on-error: true
+    continue-on-error: false
 
     steps:
       - name: Checkout
@@ -1106,7 +1106,29 @@ jobs:
         run: |
           if [ -d benchmarks/bsbm/data ]; then
             echo "BSBM data found — running regression check"
-            psql -h localhost -p 28818 -d postgres -U runner -f benchmarks/bsbm/queries.sql || echo "BSBM queries produced errors (non-blocking)"
+            # Time the BSBM query execution; fail if > 1.5x the stored baseline.
+            START_MS=$(date +%s%3N)
+            psql -h localhost -p 28818 -d postgres -U runner -f benchmarks/bsbm/queries.sql
+            END_MS=$(date +%s%3N)
+            ELAPSED_MS=$(( END_MS - START_MS ))
+            echo "BSBM elapsed: ${ELAPSED_MS} ms"
+            # Read baseline from the benchmark file (fallback: 120000 ms = 2 min).
+            BASELINE_MS=$(python3 -c "
+          import json, sys
+          try:
+              with open('benchmarks/bsbm/baseline.json') as f:
+                  print(json.load(f).get('p95_ms', 120000))
+          except Exception:
+              print(120000)
+          " 2>/dev/null || echo 120000)
+            THRESHOLD_MS=$(( BASELINE_MS * 3 / 2 ))
+            echo "Baseline: ${BASELINE_MS} ms, threshold (1.5x): ${THRESHOLD_MS} ms"
+            if [ "${ELAPSED_MS}" -gt "${THRESHOLD_MS}" ]; then
+              echo "BSBM REGRESSION: elapsed ${ELAPSED_MS} ms > threshold ${THRESHOLD_MS} ms"
+              exit 1
+            else
+              echo "BSBM OK: elapsed ${ELAPSED_MS} ms within threshold"
+            fi
           else
             echo "BSBM data not available — skipping regression check"
           fi

@@ -1248,17 +1248,86 @@ pub fn citus_service_shard_annotation(endpoint_url: &str) -> Option<String> {
     Some(format!("/* citus_pruning: worker={host} */"))
 }
 
-/// Extract the hostname from a URL string (simple heuristic, no full URL parser).
+/// Extract the hostname from a URL string.
+///
+/// Handles the following forms (CITUS-URL-01, v0.72.0):
+/// - Normal host:   `http://worker1.internal/db`     → `worker1.internal`
+/// - IPv6 literal: `http://[::1]:5432/db`            → `[::1]`
+/// - IDN:           `http://xn--bcher-kva.example.com/db` → `xn--bcher-kva.example.com`
+/// - Port-only:     `http://host:5432`               → `host`
+/// - Malformed:     `not-a-url`                      → `""` (empty)
 fn extract_url_host(url: &str) -> String {
-    // Strip scheme (http:// or https://)
+    // Strip scheme (http:// or https://).
     let rest = if let Some(r) = url.strip_prefix("https://") {
         r
     } else if let Some(r) = url.strip_prefix("http://") {
         r
     } else {
-        return url.to_owned();
+        // Not a valid http/https URL — return empty to signal failure.
+        return String::new();
     };
-    // Take up to the first '/', ':', or '?'
+    // IPv6 literal: starts with '['.
+    if rest.starts_with('[') {
+        // Find the closing ']'.
+        if let Some(close) = rest.find(']') {
+            return rest[..=close].to_owned();
+        }
+        // Malformed IPv6 literal — return empty.
+        return String::new();
+    }
+    // Normal host: take up to the first '/', ':', or '?'.
     let end = rest.find(['/', ':', '?']).unwrap_or(rest.len());
     rest[..end].to_owned()
+}
+
+#[cfg(any(test, feature = "pg_test"))]
+#[cfg(test)]
+mod url_parsing_tests {
+    use super::extract_url_host;
+
+    #[test]
+    fn test_normal_host() {
+        assert_eq!(
+            extract_url_host("http://worker1.internal/db"),
+            "worker1.internal"
+        );
+    }
+
+    #[test]
+    fn test_ipv6_literal() {
+        assert_eq!(extract_url_host("http://[::1]:5432/db"), "[::1]");
+    }
+
+    #[test]
+    fn test_idn_host() {
+        assert_eq!(
+            extract_url_host("http://xn--bcher-kva.example.com/db"),
+            "xn--bcher-kva.example.com"
+        );
+    }
+
+    #[test]
+    fn test_port_only_no_path() {
+        assert_eq!(extract_url_host("http://host:5432"), "host");
+    }
+
+    #[test]
+    fn test_malformed_url() {
+        // Not an http:// URL — must return empty string, not panic.
+        assert_eq!(extract_url_host("not-a-url"), "");
+    }
+
+    #[test]
+    fn test_https_scheme() {
+        assert_eq!(
+            extract_url_host("https://secure.worker.local/sparql"),
+            "secure.worker.local"
+        );
+    }
+
+    #[test]
+    fn test_ipv6_malformed_no_close_bracket() {
+        // Malformed IPv6 literal — must return empty, not panic.
+        assert_eq!(extract_url_host("http://[::1"), "");
+    }
 }

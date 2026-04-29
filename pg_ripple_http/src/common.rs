@@ -5,8 +5,10 @@ use axum::body::Body;
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use constant_time_eq::constant_time_eq;
+use dashmap::DashMap;
 use deadpool_postgres::Pool;
 use std::sync::atomic::AtomicBool;
+use std::time::Instant;
 use uuid::Uuid;
 
 use crate::metrics::Metrics;
@@ -37,6 +39,14 @@ pub struct AppState {
     /// accepted (local development only). Controlled by the env var
     /// `ARROW_UNSIGNED_TICKETS_ALLOWED=true`. Default `false`.
     pub arrow_unsigned_tickets_allowed: bool,
+    /// v0.72.0 FLIGHT-NONCE-01: seen-nonce LRU cache for Arrow Flight replay protection.
+    /// Maps nonce string → (accepted_at Instant, expiry_secs u64).
+    /// Entries are lazily evicted when the expiry window has elapsed.
+    /// Capped at `arrow_nonce_cache_max` entries.
+    pub arrow_nonce_cache: DashMap<String, (Instant, u64)>,
+    /// Maximum number of nonce entries in the replay-protection cache.
+    /// Configurable via `ARROW_NONCE_CACHE_MAX` env var (default: 10000).
+    pub arrow_nonce_cache_max: usize,
 }
 
 // ─── Configuration ────────────────────────────────────────────────────────────

@@ -713,14 +713,37 @@ fn json_value_to_nt_term(
     match val {
         serde_json::Value::String(s) => Some(format!("\"{}\"", escape_nt_literal(s))),
         serde_json::Value::Number(n) => {
-            if let Some(i) = n.as_i64() {
+            // RT-FIX-06: check is_f64() first so that `5.0` is stored as
+            // xsd:decimal rather than collapsing to xsd:integer.
+            if n.is_f64() {
+                n.as_f64()
+                    .map(|f| format!("\"{}\"^^<http://www.w3.org/2001/XMLSchema#decimal>", f))
+            } else if let Some(i) = n.as_i64() {
                 Some(format!(
                     "\"{}\"^^<http://www.w3.org/2001/XMLSchema#integer>",
                     i
                 ))
+            } else if let Some(u) = n.as_u64() {
+                // Values in (i64::MAX, u64::MAX] — still valid xsd:integer.
+                Some(format!(
+                    "\"{}\"^^<http://www.w3.org/2001/XMLSchema#integer>",
+                    u
+                ))
             } else {
-                n.as_f64()
-                    .map(|f| format!("\"{}\"^^<http://www.w3.org/2001/XMLSchema#decimal>", f))
+                // RT-FIX-04B: numbers that exceed u64::MAX are preserved as
+                // an xsd:integer string rather than silently losing precision.
+                let s = n.to_string();
+                if s.contains('.') || s.contains('e') || s.contains('E') {
+                    Some(format!(
+                        "\"{}\"^^<http://www.w3.org/2001/XMLSchema#decimal>",
+                        s
+                    ))
+                } else {
+                    Some(format!(
+                        "\"{}\"^^<http://www.w3.org/2001/XMLSchema#integer>",
+                        s
+                    ))
+                }
             }
         }
         serde_json::Value::Bool(b) => Some(format!(
@@ -796,6 +819,28 @@ fn json_object_to_ntriples_inner(
 ///
 /// Returns the N-Triples string.  Nested objects become blank nodes.  Arrays
 /// produce one triple per element.  `null` values are silently skipped.
+
+/// RT-FIX-07: Validate that a JSON key is safe to expand under @vocab.
+///
+/// Raises a PostgreSQL error if the key contains characters forbidden in IRI
+/// references (RFC 3987): spaces, control characters, `"`, `<`, `>`, `{`, `}`,
+/// `|`, `\\`, `^`, and `` ` ``.
+fn validate_iri_key_or_error(key: &str) {
+    let forbidden =
+        |c: char| c <= '\x20' || matches!(c, '"' | '<' | '>' | '{' | '}' | '|' | '\\' | '^' | '`');
+    if let Some(bad) = key.chars().find(|&c| forbidden(c)) {
+        pgrx::error!(
+            "cannot derive predicate IRI from JSON key {:?}: \
+             character {:?} is not allowed in IRI references — \
+             add an explicit context entry, e.g. {:?}: \"ex:{}\"",
+            key,
+            bad,
+            key,
+            key.replace(' ', "_")
+        );
+    }
+}
+
 pub fn json_to_ntriples(
     payload: &serde_json::Value,
     subject_iri: &str,
@@ -817,6 +862,8 @@ pub fn json_to_ntriples(
             // @vocab provides the default IRI prefix for all unmapped keys.
             for (k, _) in map {
                 if !k.starts_with('@') && !c.contains_key(k.as_str()) {
+                    // RT-FIX-07: validate the key is a valid IRI local part.
+                    validate_iri_key_or_error(k);
                     ctx.insert(k.clone(), format!("{}{}", vocab, k));
                 }
             }
@@ -825,8 +872,25 @@ pub fn json_to_ntriples(
             if k == "@vocab" || k.starts_with('@') {
                 continue;
             }
-            if let serde_json::Value::String(iri) = v {
-                ctx.insert(k.clone(), iri.clone());
+            match v {
+                serde_json::Value::String(iri) => {
+                    // Simple string-valued context entry: "key": "iri"
+                    ctx.insert(k.clone(), iri.clone());
+                }
+                serde_json::Value::Object(meta) => {
+                    // BUG-JSONLD-CONTEXT-01: object-form context entry.
+                    // Extract the @id field as the predicate IRI.
+                    if let Some(serde_json::Value::String(iri)) = meta.get("@id") {
+                        ctx.insert(k.clone(), iri.clone());
+                    } else if let Some(serde_json::Value::String(vocab)) = c.get("@vocab") {
+                        // Fall back to @vocab expansion for the key.
+                        ctx.insert(k.clone(), format!("{}{}", vocab, k));
+                    }
+                    // Note: @container, @type, @language metadata is noted
+                    // for forward-compatibility but not fully processed here;
+                    // the IRI mapping is the critical fix for round-trip correctness.
+                }
+                _ => {}
             }
         }
     }

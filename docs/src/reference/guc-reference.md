@@ -50,7 +50,65 @@ Timeout for outbound SPARQL federation requests.
 | Type | Integer |
 | Default | `1000` |
 
-Number of rows written per batch in Parquet export operations.
+Number of rows fetched per page when a SPARQL cursor streams results back to the
+caller. This controls Rust-side peak memory: at most `export_batch_size` result
+rows are decoded from dictionary IDs and held in memory simultaneously before
+being forwarded. Increase for higher throughput at the cost of more memory;
+decrease for tighter memory budgets.
+
+See also: `arrow_batch_size` (Arrow IPC batching) operates independently —
+the two GUCs govern different output paths and can be tuned separately.
+
+---
+
+### `pg_ripple.arrow_batch_size`
+
+| | |
+|---|---|
+| Type | Integer |
+| Default | `1000` |
+| Minimum | `1` |
+
+Number of rows packed into each Arrow IPC `RecordBatch` during Arrow Flight
+bulk export. A larger value produces fewer IPC frames and lower per-frame
+overhead; a smaller value allows consumers to begin processing results sooner.
+
+**Interaction with `export_batch_size`**: `arrow_batch_size` controls the IPC
+batch granularity inside the Arrow Flight response body. `export_batch_size`
+controls how many SPARQL cursor rows are fetched per page from PostgreSQL. The
+two parameters operate on independent code paths and can be tuned separately.
+
+```sql
+-- Tune for high-bandwidth Arrow bulk export
+SET pg_ripple.arrow_batch_size = 5000;
+```
+
+---
+
+### `pg_ripple.vp_promotion_batch_size`
+
+| | |
+|---|---|
+| Type | Integer |
+| Default | `10000` |
+| Minimum | `100` |
+
+Batch size for the COPY-phase of VP table promotion: when a rare-predicate
+triple count exceeds `vp_promotion_threshold`, the promotion worker copies rows
+from `_pg_ripple.vp_rare` into the new dedicated VP table in batches of this
+size. Larger batches reduce promotion time at the cost of a larger WAL record
+per batch; smaller batches reduce WAL pressure and allow other transactions to
+proceed between batches.
+
+**Interaction with the other batch-size GUCs**: VP promotion runs in the
+background worker and is unrelated to SPARQL cursor streaming or Arrow IPC
+export. Changing this GUC affects only the promotion throughput, not query
+performance.
+
+```sql
+-- Reduce WAL pressure during a large promotion
+SET pg_ripple.vp_promotion_batch_size = 1000;
+```
 
 ---
 
