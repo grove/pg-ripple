@@ -38,14 +38,26 @@ const INJECTION_MARKERS: &[&str] = &[
 /// Iterates to fixpoint: removing one marker may expose another (e.g.
 /// `###[SYSTEM]SYS` → strip `[SYSTEM]` → `###SYS`), so the loop repeats
 /// until a full pass over all markers produces no further changes.
+///
+/// # Why `to_ascii_uppercase` instead of `to_uppercase`
+///
+/// Unicode `to_uppercase` can change the byte length of a string (e.g. U+023F
+/// `ȿ` is 2 UTF-8 bytes but its uppercase U+2C9F `Ȿ` is 3 bytes). Using the
+/// Unicode-uppercased string to find byte offsets and then applying those
+/// offsets to the original `result` (which has different lengths) would slice
+/// at wrong positions. All injection markers are ASCII, so ASCII-only
+/// uppercasing is both correct and length-preserving: offsets in `upper`
+/// always correspond to the same byte positions in `result`.
 fn sanitize_prompt(input: &str) -> String {
     let mut result = input.to_owned();
     loop {
         let mut changed = false;
         for marker in INJECTION_MARKERS {
-            // Case-insensitive removal: rebuild `result` without the marker.
-            let upper = result.to_uppercase();
-            let marker_upper = marker.to_uppercase();
+            // ASCII-only case-insensitive removal.
+            // to_ascii_uppercase preserves byte length, so offsets found in
+            // `upper` are valid byte indices into `result`.
+            let upper = result.to_ascii_uppercase();
+            let marker_upper = marker.to_ascii_uppercase();
             let mut out = String::with_capacity(result.len());
             let mut last = 0usize;
             let mut search_from = 0usize;
