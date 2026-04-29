@@ -21,15 +21,37 @@
 ## Architecture
 
 ```
-src/lib.rs          — pgrx entry points, _PG_init, GUC parameters
-src/dictionary/     — IRI/blank-node/literal → i64 encoder (XXH3-128 + LRU cache)
-src/storage/        — VP tables, HTAP delta/main partitions, merge background worker
-src/sparql/         — SPARQL text → spargebra algebra → SQL → SPI execution → decode
-src/datalog/        — Datalog rule parser, stratifier, SQL compiler, built-in RDFS/OWL RL
-src/shacl/          — SHACL shapes → DDL constraints + async validation pipeline
-src/export/         — Turtle / N-Triples / JSON-LD serialization
-src/stats/          — Monitoring, pg_stat_statements integration
-src/admin/          — vacuum, reindex, prefix registry
+src/lib.rs                 — pgrx entry points, _PG_init, GUC parameters
+src/dictionary/            — IRI/blank-node/literal → i64 encoder (XXH3-128 + LRU cache)
+src/storage/               — VP tables, HTAP delta/main partitions, merge background worker
+  src/storage/promote.rs   — VP promotion helpers (promote_predicate, promote_rare_predicates)
+src/sparql/                — SPARQL text → spargebra algebra → SQL → SPI execution → decode
+  src/sparql/parse.rs      — query complexity checks + ARQ aggregate preprocessing
+  src/sparql/plan.rs       — SPARQL algebra → SQL translation + plan cache
+  src/sparql/decode.rs     — batch dictionary decode for SPARQL results
+  src/sparql/execute.rs    — SPI execution, CONSTRUCT/DESCRIBE/UPDATE, explain
+src/construct_rules/       — SPARQL CONSTRUCT writeback rules (was construct_rules.rs)
+  src/construct_rules/catalog.rs   — ensure_catalog bootstrap
+  src/construct_rules/scheduler.rs — topological sort + source-graph parse helpers
+  src/construct_rules/delta.rs     — compile_construct_to_inserts + run_full_recompute
+  src/construct_rules/retract.rs   — Delete-Rederive retraction
+src/datalog/               — Datalog rule parser, stratifier, SQL compiler, built-in RDFS/OWL RL
+src/shacl/                 — SHACL shapes → DDL constraints + async validation pipeline
+src/export/                — Turtle / N-Triples / JSON-LD serialization
+src/stats/                 — Monitoring, pg_stat_statements integration
+src/admin/                 — vacuum, reindex, prefix registry
+```
+
+`pg_ripple_http/src/` layout (v0.69.0+):
+```
+pg_ripple_http/src/main.rs          — startup code + main() (250 lines)
+pg_ripple_http/src/routing.rs       — all HTTP handler functions, response formatters, build_router()
+pg_ripple_http/src/spi_bridge.rs    — execute_sparql_with_traceparent + execute_select/ask/construct/describe
+pg_ripple_http/src/arrow_encode.rs  — Arrow Flight bulk-export endpoint
+pg_ripple_http/src/stream.rs        — SSE/chunked-transfer streaming placeholder
+pg_ripple_http/src/common.rs        — AppState, check_auth, env_or, redacted_error
+pg_ripple_http/src/datalog.rs       — Datalog REST API handlers
+pg_ripple_http/src/metrics.rs       — Prometheus metrics
 ```
 
 All user-visible objects live in the `pg_ripple` schema; internal tables and VP tables live in `_pg_ripple`.

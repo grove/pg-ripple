@@ -13,6 +13,48 @@ Versions correspond to the milestones in [ROADMAP.md](ROADMAP.md).
 
 ---
 
+## [0.69.0] — 2026-05-06 — Module Architecture Restructuring
+
+**Implements v0.69.0 roadmap: splits four large source modules along single-responsibility boundaries with zero behavioral changes.**
+
+### What's new
+
+- **ARCH-01 — `src/sparql/mod.rs` split** (already delivered in prior sessions): `parse.rs`, `plan.rs`, `decode.rs`, `execute.rs` extracted; `mod.rs` is now a 157-line facade with re-exports and the three public SQL-entry-point functions.
+
+- **ARCH-02 — `pg_ripple_http/src/main.rs` split**: Handler functions, content-type constants, and response formatters extracted to `routing.rs`; SPARQL execution helpers (execute_select/ask/construct/describe) to `spi_bridge.rs`; Arrow IPC Flight endpoint to `arrow_encode.rs`; streaming placeholder to `stream.rs`. `main.rs` is now 250 lines (startup code + `main()` only).
+
+- **ARCH-03 — `src/construct_rules.rs` split into a module directory**: `catalog.rs` (ensure_catalog), `scheduler.rs` (collect_source_graphs + compute_rule_order topological sort), `delta.rs` (compile_construct_to_inserts + run_full_recompute), `retract.rs` (retract_exclusive_triples), `mod.rs` (public API + write hooks).
+
+- **ARCH-04 — `src/storage/mod.rs` narrowed public API**: `insert_triple_by_ids`, `delete_triple_by_ids`, and `batch_insert_encoded` narrowed to `pub(crate)` with journal-caller doc comments. VP promotion helpers (`promote_predicate`, `promote_rare_predicates`, `recover_interrupted_promotions`, `vp_promotion_threshold`, `create_extended_statistics`) extracted to `storage/promote.rs`.
+
+- **ARCH-05 — All 186 pg_regress tests pass**; no SQL-visible changes.
+
+### Schema changes
+
+None. This is a pure Rust module restructuring.
+
+### Files changed
+
+- **src/sparql/parse.rs** — query complexity checks + ARQ aggregate preprocessing (new)
+- **src/sparql/plan.rs** — SPARQL algebra → SQL plan cache (new)
+- **src/sparql/decode.rs** — batch dictionary decode (new)
+- **src/sparql/execute.rs** — SPI execution, CONSTRUCT/DESCRIBE/UPDATE, explain (new)
+- **src/sparql/mod.rs** — thin facade: re-exports + 3 public SQL entry points
+- **pg_ripple_http/src/routing.rs** — all HTTP handlers, response formatters, build_router (new)
+- **pg_ripple_http/src/spi_bridge.rs** — execute_sparql_with_traceparent + execute_select/ask/construct/describe (new)
+- **pg_ripple_http/src/arrow_encode.rs** — Arrow Flight bulk-export (new)
+- **pg_ripple_http/src/stream.rs** — SSE/streaming placeholder (new)
+- **pg_ripple_http/src/main.rs** — startup code only (250 lines, was 2252)
+- **src/construct_rules/mod.rs** — public API + on_graph_write/delete hooks (new directory)
+- **src/construct_rules/catalog.rs** — ensure_catalog (new)
+- **src/construct_rules/scheduler.rs** — topological sort (new)
+- **src/construct_rules/delta.rs** — compile + recompute (new)
+- **src/construct_rules/retract.rs** — retract_exclusive_triples (new)
+- **src/storage/promote.rs** — VP promotion helpers (new)
+- **src/storage/mod.rs** — narrowed mutation API, pub(crate) for mutation functions
+
+---
+
 ## [0.68.0] — 2026-04-29 — Distributed Scalability, Streaming Completion, and Fuzz Hardening
 
 **Implements v0.68.0 roadmap: portal-based CONSTRUCT cursor streaming, Citus HLL COUNT(DISTINCT), Citus SERVICE shard pruning, nonblocking VP promotion with crash recovery, and scheduled nightly fuzz CI.**
