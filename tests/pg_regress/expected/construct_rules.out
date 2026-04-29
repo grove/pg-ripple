@@ -33,7 +33,7 @@ SELECT column_name
 FROM information_schema.columns
 WHERE table_schema = '_pg_ripple'
   AND table_name = 'construct_rules'
-  AND column_name IN ('name','sparql','generated_sql','target_graph',
+  AND column_name IN ('name','sparql','generated_sql',
                       'target_graph_id','mode','source_graphs',
                       'rule_order','created_at','last_refreshed')
 ORDER BY column_name;
@@ -47,9 +47,8 @@ ORDER BY column_name;
  rule_order
  source_graphs
  sparql
- target_graph
  target_graph_id
-(10 rows)
+(9 rows)
 
 -- ── list_construct_rules: empty initially ─────────────────────────────────────
 SELECT pg_ripple.list_construct_rules() = '[]'::jsonb AS construct_rules_initially_empty;

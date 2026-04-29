@@ -1,13 +1,21 @@
-// ─── SHACL → SPARQL planner hints (v0.38.0) ──────────────────────────────────
+// ─── SHACL → SPARQL planner hints (v0.38.0, updated v0.74.0 SCHEMA-NORM-09) ─
 //
 // Populates `_pg_ripple.shape_hints` from loaded SHACL shapes so that the
 // SPARQL SQL generator can make smarter join choices:
 //
-//   hint_type = 'min_count_1'  → predicate is mandatory (minCount ≥ 1)
-//                                sqlgen may downgrade LEFT JOIN → INNER JOIN
+//   hint_type = 2 (min_count_1)  → predicate is mandatory (minCount ≥ 1)
+//                                   sqlgen may downgrade LEFT JOIN → INNER JOIN
 //
-//   hint_type = 'max_count_1'  → predicate is single-valued (maxCount ≤ 1)
-//                                sqlgen may suppress DISTINCT for that predicate
+//   hint_type = 1 (max_count_1)  → predicate is single-valued (maxCount ≤ 1)
+//                                   sqlgen may suppress DISTINCT for that predicate
+//
+// SCHEMA-NORM-09: hint_type changed from TEXT to SMALLINT in v0.74.0.
+//   1 = max_count_1, 2 = min_count_1
+
+/// SMALLINT constant: predicate is single-valued (maxCount ≤ 1).
+const HINT_MAX_COUNT_1: i16 = 1;
+/// SMALLINT constant: predicate is mandatory (minCount ≥ 1).
+const HINT_MIN_COUNT_1: i16 = 2;
 
 use pgrx::prelude::*;
 
@@ -45,10 +53,11 @@ pub fn populate_hints(shape: &super::Shape) {
             let _ = Spi::run_with_args(
                 "INSERT INTO _pg_ripple.shape_hints \
                  (predicate_id, hint_type, shape_iri_id, updated_at) \
-                 VALUES ($1, 'min_count_1', $2, now()) \
+                 VALUES ($1, $2, $3, now()) \
                  ON CONFLICT (predicate_id, hint_type) DO UPDATE SET updated_at = now()",
                 &[
                     pgrx::datum::DatumWithOid::from(pred_id),
+                    pgrx::datum::DatumWithOid::from(HINT_MIN_COUNT_1),
                     pgrx::datum::DatumWithOid::from(shape_iri_id),
                 ],
             );
@@ -58,10 +67,11 @@ pub fn populate_hints(shape: &super::Shape) {
             let _ = Spi::run_with_args(
                 "INSERT INTO _pg_ripple.shape_hints \
                  (predicate_id, hint_type, shape_iri_id, updated_at) \
-                 VALUES ($1, 'max_count_1', $2, now()) \
+                 VALUES ($1, $2, $3, now()) \
                  ON CONFLICT (predicate_id, hint_type) DO UPDATE SET updated_at = now()",
                 &[
                     pgrx::datum::DatumWithOid::from(pred_id),
+                    pgrx::datum::DatumWithOid::from(HINT_MAX_COUNT_1),
                     pgrx::datum::DatumWithOid::from(shape_iri_id),
                 ],
             );
@@ -82,8 +92,8 @@ pub fn remove_hints_for_shape(shape_iri: &str) {
     );
 }
 
-/// Returns `true` if the given predicate has a `min_count_1` hint, meaning
-/// at least one value per focus node is guaranteed by a SHACL shape.
+/// Returns `true` if the given predicate has a `min_count_1` hint (hint_type = 2),
+/// meaning at least one value per focus node is guaranteed by a SHACL shape.
 ///
 /// When this is true the SPARQL SQL generator may safely use `INNER JOIN`
 /// instead of `LEFT JOIN` for optional patterns on this predicate.
@@ -91,7 +101,7 @@ pub fn has_min_count_1(pred_id: i64) -> bool {
     Spi::get_one_with_args::<bool>(
         "SELECT EXISTS(\
              SELECT 1 FROM _pg_ripple.shape_hints \
-             WHERE predicate_id = $1 AND hint_type = 'min_count_1'\
+             WHERE predicate_id = $1 AND hint_type = 2\
          )",
         &[pgrx::datum::DatumWithOid::from(pred_id)],
     )
@@ -100,15 +110,15 @@ pub fn has_min_count_1(pred_id: i64) -> bool {
     .unwrap_or(false)
 }
 
-/// Returns `true` if the given predicate has a `max_count_1` hint, meaning
-/// at most one value per focus node is guaranteed by a SHACL shape.
+/// Returns `true` if the given predicate has a `max_count_1` hint (hint_type = 1),
+/// meaning at most one value per focus node is guaranteed by a SHACL shape.
 ///
 /// When this is true the SPARQL SQL generator may safely suppress `DISTINCT`.
 pub fn has_max_count_1(pred_id: i64) -> bool {
     Spi::get_one_with_args::<bool>(
         "SELECT EXISTS(\
              SELECT 1 FROM _pg_ripple.shape_hints \
-             WHERE predicate_id = $1 AND hint_type = 'max_count_1'\
+             WHERE predicate_id = $1 AND hint_type = 1\
          )",
         &[pgrx::datum::DatumWithOid::from(pred_id)],
     )

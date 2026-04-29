@@ -84,14 +84,15 @@ pub fn refresh_endpoint_stats(url: &str) {
     let stats = fetch_void_stats(url);
 
     // Upsert into endpoint_stats.
+    // JSON-01 (v0.74.0): column renamed predicate_stats_json → predicate_stats (JSONB).
     Spi::run_with_args(
         "INSERT INTO _pg_ripple.endpoint_stats
-             (endpoint_url, total_triples, predicate_stats_json, distinct_subjects,
+             (endpoint_url, total_triples, predicate_stats, distinct_subjects,
               distinct_objects, fetched_at)
-         VALUES ($1, $2, $3, $4, $5, now())
+         VALUES ($1, $2, $3::jsonb, $4, $5, now())
          ON CONFLICT (endpoint_url) DO UPDATE
              SET total_triples       = EXCLUDED.total_triples,
-                 predicate_stats_json = EXCLUDED.predicate_stats_json,
+                 predicate_stats     = EXCLUDED.predicate_stats,
                  distinct_subjects   = EXCLUDED.distinct_subjects,
                  distinct_objects    = EXCLUDED.distinct_objects,
                  fetched_at          = EXCLUDED.fetched_at",
@@ -232,7 +233,7 @@ pub fn load_endpoint_stats(url: &str) -> EndpointStats {
 
     Spi::connect(|c| {
         let result = c.select(
-            "SELECT total_triples, predicate_stats_json, distinct_subjects, distinct_objects
+            "SELECT total_triples, predicate_stats::text, distinct_subjects, distinct_objects
              FROM _pg_ripple.endpoint_stats
              WHERE endpoint_url = $1",
             None,

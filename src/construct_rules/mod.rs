@@ -84,16 +84,17 @@ pub(crate) fn create_construct_rule(name: &str, sparql: &str, target_graph: &str
         format!("ARRAY[{}]::text[]", quoted.join(", "))
     };
 
+    // SCHEMA-NORM-04: target_graph TEXT column is dropped in v0.74.0.
+    // Use target_graph_id (BIGINT) only; decode for display via dictionary::decode.
     Spi::run_with_args(
         &format!(
             "INSERT INTO _pg_ripple.construct_rules \
-             (name, sparql, generated_sql, target_graph, target_graph_id, mode, \
+             (name, sparql, generated_sql, target_graph_id, mode, \
               source_graphs, rule_order) \
-             VALUES ($1, $2, $3, $4, $5, $6, {source_graphs_literal}, $7) \
+             VALUES ($1, $2, $3, $4, $5, {source_graphs_literal}, $6) \
              ON CONFLICT (name) DO UPDATE \
              SET sparql = EXCLUDED.sparql, \
                  generated_sql = EXCLUDED.generated_sql, \
-                 target_graph = EXCLUDED.target_graph, \
                  target_graph_id = EXCLUDED.target_graph_id, \
                  mode = EXCLUDED.mode, \
                  source_graphs = EXCLUDED.source_graphs, \
@@ -103,7 +104,6 @@ pub(crate) fn create_construct_rule(name: &str, sparql: &str, target_graph: &str
             DatumWithOid::from(name),
             DatumWithOid::from(sparql),
             DatumWithOid::from(generated_sql.as_str()),
-            DatumWithOid::from(target_graph),
             DatumWithOid::from(target_graph_id),
             DatumWithOid::from(mode),
             DatumWithOid::from(rule_order),
@@ -193,8 +193,11 @@ pub(crate) fn refresh_construct_rule(name: &str) -> i64 {
 pub(crate) fn list_construct_rules() -> pgrx::JsonB {
     catalog::ensure_catalog();
     Spi::get_one::<pgrx::JsonB>(
+        // SCHEMA-NORM-04: target_graph TEXT dropped; decode target_graph_id via dictionary.
         "SELECT COALESCE(json_agg(row_to_json(r))::jsonb, '[]'::jsonb) \
-         FROM (SELECT name, sparql, target_graph, mode, source_graphs, \
+         FROM (SELECT name, sparql, \
+                      (SELECT value FROM _pg_ripple.dictionary WHERE id = target_graph_id) AS target_graph, \
+                      mode, source_graphs, \
                       rule_order, last_refreshed, last_incremental_run, \
                       successful_run_count, failed_run_count, \
                       derived_triple_count, last_error \
@@ -480,7 +483,7 @@ pub(crate) fn construct_pipeline_status() -> pgrx::JsonB {
                 'rule_order',           rule_order,
                 'mode',                 mode,
                 'source_graphs',        source_graphs,
-                'target_graph',         target_graph,
+                'target_graph',         (SELECT value FROM _pg_ripple.dictionary WHERE id = target_graph_id),
                 'derived_triple_count', derived_triple_count,
                 'successful_run_count', successful_run_count,
                 'failed_run_count',     failed_run_count,

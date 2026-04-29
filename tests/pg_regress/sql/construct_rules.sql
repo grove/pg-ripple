@@ -28,7 +28,7 @@ SELECT column_name
 FROM information_schema.columns
 WHERE table_schema = '_pg_ripple'
   AND table_name = 'construct_rules'
-  AND column_name IN ('name','sparql','generated_sql','target_graph',
+  AND column_name IN ('name','sparql','generated_sql',
                       'target_graph_id','mode','source_graphs',
                       'rule_order','created_at','last_refreshed')
 ORDER BY column_name;

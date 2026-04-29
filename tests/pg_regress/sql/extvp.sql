@@ -13,11 +13,11 @@ SELECT pg_ripple.list_extvp() = '[]'::jsonb AS no_extvp_yet;
 
 -- ── ExtVP catalog table structure ────────────────────────────────────────────
 
-SELECT COUNT(*) = 9 AS extvp_has_all_columns
+SELECT COUNT(*) = 7 AS extvp_has_all_columns
 FROM information_schema.columns
 WHERE table_schema = '_pg_ripple'
   AND table_name = 'extvp_tables'
-  AND column_name IN ('name','pred1_iri','pred2_iri','pred1_id','pred2_id',
+  AND column_name IN ('name','pred1_id','pred2_id',
                        'generated_sql','schedule','stream_table','created_at');
 
 -- Verify the index on pred1_id exists.
@@ -51,12 +51,11 @@ SELECT pg_ripple.insert_triple(
 ) > 0 AS foaf_knows_inserted;
 
 -- Directly insert a catalog entry to simulate create_extvp without pg_trickle.
+-- REDUNDANT-01: pred1_iri/pred2_iri columns dropped; insert by pred_id only.
 INSERT INTO _pg_ripple.extvp_tables
-  (name, pred1_iri, pred2_iri, pred1_id, pred2_id, generated_sql, schedule, stream_table)
+  (name, pred1_id, pred2_id, generated_sql, schedule, stream_table)
 VALUES (
   'knows_name_ss',
-  'http://xmlns.com/foaf/0.1/knows',
-  'http://xmlns.com/foaf/0.1/name',
   pg_ripple.encode_term('http://xmlns.com/foaf/0.1/knows', 0::smallint),
   pg_ripple.encode_term('http://xmlns.com/foaf/0.1/name',  0::smallint),
   'SELECT p1.s, p1.o AS o1, p2.o AS o2 FROM _pg_ripple.vp_rare p1 WHERE EXISTS (SELECT 1 FROM _pg_ripple.vp_rare p2 WHERE p2.s = p1.s)',

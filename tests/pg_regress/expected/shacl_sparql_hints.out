@@ -37,7 +37,7 @@ SELECT count(*) = 1 AS has_min_count_hint
 FROM _pg_ripple.shape_hints sh
 JOIN _pg_ripple.dictionary d ON d.id = sh.predicate_id
 WHERE d.value = 'https://hints.test/name'
-  AND sh.hint_type = 'min_count_1';
+  AND sh.hint_type = 2;
  has_min_count_hint 
 --------------------
  t
@@ -48,7 +48,7 @@ SELECT count(*) = 1 AS has_max_count_hint
 FROM _pg_ripple.shape_hints sh
 JOIN _pg_ripple.dictionary d ON d.id = sh.predicate_id
 WHERE d.value = 'https://hints.test/name'
-  AND sh.hint_type = 'max_count_1';
+  AND sh.hint_type = 1;
  has_max_count_hint 
 --------------------
  t
@@ -77,7 +77,7 @@ SELECT count(*) = 1 AS foundedyear_min_hint
 FROM _pg_ripple.shape_hints sh
 JOIN _pg_ripple.dictionary d ON d.id = sh.predicate_id
 WHERE d.value = 'https://hints.test/foundedYear'
-  AND sh.hint_type = 'min_count_1';
+  AND sh.hint_type = 2;
  foundedyear_min_hint 
 ----------------------
  t
@@ -88,7 +88,7 @@ SELECT count(*) = 0 AS foundedyear_no_max_hint
 FROM _pg_ripple.shape_hints sh
 JOIN _pg_ripple.dictionary d ON d.id = sh.predicate_id
 WHERE d.value = 'https://hints.test/foundedYear'
-  AND sh.hint_type = 'max_count_1';
+  AND sh.hint_type = 1;
  foundedyear_no_max_hint 
 -------------------------
  t
@@ -106,7 +106,7 @@ SELECT count(*) = 0 AS name_min_hint_removed
 FROM _pg_ripple.shape_hints sh
 JOIN _pg_ripple.dictionary d ON d.id = sh.predicate_id
 WHERE d.value = 'https://hints.test/name'
-  AND sh.hint_type = 'min_count_1';
+  AND sh.hint_type = 2;
  name_min_hint_removed 
 -----------------------
  t
@@ -117,7 +117,7 @@ SELECT count(*) = 0 AS name_max_hint_removed
 FROM _pg_ripple.shape_hints sh
 JOIN _pg_ripple.dictionary d ON d.id = sh.predicate_id
 WHERE d.value = 'https://hints.test/name'
-  AND sh.hint_type = 'max_count_1';
+  AND sh.hint_type = 1;
  name_max_hint_removed 
 -----------------------
  t
@@ -128,7 +128,7 @@ SELECT count(*) = 1 AS foundedyear_hint_still_present
 FROM _pg_ripple.shape_hints sh
 JOIN _pg_ripple.dictionary d ON d.id = sh.predicate_id
 WHERE d.value = 'https://hints.test/foundedYear'
-  AND sh.hint_type = 'min_count_1';
+  AND sh.hint_type = 2;
  foundedyear_hint_still_present 
 --------------------------------
  t
