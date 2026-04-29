@@ -27,13 +27,13 @@ Versions correspond to the milestones in [ROADMAP.md](ROADMAP.md).
 
 - **SHACL-DOC-01** — `docs/src/features/shacl-sparql-rules.md` rewritten: `sh:SPARQLRule` is clearly documented as not supported (emits PT481 WARNING and skips). `sh:TripleRule` and `sh:SPARQLConstraint` remain fully supported.
 
-- **README-01/02** — README updated from v0.67.0 to v0.69.0 in "What works today" and "Known limitations" sections. `scripts/check_readme_version.sh` added and wired into `just assess-release`.
+- **README-01/02** — `README.md` updated from v0.67.0 to v0.69.0 in "What works today" and "Known limitations" sections. `scripts/check_readme_version.sh` added and wired into `just assess-release`.
 
 - **RLS-SQL-01** — `grant_graph_access()` and `apply_rls_to_vp_table()` now validate role names against `[A-Za-z_][A-Za-z0-9_$]*` (PT711 error on mismatch) and use `quote_ident_safe()` in DDL. SQL injection test added: `tests/pg_regress/sql/security_rls_role_injection.sql`.
 
 - **SBOM-02** — `sbom.json` regenerated for v0.70.0. Release CI `release.yml` confirmed to include a blocking SBOM-version-match step.
 
-- **GATE-04** — Legacy `scripts/check_roadmap_evidence.sh` and `scripts/check_api_drift.sh` deleted. `justfile` `assess-release` target now calls `.py` versions exclusively.
+- **GATE-04** — Legacy `scripts/check_roadmap_evidence.sh` and `scripts/check_api_drift.sh` deleted. `justfile` `assess-release` target now calls `.py` versions exclusively. Verified by `.github/workflows/ci.yml` (Validate feature status job).
 
 - **TEST-01** — `tests/pg_regress/sql/v067_features.sql` added (mutation journal smoke test, Arrow Flight GUC check, feature_status evidence path regression guard).
 
