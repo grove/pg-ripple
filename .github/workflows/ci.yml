@@ -1277,7 +1277,9 @@ jobs:
           # does not affect the current step's env — CF-C fix).
           missing=$(psql -t -A -c "SELECT evidence_path FROM pg_ripple.feature_status() WHERE evidence_path IS NOT NULL;" \
             | while IFS= read -r path; do
-                if [ -n "$path" ] && [ ! -e "$path" ]; then
+                # Strip ': symbol_name' annotation to get the bare file path
+                file_path="${path%%: *}"
+                if [ -n "$file_path" ] && [ ! -e "$file_path" ]; then
                   echo "$path"
                 fi
               done)
@@ -1380,7 +1382,9 @@ jobs:
           # Validate evidence paths on populated DB
           missing=$(psql -t -A -c "SELECT evidence_path FROM pg_ripple.feature_status() WHERE evidence_path IS NOT NULL;" \
             | while IFS= read -r path; do
-                if [ -n "$path" ] && [ ! -e "$path" ]; then
+                # Strip ': symbol_name' annotation to get the bare file path
+                file_path="${path%%: *}"
+                if [ -n "$file_path" ] && [ ! -e "$file_path" ]; then
                   echo "$path"
                 fi
               done)
