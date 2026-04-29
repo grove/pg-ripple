@@ -18,7 +18,7 @@ SELECT pg_ripple.json_to_ntriples_and_load(
 
 -- The integer predicate should have an xsd:integer triple.
 SELECT COUNT(*) > 0 AS integer_triple_exists
-FROM pg_ripple.sparql_select(
+FROM pg_ripple.sparql(
     'SELECT * WHERE { <https://example.org/rt_fix_06_subject> <https://example.org/intval> "5"^^<http://www.w3.org/2001/XMLSchema#integer> }'
 );
 
@@ -33,7 +33,7 @@ SELECT pg_ripple.json_to_ntriples_and_load(
 
 -- Should not have silently lost precision — triple must exist.
 SELECT COUNT(*) > 0 AS bignum_triple_exists
-FROM pg_ripple.sparql_select(
+FROM pg_ripple.sparql(
     'SELECT * WHERE { <https://example.org/rt_fix_04b_subject> <https://example.org/bignum> ?o }'
 );
 
@@ -48,7 +48,7 @@ SELECT pg_ripple.json_to_ntriples_and_load(
 
 -- The empty object becomes a blank node; at least one triple must exist.
 SELECT COUNT(*) > 0 AS empty_object_triple_exists
-FROM pg_ripple.sparql_select(
+FROM pg_ripple.sparql(
     'SELECT * WHERE { <https://example.org/rt_test_02_subject> <https://example.org/address> ?bn }'
 );
 

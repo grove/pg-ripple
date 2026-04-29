@@ -10,8 +10,8 @@ CREATE EXTENSION IF NOT EXISTS pg_ripple;
 SET client_min_messages = DEFAULT;
 SET search_path TO pg_ripple, public;
 
--- Verify that citus_is_enabled() is callable (returns boolean, no panic).
-SELECT pg_ripple.citus_is_enabled() AS citus_enabled;
+-- Verify that citus_available() is callable (returns boolean, no panic).
+SELECT pg_ripple.citus_available() AS citus_available;
 
 -- Verify feature_status() includes citus entry (smoke test for citus module).
 SELECT COUNT(*) > 0 AS citus_in_feature_status

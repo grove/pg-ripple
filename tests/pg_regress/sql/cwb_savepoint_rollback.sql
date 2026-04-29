@@ -36,7 +36,7 @@ SELECT pg_ripple.load_ntriples_into_graph(
 
 -- Confirm the target now has at least one derived triple.
 SELECT COUNT(*) >= 1 AS derived_before_savepoint
-FROM   pg_ripple.sparql_select(
+FROM   pg_ripple.sparql(
     'SELECT * WHERE { GRAPH <https://example.org/cwb_savepoint_target> { ?s ?p ?o } }'
 );
 
@@ -54,7 +54,7 @@ COMMIT;
 -- The derived graph size should be unchanged (still the baseline).
 -- If XACT-01 is not implemented, phantom derived triples appear here.
 SELECT COUNT(*) >= 1 AS derived_after_rollback
-FROM   pg_ripple.sparql_select(
+FROM   pg_ripple.sparql(
     'SELECT * WHERE { GRAPH <https://example.org/cwb_savepoint_target> { ?s ?p ?o } }'
 );
 

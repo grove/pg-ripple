@@ -819,7 +819,7 @@ fn json_object_to_ntriples_inner(
 ///
 /// Returns the N-Triples string.  Nested objects become blank nodes.  Arrays
 /// produce one triple per element.  `null` values are silently skipped.
-
+///
 /// RT-FIX-07: Validate that a JSON key is safe to expand under @vocab.
 ///
 /// Raises a PostgreSQL error if the key contains characters forbidden in IRI

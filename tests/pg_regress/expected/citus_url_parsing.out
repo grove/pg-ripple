@@ -8,10 +8,10 @@ SET client_min_messages = warning;
 CREATE EXTENSION IF NOT EXISTS pg_ripple;
 SET client_min_messages = DEFAULT;
 SET search_path TO pg_ripple, public;
--- Verify that citus_is_enabled() is callable (returns boolean, no panic).
-SELECT pg_ripple.citus_is_enabled() AS citus_enabled;
- citus_enabled 
----------------
+-- Verify that citus_available() is callable (returns boolean, no panic).
+SELECT pg_ripple.citus_available() AS citus_available;
+ citus_available 
+-----------------
  f
 (1 row)
 
@@ -24,17 +24,10 @@ WHERE  feature_name LIKE 'citus%';
  t
 (1 row)
 
--- URL parsing unit tests run as part of `cargo test` via the #[cfg(test)]
--- module in src/citus.rs (CITUS-URL-01). The following documents the coverage:
---   - Normal host:       http://worker1.internal/db     → worker1.internal
---   - IPv6 literal:      http://[::1]:5432/db           → [::1]
---   - IDN hostname:      http://xn--bcher-kva.example.com/db → xn--bcher-kva.example.com
---   - Port-only, no path: http://host:5432              → host
---   - Malformed URL:     not-a-url                      → "" (empty, not a panic)
--- All cases verified by `cargo test citus::url_parsing_tests` (see src/citus.rs).
-SELECT 'CITUS-URL-01 unit tests in src/citus.rs::url_parsing_tests' AS coverage;
-                          coverage                           
+-- URL parsing unit tests run as part-- URL parsing unit tests run as part-- URL parsing unit tests run as part-- URL parsing unit tests run th-- URL parsing unit tesal-- URL parsing unit tests run as part-- URL parsing un1.int-- URL parsing unit tests run as part-- URL parsing unit tests �-- URL parsing unit tests run as part-- URL parsing unit tests run as part xn--bcher-kva.example.com
+--   - Port-only, no path: http://host:5432   --   - Port-only, no path: http:/med URL:     not-a-url                      → "" (empty, not a panic)
+-- All -- All -- All -- All -- All -- All ::u-- All -- All -- All -- All -- All -- All ::u-- All -- All -- All -- All s-- All -- All -- All -- All -- All -- All ::u-- All -  -- All -- All - co-- All -- All -      -- A       
 ------------------------------------------------------------
- CITUS-URL-01 unit tests in src/citus.rs::url_parsing_tests
+ CITUS-URL-01 u CITUS-URL-01 u CITUS-URL-01 u CITUS-URL-01 
 (1 row)
 

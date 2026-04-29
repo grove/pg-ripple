@@ -54,7 +54,7 @@ SELECT pg_ripple.load_ntriples_into_graph(
 -- Both roles run the same SPARQL query text; the named graph binding differs.
 -- As superuser (should see alice's data in graph_a):
 SELECT COUNT(*) = 1 AS alice_triple_visible
-FROM   pg_ripple.sparql_select(
+FROM   pg_ripple.sparql(
     'SELECT * WHERE { GRAPH <https://example.org/plan_cache_graph_a> { ?s ?p ?o } }'
 );
  alice_triple_visible 
@@ -64,7 +64,7 @@ FROM   pg_ripple.sparql_select(
 
 -- As superuser (should see bob's data in graph_b):
 SELECT COUNT(*) = 1 AS bob_triple_visible
-FROM   pg_ripple.sparql_select(
+FROM   pg_ripple.sparql(
     'SELECT * WHERE { GRAPH <https://example.org/plan_cache_graph_b> { ?s ?p ?o } }'
 );
  bob_triple_visible 
@@ -92,5 +92,7 @@ SELECT pg_ripple.drop_graph('https://example.org/plan_cache_graph_b') IS NULL AS
  f
 (1 row)
 
+REVOKE ALL ON SCHEMA pg_ripple FROM ripple_alice, ripple_bob;
+REVOKE EXECUTE ON ALL FUNCTIONS IN SCHEMA pg_ripple FROM ripple_alice, ripple_bob;
 DROP ROLE IF EXISTS ripple_alice;
 DROP ROLE IF EXISTS ripple_bob;

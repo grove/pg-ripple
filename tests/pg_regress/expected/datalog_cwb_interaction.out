@@ -22,9 +22,9 @@ SELECT pg_ripple.insert_triple(
 
 -- Load a simple Datalog rule: knows(?x, ?z) :- knows(?x, ?y), knows(?y, ?z).
 SELECT pg_ripple.load_rules(
-    '<https://example.org/cwb_dl/knows>(?x, ?z) :- '
-    '<https://example.org/cwb_dl/knows>(?x, ?y), '
-    '<https://example.org/cwb_dl/knows>(?y, ?z).',
+    '?x <https://example.org/cwb_dl/knows> ?z :- '
+    '?x <https://example.org/cwb_dl/knows> ?y , '
+    '?y <https://example.org/cwb_dl/knows> ?z .',
     'cwb_dl_test'
 ) >= 0 AS rules_loaded;
  rules_loaded 

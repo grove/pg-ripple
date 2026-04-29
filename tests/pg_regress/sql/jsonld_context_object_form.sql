@@ -25,7 +25,7 @@ SELECT pg_ripple.json_to_ntriples_and_load(
 
 -- Verify the triple was stored with the correct predicate IRI.
 SELECT COUNT(*) > 0 AS object_form_triples_exist
-FROM   pg_ripple.sparql_select(
+FROM   pg_ripple.sparql(
     'SELECT * WHERE { <https://example.org/device1> <https://saref.etsi.org/core/hasValue> ?o }'
 );
 
@@ -39,7 +39,7 @@ SELECT pg_ripple.json_to_ntriples_and_load(
 ) > 0 AS string_form_loaded;
 
 SELECT COUNT(*) > 0 AS string_form_triples_exist
-FROM   pg_ripple.sparql_select(
+FROM   pg_ripple.sparql(
     'SELECT * WHERE { <https://example.org/person1> <https://schema.org/name> ?o }'
 );
 

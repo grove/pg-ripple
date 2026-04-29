@@ -1368,12 +1368,12 @@ pub fn export_jsonld_node_impl(
     strip: Vec<String>,
 ) -> Result<Option<serde_json::Value>, String> {
     // Guard: frame must not already contain @id; we inject it.
-    if let serde_json::Value::Object(ref obj) = frame {
-        if obj.contains_key("@id") {
-            return Err("export_jsonld_node: frame must not contain '@id'; \
-                 subject_id provides the subject IRI"
-                .to_owned());
-        }
+    if let serde_json::Value::Object(ref obj) = frame
+        && obj.contains_key("@id")
+    {
+        return Err("export_jsonld_node: frame must not contain '@id'; \
+             subject_id provides the subject IRI"
+            .to_owned());
     }
 
     // Look up the IRI for subject_id.

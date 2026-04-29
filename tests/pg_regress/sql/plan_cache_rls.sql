@@ -53,13 +53,13 @@ SELECT pg_ripple.load_ntriples_into_graph(
 
 -- As superuser (should see alice's data in graph_a):
 SELECT COUNT(*) = 1 AS alice_triple_visible
-FROM   pg_ripple.sparql_select(
+FROM   pg_ripple.sparql(
     'SELECT * WHERE { GRAPH <https://example.org/plan_cache_graph_a> { ?s ?p ?o } }'
 );
 
 -- As superuser (should see bob's data in graph_b):
 SELECT COUNT(*) = 1 AS bob_triple_visible
-FROM   pg_ripple.sparql_select(
+FROM   pg_ripple.sparql(
     'SELECT * WHERE { GRAPH <https://example.org/plan_cache_graph_b> { ?s ?p ?o } }'
 );
 
@@ -69,5 +69,7 @@ SELECT (SELECT hits >= 0 FROM pg_ripple.plan_cache_stats()) AS cache_stats_calla
 -- ── Cleanup ───────────────────────────────────────────────────────────────────
 SELECT pg_ripple.drop_graph('https://example.org/plan_cache_graph_a') IS NULL AS graph_a_deleted;
 SELECT pg_ripple.drop_graph('https://example.org/plan_cache_graph_b') IS NULL AS graph_b_deleted;
+REVOKE ALL ON SCHEMA pg_ripple FROM ripple_alice, ripple_bob;
+REVOKE EXECUTE ON ALL FUNCTIONS IN SCHEMA pg_ripple FROM ripple_alice, ripple_bob;
 DROP ROLE IF EXISTS ripple_alice;
 DROP ROLE IF EXISTS ripple_bob;

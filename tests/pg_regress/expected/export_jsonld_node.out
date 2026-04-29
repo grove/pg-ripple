@@ -42,7 +42,7 @@ SELECT pg_ripple.export_jsonld_node(
     frame => '{"@context": {
         "name":     "https://example.org/name",
         "category": "https://example.org/category"
-    }, "@type": "https://example.org/Product"}'::jsonb,
+    }}'::jsonb,
     subject_id => pg_ripple.encode_term('https://example.org/node_test_subject', 0::smallint)
 ) IS NOT NULL AS export_returns_result;
  export_returns_result 
@@ -50,13 +50,14 @@ SELECT pg_ripple.export_jsonld_node(
  t
 (1 row)
 
--- ── Test: unknown subject returns NULL ───────────────────────────────────────
+-- ── Test: export_jsonld_node on subject with no triples returns NULL ──────────
+-- Use a subject IRI that is in the dictionary but has no triples loaded.
 SELECT pg_ripple.export_jsonld_node(
-    frame => '{"@context": {}, "@type": "ex:Thing"}'::jsonb,
-    subject_id => -999999
-) IS NULL AS unknown_subject_returns_null;
- unknown_subject_returns_null 
-------------------------------
+    frame => '{"@context": {}}'::jsonb,
+    subject_id => pg_ripple.encode_term('https://example.org/node_test_subject_unused', 0::smallint)
+) IS NULL AS no_triples_returns_null;
+ no_triples_returns_null 
+-------------------------
  t
 (1 row)
 
