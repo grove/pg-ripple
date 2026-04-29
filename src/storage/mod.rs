@@ -613,8 +613,12 @@ pub fn insert_encoded_triple(s_id: i64, p_id: i64, o_id: i64, g: i64) -> i64 {
 ///
 /// Uses a VALUES-list INSERT to reduce SPI round-trips.
 /// All values are i64 integers — no SQL injection risk.
+///
+/// Records unique graph IDs in the mutation journal so that CWB writeback fires
+/// when `mutation_journal::flush()` is called at the end of the enclosing load_*.
+/// The flush is the caller's responsibility; this function does NOT flush.
 /// # Callers
-/// Direct callers must be the mutation journal flush function only.
+/// Direct callers must be bulk-load functions only.
 pub(crate) fn batch_insert_encoded(p_id: i64, rows: &[(i64, i64, i64)]) -> i64 {
     if rows.is_empty() {
         return 0;
@@ -683,6 +687,14 @@ pub(crate) fn batch_insert_encoded(p_id: i64, rows: &[(i64, i64, i64)]) -> i64 {
             &[DatumWithOid::from(p_id), DatumWithOid::from(cnt)],
         )
         .unwrap_or_else(|e| pgrx::error!("predicate count batch upsert SPI error: {e}"));
+    }
+
+    // BULK-01: record unique graph IDs in the mutation journal so CWB
+    // writeback fires when the caller calls mutation_journal::flush().
+    if !crate::construct_rules::has_no_rules() {
+        for &(_s, _o, g) in rows {
+            mutation_journal::record_write(g);
+        }
     }
 
     rows.len() as i64
@@ -1688,9 +1700,9 @@ fn decode_sog(s_id: i64, p_id: i64, o_id: i64, g_id: i64) -> (String, String, St
 /// Direct callers must be the mutation journal flush function only.
 pub(crate) fn insert_triple_by_ids(s_id: i64, p_id: i64, o_id: i64, g_id: i64) -> i64 {
     let sid = insert_encoded_triple(s_id, p_id, o_id, g_id);
-    // MJOURNAL-01/02: record in mutation journal so CWB hooks fire.
+    // MJOURNAL-01/02: record in mutation journal; flush deferred to
+    // XACT_EVENT_PRE_COMMIT via xact_callback_c (FLUSH-01).
     mutation_journal::record_write(g_id);
-    mutation_journal::flush();
     sid
 }
 
@@ -1786,10 +1798,10 @@ pub(crate) fn delete_triple_by_ids(s_id: i64, p_id: i64, o_id: i64, g_id: i64) -
         deleted += d;
     }
 
-    // MJOURNAL-01/02: record deletion in mutation journal so CWB hooks fire.
+    // MJOURNAL-01/02: record deletion in mutation journal; flush deferred to
+    // XACT_EVENT_PRE_COMMIT via xact_callback_c (FLUSH-01).
     if deleted > 0 {
         mutation_journal::record_delete(g_id);
-        mutation_journal::flush();
     }
 
     deleted

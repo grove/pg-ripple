@@ -2137,11 +2137,17 @@ unsafe extern "C-unwind" fn xact_callback_c(event: u32, _arg: *mut std::ffi::c_v
         // Transaction is being rolled back: evict shmem entries inserted in
         // this transaction so stale hash→id mappings cannot pollute later txns.
         crate::dictionary::clear_caches();
+        // Also clear any pending journal entries — they must not fire after rollback.
+        crate::storage::mutation_journal::clear();
     } else if event == 0 || event == 1 {
         // Transaction committed successfully: dictionary rows are durable, so
         // the shmem entries are correct — just clear the tracking list.
         crate::dictionary::commit_cleanup();
     }
+    // Note: we do NOT call flush() here for XACT_EVENT_PRE_COMMIT (event 5)
+    // because SPI is not safely callable from within a PostgreSQL xact callback.
+    // Flush is called directly at each write API boundary in dict_api.rs and
+    // views_api.rs instead (FLUSH-01 revised).
 }
 
 // ─── Public SQL-callable functions ────────────────────────────────────────────

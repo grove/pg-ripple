@@ -223,8 +223,9 @@ mod pg_ripple {
         }
 
         // ── v0.67.0 MJOURNAL-02: route through mutation journal ──────────────
-        // (Previously called on_graph_write directly; now uses the journal so
-        //  all write paths share a single flush path.)
+        // The journal deduplicates multiple graph writes within one API call.
+        // Flush at the API boundary so CWB writeback fires in normal SPI context
+        // (NOT from an xact callback where SPI is unsafe — FLUSH-01 revised).
         if sid > 0 {
             crate::storage::mutation_journal::record_write(g_id);
             crate::storage::mutation_journal::flush();
@@ -293,6 +294,8 @@ mod pg_ripple {
         }
         if !sids.is_empty() {
             crate::datalog::tabling_invalidate_all();
+            // Flush mutation journal once for all inserts in this batch (FLUSH-01 revised).
+            crate::storage::mutation_journal::flush();
         }
         pgrx::iter::SetOfIterator::new(sids)
     }

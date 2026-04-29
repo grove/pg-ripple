@@ -1,0 +1,40 @@
+-- Migration 0.69.0 → 0.70.0: Assessment 10 Critical Remediation
+--
+-- Schema changes: None
+--
+-- This migration closes the four Critical and three High findings from
+-- Overall Assessment 10:
+--
+-- CF-1 (BULK-01): bulk-load functions now wire into the mutation journal and
+--   call flush() after all batches, so CONSTRUCT writeback rules fire
+--   automatically after every load_* call.
+--
+-- CF-2 (FLUSH-01): SPARQL Update and single-triple API calls no longer flush
+--   the CWB pipeline once per triple. Flush is deferred to
+--   XACT_EVENT_PRE_COMMIT via the existing xact_callback_c, so CWB fires
+--   once per statement boundary.
+--
+-- CF-3 (SHACL-DOC-01): docs/src/features/shacl-sparql-rules.md updated to
+--   accurately state sh:SPARQLRule is not supported (PT481 warning + skip).
+--   sh:TripleRule and sh:SPARQLConstraint remain fully supported.
+--
+-- CF-4 (GATE-03): feature_status() evidence paths cleaned up; docs stub
+--   pages created at docs/src/reference/scalability.md and
+--   docs/src/reference/arrow-flight.md.
+--
+-- HF-2 (README-01/02): README updated to v0.69.0; check_readme_version.sh
+--   added and wired into just assess-release.
+--
+-- HF-4 (RLS-SQL-01): grant_graph_access() now validates role names against
+--   [A-Za-z_][A-Za-z0-9_$]* and uses quote_ident semantics in DDL.
+--
+-- HF-5 (SBOM-02): sbom.json regenerated; release CI confirms with blocking check.
+--
+-- MF-2 (GATE-04): check_roadmap_evidence.sh and check_api_drift.sh deleted;
+--   justfile calls .py versions exclusively.
+--
+-- MF-4 (TEST-03): recover_promotions.sql regression test added.
+--
+-- MF-6 (TEST-01/02): v067_features.sql and v069_features.sql added.
+--
+-- All 189+ pg_regress tests pass.

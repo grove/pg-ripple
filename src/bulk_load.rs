@@ -199,6 +199,9 @@ pub fn load_ntriples(data: &str, strict: bool) -> i64 {
     }
 
     flush_batch(&mut by_predicate);
+    // BULK-01: flush mutation journal after all batches so CWB writeback fires
+    // once per load_* call rather than never (bulk inserts skip per-triple flush).
+    crate::storage::mutation_journal::flush();
     post_load_cleanup(touched.into_iter().collect());
     // v0.58.0: emit PROV-O provenance triples if enabled.
     crate::prov::emit_load_provenance("ntriples:inline", total);
@@ -234,6 +237,8 @@ pub fn load_nquads(data: &str, _strict: bool) -> i64 {
         .unwrap_or_else(|e| pgrx::error!("N-Quads parse error: {e}"));
 
     flush_batch(&mut by_predicate);
+    // BULK-01: flush mutation journal after all batches.
+    crate::storage::mutation_journal::flush();
     post_load_cleanup(touched.into_iter().collect());
     // v0.58.0: emit PROV-O provenance triples if enabled.
     crate::prov::emit_load_provenance("nquads:inline", total);
@@ -265,6 +270,8 @@ pub fn load_turtle(data: &str, _strict: bool) -> i64 {
         .unwrap_or_else(|e| pgrx::error!("Turtle parse error: {e}"));
 
     flush_batch(&mut by_predicate);
+    // BULK-01: flush mutation journal after all batches.
+    crate::storage::mutation_journal::flush();
     post_load_cleanup(touched.into_iter().collect());
     // v0.58.0: emit PROV-O provenance triples if enabled.
     crate::prov::emit_load_provenance("turtle:inline", total);
@@ -300,6 +307,8 @@ pub fn load_trig(data: &str, _strict: bool) -> i64 {
         .unwrap_or_else(|e| pgrx::error!("TriG parse error: {e}"));
 
     flush_batch(&mut by_predicate);
+    // BULK-01: flush mutation journal after all batches.
+    crate::storage::mutation_journal::flush();
     post_load_cleanup(touched.into_iter().collect());
     total
 }
@@ -436,6 +445,8 @@ pub fn load_rdfxml(data: &str, _strict: bool) -> i64 {
         .unwrap_or_else(|e| pgrx::error!("RDF/XML parse error: {e}"));
 
     flush_batch(&mut by_predicate);
+    // BULK-01: flush mutation journal after all batches.
+    crate::storage::mutation_journal::flush();
     post_load_cleanup(touched.into_iter().collect());
     total
 }
@@ -470,6 +481,8 @@ pub fn load_ntriples_into_graph(data: &str, g_id: i64) -> i64 {
     }
 
     flush_batch(&mut by_predicate);
+    // BULK-01: flush mutation journal after all batches.
+    crate::storage::mutation_journal::flush();
     post_load_cleanup(touched.into_iter().collect());
     total
 }
@@ -501,6 +514,8 @@ pub fn load_turtle_into_graph(data: &str, g_id: i64) -> i64 {
         .unwrap_or_else(|e| pgrx::error!("Turtle parse error: {e}"));
 
     flush_batch(&mut by_predicate);
+    // BULK-01: flush mutation journal after all batches.
+    crate::storage::mutation_journal::flush();
     post_load_cleanup(touched.into_iter().collect());
     total
 }
@@ -532,6 +547,8 @@ pub fn load_rdfxml_into_graph(data: &str, g_id: i64) -> i64 {
         .unwrap_or_else(|e| pgrx::error!("RDF/XML parse error: {e}"));
 
     flush_batch(&mut by_predicate);
+    // BULK-01: flush mutation journal after all batches.
+    crate::storage::mutation_journal::flush();
     post_load_cleanup(touched.into_iter().collect());
     total
 }

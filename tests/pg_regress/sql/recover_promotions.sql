@@ -1,0 +1,83 @@
+-- pg_regress test: recover_interrupted_promotions() regression test (v0.70.0 TEST-03)
+--
+-- Verifies that recover_interrupted_promotions() is callable and handles the
+-- interrupted-promotion recovery scenario.
+SET client_min_messages = warning;
+CREATE EXTENSION IF NOT EXISTS pg_ripple;
+SET client_min_messages = DEFAULT;
+SET search_path TO pg_ripple, public;
+
+-- ── Part 1: Basic smoke test ──────────────────────────────────────────────────
+
+-- 1a. Function exists and returns BIGINT.
+SELECT pg_typeof(pg_ripple.recover_interrupted_promotions()) = 'bigint'::regtype
+    AS return_type_ok;
+
+-- 1b. On a fresh database with no interrupted promotions, returns 0.
+SELECT pg_ripple.recover_interrupted_promotions() = 0
+    AS no_interrupted_promotions;
+
+-- ── Part 2: Simulated interrupted promotion recovery ─────────────────────────
+
+-- Insert triples for a test predicate with a unique IRI.
+-- We'll use a high triple count to force promotion, then simulate
+-- the interruption by manually setting promotion_status = 'promoting'.
+
+-- 2a. Load enough triples to get a predicate into the predicates catalog.
+SELECT pg_ripple.load_ntriples($$
+<https://recover.test/s1> <https://recover.test/testPred> <https://recover.test/o1> .
+<https://recover.test/s2> <https://recover.test/testPred> <https://recover.test/o2> .
+<https://recover.test/s3> <https://recover.test/testPred> <https://recover.test/o3> .
+$$) >= 0 AS loaded_triples;
+
+-- 2b. Get the predicate ID for our test predicate.
+SELECT EXISTS(
+    SELECT 1 FROM _pg_ripple.predicates p
+    JOIN _pg_ripple.dictionary d ON d.id = p.id
+    WHERE d.value = 'https://recover.test/testPred'
+) AS test_predicate_registered;
+
+-- 2c. Manually simulate an interrupted promotion by setting status to 'promoting'.
+UPDATE _pg_ripple.predicates
+SET promotion_status = 'promoting'
+WHERE id = (
+    SELECT d.id FROM _pg_ripple.dictionary d WHERE d.value = 'https://recover.test/testPred'
+);
+
+-- Confirm status was set.
+SELECT promotion_status = 'promoting' AS status_is_promoting
+FROM _pg_ripple.predicates
+WHERE id = (
+    SELECT d.id FROM _pg_ripple.dictionary d WHERE d.value = 'https://recover.test/testPred'
+);
+
+-- 2d. Call recover_interrupted_promotions() — it should retry the promotion
+--     and return at least 1 (the simulated interrupted predicate).
+SET client_min_messages = error;
+SELECT pg_ripple.recover_interrupted_promotions() >= 1
+    AS recovered_at_least_one;
+SET client_min_messages = DEFAULT;
+
+-- 2e. After recovery, the predicate's promotion_status should be 'promoted'.
+SELECT promotion_status = 'promoted' AS status_is_promoted
+FROM _pg_ripple.predicates
+WHERE id = (
+    SELECT d.id FROM _pg_ripple.dictionary d WHERE d.value = 'https://recover.test/testPred'
+);
+
+-- 2f. Another call to recover_interrupted_promotions() now returns 0
+--     (no more interrupted promotions).
+SELECT pg_ripple.recover_interrupted_promotions() = 0
+    AS idempotent_after_recovery;
+
+-- ── Cleanup ───────────────────────────────────────────────────────────────────
+
+SELECT pg_ripple.delete_triple(
+    '<https://recover.test/s1>', '<https://recover.test/testPred>', '<https://recover.test/o1>'
+) >= 0 AS cleanup_1_ok;
+SELECT pg_ripple.delete_triple(
+    '<https://recover.test/s2>', '<https://recover.test/testPred>', '<https://recover.test/o2>'
+) >= 0 AS cleanup_2_ok;
+SELECT pg_ripple.delete_triple(
+    '<https://recover.test/s3>', '<https://recover.test/testPred>', '<https://recover.test/o3>'
+) >= 0 AS cleanup_3_ok;

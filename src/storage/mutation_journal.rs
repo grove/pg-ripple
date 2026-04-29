@@ -71,6 +71,14 @@ pub fn record_delete(g_id: i64) {
     });
 }
 
+/// Clear the journal without firing any CWB hooks.
+///
+/// Called on transaction abort so that pending entries from a rolled-back
+/// transaction do not fire after rollback (FLUSH-01).
+pub fn clear() {
+    JOURNAL.with(|j| j.borrow_mut().clear());
+}
+
 /// Flush the journal: call `on_graph_write` / `on_graph_delete` for each
 /// unique affected graph, then clear the journal.
 ///

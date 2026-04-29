@@ -211,10 +211,13 @@ assess-release VERSION="":
     bash scripts/check_no_security_definer.sh
     @echo ""
     @echo "--- Roadmap evidence check ---"
-    bash scripts/check_roadmap_evidence.sh
+    python3 scripts/check_roadmap_evidence.py --version {{VERSION}}
     @echo ""
     @echo "--- API drift check ---"
-    bash scripts/check_api_drift.sh
+    python3 scripts/check_api_drift.py --version {{VERSION}}
+    @echo ""
+    @echo "--- README version check ---"
+    bash scripts/check_readme_version.sh
     @echo ""
     @echo "--- Version sync check ---"
     @CARGO_VER=$(grep '^version = ' Cargo.toml | head -1 | grep -oP '"\\K[^"]+'); \
