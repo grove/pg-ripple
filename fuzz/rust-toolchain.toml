@@ -1,0 +1,6 @@
+[toolchain]
+# cargo-fuzz requires nightly for -Zsanitizer=address.
+# This file overrides the root rust-toolchain.toml (which pins to stable)
+# when cargo is invoked inside the fuzz/ directory.
+channel = "nightly"
+components = ["rust-src"]
