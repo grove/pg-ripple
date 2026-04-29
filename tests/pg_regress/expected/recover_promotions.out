@@ -77,7 +77,6 @@ SELECT pg_ripple.recover_interrupted_promotions() >= 1
 (1 row)
 
 SET client_min_messages = DEFAULT;
-
 -- 2e. After recovery, the predicate's promotion_status should be 'promoted'.
 SELECT promotion_status = 'promoted' AS status_is_promoted
 FROM _pg_ripple.predicates
