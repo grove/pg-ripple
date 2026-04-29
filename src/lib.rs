@@ -396,3 +396,12 @@ unsafe extern "C-unwind" fn sub_xact_callback_c(
 #[cfg(any(test, feature = "pg_test"))]
 #[allow(non_snake_case)]
 mod lib_tests;
+
+/// Required by pgrx test framework: defines setup/teardown hooks for pg_test.
+#[cfg(any(test, feature = "pg_test"))]
+pub mod pg_test {
+    pub fn setup(_options: Vec<&str>) {}
+    pub fn postgresql_conf_options() -> Vec<&'static str> {
+        vec!["allow_system_table_mods = on"]
+    }
+}

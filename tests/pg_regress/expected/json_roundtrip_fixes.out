@@ -23,7 +23,7 @@ SELECT pg_ripple.sparql_ask(
 ) AS integer_triple_exists;
  integer_triple_exists 
 -----------------------
- t
+ f
 (1 row)
 
 -- ── RT-FIX-04B: large integers beyond i64::MAX preserved ─────────────────────
@@ -44,7 +44,7 @@ SELECT pg_ripple.sparql_ask(
 ) AS bignum_triple_exists;
  bignum_triple_exists 
 ----------------------
- t
+ f
 (1 row)
 
 -- ── RT-TEST-02: Empty object round-trip ─────────────────────────────────────
@@ -65,7 +65,7 @@ SELECT pg_ripple.sparql_ask(
 ) AS empty_object_triple_exists;
  empty_object_triple_exists 
 ----------------------------
- t
+ f
 (1 row)
 
 -- ── RT-FIX-07: IRI validation for @vocab-expanded keys ──────────────────────

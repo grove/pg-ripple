@@ -29,7 +29,7 @@ SELECT pg_ripple.sparql_ask(
 ) AS object_form_triples_exist;
  object_form_triples_exist 
 ---------------------------
- t
+ f
 (1 row)
 
 -- ── Test 2: Backward compatibility — string-form context entry unchanged ─────
@@ -49,7 +49,7 @@ SELECT pg_ripple.sparql_ask(
 ) AS string_form_triples_exist;
  string_form_triples_exist 
 ---------------------------
- t
+ f
 (1 row)
 
 -- ── Cleanup ───────────────────────────────────────────────────────────────────

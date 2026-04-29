@@ -250,10 +250,4 @@ mod tests {
     }
 }
 
-#[cfg(test)]
-pub mod pg_test {
-    pub fn setup(_options: Vec<&str>) {}
-    pub fn postgresql_conf_options() -> Vec<&'static str> {
-        vec!["allow_system_table_mods = on"]
-    }
-}
+
