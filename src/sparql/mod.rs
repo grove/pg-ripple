@@ -154,3 +154,42 @@ pub fn sparql_explain(query_text: &str, analyze: bool) -> String {
 
     format!("-- Generated SQL --\n{inner_sql}\n\n-- EXPLAIN ANALYZE --\n{plan}")
 }
+
+/// Execute a SPARQL SELECT query and return the result as a JSON string.
+///
+/// Used by the subscription notification path (SUB-01) to compute the
+/// current result set and send it via `pg_notify`.
+///
+/// Returns `Err` with a descriptive message if the query fails or is not a SELECT.
+#[allow(dead_code)]
+pub fn sparql_query_to_json(query_text: &str) -> Result<String, String> {
+    let preprocessed = parse::preprocess_arq_aggregates(query_text);
+    let query_text = preprocessed.as_str();
+
+    let query = SparqlParser::new()
+        .parse_query(query_text)
+        .map_err(|e| format!("SPARQL parse error: {e}"))?;
+
+    let results = match query {
+        spargebra::Query::Select { .. } => {
+            let (sql, vars, raw_numeric, raw_text, raw_iri, raw_double, wcoj) =
+                prepare_select(query_text);
+            execute::execute_select(
+                &sql,
+                &vars,
+                &raw_numeric,
+                &raw_text,
+                &raw_iri,
+                &raw_double,
+                wcoj,
+            )
+        }
+        _ => return Err("subscribe_sparql only supports SELECT queries".to_string()),
+    };
+
+    // Serialize results to a compact JSON array string.
+    let arr: Vec<serde_json::Value> = results.into_iter().map(|j| j.0).collect();
+    let out = serde_json::to_string(&serde_json::Value::Array(arr))
+        .map_err(|e| format!("JSON serialise error: {e}"))?;
+    Ok(out)
+}

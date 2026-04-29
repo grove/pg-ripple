@@ -1279,3 +1279,75 @@ pgrx::extension_sql!(
     name = "v069_schema_version_stamp",
     requires = ["v068_schema_version_stamp"]
 );
+
+// v0.70.0: Assessment 10 critical remediation.
+// No schema DDL changes — stamp only.
+pgrx::extension_sql!(
+    "INSERT INTO _pg_ripple.schema_version (version, upgraded_from, installed_at) \
+     VALUES ('0.70.0', '0.69.0', clock_timestamp());",
+    name = "v070_schema_version_stamp",
+    requires = ["v069_schema_version_stamp"]
+);
+
+// v0.71.0: Arrow Flight streaming, Citus integration test, compatibility matrix.
+// No schema DDL changes — stamp only.
+pgrx::extension_sql!(
+    "INSERT INTO _pg_ripple.schema_version (version, upgraded_from, installed_at) \
+     VALUES ('0.71.0', '0.70.0', clock_timestamp());",
+    name = "v071_schema_version_stamp",
+    requires = ["v070_schema_version_stamp"]
+);
+
+// v0.72.0: Architecture and Protocol Hardening.
+// No schema DDL changes — stamp only.
+pgrx::extension_sql!(
+    "INSERT INTO _pg_ripple.schema_version (version, upgraded_from, installed_at) \
+     VALUES ('0.72.0', '0.71.0', clock_timestamp());",
+    name = "v072_schema_version_stamp",
+    requires = ["v071_schema_version_stamp"]
+);
+
+// v0.73.0: SPARQL 1.2 tracking, live subscriptions, JSON mapping.
+// Schema changes:
+//   - _pg_ripple.sparql_subscriptions: live SPARQL subscription catalog (SUB-01)
+//   - _pg_ripple.json_mappings: named bidirectional JSON-LD mapping registry (JSON-MAPPING-01)
+//   - _pg_ripple.json_mapping_warnings: SHACL consistency check warnings
+pgrx::extension_sql!(
+    r#"
+-- v0.73.0 SUB-01: Live SPARQL subscription catalog.
+CREATE TABLE IF NOT EXISTS _pg_ripple.sparql_subscriptions (
+    subscription_id  TEXT        NOT NULL PRIMARY KEY,
+    query            TEXT        NOT NULL,
+    graph_iri        TEXT,
+    created_at       TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+COMMENT ON TABLE _pg_ripple.sparql_subscriptions IS
+    'Registered SPARQL SELECT subscriptions for live query change notifications (v0.73.0 SUB-01)';
+
+-- v0.73.0 JSON-MAPPING-01: Named bidirectional JSON-LD mapping registry.
+CREATE TABLE IF NOT EXISTS _pg_ripple.json_mappings (
+    name       TEXT        NOT NULL PRIMARY KEY,
+    context    JSONB       NOT NULL,
+    shape_iri  TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+COMMENT ON TABLE _pg_ripple.json_mappings IS
+    'Named bidirectional JSON<->RDF mapping registry (v0.73.0 JSON-MAPPING-01)';
+
+-- v0.73.0 JSON-MAPPING-01: SHACL consistency check warnings.
+CREATE TABLE IF NOT EXISTS _pg_ripple.json_mapping_warnings (
+    mapping_name  TEXT        NOT NULL,
+    kind          TEXT        NOT NULL,
+    detail        TEXT        NOT NULL,
+    recorded_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (mapping_name, kind, detail)
+);
+COMMENT ON TABLE _pg_ripple.json_mapping_warnings IS
+    'SHACL consistency check warnings from register_json_mapping() (v0.73.0 JSON-MAPPING-01)';
+
+INSERT INTO _pg_ripple.schema_version (version, upgraded_from, installed_at)
+    VALUES ('0.73.0', '0.72.0', clock_timestamp());
+"#,
+    name = "v073_schema_additions",
+    requires = ["v072_schema_version_stamp"]
+);

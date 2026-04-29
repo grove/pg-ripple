@@ -368,6 +368,109 @@ mod pg_ripple {
                 Some("docs/src/reference/development.md".to_string()),
                 Some(".github/workflows/fuzz.yml".to_string()),
             ),
+            // ── LLM / NL-to-SPARQL (v0.49.0, FEATURE-STATUS-02) ─────────
+            (
+                "llm_sparql_repair".to_string(),
+                "experimental".to_string(),
+                Some("external LLM endpoint".to_string()),
+                Some(
+                    "FEATURE-STATUS-02 (v0.73.0): src/llm/ provides NL-to-SPARQL via a \
+                     configurable LLM endpoint (sparql_from_nl), SPARQL auto-repair, and \
+                     embedding-based entity alignment (suggest_sameas). \
+                     All paths degrade gracefully when no LLM endpoint is configured."
+                        .to_string(),
+                ),
+                Some("ci/regress: v073_features.sql".to_string()),
+                Some("docs/src/features/nl-to-sparql.md".to_string()),
+                Some("src/llm/mod.rs".to_string()),
+            ),
+            (
+                "kge_embeddings".to_string(),
+                "experimental".to_string(),
+                Some("pgvector".to_string()),
+                Some(
+                    "FEATURE-STATUS-02 (v0.73.0): src/kge.rs implements TransE / RotatE \
+                     knowledge-graph embeddings stored in _pg_ripple.kge_embeddings with \
+                     HNSW index. Requires pgvector; degrades gracefully when absent."
+                        .to_string(),
+                ),
+                Some("ci/regress: v073_features.sql".to_string()),
+                Some("docs/src/features/knowledge-graph-embeddings.md".to_string()),
+                Some("src/kge.rs".to_string()),
+            ),
+            (
+                "sparql_nl_to_sparql".to_string(),
+                "experimental".to_string(),
+                Some("external LLM endpoint".to_string()),
+                Some(
+                    "FEATURE-STATUS-02 (v0.73.0): sparql_from_nl() translates natural-language \
+                     questions to SPARQL SELECT queries via a configurable LLM endpoint. \
+                     Returns NULL when no LLM endpoint is configured."
+                        .to_string(),
+                ),
+                Some("ci/regress: v073_features.sql".to_string()),
+                Some("docs/src/features/nl-to-sparql.md".to_string()),
+                Some("src/llm/mod.rs: sparql_from_nl".to_string()),
+            ),
+            // ── SPARQL 1.2 (v0.73.0 SPARQL12-01) ─────────────────────────
+            (
+                "sparql_12".to_string(),
+                "planned".to_string(),
+                Some("spargebra SPARQL 1.2 grammar".to_string()),
+                Some(
+                    "SPARQL12-01 (v0.73.0): SPARQL 1.2 (W3C WG draft) tracked in \
+                     plans/sparql12_tracking.md. Waiting for spargebra upstream to ship \
+                     SPARQL 1.2 grammar support before implementation. \
+                     Targeted as post-v1.0.0 unless spargebra ships 1.2 before v1.0.0."
+                        .to_string(),
+                ),
+                None,
+                Some("plans/sparql12_tracking.md".to_string()),
+                Some("plans/sparql12_tracking.md".to_string()),
+            ),
+            // ── Live SPARQL subscriptions (v0.73.0 SUB-01) ───────────────
+            (
+                "sparql_subscription".to_string(),
+                "experimental".to_string(),
+                None,
+                Some(
+                    "SUB-01 (v0.73.0): subscribe_sparql() / unsubscribe_sparql() SQL functions \
+                     register subscriptions in _pg_ripple.sparql_subscriptions. \
+                     After each graph write, the mutation journal flush calls pg_notify with \
+                     the updated SPARQL result (or {\"changed\":true} when result > 8 KB). \
+                     pg_ripple_http /subscribe/:id exposes SSE streaming."
+                        .to_string(),
+                ),
+                Some("ci/regress: subscriptions.sql".to_string()),
+                Some("docs/src/features/live-subscriptions.md".to_string()),
+                Some("src/subscriptions.rs".to_string()),
+            ),
+            // ── Multi-subject JSON-LD ingest (v0.73.0 JSONLD-INGEST-02) ──
+            (
+                "json_ld_multi_ingest".to_string(),
+                "implemented".to_string(),
+                None,
+                None,
+                Some("ci/regress: jsonld_ingest_multi_graph.sql".to_string()),
+                Some("docs/src/features/loading-data.md".to_string()),
+                Some("src/bulk_load.rs: json_ld_load".to_string()),
+            ),
+            // ── Named JSON mapping (v0.73.0 JSON-MAPPING-01) ─────────────
+            (
+                "json_mapping".to_string(),
+                "experimental".to_string(),
+                None,
+                Some(
+                    "JSON-MAPPING-01 (v0.73.0): register_json_mapping() stores a named \
+                     JSON-LD context; ingest_json() and export_json_node() derive both \
+                     directions from one registration. Optional SHACL shape integration \
+                     for nesting derivation and consistency checking."
+                        .to_string(),
+                ),
+                Some("ci/regress: json_mapping.sql".to_string()),
+                Some("docs/src/features/loading-data.md".to_string()),
+                Some("src/json_mapping.rs".to_string()),
+            ),
         ];
 
         TableIterator::new(rows)

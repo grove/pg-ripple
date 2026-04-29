@@ -935,3 +935,113 @@ pub fn json_to_ntriples_and_load(
     }
     load_ntriples(&nt, false)
 }
+
+// ─── JSONLD-INGEST-02: multi-subject JSON-LD document ingest ─────────────────
+
+/// Ingest a full JSON-LD document that may contain multiple top-level subjects.
+///
+/// Handles both the `@graph` form (multiple top-level nodes) and the single-node
+/// form (object with `@id`).  Each top-level node must have an `@id` key.
+///
+/// - `document`      — JSONB value representing the JSON-LD document.
+/// - `default_graph` — named graph IRI to use when the document has no outer
+///   named graph.  `None` means the default graph (id = 0).
+///
+/// Returns the total number of triples loaded.
+pub fn json_ld_load(document: &serde_json::Value, default_graph: Option<&str>) -> i64 {
+    // Determine the outer named graph (if the document has a top-level @id
+    // that looks like a graph IRI, treat it as the target graph).
+    let outer_graph: Option<String> = match document {
+        serde_json::Value::Object(obj) => obj
+            .get("@id")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_owned()),
+        _ => None,
+    };
+
+    // Collect the nodes to process.
+    let nodes: Vec<&serde_json::Value> = match document {
+        serde_json::Value::Object(obj) => {
+            if let Some(serde_json::Value::Array(graph)) = obj.get("@graph") {
+                // Multi-subject @graph form.
+                graph.iter().collect()
+            } else {
+                // Single-node form.
+                vec![document]
+            }
+        }
+        serde_json::Value::Array(arr) => {
+            // Top-level array (expanded JSON-LD).
+            arr.iter().collect()
+        }
+        _ => {
+            pgrx::error!("json_ld_load: document must be a JSON object or array");
+        }
+    };
+
+    let mut total = 0i64;
+
+    for node in nodes {
+        let obj = match node {
+            serde_json::Value::Object(o) => o,
+            _ => {
+                pgrx::warning!("json_ld_load: skipping non-object node in @graph");
+                continue;
+            }
+        };
+
+        // Each node must have an @id.
+        let subject_iri = obj
+            .get("@id")
+            .and_then(|v| v.as_str())
+            .unwrap_or_else(|| {
+                pgrx::error!(
+                    "json_ld_load: top-level node in @graph is missing @id; \
+                     all JSON-LD nodes must have an @id when using json_ld_load(). \
+                     Provide an @id field or use json_to_ntriples_and_load() with an explicit subject IRI."
+                )
+            });
+
+        // Build context from the node's @context (if present) or the outer document's @context.
+        let ctx = node
+            .get("@context")
+            .or_else(|| document.as_object().and_then(|d| d.get("@context")));
+
+        // Determine the target graph.
+        let graph_id: i64 = {
+            let g_iri = outer_graph
+                .as_deref()
+                .or(default_graph)
+                .filter(|s| !s.is_empty());
+            match g_iri {
+                None => 0, // default graph
+                Some(g) => dictionary::encode(g, dictionary::KIND_IRI),
+            }
+        };
+
+        // Build a payload without @-keywords for the json_to_ntriples path.
+        let payload_obj: serde_json::Map<String, serde_json::Value> = obj
+            .iter()
+            .filter(|(k, _)| !k.starts_with('@'))
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
+
+        if payload_obj.is_empty() {
+            continue;
+        }
+
+        let payload = serde_json::Value::Object(payload_obj);
+        let nt = json_to_ntriples(&payload, subject_iri, None, ctx);
+        if nt.is_empty() {
+            continue;
+        }
+
+        total += if graph_id == 0 {
+            load_ntriples(&nt, false)
+        } else {
+            load_ntriples_into_graph(&nt, graph_id)
+        };
+    }
+
+    total
+}

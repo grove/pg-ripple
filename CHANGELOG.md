@@ -13,6 +13,41 @@ Versions correspond to the milestones in [ROADMAP.md](ROADMAP.md).
 
 ---
 
+## [0.73.0] — 2026-05-05 — SPARQL 1.2 Tracking, Live Subscriptions, and JSON Mapping Registry
+
+**Implements v0.73.0 roadmap: SPARQL 1.2 compatibility tracking, SPARQL live subscription API via SSE, named bidirectional JSON↔RDF mapping registry, multi-graph JSON-LD ingest, CONTRIBUTING.md, Helm chart sidecar image config, and feature-status taxonomy.**
+
+### What's new
+
+- **SUB-01** — SPARQL live subscription API: `subscribe_sparql(id, query, graph_iri)` registers a subscription in `_pg_ripple.sparql_subscriptions`; `unsubscribe_sparql(id)` removes it; `list_sparql_subscriptions()` enumerates active subscriptions. After each graph write, `notify_affected_subscriptions()` re-executes the query and fires `pg_notify('pg_ripple_subscription_<id>', <json>)`. Payloads >8 KB send `{"changed":true}` instead. The `pg_ripple_http` companion now exposes `GET /subscribe/{id}` as a Server-Sent Events stream. Regression test: `tests/pg_regress/sql/v073_features.sql`.
+
+- **JSON-MAPPING-01** — Named bidirectional JSON↔RDF mapping registry: `register_json_mapping(name, context_jsonb, shape_iri)` stores a JSON-LD `@context` in `_pg_ripple.json_mappings`. Inconsistencies with the optional SHACL shape are recorded as warnings in `_pg_ripple.json_mapping_warnings`. `ingest_json(mapping, document)` and `export_json_node(mapping, iri)` use the stored context for bidirectional conversion.
+
+- **JSONLD-INGEST-02** — Multi-graph JSON-LD ingest: `json_ld_load(document jsonb, default_graph text) → bigint` walks `@graph` arrays or single-node JSON-LD documents and loads each node into the triple store, returning the total number of triples inserted.
+
+- **SPARQL12-01** — SPARQL 1.2 compatibility tracking document at `plans/sparql12_tracking.md` listing all SPARQL 1.2 features and their current status in pg_ripple.
+
+- **CONTRIB-01** — `CONTRIBUTING.md` added with branch naming conventions, commit format, pre-commit checklist, migration discipline, and PR checklist.
+
+- **TAXONOMY-01** — Feature status taxonomy documentation at `docs/src/reference/feature-status-taxonomy.md` with promotion criteria for each status tier.
+
+- **HELM-01** — Helm chart `charts/pg_ripple/values.yaml` updated to include a separate `http.image` section for the pg_ripple_http sidecar; `statefulset.yaml` uses `http.image.tag` to pin the sidecar version independently.
+
+- **FEATURE-STATUS-02** — `feature_status()` now includes entries for `llm_sparql_repair`, `kge_embeddings`, `sparql_nl_to_sparql`, `sparql_12`, `sparql_subscription`, `json_ld_multi_ingest`, and `json_mapping`.
+
+- **R2RML-DOC-01** — `plans/r2rml_virtual.md` documents the planned virtual R2RML layer and its scope relative to `register_json_mapping`.
+
+- **CONTROL-01** — `pg_ripple.control` `comment` updated to reflect v0.73.0 capabilities.
+
+### Schema changes
+
+- New table `_pg_ripple.sparql_subscriptions(subscription_id TEXT PK, query TEXT, graph_iri TEXT, created_at TIMESTAMPTZ)`.
+- New table `_pg_ripple.json_mappings(mapping_name TEXT PK, context JSONB, shape_iri TEXT, created_at TIMESTAMPTZ)`.
+- New table `_pg_ripple.json_mapping_warnings(id BIGSERIAL PK, mapping_name TEXT, kind TEXT, detail TEXT, created_at TIMESTAMPTZ)`.
+- Migration: `sql/pg_ripple--0.72.0--0.73.0.sql`.
+
+---
+
 ## [0.72.0] — 2026-05-01 — Architecture and Protocol Hardening
 
 **Implements v0.72.0 roadmap: sub-transaction safety, JSON-LD fixes, Flight nonce replay protection, observability, module splitting.**

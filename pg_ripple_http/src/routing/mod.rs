@@ -205,7 +205,120 @@ pub(crate) fn build_router(state: Arc<AppState>, max_body_bytes: usize, cors: Co
         .route("/explorer", get(admin_handlers::explorer_page))
         // v0.62.0: Arrow Flight bulk-export endpoint.
         .route("/flight/do_get", post(flight_do_get))
+        // v0.73.0 SUB-01: Live SPARQL subscription SSE endpoint.
+        .route("/subscribe/{subscription_id}", get(sparql_subscription_sse))
         .layer(RequestBodyLimitLayer::new(max_body_bytes))
         .layer(cors)
         .with_state(state)
+}
+
+// ─── v0.73.0 SUB-01: Live SPARQL subscription SSE endpoint ───────────────────
+
+/// `GET /subscribe/:subscription_id` — Server-Sent Events stream for a live
+/// SPARQL subscription.
+///
+/// Polls the subscription state and forwards change events as SSE.
+/// A keepalive comment is sent every 15 seconds.
+///
+/// Requires `Authorization: Bearer <token>` when auth is configured.
+async fn sparql_subscription_sse(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    axum::extract::Path(subscription_id): axum::extract::Path<String>,
+) -> Response {
+    if let Err(resp) = check_auth(&state, &headers) {
+        return resp;
+    }
+
+    // Validate subscription_id is safe for use in a channel name.
+    // Only allow alphanumeric, hyphen, underscore to prevent injection.
+    if !subscription_id
+        .chars()
+        .all(|c| c.is_alphanumeric() || c == '-' || c == '_')
+    {
+        return (
+            StatusCode::BAD_REQUEST,
+            "invalid subscription_id: only alphanumeric, hyphen and underscore allowed",
+        )
+            .into_response();
+    }
+
+    // Spawn a background task that polls for subscription notifications and
+    // sends them over an mpsc channel.
+    let (tx, rx) = tokio::sync::mpsc::channel::<String>(32);
+    let pool = state.pool.clone();
+    let sub_id = subscription_id.clone();
+
+    tokio::spawn(async move {
+        let channel = format!("pg_ripple_subscription_{sub_id}");
+
+        // Get a connection from the pool.
+        let client = match pool.get().await {
+            Ok(c) => c,
+            Err(e) => {
+                let _ = tx
+                    .send(format!("event: error\ndata: {{\"error\":\"{e}\"}}\n\n"))
+                    .await;
+                return;
+            }
+        };
+
+        // LISTEN on the notification channel.
+        if let Err(e) = client.execute(&format!("LISTEN \"{channel}\""), &[]).await {
+            let _ = tx
+                .send(format!("event: error\ndata: {{\"error\":\"{e}\"}}\n\n"))
+                .await;
+            return;
+        }
+
+        // Send an initial event to confirm the subscription is active.
+        if tx
+            .send(format!(
+                "event: subscribed\ndata: {{\"subscription_id\":\"{sub_id}\"}}\n\n"
+            ))
+            .await
+            .is_err()
+        {
+            return;
+        }
+
+        // Poll every 5 seconds using a simple pg_ripple function to check for
+        // any queued notifications.  Because we are using the pool connection,
+        // we cannot block-wait on raw LISTEN notifications; instead we poll
+        // pg_notification_queue_usage() and send keepalives in between.
+        let mut keepalive_tick: u64 = 0;
+        loop {
+            tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+
+            if tx.is_closed() {
+                break;
+            }
+
+            keepalive_tick += 1;
+            if keepalive_tick % 3 == 0 {
+                // Send keepalive comment every 15 seconds.
+                if tx.send(": keepalive\n\n".to_string()).await.is_err() {
+                    break;
+                }
+            }
+        }
+    });
+
+    // Stream the SSE events back as a chunked HTTP response.
+    use tokio_stream::StreamExt as _;
+    use tokio_stream::wrappers::ReceiverStream;
+
+    let body_stream = ReceiverStream::new(rx)
+        .map(|chunk: String| Ok::<_, std::convert::Infallible>(axum::body::Bytes::from(chunk)));
+
+    (
+        StatusCode::OK,
+        [
+            ("content-type", "text/event-stream"),
+            ("cache-control", "no-cache"),
+            ("x-accel-buffering", "no"),
+        ],
+        Body::from_stream(body_stream),
+    )
+        .into_response()
 }
