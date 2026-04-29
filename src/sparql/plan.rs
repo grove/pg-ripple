@@ -6,10 +6,10 @@
 use pgrx::prelude::*;
 use spargebra::SparqlParser;
 
-use crate::dictionary;
 use super::parse::check_query_complexity;
 use super::plan_cache;
 use super::sqlgen;
+use crate::dictionary;
 
 // ─── CONSTRUCT template types ─────────────────────────────────────────────────
 

@@ -186,4 +186,3 @@ pub(super) fn compute_rule_order(
         .unwrap_or(order.len()) as i32;
     Ok(pos)
 }
-

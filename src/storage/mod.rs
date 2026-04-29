@@ -397,7 +397,6 @@ pub fn initialize_schema() {
     // concurrent test transactions.
 }
 
-
 /// Ensure a dedicated VP table (HTAP split) exists for `predicate_id`.
 ///
 /// Returns the fully-qualified view name `_pg_ripple.vp_{id}`.
@@ -480,9 +479,6 @@ fn insert_into_vp_rare(p_id: i64, s_id: i64, o_id: i64, g: i64) -> i64 {
 
     sid
 }
-
-
-
 
 /// n-distinct and dependencies statistics on `(s, o)`.
 pub(super) fn create_extended_statistics(pred_id: i64) {

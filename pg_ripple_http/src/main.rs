@@ -8,19 +8,19 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
 
+use axum::http::HeaderValue;
 use deadpool_postgres::{Config, Runtime};
 use tokio_postgres::NoTls;
 use tower_governor::GovernorLayer;
 use tower_governor::governor::GovernorConfigBuilder;
 use tower_http::cors::{AllowOrigin, CorsLayer};
-use axum::http::HeaderValue;
 
+pub mod arrow_encode;
 pub mod common;
 pub mod datalog;
 pub mod metrics;
 pub mod routing;
 pub mod spi_bridge;
-pub mod arrow_encode;
 pub mod stream;
 
 use common::{AppState, env_or};
@@ -247,4 +247,3 @@ async fn main() {
         std::process::exit(1);
     }
 }
-

@@ -11,12 +11,12 @@ use spargebra::GraphUpdateOperation;
 use spargebra::SparqlParser;
 use spargebra::term::{GraphName, NamedOrBlankNode, Term};
 
-use crate::dictionary;
-use crate::storage;
 use super::decode::batch_decode;
 use super::plan::prepare_select;
 use super::plan_cache;
 use super::sqlgen;
+use crate::dictionary;
+use crate::storage;
 
 // ─── SELECT execution ─────────────────────────────────────────────────────────
 
@@ -228,8 +228,7 @@ pub(crate) fn sparql_construct_rows(query_text: &str) -> Vec<(i64, i64, i64)> {
                         spargebra::term::TermPattern::Variable(v)
                             if var_set.contains(v.as_str()) =>
                         {
-                            resolve_idx(v.as_str())
-                                .and_then(|i| row_vals.get(i).copied().flatten())
+                            resolve_idx(v.as_str()).and_then(|i| row_vals.get(i).copied().flatten())
                         }
                         _ => None,
                     };

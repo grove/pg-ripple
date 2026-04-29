@@ -55,4 +55,3 @@ pub(super) fn ensure_catalog() {
     )
     .unwrap_or_else(|e| pgrx::warning!("construct_rule_triples catalog creation: {e}"));
 }
-

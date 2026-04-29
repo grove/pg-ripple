@@ -16,10 +16,10 @@ use tower_http::cors::CorsLayer;
 use tower_http::limit::RequestBodyLimitLayer;
 use utoipa::OpenApi;
 
-use crate::common::{AppState, check_auth, redacted_error};
-use crate::spi_bridge::execute_sparql_with_traceparent;
 use crate::arrow_encode::flight_do_get;
+use crate::common::{AppState, check_auth, redacted_error};
 use crate::datalog;
+use crate::spi_bridge::execute_sparql_with_traceparent;
 
 // ─── OpenAPI specification (K-1, v0.55.0) ────────────────────────────────────
 
@@ -1414,17 +1414,12 @@ async fn explorer_page() -> Response {
         .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())
 }
 
-
 // ─── Router factory ───────────────────────────────────────────────────────────
 
 /// Build the application [`Router`] and apply middleware layers.
 ///
 /// Called from `main` after the [`AppState`] and CORS policy are constructed.
-pub(crate) fn build_router(
-    state: Arc<AppState>,
-    max_body_bytes: usize,
-    cors: CorsLayer,
-) -> Router {
+pub(crate) fn build_router(state: Arc<AppState>, max_body_bytes: usize, cors: CorsLayer) -> Router {
     Router::new()
         // SPARQL 1.1 Protocol
         .route("/sparql", get(sparql_get).post(sparql_post))

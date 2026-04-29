@@ -112,4 +112,3 @@ pub(super) fn retract_exclusive_triples(rule_name: &str) {
         }
     }
 }
-

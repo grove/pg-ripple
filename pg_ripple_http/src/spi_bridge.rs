@@ -10,9 +10,7 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 
 use crate::common::{AppState, redacted_error};
-use crate::routing::{
-    format_ask_result, format_graph_results, format_select_results,
-};
+use crate::routing::{format_ask_result, format_graph_results, format_select_results};
 
 // ─── SPARQL execution ────────────────────────────────────────────────────────
 
@@ -240,4 +238,3 @@ async fn execute_describe(
 
     format_graph_results(&triples, accept)
 }
-
