@@ -13,9 +13,9 @@ SET search_path TO pg_ripple, public;
 -- 1a. sparql_update is callable (regression guard for sparql/mod.rs split).
 SELECT pg_ripple.sparql_update('INSERT DATA {}') IS NOT NULL AS sparql_update_callable;
 
--- 1b. sparql_select is callable.
+-- 1b. sparql (SELECT) is callable.
 SELECT count(*) >= 0 AS sparql_select_callable
-FROM pg_ripple.sparql_select('SELECT * WHERE { ?s ?p ?o } LIMIT 0'::text);
+FROM pg_ripple.sparql('SELECT * WHERE { ?s ?p ?o } LIMIT 0');
 
 -- 1c. sparql_ask is callable.
 SELECT pg_ripple.sparql_ask('ASK { ?s ?p ?o }') IN (true, false) AS sparql_ask_callable;

@@ -53,8 +53,10 @@ WHERE id = (
 
 -- 2d. Call recover_interrupted_promotions() — it should retry the promotion
 --     and return at least 1 (the simulated interrupted predicate).
+SET client_min_messages = error;
 SELECT pg_ripple.recover_interrupted_promotions() >= 1
     AS recovered_at_least_one;
+SET client_min_messages = DEFAULT;
 
 -- 2e. After recovery, the predicate's promotion_status should be 'promoted'.
 SELECT promotion_status = 'promoted' AS status_is_promoted
