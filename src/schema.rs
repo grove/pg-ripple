@@ -1269,3 +1269,13 @@ pgrx::extension_sql!(
     name = "v068_schema_version_stamp",
     requires = ["v067_schema_version_stamp"]
 );
+
+// v0.69.0: ARCH-01..ARCH-05 module-restructuring (pure code layout, no SQL changes).
+// Stamp only so that diagnostic_report() returns schema_version = '0.69.0'
+// on a fresh CREATE EXTENSION.
+pgrx::extension_sql!(
+    "INSERT INTO _pg_ripple.schema_version (version, upgraded_from, installed_at) \
+     VALUES ('0.69.0', '0.68.0', clock_timestamp());",
+    name = "v069_schema_version_stamp",
+    requires = ["v068_schema_version_stamp"]
+);

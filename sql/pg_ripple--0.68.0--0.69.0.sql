@@ -15,3 +15,7 @@
 --   ARCH-05  All 186 pg_regress tests pass; no SQL-visible changes.
 --
 -- All public SQL functions, GUCs, and table schemas are identical to 0.68.0.
+
+-- Stamp the schema_version so diagnostic_report() reflects the upgrade.
+INSERT INTO _pg_ripple.schema_version (version, upgraded_from, installed_at)
+VALUES ('0.69.0', '0.68.0', clock_timestamp());
