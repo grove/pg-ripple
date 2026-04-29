@@ -1,0 +1,17 @@
+-- Migration 0.68.0 → 0.69.0: Module Architecture Restructuring
+--
+-- Schema changes: None.
+--
+-- This release splits large source modules along single-responsibility
+-- boundaries with zero behavioral changes:
+--
+--   ARCH-01  src/sparql/mod.rs   → parse.rs, plan.rs, decode.rs, execute.rs
+--   ARCH-02  pg_ripple_http/src/main.rs
+--                                → routing.rs, spi_bridge.rs, arrow_encode.rs, stream.rs
+--   ARCH-03  src/construct_rules.rs
+--                                → construct_rules/mod.rs, catalog.rs, delta.rs,
+--                                  retract.rs, scheduler.rs
+--   ARCH-04  src/storage/mod.rs  → narrowed pub API + storage/promote.rs
+--   ARCH-05  All 186 pg_regress tests pass; no SQL-visible changes.
+--
+-- All public SQL functions, GUCs, and table schemas are identical to 0.68.0.
