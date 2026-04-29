@@ -2143,12 +2143,11 @@ unsafe extern "C-unwind" fn xact_callback_c(event: u32, _arg: *mut std::ffi::c_v
         // Transaction committed successfully: dictionary rows are durable, so
         // the shmem entries are correct — just clear the tracking list.
         crate::dictionary::commit_cleanup();
-    } else if event == 5 {
-        // XACT_EVENT_PRE_COMMIT: flush deferred mutation journal entries so
-        // that CWB writeback fires once per statement boundary rather than
-        // once per individual triple (FLUSH-01).
-        crate::storage::mutation_journal::flush();
     }
+    // Note: we do NOT call flush() here for XACT_EVENT_PRE_COMMIT (event 5)
+    // because SPI is not safely callable from within a PostgreSQL xact callback.
+    // Flush is called directly at each write API boundary in dict_api.rs and
+    // views_api.rs instead (FLUSH-01 revised).
 }
 
 // ─── Public SQL-callable functions ────────────────────────────────────────────
