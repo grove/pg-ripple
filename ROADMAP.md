@@ -123,6 +123,60 @@
 | [v0.68.0](roadmap/v0.68.0.md) | Distributed scalability, streaming completion and fuzz hardening: CONSTRUCT cursor streaming, Citus HLL translation, SERVICE pruning, nonblocking VP promotion, scheduled fuzz CI | Released ✅ | Large | [Full details](roadmap/v0.68.0-full.md) |
 | [v0.69.0](roadmap/v0.69.0.md) | Module architecture restructuring: split sparql/mod.rs, pg_ripple_http/main.rs, construct_rules.rs, and storage/mod.rs along single-responsibility boundaries | Released ✅ | Large | [Full details](roadmap/v0.69.0-full.md) |
 
+### Assessment 10 Remediation & Production Hardening (v0.70.0 – v0.73.0)
+
+| Version | Theme | Status | Scope | Full details |
+|---------|-------|--------|-------|-------------- |
+| [v0.70.0](roadmap/v0.70.0.md) | Assessment 10 critical remediation: bulk-load mutation journal, per-statement flush, fail-closed evidence gate, SHACL doc truth, README versioning, RLS SQL quoting, SBOM currency | Planned | Large | [Full details](roadmap/v0.70.0-full.md) |
+| [v0.71.0](roadmap/v0.71.0.md) | Arrow Flight streaming validation, Citus multi-node integration test, pg_ripple_http/pg_ripple compatibility matrix, HLL accuracy docs, SERVICE shard benchmark | Planned | Large | [Full details](roadmap/v0.71.0-full.md) |
+| [v0.72.0](roadmap/v0.72.0.md) | Architecture and protocol hardening: mutation journal SAVEPOINT safety, plan cache docs, continued module split, ConstructTemplate proptest, SPARQL Update fuzz, conformance gate promotion, Arrow Flight replay protection | Planned | Large | [Full details](roadmap/v0.72.0-full.md) |
+| [v0.73.0](roadmap/v0.73.0.md) | SPARQL 1.2 tracking, live SPARQL subscription API (WebSocket/SSE), feature status taxonomy, CONTRIBUTING.md, Helm chart SHA pin, R2RML scope docs | Planned | Large | [Full details](roadmap/v0.73.0-full.md) |
+
+#### PLAN_OVERALL_ASSESSMENT_10 coverage map
+
+Every finding and recommendation from [plans/PLAN_OVERALL_ASSESSMENT_10.md](plans/PLAN_OVERALL_ASSESSMENT_10.md) is assigned to one or more post-v0.69.0 roadmap milestones:
+
+| Assessment finding | Roadmap coverage |
+|---|---|
+| CF-1: Bulk load bypasses mutation journal | v0.70.0 BULK-01 |
+| CF-2: Per-triple `flush()` runs CWB pipeline O(quads × rules) | v0.70.0 FLUSH-01 |
+| CF-3: SHACL-SPARQL documentation overclaim (third assessment) | v0.70.0 SHACL-DOC-01 |
+| CF-4: `feature_status()` cites three non-existent evidence files | v0.70.0 GATE-03 |
+| HF-1: Citus integration test claimed but missing | v0.71.0 CITUS-INT-01 |
+| HF-2: README two releases stale | v0.70.0 README-01, README-02 |
+| HF-3: Arrow Flight streaming behavior unverified | v0.71.0 FLIGHT-STREAM-01 |
+| HF-4: RLS DDL interpolates role names without quoting | v0.70.0 RLS-SQL-01 |
+| HF-5: SBOM 18 releases stale | v0.70.0 SBOM-02 |
+| HF-6: Plan cache key omits graph/security context | v0.72.0 CACHE-01 |
+| HF-7: Mutation journal not safe under SAVEPOINT/ROLLBACK | v0.72.0 XACT-01 |
+| HF-8: pg_ripple_http independently versioned, no compatibility matrix | v0.71.0 COMPAT-01 |
+| MF-1: cwb_write_path_equivalence.sql cannot prove bulk-load arm | v0.70.0 BULK-01 (test extension) |
+| MF-2: Legacy .sh gate scripts coexist with Python replacements | v0.70.0 GATE-04 |
+| MF-4: No regression test for `recover_interrupted_promotions()` | v0.70.0 TEST-03 |
+| MF-5: merge_throughput_history.csv has only one row | v0.72.0 BENCH-03 |
+| MF-6: v067_features.sql and v069_features.sql missing | v0.70.0 TEST-01, TEST-02 |
+| MF-7: Citus HLL accuracy bounds undocumented | v0.71.0 HLL-DOC-01 |
+| MF-8: Citus SERVICE annotation effectiveness not benchmarked | v0.71.0 CITUS-BENCH-01 |
+| MF-10: src/lib.rs and src/storage/mod.rs still >500 lines | v0.72.0 MOD-01 |
+| MF-11: No proptest for ConstructTemplate | v0.72.0 PROPTEST-01 |
+| MF-12: Fuzz corpus may not cover SPARQL Update | v0.72.0 FUZZ-02 |
+| MF-13: Streaming metrics not exposed via /metrics | v0.72.0 OBS-02 |
+| MF-14: Three batch-size GUCs undocumented relative to each other | v0.72.0 GUC-DOC-01 |
+| MF-15: [Unreleased] section lacks contributor guidance | v0.73.0 CONTRIB-01 |
+| MF-16: roadmap/v0.67.0.md still marked Planned | v0.70.0 DOC-01 |
+| MF-17: Datalog/CWB interaction undocumented and untested | v0.72.0 CWB-DATALOG-01 |
+| MF-18: is_citus_worker_endpoint() URL parsing untested | v0.72.0 CITUS-URL-01 |
+| MF-19: Arrow Flight ticket has no replay protection | v0.72.0 FLIGHT-NONCE-01 |
+| MF-20: feature_status() taxonomy has no promotion criteria | v0.73.0 TAXONOMY-01 |
+| Dimension 12 / item 17: SPARQL 1.2 tracking | v0.73.0 SPARQL12-01 |
+| Dimension 12 / item 18: WebSocket/SSE live subscription API | v0.73.0 SUB-01 |
+| Low: CONTRIBUTING.md missing | v0.73.0 CONTRIB-01 |
+| Low: Helm chart uses latest tag | v0.73.0 HELM-01 |
+| Low: src/llm/ and src/kge.rs not in feature_status() | v0.73.0 FEATURE-STATUS-02 |
+| Low: src/r2rml.rs scope unclear | v0.73.0 R2RML-DOC-01 |
+| Low: pg_ripple.control comment stale | v0.73.0 CONTROL-01 |
+| v1.0.0 readiness: Jena ≥95%, security audit, threat model, clean-package install | v1.0.0 PROD-01 through PROD-05 |
+
 #### PLAN_OVERALL_ASSESSMENT_8 coverage map
 
 Every finding and recommendation from [plans/PLAN_OVERALL_ASSESSMENT_8.md](plans/PLAN_OVERALL_ASSESSMENT_8.md) is assigned to one or more post-v0.63.0 roadmap milestones:
@@ -250,6 +304,20 @@ v0.68          ─── Distributed scalability and streaming completion: CONST
 v0.69          ─── Module architecture restructuring: split sparql/mod.rs,
                │   pg_ripple_http/main.rs, construct_rules.rs, storage/mod.rs
        │
+v0.70          ─── Assessment 10 critical remediation: bulk-load mutation journal,
+               │   per-statement flush, fail-closed evidence gate, SHACL doc truth,
+               │   README versioning, RLS SQL quoting, SBOM currency
+       │
+v0.71          ─── Arrow Flight streaming validation, Citus multi-node integration,
+               │   compatibility matrix, HLL accuracy docs, SERVICE benchmark
+       │
+v0.72          ─── Architecture hardening: mutation journal SAVEPOINT safety,
+               │   plan cache docs, module split, ConstructTemplate proptest,
+               │   SPARQL Update fuzz, conformance gate promotion, replay protection
+       │
+v0.73          ─── SPARQL 1.2 tracking, live subscription API (SSE/WebSocket),
+               │   feature taxonomy, CONTRIBUTING.md, Helm chart SHA, R2RML docs
+       │
 v1.0.0         ─── Stable release: 72-hour continuous load test, third-party security audit, documentation freeze, public benchmarks
        │
 v1.1           ─── Post-stable: Cypher/GQL transpiler (read-only + write ops), Jupyter kernel, LangChain/LlamaIndex tools, Kafka CDC sink, materialized SPARQL views, dbt adapter
@@ -309,6 +377,22 @@ Citus HLL aggregate translation, Citus SERVICE pruning, nonblocking VP promotion
 and scheduled fuzz CI for all twelve targets); and v0.69.0 restructures the large
 source modules along single-responsibility boundaries to make the codebase
 maintainable for a v1.0.0 API freeze.
+v0.70.0 through v0.73.0 address the findings from PLAN_OVERALL_ASSESSMENT_10:
+v0.70.0 closes all four Critical findings (bulk-load mutation journal bypass,
+per-triple flush overhead, missing evidence file citations, SHACL-SPARQL docs)
+and six High/Medium items (README stale, RLS DDL quoting, SBOM currency, missing
+test files, legacy script cleanup, roadmap status correction); v0.71.0 validates
+the Arrow Flight streaming contract with an RSS-bounded 10 M-row integration test,
+implements the previously-missing Citus RLS propagation integration test, adds an
+extension/HTTP companion compatibility matrix, and documents HLL accuracy bounds;
+v0.72.0 hardens the mutation journal against PostgreSQL SAVEPOINT/ROLLBACK via
+xact callbacks, continues the v0.69.0 module split for the three largest remaining
+files, adds a ConstructTemplate proptest suite and a SPARQL Update fuzz target,
+promotes W3C conformance and BSBM gates to required CI, adds Arrow Flight replay
+protection, and tests the Datalog→CWB interaction chain; v0.73.0 tracks SPARQL 1.2,
+delivers a live SPARQL subscription API prototype via SSE, and completes the
+ecosystem hardening items (CONTRIBUTING.md, Helm chart SHA pinning, feature status
+taxonomy, and R2RML scope documentation).
 v1.0.0 is the stable release: a 72-hour continuous load test, a
 third-party security audit, documentation final audit and freeze, an API stability
 guarantee, and public BSBM/WatDiv benchmark results. v1.1.0 delivers
