@@ -73,7 +73,7 @@ WHERE table_schema = '_pg_ripple'
 -- 2e. Registered mapping is visible in the catalog.
 SELECT count(*) = 1 AS mapping_in_catalog
 FROM _pg_ripple.json_mappings
-WHERE mapping_name = 'test_mapping_v073';
+WHERE name = 'test_mapping_v073';
 
 -- ── Part 3: JSONLD-INGEST-02 — Multi-graph JSON-LD ingest ────────────────────
 

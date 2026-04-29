@@ -114,7 +114,7 @@ WHERE table_schema = '_pg_ripple'
 -- 2e. Registered mapping is visible in the catalog.
 SELECT count(*) = 1 AS mapping_in_catalog
 FROM _pg_ripple.json_mappings
-WHERE mapping_name = 'test_mapping_v073';
+WHERE name = 'test_mapping_v073';
  mapping_in_catalog 
 --------------------
  t
@@ -127,7 +127,7 @@ FROM pg_ripple.feature_status()
 WHERE feature_name = 'json_ld_multi_ingest';
  jsonld_multi_ingest_status 
 ----------------------------
- experimental
+ implemented
 (1 row)
 
 -- 3b. json_ld_load is callable with a simple single-node document.

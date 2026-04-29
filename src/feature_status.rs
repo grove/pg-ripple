@@ -426,7 +426,7 @@ mod pg_ripple {
                 ),
                 None,
                 Some("plans/sparql12_tracking.md".to_string()),
-                Some("plans/sparql12_tracking.md".to_string()),
+                None,
             ),
             // ── Live SPARQL subscriptions (v0.73.0 SUB-01) ───────────────
             (

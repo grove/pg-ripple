@@ -54,7 +54,7 @@ SELECT
     (SELECT value FROM pg_ripple.diagnostic_report() WHERE key = 'compiled_version') AS cv;
    sv   |   cv   
 --------+--------
- 0.69.0 | 0.72.0
+ 0.73.0 | 0.73.0
 (1 row)
 
 -- GUC values should be valid
