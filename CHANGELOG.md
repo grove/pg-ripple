@@ -27,7 +27,7 @@ Versions correspond to the milestones in [ROADMAP.md](ROADMAP.md).
 
 - **RT-FIX-06** — `is_f64()` checked before `is_i64()` in `json_value_to_nt_term` so fractional JSON numbers (e.g. `1.5`) are not misclassified as integers.
 
-- **RT-FIX-07** — IRI key validation (`validate_iri_key_or_error`) added before triple insert to prevent malformed IRIs from entering the triple store.
+- **RT-FIX-07** — IRI key validation (`validate_iri_key_or_error`) added before triple insert to prevent malformed IRIs from entering the triple store. (ci/regress: json_roundtrip_fixes.sql)
 
 - **FLIGHT-NONCE-01** — Arrow Flight nonce replay protection: `AppState` gains a `nonce_cache: DashMap<String, Instant>` with 5-minute TTL. Replayed nonces return `401 Unauthorized`.
 
@@ -35,7 +35,7 @@ Versions correspond to the milestones in [ROADMAP.md](ROADMAP.md).
 
 - **JSONLD-NODE-01** — `export_jsonld_node(iri TEXT) → jsonb` SQL function added, returning the JSON-LD representation of all triples for a given subject IRI. Regression test: `tests/pg_regress/sql/export_jsonld_node.sql`.
 
-- **PROPTEST-01** — Property-based tests for `ConstructTemplate` / `apply_construct_template` added in `tests/proptest/construct_template.rs` using the `proptest 1` crate. Self-contained (no pgrx dependency).
+- **PROPTEST-01** — Property-based tests for `ConstructTemplate` / `apply_construct_template` added in `tests/proptest/construct_template.rs` using the `proptest 1` crate. Self-contained (no pgrx dependency). (see ROADMAP.md v0.72.0)
 
 - **MOD-01** — Source files exceeding 500 lines split into focused sub-modules:
   - `src/gucs/registration.rs` — all GUC registrations extracted from `_PG_init`
