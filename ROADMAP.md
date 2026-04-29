@@ -323,60 +323,76 @@ v1.0.0         ─── Stable release: 72-hour continuous load test, third-par
 v1.1           ─── Post-stable: Cypher/GQL transpiler (read-only + write ops), Jupyter kernel, LangChain/LlamaIndex tools, Kafka CDC sink, materialized SPARQL views, dbt adapter
 ```
 
+## Summary
+
 v0.1.0 through v0.5.1 build the complete core storage and query engine.
 v0.6.0 through v0.10.0 add the HTAP architecture, SHACL validation, and the full
-Datalog reasoning engine. v0.11.0 through v0.20.0 complete the SPARQL query and
-update surfaces and establish the W3C conformance baseline. v0.21.0 through v0.32.0
-harden correctness and deliver production-grade Datalog optimizations including
-magic sets, semi-naive evaluation, well-founded semantics, and entity resolution.
+Datalog reasoning engine.
+
+v0.11.0 through v0.20.0 complete the SPARQL query and update surfaces and establish
+the W3C conformance baseline.
+
+v0.21.0 through v0.32.0 harden correctness and deliver production-grade Datalog
+optimizations including magic sets, semi-naive evaluation, well-founded semantics,
+and entity resolution.
+
 v0.33.0 through v0.46.0 deliver the documentation site, parallel evaluation,
 worst-case optimal joins, full conformance suites, and the AI/LLM integration layer.
+
 v0.47.0 through v0.51.0 complete the architecture refactor and shipping hardening
 required for a production release. v0.52.0 through v0.54.0 deliver the pg-trickle
-relay integration and high-availability story. v0.55.0 through v0.56.0 address all
-open security findings from PLAN_OVERALL_ASSESSMENT_6 (SSRF allowlist, error-catalog
-drift) and add GeoSPARQL 1.1, federation circuit breaker, and the SPARQL audit log.
+relay integration and high-availability story.
+
+v0.55.0 through v0.56.0 address all open security findings from
+PLAN_OVERALL_ASSESSMENT_6 (SSRF allowlist, error-catalog drift) and add GeoSPARQL
+1.1, federation circuit breaker, and the SPARQL audit log.
+
 v0.57.0 through v0.59.0 extend the reasoning platform to OWL 2 EL/QL, add KG
 embeddings, entity alignment, temporal RDF queries, Citus sharding with shard-pruning,
-and PROV-O provenance. v0.60.0 through v0.62.0 are the pre-1.0 hardening and
-ecosystem sprint: v0.60.0 closes the remaining v1.0.0 blockers identified in
-PLAN_OVERALL_ASSESSMENT_7 (HTAP atomic swap, CI supply-chain hardening, fuzz target
-gaps, `geof:distance`); v0.61.0 delivers ecosystem depth (per-graph RLS, inference
-explainability, GDPR erasure, dbt adapter, SHACL-AF execution, richer federation call stats);
-v0.62.0 delivers the query frontier (Arrow Flight bulk export, WCOJ planner
-integration, visual graph explorer) plus six Citus scalability improvements (property-path
-push-down, `vp_rare` cold-entry archival, tiered dictionary cache, distributed inference
-dispatch, live shard rebalance, multi-hop pruning carry-forward). v0.63.0 introduces
-SPARQL CONSTRUCT writeback rules: any CONSTRUCT query can be registered as a persistent
-rule that writes its derived triples directly into a target named graph inside the VP
-storage layer and maintains them incrementally — inserts trigger a delta derivation path,
-deletes trigger Delete-Rederive retraction — enabling raw-to-canonical model pipelines
-where the canonical graph is always consistent with the latest raw data.
-v0.63.0 also delivers eight Citus scalability improvements (CITUS-30–37): SERVICE
-result shard pruning, streaming coordinator fan-out via SPARQL cursor, approximate
-`COUNT(DISTINCT)` via HyperLogLog, batched dictionary encoding, per-worker statement-ID
-local tables, non-blocking VP promotion via shadow-table pattern, per-graph RLS
-propagation CI gate, and per-worker BRIN summarise after merge. v0.64.0 through
-v0.64.0 through
-v0.69.0 convert the findings from PLAN_OVERALL_ASSESSMENT_8 and PLAN_OVERALL_ASSESSMENT_9 into explicit
-roadmap work: v0.64.0 adds the truth-in-release guardrails (feature status,
-deep readiness, immutable CI actions, release digest scanning, and documentation
-correction); v0.65.0 closes CONSTRUCT writeback correctness (delta maintenance,
-HTAP-aware retraction, exact provenance, and the full behavior test matrix);
-v0.66.0 makes the streaming and distributed claims real or explicitly labels
-them as planner hints/stubs/helpers (true SPARQL cursors, signed Arrow IPC export,
-explainable WCOJ mode, and integrated Citus pruning/HLL/BRIN/RLS/promotion paths);
-v0.67.0 addresses all four Critical findings from Assessment 9 (storage mutation
-journal closing all CONSTRUCT writeback bypass paths, VP table RLS coverage,
-Arrow Flight ticket security and tombstone-aware export, fail-closed release-truth
-scripts) and gathers production evidence (soak tests, audit or threat-model closure,
-public benchmarks, upgrade/backup acceptance, and mandatory release evidence
-artifacts); v0.68.0 completes the distributed execution and streaming contracts
-that were labelled partial or planned in v0.62–v0.66 (true CONSTRUCT streaming,
-Citus HLL aggregate translation, Citus SERVICE pruning, nonblocking VP promotion,
-and scheduled fuzz CI for all twelve targets); and v0.69.0 restructures the large
-source modules along single-responsibility boundaries to make the codebase
-maintainable for a v1.0.0 API freeze.
+and PROV-O provenance.
+
+v0.60.0 through v0.62.0 are the pre-1.0 hardening and ecosystem sprint: v0.60.0
+closes the remaining v1.0.0 blockers identified in PLAN_OVERALL_ASSESSMENT_7 (HTAP
+atomic swap, CI supply-chain hardening, fuzz target gaps, `geof:distance`);
+v0.61.0 delivers ecosystem depth (per-graph RLS, inference explainability, GDPR
+erasure, dbt adapter, SHACL-AF execution, richer federation call stats); v0.62.0
+delivers the query frontier (Arrow Flight bulk export, WCOJ planner integration,
+visual graph explorer) plus six Citus scalability improvements (property-path
+push-down, `vp_rare` cold-entry archival, tiered dictionary cache, distributed
+inference dispatch, live shard rebalance, multi-hop pruning carry-forward).
+
+v0.63.0 introduces SPARQL CONSTRUCT writeback rules: any CONSTRUCT query can be
+registered as a persistent rule that writes its derived triples directly into a target
+named graph inside the VP storage layer and maintains them incrementally — inserts
+trigger a delta derivation path, deletes trigger Delete-Rederive retraction —
+enabling raw-to-canonical model pipelines where the canonical graph is always
+consistent with the latest raw data. v0.63.0 also delivers eight Citus scalability
+improvements (CITUS-30–37): SERVICE result shard pruning, streaming coordinator
+fan-out via SPARQL cursor, approximate `COUNT(DISTINCT)` via HyperLogLog, batched
+dictionary encoding, per-worker statement-ID local tables, non-blocking VP promotion
+via shadow-table pattern, per-graph RLS propagation CI gate, and per-worker BRIN
+summarise after merge.
+
+v0.64.0 through v0.69.0 convert the findings from PLAN_OVERALL_ASSESSMENT_8 and
+PLAN_OVERALL_ASSESSMENT_9 into explicit roadmap work: v0.64.0 adds the
+truth-in-release guardrails (feature status, deep readiness, immutable CI actions,
+release digest scanning, and documentation correction); v0.65.0 closes CONSTRUCT
+writeback correctness (delta maintenance, HTAP-aware retraction, exact provenance,
+and the full behavior test matrix); v0.66.0 makes the streaming and distributed
+claims real or explicitly labels them as planner hints/stubs/helpers (true SPARQL
+cursors, signed Arrow IPC export, explainable WCOJ mode, and integrated Citus
+pruning/HLL/BRIN/RLS/promotion paths); v0.67.0 addresses all four Critical findings
+from Assessment 9 (storage mutation journal closing all CONSTRUCT writeback bypass
+paths, VP table RLS coverage, Arrow Flight ticket security and tombstone-aware
+export, fail-closed release-truth scripts) and gathers production evidence (soak
+tests, audit or threat-model closure, public benchmarks, upgrade/backup acceptance,
+and mandatory release evidence artifacts); v0.68.0 completes the distributed
+execution and streaming contracts that were labelled partial or planned in v0.62–v0.66
+(true CONSTRUCT streaming, Citus HLL aggregate translation, Citus SERVICE pruning,
+nonblocking VP promotion, and scheduled fuzz CI for all twelve targets); and v0.69.0
+restructures the large source modules along single-responsibility boundaries to make
+the codebase maintainable for a v1.0.0 API freeze.
+
 v0.70.0 through v0.73.0 address the findings from PLAN_OVERALL_ASSESSMENT_10:
 v0.70.0 closes all four Critical findings (bulk-load mutation journal bypass,
 per-triple flush overhead, missing evidence file citations, SHACL-SPARQL docs)
@@ -393,10 +409,12 @@ protection, and tests the Datalog→CWB interaction chain; v0.73.0 tracks SPARQL
 delivers a live SPARQL subscription API prototype via SSE, and completes the
 ecosystem hardening items (CONTRIBUTING.md, Helm chart SHA pinning, feature status
 taxonomy, and R2RML scope documentation).
-v1.0.0 is the stable release: a 72-hour continuous load test, a
-third-party security audit, documentation final audit and freeze, an API stability
-guarantee, and public BSBM/WatDiv benchmark results. v1.1.0 delivers
-post-stable improvements: Cypher/GQL transpiler (read-only and write operations),
-Jupyter SPARQL kernel, LangChain/LlamaIndex tool packages, Kafka CDC sink,
-materialized SPARQL views, and a dbt adapter.
+
+v1.0.0 is the stable release: a 72-hour continuous load test, a third-party security
+audit, documentation final audit and freeze, an API stability guarantee, and public
+BSBM/WatDiv benchmark results.
+
+v1.1.0 delivers post-stable improvements: Cypher/GQL transpiler (read-only and write
+operations), Jupyter SPARQL kernel, LangChain/LlamaIndex tool packages, Kafka CDC
+sink, materialized SPARQL views, and a dbt adapter.
 
