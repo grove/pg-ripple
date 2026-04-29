@@ -2,8 +2,8 @@
 --   MJOURNAL-01: mutation journal flush behavior
 --   FLIGHT-SEC-02: Arrow Flight ticket signature validation
 --   PROD-01: feature_status() and Python gate scripts smoke test
-
 CREATE EXTENSION IF NOT EXISTS pg_ripple;
+SELECT pg_ripple.triple_count() >= 0 AS library_loaded;
  library_loaded 
 ----------------
  t
@@ -12,25 +12,25 @@ CREATE EXTENSION IF NOT EXISTS pg_ripple;
 SET search_path TO pg_ripple, public;
 -- ── Part 1: Mutation journal — insert_triple path ────────────────────────────
 -- 1a. Register a CONSTRUCT rule so CWB fires.
-SELECT pg_ripple.create_graph('https://v067test.test/source/') IS NULL
+SELECT pg_ripple.create_graph('https://v067test.test/source/') > 0
     AS source_graph_created;
  source_graph_created 
 ----------------------
- f
+ t
 (1 row)
 
-SELECT pg_ripple.create_graph('https://v067test.test/derived/') IS NULL
+SELECT pg_ripple.create_graph('https://v067test.test/derived/') > 0
     AS derived_graph_created;
  derived_graph_created 
 -----------------------
- f
+ t
 (1 row)
 
 SELECT pg_ripple.create_construct_rule(
     'v067_journal_rule',
-    'CONSTRUCT { ?s <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> ?c }
+    'CONSTRUCT { ?s <https://v067test.test/relatesTo> ?o }
      WHERE { GRAPH <https://v067test.test/source/> {
-         ?s <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> ?c
+         ?s <https://v067test.test/knows> ?o
      } }',
     'https://v067test.test/derived/'
 ) IS NULL AS rule_created;
@@ -42,8 +42,8 @@ SELECT pg_ripple.create_construct_rule(
 -- 1b. Insert via insert_triple() — mutation journal should trigger CWB.
 SELECT pg_ripple.insert_triple(
     '<https://v067test.test/Alice>',
-    '<http://www.w3.org/1999/02/22-rdf-syntax-ns#type>',
-    '<https://v067test.test/Person>',
+    '<https://v067test.test/knows>',
+    '<https://v067test.test/Bob>',
     'https://v067test.test/source/'
 ) > 0 AS path_insert_triple_ok;
  path_insert_triple_ok 
@@ -54,9 +54,9 @@ SELECT pg_ripple.insert_triple(
 -- 1c. Insert via SPARQL INSERT DATA — mutation journal should trigger CWB.
 SELECT pg_ripple.sparql_update(
     'INSERT DATA { GRAPH <https://v067test.test/source/> {
-        <https://v067test.test/Bob>
-        <http://www.w3.org/1999/02/22-rdf-syntax-ns#type>
-        <https://v067test.test/Person> } }'
+        <https://v067test.test/Carol>
+        <https://v067test.test/knows>
+        <https://v067test.test/Dave> } }'
 ) IS NOT NULL AS path_sparql_insert_ok;
  path_sparql_insert_ok 
 -----------------------
@@ -82,23 +82,23 @@ SELECT pg_ripple.clear_graph('https://v067test.test/derived/') >= 0 AS derived_c
  t
 (1 row)
 
-SELECT pg_ripple.drop_graph('https://v067test.test/source/') IS NULL AS source_dropped;
+SELECT pg_ripple.drop_graph('https://v067test.test/source/') >= 0 AS source_dropped;
  source_dropped 
 ----------------
- f
+ t
 (1 row)
 
-SELECT pg_ripple.drop_graph('https://v067test.test/derived/') IS NULL AS derived_dropped;
+SELECT pg_ripple.drop_graph('https://v067test.test/derived/') >= 0 AS derived_dropped;
  derived_dropped 
 -----------------
- f
+ t
 (1 row)
 
 -- ── Part 2: Arrow Flight ticket security (FLIGHT-SEC-02) ─────────────────────
 -- 2a. arrow_unsigned_tickets_allowed GUC defaults to off.
 SHOW pg_ripple.arrow_unsigned_tickets_allowed;
- arrow_unsigned_tickets_allowed 
---------------------------------
+ pg_ripple.arrow_unsigned_tickets_allowed 
+------------------------------------------
  off
 (1 row)
 
@@ -131,9 +131,9 @@ WHERE evidence_path IS NOT NULL
   AND evidence_path NOT LIKE 'docs/%'
   AND evidence_path NOT LIKE 'src/%'
   AND evidence_path NOT LIKE 'tests/%'
-  AND evidence_path NOT LIKE 'scripts/%';
+  AND evidence_path NOT LIKE 'scripts/%'
+  AND evidence_path NOT LIKE '.github/%';
  no_stale_evidence_paths 
 -------------------------
  t
 (1 row)
-

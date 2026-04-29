@@ -34,21 +34,21 @@ $$) >= 0 AS loaded_triples;
 SELECT EXISTS(
     SELECT 1 FROM _pg_ripple.predicates p
     JOIN _pg_ripple.dictionary d ON d.id = p.id
-    WHERE d.iri = 'https://recover.test/testPred'
+    WHERE d.value = 'https://recover.test/testPred'
 ) AS test_predicate_registered;
 
 -- 2c. Manually simulate an interrupted promotion by setting status to 'promoting'.
 UPDATE _pg_ripple.predicates
 SET promotion_status = 'promoting'
 WHERE id = (
-    SELECT d.id FROM _pg_ripple.dictionary d WHERE d.iri = 'https://recover.test/testPred'
+    SELECT d.id FROM _pg_ripple.dictionary d WHERE d.value = 'https://recover.test/testPred'
 );
 
 -- Confirm status was set.
 SELECT promotion_status = 'promoting' AS status_is_promoting
 FROM _pg_ripple.predicates
 WHERE id = (
-    SELECT d.id FROM _pg_ripple.dictionary d WHERE d.iri = 'https://recover.test/testPred'
+    SELECT d.id FROM _pg_ripple.dictionary d WHERE d.value = 'https://recover.test/testPred'
 );
 
 -- 2d. Call recover_interrupted_promotions() — it should retry the promotion
@@ -60,7 +60,7 @@ SELECT pg_ripple.recover_interrupted_promotions() >= 1
 SELECT promotion_status = 'promoted' AS status_is_promoted
 FROM _pg_ripple.predicates
 WHERE id = (
-    SELECT d.id FROM _pg_ripple.dictionary d WHERE d.iri = 'https://recover.test/testPred'
+    SELECT d.id FROM _pg_ripple.dictionary d WHERE d.value = 'https://recover.test/testPred'
 );
 
 -- 2f. Another call to recover_interrupted_promotions() now returns 0
@@ -70,6 +70,12 @@ SELECT pg_ripple.recover_interrupted_promotions() = 0
 
 -- ── Cleanup ───────────────────────────────────────────────────────────────────
 
-SELECT pg_ripple.sparql_update(
-    'DELETE WHERE { ?s ?p ?o FILTER(STRSTARTS(STR(?s), "https://recover.test/")) }'
-) IS NOT NULL AS cleanup_ok;
+SELECT pg_ripple.delete_triple(
+    '<https://recover.test/s1>', '<https://recover.test/testPred>', '<https://recover.test/o1>'
+) >= 0 AS cleanup_1_ok;
+SELECT pg_ripple.delete_triple(
+    '<https://recover.test/s2>', '<https://recover.test/testPred>', '<https://recover.test/o2>'
+) >= 0 AS cleanup_2_ok;
+SELECT pg_ripple.delete_triple(
+    '<https://recover.test/s3>', '<https://recover.test/testPred>', '<https://recover.test/o3>'
+) >= 0 AS cleanup_3_ok;

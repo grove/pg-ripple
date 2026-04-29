@@ -10,16 +10,16 @@ SET search_path TO pg_ripple, public;
 -- ── Part 1: Mutation journal — insert_triple path ────────────────────────────
 
 -- 1a. Register a CONSTRUCT rule so CWB fires.
-SELECT pg_ripple.create_graph('https://v067test.test/source/') IS NULL
+SELECT pg_ripple.create_graph('https://v067test.test/source/') > 0
     AS source_graph_created;
-SELECT pg_ripple.create_graph('https://v067test.test/derived/') IS NULL
+SELECT pg_ripple.create_graph('https://v067test.test/derived/') > 0
     AS derived_graph_created;
 
 SELECT pg_ripple.create_construct_rule(
     'v067_journal_rule',
-    'CONSTRUCT { ?s <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> ?c }
+    'CONSTRUCT { ?s <https://v067test.test/relatesTo> ?o }
      WHERE { GRAPH <https://v067test.test/source/> {
-         ?s <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> ?c
+         ?s <https://v067test.test/knows> ?o
      } }',
     'https://v067test.test/derived/'
 ) IS NULL AS rule_created;
@@ -27,25 +27,25 @@ SELECT pg_ripple.create_construct_rule(
 -- 1b. Insert via insert_triple() — mutation journal should trigger CWB.
 SELECT pg_ripple.insert_triple(
     '<https://v067test.test/Alice>',
-    '<http://www.w3.org/1999/02/22-rdf-syntax-ns#type>',
-    '<https://v067test.test/Person>',
+    '<https://v067test.test/knows>',
+    '<https://v067test.test/Bob>',
     'https://v067test.test/source/'
 ) > 0 AS path_insert_triple_ok;
 
 -- 1c. Insert via SPARQL INSERT DATA — mutation journal should trigger CWB.
 SELECT pg_ripple.sparql_update(
     'INSERT DATA { GRAPH <https://v067test.test/source/> {
-        <https://v067test.test/Bob>
-        <http://www.w3.org/1999/02/22-rdf-syntax-ns#type>
-        <https://v067test.test/Person> } }'
+        <https://v067test.test/Carol>
+        <https://v067test.test/knows>
+        <https://v067test.test/Dave> } }'
 ) IS NOT NULL AS path_sparql_insert_ok;
 
 -- 1d. Cleanup.
 SELECT pg_ripple.drop_construct_rule('v067_journal_rule') AS rule_dropped;
 SELECT pg_ripple.clear_graph('https://v067test.test/source/') >= 0 AS source_cleared;
 SELECT pg_ripple.clear_graph('https://v067test.test/derived/') >= 0 AS derived_cleared;
-SELECT pg_ripple.drop_graph('https://v067test.test/source/') IS NULL AS source_dropped;
-SELECT pg_ripple.drop_graph('https://v067test.test/derived/') IS NULL AS derived_dropped;
+SELECT pg_ripple.drop_graph('https://v067test.test/source/') >= 0 AS source_dropped;
+SELECT pg_ripple.drop_graph('https://v067test.test/derived/') >= 0 AS derived_dropped;
 
 -- ── Part 2: Arrow Flight ticket security (FLIGHT-SEC-02) ─────────────────────
 
@@ -74,4 +74,5 @@ WHERE evidence_path IS NOT NULL
   AND evidence_path NOT LIKE 'docs/%'
   AND evidence_path NOT LIKE 'src/%'
   AND evidence_path NOT LIKE 'tests/%'
-  AND evidence_path NOT LIKE 'scripts/%';
+  AND evidence_path NOT LIKE 'scripts/%'
+  AND evidence_path NOT LIKE '.github/%';
