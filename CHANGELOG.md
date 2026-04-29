@@ -27,7 +27,7 @@ Versions correspond to the milestones in [ROADMAP.md](ROADMAP.md).
 - **GATE-05** — Fixed `validate-feature-status` CI job: replaced subshell-bypass pattern with
   `missing=$(...)` variable capture so missing evidence paths cause a real non-zero exit.
 
-- **GATE-06** — Added `validate-feature-status-populated` CI job: installs extension, inserts sample
+- **GATE-06** — Added `validate-feature-status-populated` CI job (`.github/workflows/ci.yml`): installs extension, inserts sample
   triples, then validates that `feature_status()` returns no `degraded` rows on a populated DB.
 
 - **JOURNAL-DATALOG-01** — Wired Datalog inference through the mutation journal (CF-D + HF-C fixes):
@@ -35,7 +35,7 @@ Versions correspond to the milestones in [ROADMAP.md](ROADMAP.md).
   insertion and calls `mutation_journal::flush()`. `run_inference()` similarly flushes after
   any triples are derived.
 
-- **SBOM-03** — SBOM regenerated to v0.74.0. Added `just check-sbom-version` target to the
+- **SBOM-03** — SBOM regenerated to v0.74.0 (`sbom.json`). Added `just check-sbom-version` target to the
   justfile and wired it into `just assess-release` as the first check.
 
 - **HTTP-VERSION-01** — `pg_ripple_http` version bumped to 0.74.0; `COMPATIBLE_EXTENSION_MIN`
