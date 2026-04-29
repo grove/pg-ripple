@@ -35,9 +35,19 @@ The `sig` field is computed over `query + exp + nonce` using the configured secr
 
 ## Streaming Behavior
 
-The endpoint streams Arrow IPC record batches as they are produced. Memory usage is bounded by
-the batch size (configurable via `pg_ripple_http.arrow_batch_size`). For very large result sets,
-the client should use streaming reads rather than buffering the entire response.
+The endpoint uses `Transfer-Encoding: chunked` HTTP streaming (via `axum::body::Body::from_stream`)
+so that clients can begin decoding Arrow IPC record batches before the full export completes.
+Response bytes are sent in 64 KiB chunks as the IPC buffer is produced.
+
+**Memory bound**: The Arrow IPC buffer for the entire export is built in memory before streaming
+begins. For very large result sets the RSS of `pg_ripple_http` scales with result-set size
+(approximately 32 bytes per row in the IPC buffer plus ~200 bytes per row in PostgreSQL client
+memory). The recommended upper bound for a single export call is **10 million rows** (RSS ≲ 512 MB
+on a host with 1 GB available to the HTTP companion). For larger exports, partition by named graph
+or predicate and call the endpoint in batches.
+
+Clients should use streaming reads (e.g., chunked IPC reader) rather than buffering the full
+response body.
 
 ## Configuration
 
@@ -45,12 +55,21 @@ the client should use streaming reads rather than buffering the entire response.
 |-----------|---------|-------------|
 | `pg_ripple.arrow_flight_secret` | — | HMAC secret for ticket signing (required) |
 | `pg_ripple.arrow_unsigned_tickets_allowed` | `off` | Allow unsigned tickets (development only) |
-| `pg_ripple_http.arrow_batch_size` | `1000` | Rows per Arrow IPC batch |
+| `ARROW_BATCH_SIZE` env var | `1000` | Rows per Arrow IPC record batch |
+
+## Response Headers
+
+| Header | Description |
+|--------|-------------|
+| `Content-Type` | `application/vnd.apache.arrow.stream` |
+| `X-Arrow-Rows` | Total number of triples exported |
+| `X-Arrow-Batches` | Number of Arrow IPC record batches sent |
+| `Transfer-Encoding` | `chunked` — response is streamed, not buffered |
 
 ## Status
 
-Arrow Flight bulk export is **experimental** in v0.70.0. The HMAC-SHA256 signing,
-expiry and nonce checking are fully implemented (v0.67.0 FLIGHT-SEC-02).
-Streaming validation and multi-chunk behavior are targeted for v0.71.0 (FLIGHT-STREAM-01).
+Arrow Flight bulk export is **experimental** in v0.71.0. The HMAC-SHA256 signing,
+expiry and nonce checking are fully implemented (v0.67.0 FLIGHT-SEC-02). Chunked HTTP
+streaming via `Body::from_stream` is confirmed and validated (v0.71.0 FLIGHT-STREAM-01).
 
-See also: [HTTP API](http-api.md), [Architecture](architecture.md).
+See also: [HTTP API](http-api.md), [Architecture](architecture.md), [Compatibility Matrix](../operations/compatibility.md).

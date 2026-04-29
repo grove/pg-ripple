@@ -19,7 +19,7 @@ No separate graph database. No data pipelines. No extra infrastructure.
 
 ---
 
-## What works today (v0.70.0)
+## What works today (v0.71.0)
 
 pg_ripple passes **100% of the W3C SPARQL 1.1, SHACL Core, and OWL 2 RL conformance test suites** — the industry benchmarks for correctness in knowledge graph systems. After 67 releases it covers the full feature set described below.
 
@@ -180,7 +180,7 @@ This means you get:
 
 ### How it compares
 
-> **Note**: pg_ripple features marked "Yes" in the table below are implemented across v0.1.0–v0.70.0. W3C SPARQL 1.1 Query, Update, SHACL Core, and OWL 2 RL conformance is 100%. Competitor capabilities reflect publicly documented feature sets.
+> **Note**: pg_ripple features marked "Yes" in the table below are implemented across v0.1.0–v0.71.0. W3C SPARQL 1.1 Query, Update, SHACL Core, and OWL 2 RL conformance is 100%. Competitor capabilities reflect publicly documented feature sets.
 
 | Capability | pg_ripple | Blazegraph | Virtuoso | Apache Fuseki |
 |---|---|---|---|---|
@@ -350,7 +350,7 @@ CREATE EXTENSION pg_ripple;
 
 ---
 
-## Known limitations in v0.70.0
+## Known limitations in v0.71.0
 
 The following features are available but have documented limitations in the current release. Use `SELECT feature_name, status, degraded_reason FROM pg_ripple.feature_status() WHERE status != 'implemented'` for a machine-readable summary.
 

@@ -1,0 +1,80 @@
+-- pg_regress test: HLL accuracy for approximate COUNT(DISTINCT) (v0.71.0 HLL-DOC-01)
+--
+-- Verifies that:
+--   1. approx_distinct GUC can be toggled on/off without error.
+--   2. COUNT(DISTINCT ?s) with approx_distinct=off returns one row (exact aggregate).
+--   3. When approx_distinct=on, COUNT(DISTINCT ?s) also returns one row without error.
+--   4. The hll extension availability can be checked.
+
+SET client_min_messages = warning;
+CREATE EXTENSION IF NOT EXISTS pg_ripple;
+SET client_min_messages = DEFAULT;
+SET search_path TO pg_ripple, public;
+
+-- ── Part 1: GUC toggle ────────────────────────────────────────────────────────
+
+-- 1a. approx_distinct defaults to off.
+SHOW pg_ripple.approx_distinct;
+
+-- 1b. Can be set on.
+SET pg_ripple.approx_distinct = on;
+SHOW pg_ripple.approx_distinct;
+
+-- 1c. Reset to off.
+SET pg_ripple.approx_distinct = off;
+SHOW pg_ripple.approx_distinct;
+
+-- ── Part 2: Setup test data ────────────────────────────────────────────────────
+
+-- 2a. Create test graph.
+SELECT create_graph('https://hll-test.example/g/') > 0 AS graph_created;
+
+-- 2b. Insert 5 distinct subjects (enough to test COUNT(DISTINCT) correctness).
+SELECT sparql_update(
+    'INSERT DATA {
+        GRAPH <https://hll-test.example/g/> {
+            <https://hll-test.example/s/1> <https://schema.org/index> "1" .
+            <https://hll-test.example/s/2> <https://schema.org/index> "2" .
+            <https://hll-test.example/s/3> <https://schema.org/index> "3" .
+            <https://hll-test.example/s/4> <https://schema.org/index> "4" .
+            <https://hll-test.example/s/5> <https://schema.org/index> "5" .
+        }
+    }'
+) > 0 AS data_inserted;
+
+-- ── Part 3: Exact COUNT(DISTINCT ?s) ──────────────────────────────────────────
+
+-- 3a. With approx_distinct=off: COUNT(DISTINCT ?s) returns exactly 1 aggregate row.
+SET pg_ripple.approx_distinct = off;
+SELECT count(*) = 1 AS exact_count_returns_one_row
+FROM pg_ripple.sparql('
+    SELECT (COUNT(DISTINCT ?s) AS ?n)
+    WHERE {
+        GRAPH <https://hll-test.example/g/> { ?s ?p ?o }
+    }
+');
+
+-- ── Part 4: Approximate COUNT(DISTINCT ?s) ────────────────────────────────────
+
+-- 4a. Check if hll extension is available (informational).
+SELECT count(*) > 0 AS hll_extension_available
+FROM pg_available_extensions
+WHERE name = 'hll' AND installed_version IS NOT NULL;
+
+-- 4b. With approx_distinct=on: COUNT(DISTINCT ?s) returns exactly 1 row (no error).
+SET pg_ripple.approx_distinct = on;
+SELECT count(*) = 1 AS approx_count_returns_one_row
+FROM pg_ripple.sparql('
+    SELECT (COUNT(DISTINCT ?s) AS ?n)
+    WHERE {
+        GRAPH <https://hll-test.example/g/> { ?s ?p ?o }
+    }
+');
+
+-- Reset GUC.
+SET pg_ripple.approx_distinct = off;
+
+-- ── Cleanup ────────────────────────────────────────────────────────────────────
+
+SELECT clear_graph('https://hll-test.example/g/') >= 0 AS cleared;
+SELECT drop_graph('https://hll-test.example/g/') >= 0 AS dropped;

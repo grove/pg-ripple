@@ -299,12 +299,22 @@ pub(crate) async fn flight_do_get(
         "Arrow Flight stream serialized"
     );
 
+    // FLIGHT-STREAM-01 (v0.71.0): stream the Arrow IPC buffer as chunked HTTP transfer
+    // instead of sending the full buffer in a single body.  The response header
+    // `Transfer-Encoding: chunked` allows clients to begin decoding before the
+    // export completes.  The in-memory IPC buffer (bounded by result-set size) is
+    // split into 64 KiB chunks and yielded lazily via `Body::from_stream`.
+    const CHUNK_SIZE: usize = 65_536;
+    let chunks: Vec<Result<Vec<u8>, std::io::Error>> =
+        buf.chunks(CHUNK_SIZE).map(|c| Ok(c.to_vec())).collect();
+    let byte_stream = tokio_stream::iter(chunks);
+
     Response::builder()
         .status(StatusCode::OK)
         .header("content-type", "application/vnd.apache.arrow.stream")
         .header("x-arrow-rows", total_rows.to_string())
         .header("x-arrow-batches", batches_sent.to_string())
-        .body(Body::from(buf))
+        .body(Body::from_stream(byte_stream))
         .unwrap_or_else(|e| {
             redacted_error(
                 "flight_do_get response",

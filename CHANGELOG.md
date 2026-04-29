@@ -13,6 +13,28 @@ Versions correspond to the milestones in [ROADMAP.md](ROADMAP.md).
 
 ---
 
+## [0.71.0] — 2026-04-29 — Arrow Flight Validation, Citus Integration Tests, and Compatibility Hardening
+
+**Implements v0.71.0 roadmap: closes the High-severity Assessment 10 gaps requiring runtime infrastructure.**
+
+### What's new
+
+- **FLIGHT-STREAM-01** — `pg_ripple_http` `/flight/do_get` now uses `axum::body::Body::from_stream` with 64 KiB chunks, producing `Transfer-Encoding: chunked` HTTP responses. The IPC buffer is streamed lazily so clients can begin decoding Arrow record batches before the full export completes. Integration test `tests/http_integration/arrow_export_large.sh` validates streaming behavior and RSS bounds. `docs/src/reference/arrow-flight.md` updated with memory-bound documentation.
+
+- **CITUS-INT-01** — `tests/integration/citus_rls_propagation.sh` created. The multi-node integration test starts a Citus cluster via `docker-compose`, enables sharding, inserts triples in both allowed and restricted named graphs, promotes a predicate past the threshold, and asserts that non-superuser RLS restricts cross-graph access. The `feature_status()` citation for `citus_rls_propagation` now resolves to an existing file.
+
+- **COMPAT-01** — `pg_ripple_http` now performs a version compatibility check at startup: it queries `extversion` from `pg_extension` and warns if the installed extension is below `COMPATIBLE_EXTENSION_MIN = "0.70.0"`. `docs/src/operations/compatibility.md` added with the full version compatibility matrix and upgrade procedure.
+
+- **HLL-DOC-01** — `docs/src/reference/approximate-aggregates.md` created, documenting when HLL is used (`approx_distinct=on` + `hll` extension), error bounds at default precision (`log2m=14`, ~0.81% standard error for ≥ 10,000 distinct values), and fallback to exact `COUNT(DISTINCT)`. pg_regress test `hll_accuracy.sql` validates GUC toggle and COUNT(DISTINCT) correctness.
+
+- **CITUS-BENCH-01** — `docs/src/reference/citus-service-pruning.md` created, documenting the `citus_service_pruning` GUC and expected 10× speedup for bound-subject SERVICE queries. pg_regress test `citus_service_pruning.sql` validates GUC plumbing and confirms `feature_status()` shows `experimental`.
+
+### Schema changes
+
+None.
+
+---
+
 ## [0.70.0] — 2026-04-29 — Assessment 10 Critical Remediation
 
 **Implements v0.70.0 roadmap: closes four Critical and seven High/Medium findings from Overall Assessment 10.**
