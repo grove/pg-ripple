@@ -357,14 +357,22 @@ proptest! {
     }
 
     /// Property 4 — source_priority correctness: highest-priority source wins regardless of seq.
+    /// Uses index-based distinct value selection to avoid prop_assume rejections under
+    /// large PROPTEST_CASES values in CI.
     #[test]
     fn prop_source_priority(
         subject in subject_strategy(),
         predicate in predicate_strategy(),
-        s1_val in value_strategy(),
-        s2_val in value_strategy(),
+        s1_idx in 0usize..8usize,
+        diff in 1usize..8usize,
     ) {
-        prop_assume!(s1_val != s2_val);
+        // Structural guarantee that s1_val != s2_val without prop_assume.
+        let values = [
+            "Alice", "Bob", "Carol", "Dave",
+            "+1-555-0100", "+1-555-0200", "alice@example.com", "bob@example.com",
+        ];
+        let s1_val = values[s1_idx % 8].to_string();
+        let s2_val = values[(s1_idx + diff) % 8].to_string();
 
         let priority = Policy::SourcePriority(vec!["s1".to_string(), "s2".to_string()]);
 
