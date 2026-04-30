@@ -1638,7 +1638,10 @@ ALTER TABLE _pg_ripple.extvp_tables
     name = "v074_schema_additions",
     // v028_embedding_queue is in an independent DAG branch; adding it here
     // ensures _pg_ripple.embedding_queue exists before SET UNLOGGED runs.
-    requires = ["v073_schema_additions", "v028_embedding_queue"]
+    // v038_shape_hints is also an independent leaf: add it here to guarantee
+    // the hint_type TEXT→SMALLINT migration (SCHEMA-NORM-09) always runs
+    // after the table is created (fixes non-deterministic pgrx sort ordering).
+    requires = ["v073_schema_additions", "v028_embedding_queue", "v038_shape_hints"]
 );
 
 pgrx::extension_sql!(
