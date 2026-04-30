@@ -114,7 +114,5 @@ release GitHub Actions workflow. You can also build the batteries-included image
 locally:
 
 ```bash
-docker build \
-  --file docker/Dockerfile.batteries \
-  --tag my-pg-ripple:local .
+docker build --tag my-pg-ripple:local .
 ```

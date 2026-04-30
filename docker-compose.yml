@@ -19,7 +19,7 @@ services:
   postgres:
     build:
       context: .
-      dockerfile: docker/Dockerfile.batteries
+      dockerfile: Dockerfile
     image: ghcr.io/grove/pg_ripple:0.54.0
     ports:
       - "5432:5432"
@@ -36,7 +36,7 @@ services:
   sparql:
     build:
       context: .
-      dockerfile: docker/Dockerfile.batteries
+      dockerfile: Dockerfile
     image: ghcr.io/grove/pg_ripple:0.54.0
     entrypoint: ["/usr/local/bin/pg_ripple_http"]
     ports:
