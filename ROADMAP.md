@@ -146,6 +146,12 @@
 |---------|-------|--------|-------|-------------- |
 | [v0.77.0 + v0.78.0](roadmap/v0.77.0-full.md) | **v0.77.0 — Bidirectional Integration Primitives** (source attribution, conflict resolution with echo-aware `normalize`, late-binding IRI rewrite, sparse-CAS events, linkback with target-assigned IDs, pg-trickle outbox/inbox transport) + **v0.78.0 — Bidirectional Integration Operations** (write-side outbox policy, new-events-only schema evolution, per-subscription side-band auth, write-time redaction, audit, property/chaos tests, reconciliation toolkit, ops surface). Both ship together. **BIDI-SPEC-01:** non-blocking draft RDF Bidirectional Integration Profile v1 for broader ecosystem review. | Planned | Large | [v0.77.0](roadmap/v0.77.0-full.md), [v0.78.0](roadmap/v0.78.0-full.md) |
 
+### Query Engine Completeness (v0.79.0)
+
+| Version | Theme | Status | Scope | Full details |
+|---------|-------|--------|-------|-------------- |
+| [v0.79.0](roadmap/v0.79.0.md) | Close the last two known query-engine limitations: true Leapfrog Triejoin executor for Worst-Case Optimal Joins (WCOJ-LFTI-01) and full `sh:SPARQLRule` evaluation (SHACL-SPARQL-01). Removes the "Known limitations" table from the README; all `feature_status()` rows become `implemented`. | Planned | Medium | [Full details](roadmap/v0.79.0-full.md) |
+
 #### PLAN_OVERALL_ASSESSMENT_11 coverage map
 
 Every finding and recommendation from [plans/PLAN_OVERALL_ASSESSMENT_11.md](plans/PLAN_OVERALL_ASSESSMENT_11.md) is assigned to one or more roadmap milestones:
@@ -406,6 +412,15 @@ v0.72          ─── Architecture hardening: mutation journal SAVEPOINT safe
        │
 v0.73          ─── SPARQL 1.2 tracking, live subscription API (SSE/WebSocket),
                │   feature taxonomy, CONTRIBUTING.md, Helm chart SHA, R2RML docs
+       │
+v0.74–v0.76    ─── Assessment 11 remediation & production polish: evidence truthfulness,
+               │   mutation journal wiring, RLS hash widening, toolchain pin, 227 regression tests
+       │
+v0.77–v0.78    ─── Bidirectional integration: source attribution, CAS conflict resolution,
+               │   linkback rendezvous, outbox policy, per-subscription auth, redaction, audit
+       │
+v0.79          ─── Query engine completeness: true Leapfrog Triejoin executor (WCOJ),
+               │   full sh:SPARQLRule evaluation; all feature_status() rows → implemented
        │
 v1.0.0         ─── Stable release: 72-hour continuous load test, third-party security audit, documentation freeze, public benchmarks
        │
