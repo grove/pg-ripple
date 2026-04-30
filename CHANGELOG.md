@@ -34,12 +34,12 @@ production docs, and mutation_journal feature_status entry.**
   jobs pass. Tests verify graceful-degradation behavior when Citus is not installed.
   ci/test: `.github/workflows/ci.yml` `citus-integration` job.
 
-- **CI-INTEGRATION-02** — `arrow-integration` CI job added: exercises
+- **CI-INTEGRATION-02** — `arrow-integration` CI job added (`.github/workflows/ci.yml`): exercises
   `export_arrow_flight()` against a populated database, verifies the returned ticket
   is non-empty BYTEA, and confirms `arrow_flight_export` is `implemented` in
   `feature_status()`. ci/test: `.github/workflows/ci.yml` `arrow-integration` job.
 
-- **ROADMAP-VALIDATE-01** — `scripts/check_roadmap_status.py` added: validates that
+- **ROADMAP-VALIDATE-01** — `scripts/check_roadmap_status.py` added (see ROADMAP.md): validates that
   ROADMAP.md marks the current Cargo.toml version as `Released ✅`. New
   `validate-roadmap-status` CI job runs post-release to catch forgotten status updates.
   ci/test: `.github/workflows/ci.yml` `validate-roadmap-status` job.
@@ -62,8 +62,8 @@ production docs, and mutation_journal feature_status entry.**
   `GRAPH` clause, and property-path directly in `vp_rare` predicates (confirming no
   promotion is required). ci/regress: v075_features.sql.
 
-- **FUZZ-URL-01** — `fuzz/fuzz_targets/url_host_parser.rs` added: fuzzes
-  `extract_url_host()` from `src/citus.rs` for panics and assertion violations.
+- **FUZZ-URL-01** — `fuzz/fuzz_targets/url_host_parser.rs` added (`fuzz.yml`): fuzzes `extract_url_host()`
+  from `src/citus.rs` for panics and assertion violations.
   Target added to `fuzz/Cargo.toml` and `fuzz.yml` matrix.
   ci/test: `.github/workflows/fuzz.yml` `url_host_parser` target.
 
