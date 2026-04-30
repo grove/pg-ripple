@@ -2,5 +2,5 @@
 # TOOLCHAIN-PIN-01 (v0.76.0): Pin to a specific stable release for fully
 # reproducible builds.  Renovate (package-ecosystem: rust / toolchain) will
 # open an automated PR when a newer stable release is available.
-channel = "1.87.0"
+channel = "1.88.0"
 components = ["rustfmt", "clippy"]
