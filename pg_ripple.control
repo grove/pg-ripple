@@ -1,8 +1,8 @@
 # Extension control file for pg_ripple.
 # See: https://www.postgresql.org/docs/current/extend-extensions.html
 
-comment = 'High-performance RDF triple store with SPARQL 1.1, live subscriptions, named JSON mappings, and multi-subject JSON-LD ingest (v0.73.0)'
-default_version = '0.73.0'
+comment = 'High-performance RDF triple store with SPARQL 1.1, live subscriptions, named JSON mappings, mutation journal wiring, evidence-path truthfulness, and plan cache invalidation on VP promotion (v0.74.0)'
+default_version = '0.74.0'
 # MUST match the current release version (keep in sync with Cargo.toml)
 module_pathname = '$libdir/pg_ripple'
 relocatable = false

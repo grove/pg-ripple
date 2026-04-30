@@ -103,7 +103,7 @@ WHERE table_schema = '_pg_ripple'
   AND column_name = 'complexity';
  column_name | data_type | column_default 
 -------------+-----------+----------------
- complexity  | text      | 'normal'::text
+ complexity  | smallint  | 2
 (1 row)
 
 -- ─── register_endpoint with complexity argument ───────────────────────────────

@@ -36,14 +36,14 @@ SELECT count(*) = 1 AS has_min_count_hint
 FROM _pg_ripple.shape_hints sh
 JOIN _pg_ripple.dictionary d ON d.id = sh.predicate_id
 WHERE d.value = 'https://hints.test/name'
-  AND sh.hint_type = 'min_count_1';
+  AND sh.hint_type = 2;
 
 -- ── 3. shape_hints has a max_count_1 row for ex:name ─────────────────────────
 SELECT count(*) = 1 AS has_max_count_hint
 FROM _pg_ripple.shape_hints sh
 JOIN _pg_ripple.dictionary d ON d.id = sh.predicate_id
 WHERE d.value = 'https://hints.test/name'
-  AND sh.hint_type = 'max_count_1';
+  AND sh.hint_type = 1;
 
 -- ── 4. Load a shape with only sh:minCount 1 (no maxCount) ────────────────────
 SELECT pg_ripple.load_shacl($SHACL$
@@ -64,14 +64,14 @@ SELECT count(*) = 1 AS foundedyear_min_hint
 FROM _pg_ripple.shape_hints sh
 JOIN _pg_ripple.dictionary d ON d.id = sh.predicate_id
 WHERE d.value = 'https://hints.test/foundedYear'
-  AND sh.hint_type = 'min_count_1';
+  AND sh.hint_type = 2;
 
 -- … but NOT a max_count_1 hint.
 SELECT count(*) = 0 AS foundedyear_no_max_hint
 FROM _pg_ripple.shape_hints sh
 JOIN _pg_ripple.dictionary d ON d.id = sh.predicate_id
 WHERE d.value = 'https://hints.test/foundedYear'
-  AND sh.hint_type = 'max_count_1';
+  AND sh.hint_type = 1;
 
 -- ── 5. drop_shape removes the hints ──────────────────────────────────────────
 SELECT pg_ripple.drop_shape('https://hints.test/PersonShape') AS person_shape_dropped;
@@ -81,21 +81,21 @@ SELECT count(*) = 0 AS name_min_hint_removed
 FROM _pg_ripple.shape_hints sh
 JOIN _pg_ripple.dictionary d ON d.id = sh.predicate_id
 WHERE d.value = 'https://hints.test/name'
-  AND sh.hint_type = 'min_count_1';
+  AND sh.hint_type = 2;
 
 -- max_count_1 hint for ex:name is also gone.
 SELECT count(*) = 0 AS name_max_hint_removed
 FROM _pg_ripple.shape_hints sh
 JOIN _pg_ripple.dictionary d ON d.id = sh.predicate_id
 WHERE d.value = 'https://hints.test/name'
-  AND sh.hint_type = 'max_count_1';
+  AND sh.hint_type = 1;
 
 -- OrgShape hints are unaffected.
 SELECT count(*) = 1 AS foundedyear_hint_still_present
 FROM _pg_ripple.shape_hints sh
 JOIN _pg_ripple.dictionary d ON d.id = sh.predicate_id
 WHERE d.value = 'https://hints.test/foundedYear'
-  AND sh.hint_type = 'min_count_1';
+  AND sh.hint_type = 2;
 
 -- ── 6. invalidate_catalog_cache runs without error ────────────────────────────
 SELECT pg_ripple.invalidate_catalog_cache() IS NULL AS cache_invalidated;

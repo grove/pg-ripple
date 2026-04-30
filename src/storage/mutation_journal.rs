@@ -16,12 +16,15 @@
 //!   (the journal is not populated if `has_no_rules()` returns true, and
 //!   the flush is a no-op on an empty journal).
 //!
-//! # MJOURNAL-02 wiring
+//! # Wiring status (v0.74.0 JOURNAL-DATALOG-01)
 //!
-//! After this module lands, `dict_api.rs` removes its direct `on_graph_write` /
-//! `on_graph_delete` calls and instead delegates to `record_write` / `record_delete`.
-//! Bulk loaders call `flush()` once after all rows are inserted.
-//! SPARQL Update calls `flush()` at the end of each statement execution.
+//! The following write paths are wired through this journal:
+//! - `dict_api.rs` — per-triple insert/delete (FLUSH-DEFER-01: deferred to stmt boundary)
+//! - `bulk_load.rs` — all bulk loaders call `flush()` once after all rows (BULK-01)
+//! - `datalog/seminaive.rs` — inference runs call `flush()` after materialization (JOURNAL-DATALOG-01)
+//! - `r2rml.rs` — calls `load_ntriples()` which is already covered by bulk_load (JOURNAL-DATALOG-01)
+//! - `cdc_bridge_api.rs` — calls `json_to_ntriples_and_load()` which is covered by bulk_load
+//! - SPARQL Update — wired in v0.74.0 (CF-A fix)
 
 use std::cell::RefCell;
 
@@ -82,10 +85,18 @@ pub fn clear() {
 /// Flush the journal: call `on_graph_write` / `on_graph_delete` for each
 /// unique affected graph, then clear the journal.
 ///
-/// This must be called:
-/// - At the end of every public `dict_api` write function.
-/// - At the end of every bulk-load function (`load_turtle`, `load_ntriples`, etc.).
-/// - At the end of every SPARQL Update execution.
+/// **Caller contract** (v0.74.0 DOC-JOURNAL-01 fix):
+/// This function must be called at the *statement boundary* — once per SQL
+/// statement, after all writes for that statement are complete.  Do **not**
+/// call it once per triple (quadratic overhead; see FLUSH-DEFER-01).
+///
+/// Current call sites:
+/// - End of every bulk-load function (`load_turtle`, `load_ntriples`, etc.) — BULK-01.
+/// - End of Datalog inference runs (`run_inference_seminaive`, `run_inference`) — JOURNAL-DATALOG-01.
+/// - End of `dict_api` write functions via executor-end hook — FLUSH-DEFER-01.
+/// - SPARQL Update execution path — CF-A (v0.74.0).
+///
+/// Note: calling `flush()` when the journal is empty is a no-op (fast path).
 pub fn flush() {
     JOURNAL.with(|j| {
         let mut entries = j.borrow_mut();

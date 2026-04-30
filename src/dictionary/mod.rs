@@ -130,24 +130,27 @@ fn encode_inner(term: &str, kind: i16) -> i64 {
         return id;
     }
 
-    let hash_bytes = hash128.to_be_bytes();
+    // DICT-01: split u128 into (hi, lo) i64 pair — avoids varlena BYTEA overhead.
+    let hash_hi = (hash128 >> 64) as i64;
+    let hash_lo = hash128 as i64;
 
     // Tier 3: upsert + lookup in a single SPI round-trip.  The CTE inserts the
     // term when it is new (ON CONFLICT DO NOTHING) and the outer COALESCE
     // returns the id whether the row was just inserted or already existed.
     let id: i64 = Spi::get_one_with_args::<i64>(
         "WITH ins AS ( \
-             INSERT INTO _pg_ripple.dictionary (hash, value, kind) \
-             VALUES ($1, $2, $3) \
-             ON CONFLICT (hash) DO NOTHING \
+             INSERT INTO _pg_ripple.dictionary (hash_hi, hash_lo, value, kind) \
+             VALUES ($1, $2, $3, $4) \
+             ON CONFLICT (hash_hi, hash_lo) DO NOTHING \
              RETURNING id \
          ) \
          SELECT COALESCE( \
              (SELECT id FROM ins), \
-             (SELECT id FROM _pg_ripple.dictionary WHERE hash = $1) \
+             (SELECT id FROM _pg_ripple.dictionary WHERE hash_hi = $1 AND hash_lo = $2) \
          )",
         &[
-            DatumWithOid::from(hash_bytes.as_slice()),
+            DatumWithOid::from(hash_hi),
+            DatumWithOid::from(hash_lo),
             DatumWithOid::from(term),
             DatumWithOid::from(kind),
         ],
@@ -206,21 +209,23 @@ pub fn encode_typed_literal(value: &str, datatype: &str) -> i64 {
         return id;
     }
 
-    let hash_bytes = hash128.to_be_bytes();
+    let hash_hi = (hash128 >> 64) as i64;
+    let hash_lo = hash128 as i64;
 
     let id: i64 = Spi::get_one_with_args::<i64>(
         "WITH ins AS ( \
-             INSERT INTO _pg_ripple.dictionary (hash, value, kind, datatype) \
-             VALUES ($1, $2, $3, $4) \
-             ON CONFLICT (hash) DO NOTHING \
+             INSERT INTO _pg_ripple.dictionary (hash_hi, hash_lo, value, kind, datatype) \
+             VALUES ($1, $2, $3, $4, $5) \
+             ON CONFLICT (hash_hi, hash_lo) DO NOTHING \
              RETURNING id \
          ) \
          SELECT COALESCE( \
              (SELECT id FROM ins), \
-             (SELECT id FROM _pg_ripple.dictionary WHERE hash = $1) \
+             (SELECT id FROM _pg_ripple.dictionary WHERE hash_hi = $1 AND hash_lo = $2) \
          )",
         &[
-            DatumWithOid::from(hash_bytes.as_slice()),
+            DatumWithOid::from(hash_hi),
+            DatumWithOid::from(hash_lo),
             DatumWithOid::from(value),
             DatumWithOid::from(KIND_TYPED_LITERAL),
             DatumWithOid::from(datatype),
@@ -252,21 +257,23 @@ pub fn encode_lang_literal(value: &str, lang: &str) -> i64 {
         return id;
     }
 
-    let hash_bytes = hash128.to_be_bytes();
+    let hash_hi = (hash128 >> 64) as i64;
+    let hash_lo = hash128 as i64;
 
     let id: i64 = Spi::get_one_with_args::<i64>(
         "WITH ins AS ( \
-             INSERT INTO _pg_ripple.dictionary (hash, value, kind, lang) \
-             VALUES ($1, $2, $3, $4) \
-             ON CONFLICT (hash) DO NOTHING \
+             INSERT INTO _pg_ripple.dictionary (hash_hi, hash_lo, value, kind, lang) \
+             VALUES ($1, $2, $3, $4, $5) \
+             ON CONFLICT (hash_hi, hash_lo) DO NOTHING \
              RETURNING id \
          ) \
          SELECT COALESCE( \
              (SELECT id FROM ins), \
-             (SELECT id FROM _pg_ripple.dictionary WHERE hash = $1) \
+             (SELECT id FROM _pg_ripple.dictionary WHERE hash_hi = $1 AND hash_lo = $2) \
          )",
         &[
-            DatumWithOid::from(hash_bytes.as_slice()),
+            DatumWithOid::from(hash_hi),
+            DatumWithOid::from(hash_lo),
             DatumWithOid::from(value),
             DatumWithOid::from(KIND_LANG_LITERAL),
             DatumWithOid::from(lang),
@@ -322,7 +329,8 @@ pub fn encode_quoted_triple(s_id: i64, p_id: i64, o_id: i64) -> i64 {
         return id;
     }
 
-    let hash_bytes = hash128.to_be_bytes();
+    let hash_hi = (hash128 >> 64) as i64;
+    let hash_lo = hash128 as i64;
     // Build canonical value lazily — only stored once at insert time.
     let canonical = format!(
         "<< {} {} {} >>",
@@ -333,17 +341,18 @@ pub fn encode_quoted_triple(s_id: i64, p_id: i64, o_id: i64) -> i64 {
 
     let id: i64 = Spi::get_one_with_args::<i64>(
         "WITH ins AS ( \
-             INSERT INTO _pg_ripple.dictionary (hash, value, kind, qt_s, qt_p, qt_o) \
-             VALUES ($1, $2, $3, $4, $5, $6) \
-             ON CONFLICT (hash) DO NOTHING \
+             INSERT INTO _pg_ripple.dictionary (hash_hi, hash_lo, value, kind, qt_s, qt_p, qt_o) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7) \
+             ON CONFLICT (hash_hi, hash_lo) DO NOTHING \
              RETURNING id \
          ) \
          SELECT COALESCE( \
              (SELECT id FROM ins), \
-             (SELECT id FROM _pg_ripple.dictionary WHERE hash = $1) \
+             (SELECT id FROM _pg_ripple.dictionary WHERE hash_hi = $1 AND hash_lo = $2) \
          )",
         &[
-            DatumWithOid::from(hash_bytes.as_slice()),
+            DatumWithOid::from(hash_hi),
+            DatumWithOid::from(hash_lo),
             DatumWithOid::from(canonical.as_str()),
             DatumWithOid::from(KIND_QUOTED_TRIPLE),
             DatumWithOid::from(s_id),
@@ -369,13 +378,14 @@ pub fn lookup_quoted_triple(s_id: i64, p_id: i64, o_id: i64) -> Option<i64> {
     if let Some(id) = ENCODE_CACHE.with(|c| c.borrow_mut().get(&hash128).copied()) {
         return Some(id);
     }
-    let hash_bytes = hash128.to_be_bytes();
+    let hash_hi = (hash128 >> 64) as i64;
+    let hash_lo = hash128 as i64;
     Spi::connect(|client| {
         let tbl = client
             .select(
-                "SELECT id FROM _pg_ripple.dictionary WHERE hash = $1",
+                "SELECT id FROM _pg_ripple.dictionary WHERE hash_hi = $1 AND hash_lo = $2",
                 Some(1),
-                &[DatumWithOid::from(hash_bytes.as_slice())],
+                &[DatumWithOid::from(hash_hi), DatumWithOid::from(hash_lo)],
             )
             .unwrap_or_else(|e| pgrx::error!("lookup_quoted_triple SPI error: {e}"));
         if tbl.is_empty() {
@@ -428,14 +438,18 @@ pub fn lookup(term: &str, kind: i16) -> Option<i64> {
         return Some(id);
     }
 
-    let hash_bytes = hash128.to_be_bytes();
+    let hash_hi = (hash128 >> 64) as i64;
+    let hash_lo = hash128 as i64;
 
     let id: Option<i64> = Spi::connect(|client| {
         let tbl = client
             .select(
-                "SELECT id FROM _pg_ripple.dictionary WHERE hash = $1",
+                "SELECT id FROM _pg_ripple.dictionary WHERE hash_hi = $1 AND hash_lo = $2",
                 Some(1),
-                &[pgrx::datum::DatumWithOid::from(hash_bytes.as_slice())],
+                &[
+                    pgrx::datum::DatumWithOid::from(hash_hi),
+                    pgrx::datum::DatumWithOid::from(hash_lo),
+                ],
             )
             .unwrap_or_else(|e| pgrx::error!("dictionary lookup SPI error: {e}"));
 

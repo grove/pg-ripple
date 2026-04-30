@@ -503,24 +503,21 @@ pub(crate) fn create_extvp(name: &str, pred1_iri: &str, pred2_iri: &str, schedul
     );
 
     let escaped_name = name.replace('\'', "''");
-    let escaped_pred1 = pred1_iri.replace('\'', "''");
-    let escaped_pred2 = pred2_iri.replace('\'', "''");
     let escaped_schedule = schedule.replace('\'', "''");
     let escaped_sql = extvp_sql.replace('\'', "''");
     let stream_table = format!("_pg_ripple.extvp_{name}");
     let escaped_stream_table = stream_table.replace('\'', "''");
 
     // Register in catalog.
+    // REDUNDANT-01: pred1_iri/pred2_iri TEXT dropped; use pred1_id/pred2_id only.
     Spi::run(&format!(
         "INSERT INTO _pg_ripple.extvp_tables \
-         (name, pred1_iri, pred2_iri, pred1_id, pred2_id, generated_sql, schedule, stream_table) \
-         VALUES ('{escaped_name}', '{escaped_pred1}', '{escaped_pred2}', \
+         (name, pred1_id, pred2_id, generated_sql, schedule, stream_table) \
+         VALUES ('{escaped_name}', \
                  {pred1_id}, {pred2_id}, '{escaped_sql}', \
                  '{escaped_schedule}', '{escaped_stream_table}') \
          ON CONFLICT (name) DO UPDATE \
-         SET pred1_iri = EXCLUDED.pred1_iri, \
-             pred2_iri = EXCLUDED.pred2_iri, \
-             pred1_id = EXCLUDED.pred1_id, \
+         SET pred1_id = EXCLUDED.pred1_id, \
              pred2_id = EXCLUDED.pred2_id, \
              generated_sql = EXCLUDED.generated_sql, \
              schedule = EXCLUDED.schedule, \
@@ -573,12 +570,16 @@ pub(crate) fn drop_extvp(name: &str) -> bool {
 
 /// List all registered ExtVP tables.
 ///
+/// REDUNDANT-01: pred1_iri/pred2_iri TEXT dropped; decode from dictionary for display.
 /// Returns a JSONB array of `{name, pred1_iri, pred2_iri, schedule, stream_table, created_at}`.
 pub(crate) fn list_extvp() -> pgrx::JsonB {
     Spi::get_one::<pgrx::JsonB>(
         "SELECT COALESCE(json_agg(row_to_json(v))::jsonb, '[]'::jsonb) \
-         FROM (SELECT name, pred1_iri, pred2_iri, schedule, stream_table, created_at \
-               FROM _pg_ripple.extvp_tables ORDER BY created_at) v",
+         FROM (SELECT e.name, \
+                      (SELECT value FROM _pg_ripple.dictionary WHERE id = e.pred1_id) AS pred1_iri, \
+                      (SELECT value FROM _pg_ripple.dictionary WHERE id = e.pred2_id) AS pred2_iri, \
+                      e.schedule, e.stream_table, e.created_at \
+               FROM _pg_ripple.extvp_tables e ORDER BY e.created_at) v",
     )
     .unwrap_or_else(|e| pgrx::error!("list_extvp SPI error: {e}"))
     .unwrap_or_else(|| pgrx::JsonB(serde_json::Value::Array(vec![])))

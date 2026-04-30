@@ -1,7 +1,7 @@
 {
   "bomFormat": "CycloneDX",
   "specVersion": "1.3",
-  "version": "0.70.0",
+  "version": "0.74.0",
   "serialNumber": "urn:uuid:ca4bd48b-d9bc-4c61-935f-c8261b8b1963",
   "metadata": {
     "timestamp": "2026-04-23T19:01:13.224101000Z",
@@ -14,9 +14,9 @@
     ],
     "component": {
       "type": "library",
-      "bom-ref": "path+file:///Users/geir.gronmo/projects/pg-ripple2#pg_ripple@0.51.0",
+      "bom-ref": "path+file:///Users/geir.gronmo/projects/pg-ripple2#pg_ripple@0.74.0",
       "name": "pg_ripple",
-      "version": "0.70.0",
+      "version": "0.74.0",
       "description": "High-performance RDF triple store with native SPARQL query execution for PostgreSQL 18",
       "scope": "required",
       "licenses": [
@@ -24,7 +24,7 @@
           "expression": "Apache-2.0"
         }
       ],
-      "purl": "pkg:cargo/pg_ripple@0.70.0?download_url=file://.",
+      "purl": "pkg:cargo/pg_ripple@0.74.0?download_url=file://.",
       "externalReferences": [
         {
           "type": "vcs",

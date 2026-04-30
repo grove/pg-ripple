@@ -62,11 +62,14 @@ pub(super) fn compute_rule_order(
     target_graph: &str,
     source_graphs: &[String],
 ) -> Result<i32, String> {
-    // Load existing rules: (name, target_graph, source_graphs[])
+    // Load existing rules: (name, target_graph_iri, source_graphs[])
+    // SCHEMA-NORM-04: target_graph TEXT is dropped; decode target_graph_id via dictionary.
     let existing: Vec<(String, String, Vec<String>)> = Spi::connect(|c| {
         c.select(
-            "SELECT name, target_graph, COALESCE(source_graphs, '{}') \
-             FROM _pg_ripple.construct_rules ORDER BY rule_order NULLS LAST",
+            "SELECT cr.name, \
+                    (SELECT value FROM _pg_ripple.dictionary WHERE id = cr.target_graph_id) AS target_graph, \
+                    COALESCE(cr.source_graphs, '{}') \
+             FROM _pg_ripple.construct_rules cr ORDER BY rule_order NULLS LAST",
             None,
             &[],
         )

@@ -149,7 +149,12 @@ mod pg_ripple {
         }
 
         let local_view = local_view_name.unwrap_or("");
-        let cx = complexity.unwrap_or("normal");
+        // ENUM-02 (v0.74.0): complexity column is SMALLINT (1=fast, 2=normal, 3=slow).
+        let cx_id: i16 = match complexity.unwrap_or("normal") {
+            "fast" => 1,
+            "slow" => 3,
+            _ => 2,
+        };
         if local_view.is_empty() {
             Spi::run_with_args(
                 "INSERT INTO _pg_ripple.federation_endpoints (url, enabled, complexity, graph_iri)
@@ -157,7 +162,7 @@ mod pg_ripple {
                  ON CONFLICT (url) DO UPDATE SET enabled = true, complexity = $2, graph_iri = $3",
                 &[
                     pgrx::datum::DatumWithOid::from(url),
-                    pgrx::datum::DatumWithOid::from(cx),
+                    pgrx::datum::DatumWithOid::from(cx_id),
                     pgrx::datum::DatumWithOid::from(graph_iri),
                 ],
             )
@@ -170,7 +175,7 @@ mod pg_ripple {
                 &[
                     pgrx::datum::DatumWithOid::from(url),
                     pgrx::datum::DatumWithOid::from(local_view_name),
-                    pgrx::datum::DatumWithOid::from(cx),
+                    pgrx::datum::DatumWithOid::from(cx_id),
                     pgrx::datum::DatumWithOid::from(graph_iri),
                 ],
             )
@@ -192,13 +197,21 @@ mod pg_ripple {
     /// Allowed values: `'fast'`, `'normal'`, `'slow'`.
     /// Fast endpoints execute first in queries with multiple SERVICE clauses
     /// targeting different endpoints, enabling earlier failure detection.
+    ///
+    /// Accepts 'fast', 'normal', or 'slow' (ENUM-02: stored as SMALLINT 1/2/3).
     #[pg_extern]
     fn set_endpoint_complexity(url: &str, complexity: &str) {
+        // ENUM-02 (v0.74.0): complexity column is now SMALLINT; convert text → int.
+        let complexity_id: i16 = match complexity {
+            "fast" => 1,
+            "slow" => 3,
+            _ => 2, // 'normal' and any unknown value
+        };
         Spi::run_with_args(
             "UPDATE _pg_ripple.federation_endpoints SET complexity = $2 WHERE url = $1",
             &[
                 pgrx::datum::DatumWithOid::from(url),
-                pgrx::datum::DatumWithOid::from(complexity),
+                pgrx::datum::DatumWithOid::from(complexity_id),
             ],
         )
         .unwrap_or_else(|e| pgrx::error!("set_endpoint_complexity failed: {e}"));
@@ -246,7 +259,9 @@ mod pg_ripple {
         Spi::connect(|client| {
             let result = client
                 .select(
-                    "SELECT url, enabled, local_view_name, complexity
+                    // ENUM-02: cast SMALLINT complexity back to text for callers.
+                    "SELECT url, enabled, local_view_name,
+                            CASE complexity WHEN 1 THEN 'fast' WHEN 3 THEN 'slow' ELSE 'normal' END
                      FROM _pg_ripple.federation_endpoints
                      ORDER BY url",
                     None,

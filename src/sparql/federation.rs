@@ -990,10 +990,19 @@ pub(crate) fn is_endpoint_healthy(url: &str) -> bool {
 ///
 /// Falls back to `"normal"` when the column doesn't exist (pre-migration DB)
 /// or the endpoint is not registered.
+///
+/// ENUM-02 (v0.74.0): complexity column is now SMALLINT (1=fast, 2=normal, 3=slow).
+/// The query casts back to text for backward-compatible return type.
 #[allow(dead_code)]
 pub(crate) fn get_endpoint_complexity(url: &str) -> String {
     Spi::get_one_with_args::<String>(
-        "SELECT complexity FROM _pg_ripple.federation_endpoints
+        "SELECT CASE complexity
+              WHEN 1 THEN 'fast'
+              WHEN 2 THEN 'normal'
+              WHEN 3 THEN 'slow'
+              ELSE 'normal'
+          END
+          FROM _pg_ripple.federation_endpoints
           WHERE url = $1 AND enabled = true",
         &[DatumWithOid::from(url)],
     )

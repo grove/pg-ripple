@@ -55,11 +55,11 @@ WHERE table_schema = '_pg_ripple'
                        'schedule','decode','stream_table','variables');
 
 -- Verify _pg_ripple.extvp_tables has the expected columns.
-SELECT COUNT(*) = 9 AS extvp_column_count
+SELECT COUNT(*) = 7 AS extvp_column_count
 FROM information_schema.columns
 WHERE table_schema = '_pg_ripple'
   AND table_name = 'extvp_tables'
-  AND column_name IN ('name','pred1_iri','pred2_iri','pred1_id','pred2_id',
+  AND column_name IN ('name','pred1_id','pred2_id',
                        'generated_sql','schedule','stream_table','created_at');
 
 -- ── pg_extern functions exist in pg_ripple schema ────────────────────────────

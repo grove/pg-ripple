@@ -108,6 +108,11 @@ pub(super) fn promote_predicate(p_id: i64) {
         };
         crate::citus::distribute_vp_delta(p_id, colocate);
     }
+
+    // CACHE-INVALIDATE-01: Invalidate the plan cache after VP promotion.
+    // A cached plan compiled when this predicate lived in vp_rare would still
+    // scan vp_rare after promotion, missing data in the dedicated table.
+    crate::sparql::plan_cache_reset();
 }
 /// Crash recovery for interrupted VP promotions (v0.68.0 PROMO-01).
 ///

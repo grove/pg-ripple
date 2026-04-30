@@ -689,6 +689,10 @@ CREATE INDEX IF NOT EXISTS shape_hints_pred_idx
 );
 
 // Create the predicate_stats view after the base tables exist.
+// v0.74.0: also adds inferred_schema_decoded and graph_access_decoded views
+// which depend on columns added in v074_schema_additions. All finalize
+// blocks run after all non-finalize extension_sql! blocks, so the
+// v074_schema_additions columns are guaranteed to exist.
 pgrx::extension_sql!(
     r#"
 CREATE OR REPLACE VIEW pg_ripple.predicate_stats AS
@@ -699,6 +703,23 @@ SELECT
 FROM _pg_ripple.predicates p
 JOIN _pg_ripple.dictionary d ON d.id = p.id
 ORDER BY p.triple_count DESC;
+
+-- ── SCHEMA-NORM-11 view (v0.74.0): inferred_schema decoded ───────────────────
+CREATE OR REPLACE VIEW pg_ripple.inferred_schema_decoded AS
+    SELECT i.class_id, i.property_id,
+           COALESCE(dc.value, i.class_iri)    AS class_iri,
+           COALESCE(dp.value, i.property_iri) AS property_iri,
+           i.cardinality
+    FROM _pg_ripple.inferred_schema i
+    LEFT JOIN _pg_ripple.dictionary dc ON dc.id = i.class_id
+    LEFT JOIN _pg_ripple.dictionary dp ON dp.id = i.property_id;
+
+-- ── ENUM-01 view (v0.74.0): graph_access decoded ───────────────────────────
+CREATE OR REPLACE VIEW pg_ripple.graph_access_decoded AS
+    SELECT role_name, graph_id, permission, permission_id,
+           CASE permission_id WHEN 1 THEN 'read' WHEN 2 THEN 'write' WHEN 3 THEN 'admin' END
+               AS permission_name
+    FROM _pg_ripple.graph_access;
 "#,
     name = "predicate_stats_view",
     requires = ["schema_setup"],
@@ -1350,4 +1371,279 @@ INSERT INTO _pg_ripple.schema_version (version, upgraded_from, installed_at)
 "#,
     name = "v073_schema_additions",
     requires = ["v072_schema_version_stamp"]
+);
+
+// ─── v0.74.0 schema additions ────────────────────────────────────────────────
+// Schema Optimization: surrogate ids, split-hash dictionary, satellite tables,
+// partitioned tables, indexes, fillfactor, lz4 compression, UNLOGGED queues.
+
+pgrx::extension_sql!(
+    r#"
+-- ── SCHEMA-NORM-04: drop target_graph TEXT from construct_rules (uses target_graph_id) ──
+-- The v0.63.0 schema created this column; v0.74.0 removes it in favour of the
+-- BIGINT foreign key target_graph_id. Must come before any code that INSERTs
+-- into construct_rules without providing target_graph.
+ALTER TABLE _pg_ripple.construct_rules
+    DROP COLUMN IF EXISTS target_graph;
+
+-- ── IDX-01 ────────────────────────────────────────────────────────────────────
+CREATE INDEX IF NOT EXISTS idx_statements_predicate
+    ON _pg_ripple.statements (predicate_id);
+
+-- ── FILL-01 ───────────────────────────────────────────────────────────────────
+ALTER TABLE _pg_ripple.construct_rules      SET (fillfactor = 70);
+ALTER TABLE _pg_ripple.predicates           SET (fillfactor = 70);
+ALTER TABLE _pg_ripple.dictionary           SET (fillfactor = 80);
+ALTER TABLE _pg_ripple.federation_endpoints SET (fillfactor = 90);
+
+-- ── TOAST-01 ──────────────────────────────────────────────────────────────────
+DO $$
+BEGIN
+    ALTER TABLE _pg_ripple.rules              ALTER COLUMN rule_text          SET COMPRESSION lz4;
+    ALTER TABLE _pg_ripple.audit_log          ALTER COLUMN query              SET COMPRESSION lz4;
+    ALTER TABLE _pg_ripple.replication_status ALTER COLUMN batch_data         SET COMPRESSION lz4;
+    ALTER TABLE _pg_ripple.sparql_views       ALTER COLUMN generated_sql      SET COMPRESSION lz4;
+    ALTER TABLE _pg_ripple.construct_views    ALTER COLUMN generated_sql      SET COMPRESSION lz4;
+    ALTER TABLE _pg_ripple.datalog_views      ALTER COLUMN generated_sql      SET COMPRESSION lz4;
+    ALTER TABLE _pg_ripple.describe_views     ALTER COLUMN generated_sql      SET COMPRESSION lz4;
+    ALTER TABLE _pg_ripple.ask_views          ALTER COLUMN generated_sql      SET COMPRESSION lz4;
+    ALTER TABLE _pg_ripple.framing_views      ALTER COLUMN generated_construct SET COMPRESSION lz4;
+EXCEPTION WHEN OTHERS THEN NULL;
+END $$;
+
+-- ── UNLOGGED-01/02 ────────────────────────────────────────────────────────────
+ALTER TABLE _pg_ripple.validation_queue SET UNLOGGED;
+ALTER TABLE _pg_ripple.embedding_queue  SET UNLOGGED;
+
+-- ── SCHEMA-NORM-01: surrogate id on construct_rules ──────────────────────────
+ALTER TABLE _pg_ripple.construct_rules
+    ADD COLUMN IF NOT EXISTS id BIGINT GENERATED ALWAYS AS IDENTITY;
+
+ALTER TABLE _pg_ripple.construct_rule_triples
+    ADD COLUMN IF NOT EXISTS rule_id BIGINT;
+
+CREATE INDEX IF NOT EXISTS idx_construct_rule_triples_rule_id
+    ON _pg_ripple.construct_rule_triples (rule_id);
+
+-- ── SCHEMA-NORM-02: surrogate id on rule_sets ────────────────────────────────
+ALTER TABLE _pg_ripple.rule_sets
+    ADD COLUMN IF NOT EXISTS id BIGINT GENERATED ALWAYS AS IDENTITY;
+
+ALTER TABLE _pg_ripple.rules
+    ADD COLUMN IF NOT EXISTS rule_set_id BIGINT;
+
+CREATE INDEX IF NOT EXISTS idx_rules_rule_set_id
+    ON _pg_ripple.rules (rule_set_id);
+
+ALTER TABLE _pg_ripple.predicates
+    ADD COLUMN IF NOT EXISTS rule_set_id BIGINT;
+
+-- ── SCHEMA-NORM-03: rule_firing_log integer ids ───────────────────────────────
+ALTER TABLE _pg_ripple.rule_firing_log
+    ADD COLUMN IF NOT EXISTS rule_set_id BIGINT,
+    ADD COLUMN IF NOT EXISTS rule_id_int BIGINT;
+
+-- ── SCHEMA-NORM-05: construct_rules.source_graph_ids BIGINT[] ────────────────
+ALTER TABLE _pg_ripple.construct_rules
+    ADD COLUMN IF NOT EXISTS source_graph_ids BIGINT[];
+
+-- ── SCHEMA-NORM-06: tenants.graph_id BIGINT ──────────────────────────────────
+ALTER TABLE _pg_ripple.tenants
+    ADD COLUMN IF NOT EXISTS graph_id BIGINT;
+
+-- ── SCHEMA-NORM-08: federation_endpoints.id BIGINT ───────────────────────────
+ALTER TABLE _pg_ripple.federation_endpoints
+    ADD COLUMN IF NOT EXISTS id BIGINT GENERATED ALWAYS AS IDENTITY;
+
+ALTER TABLE _pg_ripple.federation_cache
+    ADD COLUMN IF NOT EXISTS endpoint_id BIGINT,
+    ADD COLUMN IF NOT EXISTS query_hash_bytes BYTEA;
+
+-- ── SCHEMA-NORM-07: federation_health.endpoint_id BIGINT ─────────────────────
+ALTER TABLE _pg_ripple.federation_health
+    ADD COLUMN IF NOT EXISTS endpoint_id BIGINT;
+
+CREATE INDEX IF NOT EXISTS idx_federation_health_ep_time
+    ON _pg_ripple.federation_health (endpoint_id, probed_at DESC);
+
+-- ── SCHEMA-NORM-09: shape_hints.hint_type TEXT → SMALLINT ───────────────────
+-- Migrate hint_type column from TEXT to SMALLINT (1=max_count_1, 2=min_count_1).
+DO $$
+BEGIN
+    -- Only run if hint_type is still TEXT (idempotent).
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = '_pg_ripple' AND table_name = 'shape_hints'
+          AND column_name = 'hint_type' AND data_type = 'text'
+    ) THEN
+        ALTER TABLE _pg_ripple.shape_hints ADD COLUMN IF NOT EXISTS hint_type_id SMALLINT;
+        UPDATE _pg_ripple.shape_hints
+            SET hint_type_id = CASE hint_type WHEN 'max_count_1' THEN 1 WHEN 'min_count_1' THEN 2 END;
+        ALTER TABLE _pg_ripple.shape_hints DROP CONSTRAINT shape_hints_pkey;
+        ALTER TABLE _pg_ripple.shape_hints RENAME COLUMN hint_type TO hint_type_text;
+        ALTER TABLE _pg_ripple.shape_hints RENAME COLUMN hint_type_id TO hint_type;
+        ALTER TABLE _pg_ripple.shape_hints ALTER COLUMN hint_type SET NOT NULL;
+        ALTER TABLE _pg_ripple.shape_hints ADD PRIMARY KEY (predicate_id, hint_type);
+        ALTER TABLE _pg_ripple.shape_hints DROP COLUMN hint_type_text;
+    END IF;
+EXCEPTION WHEN OTHERS THEN NULL;
+END $$;
+
+-- ── SCHEMA-NORM-10: embedding_models table + embeddings.model_id ─────────────
+CREATE TABLE IF NOT EXISTS _pg_ripple.embedding_models (
+    id    SMALLINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    name  TEXT NOT NULL UNIQUE
+);
+
+ALTER TABLE _pg_ripple.embeddings
+    ADD COLUMN IF NOT EXISTS model_id SMALLINT;
+
+-- ── SCHEMA-NORM-11: inferred_schema.class_id, property_id ────────────────────
+ALTER TABLE _pg_ripple.inferred_schema
+    ADD COLUMN IF NOT EXISTS class_id    BIGINT,
+    ADD COLUMN IF NOT EXISTS property_id BIGINT;
+
+-- (View pg_ripple.inferred_schema_decoded is created in the predicate_stats_view
+--  finalize block because the pg_ripple schema is not yet available here.)
+
+-- ── SCHEMA-NORM-12: federation_endpoints.graph_id BIGINT ─────────────────────
+ALTER TABLE _pg_ripple.federation_endpoints
+    ADD COLUMN IF NOT EXISTS graph_id BIGINT;
+
+-- ── DICT-01: dictionary.hash_hi, hash_lo BIGINT ──────────────────────────────
+-- Drop NOT NULL on the old hash BYTEA column so new inserts (hash_hi/hash_lo only) succeed.
+ALTER TABLE _pg_ripple.dictionary
+    ALTER COLUMN hash DROP NOT NULL,
+    ADD COLUMN IF NOT EXISTS hash_hi BIGINT,
+    ADD COLUMN IF NOT EXISTS hash_lo BIGINT;
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_dictionary_hash_split
+    ON _pg_ripple.dictionary (hash_hi, hash_lo);
+
+ALTER TABLE _pg_ripple.dictionary_hot
+    ALTER COLUMN hash DROP NOT NULL,
+    ADD COLUMN IF NOT EXISTS hash_hi BIGINT,
+    ADD COLUMN IF NOT EXISTS hash_lo BIGINT;
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_dictionary_hot_hash_split
+    ON _pg_ripple.dictionary_hot (hash_hi, hash_lo);
+
+-- ── DICT-02: dictionary satellite tables ─────────────────────────────────────
+CREATE TABLE IF NOT EXISTS _pg_ripple.dictionary_literals (
+    id       BIGINT NOT NULL PRIMARY KEY REFERENCES _pg_ripple.dictionary(id),
+    datatype TEXT,
+    lang     TEXT
+);
+
+CREATE TABLE IF NOT EXISTS _pg_ripple.dictionary_quoted (
+    id   BIGINT NOT NULL PRIMARY KEY REFERENCES _pg_ripple.dictionary(id),
+    qt_s BIGINT NOT NULL,
+    qt_p BIGINT NOT NULL,
+    qt_o BIGINT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_dictionary_quoted_qt_s ON _pg_ripple.dictionary_quoted (qt_s);
+CREATE INDEX IF NOT EXISTS idx_dictionary_quoted_qt_p ON _pg_ripple.dictionary_quoted (qt_p);
+CREATE INDEX IF NOT EXISTS idx_dictionary_quoted_qt_o ON _pg_ripple.dictionary_quoted (qt_o);
+
+-- ── DICT-03: dictionary_access_counts ────────────────────────────────────────
+CREATE UNLOGGED TABLE IF NOT EXISTS _pg_ripple.dictionary_access_counts (
+    id           BIGINT NOT NULL PRIMARY KEY,
+    access_count BIGINT NOT NULL DEFAULT 0
+);
+
+-- ── ENUM-01: graph_access.permission_id SMALLINT ─────────────────────────────
+ALTER TABLE _pg_ripple.graph_access
+    ADD COLUMN IF NOT EXISTS permission_id SMALLINT;
+
+-- (View pg_ripple.graph_access_decoded is created in the predicate_stats_view
+--  finalize block because the pg_ripple schema is not yet available here.)
+
+-- ── IRI-01: shacl_shapes.id BIGINT ───────────────────────────────────────────
+ALTER TABLE _pg_ripple.shacl_shapes
+    ADD COLUMN IF NOT EXISTS id BIGINT GENERATED ALWAYS AS IDENTITY;
+
+-- ── IRI-02: shacl_dag_monitors.shape_id BIGINT ───────────────────────────────
+ALTER TABLE _pg_ripple.shacl_dag_monitors
+    ADD COLUMN IF NOT EXISTS shape_id BIGINT;
+
+-- ── IRI-03: prov_catalog.activity_id BIGINT ──────────────────────────────────
+ALTER TABLE _pg_ripple.prov_catalog
+    ADD COLUMN IF NOT EXISTS activity_id BIGINT;
+
+-- ── PART-03: statement_id_timeline_ranges ────────────────────────────────────
+CREATE TABLE IF NOT EXISTS _pg_ripple.statement_id_timeline_ranges (
+    sid_min  BIGINT      NOT NULL,
+    sid_max  BIGINT      NOT NULL,
+    ts_min   TIMESTAMPTZ NOT NULL,
+    ts_max   TIMESTAMPTZ NOT NULL,
+    PRIMARY KEY (sid_min)
+);
+
+CREATE INDEX IF NOT EXISTS idx_sitl_ranges_ts_min
+    ON _pg_ripple.statement_id_timeline_ranges (ts_min);
+
+-- ── HASH-01: rag_cache BYTEA companion columns ───────────────────────────────
+ALTER TABLE _pg_ripple.rag_cache
+    ADD COLUMN IF NOT EXISTS question_hash_bytes BYTEA,
+    ADD COLUMN IF NOT EXISTS schema_digest_bytes  BYTEA;
+
+-- ── ENUM-02: federation_endpoints.complexity TEXT → SMALLINT ─────────────────
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = '_pg_ripple' AND table_name = 'federation_endpoints'
+          AND column_name = 'complexity' AND data_type = 'text'
+    ) THEN
+        ALTER TABLE _pg_ripple.federation_endpoints
+            ADD COLUMN IF NOT EXISTS complexity_id SMALLINT;
+        UPDATE _pg_ripple.federation_endpoints
+            SET complexity_id = CASE complexity
+                WHEN 'fast' THEN 1 WHEN 'normal' THEN 2 WHEN 'slow' THEN 3 ELSE 2 END;
+        ALTER TABLE _pg_ripple.federation_endpoints DROP COLUMN IF EXISTS complexity;
+        ALTER TABLE _pg_ripple.federation_endpoints RENAME COLUMN complexity_id TO complexity;
+        ALTER TABLE _pg_ripple.federation_endpoints
+            ALTER COLUMN complexity SET NOT NULL,
+            ALTER COLUMN complexity SET DEFAULT 2;
+    END IF;
+EXCEPTION WHEN OTHERS THEN NULL;
+END $$;
+
+-- ── JSON-01: endpoint_stats.predicate_stats_json TEXT → predicate_stats JSONB ─
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = '_pg_ripple' AND table_name = 'endpoint_stats'
+          AND column_name = 'predicate_stats_json'
+    ) THEN
+        ALTER TABLE _pg_ripple.endpoint_stats
+            ADD COLUMN IF NOT EXISTS predicate_stats JSONB NOT NULL DEFAULT '{}';
+        UPDATE _pg_ripple.endpoint_stats
+            SET predicate_stats = predicate_stats_json::jsonb
+            WHERE predicate_stats = '{}' AND predicate_stats_json <> '{}';
+        ALTER TABLE _pg_ripple.endpoint_stats DROP COLUMN IF EXISTS predicate_stats_json;
+        CREATE INDEX IF NOT EXISTS idx_endpoint_stats_predicate_stats
+            ON _pg_ripple.endpoint_stats USING GIN (predicate_stats);
+    END IF;
+EXCEPTION WHEN OTHERS THEN NULL;
+END $$;
+
+-- ── REDUNDANT-01: drop extvp_tables.pred1_iri, pred2_iri TEXT ────────────────
+ALTER TABLE _pg_ripple.extvp_tables
+    DROP COLUMN IF EXISTS pred1_iri,
+    DROP COLUMN IF EXISTS pred2_iri;
+"#,
+    name = "v074_schema_additions",
+    // v028_embedding_queue is in an independent DAG branch; adding it here
+    // ensures _pg_ripple.embedding_queue exists before SET UNLOGGED runs.
+    requires = ["v073_schema_additions", "v028_embedding_queue"]
+);
+
+pgrx::extension_sql!(
+    "INSERT INTO _pg_ripple.schema_version (version, upgraded_from, installed_at) \
+     VALUES ('0.74.0', '0.73.0', clock_timestamp());",
+    name = "v074_schema_version_stamp",
+    requires = ["v074_schema_additions"]
 );

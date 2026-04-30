@@ -1272,14 +1272,20 @@ jobs:
           PGUSER: runner
         run: |
           psql -c "CREATE EXTENSION IF NOT EXISTS pg_ripple;" 2>&1
-          psql -t -A -c "SELECT evidence_path FROM pg_ripple.feature_status() WHERE evidence_path IS NOT NULL;" \
+          # GATE-05: Collect all missing paths in a variable to avoid the
+          # pipe-subshell bypass (writing to $GITHUB_ENV inside a while loop
+          # does not affect the current step's env — CF-C fix).
+          missing=$(psql -t -A -c "SELECT evidence_path FROM pg_ripple.feature_status() WHERE evidence_path IS NOT NULL;" \
             | while IFS= read -r path; do
-                if [ -n "$path" ] && [ ! -e "$path" ]; then
-                  echo "MISSING evidence path: $path"
-                  echo "FAIL=1" >> "$GITHUB_ENV"
+                # Strip ': symbol_name' annotation to get the bare file path
+                file_path="${path%%: *}"
+                if [ -n "$file_path" ] && [ ! -e "$file_path" ]; then
+                  echo "$path"
                 fi
-              done
-          if [ "${FAIL:-0}" = "1" ]; then
+              done)
+          if [ -n "$missing" ]; then
+            echo "MISSING evidence paths:"
+            echo "$missing"
             echo "Feature status evidence check failed — missing paths detected"
             exit 1
           fi
@@ -1294,6 +1300,100 @@ jobs:
         run: |
           VERSION=$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')
           python3 scripts/check_roadmap_evidence.py --version "$VERSION"
+
+      - name: Stop pgrx PostgreSQL 18
+        if: always()
+        run: cargo pgrx stop pg18 2>/dev/null || true
+
+  # v0.74.0 GATE-06: Validate feature_status() on a populated database.
+  validate-feature-status-populated:
+    name: Validate feature status on populated DB (v0.74.0 GATE-06)
+    needs: [test, regress]
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends curl ca-certificates lsb-release
+          curl https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo apt-key add -
+          echo "deb http://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
+            | sudo tee /etc/apt/sources.list.d/pgdg.list
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            build-essential pkg-config libssl-dev libclang-dev clang lld python3 \
+            postgresql-18 postgresql-server-dev-18
+          sudo chown -R "$USER" \
+            /usr/share/postgresql/18/extension \
+            /usr/lib/postgresql/18/lib
+
+      - name: Set up Rust toolchain
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8  # stable
+
+      - name: Cache cargo registry
+        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684  # v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ~/.cargo/bin/cargo-pgrx
+          key: ${{ runner.os }}-cargo-pgrx-gate06-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-pgrx-gate06-
+
+      - name: Install cargo-pgrx
+        run: |
+          if ! command -v cargo-pgrx &>/dev/null; then
+            cargo install cargo-pgrx --version "=${{ env.PGRX_VERSION }}" --locked
+          fi
+
+      - name: Build and install extension
+        run: |
+          PG_CONFIG=/usr/lib/postgresql/18/bin/pg_config
+          cargo pgrx init --pg18 "$PG_CONFIG"
+          cargo pgrx start pg18 --postgresql-conf "allow_system_table_mods=on"
+          cargo pgrx install --pg-config "$PG_CONFIG"
+
+      - name: Populate database and validate feature_status()
+        env:
+          PGHOST: localhost
+          PGPORT: "28818"
+          PGDATABASE: postgres
+          PGUSER: runner
+        run: |
+          psql -c "CREATE EXTENSION IF NOT EXISTS pg_ripple;" 2>&1
+
+          # Load some sample triples to create a predicate
+          psql -c "SELECT pg_ripple.insert_triple(
+            'http://example.org/Person/1',
+            'http://www.w3.org/1999/02/22-rdf-syntax-ns#type',
+            'http://example.org/Person',
+            'http://example.org/populated-test-graph');" 2>&1
+          psql -c "SELECT pg_ripple.insert_triple(
+            'http://example.org/Person/2',
+            'http://www.w3.org/1999/02/22-rdf-syntax-ns#type',
+            'http://example.org/Person',
+            'http://example.org/populated-test-graph');" 2>&1
+
+          # Run Datalog inference if built-in rules available
+          psql -c "SELECT COUNT(*) FROM pg_ripple.feature_status();" 2>&1
+
+          # Validate evidence paths on populated DB
+          missing=$(psql -t -A -c "SELECT evidence_path FROM pg_ripple.feature_status() WHERE evidence_path IS NOT NULL;" \
+            | while IFS= read -r path; do
+                # Strip ': symbol_name' annotation to get the bare file path
+                file_path="${path%%: *}"
+                if [ -n "$file_path" ] && [ ! -e "$file_path" ]; then
+                  echo "$path"
+                fi
+              done)
+          if [ -n "$missing" ]; then
+            echo "MISSING evidence paths on populated DB:"
+            echo "$missing"
+            exit 1
+          fi
+          echo "All feature_status() evidence paths verified on populated DB"
 
       - name: Stop pgrx PostgreSQL 18
         if: always()
