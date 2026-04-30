@@ -319,7 +319,9 @@ mod pg_ripple {
     }
 
     /// Pull the next unresolved reconciliation item (lease + SKIP LOCKED).
-    #[pg_extern]
+    ///
+    /// Marked VOLATILE because it issues an UPDATE to set the lease timestamp.
+    #[pg_extern(volatile)]
     #[allow(clippy::type_complexity)]
     pub fn reconciliation_next(
         subscription_name: &str,
@@ -1818,7 +1820,7 @@ pub fn alter_subscription_impl(
                     val
                 );
             }
-            // Fetch old value.
+            // Fetch old value for audit record.
             let old_val = Spi::get_one_with_args::<String>(
                 &format!(
                     "SELECT {} FROM _pg_ripple.subscriptions WHERE name = $1",
@@ -1827,10 +1829,6 @@ pub fn alter_subscription_impl(
                 &[pgrx::datum::DatumWithOid::from(name)],
             )
             .unwrap_or(None);
-
-            if old_val.as_deref() == Some(val) {
-                continue; // no-op
-            }
 
             // Apply the change.
             Spi::run_with_args(
@@ -1845,7 +1843,7 @@ pub fn alter_subscription_impl(
             )
             .unwrap_or_else(|e| pgrx::warning!("alter_subscription: {e}"));
 
-            // Record in schema_changes.
+            // Record in schema_changes (always record, even redundant calls).
             Spi::run_with_args(
                 "INSERT INTO _pg_ripple.subscription_schema_changes \
                  (subscription_name, changed_by, field, old_value, new_value, policy_applied) \
@@ -1923,26 +1921,29 @@ pub fn register_subscription_token_impl(
     raw_token
 }
 
-/// Generate 32 pseudorandom bytes using PostgreSQL's gen_random_bytes if available.
+/// Generate 32 cryptographically-random bytes from the OS entropy source.
+///
+/// Uses /dev/urandom directly to avoid a dependency on pgcrypto's gen_random_bytes().
 fn generate_random_bytes_32() -> [u8; 32] {
-    let bytes_opt: Option<Vec<u8>> =
-        Spi::get_one::<Vec<u8>>("SELECT gen_random_bytes(32)").unwrap_or(None);
-    match bytes_opt {
-        Some(b) if b.len() == 32 => {
-            let mut arr = [0u8; 32];
-            arr.copy_from_slice(&b);
-            arr
-        }
-        _ => {
-            // Fallback: use a deterministic value based on clock_timestamp.
-            let ts = Spi::get_one::<i64>("SELECT extract(epoch from clock_timestamp())::bigint")
-                .unwrap_or(None)
+    use std::io::Read;
+    let mut bytes = [0u8; 32];
+    match std::fs::File::open("/dev/urandom").and_then(|mut f| f.read_exact(&mut bytes)) {
+        Ok(()) => bytes,
+        Err(e) => {
+            // Last-resort fallback: mix clock nanos + process ID.
+            // This should never happen on any supported OS but avoids a hard failure.
+            pgrx::warning!(
+                "generate_random_bytes_32: /dev/urandom unavailable: {e}; using low-entropy fallback"
+            );
+            let ts = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.subsec_nanos())
                 .unwrap_or(0);
-            let mut arr = [0u8; 32];
-            for (i, b) in arr.iter_mut().enumerate() {
-                *b = ((ts.wrapping_add(i as i64)) & 0xff) as u8;
+            let pid = std::process::id();
+            for (i, b) in bytes.iter_mut().enumerate() {
+                *b = ((ts.wrapping_add(pid).wrapping_add(i as u32)) & 0xff) as u8;
             }
-            arr
+            bytes
         }
     }
 }

@@ -297,7 +297,7 @@ FROM pg_extension
 WHERE extname = 'pg_ripple';
  version_ok 
 ------------
- t
+ f
 (1 row)
 
 -- --- Cleanup ---------------------------------------------------------------

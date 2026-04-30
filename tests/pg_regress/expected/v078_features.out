@@ -142,7 +142,6 @@ BEGIN
     LIMIT 1;
     PERFORM pg_ripple.revoke_subscription_token(v_hash);
 END $$;
-DO
 -- 2f. Revoked token has revoked_at set.
 SELECT COUNT(*) >= 1 AS token_revoked
 FROM _pg_ripple.subscription_tokens
@@ -168,7 +167,6 @@ INSERT INTO _pg_ripple.event_dead_letters
 VALUES
     (gen_random_uuid(), 'v078_test_sub', 'test_outbox',
      '{"test": true}'::jsonb, now() - interval '1 hour', 'queue_overflow');
-INSERT 0 1
 -- 3c. list_dead_letters returns 1 row.
 SELECT COUNT(*) = 1 AS dead_letter_present
 FROM pg_ripple.list_dead_letters('v078_test_sub');
@@ -188,7 +186,6 @@ BEGIN
     LIMIT 1;
     PERFORM pg_ripple.drop_dead_letter('v078_test_sub', 'test_outbox', v_eid);
 END $$;
-DO
 SELECT COUNT(*) = 0 AS dead_letter_dropped
 FROM pg_ripple.list_dead_letters('v078_test_sub');
  dead_letter_dropped 
@@ -267,7 +264,6 @@ BEGIN
         PERFORM pg_ripple.reconciliation_resolve(v_rid, 'accept_external', 'test resolution');
     END IF;
 END $$;
-DO
 -- 5d. Verify resolved item has resolution set.
 SELECT COUNT(*) >= 0 AS recon_resolved_ok
 FROM _pg_ripple.reconciliation_queue
