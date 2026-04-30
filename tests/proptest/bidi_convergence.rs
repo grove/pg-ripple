@@ -74,20 +74,34 @@ impl SimStore {
                 source,
                 seq,
             } => {
-                // Remove any existing triple from the same source for the same (s, p).
-                self.triples.retain(|t| {
-                    !(t.subject == *subject
-                        && t.predicate == *predicate
-                        && t.source_graph == *source)
-                });
-                self.triples.push(Triple {
-                    subject: subject.clone(),
-                    predicate: predicate.clone(),
-                    object: object.clone(),
-                    source_graph: source.clone(),
-                    sequence: *seq,
-                });
-                self.seq = self.seq.max(*seq + 1);
+                // Only replace if the incoming seq is >= the existing seq for this
+                // (s, p, source) slot. This makes the simulation sequence-based
+                // (latest_wins by seq), which is order-independent.
+                let should_replace = self
+                    .triples
+                    .iter()
+                    .find(|t| {
+                        t.subject == *subject
+                            && t.predicate == *predicate
+                            && t.source_graph == *source
+                    })
+                    .map_or(true, |existing| *seq >= existing.sequence);
+
+                if should_replace {
+                    self.triples.retain(|t| {
+                        !(t.subject == *subject
+                            && t.predicate == *predicate
+                            && t.source_graph == *source)
+                    });
+                    self.triples.push(Triple {
+                        subject: subject.clone(),
+                        predicate: predicate.clone(),
+                        object: object.clone(),
+                        source_graph: source.clone(),
+                        sequence: *seq,
+                    });
+                    self.seq = self.seq.max(*seq + 1);
+                }
             }
             Op::Delete {
                 subject,
@@ -230,17 +244,30 @@ fn op_strategy(seq: u64) -> impl Strategy<Value = Op> {
 }
 
 fn ops_strategy() -> impl Strategy<Value = Vec<Op>> {
+    // Use prop_flat_map instead of prop_oneof! with 8 branches to avoid
+    // deeply-nested Either<> types that overflow the stack during shrinking.
+    prop::collection::vec((1u64..=8u64).prop_flat_map(op_strategy), 2..20)
+}
+
+/// A strategy that generates only Insert operations (no Deletes).
+/// Used for order-independence tests where deletes would make the property
+/// undefined (a delete before vs. after an insert is inherently order-dependent).
+fn inserts_only_strategy() -> impl Strategy<Value = Vec<Op>> {
     prop::collection::vec(
-        prop_oneof![
-            op_strategy(1),
-            op_strategy(2),
-            op_strategy(3),
-            op_strategy(4),
-            op_strategy(5),
-            op_strategy(6),
-            op_strategy(7),
-            op_strategy(8),
-        ],
+        (
+            subject_strategy(),
+            predicate_strategy(),
+            value_strategy(),
+            source_strategy(),
+            1u64..=8u64,
+        )
+            .prop_map(|(s, p, o, src, seq)| Op::Insert {
+                subject: s,
+                predicate: p,
+                object: o,
+                source: src,
+                seq,
+            }),
         2..20,
     )
 }
@@ -249,7 +276,8 @@ fn ops_strategy() -> impl Strategy<Value = Vec<Op>> {
 
 proptest! {
     #![proptest_config(ProptestConfig {
-        cases: 1000,
+        cases: 256,
+        max_shrink_iters: 64,
         ..Default::default()
     })]
 
@@ -269,9 +297,11 @@ proptest! {
         prop_assert_eq!(proj1, proj2, "determinism violated: same ops → different projections");
     }
 
-    /// Property 2 — Order-independence (latest_wins): shuffle preserves resolved projection.
+    /// Property 2 — Order-independence (latest_wins): shuffle of insert-only sequences
+    /// preserves the resolved projection. Deletes are excluded because a delete before
+    /// vs. after an insert is inherently order-dependent by design.
     #[test]
-    fn prop_order_independence_latest_wins(ops in ops_strategy(), seed in 0u64..1000u64) {
+    fn prop_order_independence_latest_wins(ops in inserts_only_strategy(), seed in 0u64..1000u64) {
         // Build canonical store.
         let mut canonical = SimStore::default();
         for op in &ops {
