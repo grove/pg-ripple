@@ -1553,11 +1553,14 @@ jobs:
         run: |
           # Create extension and load sample data.
           psql -c "CREATE EXTENSION IF NOT EXISTS pg_ripple;" 2>&1
+          psql -c "ALTER SYSTEM SET pg_ripple.arrow_unsigned_tickets_allowed = on;" 2>&1
+          psql -c "SELECT pg_reload_conf();" 2>&1
           psql -c "SELECT pg_ripple.load_ntriples(
-            '<http://arrow-int-test.example/s1> <http://arrow-int-test.example/p1> <http://arrow-int-test.example/o1> <http://arrow-int-test.example/g1>.'
+            '<http://arrow-int-test.example/s1> <http://arrow-int-test.example/p1> <http://arrow-int-test.example/o1> .'
           );" 2>&1
 
           # exercise export_arrow_flight() — function must return non-empty BYTEA ticket.
+          # arrow_unsigned_tickets_allowed is on so no signing secret is required.
           ticket_length=$(psql -t -A -c "SELECT length(pg_ripple.export_arrow_flight('http://arrow-int-test.example/g1'));" 2>&1)
           echo "Arrow Flight ticket length: $ticket_length bytes"
           if [ -z "$ticket_length" ] || [ "$ticket_length" -lt 10 ]; then
