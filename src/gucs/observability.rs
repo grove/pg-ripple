@@ -34,3 +34,11 @@ pub static AUDIT_LOG_ENABLED: pgrx::GucSetting<bool> = pgrx::GucSetting::<bool>:
 /// from the load balancer through the HTTP service into the query engine.
 pub static TRACING_TRACEPARENT: pgrx::GucSetting<Option<std::ffi::CString>> =
     pgrx::GucSetting::<Option<std::ffi::CString>>::new(None);
+
+// ─── v0.78.0 observability GUCs — bidi audit retention ──────────────────────
+
+/// GUC: retention period in days for `_pg_ripple.event_audit` rows (v0.78.0).
+///
+/// A background worker sweep prunes rows older than this many days once per hour.
+/// Setting to 0 disables automatic pruning (manual archival required).
+pub static AUDIT_RETENTION_DAYS: pgrx::GucSetting<i32> = pgrx::GucSetting::<i32>::new(90);

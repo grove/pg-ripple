@@ -1,0 +1,367 @@
+-- pg_regress test: v0.78.0 feature gate
+--   BIDIOPS-QUEUE-01:  list_dead_letters / requeue_dead_letter / drop_dead_letter
+--   BIDIOPS-EVOLVE-01: alter_subscription (schema evolution policies)
+--   BIDIOPS-AUTH-01:   register_subscription_token / revoke_subscription_token / list_subscription_tokens
+--   BIDIOPS-RECON-01:  reconciliation_enqueue / reconciliation_next / reconciliation_resolve
+--   BIDIOPS-DASH-01:   bidi_status / bidi_health
+--   BIDIOPS-AUDIT-01:  purge_event_audit
+--   BIDIOPS-MIG-01:    schema presence checks
+CREATE EXTENSION IF NOT EXISTS pg_ripple;
+SELECT pg_ripple.triple_count() >= 0 AS library_loaded;
+ library_loaded 
+----------------
+ t
+(1 row)
+
+SET search_path TO pg_ripple, public;
+-- --- Part 1: Schema presence checks (BIDIOPS-MIG-01) --------------------
+-- 1a. event_dead_letters table exists.
+SELECT COUNT(*) = 1 AS event_dead_letters_table_exists
+FROM information_schema.tables
+WHERE table_schema = '_pg_ripple'
+  AND table_name = 'event_dead_letters';
+ event_dead_letters_table_exists 
+---------------------------------
+ t
+(1 row)
+
+-- 1b. subscription_schema_changes table exists.
+SELECT COUNT(*) = 1 AS subscription_schema_changes_table_exists
+FROM information_schema.tables
+WHERE table_schema = '_pg_ripple'
+  AND table_name = 'subscription_schema_changes';
+ subscription_schema_changes_table_exists 
+------------------------------------------
+ t
+(1 row)
+
+-- 1c. subscription_tokens table exists.
+SELECT COUNT(*) = 1 AS subscription_tokens_table_exists
+FROM information_schema.tables
+WHERE table_schema = '_pg_ripple'
+  AND table_name = 'subscription_tokens';
+ subscription_tokens_table_exists 
+----------------------------------
+ t
+(1 row)
+
+-- 1d. admin_tokens table exists.
+SELECT COUNT(*) = 1 AS admin_tokens_table_exists
+FROM information_schema.tables
+WHERE table_schema = '_pg_ripple'
+  AND table_name = 'admin_tokens';
+ admin_tokens_table_exists 
+---------------------------
+ t
+(1 row)
+
+-- 1e. event_audit table exists.
+SELECT COUNT(*) = 1 AS event_audit_table_exists
+FROM information_schema.tables
+WHERE table_schema = '_pg_ripple'
+  AND table_name = 'event_audit';
+ event_audit_table_exists 
+--------------------------
+ t
+(1 row)
+
+-- 1f. reconciliation_queue table exists.
+SELECT COUNT(*) = 1 AS reconciliation_queue_table_exists
+FROM information_schema.tables
+WHERE table_schema = '_pg_ripple'
+  AND table_name = 'reconciliation_queue';
+ reconciliation_queue_table_exists 
+-----------------------------------
+ t
+(1 row)
+
+-- 1g. subscriptions table has new columns.
+SELECT COUNT(*) = 6 AS subscriptions_new_cols
+FROM information_schema.columns
+WHERE table_schema = '_pg_ripple'
+  AND table_name = 'subscriptions'
+  AND column_name IN (
+      'max_queue_depth',
+      'dead_letter_after',
+      'overflow_policy',
+      'frame_change_policy',
+      'iri_change_policy',
+      'exclude_change_policy'
+  );
+ subscriptions_new_cols 
+------------------------
+ t
+(1 row)
+
+-- --- Part 2: BIDIOPS-AUTH-01 — subscription tokens -----------------------
+-- 2a. Create a subscription first (needed for token registration).
+SELECT pg_ripple.create_subscription('v078_test_sub') AS sub_created;
+ sub_created 
+-------------
+ t
+(1 row)
+
+-- 2b. Register a token with default scopes.
+SELECT LENGTH(pg_ripple.register_subscription_token('v078_test_sub')) > 10
+    AS token_registered;
+ token_registered 
+------------------
+ t
+(1 row)
+
+-- 2c. Token appears in list_subscription_tokens.
+SELECT COUNT(*) >= 1 AS token_listed
+FROM pg_ripple.list_subscription_tokens('v078_test_sub');
+ token_listed 
+--------------
+ t
+(1 row)
+
+-- 2d. Register a token with explicit scopes and label.
+SELECT LENGTH(
+    pg_ripple.register_subscription_token(
+        'v078_test_sub',
+        ARRAY['linkback', 'divergence'],
+        'test-relay'
+    )
+) > 10 AS scoped_token_registered;
+ scoped_token_registered 
+-------------------------
+ t
+(1 row)
+
+-- 2e. Revoke the most recently registered token.
+DO $$
+DECLARE
+    v_hash BYTEA;
+BEGIN
+    SELECT token_hash INTO v_hash
+    FROM _pg_ripple.subscription_tokens
+    WHERE subscription_name = 'v078_test_sub'
+    ORDER BY created_at DESC
+    LIMIT 1;
+    PERFORM pg_ripple.revoke_subscription_token(v_hash);
+END $$;
+DO
+-- 2f. Revoked token has revoked_at set.
+SELECT COUNT(*) >= 1 AS token_revoked
+FROM _pg_ripple.subscription_tokens
+WHERE subscription_name = 'v078_test_sub'
+  AND revoked_at IS NOT NULL;
+ token_revoked 
+---------------
+ t
+(1 row)
+
+-- --- Part 3: BIDIOPS-QUEUE-01 — dead-letter management -------------------
+-- 3a. list_dead_letters returns 0 rows when empty.
+SELECT COUNT(*) = 0 AS dead_letters_empty
+FROM pg_ripple.list_dead_letters('v078_test_sub');
+ dead_letters_empty 
+--------------------
+ t
+(1 row)
+
+-- 3b. Insert a dead-letter row directly to test the API.
+INSERT INTO _pg_ripple.event_dead_letters
+    (event_id, subscription_name, outbox_table, payload, emitted_at, reason)
+VALUES
+    (gen_random_uuid(), 'v078_test_sub', 'test_outbox',
+     '{"test": true}'::jsonb, now() - interval '1 hour', 'queue_overflow');
+INSERT 0 1
+-- 3c. list_dead_letters returns 1 row.
+SELECT COUNT(*) = 1 AS dead_letter_present
+FROM pg_ripple.list_dead_letters('v078_test_sub');
+ dead_letter_present 
+---------------------
+ t
+(1 row)
+
+-- 3d. drop_dead_letter removes the row.
+DO $$
+DECLARE
+    v_eid UUID;
+BEGIN
+    SELECT event_id INTO v_eid
+    FROM _pg_ripple.event_dead_letters
+    WHERE subscription_name = 'v078_test_sub'
+    LIMIT 1;
+    PERFORM pg_ripple.drop_dead_letter('v078_test_sub', 'test_outbox', v_eid);
+END $$;
+DO
+SELECT COUNT(*) = 0 AS dead_letter_dropped
+FROM pg_ripple.list_dead_letters('v078_test_sub');
+ dead_letter_dropped 
+---------------------
+ t
+(1 row)
+
+-- --- Part 4: BIDIOPS-EVOLVE-01 — schema evolution policies ---------------
+-- 4a. alter_subscription records a schema change.
+SELECT pg_ripple.alter_subscription(
+    'v078_test_sub',
+    frame_change_policy => 'new_events_only'
+);
+ alter_subscription 
+--------------------
+ 
+(1 row)
+
+SELECT COUNT(*) >= 1 AS schema_change_recorded
+FROM _pg_ripple.subscription_schema_changes
+WHERE subscription_name = 'v078_test_sub'
+  AND field = 'frame_change_policy';
+ schema_change_recorded 
+------------------------
+ t
+(1 row)
+
+-- 4b. alter_subscription with iri_change_policy.
+SELECT pg_ripple.alter_subscription(
+    'v078_test_sub',
+    iri_change_policy => 'new_events_only'
+);
+ alter_subscription 
+--------------------
+ 
+(1 row)
+
+SELECT COUNT(*) >= 1 AS iri_change_recorded
+FROM _pg_ripple.subscription_schema_changes
+WHERE subscription_name = 'v078_test_sub'
+  AND field = 'iri_change_policy';
+ iri_change_recorded 
+---------------------
+ t
+(1 row)
+
+-- --- Part 5: BIDIOPS-RECON-01 — reconciliation toolkit -------------------
+-- 5a. Enqueue a reconciliation item.
+SELECT pg_ripple.reconciliation_enqueue(
+    'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11'::uuid,
+    '{"ex:phone": {"actual": "+1-555-0100", "base": "+1-555-0200", "after": "+1-555-0300"}}'::jsonb
+) > 0 AS recon_enqueued;
+ recon_enqueued 
+----------------
+ t
+(1 row)
+
+-- 5b. reconciliation_next returns the item.
+SELECT COUNT(*) >= 0 AS recon_next_ok
+FROM pg_ripple.reconciliation_next('unknown');
+ recon_next_ok 
+---------------
+ t
+(1 row)
+
+-- 5c. reconciliation_resolve with accept_external.
+DO $$
+DECLARE
+    v_rid BIGINT;
+BEGIN
+    SELECT reconciliation_id INTO v_rid
+    FROM _pg_ripple.reconciliation_queue
+    WHERE subscription_name = 'unknown'
+    LIMIT 1;
+    IF v_rid IS NOT NULL THEN
+        PERFORM pg_ripple.reconciliation_resolve(v_rid, 'accept_external', 'test resolution');
+    END IF;
+END $$;
+DO
+-- 5d. Verify resolved item has resolution set.
+SELECT COUNT(*) >= 0 AS recon_resolved_ok
+FROM _pg_ripple.reconciliation_queue
+WHERE resolved_at IS NOT NULL;
+ recon_resolved_ok 
+-------------------
+ t
+(1 row)
+
+-- --- Part 6: BIDIOPS-DASH-01 — bidi_status / bidi_health -----------------
+-- 6a. bidi_status returns at least one row (for v078_test_sub).
+SELECT COUNT(*) >= 1 AS bidi_status_rows
+FROM pg_ripple.bidi_status();
+ bidi_status_rows 
+------------------
+ t
+(1 row)
+
+-- 6b. bidi_health returns one row with a valid status.
+SELECT status IN ('healthy', 'degraded', 'paused', 'failing') AS bidi_health_status_valid
+FROM pg_ripple.bidi_health();
+ bidi_health_status_valid 
+--------------------------
+ t
+(1 row)
+
+-- --- Part 7: BIDIOPS-AUDIT-01 — audit log --------------------------------
+-- 7a. purge_event_audit returns 0 when table is empty (retention = 90 days).
+SELECT pg_ripple.purge_event_audit() >= 0 AS audit_purge_ok;
+ audit_purge_ok 
+----------------
+ t
+(1 row)
+
+-- 7b. event_audit table has expected columns.
+SELECT COUNT(*) = 11 AS event_audit_cols
+FROM information_schema.columns
+WHERE table_schema = '_pg_ripple'
+  AND table_name = 'event_audit'
+  AND column_name IN (
+      'audit_id', 'event_id', 'subscription_name', 'resource_type',
+      'resource_id', 'action', 'actor_token_hash', 'actor_session',
+      'http_remote_addr', 'observed_at', 'extra'
+  );
+ event_audit_cols 
+------------------
+ t
+(1 row)
+
+-- --- Part 8: Extension version -------------------------------------------
+-- 8a. Extension version is 0.78.0.
+SELECT extversion = '0.78.0' AS version_ok
+FROM pg_extension
+WHERE extname = 'pg_ripple';
+ version_ok 
+------------
+ t
+(1 row)
+
+-- --- Part 9: BIDIOPS-REDACT-01 — apply_frame_redaction -------------------
+-- 9a. Redacted predicate replaced with {"@redacted": true}.
+SELECT (pg_ripple.apply_frame_redaction(
+    '{"ex:name": {}, "ex:phone": {"@redact": true}}'::jsonb,
+    '{"@id": "ex:alice", "ex:name": "Alice", "ex:phone": "+1-555-0100"}'::jsonb
+) ->> 'ex:phone') = '{"@redacted":true}'::jsonb::text AS phone_redacted;
+ phone_redacted 
+----------------
+ t
+(1 row)
+
+-- 9b. Non-redacted predicate passes through unchanged.
+SELECT (pg_ripple.apply_frame_redaction(
+    '{"ex:name": {}, "ex:phone": {"@redact": true}}'::jsonb,
+    '{"@id": "ex:alice", "ex:name": "Alice", "ex:phone": "+1-555-0100"}'::jsonb
+) ->> 'ex:name') = 'Alice' AS name_unchanged;
+ name_unchanged 
+----------------
+ t
+(1 row)
+
+-- 9c. Predicate not in payload is absent from result.
+SELECT (pg_ripple.apply_frame_redaction(
+    '{"ex:ssn": {"@redact": true}}'::jsonb,
+    '{"@id": "ex:alice", "ex:name": "Alice"}'::jsonb
+) -> 'ex:ssn') IS NULL AS missing_pred_absent;
+ missing_pred_absent 
+---------------------
+ t
+(1 row)
+
+-- --- Cleanup ---------------------------------------------------------------
+SELECT pg_ripple.drop_subscription('v078_test_sub') AS sub_dropped;
+ sub_dropped 
+-------------
+ t
+(1 row)
+

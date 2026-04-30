@@ -1799,5 +1799,17 @@ pub fn register_all_gucs() {
         GucContext::Postmaster,
         GucFlags::default(),
     );
+
+        pgrx::GucRegistry::define_int_guc(
+            c"pg_ripple.audit_retention",
+            c"Retention period in days for _pg_ripple.event_audit rows (v0.78.0). \
+          0 disables automatic pruning.",
+            c"",
+            &crate::gucs::observability::AUDIT_RETENTION_DAYS,
+            0,
+            3650,
+            GucContext::Suset,
+            GucFlags::default(),
+        );
     }
 }

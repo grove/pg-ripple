@@ -13,6 +13,77 @@ Versions correspond to the milestones in [ROADMAP.md](ROADMAP.md).
 
 ---
 
+## [0.78.0] — 2026-05-22 — Bidirectional Integration Operations
+
+**Implements v0.78.0 roadmap: all BIDIOPS-* deliverables closing the operational gaps
+identified in the v0.77.0 review. Data semantics are unchanged; this release adds the
+management plane that production deployments need.**
+
+### What's new
+
+- **BIDIOPS-QUEUE-01** — Write-side outbox depth limits and dead-letter table.
+  Three overflow policies (`pause`, `drop_oldest`, `drop_newest`); `dead_letter_after`
+  interval policy; `_pg_ripple.event_dead_letters` catalog table. New SQL API:
+  `list_dead_letters()`, `requeue_dead_letter()`, `drop_dead_letter()`.
+
+- **BIDIOPS-PAUSE-01** — `bidi_status()` exposes pg-trickle pause state.
+  `bidi_health()` reports `paused` when any subscription is paused. Pause/resume
+  is delegated to `pg_trickle.pause_subscription` / `pg_trickle.resume_subscription`.
+
+- **BIDIOPS-EVOLVE-01** — Schema-evolution policies for frame, IRI template, and
+  exclude-graphs changes. New SQL API: `alter_subscription()` with
+  `frame_change_policy`, `iri_change_policy`, `exclude_change_policy` parameters.
+  All changes recorded in `_pg_ripple.subscription_schema_changes`.
+
+- **BIDIOPS-AUTH-01** — Per-subscription bearer tokens with fine-grained scopes
+  (`linkback`, `divergence`, `abandon`, `outbox_read`, `dead_letter_admin`).
+  New SQL API: `register_subscription_token()`, `revoke_subscription_token()`,
+  `list_subscription_tokens()`. SHA-256 token hashing via `sha2` crate.
+  Admin tokens stored separately in `_pg_ripple.admin_tokens`.
+
+- **BIDIOPS-REDACT-01** — Frame-level `"@redact": true` for PII / secret-bearing
+  predicates. `apply_frame_redaction()` renders `{"@redacted": true}` in place of
+  redacted predicate values. Unredacted outbox variant supported for compliance
+  pipelines. Documented in the bidi runbook.
+
+- **BIDIOPS-AUDIT-01** — `_pg_ripple.event_audit` records every side-band mutating
+  call and admin action with token hash, remote address, and session user. New SQL API:
+  `purge_event_audit()`. `pg_ripple.audit_retention` GUC (default: 90 days).
+
+- **BIDIOPS-PROPTEST-01** — Six convergence properties tested via `proptest` (1,000
+  cases each): determinism, order-independence (latest_wins), no-loss, source_priority,
+  linkback round-trip, convergence under retries. Added to `tests/proptest_suite.rs`.
+
+- **BIDIOPS-CHAOS-01** — Fault injection smoke tests in `tests/stress/bidi_chaos.sh`:
+  abandon_linkback idempotency, audit purge safety, reconciliation round-trip,
+  bidi_health status validity, token register/revoke.
+
+- **BIDIOPS-RECON-01** — Reconciliation toolkit: `_pg_ripple.reconciliation_queue`
+  table; `reconciliation_enqueue()`, `reconciliation_next()`, `reconciliation_resolve()`
+  SQL API; four resolution actions: `accept_external`, `force_internal`,
+  `merge_via_owl_sameAs`, `dead_letter`.
+
+- **BIDIOPS-DASH-01** — Consolidated operations surface: `bidi_status()` (16 columns)
+  and `bidi_health()` (3 columns) monitoring views.
+
+- **BIDIOPS-MIG-01** — Migration script `sql/pg_ripple--0.77.0--0.78.0.sql` with all
+  DDL additions. `pg_ripple.control` updated to `default_version = '0.78.0'`.
+
+- **BIDIOPS-PERF-01** — Benchmark suite `benchmarks/bidiops_throughput.sql` covering
+  queue depth estimation, audit insert throughput, scope-check latency, and frame
+  redaction render cost.
+
+- **BIDIOPS-DOC-01** — Operations runbook (`docs/src/operations/bidi-runbook.md`) and
+  production-readiness checklist (`docs/src/operations/bidi-production-checklist.md`)
+  covering all day-two operations: queue drain, token rotation, redaction, schema
+  evolution, reconciliation, and chaos-test interpretation.
+
+- **BIDI-SPEC-01** — Draft vendor-neutral *RDF Bidirectional Integration Profile v1*
+  (`docs/spec/rdf-bidi-integration-v1.md`) with 16 sections covering all 8 motivating
+  problems and candidate conformance levels.
+
+---
+
 ## [0.77.0] — 2026-05-15 — Bidirectional Integration Primitives
 
 **Implements v0.77.0 roadmap: all BIDI-* deliverables for bidirectional integration
