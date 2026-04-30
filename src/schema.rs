@@ -689,6 +689,10 @@ CREATE INDEX IF NOT EXISTS shape_hints_pred_idx
 );
 
 // Create the predicate_stats view after the base tables exist.
+// v0.74.0: also adds inferred_schema_decoded and graph_access_decoded views
+// which depend on columns added in v074_schema_additions. All finalize
+// blocks run after all non-finalize extension_sql! blocks, so the
+// v074_schema_additions columns are guaranteed to exist.
 pgrx::extension_sql!(
     r#"
 CREATE OR REPLACE VIEW pg_ripple.predicate_stats AS
@@ -699,6 +703,23 @@ SELECT
 FROM _pg_ripple.predicates p
 JOIN _pg_ripple.dictionary d ON d.id = p.id
 ORDER BY p.triple_count DESC;
+
+-- ── SCHEMA-NORM-11 view (v0.74.0): inferred_schema decoded ───────────────────
+CREATE OR REPLACE VIEW pg_ripple.inferred_schema_decoded AS
+    SELECT i.class_id, i.property_id,
+           COALESCE(dc.value, i.class_iri)    AS class_iri,
+           COALESCE(dp.value, i.property_iri) AS property_iri,
+           i.cardinality
+    FROM _pg_ripple.inferred_schema i
+    LEFT JOIN _pg_ripple.dictionary dc ON dc.id = i.class_id
+    LEFT JOIN _pg_ripple.dictionary dp ON dp.id = i.property_id;
+
+-- ── ENUM-01 view (v0.74.0): graph_access decoded ───────────────────────────
+CREATE OR REPLACE VIEW pg_ripple.graph_access_decoded AS
+    SELECT role_name, graph_id, permission, permission_id,
+           CASE permission_id WHEN 1 THEN 'read' WHEN 2 THEN 'write' WHEN 3 THEN 'admin' END
+               AS permission_name
+    FROM _pg_ripple.graph_access;
 "#,
     name = "predicate_stats_view",
     requires = ["schema_setup"],
@@ -1475,8 +1496,8 @@ ALTER TABLE _pg_ripple.inferred_schema
     ADD COLUMN IF NOT EXISTS class_id    BIGINT,
     ADD COLUMN IF NOT EXISTS property_id BIGINT;
 
--- (View pg_ripple.inferred_schema_decoded is created in v074_views_finalize
---  because the pg_ripple schema is not yet available at this point.)
+-- (View pg_ripple.inferred_schema_decoded is created in the predicate_stats_view
+--  finalize block because the pg_ripple schema is not yet available here.)
 
 -- ── SCHEMA-NORM-12: federation_endpoints.graph_id BIGINT ─────────────────────
 ALTER TABLE _pg_ripple.federation_endpoints
@@ -1528,8 +1549,8 @@ CREATE UNLOGGED TABLE IF NOT EXISTS _pg_ripple.dictionary_access_counts (
 ALTER TABLE _pg_ripple.graph_access
     ADD COLUMN IF NOT EXISTS permission_id SMALLINT;
 
--- (View pg_ripple.graph_access_decoded is created in v074_views_finalize
---  because the pg_ripple schema is not yet available at this point.)
+-- (View pg_ripple.graph_access_decoded is created in the predicate_stats_view
+--  finalize block because the pg_ripple schema is not yet available here.)
 
 -- ── IRI-01: shacl_shapes.id BIGINT ───────────────────────────────────────────
 ALTER TABLE _pg_ripple.shacl_shapes
@@ -1616,31 +1637,4 @@ pgrx::extension_sql!(
      VALUES ('0.74.0', '0.73.0', clock_timestamp());",
     name = "v074_schema_version_stamp",
     requires = ["v074_schema_additions"]
-);
-
-// v0.74.0 views that reference the pg_ripple schema must run in a finalize
-// block because the pg_ripple schema is created by pgrx function declarations
-// (which run before finalize blocks, but after regular extension_sql! blocks).
-pgrx::extension_sql!(
-    r#"
--- ── SCHEMA-NORM-11 view: inferred_schema decoded ─────────────────────────────
-CREATE OR REPLACE VIEW pg_ripple.inferred_schema_decoded AS
-    SELECT i.class_id, i.property_id,
-           COALESCE(dc.value, i.class_iri)    AS class_iri,
-           COALESCE(dp.value, i.property_iri) AS property_iri,
-           i.cardinality
-    FROM _pg_ripple.inferred_schema i
-    LEFT JOIN _pg_ripple.dictionary dc ON dc.id = i.class_id
-    LEFT JOIN _pg_ripple.dictionary dp ON dp.id = i.property_id;
-
--- ── ENUM-01 view: graph_access decoded ───────────────────────────────────────
-CREATE OR REPLACE VIEW pg_ripple.graph_access_decoded AS
-    SELECT role_name, graph_id, permission, permission_id,
-           CASE permission_id WHEN 1 THEN 'read' WHEN 2 THEN 'write' WHEN 3 THEN 'admin' END
-               AS permission_name
-    FROM _pg_ripple.graph_access;
-"#,
-    name = "v074_views_finalize",
-    requires = ["v074_schema_additions"],
-    finalize
 );
