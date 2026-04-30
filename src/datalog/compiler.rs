@@ -495,12 +495,12 @@ fn compile_nonrecursive_rule(
         } else if let Term::Const(c) = &atom.g {
             where_clauses.push(format!("{alias}.g = {}", const_sql(*c)));
         } else {
-            // DefaultGraph: g = 0 (unless rule_graph_scope = 'all')
+            // DefaultGraph: g = 0 only when rule_graph_scope = 'default' (not the default)
             let scope = crate::RULE_GRAPH_SCOPE
                 .get()
                 .as_ref()
                 .and_then(|c| c.to_str().ok())
-                .unwrap_or("default")
+                .unwrap_or("all")
                 .to_owned();
             if scope == "default" {
                 where_clauses.push(format!("{alias}.g = 0"));
@@ -737,7 +737,7 @@ fn compile_recursive_rule(
                 .get()
                 .as_ref()
                 .and_then(|c| c.to_str().ok())
-                .unwrap_or("default")
+                .unwrap_or("all")
                 .to_owned();
             let g_filter = if scope == "default" {
                 "WHERE g = 0"
@@ -1157,7 +1157,7 @@ fn build_join_cond(alias: &str, atom: &Atom, var_map: &VarMap) -> String {
             .get()
             .as_ref()
             .and_then(|c| c.to_str().ok())
-            .unwrap_or("default")
+            .unwrap_or("all")
             .to_owned();
         if scope == "default" {
             conds.push(format!("{alias}.g = 0"));
@@ -1377,7 +1377,7 @@ fn compile_rule_with_one_delta_atom(
                         .get()
                         .as_ref()
                         .and_then(|c| c.to_str().ok())
-                        .unwrap_or("default")
+                        .unwrap_or("all")
                         .to_owned();
                     if scope == "default" {
                         where_clauses.push(format!("{alias}.g = 0"));
@@ -1580,7 +1580,7 @@ pub fn compile_aggregate_rule(rule: &Rule, target: &str) -> Result<String, Strin
         .get()
         .as_ref()
         .and_then(|c| c.to_str().ok())
-        .unwrap_or("default")
+        .unwrap_or("all")
         .to_owned();
 
     let mut where_parts: Vec<String> = Vec::new();

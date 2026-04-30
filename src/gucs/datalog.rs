@@ -11,7 +11,8 @@ pub static INFERENCE_MODE: pgrx::GucSetting<Option<std::ffi::CString>> =
 pub static ENFORCE_CONSTRAINTS: pgrx::GucSetting<Option<std::ffi::CString>> =
     pgrx::GucSetting::<Option<std::ffi::CString>>::new(None);
 
-/// GUC: graph scope for unscoped body atoms.
+/// GUC: graph scope for unscoped body atoms. Default is 'all' (match any graph).
+/// Set to 'default' to restrict unscoped atoms to g = 0 only.
 pub static RULE_GRAPH_SCOPE: pgrx::GucSetting<Option<std::ffi::CString>> =
     pgrx::GucSetting::<Option<std::ffi::CString>>::new(None);
 

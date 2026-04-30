@@ -503,7 +503,7 @@ pub fn register_all_gucs() {
 
         pgrx::GucRegistry::define_string_guc_with_hooks(
             c"pg_ripple.rule_graph_scope",
-            c"Graph scope for unscoped Datalog atoms: 'default' (g=0 only) or 'all' (any graph)",
+            c"Graph scope for unscoped Datalog atoms: 'all' (any graph, default) or 'default' (g=0 only)",
             c"",
             &RULE_GRAPH_SCOPE,
             GucContext::Userset,
