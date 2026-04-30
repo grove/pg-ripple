@@ -13,6 +13,100 @@ Versions correspond to the milestones in [ROADMAP.md](ROADMAP.md).
 
 ---
 
+## [0.77.0] — 2026-05-15 — Bidirectional Integration Primitives
+
+**Implements v0.77.0 roadmap: all BIDI-* deliverables for bidirectional integration
+between pg_ripple and external systems via named-graph attribution, declarative conflict
+policies, upsert/diff ingest modes, symmetric delete, linkback rendezvous, CAS events,
+pg-trickle outbox/inbox transport, per-graph observability, and a frozen JSON wire format.**
+
+### What's new
+
+- **BIDI-ATTR-01** — Source attribution API consistency pass. `register_json_mapping`
+  gains `default_graph_iri`, `timestamp_path`, `timestamp_predicate`, `iri_template`,
+  and `iri_match_pattern` parameters. `ingest_json` and `ingest_jsonld` gain `mode` and
+  `source_timestamp` parameters. When `graph_iri` is omitted, the mapping's
+  `default_graph_iri` is used automatically.
+
+- **BIDI-CONFLICT-01** — `pg_ripple.register_conflict_policy(predicate, strategy, config)`
+  with strategies: `source_priority` (priority-ordered graph list with null fall-through),
+  `latest_wins` (highest per-triple timestamp wins; falls back to VP `i` column with
+  NOTICE), `reject_on_conflict` (raises an error on divergent values), `union` (all
+  values coexist). `drop_conflict_policy` and `recompute_conflict_winners` for lifecycle
+  management. Non-authoritative `_pg_ripple.conflict_winners` cache with register-time
+  backfill and drop-time cleanup.
+
+- **BIDI-NORMALIZE-01** — Optional `normalize` expression in conflict policy config.
+  Expressions validated against a whitelist (STR, LCASE, UCASE, ROUND, SUBSTR, casts).
+  Forbidden constructs (SELECT, WHERE, SERVICE, aggregate functions) raise an error at
+  registration time.
+
+- **BIDI-UPSERT-01** — `ingest_json(..., mode => 'upsert')` deletes existing values for
+  `sh:maxCount 1` predicates (from the registered shape) before inserting, enabling
+  idempotent updates for functional properties.
+
+- **BIDI-DIFF-01** — `ingest_json(..., mode => 'diff')` derives per-triple change
+  timestamps from a payload-level `lastModified` field (configurable via `timestamp_path`).
+  Timestamps are stored as RDF-star annotations using `prov:generatedAtTime`. Only
+  predicates whose values actually changed are written.
+
+- **BIDI-DELETE-01** — `pg_ripple.delete_by_subject(mapping, subject_iri, graph_iri)`
+  deletes all triples for a subject. `delete_mapped_predicates(mapping, subject_iri,
+  graph_iri)` deletes only the predicates declared in the mapping's context. Both respect
+  the mapping's `default_graph_iri` when `graph_iri` is omitted.
+
+- **BIDI-LOOP-01** — `exclude_graphs TEXT[]` and `propagation_depth SMALLINT` columns
+  added to `_pg_ripple.subscriptions` for loop-safe subscription configuration.
+
+- **BIDI-CAS-01** — `pg_ripple.assert_cas(event, actual)` verifies that the `base`
+  object in an outbound event matches the current state in the target system. No-ops when
+  base is empty or when `after` already matches actual (idempotent delivery).
+
+- **BIDI-LINKBACK-01** — `_pg_ripple.pending_linkbacks` and `_pg_ripple.subscription_buffer`
+  tables for target-assigned ID rendezvous. `record_linkback(event_id, target_id,
+  target_iri)` expands bare IDs through the target graph's `iri_template`, writes
+  `owl:sameAs`, flushes buffered events, and deletes the pending row atomically.
+  `abandon_linkback(event_id)` drops buffered events with a NOTICE and records the miss
+  in `_pg_ripple.iri_rewrite_misses`.
+
+- **BIDI-OUTBOX-01** — `outbox_table`, `outbox_distribution_column`, `outbox_format`,
+  and `outbox_merge` columns added to `_pg_ripple.subscriptions` for pg-trickle outbox
+  configuration.
+
+- **BIDI-INBOX-01** — `pg_ripple.install_bidi_inbox(inbox_table)` creates a schema,
+  inbox table, dispatch PL/pgSQL function, and `AFTER INSERT` trigger that routes
+  `linkback` and `abandon` events to the appropriate SQL helpers.
+
+- **BIDI-WIRE-01** — Frozen flat JSON event shape with top-level `version: "1.0"`
+  discriminator. `pg_ripple.bidi_wire_version()` returns `"1.0"`. JSON Schema published
+  at `docs/src/operations/event-schema-v1.json`.
+
+- **BIDI-OBS-01** — `pg_ripple.graph_stats(graph_iri)` returns per-graph triple count,
+  last-write timestamp, conflict rejection count, and active subscription count.
+  `_pg_ripple.graph_metrics` table stores the persistent counters.
+
+- **BIDI-MIG-01** — `sql/pg_ripple--0.76.0--0.77.0.sql` migration script creates all
+  new catalog tables and schema extensions. Schema blocks added to `src/schema.rs` for
+  fresh installs.
+
+- **BIDI-PERF-01** — `benchmarks/bidi_relay_throughput.sql` pgbench script for
+  measuring conflict-policied ingest throughput.
+
+- **BIDI-DOC-01** — `docs/src/operations/pg-trickle-relay.md` updated with a
+  bidirectional CRM ⇄ ERP walkthrough documenting mesh, federated, and named-graph
+  patterns.
+
+### Schema changes
+
+New tables: `_pg_ripple.conflict_policies`, `_pg_ripple.conflict_winners`,
+`_pg_ripple.iri_rewrite_misses`, `_pg_ripple.graph_metrics`,
+`_pg_ripple.pending_linkbacks`, `_pg_ripple.subscription_buffer`.
+
+Altered tables: `_pg_ripple.json_mappings` (5 new columns),
+`_pg_ripple.subscriptions` (12 new columns).
+
+---
+
 ## [0.76.0] — 2026-04-30 — Assessment 11 Low-Severity Findings and Production Polish
 
 **Implements v0.76.0 roadmap: toolchain version pin, RLS policy hash widening to 128-bit,
