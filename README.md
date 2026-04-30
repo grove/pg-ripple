@@ -8,6 +8,7 @@
 [![pgrx 0.18](https://img.shields.io/badge/pgrx-0.18-orange)](https://github.com/pgcentralfoundation/pgrx)
 [![WatDiv correctness](https://img.shields.io/badge/WatDiv-100%25%20correct-brightgreen)](docs/src/reference/watdiv-results.md)
 [![LUBM conformance](https://img.shields.io/badge/LUBM-14%2F14%20pass-brightgreen)](docs/src/reference/lubm-results.md)
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/grove/pg-ripple)
 
 **A knowledge graph engine built into PostgreSQL.**
 
