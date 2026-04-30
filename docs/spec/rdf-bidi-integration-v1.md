@@ -21,9 +21,11 @@ Every RDF triplestore today exposes some form of change-data-capture (Jena liste
 
 Existing CDC mechanisms answer (1) implicitly at best and (2)–(8) not at all. The Bidi Profile answers all eight in a way every triplestore can implement.
 
-## 2. Conformance levels
+## 2. Candidate conformance levels
 
-A triplestore claims **Bidi-1.0 compliance** if it implements §3 (Data Model), §4 (Wire Format), §5 (Receiver Protocol), §6 (Reconciliation), and the §11 conformance test corpus.
+This draft sketches candidate conformance levels for review. They are **non-normative** until the profile is extracted from the pg_ripple roadmap and stabilized.
+
+A triplestore claims **Bidi-1.0 compliance** if it implements §3 (Data Model), §4 (Wire Format), §5 (Receiver Protocol), §6 (Reconciliation), and the §11 candidate conformance test corpus.
 
 A triplestore claims **Bidi-1.0-Ops compliance** if it additionally implements §7 (Schema Evolution), §8 (Auth & Redaction), §9 (Audit), and §10 (Operations Surface).
 
@@ -92,7 +94,7 @@ Outbound events are JSON documents with the following top-level schema:
   "event_id":          "<uuid>",
   "event_type":        "INSERT" | "UPDATE" | "DELETE",
   "subject":           "<canonical-iri>",
-  "subject_resolved":  "<rewritten-iri>",
+  "subject_resolved":  true | false,
   "graph":             "<source-graph-iri>",
   "timestamp":         "<RFC 3339 instant>",
   "@context":          { ... JSON-LD context ... },
@@ -104,10 +106,10 @@ Outbound events are JSON documents with the following top-level schema:
 Field semantics:
 
 - **`version`**: the only top-level discriminator. Receivers MUST switch on this. Future versions MUST remain forward-compatible-by-default; receivers ignore unknown fields.
-- **`event_id`**: globally unique. Used for ack/nack/linkback addressing.
+- **`event_id`**: globally unique. Used for traceability and side-band callbacks such as linkback, divergence reporting, and abandon.
 - **`event_type`**: one of `INSERT`, `UPDATE`, `DELETE`. SHACL semantics (atomic delete-then-insert) collapse to `UPDATE`.
 - **`subject`**: the canonical hub IRI of the changed entity.
-- **`subject_resolved`**: the IRI as the receiver should see it (after late-binding rewrite under the receiver's `iri_pattern`). MAY equal `subject`.
+- **`subject_resolved`**: boolean. `true` means `subject` is already the IRI the receiver should use after late-binding rewrite under the receiver's `iri_pattern`; `false` means the event is an unresolved INSERT whose target-assigned ID must be reported via linkback before follow-up events are emitted.
 - **`graph`**: the source graph IRI. The receiver uses this for echo detection (do not re-ingest events whose `graph` matches the receiver's own source graph).
 - **`timestamp`**: the event emit time, RFC 3339.
 - **`@context`**: JSON-LD context for `after` and `base`. SHOULD be a stable URL or a small inline context.
@@ -144,15 +146,13 @@ Implementations MAY offer a triple-level grouping mode as a legacy escape hatch 
 
 ## 5. Receiver protocol
 
-### 5.1 Pull, ack, nack
+### 5.1 Delivery substrate
 
-Receivers consume events via three primitives (transport-independent names):
+Receivers consume events from an implementation-defined at-least-once delivery substrate. This draft intentionally does not prescribe `pull`, `ack`, or `nack` functions: a conforming implementation MAY use transactional outbox tables, Kafka, NATS, webhooks, logical replication, or direct polling.
 
-- `next_event(subscription) → event | null` — returns the next unleased event, leases it for `lease_timeout` (default 30 s).
-- `ack_event(event_id)` — confirms the event was applied. Removes it from the queue.
-- `nack_event(event_id, reason)` — records the failure, releases the lease, leaves the event for retry.
+The substrate MUST provide at-least-once delivery, durable retry, and an operator-visible delivery dead-letter mechanism or equivalent failure surface. Implementations SHOULD expose delivery status (depth, last delivery, last error, retry/DLQ counts) through §10.
 
-Implementations MUST guarantee at-least-once delivery: an event whose lease expires without ack/nack MUST be redelivered.
+For pg_ripple, this substrate is pg-trickle's outbox/inbox and relay; pg_ripple itself does not expose `next_event`, `ack_event`, or `nack_event`.
 
 ### 5.2 Sparse-CAS application
 
@@ -160,7 +160,7 @@ For `UPDATE` events, the receiver applies the following algorithm:
 
 ```
 for each (predicate, base_value) in event.base:
-    actual_value = read_actual(target_system, event.subject_resolved, predicate)
+    actual_value = read_actual(target_system, event.subject, predicate)
     if actual_value == base_value:
         continue  # CAS holds for this predicate
     elif actual_value == event.after[predicate]:
@@ -169,8 +169,8 @@ for each (predicate, base_value) in event.base:
         escalate(event, predicate, actual_value, base_value, event.after[predicate])
         return
 
-apply_writes(target_system, event.subject_resolved, event.after)
-ack_event(event.event_id)
+apply_writes(target_system, event.subject, event.after)
+mark_delivery_complete(event.event_id)  # substrate-specific
 ```
 
 `escalate` MUST invoke the reconciliation toolkit (§6) rather than silently overwriting.
@@ -194,11 +194,11 @@ The source store:
 
 Implementations MUST also accept a `target_iri` form for cases where the target system returns a canonical URL rather than a bare ID.
 
-`ack_event` for an unresolved INSERT (one without a corresponding `record_linkback` or `target_id` field on the event) MUST fail. This prevents losing the linkback.
+The source store MUST make the initial unresolved INSERT visible to the receiver so the receiver can create the target entity and call `record_linkback`. Follow-up events for the same pending subject are held by §5.4 until linkback lands. Delivery completion for the unresolved INSERT is substrate-specific; implementations SHOULD document how redelivery behaves if linkback never arrives.
 
 ### 5.4 Subscription buffering during pending linkback
 
-While a linkback is pending for `(subject, subscription)`, subsequent events for the same `(subject, subscription)` MUST be persisted in unrendered form and flushed atomically when `record_linkback` lands. Implementations MUST NOT emit two events for an entity whose target ID is not yet known.
+While a linkback is pending for `(subject, subscription)`, subsequent events for the same `(subject, subscription)` MUST be persisted in unrendered form and flushed atomically when `record_linkback` lands. Implementations MUST NOT emit follow-up events for an entity whose target ID is not yet known.
 
 If the linkback never lands (operator abandonment, target system failure), buffered events MUST be expired after `linkback_timeout` (default 1 h) with operator notification.
 
@@ -207,8 +207,8 @@ If the linkback never lands (operator abandonment, target system failure), buffe
 When emitting an event for subject `s` to a subscription whose `target_graph` is `g`:
 
 1. Compute the equivalence class `E = closure_owl_sameAs(s)`.
-2. If any member of `E` matches the `iri_pattern` for `g`, that member is `subject_resolved`.
-3. Otherwise, `subject_resolved = s` (the canonical hub IRI passes through unchanged).
+2. If any member of `E` matches the `iri_pattern` for `g`, emit that member as `subject` and set `subject_resolved = true`.
+3. Otherwise, emit the canonical hub IRI as `subject` and set `subject_resolved = false` only for unresolved INSERTs that require linkback; for other event types, emit according to the implementation's missing-rewrite policy.
 
 This rewrite is **late-binding**: it happens at emit time, not at write time. Closure changes (new `owl:sameAs` discovered) MUST NOT retroactively rewrite already-queued events.
 
@@ -232,7 +232,7 @@ reconciliation_enqueue(
 )
 ```
 
-Implementations MUST provide an operator-facing primitive `reconciliation_next(subscription)` that pulls the next unresolved entry under a lease, mirroring `next_event` semantics.
+Implementations SHOULD provide an operator-facing primitive `reconciliation_next(subscription)` that leases the next unresolved entry using `SKIP LOCKED` or an equivalent work-queue mechanism. This is a reconciliation queue, not the main event-delivery substrate.
 
 Implementations MUST support four resolution actions:
 
@@ -253,22 +253,22 @@ Subscriptions evolve over time: frames change, IRI patterns change, exclude list
 
 When a subscription's frame is altered, queued events are affected per `frame_change_policy`:
 
-- `reframe_queued` (default): queued events render under the new frame at next-pull time. Currently-leased events finish under the old frame.
-- `drain_then_switch`: the subscription is implicitly paused; new emits go to a parallel queue under the new frame; once the old queue drains, the parallel queue takes over.
+- `new_events_only` (recommended default): already-rendered queued events drain unchanged; new events use the new frame.
+- `reframe_queued` and `drain_then_switch` are advanced implementation-defined policies. They require queued events to be stored in unrendered form and are not required by this draft.
 
 ### 7.2 IRI pattern changes
 
 When a graph's `iri_pattern` is altered, queued events are affected per `pattern_change_policy`:
 
-- `no_retroactive` (default): queued events keep the original pattern's IRIs; new events use the new pattern.
-- `reframe_queued`: queued events are re-rewritten under the new pattern at next-pull time.
+- `new_events_only` (recommended default): queued events keep the original pattern's IRIs; new events use the new pattern.
+- Retroactive re-rewrite is implementation-defined and requires unrendered queued events.
 
 ### 7.3 Exclude-graphs changes
 
 When `exclude_graphs` is altered, queued events are affected per `exclude_change_policy`:
 
-- `apply_to_new` (default): the new exclude list applies only to events emitted after the change. Queued events drain unchanged.
-- `apply_to_queued`: re-apply the new exclude list to queued events; filtered-out events move to dead-letter.
+- `new_events_only` (recommended default): the new exclude list applies only to events emitted after the change. Queued events drain unchanged.
+- Retroactive filtering of queued events is implementation-defined.
 
 All schema changes MUST be recorded in an audit table with the old value, new value, applied policy, and affected event count.
 
@@ -280,11 +280,11 @@ Implementations MUST support bearer tokens scoped to a single subscription with 
 
 | Scope | Permits |
 |---|---|
-| `pull` | `next_event` |
-| `ack` | `ack_event` |
-| `nack` | `nack_event` |
 | `linkback` | `record_linkback` |
-| `unredacted` | Receive cleartext for redacted predicates (§8.2) |
+| `divergence` | Report CAS divergence |
+| `abandon` | Abandon pending linkback |
+| `outbox_read` | Read a subscription's outbox table or equivalent delivery stream |
+| `dead_letter_admin` | Requeue/drop semantic dead-letter rows |
 
 Tokens MUST be SHA-256 hashed at rest. The raw token MUST be returned only at registration time.
 
@@ -304,13 +304,13 @@ Frames MAY mark predicates with `"@redact": true`:
 }
 ```
 
-For non-`unredacted`-scoped consumers, redacted predicates MUST be emitted in `after` and `base` as the literal object `{"@redacted": true}`. CAS works because both sides redact identically.
+For redacted consumers, redacted predicates MUST be emitted in `after` and `base` as the literal object `{"@redacted": true}`. CAS works because both sides redact identically.
 
-For `unredacted`-scoped consumers, the cleartext value MUST be emitted. The same queued event MUST render differently per consumer based on the requesting token's scopes; implementations MUST NOT require re-emit to elevate.
+For unredacted consumers, the cleartext value MAY be emitted through a separate subscription, outbox, stream, or authorization boundary. Implementations SHOULD prefer write-time redaction with separate redacted/unredacted delivery surfaces over per-token pull-time rendering.
 
 ## 9. Audit
 
-Implementations MUST record every transport call (`next_event`, `ack_event`, `nack_event`, `record_linkback`, dead-letter requeue/drop, reconciliation resolve) with at minimum:
+Implementations MUST record every side-band mutating call (`record_linkback`, divergence report, abandon, semantic dead-letter requeue/drop, reconciliation resolve) with at minimum:
 
 | Field | Required |
 |---|---|
@@ -322,7 +322,7 @@ Implementations MUST record every transport call (`next_event`, `ack_event`, `na
 | `remote_addr` | Yes when called via HTTP |
 | `observed_at` | Yes |
 
-Audit records MUST distinguish `pull` from `pull_unredacted`.
+Delivery substrate audit (pull/ack/nack, sink delivery, retry) is implementation-defined and MAY live outside the Bidi store.
 
 Implementations MUST provide a configurable retention window with a default of 90 days.
 
@@ -335,7 +335,7 @@ Implementations MUST expose a per-subscription status view with at minimum:
 - dead-letter count
 - conflict-rejection rate (rolling window)
 - pending-linkback count and oldest-pending age
-- last-pull and last-ack timestamps
+- delivery-substrate status such as last delivery timestamp, last error, retry count, and delivery-DLQ count
 - reconciliation-open count
 
 Implementations MUST expose a single overall health status with values `healthy` / `degraded` / `paused` / `failing` and a list of triggering conditions. The mapping rules are at the implementation's discretion but MUST be documented.
@@ -351,20 +351,20 @@ A reference test corpus accompanies this specification at `tests/bidi-conformanc
 | `single_source_insert` | Ingest one triple under `urn:source:s1`; verify it appears in the resolved projection and emits one INSERT event. |
 | `two_source_latest_wins` | Ingest conflicting `sh:maxCount 1` values from `s1` and `s2`; verify the latest timestamp wins; verify one UPDATE event with sparse `base`. |
 | `echo_suppression` | Ingest from `s1`, mirror to `s2`, mirror back; verify no second event under the `normalize` rule. |
-| `late_binding_rewrite` | Ingest `s1` reference to `s2:foo` before `owl:sameAs(s2:foo, s1:bar)` is asserted; verify the next event for `s1:bar` carries `subject_resolved = s2:foo`; verify *queued* events do NOT retroactively rewrite. |
+| `late_binding_rewrite` | Ingest `s1` reference to `s2:foo` before `owl:sameAs(s2:foo, s1:bar)` is asserted; verify the next event for `s1:bar` carries `subject = s2:foo` and `subject_resolved = true`; verify already-rendered queued events do NOT retroactively rewrite. |
 | `linkback_round_trip` | Emit INSERT to a subscription with target-assigned IDs; record linkback with bare ID; verify `owl:sameAs` written; verify subsequent UPDATE for the same subject carries the rewritten IRI. |
 | `subscription_buffer_flush` | Same as linkback_round_trip but with a second event emitted before the linkback lands; verify the second event is buffered and flushes atomically when the linkback lands. |
 | `cas_divergence_escalates` | Receiver applies UPDATE; meanwhile target system has changed `actual` independently; verify CAS fails and reconciliation enqueues. |
 | `four_resolutions` | For each of the four resolution actions, drive the reconciliation to that resolution and assert the resulting state. |
-| `frame_change_reframe_queued` | Alter frame mid-flight; verify queued events render under the new frame. |
-| `frame_change_drain_then_switch` | Alter frame mid-flight under `drain_then_switch`; verify subscription pauses, drains under v1, resumes under v2. |
-| `redacted_predicate` | Frame predicate with `@redact`; pull with non-elevated token; verify `{"@redacted": true}`. Pull same event with `unredacted` token; verify cleartext. |
+| `frame_change_new_events_only` | Alter frame mid-flight; verify already-rendered queued events drain under the old frame and newly emitted events use the new frame. |
+| `frame_change_advanced_policy` | Optional: implementation that supports queued re-framing or drain-then-switch proves queued events are stored unrendered and do not race delivery. |
+| `redacted_predicate` | Frame predicate with `@redact`; verify the redacted delivery surface emits `{"@redacted": true}` and the unredacted delivery surface emits cleartext when configured. |
 | `scope_isolation` | Token for subscription A used against subscription B; verify rejection. |
 | `dead_letter_overflow` | Push events past `max_queue_depth` under each of the three overflow policies; verify expected dead-letter contents. |
-| `audit_completeness` | After a round of pull/ack/nack/linkback/resolve, verify each call has exactly one audit record. |
+| `audit_completeness` | After a round of linkback/divergence/resolve/dead-letter admin actions, verify each side-band mutating call has exactly one audit record. |
 | `convergence_random` | Apply 1000 random insert/update/delete operations from 4 sources; verify the resolved projection is independent of operation arrival order under `latest_wins`. |
 
-Implementations claiming Bidi-1.0 MUST pass scenarios 1–8. Implementations claiming Bidi-1.0-Ops MUST additionally pass 9–15.
+Candidate mapping: Bidi-1.0 would cover scenarios 1–8; Bidi-1.0-Ops would additionally cover 9–15. This draft does not make those gates normative yet.
 
 ## 12. Non-normative reference implementation
 
