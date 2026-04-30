@@ -1,401 +1,585 @@
-# Report: Superfluous Features & Removal Candidates for v1.0
+# Slimming Down for v1.0 — What Can We Drop?
 
-> **Audience:** Maintainers preparing the v1.0.0 cut.
-> **Scope:** A prioritized inventory of code, modules, plans, docs, and
-> developer artefacts that look like good removal candidates because they are
-> stubbed, experimental, niche, duplicated, or simply dead weight.
-> **Authority:** This is an opinion paper — every item is a *candidate* and
-> needs an explicit decision before deletion.
-
-## Method
-
-1. Walked every top-level directory and `src/` module.
-2. Cross-referenced [src/feature_status.rs](src/feature_status.rs) for the
-   honest status of each capability (`stub`, `experimental`, `planner_hint`,
-   `planned`, `degraded`, `implemented`).
-3. Grepped `#[allow(dead_code)]` annotations across the crate.
-4. Compared the [ROADMAP.md](ROADMAP.md) section structure against the
-   [plans/](plans/) directory and the contents of [docs/src/](docs/src/) and
-   [blog/](blog/).
-5. Looked for tracked developer artefacts (build logs, transient outputs)
-   that should never have been committed.
-
-## Summary
-
-| Tier | Theme | LOC removable (approx.) | Candidates |
-|---|---|---|---|
-| **Tier 0** | Tracked developer junk | ~5 KB | 8 root files |
-| **Tier 1** | Stubbed / planner-hint / dead-code modules | ~3 500 | 4–5 modules |
-| **Tier 2** | Experimental late-cycle features built on optional deps | ~7 000 | bidi, kge, llm, citus, flight, replication |
-| **Tier 3** | Niche feature modules with thin user demand | ~1 500 | r2rml, prov, temporal, tenant, ql_rewrite, sparqldl |
-| **Tier 4** | Plans / docs / blog / examples backlog | ~8 000 lines | 11 PLAN_OVERALL_ASSESSMENT files, cypher plans, speculative plans, stale blogs |
-| **Tier 5** | Adjacent ecosystem artefacts | n/a | dbt-pg-ripple, Helm chart, CloudNativePG, GraphRAG vocab |
-| **Tier 6** | Small organisational cleanups | small | duplicated docs, vendored vocab in `sql/` |
-
-Total addressable surface area: **~20 000 lines of code + ~100 markdown files
-+ several adjacent components.** Trimming the top two tiers alone reduces
-extension binary surface significantly and cuts the SQL API by dozens of
-`#[pg_extern]` symbols.
+> **What is this?** pg_ripple has grown a lot of features over 78 releases.
+> Some of those features are half-finished, rarely used, or duplicated by
+> other parts of the system. This document is a prioritized list of things we
+> could remove to make the v1.0 release smaller, simpler, and more honest
+> about what it actually does well.
+>
+> **Nothing here is decided yet.** Every item is a *candidate* for discussion.
 
 ---
 
-## Tier 0 — Tracked developer junk (delete now, no risk)
+## The big picture
 
-These are tracked files that look like one-off debugging artefacts. They are
-*not* in `.gitignore` but should be. Deleting them is mechanical.
+We found roughly **20 000 lines of code** and **100 documentation files** that
+are candidates for removal or relocation. That's a meaningful slice of the
+project. The items fall into six priority tiers, from "delete today with zero
+risk" through "think about it after v1.0."
 
-| File | Why it should go |
-|---|---|
-| [build_output.txt](build_output.txt) | Cached `cargo build` stdout from 2026-04-21. |
-| [cargo_check_output.txt](cargo_check_output.txt) | Cached `cargo check` output. |
-| [clippy_all.txt](clippy_all.txt) | Cached `clippy` output. |
-| [clippy_output.txt](clippy_output.txt) | Empty (0 bytes). |
-| [check_test_output.sh](check_test_output.sh) | 204-byte ad-hoc helper script, not referenced by `justfile` or CI. |
-| [sbom.json](sbom.json), [sbom_diff.md](sbom_diff.md) | SBOM artefacts; should be regenerated in CI, not committed. |
-| [DEEP_ANALYSIS_PROMPT.md](DEEP_ANALYSIS_PROMPT.md) | Internal prompt scaffold for the agent, not user-facing. Move to `.github/skills/` or delete. |
-
-**Action:** Delete and add the patterns to `.gitignore`. Generate `sbom.json`
-in CI as a build artefact attached to GitHub releases.
-
----
-
-## Tier 1 — Stubbed, dead-code, or planner-hint-only features
-
-These features advertise a capability but the implementation is either
-explicitly marked `#[allow(dead_code)]`, a `planner_hint` (not an executor),
-or a `planned` placeholder. They are the highest-leverage cuts because they
-represent *false advertising* on the v1.0 surface.
-
-### 1.1 [src/sparql/sparqldl.rs](src/sparql/sparqldl.rs) — SPARQL-DL routing
-- File starts with `#![allow(dead_code)]`.
-- Targets OWL T-Box queries, but no end-to-end execution is wired through the
-  optimizer.
-- Documented as experimental in [ROADMAP.md](ROADMAP.md) v0.58.0 but never
-  promoted to `implemented` in [src/feature_status.rs](src/feature_status.rs).
-- **Recommendation:** delete the module, remove the OWL-routing branch from
-  the planner, and document SPARQL-DL as out of scope for v1.0.
-
-### 1.2 [src/sparql/wcoj.rs](src/sparql/wcoj.rs) — Worst-Case Optimal Joins
-- `feature_status` entry: `"wcoj" → "planner_hint"` with the description
-  *"a true Leapfrog Triejoin executor is not implemented"*.
-- ~10×–100× speedup claim in the v0.36.0 release notes is not delivered by
-  this code; only join-order reordering is.
-- **Recommendation:** either retitle to `bgp_cycle_reorder` (small, honest) or
-  remove and merge the small reorder hint into the existing
-  [src/sparql/optimizer.rs](src/sparql/optimizer.rs). Delete the
-  `sparql_wcoj.sql` regress test or rename it.
-
-### 1.3 SHACL SPARQL **Rule** routing
-- `feature_status` entry: `"shacl_sparql_rule" → "planned"` ("parsed and
-  stored but not executed through the derivation kernel").
-- The parsing path consumes lines in `src/shacl/` for a feature that does
-  nothing.
-- **Recommendation:** strip the parser branch for `sh:SPARQLRule` and emit a
-  `feature_unsupported` notice at registration time.
-
-### 1.4 SPARQL 1.2
-- `feature_status` entry: `"sparql_12" → "planned"`. Blocked on upstream
-  `spargebra`. The `sparql-12` feature flag is enabled on `spargebra`/`sparopt`
-  in [Cargo.toml](Cargo.toml#L23-L24) for no functional benefit.
-- **Recommendation:** drop the `sparql-12` feature flag until the grammar
-  ships upstream. Delete [plans/sparql12_tracking.md](plans/sparql12_tracking.md)
-  or move it to `plans/future-directions.md`.
-
-### 1.5 Datalog dead-code surface
-- `grep -n '#\[allow(dead_code)\]' src/datalog/` returns 20+ hits across
-  [cache.rs](src/datalog/cache.rs), [stratify.rs](src/datalog/stratify.rs),
-  [compiler.rs](src/datalog/compiler.rs), [magic.rs](src/datalog/magic.rs),
-  [demand.rs](src/datalog/demand.rs), [coordinator.rs](src/datalog/coordinator.rs),
-  [parallel.rs](src/datalog/parallel.rs), [lattice.rs](src/datalog/lattice.rs).
-- Some are legitimate forward declarations; many are stale.
-- **Recommendation:** audit each `dead_code` allow and either wire it up,
-  expose it via `#[pg_extern]`, or delete it. Probable yield: 500–1 000 LOC.
-
----
-
-## Tier 2 — Late-cycle experimental features (highest weight to remove)
-
-Each item below was added in the v0.5x – v0.7x cycle, is marked
-`experimental` in [src/feature_status.rs](src/feature_status.rs), depends on
-an optional extension that is not always installed, and adds a large surface
-to maintain across migrations, SHACL/Datalog interactions, and HTTP routes.
-
-### 2.1 Bidirectional integration primitives — [src/bidi.rs](src/bidi.rs) *(2 491 LOC)*
-- Largest single source file in the crate.
-- Implements 15 BIDI-* features (conflict policies, normalize expressions,
-  upsert, diff, delete, ref, loop-safe subscriptions, CAS, linkback, outbox,
-  inbox, wire format, observability, performance budget).
-- Heavy dependency on pg-trickle (`outbox`/`inbox`).
-- **Recommendation:** move `pg_ripple_bidi` to a separate companion crate (or
-  defer to v1.1.0). The base extension does not need to ship 15 BIDI knobs to
-  reach v1.0. Spec already lives at
-  [docs/spec/rdf-bidi-integration-v1.md](docs/spec/rdf-bidi-integration-v1.md)
-  so the design is preserved.
-
-### 2.2 Knowledge-Graph Embeddings — [src/kge.rs](src/kge.rs) *(486 LOC)*
-- Whole module gated by `#![allow(dead_code)]`.
-- Requires pgvector; degrades silently when missing.
-- TransE/RotatE training inside a PostgreSQL extension is an unusual and
-  unscalable place for SGD; users with embedding workloads run them outside
-  PG.
-- **Recommendation:** remove the module, drop the
-  `_pg_ripple.kge_embeddings` table from the v1.0.0 migration, and document
-  as out-of-scope. Keep the simpler `embeddings` table used by hybrid search.
-
-### 2.3 LLM bridge — [src/llm/mod.rs](src/llm/mod.rs) *(966 LOC)*
-- Entries `llm_sparql_repair`, `sparql_nl_to_sparql`, and the `suggest_sameas`
-  alignment pipeline are all `experimental` and degrade silently with no LLM
-  endpoint.
-- A 1k-LOC HTTP/JSON LLM client inside a database extension is a maintenance
-  burden (TLS pinning, prompt-injection handling, model drift, rate-limit
-  semantics).
-- **Recommendation:** extract to a separate crate or to `pg_ripple_http` and
-  leave the database extension to receive the rewritten SPARQL via SPI. Cuts
-  the dep surface meaningfully.
-
-### 2.4 Citus integration — [src/citus.rs](src/citus.rs) *(1 333 LOC)*
-- Five Citus features in [src/feature_status.rs](src/feature_status.rs); only
-  `citus_brin_summarise` is `implemented`. The other four
-  (`citus_service_pruning`, `citus_hll_distinct`, `citus_nonblocking_promotion`,
-  `citus_rls_propagation`, `citus_multihop_pruning`) are `experimental` with
-  notes saying *"Full multi-node infrastructure required for end-to-end
-  testing"*.
-- The corresponding regress tests (`citus_*.sql`) cover SQL-only smoke paths,
-  not real cluster behaviour.
-- **Recommendation:** keep the BRIN-summarise glue and the small Citus
-  detection helper; move the rest behind a `pg_ripple_citus` companion crate
-  loaded only when Citus is detected. Strip the 4 unproven features from the
-  v1.0 surface.
-
-### 2.5 Arrow Flight bulk export — [src/flight.rs](src/flight.rs) + `pg_ripple_http/src/arrow_encode.rs`
-- `feature_status` entry: `"arrow_flight" → "experimental"`. Requires
-  `pg_ripple.arrow_flight_secret`, HMAC ticket plumbing, and a streaming
-  encoder that replicates work the upcoming PG18 logical decoding bridge
-  already does.
-- **Recommendation:** defer to v1.1. Keep the `parquet` dep only if BYOG
-  GraphRAG export still needs it; otherwise drop the `parquet` workspace
-  dependency too.
-
-### 2.6 RDF logical replication — [src/replication.rs](src/replication.rs)
-- Implements an `apply_worker` subscriber to a PG logical replication slot.
-- Conflicts with the v0.54.0 PG18 logical-decoding RDF bridge work (the
-  `replication.rs` worker is the "previous" approach).
-- **Recommendation:** consolidate into the PG18 replication path or drop one
-  of the two. Two parallel replication implementations doubles support cost.
-
-### 2.7 Live SPARQL subscriptions — [src/subscriptions.rs](src/subscriptions.rs)
-- `feature_status`: `"sparql_subscription" → "experimental"`. Pushes full
-  serialised SPARQL results through `pg_notify` (with an 8 KB cap and
-  `{"changed":true}` fallback). Cute, but not production-shaped.
-- **Recommendation:** keep behind a GUC turned `off` by default for v1.0; or
-  extract to `pg_ripple_http` SSE only.
-
-### 2.8 CDC bridge — [src/cdc_bridge_api.rs](src/cdc_bridge_api.rs) + [src/storage/cdc_bridge.rs](src/storage/cdc_bridge.rs)
-- pg-trickle outbox bridge, CDC lifecycle events. Overlaps significantly with
-  Tier 2.1 (bidi outbox) and Tier 2.6 (replication). Pick one.
-
-### 2.9 JSON Mapping — [src/json_mapping.rs](src/json_mapping.rs)
-- `feature_status`: `"json_mapping" → "experimental"`.
-- Function set overlaps with [src/framing/](src/framing/) (JSON-LD framing)
-  and the JSON-LD ingest path.
-- **Recommendation:** fold the useful pieces into `framing` and remove the
-  separate `register_json_mapping()` registry.
-
----
-
-## Tier 3 — Niche feature modules with thin demonstrated demand
-
-These modules each implement a real spec/feature, but with low usage signal
-and overlap with simpler primitives that already exist.
-
-| Module | LOC | Why it's a candidate |
+| Priority | What it is | How much weight |
 |---|---|---|
-| [src/r2rml.rs](src/r2rml.rs) | 290 | R2RML Direct Mapping — niche; covered better by `pg-trickle` + JSON mapping for most users. Plan ([plans/r2rml_virtual.md](plans/r2rml_virtual.md)) is unimplemented. |
-| [src/prov.rs](src/prov.rs) | 203 | Bulk-load PROV-O emissions; `prov_enabled` GUC defaults `off`. Could be a recipe in the cookbook. |
-| [src/temporal.rs](src/temporal.rs) | 194 | `point_in_time(ts)` GUC + `validFrom`/`validThrough` rewrite. Niche; SID-based time travel is fragile across promotions. |
-| [src/tenant.rs](src/tenant.rs) | 220 | `create_tenant` is a thin wrapper over `grant_graph_access` from v0.55.0. |
-| [src/sparql/ql_rewrite.rs](src/sparql/ql_rewrite.rs) | ~? | OWL 2 QL rewriter. The product positions itself around OWL 2 RL via Datalog; QL adds a second profile path. |
-| [src/sparql/embedding.rs](src/sparql/embedding.rs) | ~? | OpenAI-compatible embedding client living *inside* the SPARQL crate. Cross-cutting concern; probably belongs in `pg_ripple_http` or a tool. |
-
-**Recommendation:** for each, run a one-week telemetry/usage poll among
-existing pilots; if no concrete deployment depends on it, retire to a
-companion crate or delete.
+| **Tier 0** | Leftover build logs and scratch files | Trivial (just delete) |
+| **Tier 1** | Features that are advertised but not actually working | ~3 500 lines |
+| **Tier 2** | Big experimental features that depend on external tools | ~7 000 lines |
+| **Tier 3** | Small niche features with little proven demand | ~1 500 lines |
+| **Tier 4** | Outdated planning documents, blog posts, and examples | ~100 files |
+| **Tier 5** | Side-projects bundled in the same repo (Helm chart, dbt, etc.) | Several components |
+| **Tier 6** | Housekeeping and reorganisation | Small but worthwhile |
 
 ---
 
-## Tier 4 — Plans, docs, blog, examples (low risk, large surface)
+## Tier 0 — Leftover scratch files (safe to delete immediately)
 
-### 4.1 Stale assessment plans
-There are **eleven** numbered overall-assessment files:
+During development, some temporary files were accidentally saved into the
+repository. They serve no purpose for users or contributors.
 
-- [plans/PLAN_OVERALL_ASSESSMENT.md](plans/PLAN_OVERALL_ASSESSMENT.md)
-- [plans/PLAN_OVERALL_ASSESSMENT_2.md](plans/PLAN_OVERALL_ASSESSMENT_2.md)
-- [plans/PLAN_OVERALL_ASSESSMENT_3.md](plans/PLAN_OVERALL_ASSESSMENT_3.md)
-- [plans/PLAN_OVERALL_ASSESSMENT_4.md](plans/PLAN_OVERALL_ASSESSMENT_4.md)
-- [plans/PLAN_OVERALL_ASSESSMENT_6.md](plans/PLAN_OVERALL_ASSESSMENT_6.md)
-- [plans/PLAN_OVERALL_ASSESSMENT_7.md](plans/PLAN_OVERALL_ASSESSMENT_7.md)
-- [plans/PLAN_OVERALL_ASSESSMENT_8.md](plans/PLAN_OVERALL_ASSESSMENT_8.md)
-- [plans/PLAN_OVERALL_ASSESSMENT_9.md](plans/PLAN_OVERALL_ASSESSMENT_9.md)
-- [plans/PLAN_OVERALL_ASSESSMENT_10.md](plans/PLAN_OVERALL_ASSESSMENT_10.md)
-- [plans/PLAN_OVERALL_ASSESSMENT_11.md](plans/PLAN_OVERALL_ASSESSMENT_11.md)
-- [plans/PLAN_DOCUMENTATION_GAPS_1.md](plans/PLAN_DOCUMENTATION_GAPS_1.md)
+| File | What it is | Why drop it |
+|---|---|---|
+| `build_output.txt` | A saved copy of compiler output from April 21 | Stale; CI produces this fresh on every run |
+| `cargo_check_output.txt` | Another saved compiler log | Same reason |
+| `clippy_all.txt` / `clippy_output.txt` | Linting results (one is empty) | Regenerated on demand |
+| `check_test_output.sh` | A tiny throwaway script | Not used by any workflow |
+| `sbom.json` / `sbom_diff.md` | Software bill-of-materials snapshot | Should be generated automatically in CI, not stored |
+| `DEEP_ANALYSIS_PROMPT.md` | An internal working document | Not relevant to users or contributors |
 
-The most recent (`_11`) is the only one with active follow-ups; the rest are
-historical. **Recommendation:** archive #1–#10 under
-`plans/archive/assessments/` (or delete) and keep only the active one.
-
-### 4.2 Speculative / never-shipped plans
-Candidates to delete or move under `plans/future-directions.md` as
-single-paragraph stubs:
-
-- [plans/cypher.md](plans/cypher.md) and [plans/cypher-gql-transpiler.md](plans/cypher-gql-transpiler.md) and [plans/cypher/](plans/cypher/) — Cypher/GQL is *not* in the roadmap.
-- [plans/storage-tiering-slatedb-duckdb.md](plans/storage-tiering-slatedb-duckdb.md) — speculative; out of v1.0 scope.
-- [plans/link_prediction.md](plans/link_prediction.md), [plans/neuro-symbolic-record-linkage.md](plans/neuro-symbolic-record-linkage.md), [plans/graphrag.md](plans/graphrag.md), [plans/vector_sparql_hybrid.md](plans/vector_sparql_hybrid.md) — already implemented or speculative.
-- [plans/postgresql-triplestore-deep-dive.md](plans/postgresql-triplestore-deep-dive.md), [plans/postgresql-native-partitioning.md](plans/postgresql-native-partitioning.md), [plans/r2rml_virtual.md](plans/r2rml_virtual.md) — research notes; move to `docs/src/research/`.
-- [plans/agent_skills.md](plans/agent_skills.md) — agent operations note; should live under `.github/skills/` or AGENTS.md.
-- [plans/ecosystem/](plans/ecosystem/) — competitive landscape notes; great content but doesn't belong in `plans/`.
-
-### 4.3 Blog posts
-[blog/](blog/) contains **35** posts (~352 KB). Several promote features
-listed for removal in Tiers 1–3:
-
-- [blog/leapfrog-triejoin.md](blog/leapfrog-triejoin.md) — promotes WCOJ as
-  a real executor; misleading per [src/feature_status.rs](src/feature_status.rs).
-- [blog/probabilistic-datalog.md](blog/probabilistic-datalog.md) — there is
-  no probabilistic Datalog in the codebase.
-- [blog/neuro-symbolic-entity-resolution.md](blog/neuro-symbolic-entity-resolution.md) — depends on KGE/LLM modules in Tier 2.
-- [blog/r2rml-relational-to-graph.md](blog/r2rml-relational-to-graph.md) — depends on R2RML (Tier 3.1).
-- [blog/citus-shard-pruning-sparql.md](blog/citus-shard-pruning-sparql.md) — depends on `citus_service_pruning` (experimental in Tier 2.4).
-- [blog/temporal-time-travel-queries.md](blog/temporal-time-travel-queries.md) — depends on `temporal.rs` (Tier 3).
-- [blog/cdc-knowledge-graphs.md](blog/cdc-knowledge-graphs.md), [blog/ivm-pg-trickle-integration.md](blog/ivm-pg-trickle-integration.md), [blog/semantic-hub-trickle-relay.md](blog/semantic-hub-trickle-relay.md), [blog/bidi-relay-throughput.md](blog/) — coupled to bidi/CDC/replication.
-
-**Recommendation:** every blog post that describes a feature being trimmed
-must be deleted in the same commit as the code, or kept with an
-"Implementation status" disclaimer at the top.
-
-### 4.4 Examples
-[examples/](examples/) (17 files) contains several files coupled to the
-Tier 2 modules — `cdc_subscription.sql`, `citus_rebalance_with_trickle.sql`,
-`replication_setup.sql`, `llm_workflow.sql`, `sparql_repair.sql`,
-`graphrag_round_trip.sql`, `probabilistic_rules.sql`. Delete with their
-parent module if those modules are removed.
-
-### 4.5 Docs
-[docs/src/](docs/src/) is 33 199 lines across 153 markdown files. No
-specific page deletions are recommended without inspecting them, but the
-general rule is: every Tier 1–3 module deletion must drag down its
-`docs/src/reference/*.md` page and any `docs/src/features/*.md` chapter.
+**What to do:** Delete them all and add the filenames to `.gitignore` so they
+don't come back.
 
 ---
 
-## Tier 5 — Adjacent ecosystem artefacts
+## Tier 1 — Features that look real but aren't finished
 
-These live alongside the extension; each one is *a separate product* that the
-core team has signed up to maintain.
+These are the most important candidates because they appear in the product's
+feature list, but when you look under the hood, they either do nothing or do
+far less than advertised. Shipping them in v1.0 would mislead users.
 
-### 5.1 [clients/dbt-pg-ripple/](clients/dbt-pg-ripple/) — dbt adapter
-- Tiny (one adapter, one test). No traction signal.
-- **Recommendation:** move to its own repo (`grove/dbt-pg-ripple`) and let it
-  evolve independently.
+### 1.1 SPARQL-DL (querying OWL class hierarchies directly)
 
-### 5.2 [charts/pg_ripple/](charts/pg_ripple/) — Helm chart
-- 7 templates. Helm charts go stale fast and require their own release
-  cadence.
-- **Recommendation:** move to a `grove/pg-ripple-helm` repo and reference it
-  from the docs.
+**What it is:** A way to ask questions directly about the "vocabulary" of your
+knowledge graph — things like "which classes are subclasses of Animal?" —
+without having to store those relationships as regular data triples.
 
-### 5.3 [docker/Dockerfile.cnpg](docker/Dockerfile.cnpg) — CloudNativePG image
-- Ships an OpenShift/K8s-targeted image alongside the standalone
-  [Dockerfile](Dockerfile).
-- **Recommendation:** keep only one image in v1.0; CNPG can be a separate
-  release artefact.
+**What value it would bring:** Faster and more natural queries over ontology
+structure for users who work with complex OWL vocabularies.
 
-### 5.4 GraphRAG ontology files in `sql/`
-[sql/graphrag_enrichment_rules.pl](sql/graphrag_enrichment_rules.pl),
-[sql/graphrag_ontology.ttl](sql/graphrag_ontology.ttl),
-[sql/graphrag_shapes.ttl](sql/graphrag_shapes.ttl) — these are *vocab*, not
-extension SQL. They live in `sql/` because that directory is `EXTENSION`'s
-install dir, but PG's extension installer copies the entire directory.
-**Recommendation:** move to [sql/vocab/](sql/vocab/) (which already exists)
-or to [examples/](examples/).
-
-### 5.5 [sql/basic_crud.sql](sql/basic_crud.sql), [sql/dictionary.sql](sql/dictionary.sql)
-- Standalone demo scripts in the extension SQL directory. Same problem as
-  5.4: PG installs them. **Recommendation:** move to [examples/](examples/).
+**Why consider dropping it:** The code is entirely marked as unused. It was
+started in v0.58.0 but never wired into the actual query engine. If you call
+it, nothing happens. Rather than ship dead code, we should remove it and
+honestly say "not supported in v1.0."
 
 ---
 
-## Tier 6 — Small organisational cleanups
+### 1.2 Worst-Case Optimal Joins (the "Leapfrog" algorithm)
 
-| Item | Action |
+**What it is:** A cutting-edge algorithm for queries that have cycles — for
+example, "find all triangles where A knows B, B knows C, and C knows A." The
+traditional approach produces huge intermediate results; this algorithm avoids
+that by intersecting sorted data streams.
+
+**What value it would bring:** Dramatic speedups (10–100×) on cyclic graph
+patterns, which are common in social-network and fraud-detection queries.
+
+**Why consider dropping it:** We only implemented the easy part — reordering
+which tables are joined first. The actual leapfrog execution engine was never
+built. Our release notes claim a big speedup that isn't really delivered. We
+should either rename this to what it actually is (a join-order hint) or merge
+the small useful piece into the existing optimizer module and drop the
+misleading name.
+
+---
+
+### 1.3 SHACL SPARQL Rules (deriving new data from SHACL shapes)
+
+**What it is:** SHACL is our data-quality system — it lets you define what
+"valid" data looks like. SHACL *rules* go a step further: they can
+automatically generate new data when certain patterns are found. Think of it
+like database triggers, but for knowledge graphs.
+
+**What value it would bring:** Users could express complex derivation logic
+using the same SHACL language they already use for validation, without
+learning Datalog.
+
+**Why consider dropping it:** The system accepts and stores these rules, but
+never actually runs them. The execution engine hasn't been built. This is
+confusing for users who define rules and then wonder why nothing happens.
+
+---
+
+### 1.4 SPARQL 1.2 support
+
+**What it is:** The next version of the SPARQL query language standard,
+currently being drafted by the W3C working group.
+
+**What value it would bring:** Future-proofing — when the standard is
+finalized, we'd already support it.
+
+**Why consider dropping it:** The upstream library we depend on hasn't shipped
+SPARQL 1.2 grammar support yet, so our "support" is just a configuration
+flag that does nothing. We're paying a small maintenance cost for zero
+functionality. We can easily re-add this once the standard is actually ready.
+
+---
+
+### 1.5 Unused code in the Datalog engine
+
+**What it is:** The Datalog module (our rule-based reasoning engine) contains
+over 20 places where code is explicitly marked as "not currently used."
+
+**What value it would bring:** Some of it may be forward-looking scaffolding
+for future features.
+
+**Why consider dropping it:** Much of it appears to be leftover from
+refactoring — functions that were replaced by newer versions but never
+cleaned up. Every unused function is a maintenance burden and a source of
+confusion. We should audit each one: if it's needed, wire it up; otherwise,
+delete it.
+
+---
+
+## Tier 2 — Big experimental features (largest weight savings)
+
+These are substantial features — each hundreds or thousands of lines of code
+— that were added in recent development cycles. They're all marked
+"experimental" and most require additional software to be installed alongside
+pg_ripple. They represent the largest opportunity to slim down the extension.
+
+### 2.1 Bidirectional sync (two-way data exchange between systems)
+
+**What it is:** A comprehensive framework for synchronizing data between
+pg_ripple and external systems. It handles conflicts (what happens when both
+sides change the same data?), deduplication, upserts, deletes, and
+back-references. Think of it like two-way Google Drive sync, but for
+knowledge-graph data.
+
+**What value it would bring:** Enterprise deployments where pg_ripple needs
+to both consume data from and publish data to other systems in real time, with
+no data loss or duplication.
+
+**Why consider dropping it:** At 2 500 lines, this is the single largest
+source file in the entire project. It implements 15 separate sub-features, many
+of which depend on our sibling project pg-trickle. It's a complex, hard-to-test
+subsystem that hasn't been battle-tested in production. The core pg_ripple
+value proposition (store RDF, run SPARQL) doesn't require it. It could live as
+a separate add-on module shipped after v1.0.
+
+---
+
+### 2.2 Knowledge-Graph Embeddings (machine-learning on graph structure)
+
+**What it is:** A way to train mathematical vector representations ("embeddings")
+of entities in the knowledge graph using algorithms called TransE and RotatE.
+These embeddings can then be used to find entities that are structurally
+similar — for example, finding companies that look like other companies based
+on their relationships.
+
+**What value it would bring:** Entity alignment (matching the same entity
+across different datasets), link prediction (guessing missing relationships),
+and similarity search.
+
+**Why consider dropping it:** The entire module is marked as unused code.
+Training machine-learning models inside a database extension is unusual —
+users who need this capability typically run it in Python with PyTorch or
+similar tools where they have GPU access and better tooling. The simpler
+"store and search pre-computed embeddings" feature (which we'd keep) covers
+the common use case.
+
+---
+
+### 2.3 LLM / AI integration (natural-language to SPARQL)
+
+**What it is:** Three AI-powered features: (a) translating plain English
+questions into SPARQL queries, (b) automatically fixing broken SPARQL queries
+by asking an LLM to repair them, and (c) using embeddings to suggest that
+two entities in different datasets might be the same thing.
+
+**What value it would bring:** Makes the system accessible to non-technical
+users who can't write SPARQL, and provides intelligent data-matching
+capabilities.
+
+**Why consider dropping it:** This is essentially an HTTP client that talks
+to external AI services (like OpenAI). Putting that inside a database
+extension means we have to handle TLS certificates, rate limiting, prompt
+injection attacks, API key management, and model changes — all inside the
+database process. This is better handled by the HTTP companion service
+(`pg_ripple_http`) or by application code outside the database. When no AI
+endpoint is configured, all three features silently do nothing.
+
+---
+
+### 2.4 Citus distributed database support
+
+**What it is:** Integration with Citus, a PostgreSQL extension that
+distributes tables across multiple servers for horizontal scaling. Our Citus
+support would shard the triple store across many machines.
+
+**What value it would bring:** The ability to handle very large knowledge
+graphs (billions of triples) by spreading the work across a cluster of
+database servers.
+
+**Why consider dropping it:** Of the five Citus features we've implemented,
+only one is fully working. The other four are marked "experimental" with
+notes saying they've never been tested on an actual multi-server cluster.
+We're shipping 1 300 lines of code that was only ever tested with mocked-up
+single-server scenarios. The recommendation is to keep the one working piece
+and move the rest to a separate companion module that's loaded only when
+Citus is detected.
+
+---
+
+### 2.5 Arrow Flight bulk export (high-speed data streaming)
+
+**What it is:** Apache Arrow Flight is a high-performance protocol for
+streaming large datasets. Our implementation lets analytics tools pull
+millions of triples out of pg_ripple very quickly in a columnar format.
+
+**What value it would bring:** Fast data export for data science and
+analytics workloads — think "dump everything into a Jupyter notebook."
+
+**Why consider dropping it:** It requires cryptographic ticket signing,
+secret management, and a dedicated streaming encoder. Much of this
+overlaps with work already done in our PG18 logical-decoding bridge and with
+the GraphRAG Parquet export. It adds complexity without a clear user asking
+for it specifically. We could defer it to v1.1.
+
+---
+
+### 2.6 RDF logical replication (keeping replicas in sync)
+
+**What it is:** A background worker that subscribes to PostgreSQL's built-in
+change stream and replays triple inserts/deletes onto a read-only replica of
+the knowledge graph.
+
+**What value it would bring:** High availability — if the primary database
+goes down, a replica has an up-to-date copy of the knowledge graph.
+
+**Why consider dropping it:** We actually have *two* replication approaches
+in the codebase. This older one (`replication.rs`) and a newer one from
+v0.54.0 that uses PG18's native logical decoding. Maintaining two parallel
+replication systems doubles the testing and support burden. We should pick
+one and drop the other.
+
+---
+
+### 2.7 Live SPARQL subscriptions (push notifications for query results)
+
+**What it is:** Register a SPARQL query and get notified every time its
+results change. The notification is delivered via PostgreSQL's built-in
+NOTIFY/LISTEN mechanism.
+
+**What value it would bring:** Real-time dashboards that update automatically
+when the underlying data changes, without polling.
+
+**Why consider dropping it:** The implementation hits PostgreSQL's 8 KB
+notification payload limit, so for any non-trivial query result, it just sends
+`{"changed": true}` and the client has to re-query anyway. It's a neat
+concept that doesn't scale to production use. The HTTP companion service has
+Server-Sent Events (SSE) which is a more robust delivery mechanism — keep it
+there only if anywhere.
+
+---
+
+### 2.8 CDC bridge (change-data-capture outbox)
+
+**What it is:** A bridge that captures every write to the knowledge graph and
+publishes it as a structured event to pg-trickle's outbox system, suitable
+for downstream consumers like Kafka, Debezium, or webhook endpoints.
+
+**What value it would bring:** Event-driven architectures where other systems
+need to react to knowledge-graph changes in near real-time.
+
+**Why consider dropping it:** It overlaps heavily with both the bidirectional
+sync (Tier 2.1, which has its own outbox) and the replication worker (Tier
+2.6). We have three different systems for "tell the outside world about
+changes." We should pick one and commit to it.
+
+---
+
+### 2.9 JSON Mapping (named JSON-LD context registry)
+
+**What it is:** A way to register a named mapping between JSON fields and RDF
+properties, so you can import plain JSON documents and export graph data as
+familiar JSON structures using a single registered template.
+
+**What value it would bring:** Simplifies integration with REST APIs that
+speak JSON — you define the mapping once and use it in both directions.
+
+**Why consider dropping it:** The functionality largely overlaps with our
+existing JSON-LD framing engine (which already translates between flat RDF
+and nested JSON) and with the JSON-LD ingest path. Having two slightly
+different approaches to "JSON ↔ RDF" confuses users. We should fold the
+useful bits into the framing module and remove the separate registry.
+
+---
+
+## Tier 3 — Small niche features with little proven demand
+
+These are small, real features — each implements a recognized standard or
+pattern — but they serve narrow use cases and overlap with other capabilities
+that already exist in pg_ripple.
+
+### 3.1 R2RML (mapping relational tables to RDF)
+
+**What it is:** A W3C standard for defining how rows in a relational SQL
+table should be transformed into RDF triples. You write a mapping document
+that says "column X becomes predicate Y" and the system generates triples.
+
+**Value:** Useful for organizations that want to expose their existing SQL
+databases as a knowledge graph without moving data.
+
+**Why consider dropping:** Only about 290 lines and the more advanced "virtual
+mapping" plan was never implemented. Most users who want this workflow use
+pg-trickle or JSON mapping instead, which are more flexible.
+
+---
+
+### 3.2 Provenance tracking (PROV-O)
+
+**What it is:** Automatically records *who* loaded *what* data and *when*,
+using the W3C PROV-O vocabulary. Every bulk-load operation generates a small
+audit trail describing the activity, the person responsible, and what was
+produced.
+
+**Value:** Compliance and auditing — "show me the lineage of this data."
+
+**Why consider dropping:** The feature defaults to "off" and adds overhead to
+every load. The same information can be recorded by application code or by a
+cookbook recipe without building it into the extension core.
+
+---
+
+### 3.3 Temporal queries (time-travel)
+
+**What it is:** The ability to ask "what did the knowledge graph look like at
+3pm yesterday?" by setting a point-in-time threshold that filters out
+triples that were inserted after that moment.
+
+**Value:** Reproducibility, debugging, and regulatory compliance (some
+industries require the ability to reconstruct historical states).
+
+**Why consider dropping:** The implementation is fragile — it relies on
+internal statement IDs which can shift when data is reorganized during
+maintenance operations. It's only 194 lines, but it promises more than it
+can reliably deliver.
+
+---
+
+### 3.4 Multi-tenancy helpers
+
+**What it is:** A convenience wrapper that creates a PostgreSQL role, assigns
+it to a named graph, and optionally enforces a quota on how many triples that
+tenant can store.
+
+**Value:** SaaS-style deployments where multiple customers share one database
+but each can only see their own data.
+
+**Why consider dropping:** It's just a thin wrapper around `grant_graph_access()`
+which already exists and works. Users can achieve the same result with two SQL
+calls. The wrapper adds 220 lines of code for minimal convenience.
+
+---
+
+### 3.5 OWL 2 QL query rewriting
+
+**What it is:** The OWL standard defines several "profiles" (subsets of the
+language). Our main reasoning engine implements OWL 2 RL (Rule Language).
+This module adds a second profile — OWL 2 QL (Query Language) — which works
+by rewriting SPARQL queries rather than materializing inferences.
+
+**Value:** Faster queries for users who have OWL 2 QL ontologies, without the
+storage overhead of pre-computing all inferences.
+
+**Why consider dropping:** We're positioning pg_ripple around OWL 2 RL
+(Datalog-based reasoning). Supporting a second OWL profile adds cognitive
+load for users and testing burden for us. Very few users have asked for
+OWL 2 QL specifically.
+
+---
+
+### 3.6 Embedding client inside the SPARQL module
+
+**What it is:** An HTTP client that calls OpenAI-compatible embedding APIs,
+bundled inside the query engine module.
+
+**Value:** Powers the `pg:similar()` function in SPARQL queries for
+vector-similarity search.
+
+**Why consider dropping:** An HTTP client for calling external AI services
+doesn't belong inside the query-translation layer. It should live in the HTTP
+companion service or be a standalone utility. This is a code-organization
+issue more than a feature-removal issue.
+
+---
+
+## Tier 4 — Outdated documents, blog posts, and examples
+
+Over 78 releases, we've accumulated a lot of written material. Some of it
+describes features that were never built, promotes capabilities that are
+misleading, or duplicates content in other locations.
+
+### 4.1 Old assessment documents
+
+We have **eleven** numbered "overall assessment" files from past code-quality
+reviews. Only the latest one (#11) is still relevant. The older ten are
+historical records that clutter the `plans/` directory.
+
+**What to do:** Archive #1–#10 into a subfolder or delete them.
+
+### 4.2 Plans for features we're not building
+
+Several planning documents describe features that are *not* on the roadmap:
+
+- **Cypher/GQL query language** — We have three documents exploring Cypher
+  support, but it's not planned. This is noise.
+- **Storage tiering (SlateDB/DuckDB)** — Speculative architecture research
+  that won't happen for v1.0.
+- **Link prediction, neuro-symbolic record linkage** — Research topics, not
+  product plans.
+- **Competitive landscape notes** — Great content, but it belongs in research
+  docs, not in `plans/`.
+
+**What to do:** Move to a `docs/research/` folder or consolidate into a
+single "future directions" document.
+
+### 4.3 Blog posts that describe unimplemented features
+
+Several blog posts market features that don't work as described:
+
+- The **Leapfrog Triejoin** post describes a full custom executor that was
+  never built (only the join-reorder hint exists).
+- The **Probabilistic Datalog** post describes a feature that doesn't exist
+  in the code at all.
+- Posts about **Citus shard pruning**, **temporal queries**, **R2RML**, and
+  **neuro-symbolic entity resolution** all depend on experimental or niche
+  modules we're considering removing.
+
+**What to do:** If we remove a feature, we must also remove or update its
+blog post. A post promoting non-existent functionality is worse than no post.
+
+### 4.4 Examples and documentation pages
+
+Seventeen example SQL scripts and 153 documentation pages exist. Several are
+tightly coupled to the features above. When a feature is removed, its
+examples and docs pages should go with it.
+
+---
+
+## Tier 5 — Side-projects that could live in their own repositories
+
+These are separate tools that happen to be bundled in the same Git repository.
+Each one has its own release cadence and its own users. Bundling them with
+the core extension means every release of pg_ripple implicitly "releases"
+all of them too, even if they haven't changed.
+
+### 5.1 dbt adapter (`clients/dbt-pg-ripple/`)
+
+**What it is:** An adapter for the dbt (data build tool) ecosystem that lets
+dbt manage SPARQL views and transformations.
+
+**Why consider separating:** It's tiny (one file, one test) with no evidence
+of active users. It would be better served as its own repository with its own
+versioning.
+
+### 5.2 Helm chart (`charts/pg_ripple/`)
+
+**What it is:** A Kubernetes deployment template for running pg_ripple in
+cloud-native environments.
+
+**Why consider separating:** Helm charts evolve on a different cadence from
+the database extension. Keeping them together means chart updates require
+tagging a new extension release.
+
+### 5.3 CloudNativePG Docker image
+
+**What it is:** A specialized container image for the CloudNativePG Kubernetes
+operator (used for running PostgreSQL on OpenShift/K8s).
+
+**Why consider separating:** We already have a standard Dockerfile. Two
+container images doubles the build and testing surface for each release.
+
+### 5.4 GraphRAG vocabulary files in the wrong directory
+
+**What it is:** Ontology and shape files for the GraphRAG export feature,
+currently placed in the `sql/` directory.
+
+**Why consider moving:** PostgreSQL's extension installer copies *everything*
+in `sql/` when the extension is installed. These vocabulary files aren't SQL
+and shouldn't be installed alongside migration scripts.
+
+---
+
+## Tier 6 — Housekeeping
+
+| What | Why it matters |
 |---|---|
-| Tracked [pg_regress_results/regression.diffs](pg_regress_results/regression.diffs) | The directory is in `.gitignore` but `regression.diffs` and `regression.out` are still tracked. Remove from history. |
-| Many top-level `.md` files (`AGENTS.md`, `RELEASE.md`, `CONTRIBUTING.md`, `ROADMAP.md`, `README.md`, `CHANGELOG.md`, `DEEP_ANALYSIS_PROMPT.md`) | Move dev-facing docs (`AGENTS.md`, `RELEASE.md`, `DEEP_ANALYSIS_PROMPT.md`) under `.github/` or `docs/internal/`. |
-| `src/stats.rs` (4 KB) vs `src/stats_admin.rs` (20 KB) | Two files, one concept. Merge. |
-| `src/views.rs` + `src/views_api.rs` and similar `_api.rs` siblings | Eight `_api.rs` modules contain only `#[pg_extern]` shims. Consider rolling them into their feature module behind a `mod api;` to halve the file count. |
-| 81 SQL migration files in `sql/` | Compact early migrations (`pg_ripple--0.1.0--*.sql` … `pg_ripple--0.5.x--*.sql`) into a single `pg_ripple--0.x--1.0.0.sql` "from-scratch" path for v1.0. Keep the granular paths for users on intermediate versions, but stop accruing one per release. |
-| 128 GUCs registered in [src/gucs/registration.rs](src/gucs/registration.rs) (1 815 lines) | Audit for unused / "experimental-only" GUCs and move them under a `pg_ripple.experimental.*` namespace. |
-| 17 `roadmap/` versions with "full" plus "summary" markdown | Once tagged, the "plan" version of a release becomes historical; move tagged plans into `roadmap/archive/`. |
-| [tests/jena/](tests/jena/) (7.5 MB) | Conformance vendor data. Keep as a submodule or download in CI rather than in the repo. |
-| [tests/w3c/](tests/w3c/) (5.0 MB) | Same — fetch via [scripts/fetch_w3c_tests.sh](scripts/fetch_w3c_tests.sh) on demand. |
+| Old test results still tracked in Git | Adds noise to the repo history |
+| 128 configuration knobs | Many are for experimental features; hard for users to know which ones matter |
+| 81 SQL migration files | Users upgrading from v0.1 must walk through 81 steps; we should offer a direct path |
+| 12.5 MB of third-party test data in the repo | Makes cloning slow; could be downloaded on demand in CI |
+| Developer-facing docs at the top level | `AGENTS.md`, `RELEASE.md`, etc. are for contributors, not users; could live under `.github/` |
+| Duplicate file patterns (e.g., `views.rs` + `views_api.rs`) | Eight modules have this split where one file is just a thin wrapper around the other |
 
 ---
 
-## Suggested ordering
+## Recommended order of work
 
-1. **Day 0 (no risk):** Tier 0 + Tier 6 (junk files, vendored test fixtures).
-2. **Day 1 (no public-API impact):** Tier 1 (stubs, dead code, planner-hint
-   relabelling, `sparql-12` feature flag).
-3. **Day 2 (deprecate-then-remove):** Tier 2.5 (Arrow Flight), 2.6
-   (replication.rs duplicate), 2.7 (subscriptions), 2.8 (CDC bridge), 2.9
-   (json_mapping). Mark deprecated in v0.79.x; delete in v1.0.0.
-4. **v1.0.0 cut:** Tier 2.1 (bidi → companion crate), 2.2 (KGE → delete),
-   2.3 (LLM → companion crate), 2.4 (Citus → companion crate).
-5. **Post-1.0 housekeeping:** Tier 3 modules; Tier 5 ecosystem extractions;
-   Tier 4 doc/blog/example sweeps.
+1. **Immediate (zero risk):** Delete scratch files (Tier 0) and do
+   housekeeping (Tier 6). This has no effect on functionality.
 
----
+2. **Before v1.0 (no user-facing API change):** Remove dead code and
+   unfinished stubs (Tier 1). This makes the feature list honest.
 
-## Risks and counter-arguments
+3. **Deprecation period (announce in v0.79):** Mark the smaller Tier 2
+   features as deprecated (Arrow Flight, old replication, subscriptions, CDC
+   bridge, JSON mapping). Remove them in v1.0.0.
 
-- **Marketing surface vs. production surface.** Several Tier 2/3 features
-  exist primarily to support blog posts and the "what makes pg_ripple
-  different" pitch. Cutting them shrinks the marketing story; keep this
-  constraint in mind when removing per item.
-- **Reversibility.** Modules deleted in v1.0 can be restored from git
-  history, but their *catalog tables* (e.g. `_pg_ripple.kge_embeddings`)
-  cannot be silently re-added later without a migration. Move the
-  table-creation DDL to the migration that drops the module so the rollback
-  path is tested.
-- **Citus and pg-trickle integration.** Both extensions are first-party
-  ecosystem siblings; users may legitimately expect them in the box. Splitting
-  them into companion crates is preferable to deletion.
-- **HTTP companion (`pg_ripple_http`) coupling.** Several Tier 2 features
-  have HTTP route handlers in
-  [pg_ripple_http/src/routing.rs](pg_ripple_http/src/routing.rs); deletions
-  must remove the corresponding routes in lockstep, or the COMPAT-01 version
-  gate will report missing endpoints.
+4. **At the v1.0.0 release:** Move the large Tier 2 features (bidirectional
+   sync, KGE, LLM, Citus) into separate companion packages. They can evolve
+   on their own schedule and ship for v1.1 when ready.
+
+5. **After v1.0:** Evaluate Tier 3 modules based on user feedback. Extract
+   side-projects (Tier 5) into their own repos. Clean up documentation and
+   blog posts (Tier 4).
 
 ---
 
-## Concrete first PR (proposed)
+## Things to keep in mind
 
-A single pull request with no behavioural impact and an immediately visible
-LOC reduction:
+**Removing features has trade-offs:**
 
-1. Delete Tier 0 files and update [.gitignore](.gitignore).
-2. Delete Tier 1.1 ([src/sparql/sparqldl.rs](src/sparql/sparqldl.rs)) and
-   the `sparql_12` feature flag in [Cargo.toml](Cargo.toml).
-3. Archive Tier 4.1 (move the ten old `PLAN_OVERALL_ASSESSMENT_*.md` files
-   under `plans/archive/assessments/`).
-4. Move Tier 5.4–5.5 SQL fixtures out of `sql/`.
-5. Remove tracked [pg_regress_results/regression.diffs](pg_regress_results/regression.diffs)
-   and [pg_regress_results/regression.out](pg_regress_results/regression.out).
+- **Marketing vs. reality.** Some of these features exist because they tell a
+  compelling story ("we have AI integration!" or "we scale to billions of
+  triples!"). Removing them makes the product sound smaller, even if it makes
+  it more solid. That's a legitimate tension to weigh.
 
-Net outcome: smaller install footprint, clearer `plans/` directory, no
-behaviour change.
+- **We can always bring things back.** Code deleted from v1.0 lives on in Git
+  history and can be restored. But database tables that are dropped require a
+  migration to re-add, so we need to plan the removal carefully.
+
+- **Companion modules vs. deletion.** For big features like Citus and
+  bidirectional sync, moving them to a separate package is better than
+  deleting them. Users who need them can install the add-on; users who don't
+  get a smaller, simpler core.
+
+- **The HTTP companion is tightly coupled.** Several experimental features
+  have web endpoints in the HTTP service. When we remove a feature from the
+  core, we must also remove its HTTP routes at the same time.
 
 ---
 
-*Generated as a planning artefact; not authoritative. Discuss each tier
-before acting.*
+## Suggested first step
+
+A single pull request that is completely safe and immediately beneficial:
+
+1. Delete the eight scratch files (Tier 0)
+2. Remove the dead SPARQL-DL module (Tier 1.1)
+3. Archive old planning documents (Tier 4.1)
+4. Move demo SQL scripts out of the extension install directory (Tier 5.4/5.5)
+
+This gives us a smaller, cleaner project with no behaviour change and no risk
+of breaking anything.
+
+---
+
+*This document is a discussion starter, not a decision. Each item needs an
+explicit go/no-go before anyone starts deleting code.*
