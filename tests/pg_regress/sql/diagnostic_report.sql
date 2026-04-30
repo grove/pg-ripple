@@ -28,7 +28,7 @@ WHERE key IN (
 ORDER BY key;
 
 -- schema_version reflects the last schema change; compiled_version reflects the
--- Rust binary. For v0.75.0 there are no schema changes so sv stays at 0.74.0.
+-- Rust binary. For v0.77.0 schema_version was bumped, so sv = cv = 0.77.0.
 SELECT
     (SELECT value FROM pg_ripple.diagnostic_report() WHERE key = 'schema_version') AS sv,
     (SELECT value FROM pg_ripple.diagnostic_report() WHERE key = 'compiled_version') AS cv;

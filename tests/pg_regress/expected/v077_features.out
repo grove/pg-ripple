@@ -254,7 +254,6 @@ SELECT pg_ripple.assert_cas(
 -- 8a. abandon_linkback on unknown event_id emits a NOTICE and returns void.
 --     Suppress the NOTICE so expected output stays stable.
 SET client_min_messages = warning;
-SET
 SELECT pg_ripple.abandon_linkback('00000000-0000-0000-0000-000000000001'::uuid);
  abandon_linkback 
 ------------------
@@ -262,8 +261,6 @@ SELECT pg_ripple.abandon_linkback('00000000-0000-0000-0000-000000000001'::uuid);
 (1 row)
 
 RESET client_min_messages;
-RESET
-
 -- --- Part 9: BIDI-INBOX-01 — install_bidi_inbox ---------------------------
 -- 9a. install_bidi_inbox creates the table and trigger.
 SELECT pg_ripple.install_bidi_inbox('pg_ripple_inbox.test_inbox');
