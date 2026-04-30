@@ -1379,6 +1379,13 @@ INSERT INTO _pg_ripple.schema_version (version, upgraded_from, installed_at)
 
 pgrx::extension_sql!(
     r#"
+-- ── SCHEMA-NORM-04: drop target_graph TEXT from construct_rules (uses target_graph_id) ──
+-- The v0.63.0 schema created this column; v0.74.0 removes it in favour of the
+-- BIGINT foreign key target_graph_id. Must come before any code that INSERTs
+-- into construct_rules without providing target_graph.
+ALTER TABLE _pg_ripple.construct_rules
+    DROP COLUMN IF EXISTS target_graph;
+
 -- ── IDX-01 ────────────────────────────────────────────────────────────────────
 CREATE INDEX IF NOT EXISTS idx_statements_predicate
     ON _pg_ripple.statements (predicate_id);
