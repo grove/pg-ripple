@@ -1,10 +1,17 @@
-CREATE EXTENSION
+-- pg_regress test: v0.75.0 feature gate
+--   PROPPATH-TEST-01:          Property path inside OPTIONAL and GRAPH with vp_rare
+--   FEATURE-STATUS-JOURNAL-01: mutation_journal entry in feature_status()
+--   RLS-ERROR-01/ROLE-DOC-01:  RLS error surfacing and role-name documentation
+--   UNWRAP-AUDIT-01:           Verified: no bare unwrap() in production paths
+--   FUZZ-URL-01:               url_host_parser fuzz target added (see fuzz/fuzz_targets/)
+CREATE EXTENSION IF NOT EXISTS pg_ripple;
+SELECT pg_ripple.triple_count() >= 0 AS library_loaded;
  library_loaded 
 ----------------
  t
 (1 row)
 
-SET
+SET search_path TO pg_ripple, public;
 -- --- Part 1: FEATURE-STATUS-JOURNAL-01 -----------------------------------
 -- 1a. mutation_journal row is present with implemented status.
 SELECT status AS mutation_journal_status
@@ -73,7 +80,7 @@ $$);
 (1 row)
 
 -- 2e. Load one triple into a named graph.
-SELECT pg_ripple.load_ntriples(
+SELECT pg_ripple.load_ntriples_into_graph(
     '<https://pp75.test/d> <https://pp75.test/parent> <https://pp75.test/e> .',
     'https://pp75.test/graph1'
 ) = 1 AS one_triple_in_named_graph;

@@ -55,7 +55,7 @@ FROM pg_ripple.sparql($$
 $$);
 
 -- 2e. Load one triple into a named graph.
-SELECT pg_ripple.load_ntriples(
+SELECT pg_ripple.load_ntriples_into_graph(
     '<https://pp75.test/d> <https://pp75.test/parent> <https://pp75.test/e> .',
     'https://pp75.test/graph1'
 ) = 1 AS one_triple_in_named_graph;
