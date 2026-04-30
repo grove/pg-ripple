@@ -109,7 +109,7 @@ Field semantics:
 - **`event_id`**: globally unique. Used for traceability and side-band callbacks such as linkback, divergence reporting, and abandon.
 - **`event_type`**: one of `INSERT`, `UPDATE`, `DELETE`. SHACL semantics (atomic delete-then-insert) collapse to `UPDATE`.
 - **`subject`**: the canonical hub IRI of the changed entity.
-- **`subject_resolved`**: boolean. `true` means `subject` is already the IRI the receiver should use after late-binding rewrite under the receiver's `iri_pattern`; `false` means the event is an unresolved INSERT whose target-assigned ID must be reported via linkback before follow-up events are emitted.
+- **`subject_resolved`**: boolean. `true` means `subject` is already the IRI the receiver should use after late-binding rewrite under the receiver's `iri_match_pattern`; `false` means the event is an unresolved INSERT whose target-assigned ID must be reported via linkback before follow-up events are emitted.
 - **`graph`**: the source graph IRI. The receiver uses this for echo detection (do not re-ingest events whose `graph` matches the receiver's own source graph).
 - **`timestamp`**: the event emit time, RFC 3339.
 - **`@context`**: JSON-LD context for `after` and `base`. SHOULD be a stable URL or a small inline context.
@@ -188,7 +188,7 @@ When the target system assigns the canonical ID for a fresh INSERT (e.g. an ERP 
 
 The source store:
 
-1. Expands `target_id` through the receiving graph's `iri_pattern` to produce the target IRI.
+1. Expands `target_id` through the receiving graph's `iri_template` to produce the target IRI.
 2. Atomically writes `owl:sameAs` between the original `subject` and the expanded target IRI.
 3. Flushes any subscription-buffered subsequent events for that subject (§5.4).
 
@@ -207,7 +207,7 @@ If the linkback never lands (operator abandonment, target system failure), buffe
 When emitting an event for subject `s` to a subscription whose `target_graph` is `g`:
 
 1. Compute the equivalence class `E = closure_owl_sameAs(s)`.
-2. If any member of `E` matches the `iri_pattern` for `g`, emit that member as `subject` and set `subject_resolved = true`.
+2. If any member of `E` matches the `iri_match_pattern` for `g`, emit that member as `subject` and set `subject_resolved = true`.
 3. Otherwise, emit the canonical hub IRI as `subject` and set `subject_resolved = false` only for unresolved INSERTs that require linkback; for other event types, emit according to the implementation's missing-rewrite policy.
 
 This rewrite is **late-binding**: it happens at emit time, not at write time. Closure changes (new `owl:sameAs` discovered) MUST NOT retroactively rewrite already-queued events.
@@ -247,7 +247,7 @@ Implementations MAY offer additional actions but MUST NOT redefine these four.
 
 ## 7. Schema evolution
 
-Subscriptions evolve over time: frames change, IRI patterns change, exclude lists change. The protocol defines explicit policies for each.
+Subscriptions evolve over time: frames change, IRI templates / match patterns change, exclude lists change. The protocol defines explicit policies for each.
 
 ### 7.1 Frame changes
 
@@ -256,11 +256,11 @@ When a subscription's frame is altered, queued events are affected per `frame_ch
 - `new_events_only` (recommended default): already-rendered queued events drain unchanged; new events use the new frame.
 - `reframe_queued` and `drain_then_switch` are advanced implementation-defined policies. They require queued events to be stored in unrendered form and are not required by this draft.
 
-### 7.2 IRI pattern changes
+### 7.2 IRI template / match-pattern changes
 
-When a graph's `iri_pattern` is altered, queued events are affected per `pattern_change_policy`:
+When a graph's `iri_template` or `iri_match_pattern` is altered, queued events are affected per `iri_change_policy`:
 
-- `new_events_only` (recommended default): queued events keep the original pattern's IRIs; new events use the new pattern.
+- `new_events_only` (recommended default): queued events keep the original rendered IRIs; new events use the new template / match pattern.
 - Retroactive re-rewrite is implementation-defined and requires unrendered queued events.
 
 ### 7.3 Exclude-graphs changes
@@ -304,7 +304,7 @@ Frames MAY mark predicates with `"@redact": true`:
 }
 ```
 
-For redacted consumers, redacted predicates MUST be emitted in `after` and `base` as the literal object `{"@redacted": true}`. CAS works because both sides redact identically.
+For redacted consumers, redacted predicates MUST be emitted in `after` and `base` as the literal object `{"@redacted": true}`. Redacted predicates are not independently CAS-verifiable by receivers that only see the redacted delivery surface. Predicates requiring strict receiver-side CAS MUST be delivered through an unredacted surface or omitted from `base`.
 
 For unredacted consumers, the cleartext value MAY be emitted through a separate subscription, outbox, stream, or authorization boundary. Implementations SHOULD prefer write-time redaction with separate redacted/unredacted delivery surfaces over per-token pull-time rendering.
 
