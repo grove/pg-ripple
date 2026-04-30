@@ -68,13 +68,15 @@ RESET pg_ripple.rule_graph_scope;
 -- Clean up previously derived triples so the re-run starts fresh.
 SELECT pg_ripple.drop_rules('ngs_test') >= 0 AS rules_dropped_for_scope_test;
 
+-- Set scope BEFORE add_rule so the eager seed pass also restricts to g=0.
+SET pg_ripple.rule_graph_scope = 'default';
+
 -- Reload rule.
 SELECT pg_ripple.add_rule(
     'ngs_test_default_scope',
     '?x <https://ngs.test/hasContact2> ?y :- ?x <https://ngs.test/email> ?y'
 ) IS NOT NULL AS rule_added_for_scope_test;
 
-SET pg_ripple.rule_graph_scope = 'default';
 -- infer() succeeds but derives 0 hasContact2 triples because email triples are
 -- in named graphs, not the default graph.  The return value counts SQL
 -- executions (>= 1 for a 1-rule set), so we only assert it ran successfully.
