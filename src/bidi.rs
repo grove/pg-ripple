@@ -2455,6 +2455,7 @@ fn now_tstz() -> pgrx::datum::TimestampWithTimeZone {
 #[cfg(any(test, feature = "pg_test"))]
 #[pgrx::pg_schema]
 mod tests {
+    use pgrx::prelude::*;
 
     #[pg_test]
     fn test_validate_normalize_allowed() {
