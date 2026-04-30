@@ -69,9 +69,17 @@ The following functions are **stable** as of v0.20.0 and will be maintained with
 
 | Function | Signature | Notes |
 |---|---|---|
-| `create_rule_set` | `(name text, rules text) → bigint` | Parse and store a Datalog rule set. |
-| `apply_rules` | `(name text) → bigint` | Materialise inferences for a rule set. |
-| `drop_rule_set` | `(name text) → bigint` | Remove a rule set and its inferences. |
+| `load_rules` | `(rules text, rule_set text DEFAULT 'custom') → bigint` | Parse and store a Datalog rule set. |
+| `load_rules_builtin` | `(name text) → bigint` | Load a built-in rule set (`'rdfs'` or `'owl-rl'`). |
+| `add_rule` | `(rule_set text, rule_text text) → bigint` | Add a single rule; returns new rule catalog ID. |
+| `remove_rule` | `(rule_id bigint) → bigint` | Remove a rule by ID; returns triples retracted. |
+| `drop_rules` | `(rule_set text) → bigint` | Drop all rules in a named rule set. |
+| `infer` | `(rule_set text DEFAULT 'custom') → bigint` | Materialise inferences; returns triple count. |
+| `infer_with_stats` | `(rule_set text DEFAULT 'custom') → jsonb` | Semi-naive inference with statistics. |
+| `infer_goal` | `(rule_set text, goal text) → jsonb` | Goal-directed magic-sets inference. |
+| `retract_inferred` | `(rule_set text) → bigint` | Delete all materialised triples for a rule set. |
+| `list_rules` | `() → jsonb` | List all stored rules with metadata. |
+| `list_rule_sets` | `() → table` | List all named rule sets with rule counts. |
 
 ### Administration
 
@@ -96,8 +104,10 @@ The following functions are **stable** as of v0.20.0 and will be maintained with
 | Function | Signature | Notes |
 |---|---|---|
 | `enable_graph_rls` | `() → void` | Enable graph-level Row-Level Security. |
-| `grant_graph` | `(role text, graph text, level text) → void` | Grant read/write/admin access to a graph. |
-| `revoke_graph` | `(role text, graph text) → void` | Revoke access. |
+| `grant_graph` | `(graph_iri text, role text) → void` | Grant RLS SELECT access to a graph for a role. |
+| `revoke_graph` | `(graph_iri text, role text) → void` | Revoke RLS access for a role. |
+| `grant_graph_access` | `(graph_iri text, role text, privilege text DEFAULT 'SELECT') → void` | Grant with explicit privilege level. |
+| `revoke_graph_access` | `(graph_iri text, role text) → void` | Revoke access (detailed). |
 
 ### Full-text search
 

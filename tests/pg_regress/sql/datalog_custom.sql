@@ -63,6 +63,20 @@ SELECT pg_ripple.check_constraints() IS NOT NULL AS constraints_ok;
 -- ── Hot dictionary ────────────────────────────────────────────────────────────
 SELECT pg_ripple.prewarm_dictionary_hot() >= 0 AS hot_prewarm_ok;
 
+-- ── list_rule_sets ───────────────────────────────────────────────────────────
+-- After loading rdfs, there should be at least one rule set.
+SELECT count(*) > 0 AS rule_sets_present
+FROM pg_ripple.list_rule_sets();
+
+-- Columns sanity-check: active should be TRUE for rdfs after re-enable.
+SELECT active = true AS rdfs_active
+FROM pg_ripple.list_rule_sets()
+WHERE rule_set = 'rdfs';
+
+-- ── retract_inferred ─────────────────────────────────────────────────────────
+-- Retract inferred triples for rdfs; no materialization was run so count >= 0.
+SELECT pg_ripple.retract_inferred('rdfs') >= 0 AS retract_ok;
+
 -- Cleanup.
 SELECT pg_ripple.drop_rules('rdfs') >= 0 AS rdfs_cleanup;
 SELECT pg_ripple.drop_rules('test_rule_meta') >= 0 AS meta_cleanup;

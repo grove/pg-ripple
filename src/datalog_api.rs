@@ -663,6 +663,120 @@ mod pg_ripple {
         TableIterator::new(rows)
     }
 
+    /// List all named rule sets as a table (name, active, rule_count, created_at).
+    ///
+    /// Returns one row per rule set stored in `_pg_ripple.rule_sets`, including
+    /// disabled rule sets.  Use `pg_ripple.enable_rule_set()` /
+    /// `pg_ripple.disable_rule_set()` to toggle sets without dropping them.
+    #[pg_extern]
+    fn list_rule_sets() -> TableIterator<
+        'static,
+        (
+            name!(rule_set, String),
+            name!(active, bool),
+            name!(rule_count, i64),
+            name!(created_at, String),
+        ),
+    > {
+        crate::datalog::ensure_catalog();
+        let rows: Vec<(String, bool, i64, String)> = pgrx::Spi::connect(|c| {
+            c.select(
+                "SELECT rs.name, rs.active, \
+                     COUNT(r.id) AS rule_count, \
+                     to_char(rs.created_at, 'YYYY-MM-DD HH24:MI:SS') \
+                 FROM _pg_ripple.rule_sets rs \
+                 LEFT JOIN _pg_ripple.rules r ON r.rule_set = rs.name \
+                 GROUP BY rs.name, rs.active, rs.created_at \
+                 ORDER BY rs.created_at, rs.name",
+                None,
+                &[],
+            )
+            .unwrap_or_else(|e| pgrx::error!("list_rule_sets SPI error: {e}"))
+            .map(|row| {
+                let name: String = row.get::<String>(1).ok().flatten().unwrap_or_default();
+                let active: bool = row.get::<bool>(2).ok().flatten().unwrap_or(true);
+                let count: i64 = row.get::<i64>(3).ok().flatten().unwrap_or(0);
+                let ts: String = row.get::<String>(4).ok().flatten().unwrap_or_default();
+                (name, active, count, ts)
+            })
+            .collect()
+        });
+        TableIterator::new(rows)
+    }
+
+    /// Retract all materialised (inferred) triples for a named rule set.
+    ///
+    /// Deletes every triple with `source = 1` (derived) that was produced by
+    /// any rule in the given rule set.  Only triples whose head predicate
+    /// belongs exclusively to this rule set are deleted; predicates shared
+    /// across rule sets are left untouched.
+    ///
+    /// This is the bulk-retraction counterpart to `pg_ripple.infer()`.  For
+    /// fine-grained per-triple retraction use `pg_ripple.remove_rule()` with
+    /// DRed enabled.
+    ///
+    /// Returns the total number of triples deleted.
+    #[pg_extern]
+    fn retract_inferred(rule_set: &str) -> i64 {
+        crate::datalog::ensure_catalog();
+        // Collect all head predicate IDs for the rule set.
+        let pred_ids: Vec<i64> = pgrx::Spi::connect(|c| {
+            c.select(
+                "SELECT DISTINCT head_pred FROM _pg_ripple.rules \
+                 WHERE rule_set = $1 AND head_pred IS NOT NULL",
+                None,
+                &[pgrx::datum::DatumWithOid::from(rule_set)],
+            )
+            .unwrap_or_else(|e| pgrx::error!("retract_inferred: SPI error: {e}"))
+            .map(|row| row.get::<i64>(1).ok().flatten().unwrap_or(0))
+            .filter(|&id| id != 0)
+            .collect()
+        });
+
+        let mut total_deleted: i64 = 0;
+
+        for pred_id in pred_ids {
+            // Check if there is a dedicated VP table for this predicate.
+            let has_vp: bool = pgrx::Spi::get_one_with_args::<bool>(
+                "SELECT EXISTS(\
+                     SELECT 1 FROM _pg_ripple.predicates WHERE id = $1 AND table_oid IS NOT NULL\
+                 )",
+                &[pgrx::datum::DatumWithOid::from(pred_id)],
+            )
+            .unwrap_or(None)
+            .unwrap_or(false);
+
+            if has_vp {
+                // Delete from delta table (inferred triples land there).
+                let delta_tbl = format!("_pg_ripple.vp_{pred_id}_delta");
+                let deleted_delta = pgrx::Spi::get_one_with_args::<i64>(
+                    &format!("WITH d AS (DELETE FROM {delta_tbl} WHERE source = 1 RETURNING 1) \
+                              SELECT count(*) FROM d"),
+                    &[],
+                )
+                .unwrap_or(None)
+                .unwrap_or(0);
+                total_deleted += deleted_delta;
+            }
+
+            // Also clean up vp_rare for this predicate.
+            let deleted_rare = pgrx::Spi::get_one_with_args::<i64>(
+                "WITH d AS (DELETE FROM _pg_ripple.vp_rare WHERE p = $1 AND source = 1 RETURNING 1) \
+                 SELECT count(*) FROM d",
+                &[pgrx::datum::DatumWithOid::from(pred_id)],
+            )
+            .unwrap_or(None)
+            .unwrap_or(0);
+            total_deleted += deleted_rare;
+        }
+
+        // Invalidate caches so subsequent queries reflect the retraction.
+        crate::datalog::cache::invalidate(rule_set);
+        crate::datalog::tabling_invalidate_all();
+
+        total_deleted
+    }
+
     /// Check all active constraint rules and return violations as JSONB.
     ///
     /// Each element has fields: `rule` (text), `violated` (bool).

@@ -23,17 +23,26 @@ WHERE feature_name LIKE 'datalog%';
 
 | Function | Description |
 |---|---|
-| `pg_ripple.create_rule_set(name TEXT) → void` | Create a named Datalog rule set |
-| `pg_ripple.drop_rule_set(name TEXT) → void` | Drop a rule set and all its rules |
-| `pg_ripple.add_rule(rule_set TEXT, rule_text TEXT) → void` | Add a Datalog rule to a rule set |
-| `pg_ripple.remove_rule(rule_set TEXT, rule_id BIGINT) → void` | Remove a specific rule from a set |
-| `pg_ripple.materialize(rule_set TEXT) → BIGINT` | Run forward-chaining inference, return triple count |
-| `pg_ripple.retract(rule_set TEXT) → BIGINT` | Retract all inferred triples for a rule set (DRed) |
-| `pg_ripple.query_goal(rule_set TEXT, goal TEXT) → SETOF record` | Goal-directed query with magic sets |
-| `pg_ripple.explain_inference(rule_set TEXT, triple TEXT) → TEXT` | Return derivation tree for a triple |
-| `pg_ripple.list_rules(rule_set TEXT) → SETOF record` | List all rules in a rule set |
-| `pg_ripple.list_rule_sets() → SETOF record` | List all rule sets |
-| `pg_ripple.validate_datalog_constraints(rule_set TEXT) → SETOF record` | Run integrity constraints |
+| `pg_ripple.load_rules(rules TEXT, rule_set TEXT DEFAULT 'custom') → BIGINT` | Parse and store a Datalog rule set; returns rule count |
+| `pg_ripple.load_rules_builtin(name TEXT) → BIGINT` | Load a built-in rule set (`'rdfs'` or `'owl-rl'`) |
+| `pg_ripple.add_rule(rule_set TEXT, rule_text TEXT) → BIGINT` | Add a single rule to an existing rule set; returns new rule ID |
+| `pg_ripple.remove_rule(rule_id BIGINT) → BIGINT` | Remove a rule by catalog ID; returns triples retracted |
+| `pg_ripple.drop_rules(rule_set TEXT) → BIGINT` | Drop all rules in a named rule set; returns rule count |
+| `pg_ripple.enable_rule_set(name TEXT) → void` | Enable a rule set without re-loading |
+| `pg_ripple.disable_rule_set(name TEXT) → void` | Disable a rule set without dropping it |
+| `pg_ripple.list_rules() → JSONB` | List all stored rules with id, rule_set, rule_text, stratum, active |
+| `pg_ripple.list_rule_sets() → TABLE(rule_set, active, rule_count, created_at)` | List all named rule sets |
+| `pg_ripple.infer(rule_set TEXT DEFAULT 'custom') → BIGINT` | Run forward-chaining inference; returns triple count |
+| `pg_ripple.infer_with_stats(rule_set TEXT DEFAULT 'custom') → JSONB` | Run semi-naive inference with detailed statistics |
+| `pg_ripple.infer_goal(rule_set TEXT, goal TEXT) → JSONB` | Goal-directed inference using magic sets |
+| `pg_ripple.infer_agg(rule_set TEXT DEFAULT 'custom') → JSONB` | Run Datalog^agg inference for aggregate rules |
+| `pg_ripple.infer_wfs(rule_set TEXT DEFAULT 'custom') → JSONB` | Well-founded semantics inference for cyclic programs |
+| `pg_ripple.infer_lattice(rule_set TEXT, lattice_name TEXT) → JSONB` | Lattice-based monotone fixpoint inference |
+| `pg_ripple.retract_inferred(rule_set TEXT) → BIGINT` | Delete all materialised triples for a rule set; returns count |
+| `pg_ripple.check_constraints(rule_set TEXT DEFAULT NULL) → JSONB` | Run integrity constraint rules; returns violations |
+| `pg_ripple.explain_inference(s TEXT, p TEXT, o TEXT, g TEXT DEFAULT NULL) → TABLE` | Return derivation tree for an inferred triple |
+| `pg_ripple.explain_datalog(rule_set_name TEXT) → JSONB` | Full explain document: strata, rules, SQL, last run stats |
+| `pg_ripple.dred_on_delete(pred_id BIGINT, s BIGINT, o BIGINT, g BIGINT) → BIGINT` | Manual DRed retraction for a deleted base triple |
 
 ## Rule Syntax
 
