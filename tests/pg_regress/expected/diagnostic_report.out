@@ -49,13 +49,13 @@ ORDER BY key;
 (11 rows)
 
 -- schema_version reflects the last schema change; compiled_version reflects the
--- Rust binary. For v0.75.0 there are no schema changes so sv stays at 0.74.0.
+-- Rust binary. For v0.77.0 both sv and cv are 0.77.0.
 SELECT
     (SELECT value FROM pg_ripple.diagnostic_report() WHERE key = 'schema_version') AS sv,
     (SELECT value FROM pg_ripple.diagnostic_report() WHERE key = 'compiled_version') AS cv;
    sv   |   cv   
 --------+--------
- 0.74.0 | 0.76.0
+ 0.77.0 | 0.77.0
 (1 row)
 
 -- GUC values should be valid

@@ -540,7 +540,7 @@ pub fn record_linkback_impl(
         let mut out = None;
         let mut iter = c.select(
             "SELECT subscription_name, target_graph_id, hub_subject_id \
-             FROM _pg_ripple.pending_linkbacks WHERE event_id = $1",
+             FROM _pg_ripple.pending_linkbacks WHERE event_id = $1::uuid",
             None,
             &[pgrx::datum::DatumWithOid::from(event_id_str.as_str())],
         )?;
@@ -639,7 +639,7 @@ pub fn record_linkback_impl(
 
     // Delete pending row.
     Spi::run_with_args(
-        "DELETE FROM _pg_ripple.pending_linkbacks WHERE event_id = $1",
+        "DELETE FROM _pg_ripple.pending_linkbacks WHERE event_id = $1::uuid",
         &[pgrx::datum::DatumWithOid::from(event_id_str.as_str())],
     )
     .unwrap_or_else(|e| pgrx::warning!("record_linkback: pending row cleanup: {e}"));
@@ -736,7 +736,7 @@ pub fn abandon_linkback_impl(event_id: pgrx::datum::Uuid) {
         let mut out = None;
         let mut iter = c.select(
             "SELECT subscription_name, target_graph_id, hub_subject_id \
-             FROM _pg_ripple.pending_linkbacks WHERE event_id = $1",
+             FROM _pg_ripple.pending_linkbacks WHERE event_id = $1::uuid",
             None,
             &[pgrx::datum::DatumWithOid::from(event_id_str.as_str())],
         )?;
@@ -803,7 +803,7 @@ pub fn abandon_linkback_impl(event_id: pgrx::datum::Uuid) {
     .unwrap_or_else(|e| pgrx::warning!("abandon_linkback: buffer cleanup: {e}"));
 
     Spi::run_with_args(
-        "DELETE FROM _pg_ripple.pending_linkbacks WHERE event_id = $1",
+        "DELETE FROM _pg_ripple.pending_linkbacks WHERE event_id = $1::uuid",
         &[pgrx::datum::DatumWithOid::from(event_id_str.as_str())],
     )
     .unwrap_or_else(|e| pgrx::warning!("abandon_linkback: pending row cleanup: {e}"));

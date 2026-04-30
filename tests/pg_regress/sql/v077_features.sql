@@ -165,7 +165,10 @@ SELECT pg_ripple.assert_cas(
 -- --- Part 8: BIDI-LINKBACK-01 — abandon_linkback noop --------------------
 
 -- 8a. abandon_linkback on unknown event_id emits a NOTICE and returns void.
+--     Suppress the NOTICE so expected output stays stable.
+SET client_min_messages = warning;
 SELECT pg_ripple.abandon_linkback('00000000-0000-0000-0000-000000000001'::uuid);
+RESET client_min_messages;
 
 -- --- Part 9: BIDI-INBOX-01 — install_bidi_inbox ---------------------------
 
