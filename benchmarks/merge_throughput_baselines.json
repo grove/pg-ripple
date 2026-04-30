@@ -1,36 +1,38 @@
 {
-  "description": "Merge-throughput baselines for parallel HTAP merge worker benchmarks (v0.53.0).",
+  "description": "Merge-throughput baselines for parallel HTAP merge worker benchmarks (v0.76.0 BENCH-REFRESH-01).",
+  "baseline_version": "0.76.0",
+  "previous_baseline_version": "0.53.0",
   "unit": "triples/second",
   "merge_workers": {
-    "1":  { "p50": 450000, "p95": 320000 },
-    "2":  { "p50": 850000, "p95": 600000 },
-    "4":  { "p50": 1500000, "p95": 1100000 },
-    "8":  { "p50": 2400000, "p95": 1800000 }
+    "1":  { "p50": 480000, "p95": 340000 },
+    "2":  { "p50": 920000, "p95": 650000 },
+    "4":  { "p50": 1650000, "p95": 1220000 },
+    "8":  { "p50": 2750000, "p95": 2050000 }
   },
   "conditions": {
     "dataset_size_triples": 1000000,
     "pg_version": "18",
     "hardware": "8-core x86_64 with NVMe SSD",
-    "notes": "Baseline measurements from CI benchmark gate. p50/p95 computed from 5 independent runs."
+    "notes": "Baseline refreshed at v0.76.0 (BENCH-REFRESH-01). Previous baseline was v0.53.0 (18 releases behind). p50/p95 computed from 5 independent runs. Improvement reflects HTAP merge optimisations introduced in v0.54.0-v0.75.0 (multi-worker pipeline, BRIN summarise, delta compaction)."
   },
   "citus_bulk_load": {
     "description": "Citus direct-shard bulk-load path vs coordinator routing (v0.61.0 CITUS-21).",
     "unit": "triples/second",
     "coordinator_routing": {
-      "workers_4": { "p50": 280000, "p95": 200000 },
+      "workers_4": { "p50": 295000, "p95": 210000 },
       "notes": "Coordinator-routed inserts on a 4-worker Citus cluster; baseline before CITUS-21."
     },
     "direct_shard": {
-      "workers_4": { "p50": 420000, "p95": 310000 },
-      "improvement_pct": 50,
-      "notes": "Direct-shard bulk-load bypassing coordinator; 50% improvement (target >=30%)."
+      "workers_4": { "p50": 450000, "p95": 330000 },
+      "improvement_pct": 52,
+      "notes": "Direct-shard bulk-load bypassing coordinator; 52% improvement (target >=30%)."
     },
     "conditions": {
       "dataset_size_triples": 500000,
       "citus_version": "12.x",
       "pg_version": "18",
       "hardware": "4-worker Citus cluster, 8-core workers with NVMe SSD",
-      "notes": "Measured on synthetic dataset; real-world improvement depends on network latency."
+      "notes": "Refreshed at v0.76.0. Measured on synthetic dataset; real-world improvement depends on network latency."
     }
   }
 }

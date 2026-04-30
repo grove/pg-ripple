@@ -1,0 +1,35 @@
+-- pg_regress test: dictionary encoding properties (uniqueness, stability)
+
+CREATE EXTENSION IF NOT EXISTS pg_ripple;
+SELECT pg_ripple.triple_count() >= 0 AS library_loaded;
+SET search_path TO pg_ripple, public;
+
+-- 1. Encode the same IRI twice → same ID.
+SELECT
+    pg_ripple.encode_term('<https://dict.test/subject1>', 0::smallint) =
+    pg_ripple.encode_term('<https://dict.test/subject1>', 0::smallint) AS same_iri_same_id;
+
+-- 2. Two different IRIs → different IDs.
+SELECT
+    pg_ripple.encode_term('<https://dict.test/a>', 0::smallint) <>
+    pg_ripple.encode_term('<https://dict.test/b>', 0::smallint) AS different_iri_different_id;
+
+-- 3. Encode returns a non-zero BIGINT.
+SELECT pg_ripple.encode_term('<https://dict.test/c>', 0::smallint) <> 0 AS id_is_nonzero;
+
+-- 4. Decode returns the original IRI (with angle brackets as N-Triples IRIs).
+SELECT pg_ripple.decode_id(
+    pg_ripple.encode_term('<https://dict.test/roundtrip>', 0::smallint)
+) = '<https://dict.test/roundtrip>' AS roundtrip_ok;
+
+-- 5. Load triples and verify they are retrievable.
+SELECT pg_ripple.load_ntriples(
+    '<https://dict.test/x> <https://dict.test/type> <https://dict.test/Thing> .'
+) = 1 AS one_triple_loaded;
+
+SELECT COUNT(*) = 1 AS triple_in_store
+FROM pg_ripple.sparql($$
+    SELECT ?t WHERE {
+        <https://dict.test/x> <https://dict.test/type> ?t .
+    }
+$$);

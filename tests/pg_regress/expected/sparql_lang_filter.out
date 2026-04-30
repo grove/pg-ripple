@@ -1,0 +1,73 @@
+-- pg_regress test: SPARQL language tag filters (LANG, LANGMATCHES)
+CREATE EXTENSION IF NOT EXISTS pg_ripple;
+SELECT pg_ripple.triple_count() >= 0 AS library_loaded;
+ library_loaded 
+----------------
+ t
+(1 row)
+
+SET search_path TO pg_ripple, public;
+-- Load multilingual test data.
+SELECT pg_ripple.load_ntriples(
+    '<https://lang.test/item1> <https://lang.test/label> "Hello"@en .' || E'\n' ||
+    '<https://lang.test/item1> <https://lang.test/label> "Hallo"@de .' || E'\n' ||
+    '<https://lang.test/item1> <https://lang.test/label> "Bonjour"@fr .' || E'\n' ||
+    '<https://lang.test/item2> <https://lang.test/label> "World"@en .' || E'\n' ||
+    '<https://lang.test/item2> <https://lang.test/label> "Welt"@de .'
+) = 5 AS five_lang_triples_loaded;
+ five_lang_triples_loaded 
+--------------------------
+ t
+(1 row)
+
+-- 1. FILTER using LANG().
+SELECT COUNT(*) = 2 AS english_labels_found
+FROM pg_ripple.sparql($$
+    SELECT ?item ?label WHERE {
+        ?item <https://lang.test/label> ?label .
+        FILTER(LANG(?label) = "en")
+    }
+$$);
+ english_labels_found 
+----------------------
+ t
+(1 row)
+
+-- 2. FILTER using LANGMATCHES().
+SELECT COUNT(*) = 2 AS german_langmatches_works
+FROM pg_ripple.sparql($$
+    SELECT ?item ?label WHERE {
+        ?item <https://lang.test/label> ?label .
+        FILTER(LANGMATCHES(LANG(?label), "de"))
+    }
+$$);
+ german_langmatches_works 
+--------------------------
+ t
+(1 row)
+
+-- 3. LANGMATCHES wildcard (*) returns all tagged literals.
+SELECT COUNT(*) = 5 AS wildcard_langmatches_works
+FROM pg_ripple.sparql($$
+    SELECT ?item ?label WHERE {
+        ?item <https://lang.test/label> ?label .
+        FILTER(LANGMATCHES(LANG(?label), "*"))
+    }
+$$);
+ wildcard_langmatches_works 
+----------------------------
+ t
+(1 row)
+
+-- 4. Items with any label count.
+SELECT COUNT(*) = 2 AS distinct_items_count
+FROM pg_ripple.sparql($$
+    SELECT DISTINCT ?item WHERE {
+        ?item <https://lang.test/label> ?label .
+    }
+$$);
+ distinct_items_count 
+----------------------
+ t
+(1 row)
+

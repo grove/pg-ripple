@@ -211,13 +211,28 @@ The `pg_ripple_http` companion service exposes Prometheus-compatible metrics at 
 curl http://localhost:7878/metrics
 ```
 
+### Authentication Model for /metrics (METRICS-AUTH-DOC-01)
+
+> **The `/metrics` endpoint is unauthenticated by design.** It does not require an `Authorization: Bearer` token even when `PG_RIPPLE_BEARER_TOKEN` is configured and all SPARQL/Datalog/admin routes require authentication.
+
+**Rationale**: Prometheus scrapers typically run inside the same private network as `pg_ripple_http` and require no-auth scrape targets. Exposing counter and gauge data about query rates and error counts does not reveal graph data or connection credentials.
+
+**Operator guidance**:
+- If you expose `pg_ripple_http` directly on a public interface, place `/metrics` behind a reverse-proxy access-control rule (e.g., `location /metrics { allow 10.0.0.0/8; deny all; }` in nginx).
+- Alternatively, use a dedicated scrape network interface (e.g., `--metrics-bind 127.0.0.1:9090`) if a future release adds per-endpoint bind configuration.
+- The `/metrics/extension` endpoint (streaming counters from the PostgreSQL extension) follows the same unauthenticated model.
+
+**Security impact**: Metrics contain request counts, error counts, and latency totals — no user data or credentials. There is no SSRF or injection risk from the metrics payload.
+
 ### Available Metrics
 
 | Metric | Type | Description |
 |---|---|---|
-| `pg_ripple_http_queries_total` | counter | Total SPARQL queries processed |
+| `pg_ripple_http_sparql_queries_total` | counter | Total SPARQL queries executed |
+| `pg_ripple_http_datalog_queries_total` | counter | Total Datalog API calls |
 | `pg_ripple_http_errors_total` | counter | Total query errors |
 | `pg_ripple_http_query_duration_seconds_total` | counter | Cumulative query execution time |
+| `pg_ripple_http_pool_size` | gauge | Current connection pool size |
 
 ### Prometheus Scrape Configuration
 
@@ -229,6 +244,8 @@ scrape_configs:
     static_configs:
       - targets: ['pg-ripple-http:7878']
     metrics_path: /metrics
+    # No bearer_token needed — /metrics is unauthenticated.
+    # Restrict access at network level (see operator guidance above).
 ```
 
 ### Derived Metrics for Dashboards
@@ -237,13 +254,13 @@ Use PromQL to compute useful rates:
 
 ```promql
 # Queries per second
-rate(pg_ripple_http_queries_total[5m])
+rate(pg_ripple_http_sparql_queries_total[5m])
 
 # Error rate
-rate(pg_ripple_http_errors_total[5m]) / rate(pg_ripple_http_queries_total[5m])
+rate(pg_ripple_http_errors_total[5m]) / rate(pg_ripple_http_sparql_queries_total[5m])
 
 # Average query latency
-rate(pg_ripple_http_query_duration_seconds_total[5m]) / rate(pg_ripple_http_queries_total[5m])
+rate(pg_ripple_http_query_duration_seconds_total[5m]) / rate(pg_ripple_http_sparql_queries_total[5m])
 ```
 
 ---

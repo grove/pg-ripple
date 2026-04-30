@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use axum::Router;
 use axum::body::Body;
-use axum::extract::{Query, State};
+use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get, post, put};
@@ -17,9 +17,8 @@ use tower_http::limit::RequestBodyLimitLayer;
 use utoipa::OpenApi;
 
 use crate::arrow_encode::flight_do_get;
-use crate::common::{AppState, check_auth, redacted_error};
+use crate::common::{AppState, check_auth};
 use crate::datalog;
-use crate::spi_bridge::execute_sparql_with_traceparent;
 
 // ─── OpenAPI specification (K-1, v0.55.0) ────────────────────────────────────
 
@@ -295,7 +294,7 @@ async fn sparql_subscription_sse(
             }
 
             keepalive_tick += 1;
-            if keepalive_tick % 3 == 0 {
+            if keepalive_tick.is_multiple_of(3) {
                 // Send keepalive comment every 15 seconds.
                 if tx.send(": keepalive\n\n".to_string()).await.is_err() {
                     break;

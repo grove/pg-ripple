@@ -15,9 +15,11 @@
 // ─── Internal helpers ─────────────────────────────────────────────────────────
 
 fn graph_iri_to_policy_suffix(graph_iri: &str) -> String {
-    // Create a stable short suffix from the IRI for use in policy names.
-    use xxhash_rust::xxh3::xxh3_64;
-    format!("{:016x}", xxh3_64(graph_iri.as_bytes()))
+    // RLS-HASH-01 (v0.76.0): use XXH3-128 for policy name generation to reduce
+    // the 4-billion-graph birthday-paradox collision probability from ~50% (64-bit)
+    // to essentially zero (~2×10⁻²⁰ at 4B graphs with 128-bit hash).
+    use xxhash_rust::xxh3::xxh3_128;
+    format!("{:032x}", xxh3_128(graph_iri.as_bytes()))
 }
 
 /// Validate that a role name contains only safe PostgreSQL identifier characters.
@@ -158,10 +160,11 @@ pub(crate) fn apply_rls_to_vp_table(table: &str) {
         // RLS-AUDIT-01: role is validated by is_safe_role_name() before reaching here,
         // so quote_ident_safe() provides defense-in-depth quoting for SQL identifiers.
         let quoted_role = quote_ident_safe(&role);
-        // Use a hash of (table, role, graph_id) for a unique policy name.
-        use xxhash_rust::xxh3::xxh3_64;
+        // RLS-HASH-01: use XXH3-128 for unique policy names (128-bit → negligible
+        // collision probability even at 4 billion graphs).
+        use xxhash_rust::xxh3::xxh3_128;
         let key = format!("{table}:{role}:{graph_id}");
-        let suffix = format!("{:016x}", xxh3_64(key.as_bytes()));
+        let suffix = format!("{:032x}", xxh3_128(key.as_bytes()));
         let policy_name = format!("pg_ripple_vp_{role}_{suffix}");
         let policy_sql = format!(
             "CREATE POLICY IF NOT EXISTS {policy_name} ON {table} \
@@ -270,9 +273,10 @@ fn apply_rls_policy_to_all_dedicated_tables(graph_id: i64, role: &str, pg_privil
                 pgrx::warning!("apply_rls_policy_to_all: could not enable RLS on {table}: {e}");
                 continue;
             }
-            use xxhash_rust::xxh3::xxh3_64;
+            // RLS-HASH-01: XXH3-128 policy names.
+            use xxhash_rust::xxh3::xxh3_128;
             let key = format!("{table}:{role}:{graph_id}");
-            let suffix = format!("{:016x}", xxh3_64(key.as_bytes()));
+            let suffix = format!("{:032x}", xxh3_128(key.as_bytes()));
             let pname = format!("pg_ripple_vp_{role}_{suffix}");
             // RLS-AUDIT-01: role is pre-validated by is_safe_role_name(); quote_ident_safe
             // provides defense-in-depth double-quoting per SQL standard.
@@ -324,9 +328,10 @@ fn do_revoke_graph_access(graph_iri: &str, role: &str) {
     for pred_id in pred_ids {
         for table_suffix in &["_delta", "_main"] {
             let table = format!("_pg_ripple.vp_{pred_id}{table_suffix}");
-            use xxhash_rust::xxh3::xxh3_64;
+            // RLS-HASH-01: XXH3-128 policy names.
+            use xxhash_rust::xxh3::xxh3_128;
             let key = format!("{table}:{role}:{graph_id}");
-            let vsuffix = format!("{:016x}", xxh3_64(key.as_bytes()));
+            let vsuffix = format!("{:032x}", xxh3_128(key.as_bytes()));
             let pname = format!("pg_ripple_vp_{role}_{vsuffix}");
             let _ =
                 pgrx::Spi::run_with_args(&format!("DROP POLICY IF EXISTS {pname} ON {table}"), &[]);

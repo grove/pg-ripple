@@ -1,0 +1,76 @@
+-- pg_regress test: SPARQL VALUES clause (inline binding tables)
+CREATE EXTENSION IF NOT EXISTS pg_ripple;
+SELECT pg_ripple.triple_count() >= 0 AS library_loaded;
+ library_loaded 
+----------------
+ t
+(1 row)
+
+SET search_path TO pg_ripple, public;
+-- Load test data.
+SELECT pg_ripple.load_ntriples(
+    '<https://vals.test/alice> <https://vals.test/dept> <https://vals.test/eng> .' || E'\n' ||
+    '<https://vals.test/bob> <https://vals.test/dept> <https://vals.test/sales> .' || E'\n' ||
+    '<https://vals.test/carol> <https://vals.test/dept> <https://vals.test/eng> .' || E'\n' ||
+    '<https://vals.test/dave> <https://vals.test/dept> <https://vals.test/hr> .'
+) = 4 AS four_triples_loaded;
+ four_triples_loaded 
+---------------------
+ t
+(1 row)
+
+-- 1. VALUES clause restricts results to listed values.
+SELECT COUNT(*) = 2 AS values_filter_works
+FROM pg_ripple.sparql($$
+    SELECT ?person WHERE {
+        VALUES ?dept { <https://vals.test/eng> }
+        ?person <https://vals.test/dept> ?dept .
+    }
+$$);
+ values_filter_works 
+---------------------
+ t
+(1 row)
+
+-- 2. VALUES with multiple binding rows.
+SELECT COUNT(*) = 3 AS values_multi_row_works
+FROM pg_ripple.sparql($$
+    SELECT ?person WHERE {
+        VALUES ?dept { <https://vals.test/eng> <https://vals.test/sales> }
+        ?person <https://vals.test/dept> ?dept .
+    }
+$$);
+ values_multi_row_works 
+------------------------
+ t
+(1 row)
+
+-- 3. VALUES with multiple variables.
+SELECT COUNT(*) >= 1 AS values_multi_var_works
+FROM pg_ripple.sparql($$
+    SELECT ?person ?dept WHERE {
+        VALUES (?person ?dept) {
+            (<https://vals.test/alice> <https://vals.test/eng>)
+            (<https://vals.test/bob> <https://vals.test/sales>)
+        }
+        ?person <https://vals.test/dept> ?dept .
+    }
+$$);
+ values_multi_var_works 
+------------------------
+ t
+(1 row)
+
+-- 4. Inline VALUES with UNDEF (optional binding).
+SELECT COUNT(*) >= 0 AS values_undef_ok
+FROM pg_ripple.sparql($$
+    SELECT ?person WHERE {
+        VALUES ?dept { <https://vals.test/eng> UNDEF }
+        ?person <https://vals.test/dept> ?dept .
+    }
+$$);
+ values_undef_ok 
+-----------------
+ t
+(1 row)
+

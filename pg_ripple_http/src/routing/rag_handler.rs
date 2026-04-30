@@ -3,16 +3,13 @@
 use std::sync::Arc;
 
 use axum::body::Body;
-use axum::extract::{Query, State};
+use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
-use serde::{Deserialize, Serialize};
 
 use crate::common::{AppState, check_auth, redacted_error};
 // Re-use types declared in parent routing module.
-use super::{RagRequest, RagResponse, RagResult, SparqlParams};
-
-use super::sparql_handlers::negotiate_accept;
+use super::{RagRequest, RagResponse, RagResult};
 
 pub(crate) async fn rag_post(
     State(state): State<Arc<AppState>>,

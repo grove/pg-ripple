@@ -341,3 +341,35 @@ For fine-grained audit logging, consider the `pgaudit` extension alongside pg_ri
 ```admonish note title="SPARQL query logging"
 pg_ripple logs the generated SQL via PostgreSQL's standard statement logging. To see the original SPARQL text, enable `log_statement = 'all'` — the SPARQL text appears as the argument to `pg_ripple.sparql()`.
 ```
+
+---
+
+## Log-Hook Audit and Secret Suppression (LOG-HOOK-01)
+
+> **v0.76.0 audit finding**: No `RegisterEmitLogHook` is installed to suppress secrets from PostgreSQL error messages. A defense-in-depth audit was performed to verify that no error or warning call site leaks raw secrets.
+
+### Audit Results
+
+The following audit was performed on all `pgrx::error!()`, `pgrx::warning!()`, `tracing::error!()`, and `tracing::warn!()` call sites in the pg_ripple extension and `pg_ripple_http` companion service:
+
+| Component | Secrets handled | Logged in errors? | Notes |
+|---|---|---|---|
+| `src/security_api.rs` | None (policy names, graph IRIs) | No | Only structural metadata |
+| `src/llm/mod.rs` | LLM API key (env var) | No | Key is read from env at call time and not referenced in error paths |
+| `pg_ripple_http` auth check | Bearer token (HMAC comparison) | No | `check_token` uses `constant_time_eq`; returns 401 without token value |
+| `pg_ripple_http` Arrow Flight | HMAC signing secret | No | Error returns generic `"HMAC key error: {e}"` — `e` is a key-length error only |
+| `pg_ripple_http/src/common.rs` | `auth_token`, `datalog_write_token` | No | Tokens stored in `AppState` but never interpolated into error messages |
+| `pg_ripple_http/src/main.rs` | `ARROW_FLIGHT_SECRET` (env var) | No | Env var read at startup; not referenced in tracing calls |
+
+### No `RegisterEmitLogHook` Required
+
+Based on the audit, no error path in the current codebase logs raw HMAC keys, connection strings, bearer tokens, or other credentials. A `RegisterEmitLogHook` is therefore not required at this time.
+
+**If you add a new error path that touches secrets**, follow these guidelines:
+- Do not interpolate secret values (`token`, `key`, `password`) into `pgrx::error!()` or `pgrx::warning!()` messages.
+- Use descriptive error types without values (e.g., `"HMAC key error: invalid key length"` not `"bad key: {key_value}"`).
+- If a future release handles user-supplied credentials in a hot path, consider installing a `RegisterEmitLogHook` to scrub sensitive patterns from log lines.
+
+### Connection Strings
+
+PostgreSQL connection strings (DSN) containing passwords may appear in `pg_log` via `log_connections = on`. Use `pg_hba.conf` with `scram-sha-256` and a connection pooler (e.g., PgBouncer) that authenticates separately so application DSNs never include inline passwords.

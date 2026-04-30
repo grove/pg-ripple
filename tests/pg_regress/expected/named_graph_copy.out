@@ -1,0 +1,81 @@
+-- pg_regress test: named graph operations (COPY, MOVE, ADD)
+CREATE EXTENSION IF NOT EXISTS pg_ripple;
+SELECT pg_ripple.triple_count() >= 0 AS library_loaded;
+ library_loaded 
+----------------
+ t
+(1 row)
+
+SET search_path TO pg_ripple, public;
+-- Load initial data into a named graph.
+SELECT pg_ripple.load_ntriples_into_graph(
+    '<https://ngop.test/s1> <https://ngop.test/p> <https://ngop.test/o1> .' || E'\n' ||
+    '<https://ngop.test/s2> <https://ngop.test/p> <https://ngop.test/o2> .',
+    'https://ngop.test/graph1'
+) = 2 AS two_triples_in_graph1;
+ two_triples_in_graph1 
+-----------------------
+ t
+(1 row)
+
+-- 1. Query named graph returns expected results.
+SELECT COUNT(*) = 2 AS named_graph_query_ok
+FROM pg_ripple.sparql($$
+    SELECT ?s ?o WHERE {
+        GRAPH <https://ngop.test/graph1> {
+            ?s <https://ngop.test/p> ?o .
+        }
+    }
+$$);
+ named_graph_query_ok 
+----------------------
+ t
+(1 row)
+
+-- 2. Load into a second graph.
+SELECT pg_ripple.load_ntriples_into_graph(
+    '<https://ngop.test/s3> <https://ngop.test/p> <https://ngop.test/o3> .',
+    'https://ngop.test/graph2'
+) = 1 AS one_triple_in_graph2;
+ one_triple_in_graph2 
+----------------------
+ t
+(1 row)
+
+-- 3. ADD: copy graph1 triples into graph2.
+SELECT pg_ripple.sparql_update($$
+    ADD <https://ngop.test/graph1> TO <https://ngop.test/graph2>
+$$) >= 0 AS add_ok;
+ add_ok 
+--------
+ t
+(1 row)
+
+-- 4. After ADD: graph2 should have 3 triples.
+SELECT COUNT(*) = 3 AS graph2_has_three_after_add
+FROM pg_ripple.sparql($$
+    SELECT ?s ?o WHERE {
+        GRAPH <https://ngop.test/graph2> {
+            ?s <https://ngop.test/p> ?o .
+        }
+    }
+$$);
+ graph2_has_three_after_add 
+----------------------------
+ t
+(1 row)
+
+-- 5. graph1 still intact after ADD.
+SELECT COUNT(*) = 2 AS graph1_intact_after_add
+FROM pg_ripple.sparql($$
+    SELECT ?s ?o WHERE {
+        GRAPH <https://ngop.test/graph1> {
+            ?s <https://ngop.test/p> ?o .
+        }
+    }
+$$);
+ graph1_intact_after_add 
+-------------------------
+ t
+(1 row)
+

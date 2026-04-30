@@ -1,0 +1,62 @@
+-- pg_regress test: SPARQL NOT EXISTS and MINUS
+CREATE EXTENSION IF NOT EXISTS pg_ripple;
+SELECT pg_ripple.triple_count() >= 0 AS library_loaded;
+ library_loaded 
+----------------
+ t
+(1 row)
+
+SET search_path TO pg_ripple, public;
+-- Load test data.
+SELECT pg_ripple.load_ntriples(
+    '<https://notex.test/alice> <https://notex.test/knows> <https://notex.test/bob> .' || E'\n' ||
+    '<https://notex.test/alice> <https://notex.test/knows> <https://notex.test/carol> .' || E'\n' ||
+    '<https://notex.test/bob> <https://notex.test/knows> <https://notex.test/dave> .' || E'\n' ||
+    '<https://notex.test/alice> <https://notex.test/type> <https://notex.test/Person> .' || E'\n' ||
+    '<https://notex.test/bob> <https://notex.test/type> <https://notex.test/Person> .' || E'\n' ||
+    '<https://notex.test/carol> <https://notex.test/type> <https://notex.test/Person> .'
+) = 6 AS six_triples_loaded;
+ six_triples_loaded 
+--------------------
+ t
+(1 row)
+
+-- 1. NOT EXISTS: persons who don't know anyone.
+SELECT COUNT(*) = 1 AS not_exists_works
+FROM pg_ripple.sparql($$
+    SELECT ?p WHERE {
+        ?p <https://notex.test/type> <https://notex.test/Person> .
+        FILTER NOT EXISTS { ?p <https://notex.test/knows> ?x }
+    }
+$$);
+ not_exists_works 
+------------------
+ t
+(1 row)
+
+-- 2. NOT EXISTS alternative (MINUS semantics via FILTER NOT EXISTS).
+SELECT COUNT(*) = 1 AS minus_works
+FROM pg_ripple.sparql($$
+    SELECT ?p WHERE {
+        ?p <https://notex.test/knows> ?x .
+        FILTER NOT EXISTS { ?p <https://notex.test/knows> <https://notex.test/carol> . }
+    }
+$$);
+ minus_works 
+-------------
+ t
+(1 row)
+
+-- 3. FILTER EXISTS: persons who know at least one person.
+SELECT COUNT(*) = 2 AS filter_exists_works
+FROM pg_ripple.sparql($$
+    SELECT ?p WHERE {
+        ?p <https://notex.test/type> <https://notex.test/Person> .
+        FILTER EXISTS { ?p <https://notex.test/knows> ?x }
+    }
+$$);
+ filter_exists_works 
+---------------------
+ t
+(1 row)
+

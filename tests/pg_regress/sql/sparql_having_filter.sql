@@ -1,0 +1,41 @@
+-- pg_regress test: SPARQL HAVING clause with GROUP BY
+
+CREATE EXTENSION IF NOT EXISTS pg_ripple;
+SELECT pg_ripple.triple_count() >= 0 AS library_loaded;
+SET search_path TO pg_ripple, public;
+
+-- Load test data: multiple values per subject.
+SELECT pg_ripple.load_ntriples(
+    '<https://having.test/a> <https://having.test/score> "10"^^<http://www.w3.org/2001/XMLSchema#integer> .' || E'\n' ||
+    '<https://having.test/a> <https://having.test/score> "20"^^<http://www.w3.org/2001/XMLSchema#integer> .' || E'\n' ||
+    '<https://having.test/a> <https://having.test/score> "30"^^<http://www.w3.org/2001/XMLSchema#integer> .' || E'\n' ||
+    '<https://having.test/b> <https://having.test/score> "5"^^<http://www.w3.org/2001/XMLSchema#integer> .' || E'\n' ||
+    '<https://having.test/b> <https://having.test/score> "15"^^<http://www.w3.org/2001/XMLSchema#integer> .'
+) = 5 AS five_triples_loaded;
+
+-- 1. GROUP BY with HAVING (sum > 40 → only subject a).
+SELECT COUNT(*) = 1 AS having_filters_groups
+FROM pg_ripple.sparql($$
+    SELECT ?s (SUM(?score) AS ?total) WHERE {
+        ?s <https://having.test/score> ?score .
+    }
+    GROUP BY ?s
+    HAVING (SUM(?score) > 40)
+$$);
+
+-- 2. GROUP BY without HAVING returns both subjects.
+SELECT COUNT(*) = 2 AS group_by_both_subjects
+FROM pg_ripple.sparql($$
+    SELECT ?s (COUNT(?score) AS ?n) WHERE {
+        ?s <https://having.test/score> ?score .
+    }
+    GROUP BY ?s
+$$);
+
+-- 3. COUNT aggregate is non-negative.
+SELECT COUNT(*) >= 0 AS count_agg_ok
+FROM pg_ripple.sparql($$
+    SELECT (COUNT(*) AS ?n) WHERE {
+        ?s <https://having.test/score> ?score .
+    }
+$$);

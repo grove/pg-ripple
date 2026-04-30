@@ -6,7 +6,6 @@ use axum::body::Body;
 use axum::extract::{Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
-use serde::{Deserialize, Serialize};
 
 use crate::common::{AppState, check_auth, redacted_error};
 use crate::spi_bridge::execute_sparql_with_traceparent;

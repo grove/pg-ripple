@@ -1,0 +1,63 @@
+-- pg_regress test: SPARQL INSERT DATA and DELETE DATA (incremental updates)
+
+CREATE EXTENSION IF NOT EXISTS pg_ripple;
+SELECT pg_ripple.triple_count() >= 0 AS library_loaded;
+SET search_path TO pg_ripple, public;
+
+-- 1. INSERT DATA adds triples.
+SELECT pg_ripple.sparql_update($$
+    INSERT DATA {
+        <https://incr.test/alice> <https://incr.test/knows> <https://incr.test/bob> .
+        <https://incr.test/alice> <https://incr.test/age> "30"^^<http://www.w3.org/2001/XMLSchema#integer> .
+    }
+$$) >= 0 AS insert_data_ok;
+
+-- 2. Query confirms inserted data.
+SELECT COUNT(*) = 1 AS alice_knows_bob
+FROM pg_ripple.sparql($$
+    SELECT ?x WHERE {
+        <https://incr.test/alice> <https://incr.test/knows> ?x .
+    }
+$$);
+
+-- 3. INSERT DATA into named graph.
+SELECT pg_ripple.sparql_update($$
+    INSERT DATA {
+        GRAPH <https://incr.test/g1> {
+            <https://incr.test/carol> <https://incr.test/knows> <https://incr.test/dave> .
+        }
+    }
+$$) >= 0 AS insert_named_graph_ok;
+
+-- 4. Named graph has the triple.
+SELECT COUNT(*) = 1 AS named_graph_has_carol
+FROM pg_ripple.sparql($$
+    SELECT ?x WHERE {
+        GRAPH <https://incr.test/g1> {
+            <https://incr.test/carol> <https://incr.test/knows> ?x .
+        }
+    }
+$$);
+
+-- 5. DELETE DATA removes a specific triple.
+SELECT pg_ripple.sparql_update($$
+    DELETE DATA {
+        <https://incr.test/alice> <https://incr.test/age> "30"^^<http://www.w3.org/2001/XMLSchema#integer> .
+    }
+$$) >= 0 AS delete_data_ok;
+
+-- 6. Deleted triple is gone.
+SELECT COUNT(*) = 0 AS age_deleted
+FROM pg_ripple.sparql($$
+    SELECT ?a WHERE {
+        <https://incr.test/alice> <https://incr.test/age> ?a .
+    }
+$$);
+
+-- 7. Non-deleted triple still present.
+SELECT COUNT(*) = 1 AS knows_still_present
+FROM pg_ripple.sparql($$
+    SELECT ?x WHERE {
+        <https://incr.test/alice> <https://incr.test/knows> ?x .
+    }
+$$);

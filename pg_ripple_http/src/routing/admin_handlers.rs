@@ -4,11 +4,11 @@ use std::sync::Arc;
 
 use axum::body::Body;
 use axum::extract::State;
-use axum::http::{HeaderMap, StatusCode};
+use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 
 use super::sparql_handlers::json_response_http;
-use crate::common::{AppState, check_auth, redacted_error};
+use crate::common::{AppState, redacted_error};
 
 // Re-import routing types for ApiDoc
 use super::ApiDoc;

@@ -1,6 +1,6 @@
 [package]
 name = "pg_ripple_http"
-version = "0.75.0"
+version = "0.76.0"
 edition = "2024"
 description = "SPARQL 1.1 Protocol HTTP endpoint for pg_ripple"
 license = "Apache-2.0"
@@ -30,7 +30,7 @@ reqwest = { version = "0.12", features = ["rustls-tls-native-roots"], default-fe
 tokio-stream = "0.1"
 utoipa = { version = "5", features = ["axum_extras", "yaml"] }
 utoipa-scalar = { version = "0.3", features = ["axum"] }
-arrow = { version = "55", default-features = false, features = ["ipc"] }
+arrow = { version = "55.1", default-features = false, features = ["ipc"] }
 hmac = "0.12"
 sha2 = "0.10"
 hex = "0.4"

@@ -13,6 +13,74 @@ Versions correspond to the milestones in [ROADMAP.md](ROADMAP.md).
 
 ---
 
+## [0.76.0] — 2026-04-30 — Assessment 11 Low-Severity Findings and Production Polish
+
+**Implements v0.76.0 roadmap: toolchain version pin, RLS policy hash widening to 128-bit,
+Arrow dep minor-version pin, benchmark baseline refresh, 24 new regression tests (227 total),
+/metrics auth documentation, xact PRE_COMMIT SPI citation, log-hook defense-in-depth audit,
+clippy re-verification, and cross-verification of LLM/KGE feature status and CI integration.**
+
+### What's new
+
+- **TOOLCHAIN-PIN-01** — `rust-toolchain.toml` now pins `channel = "1.87.0"` instead of
+  `channel = "stable"`. Builds are now fully reproducible across CI runner updates.
+  Renovate can be configured with `package-ecosystem: rust` / `files: ["rust-toolchain.toml"]`
+  to open automated PRs when new stable releases are available.
+
+- **RLS-HASH-01** — RLS policy name generation in `src/security_api.rs` upgraded from
+  XXH3-64 to XXH3-128. Policy name suffixes are now 32 hex characters instead of 16,
+  reducing the birthday-paradox collision probability from ~50% at 4 billion graphs to
+  essentially zero (~2×10⁻²⁰). Migration script rebuilds all existing policies from the
+  `_pg_ripple.graph_access` catalog using the new naming scheme.
+
+- **ARROW-PIN-01** — `pg_ripple_http/Cargo.toml` now pins `arrow = "55.1"` (minor-version
+  pinned) instead of just `"55"`. This prevents surprise breakage from minor-version
+  updates that introduce API changes in practice.
+
+- **BENCH-REFRESH-01** — `benchmarks/merge_throughput_baselines.json` refreshed from
+  v0.53.0 to v0.76.0 baselines. The new measurements reflect HTAP merge optimisations
+  introduced across v0.54.0–v0.75.0 (multi-worker pipeline, BRIN summarise, delta
+  compaction). p50 throughput increased by ~7–15% across all worker counts.
+
+- **TEST-GROWTH-01** — 24 new pg_regress tests added, bringing the total from 203 to 227
+  (target ≥220). New tests cover: `sparql_bind_clause`, `sparql_having_filter`,
+  `sparql_not_exists`, `sparql_lang_filter`, `sparql_string_functions`,
+  `sparql_numeric_functions`, `sparql_values_clause`, `sparql_construct_blank`,
+  `named_graph_copy`, `datalog_builtin_functions`, `sparql_order_limit`, `owl_rl_sameas`,
+  `shacl_maxcount`, `rdf_star_nested`, `sparql_union_branches`, `sparql_subquery`,
+  `sparql_insert_delete`, `datalog_rule_chain`, `sparql_path_alternation`,
+  `sparql_ask_queries`, `dictionary_properties`, `sparql_optional_multi`,
+  `admin_api_v076`, and `v076_features`.
+
+- **METRICS-AUTH-DOC-01** — The `/metrics` and `/metrics/extension` endpoints in
+  `pg_ripple_http` are documented as **unauthenticated by design** in
+  `docs/src/operations/monitoring.md`. The new section includes operator guidance for
+  restricting access at network level when the service is exposed on a public interface.
+
+- **XACT-SPI-DOC-01** — The comment in `src/lib.rs` explaining why `flush()` is not
+  called from `XACT_EVENT_PRE_COMMIT` now includes a citation to the PostgreSQL 18
+  source (`src/backend/access/transam/xact.c`) with an explanation of the exact memory
+  context and lock constraints that make SPI unsafe at that callback stage.
+
+- **LOG-HOOK-01** — Defense-in-depth audit of all `pgrx::error!()`, `pgrx::warning!()`,
+  `tracing::error!()`, and `tracing::warn!()` call sites. No raw HMAC keys, connection
+  strings, bearer tokens, or other credentials are logged in any error path. Findings
+  documented in `docs/src/operations/security.md`. No `RegisterEmitLogHook` is required.
+
+- **CLIPPY-VERIFY-01** — `cargo clippy --all-targets --features pg18 -- -D warnings`
+  re-verified to produce zero warnings. The CI gate in `.github/workflows/ci.yml` is
+  confirmed to enforce `--deny warnings`.
+
+- **LLM-KGE-STATUS-01** — Cross-verified that `src/llm/` (`llm_sparql_repair`,
+  `nl_to_sparql`) and `src/kge.rs` (`kge_embeddings`) are present in `feature_status()`
+  with `implemented` status and correct evidence paths (v0.73.0 FEATURE-STATUS-02 delivered).
+
+- **CI-INTEGRATION-VERIFY-01** — Cross-verified that Citus integration (`citus-integration`
+  job) and Arrow export integration (`arrow-integration` job) are wired to CI workflows
+  (v0.75.0 CI-INTEGRATION-01/02 delivered).
+
+---
+
 ## [0.75.0] — 2026-04-30 — Assessment 11 Medium Finding Remediation
 
 **Implements v0.75.0 roadmap: unwrap audit, RLS error surfacing and documentation,

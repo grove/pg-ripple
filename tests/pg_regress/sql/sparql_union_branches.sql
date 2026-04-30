@@ -1,0 +1,45 @@
+-- pg_regress test: SPARQL UNION with multiple branches
+
+CREATE EXTENSION IF NOT EXISTS pg_ripple;
+SELECT pg_ripple.triple_count() >= 0 AS library_loaded;
+SET search_path TO pg_ripple, public;
+
+-- Load test data for two different predicates.
+SELECT pg_ripple.load_ntriples(
+    '<https://union2.test/alice> <https://union2.test/email> "alice@example.com" .' || E'\n' ||
+    '<https://union2.test/bob> <https://union2.test/phone> "+1-555-0100" .' || E'\n' ||
+    '<https://union2.test/carol> <https://union2.test/email> "carol@example.com" .' || E'\n' ||
+    '<https://union2.test/carol> <https://union2.test/phone> "+1-555-0200" .'
+) = 4 AS four_triples_loaded;
+
+-- 1. UNION of two branches returns combined results.
+SELECT COUNT(*) = 4 AS union_combines_results
+FROM pg_ripple.sparql($$
+    SELECT ?person ?contact WHERE {
+        { ?person <https://union2.test/email> ?contact }
+        UNION
+        { ?person <https://union2.test/phone> ?contact }
+    }
+$$);
+
+-- 2. UNION with DISTINCT deduplicates.
+SELECT COUNT(*) = 3 AS union_distinct_persons
+FROM pg_ripple.sparql($$
+    SELECT DISTINCT ?person WHERE {
+        { ?person <https://union2.test/email> ?contact }
+        UNION
+        { ?person <https://union2.test/phone> ?contact }
+    }
+$$);
+
+-- 3. Three-branch UNION.
+SELECT COUNT(*) = 4 AS three_branch_union_ok
+FROM pg_ripple.sparql($$
+    SELECT ?person ?val WHERE {
+        { ?person <https://union2.test/email> ?val }
+        UNION
+        { ?person <https://union2.test/phone> ?val }
+        UNION
+        { ?person <https://union2.test/email> ?val FILTER(?val = "fake") }
+    }
+$$);

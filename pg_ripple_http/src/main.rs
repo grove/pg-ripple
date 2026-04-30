@@ -31,7 +31,7 @@ use common::{AppState, env_or};
 ///
 /// Connections to older extension versions log a prominent warning.  The extension
 /// is still served (degraded mode) so that rolling upgrades do not hard-fail.
-const COMPATIBLE_EXTENSION_MIN: &str = "0.74.0";
+const COMPATIBLE_EXTENSION_MIN: &str = "0.75.0";
 
 /// Check that the installed pg_ripple extension version is within the known-compatible
 /// range for this pg_ripple_http build.  Logs a warning if it is not; does NOT exit.

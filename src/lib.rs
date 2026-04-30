@@ -369,7 +369,21 @@ unsafe extern "C-unwind" fn xact_callback_c(event: u32, _arg: *mut std::ffi::c_v
         crate::dictionary::commit_cleanup();
     }
     // Note: we do NOT call flush() here for XACT_EVENT_PRE_COMMIT (event 5)
-    // because SPI is not safely callable from within a PostgreSQL xact callback.
+    // because SPI is not safely callable from within a PostgreSQL xact callback
+    // at the PRE_COMMIT stage.
+    //
+    // XACT-SPI-DOC-01 (v0.76.0): This claim is supported by PostgreSQL source:
+    // src/backend/access/transam/xact.c – CallXactCallbacks() is invoked from
+    // CommitTransaction() AFTER CommandCounterIncrement() and BEFORE the commit
+    // record is written to WAL.  At that point the CurrentMemoryContext is
+    // TopTransactionContext, which is about to be freed; any SPI_connect() call
+    // would allocate in that context and the resulting portal/memory would be
+    // invalidated before SPI_finish().  Additionally, pg_catalog writes from
+    // within a pre-commit callback can deadlock when the heap AM acquires locks
+    // that are already held by the outer transaction.
+    // Reference: https://github.com/postgres/postgres/blob/REL_18_STABLE/src/backend/access/transam/xact.c
+    // (search for "XACT_EVENT_PRE_COMMIT" and "CallXactCallbacks").
+    //
     // Flush is called directly at each write API boundary in dict_api.rs and
     // views_api.rs instead (FLUSH-01 revised).
 }
