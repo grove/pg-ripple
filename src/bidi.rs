@@ -1291,7 +1291,21 @@ pub fn ingest_jsonld_impl(
             other
         ),
     }
-    crate::bulk_load::json_ld_load(document, graph_iri)
+    let inserted = crate::bulk_load::json_ld_load(document, graph_iri);
+    
+    if inserted > 0 {
+        let graph_id = graph_iri
+            .map(|g| {
+                crate::dictionary::encode(
+                    g.trim_matches(|c| c == '<' || c == '>'),
+                    crate::dictionary::KIND_IRI,
+                )
+            })
+            .unwrap_or(0_i64);
+        update_graph_metrics_triple_count(graph_id, inserted);
+    }
+    
+    inserted
 }
 
 // ── BIDI-DIFF-01: Diff-mode ingest ───────────────────────────────────────────
@@ -1416,6 +1430,10 @@ pub fn ingest_json_diff_impl(
             );
             let _ = crate::sparql::execute::sparql_update(&annotation_sparql);
         }
+    }
+
+    if written > 0 {
+        update_graph_metrics_triple_count(graph_id, written);
     }
 
     written
