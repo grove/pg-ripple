@@ -42,6 +42,15 @@ range. If the extension is older than the minimum supported version:
 The check can be disabled with `PG_RIPPLE_HTTP_SKIP_COMPAT_CHECK=1` for testing scenarios where
 an older extension is intentionally paired with a newer companion.
 
+> **⚠ Production warning (COMPAT-DOC-01 / MF-R):**
+> `PG_RIPPLE_HTTP_SKIP_COMPAT_CHECK=1` is intended **only for testing and development** where
+> you deliberately need to run a mismatched pair (e.g., integration tests against an older
+> extension). **Do not set this in production environments.** Skipping the check allows the
+> HTTP companion to serve requests to an incompatible extension, which can result in silent data
+> corruption, unexpected errors, or security vulnerabilities when new SQL functions are called
+> against an older extension schema. If you need to silence the compatibility warning in
+> production, upgrade the extension or the companion to a compatible version pair instead.
+
 ## Independent versioning rationale
 
 The HTTP companion is distributed as a pre-built binary. Extension upgrades (`ALTER EXTENSION

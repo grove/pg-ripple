@@ -99,3 +99,9 @@ path = "fuzz_targets/sparql_update.rs"
 test = false
 doc = false
 
+
+[[bin]]
+name = "url_host_parser"
+path = "fuzz_targets/url_host_parser.rs"
+test = false
+doc = false

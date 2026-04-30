@@ -2,7 +2,7 @@ name: Scheduled Fuzz
 
 on:
   schedule:
-    # Nightly fuzz run: each target runs for 60 seconds.
+    # Nightly fuzz run: each target runs for 120 seconds (FUZZ-DURATION-01 v0.75.0).
     - cron: "0 2 * * *"
   workflow_dispatch:
     inputs:
@@ -36,6 +36,7 @@ jobs:
           - geosparql_wkt
           - llm_prompt_builder
           - sparql_update
+          - url_host_parser
 
     steps:
       - name: Checkout repository
@@ -63,7 +64,7 @@ jobs:
       - name: Run fuzz target
         working-directory: fuzz
         env:
-          DURATION: ${{ github.event.inputs.duration || '60' }}
+          DURATION: ${{ github.event.inputs.duration || '120' }}
         run: |
           cargo fuzz run ${{ matrix.target }} -- \
             -max_total_time=${DURATION} \

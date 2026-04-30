@@ -49,11 +49,12 @@ async fn read_body(body: Body) -> Result<String, Response> {
 }
 
 fn json_response(status: StatusCode, body: serde_json::Value) -> Response {
+    // SAFETY: status and header values are compile-time constants; builder never fails.
     Response::builder()
         .status(status)
         .header("content-type", "application/json")
         .body(Body::from(body.to_string()))
-        .unwrap()
+        .expect("infallible: hardcoded valid HTTP headers")
 }
 
 // ─── Phase 1 — Rule management ────────────────────────────────────────────────

@@ -1,0 +1,31 @@
+-- Migration 0.74.0 → 0.75.0
+--
+-- v0.75.0: Assessment 11 medium finding remediation
+--
+-- Deliverables (no SQL schema changes required):
+--
+--   UNWRAP-AUDIT-01:           Replaced bare .unwrap() with .expect() in pg_ripple_http
+--                              production code (common.rs, datalog.rs json_response).
+--   CI-INTEGRATION-01:         Citus integration tests wired into CI (citus-integration job).
+--   CI-INTEGRATION-02:         Arrow export integration tests wired into CI (arrow-integration job).
+--   ROADMAP-VALIDATE-01:       scripts/check_roadmap_status.py added; validate-roadmap-status
+--                              CI job added (checks ROADMAP.md Released status post-release).
+--   RLS-ERROR-01 (MF-M):       apply_rls_to_vp_table now surfaces ALTER TABLE ENABLE RLS
+--                              and CREATE POLICY errors as WARNING instead of swallowing
+--                              them silently via `let _ = ...`.
+--   ROLE-DOC-01 (MF-N):        is_safe_role_name() documented to note non-ASCII limitation.
+--   RLS-AUDIT-01 (MF-O):       apply_rls_policy_to_all_dedicated_tables audited and documented;
+--                              role quoting via quote_ident_safe() confirmed correct; errors
+--                              surfaced as warnings.
+--   PROPPATH-TEST-01 (MF-P):   tests/pg_regress/sql/v075_features.sql adds property-path
+--                              inside OPTIONAL and GRAPH with vp_rare predicates.
+--   FUZZ-URL-01 (MF-Q):        fuzz/fuzz_targets/url_host_parser.rs added (fuzzes
+--                              extract_url_host from src/citus.rs).
+--   COMPAT-DOC-01 (MF-R):      docs/src/operations/compatibility.md updated with production
+--                              warning for PG_RIPPLE_HTTP_SKIP_COMPAT_CHECK=1.
+--   FUZZ-DURATION-01 (MF-S):   Nightly fuzz duration increased from 60s to 120s per target.
+--   FEATURE-STATUS-JOURNAL-01 (MF-T): mutation_journal row added to feature_status().
+--
+-- Schema change: schema_version stamp updated to 0.75.0.
+INSERT INTO _pg_ripple.schema_version (version, upgraded_from, installed_at)
+VALUES ('0.75.0', '0.74.0', clock_timestamp());

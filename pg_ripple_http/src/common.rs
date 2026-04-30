@@ -67,11 +67,12 @@ pub fn redacted_error(category: &str, detail: &str, status: StatusCode) -> Respo
         "error": category,
         "trace_id": trace_id
     });
+    // SAFETY: status and header values are compile-time constants; builder never fails.
     Response::builder()
         .status(status)
         .header("content-type", "application/json")
         .body(Body::from(body.to_string()))
-        .unwrap()
+        .expect("infallible: hardcoded valid HTTP headers")
 }
 
 // ─── Authentication ───────────────────────────────────────────────────────────

@@ -25,6 +25,19 @@ fn graph_iri_to_policy_suffix(graph_iri: &str) -> String {
 /// Accepts `[A-Za-z_][A-Za-z0-9_$]*` — the subset of valid unquoted identifiers
 /// that cannot contain special SQL characters. This is the OWASP-recommended
 /// allowlist approach for DDL interpolation (RLS-SQL-01).
+///
+/// # Limitations (ROLE-DOC-01 / MF-N)
+///
+/// PostgreSQL allows role names with non-ASCII Unicode characters when the role
+/// is quoted (e.g., `CREATE ROLE "rôle_admin"`). This function rejects all
+/// non-ASCII characters. If your deployment uses non-ASCII role names, those
+/// roles cannot use `grant_graph_access()` / `revoke_graph_access()` and RLS
+/// will not be applied to VP tables for those roles. This is a known
+/// limitation documented in `docs/src/operations/security.md`.
+///
+/// The restriction exists to provide a fully SQL-injection-safe allowlist
+/// without relying on `pg_catalog.quote_ident()` SPI calls in the hot RLS
+/// path. Full Unicode support requires a separate `quote_ident()`-based path.
 fn is_safe_role_name(role: &str) -> bool {
     if role.is_empty() {
         return false;
@@ -69,16 +82,28 @@ fn is_rls_enabled() -> bool {
 /// Enables row-level security on the table and creates policies for every
 /// `(role, graph_id, privilege)` pair currently in `_pg_ripple.graph_access`.
 /// Called from `ensure_htap_tables` and `promote_predicate` (RLS-01).
+///
+/// # Error handling (RLS-ERROR-01 / MF-M)
+///
+/// Previously, errors from `ALTER TABLE ENABLE ROW LEVEL SECURITY` and
+/// `CREATE POLICY` were silently swallowed via `let _ = ...`. This was
+/// changed in v0.75.0 to emit a `WARNING` so operators can detect failures
+/// without having to trace the call site. Errors are non-fatal (returned
+/// as warnings) because VP table creation must not abort on RLS failures
+/// when RLS is not strictly required.
 pub(crate) fn apply_rls_to_vp_table(table: &str) {
     if !is_rls_enabled() {
         return;
     }
 
-    // Enable RLS on the table.
-    let _ = pgrx::Spi::run_with_args(
+    // Enable RLS on the table; emit a warning if this fails (RLS-ERROR-01).
+    if let Err(e) = pgrx::Spi::run_with_args(
         &format!("ALTER TABLE {table} ENABLE ROW LEVEL SECURITY"),
         &[],
-    );
+    ) {
+        pgrx::warning!("apply_rls_to_vp_table: could not enable RLS on {table}: {e}");
+        return;
+    }
 
     // Enumerate existing grants and create matching policies.
     let rows: Vec<(String, i64, String)> = pgrx::Spi::connect(|client| {
@@ -122,6 +147,7 @@ pub(crate) fn apply_rls_to_vp_table(table: &str) {
             "ALL"
         };
         // RLS-SQL-01: skip invalid role names rather than injecting them into DDL.
+        // Note: this also skips valid non-ASCII PostgreSQL role names (see ROLE-DOC-01).
         if !is_safe_role_name(&role) {
             pgrx::warning!(
                 "apply_rls_to_vp_table: skipping unsafe role name '{role}'; \
@@ -129,6 +155,8 @@ pub(crate) fn apply_rls_to_vp_table(table: &str) {
             );
             continue;
         }
+        // RLS-AUDIT-01: role is validated by is_safe_role_name() before reaching here,
+        // so quote_ident_safe() provides defense-in-depth quoting for SQL identifiers.
         let quoted_role = quote_ident_safe(&role);
         // Use a hash of (table, role, graph_id) for a unique policy name.
         use xxhash_rust::xxh3::xxh3_64;
@@ -140,7 +168,12 @@ pub(crate) fn apply_rls_to_vp_table(table: &str) {
              AS PERMISSIVE FOR {pg_privilege} TO {quoted_role} \
              USING (g = {graph_id})"
         );
-        let _ = pgrx::Spi::run_with_args(&policy_sql, &[]);
+        // Surface policy creation errors as warnings (RLS-ERROR-01).
+        if let Err(e) = pgrx::Spi::run_with_args(&policy_sql, &[]) {
+            pgrx::warning!(
+                "apply_rls_to_vp_table: could not create policy {policy_name} on {table}: {e}"
+            );
+        }
     }
 }
 
@@ -193,7 +226,20 @@ fn do_grant_graph_access(graph_iri: &str, role: &str, privilege: &str) {
 }
 
 /// Apply an RLS policy for (graph_id, role, privilege) to every dedicated VP table.
+///
 /// Called when grant_graph_access is invoked after promoted VP tables exist.
+///
+/// # Security audit (RLS-AUDIT-01 / MF-O)
+///
+/// Role quoting is performed via `quote_ident_safe(role)` which:
+/// 1. Validates the role matches `[A-Za-z_][A-Za-z0-9_$]*` before this function
+///    is called (caller guarantees: `is_safe_role_name()` already checked).
+/// 2. Wraps the validated identifier in double-quotes and escapes any embedded
+///    double-quote characters per SQL standard.
+///
+/// Table names (`vp_{pred_id}_delta` / `vp_{pred_id}_main`) contain only the
+/// `pred_id` integer value, which comes from `_pg_ripple.predicates.id BIGINT`
+/// and is safe to interpolate directly.
 fn apply_rls_policy_to_all_dedicated_tables(graph_id: i64, role: &str, pg_privilege: &str) {
     let pred_ids: Vec<i64> = pgrx::Spi::connect(|client| {
         let tbl = client
@@ -216,21 +262,32 @@ fn apply_rls_policy_to_all_dedicated_tables(graph_id: i64, role: &str, pg_privil
     for pred_id in pred_ids {
         for table_suffix in &["_delta", "_main"] {
             let table = format!("_pg_ripple.vp_{pred_id}{table_suffix}");
-            let _ = pgrx::Spi::run_with_args(
+            // Surface errors as warnings (RLS-ERROR-01).
+            if let Err(e) = pgrx::Spi::run_with_args(
                 &format!("ALTER TABLE {table} ENABLE ROW LEVEL SECURITY"),
                 &[],
-            );
+            ) {
+                pgrx::warning!("apply_rls_policy_to_all: could not enable RLS on {table}: {e}");
+                continue;
+            }
             use xxhash_rust::xxh3::xxh3_64;
             let key = format!("{table}:{role}:{graph_id}");
             let suffix = format!("{:016x}", xxh3_64(key.as_bytes()));
             let pname = format!("pg_ripple_vp_{role}_{suffix}");
+            // RLS-AUDIT-01: role is pre-validated by is_safe_role_name(); quote_ident_safe
+            // provides defense-in-depth double-quoting per SQL standard.
             let quoted = quote_ident_safe(role);
             let psql = format!(
                 "CREATE POLICY IF NOT EXISTS {pname} ON {table} \
                  AS PERMISSIVE FOR {pg_privilege} TO {quoted} \
                  USING (g = {graph_id})"
             );
-            let _ = pgrx::Spi::run_with_args(&psql, &[]);
+            // Surface errors as warnings (RLS-ERROR-01).
+            if let Err(e) = pgrx::Spi::run_with_args(&psql, &[]) {
+                pgrx::warning!(
+                    "apply_rls_policy_to_all: could not create policy {pname} on {table}: {e}"
+                );
+            }
         }
     }
 }

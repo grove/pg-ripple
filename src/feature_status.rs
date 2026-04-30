@@ -491,6 +491,24 @@ mod pg_ripple {
                 Some("docs/src/reference/storage.md".to_string()),
                 Some("src/storage/promote.rs: recover_interrupted_promotions".to_string()),
             ),
+            // ── Mutation journal (v0.75.0 FEATURE-STATUS-JOURNAL-01) ────────
+            (
+                "mutation_journal".to_string(),
+                "implemented".to_string(),
+                None,
+                Some(
+                    "FEATURE-STATUS-JOURNAL-01 (v0.75.0): mutation_journal tracks every \
+                     graph write and fires CONSTRUCT writeback rules (CWB). \
+                     Wired call sites: bulk_load (BULK-01), dict_api executor-end hook \
+                     (FLUSH-DEFER-01), Datalog seminaive inference (JOURNAL-DATALOG-01), \
+                     SPARQL Update (CF-A v0.74.0). flush() is called per-statement, not \
+                     per-triple, to avoid O(n x rules) quadratic cost."
+                        .to_string(),
+                ),
+                Some("ci/regress: v075_features.sql".to_string()),
+                Some("docs/src/reference/storage.md".to_string()),
+                Some("src/storage/mutation_journal.rs".to_string()),
+            ),
         ];
 
         TableIterator::new(rows)
