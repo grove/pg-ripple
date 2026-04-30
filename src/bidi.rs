@@ -2082,9 +2082,9 @@ pub fn reconciliation_next_impl(
     pgrx::JsonB,
     pgrx::datum::TimestampWithTimeZone,
 )> {
-    Spi::connect(|c| {
+    Spi::connect_mut(|c| {
         let mut out = Vec::new();
-        let iter = c.select(
+        let iter = c.update(
             "UPDATE _pg_ripple.reconciliation_queue \
              SET leased_until = now() + interval '10 minutes', \
                  leased_by = session_user::text \
