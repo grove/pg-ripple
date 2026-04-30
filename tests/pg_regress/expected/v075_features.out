@@ -1,18 +1,11 @@
--- pg_regress test: v0.75.0 feature gate
---   PROPPATH-TEST-01:          Property path inside OPTIONAL and GRAPH with vp_rare
---   FEATURE-STATUS-JOURNAL-01: mutation_journal entry in feature_status()
---   RLS-ERROR-01/ROLE-DOC-01:  RLS error surfacing and role-name documentation
---   UNWRAP-AUDIT-01:           Verified: no bare unwrap() in production paths
---   FUZZ-URL-01:               url_host_parser fuzz target added (see fuzz/fuzz_targets/)
-CREATE EXTENSION IF NOT EXISTS pg_ripple;
-SELECT pg_ripple.triple_count() >= 0 AS library_loaded;
+CREATE EXTENSION
  library_loaded 
 ----------------
  t
 (1 row)
 
-SET search_path TO pg_ripple, public;
--- ─── Part 1: FEATURE-STATUS-JOURNAL-01 ─────────────────────────────────────
+SET
+-- --- Part 1: FEATURE-STATUS-JOURNAL-01 -----------------------------------
 -- 1a. mutation_journal row is present with implemented status.
 SELECT status AS mutation_journal_status
 FROM pg_ripple.feature_status()
@@ -31,7 +24,7 @@ WHERE feature_name = 'mutation_journal';
  t
 (1 row)
 
--- ─── Part 2: PROPPATH-TEST-01 ───────────────────────────────────────────────
+-- --- Part 2: PROPPATH-TEST-01 -------------------------------------------
 -- 2a. Load test triples using a unique namespace (predicate stays in vp_rare).
 SELECT pg_ripple.load_ntriples(
     '<https://pp75.test/a> <https://pp75.test/parent> <https://pp75.test/b> .' || E'\n' ||
@@ -116,7 +109,7 @@ $$);
  t
 (1 row)
 
--- ─── Part 3: ROADMAP-VALIDATE-01 ───────────────────────────────────────────
+-- --- Part 3: ROADMAP-VALIDATE-01 ----------------------------------------
 -- 3a. Extension is registered in pg_extension.
 SELECT extname = 'pg_ripple' AS extension_registered
 FROM pg_extension

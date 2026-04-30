@@ -9,7 +9,7 @@ CREATE EXTENSION IF NOT EXISTS pg_ripple;
 SELECT pg_ripple.triple_count() >= 0 AS library_loaded;
 SET search_path TO pg_ripple, public;
 
--- ─── Part 1: FEATURE-STATUS-JOURNAL-01 ─────────────────────────────────────
+-- --- Part 1: FEATURE-STATUS-JOURNAL-01 -----------------------------------
 
 -- 1a. mutation_journal row is present with implemented status.
 SELECT status AS mutation_journal_status
@@ -17,20 +17,31 @@ FROM pg_ripple.feature_status()
 WHERE feature_name = 'mutation_journal';
 
 -- 1b. mutation_journal evidence path references the source file.
-SELECT evidence_path LIKE '%mutation_journal%' AS mutation_journal_evidSELECT evidence_path LIKE '%mutation_journal%' AS mutation_journal_evidSELECal';
+SELECT evidence_path LIKE '%mutation_journal%' AS mutation_journal_evidence_ok
+FROM pg_ripple.feature_status()
+WHERE feature_name = 'mutation_journal';
 
--- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -��-- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- ��────────
+-- --- Part 2: PROPPATH-TEST-01 -------------------------------------------
 
 -- 2a. Load test triples using a unique namespace (predicate stays in vp_rare).
 SELECT pg_ripple.load_ntriples(
-    '<https://pp75.test/a> <https://    '<https://pp75.test/a> <https:// b> .'    '<https://pp75.test/a> <https://    '<https://pp5.test/parent> <https://pp75.test/c> .' ||     '<https://pp75.test/a> <https://    '<https://pp75.test/a> <https:// b> .'    '<https://pp75.test/a> <https://    '<https://pp5.test/parent> <https:/) = 4 AS four_triples_loaded;
+    '<https://pp75.test/a> <https://pp75.test/parent> <https://pp75.test/b> .' || E'\n' ||
+    '<https://pp75.test/b> <https://pp75.test/parent> <https://pp75.test/c> .' || E'\n' ||
+    '<https://pp75.test/a> <https://pp75.test/label>  "node-a" .' || E'\n' ||
+    '<https://pp75.test/b> <https://pp75.test/label>  "node-b" .'
+) = 4 AS four_triples_loaded;
 
 -- 2b. Confirm predicate lives in vp_rare.
 SELECT COUNT(*) > 0 AS parent_pred_in_vp_rare
-FROM _pg_ripple.vp_rare FROM _pg_ripple.vp_rare FROM _pg_rippd = v.p
+FROM _pg_ripple.vp_rare v
+JOIN _pg_ripple.dictionary d ON d.id = v.p
 WHERE d.value = 'https://pp75.test/parent';
 
--- 2c. Property pa-- 2c. Property pa-- 2c. Property pa-- 2c. Property pa-- 2c. Property pa-- 2c. Property pa-- 2c. Property pa-- 2c. Property pa-- 2c. Property pa-- 2c <https://pp75.test/parent>+ ?anc
+-- 2c. Property path (one-or-more) in vp_rare.
+SELECT COUNT(*) AS proppath_vp_rare_count
+FROM pg_ripple.sparql($$
+    SELECT ?anc WHERE {
+        <https://pp75.test/a> <https://pp75.test/parent>+ ?anc
     }
 $$);
 
@@ -38,12 +49,28 @@ $$);
 SELECT COUNT(*) AS opt_proppath_row_count
 FROM pg_ripple.sparql($$
     SELECT ?x ?ancestor WHERE {
-                                                                            p75.test/parent>+ ?ancestor }
+        ?x <https://pp75.test/label> ?lbl .
+        OPTIONAL { ?x <https://pp75.test/parent>+ ?ancestor }
     }
-$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$$l($$
+$$);
+
+-- 2e. Load one triple into a named graph.
+SELECT pg_ripple.load_ntriples(
+    '<https://pp75.test/d> <https://pp75.test/parent> <https://pp75.test/e> .',
+    'https://pp75.test/graph1'
+) = 1 AS one_triple_in_named_graph;
+
+-- 2f. Property path inside GRAPH clause with vp_rare predicate.
+SELECT COUNT(*) AS graph_proppath_count
+FROM pg_ripple.sparql($$
     SELECT ?child ?anc WHERE {
         GRAPH <https://pp75.test/graph1> {
-            ?ch            ?ch            ?ch            ?ch            ?ch      Zer            ?ch            ?ch          panic.
+            ?child <https://pp75.test/parent>+ ?anc
+        }
+    }
+$$);
+
+-- 2g. Zero-or-more path inside OPTIONAL must not panic.
 SELECT COUNT(*) >= 0 AS zero_or_more_opt_ok
 FROM pg_ripple.sparql($$
     SELECT ?x ?anc WHERE {
@@ -52,7 +79,7 @@ FROM pg_ripple.sparql($$
     }
 $$);
 
-----------------------------------ATE-01 ──────────────────────----------------------------��───────────
+-- --- Part 3: ROADMAP-VALIDATE-01 ----------------------------------------
 
 -- 3a. Extension is registered in pg_extension.
 SELECT extname = 'pg_ripple' AS extension_registered

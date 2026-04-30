@@ -26,5 +26,6 @@
 --   FUZZ-DURATION-01 (MF-S):   Nightly fuzz duration increased from 60s to 120s per target.
 --   FEATURE-STATUS-JOURNAL-01 (MF-T): mutation_journal row added to feature_status().
 --
--- No SQL schema changes. All changes are in Rust source, CI configuration,
--- documentation, and test files.
+-- Schema change: schema_version stamp updated to 0.75.0.
+INSERT INTO _pg_ripple.schema_version (version, upgraded_from, installed_at)
+VALUES ('0.75.0', '0.74.0', clock_timestamp());
