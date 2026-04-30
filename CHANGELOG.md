@@ -13,6 +13,80 @@ Versions correspond to the milestones in [ROADMAP.md](ROADMAP.md).
 
 ---
 
+## [0.75.0] — 2026-04-30 — Assessment 11 Medium Finding Remediation
+
+**Implements v0.75.0 roadmap: unwrap audit, RLS error surfacing and documentation,
+Citus and Arrow CI integration tests, roadmap status validation, property-path/vp_rare
+regression tests, URL host parser fuzz target, fuzz duration increase, HTTP companion
+production docs, and mutation_journal feature_status entry.**
+
+### What's new
+
+- **UNWRAP-AUDIT-01** — Audited all `.unwrap()` calls in production code outside
+  `#[cfg(test)]` blocks. `pg_ripple_http` `json_response()` helpers in `common.rs`
+  and `datalog.rs` updated to use `.expect("infallible: hardcoded valid HTTP headers")`
+  for clearer panic messages. All other production `unwrap()` calls are either in
+  test modules or already annotated with `#[allow(clippy::unwrap_used)]` + `// SAFETY:`
+  comments. ci/regress: cargo clippy --features pg18.
+
+- **CI-INTEGRATION-01** — `citus-integration` CI job added (`.github/workflows/ci.yml`):
+  runs all `citus_*.sql` pg_regress tests in a dedicated job after main test/regress
+  jobs pass. Tests verify graceful-degradation behavior when Citus is not installed.
+  ci/test: `.github/workflows/ci.yml` `citus-integration` job.
+
+- **CI-INTEGRATION-02** — `arrow-integration` CI job added: exercises
+  `export_arrow_flight()` against a populated database, verifies the returned ticket
+  is non-empty BYTEA, and confirms `arrow_flight_export` is `implemented` in
+  `feature_status()`. ci/test: `.github/workflows/ci.yml` `arrow-integration` job.
+
+- **ROADMAP-VALIDATE-01** — `scripts/check_roadmap_status.py` added: validates that
+  ROADMAP.md marks the current Cargo.toml version as `Released ✅`. New
+  `validate-roadmap-status` CI job runs post-release to catch forgotten status updates.
+  ci/test: `.github/workflows/ci.yml` `validate-roadmap-status` job.
+
+- **RLS-ERROR-01** — `apply_rls_to_vp_table()` and `apply_rls_policy_to_all_dedicated_tables()`
+  now surface `ALTER TABLE ENABLE ROW LEVEL SECURITY` and `CREATE POLICY` errors as
+  `WARNING` messages instead of silently discarding them via `let _ = ...`. Operators
+  can now detect RLS failures in PostgreSQL logs. ci/regress: v075_features.sql.
+
+- **ROLE-DOC-01** — `is_safe_role_name()` documentation updated to explicitly state
+  that non-ASCII Unicode role names are rejected with a guidance note on the limitation
+  and why it exists (SQL-injection-safe allowlist). docs/src/operations/security.md.
+
+- **RLS-AUDIT-01** — `apply_rls_policy_to_all_dedicated_tables()` fully audited:
+  role quoting via `quote_ident_safe()` confirmed correct; function doc comment added
+  describing the security invariants. ci/regress: v075_features.sql.
+
+- **PROPPATH-TEST-01** — `tests/pg_regress/sql/v075_features.sql` adds property-path
+  regression tests for: property-path (`+`) inside `OPTIONAL`, property-path inside
+  `GRAPH` clause, and property-path directly in `vp_rare` predicates (confirming no
+  promotion is required). ci/regress: v075_features.sql.
+
+- **FUZZ-URL-01** — `fuzz/fuzz_targets/url_host_parser.rs` added: fuzzes
+  `extract_url_host()` from `src/citus.rs` for panics and assertion violations.
+  Target added to `fuzz/Cargo.toml` and `fuzz.yml` matrix.
+  ci/test: `.github/workflows/fuzz.yml` `url_host_parser` target.
+
+- **COMPAT-DOC-01** — `docs/src/operations/compatibility.md` updated with a
+  production warning for `PG_RIPPLE_HTTP_SKIP_COMPAT_CHECK=1`, clarifying it is
+  only for testing/development and must not be set in production environments.
+  docs/src/operations/compatibility.md.
+
+- **FUZZ-DURATION-01** — Nightly fuzz duration increased from 60s to 120s per target
+  (default for `workflow_dispatch` unchanged at 3600s). ci/test: fuzz.yml.
+
+- **FEATURE-STATUS-JOURNAL-01** — `mutation_journal` row added to `feature_status()`
+  with `implemented` status. Documents all wired call sites (bulk_load, dict_api
+  executor-end hook, Datalog seminaive, SPARQL Update) and the per-statement flush
+  semantics. ci/regress: v075_features.sql.
+
+- **HTTP-VERSION-01** — `pg_ripple_http` version bumped to 0.75.0;
+  `COMPATIBLE_EXTENSION_MIN` updated to `"0.74.0"`. pg_ripple_http/Cargo.toml.
+
+### Migration
+
+- Migration: `sql/pg_ripple--0.74.0--0.75.0.sql`.
+
 ## [0.74.0] — 2026-05-09 — Assessment 11 Critical/High Remediation
 
 **Implements v0.74.0 roadmap: evidence truthfulness for all 12 missing reference docs, mutation journal wired through Datalog inference and executor-end hook, VP promotion plan-cache invalidation, interrupted-promotion recovery, and comprehensive CI validation.**
