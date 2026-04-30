@@ -163,6 +163,10 @@ One release remains on the path to v1.0.0.
 
 The v0.64.0–v0.76.0 Assessment Remediation & Production Polish sequence is complete. Key milestones: honest feature-status SQL API (`feature_status()`), GitHub Actions SHA pinning and Docker release digest integrity, CONSTRUCT writeback incremental delta maintenance, true portal-based SPARQL cursor streaming (bounded memory), HMAC-SHA256 signed Arrow Flight tickets with nonce replay protection, real Arrow IPC streaming in `pg_ripple_http`, 72-hour soak test artifacts, security audit closure, public benchmark baselines, upgrade and backup acceptance tests, operator runbooks, a mandatory release evidence dashboard, module restructuring along single-responsibility boundaries (v0.69.0), sub-transaction savepoint/rollback support (v0.72.0), SPARQL live subscription API with SSE (v0.73.0), JSON↔RDF mapping registry (v0.73.0), mutation journal wired through Datalog inference (v0.74.0), VP promotion plan-cache invalidation and interrupted-promotion recovery (v0.74.0), Citus and Arrow CI integration jobs (v0.75.0), RLS policy hash widened to XXH3-128, reproducible toolchain pin (v0.76.0), 227 regression tests (v0.76.0), and benchmark baselines refreshed to current HTAP performance levels (v0.76.0).
 
+### v0.79.0 — Query Engine Completeness
+
+Before the production release, v0.79.0 closes the two remaining known limitations: a true **Leapfrog Triejoin executor** for Worst-Case Optimal Joins (WCOJ), replacing the current planner-hint-only mode; and full **`sh:SPARQLRule`** evaluation, allowing SHACL Advanced Features forward-chaining rules to materialise triples via native SPARQL CONSTRUCT queries. When both are delivered, every row in `pg_ripple.feature_status()` will show `implemented` and the "Known limitations" table will be removed from the README.
+
 ### v1.0.0 — Production Release
 
 The final milestone: full API and documentation freeze, long-term support commitment, and public production dossier. All conformance suites (SPARQL 1.1, SHACL Core, OWL 2 RL, LUBM) remain required gates; performance regression CI and the release evidence dashboard are mandatory artifacts.
@@ -358,9 +362,8 @@ The following features are available but have documented limitations in the curr
 
 | Feature | Status | Detail |
 |---|---|---|
-| **Arrow Flight bulk export** | Implemented | `/flight/do_get` streams tombstone-excluded Arrow IPC record batches with HMAC-SHA256 signed tickets and nonce replay protection. Citus and Arrow CI integration tests run in dedicated CI jobs (`citus-integration`, `arrow-integration`). |
-| **WCOJ (Worst-Case Optimal Joins)** | Planner hint | WCOJ re-orders cyclic BGP joins at plan time. A true Leapfrog Triejoin executor is not implemented. |
-| **SHACL-SPARQL rules (`sh:SPARQLRule`)** | Not supported | When detected, the extension emits a WARNING (PT481) and skips the rule. Full `sh:SPARQLRule` support is targeted for v1.0.0. `sh:TripleRule` and `sh:SPARQLConstraint` are fully supported. |
+| **WCOJ (Worst-Case Optimal Joins)** | Planner hint | WCOJ re-orders cyclic BGP joins at plan time. A true Leapfrog Triejoin executor is planned for v0.79.0 (WCOJ-LFTI-01). |
+| **SHACL-SPARQL rules (`sh:SPARQLRule`)** | Planned (v0.79.0) | When detected, the extension emits a WARNING (PT481) and skips the rule. Full `sh:SPARQLRule` support is planned for v0.79.0 (SHACL-SPARQL-01). `sh:TripleRule` and `sh:SPARQLConstraint` are fully supported. |
 | **Citus, pgvector, pg_trickle** | Optional | Citus, pgvector, and pg_trickle are optional dependencies. Dependent features degrade gracefully when these extensions are not installed. |
 
 These are not bugs — they are known partial implementations. All limitations are surfaced in `pg_ripple.feature_status()`.
