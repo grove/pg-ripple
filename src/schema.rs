@@ -1629,7 +1629,9 @@ ALTER TABLE _pg_ripple.extvp_tables
     DROP COLUMN IF EXISTS pred2_iri;
 "#,
     name = "v074_schema_additions",
-    requires = ["v073_schema_additions"]
+    // v028_embedding_queue is in an independent DAG branch; adding it here
+    // ensures _pg_ripple.embedding_queue exists before SET UNLOGGED runs.
+    requires = ["v073_schema_additions", "v028_embedding_queue"]
 );
 
 pgrx::extension_sql!(
