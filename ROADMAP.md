@@ -140,6 +140,12 @@
 | [v0.75.0](roadmap/v0.75.0.md) | Assessment 11 medium findings: unwrap/panic audit, Citus and Arrow integration test CI wiring, roadmap status validation, RLS error surfacing, role-name doc, property-path edge tests, fuzz duration increase, URL parser fuzz target, HTTP companion production docs, feature-status journal entry | Planned | Large | [Full details](roadmap/v0.75.0-full.md) |
 | [v0.76.0](roadmap/v0.76.0.md) | Assessment 11 low-severity and polish: rust-toolchain pin, RLS hash widening, Arrow dep pin, benchmark baseline refresh, test count growth, /metrics auth docs, xact SPI safety citation, log-hook audit, clippy gate verification | Planned | Medium | [Full details](roadmap/v0.76.0-full.md) |
 
+### Bidirectional Integration & Beyond (v0.77.0 – v0.78.0)
+
+| Version | Theme | Status | Scope | Full details |
+|---------|-------|--------|-------|-------------- |
+| [v0.77.0 + v0.78.0](roadmap/v0.77.0-full.md) | **v0.77.0 — Bidirectional Integration Primitives** (source attribution, conflict resolution with echo-aware `normalize`, late-binding IRI rewrite, sparse-CAS events, linkback with target-assigned IDs, stable transport) + **v0.78.0 — Bidirectional Integration Operations** (queue mgmt, schema evolution, per-subscription auth, redaction, audit, property/chaos tests, reconciliation toolkit, ops surface). Both ship together. **BIDI-SPEC-01:** vendor-neutral RDF Bidirectional Integration Profile v1 specification; other triplestores can implement the same protocol. | Planned | Large | [v0.77.0](roadmap/v0.77.0-full.md), [v0.78.0](roadmap/v0.78.0-full.md) |
+
 #### PLAN_OVERALL_ASSESSMENT_11 coverage map
 
 Every finding and recommendation from [plans/PLAN_OVERALL_ASSESSMENT_11.md](plans/PLAN_OVERALL_ASSESSMENT_11.md) is assigned to one or more roadmap milestones:
