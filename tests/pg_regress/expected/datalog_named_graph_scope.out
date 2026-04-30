@@ -19,13 +19,13 @@ SET search_path TO pg_ripple, public;
 SELECT pg_ripple.drop_graph('https://ngs.test/graph1');
  drop_graph 
 ------------
- 0
+          0
 (1 row)
 
 SELECT pg_ripple.drop_graph('https://ngs.test/graph2');
  drop_graph 
 ------------
- 0
+          0
 (1 row)
 
 -- Insert base triples into a named graph (g != 0) via N-Quads.
@@ -122,11 +122,24 @@ SELECT pg_ripple.add_rule(
 (1 row)
 
 SET pg_ripple.rule_graph_scope = 'default';
--- infer() succeeds but derives 0 new triples because email triples are in named
--- graphs, not the default graph.
-SELECT pg_ripple.infer('ngs_test_default_scope') = 0 AS zero_derived_when_scope_default;
- zero_derived_when_scope_default 
----------------------------------
+-- infer() succeeds but derives 0 hasContact2 triples because email triples are
+-- in named graphs, not the default graph.  The return value counts SQL
+-- executions (>= 1 for a 1-rule set), so we only assert it ran successfully.
+SELECT pg_ripple.infer('ngs_test_default_scope') >= 0 AS infer_ran_with_default_scope;
+ infer_ran_with_default_scope 
+------------------------------
+ t
+(1 row)
+
+-- Confirm no hasContact2 triples were actually materialised.
+SELECT COUNT(*) = 0 AS no_contacts2_derived_with_default_scope
+FROM pg_ripple.sparql($$
+    SELECT ?x ?y WHERE {
+        ?x <https://ngs.test/hasContact2> ?y
+    }
+$$);
+ no_contacts2_derived_with_default_scope 
+-----------------------------------------
  t
 (1 row)
 

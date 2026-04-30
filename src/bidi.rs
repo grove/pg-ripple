@@ -1292,7 +1292,7 @@ pub fn ingest_jsonld_impl(
         ),
     }
     let inserted = crate::bulk_load::json_ld_load(document, graph_iri);
-    
+
     if inserted > 0 {
         let graph_id = graph_iri
             .map(|g| {
@@ -1304,7 +1304,7 @@ pub fn ingest_jsonld_impl(
             .unwrap_or(0_i64);
         update_graph_metrics_triple_count(graph_id, inserted);
     }
-    
+
     inserted
 }
 

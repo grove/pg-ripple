@@ -750,8 +750,10 @@ mod pg_ripple {
                 // Delete from delta table (inferred triples land there).
                 let delta_tbl = format!("_pg_ripple.vp_{pred_id}_delta");
                 let deleted_delta = pgrx::Spi::get_one_with_args::<i64>(
-                    &format!("WITH d AS (DELETE FROM {delta_tbl} WHERE source = 1 RETURNING 1) \
-                              SELECT count(*) FROM d"),
+                    &format!(
+                        "WITH d AS (DELETE FROM {delta_tbl} WHERE source = 1 RETURNING 1) \
+                              SELECT count(*) FROM d"
+                    ),
                     &[],
                 )
                 .unwrap_or(None)
