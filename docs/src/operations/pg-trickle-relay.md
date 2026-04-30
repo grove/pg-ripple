@@ -945,6 +945,183 @@ shape than before. Manage this with:
 
 ---
 
+## Bidirectional CRM ⇄ ERP Walkthrough (v0.77.0)
+
+> **Available since**: v0.77.0
+
+v0.77.0 adds the generic bidirectional integration primitives that make it
+possible to build a two-way relay between any two systems through pg_ripple.
+This walkthrough uses a CRM ⇄ ERP scenario as the concrete example.
+
+### Topology
+
+```
+  CRM (source of truth       ERP (source of truth
+   for email/phone)           for tax ID/status)
+       │                           │
+       │  pg-trickle relay         │  pg-trickle relay
+       ▼                           ▼
+  <urn:source:crm>           <urn:source:erp>
+       │                           │
+       └──────────┬────────────────┘
+                  ▼
+           pg_ripple hub
+           (named graphs)
+                  │
+          conflict policies
+          (source_priority)
+                  │
+          resolved projection
+                  │
+    ┌─────────────┴─────────────┐
+    ▼                           ▼
+  CRM outbox               ERP outbox
+  (pg-trickle)             (pg-trickle)
+```
+
+### Step 1: Register mappings with default graph IRIs
+
+```sql
+-- CRM mapping: contacts
+SELECT pg_ripple.register_json_mapping(
+    'crm_contact',
+    '{"@context": {
+        "ex:name":    "http://schema.org/name",
+        "ex:email":   "http://schema.org/email",
+        "ex:phone":   "http://schema.org/telephone"
+    }}'::jsonb,
+    default_graph_iri   => '<urn:source:crm>',
+    timestamp_path      => '$.lastModified',
+    iri_template        => 'https://crm.example.com/contacts/{id}'
+);
+
+-- ERP mapping: employees
+SELECT pg_ripple.register_json_mapping(
+    'erp_employee',
+    '{"@context": {
+        "ex:name":   "http://schema.org/name",
+        "ex:taxId":  "http://schema.org/taxID",
+        "ex:status": "http://schema.org/employmentType"
+    }}'::jsonb,
+    default_graph_iri   => '<urn:source:erp>',
+    timestamp_path      => '$.updatedAt',
+    iri_template        => 'https://erp.example.com/employees/{id}'
+);
+```
+
+### Step 2: Declare conflict resolution policies
+
+```sql
+-- Email: CRM is authoritative
+SELECT pg_ripple.register_conflict_policy(
+    'http://schema.org/email',
+    'source_priority',
+    '{"order": ["<urn:source:crm>", "<urn:source:erp>"]}'::jsonb
+);
+
+-- Name: last-write wins across both systems
+SELECT pg_ripple.register_conflict_policy(
+    'http://schema.org/name',
+    'latest_wins'
+);
+
+-- Tax ID: ERP is sole source; reject any CRM attempt
+SELECT pg_ripple.register_conflict_policy(
+    'http://schema.org/taxID',
+    'reject_on_conflict'
+);
+```
+
+### Step 3: Ingest payloads
+
+```sql
+-- Ingest a CRM contact update (diff mode: derives per-triple timestamps)
+SELECT pg_ripple.ingest_json(
+    '{"ex:name": "Alice Smith", "ex:email": "alice@crm.example.com"}'::jsonb,
+    'https://crm.example.com/contacts/42',
+    'crm_contact',
+    mode => 'diff'
+);
+
+-- Ingest the matching ERP employee (upsert mode: replaces sh:maxCount 1 fields)
+SELECT pg_ripple.ingest_json(
+    '{"ex:name": "Alice Smith", "ex:taxId": "123-45-6789"}'::jsonb,
+    'https://erp.example.com/employees/E-999',
+    'erp_employee',
+    mode => 'upsert'
+);
+```
+
+### Step 4: Cross-source entity linking (BIDI-REF-01)
+
+After the ERP confirms Alice is the same person as CRM contact 42:
+
+```sql
+-- Record the linkback: CRM hub IRI ↔ ERP employee IRI
+SELECT pg_ripple.record_linkback(
+    'event-uuid-from-outbox'::uuid,
+    target_iri => 'https://erp.example.com/employees/E-999'
+);
+```
+
+This writes `<https://crm.example.com/contacts/42> owl:sameAs <https://erp.example.com/employees/E-999>` into the target graph and flushes any buffered events.
+
+### Step 5: Loop-safe subscriptions (BIDI-LOOP-01)
+
+When creating subscriptions, use `exclude_graphs` to prevent echo loops:
+
+```sql
+-- CRM subscription: exclude CRM's own graph to prevent loop
+SELECT pg_ripple.create_subscription(
+    'crm_contact_sync',
+    outbox_table => 'pg_ripple_outbox.crm_contact_events'
+    -- Note: exclude_graphs and propagation_depth are set via the
+    -- _pg_ripple.subscriptions table after creation:
+    -- UPDATE _pg_ripple.subscriptions
+    --   SET exclude_graphs = ARRAY['<urn:source:crm>'],
+    --       propagation_depth = 1
+    -- WHERE name = 'crm_contact_sync';
+);
+```
+
+### Step 6: Observe per-graph metrics (BIDI-OBS-01)
+
+```sql
+SELECT graph_iri, triple_count, last_write_at, conflicts_total
+FROM pg_ripple.graph_stats()
+ORDER BY triple_count DESC;
+```
+
+### Outbound event wire format (BIDI-WIRE-01)
+
+Every event emitted to an outbox table follows this shape:
+
+```json
+{
+  "version": "1.0",
+  "event_id": "550e8400-e29b-41d4-a716-446655440000",
+  "subscription": "crm_contact_sync",
+  "subject": "https://crm.example.com/contacts/42",
+  "source_graph": "urn:source:crm",
+  "after": {
+    "http://schema.org/name": "Alice Smith",
+    "http://schema.org/email": "alice@crm.example.com"
+  },
+  "base": {
+    "http://schema.org/name": "Alice"
+  },
+  "subject_resolved": true
+}
+```
+
+The `base` object carries the previous values for changed predicates, enabling
+compare-and-swap (CAS) safety at the receiving system. See
+`assert_cas(event, actual)` for a built-in CAS helper.
+
+The full JSON Schema is at `docs/src/operations/event-schema-v1.json`.
+
+---
+
 ## Related pages
 
 - [CDC Operations](cdc.md)

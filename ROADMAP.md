@@ -144,7 +144,7 @@
 
 | Version | Theme | Status | Scope | Full details |
 |---------|-------|--------|-------|-------------- |
-| [v0.77.0 + v0.78.0](roadmap/v0.77.0-full.md) | **v0.77.0 — Bidirectional Integration Primitives** (source attribution, conflict resolution with echo-aware `normalize`, late-binding IRI rewrite, sparse-CAS events, linkback with target-assigned IDs, pg-trickle outbox/inbox transport) + **v0.78.0 — Bidirectional Integration Operations** (write-side outbox policy, new-events-only schema evolution, per-subscription side-band auth, write-time redaction, audit, property/chaos tests, reconciliation toolkit, ops surface). Both ship together. **BIDI-SPEC-01:** non-blocking draft RDF Bidirectional Integration Profile v1 for broader ecosystem review. | Planned | Large | [v0.77.0](roadmap/v0.77.0-full.md), [v0.78.0](roadmap/v0.78.0-full.md) |
+| [v0.77.0 + v0.78.0](roadmap/v0.77.0-full.md) | **v0.77.0 — Bidirectional Integration Primitives** (source attribution, conflict resolution with echo-aware `normalize`, late-binding IRI rewrite, sparse-CAS events, linkback with target-assigned IDs, pg-trickle outbox/inbox transport) + **v0.78.0 — Bidirectional Integration Operations** (write-side outbox policy, new-events-only schema evolution, per-subscription side-band auth, write-time redaction, audit, property/chaos tests, reconciliation toolkit, ops surface). Both ship together. **BIDI-SPEC-01:** non-blocking draft RDF Bidirectional Integration Profile v1 for broader ecosystem review. | Released ✅ | Large | [v0.77.0](roadmap/v0.77.0-full.md), [v0.78.0](roadmap/v0.78.0-full.md) |
 
 ### Query Engine Completeness (v0.79.0)
 

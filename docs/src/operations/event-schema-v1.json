@@ -1,0 +1,89 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pg-ripple.dev/schemas/event-v1.json",
+  "title": "pg_ripple Bidi Event v1.0",
+  "description": "Wire format for bidirectional integration events emitted by pg_ripple v0.77.0+. All events carry a top-level 'version' discriminator for forward compatibility.",
+  "type": "object",
+  "required": ["version", "event_id", "subscription", "subject"],
+  "additionalProperties": false,
+  "properties": {
+    "version": {
+      "type": "string",
+      "const": "1.0",
+      "description": "Wire format version discriminator. Always '1.0' for this schema."
+    },
+    "event_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "Stable UUID for this event, used for idempotent delivery and linkback rendezvous."
+    },
+    "subscription": {
+      "type": "string",
+      "description": "Name of the pg_ripple subscription that emitted this event."
+    },
+    "subject": {
+      "type": "string",
+      "format": "uri",
+      "description": "IRI of the RDF subject (entity) this event describes."
+    },
+    "source_graph": {
+      "type": ["string", "null"],
+      "description": "IRI of the named graph that is the source of the subject's triples. NULL for the default graph."
+    },
+    "after": {
+      "type": "object",
+      "description": "Full predicate → object snapshot after this transaction. Keys are predicate IRIs; values are decoded literals or IRI strings.",
+      "additionalProperties": {
+        "type": ["string", "number", "boolean", "null"]
+      }
+    },
+    "base": {
+      "type": "object",
+      "description": "Sparse diff of previous values for changed predicates. Keys are predicate IRIs. Empty when the subject is new. Used by assert_cas() for optimistic locking.",
+      "additionalProperties": {
+        "type": ["string", "number", "boolean", "null"]
+      }
+    },
+    "subject_resolved": {
+      "type": "boolean",
+      "default": false,
+      "description": "True when the subject IRI has been confirmed by the target system via record_linkback(). False (or absent) for the initial event on a new subject whose target ID is pending."
+    },
+    "source_timestamp": {
+      "type": ["string", "null"],
+      "format": "date-time",
+      "description": "Optional ISO 8601 timestamp extracted from the source payload (e.g. 'lastModified'). Present only when the mapping has a timestamp_path configured and diff mode was used."
+    }
+  },
+  "examples": [
+    {
+      "version": "1.0",
+      "event_id": "550e8400-e29b-41d4-a716-446655440000",
+      "subscription": "crm_contact_sync",
+      "subject": "https://crm.example.com/contacts/42",
+      "source_graph": "urn:source:crm",
+      "after": {
+        "http://schema.org/name": "Alice Smith",
+        "http://schema.org/email": "alice@crm.example.com"
+      },
+      "base": {
+        "http://schema.org/name": "Alice"
+      },
+      "subject_resolved": true,
+      "source_timestamp": "2026-03-15T10:30:00Z"
+    },
+    {
+      "version": "1.0",
+      "event_id": "6ba7b810-9dad-11d1-80b4-00c04fd430c8",
+      "subscription": "erp_employee_sync",
+      "subject": "https://erp.example.com/employees/E-999",
+      "source_graph": "urn:source:erp",
+      "after": {
+        "http://schema.org/name": "Alice Smith",
+        "http://schema.org/taxID": "123-45-6789"
+      },
+      "base": {},
+      "subject_resolved": false
+    }
+  ]
+}

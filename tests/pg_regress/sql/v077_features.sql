@@ -1,0 +1,200 @@
+-- pg_regress test: v0.77.0 feature gate
+--   BIDI-ATTR-01:     register_json_mapping accepts default_graph_iri, iri_template etc.
+--   BIDI-CONFLICT-01: register_conflict_policy / drop_conflict_policy
+--   BIDI-DELETE-01:   delete_by_subject / delete_mapped_predicates
+--   BIDI-LINKBACK-01: record_linkback / abandon_linkback
+--   BIDI-INBOX-01:    install_bidi_inbox
+--   BIDI-CAS-01:      assert_cas
+--   BIDI-OBS-01:      graph_stats
+--   BIDI-WIRE-01:     bidi_wire_version
+--   BIDI-ATTR-01:     ingest_jsonld with mode parameter
+
+CREATE EXTENSION IF NOT EXISTS pg_ripple;
+SELECT pg_ripple.triple_count() >= 0 AS library_loaded;
+SET search_path TO pg_ripple, public;
+
+-- --- Part 1: BIDI-WIRE-01 — wire format version -------------------------
+
+-- 1a. bidi_wire_version returns '1.0'.
+SELECT pg_ripple.bidi_wire_version() = '1.0' AS wire_version_ok;
+
+-- --- Part 2: Schema presence checks (BIDI-MIG-01) ----------------------
+
+-- 2a. conflict_policies table exists.
+SELECT COUNT(*) = 1 AS conflict_policies_table_exists
+FROM information_schema.tables
+WHERE table_schema = '_pg_ripple'
+  AND table_name = 'conflict_policies';
+
+-- 2b. conflict_winners table exists.
+SELECT COUNT(*) = 1 AS conflict_winners_table_exists
+FROM information_schema.tables
+WHERE table_schema = '_pg_ripple'
+  AND table_name = 'conflict_winners';
+
+-- 2c. graph_metrics table exists.
+SELECT COUNT(*) = 1 AS graph_metrics_table_exists
+FROM information_schema.tables
+WHERE table_schema = '_pg_ripple'
+  AND table_name = 'graph_metrics';
+
+-- 2d. pending_linkbacks table exists.
+SELECT COUNT(*) = 1 AS pending_linkbacks_table_exists
+FROM information_schema.tables
+WHERE table_schema = '_pg_ripple'
+  AND table_name = 'pending_linkbacks';
+
+-- 2e. subscription_buffer table exists.
+SELECT COUNT(*) = 1 AS subscription_buffer_table_exists
+FROM information_schema.tables
+WHERE table_schema = '_pg_ripple'
+  AND table_name = 'subscription_buffer';
+
+-- 2f. iri_rewrite_misses table exists.
+SELECT COUNT(*) = 1 AS iri_rewrite_misses_table_exists
+FROM information_schema.tables
+WHERE table_schema = '_pg_ripple'
+  AND table_name = 'iri_rewrite_misses';
+
+-- 2g. json_mappings has new BIDI-ATTR-01 columns.
+SELECT COUNT(*) = 5 AS bidi_columns_added
+FROM information_schema.columns
+WHERE table_schema = '_pg_ripple'
+  AND table_name = 'json_mappings'
+  AND column_name IN (
+      'default_graph_iri',
+      'timestamp_path',
+      'timestamp_predicate',
+      'iri_template',
+      'iri_match_pattern'
+  );
+
+-- --- Part 3: BIDI-ATTR-01 — register_json_mapping ----------------------
+
+-- 3a. Register a mapping with all new parameters.
+SELECT pg_ripple.register_json_mapping(
+    'test_crm',
+    '{"ex:name": "http://schema.org/name",
+      "ex:email": "http://schema.org/email"}',
+    default_graph_iri   => '<urn:source:crm>',
+    timestamp_path      => '$.lastModified',
+    timestamp_predicate => 'http://www.w3.org/ns/prov#generatedAtTime',
+    iri_template        => 'https://crm.example.com/contacts/{id}',
+    iri_match_pattern   => 'https://crm.example.com/'
+);
+
+-- 3b. Verify mapping was registered.
+SELECT
+    default_graph_iri = '<urn:source:crm>'   AS default_graph_ok,
+    timestamp_path = '$.lastModified'        AS ts_path_ok,
+    iri_template LIKE '%{id}%'               AS iri_template_ok
+FROM _pg_ripple.json_mappings
+WHERE name = 'test_crm';
+
+-- --- Part 4: BIDI-CONFLICT-01 — conflict policy management ---------------
+
+-- 4a. Register a source_priority policy.
+SELECT pg_ripple.register_conflict_policy(
+    'http://schema.org/email',
+    'source_priority',
+    '{"order": ["<urn:source:crm>", "<urn:source:erp>"]}'::jsonb
+);
+
+-- 4b. Verify the policy was inserted.
+SELECT
+    strategy = 'source_priority' AS strategy_ok,
+    config ->> 'order' IS NOT NULL AS config_ok
+FROM _pg_ripple.conflict_policies
+WHERE predicate_iri = 'http://schema.org/email';
+
+-- 4c. Register a latest_wins policy.
+SELECT pg_ripple.register_conflict_policy(
+    'http://schema.org/name',
+    'latest_wins'
+);
+
+SELECT strategy = 'latest_wins' AS latest_wins_ok
+FROM _pg_ripple.conflict_policies
+WHERE predicate_iri = 'http://schema.org/name';
+
+-- 4d. Drop a policy.
+SELECT pg_ripple.drop_conflict_policy('http://schema.org/name');
+
+SELECT COUNT(*) = 0 AS policy_dropped
+FROM _pg_ripple.conflict_policies
+WHERE predicate_iri = 'http://schema.org/name';
+
+-- 4e. Recompute conflict winners (no-op when no data, but must not error).
+SELECT pg_ripple.recompute_conflict_winners('http://schema.org/email');
+
+-- --- Part 5: BIDI-OBS-01 — graph_stats -----------------------------------
+
+-- 5a. graph_stats returns a table (empty when no metrics, but no error).
+SELECT COUNT(*) >= 0 AS graph_stats_ok
+FROM pg_ripple.graph_stats();
+
+-- 5b. graph_stats with filter also works without error.
+SELECT COUNT(*) >= 0 AS graph_stats_filtered_ok
+FROM pg_ripple.graph_stats('urn:source:crm');
+
+-- --- Part 6: BIDI-DELETE-01 — delete functions ----------------------------
+
+-- 6a. delete_by_subject returns 0 when no triples exist.
+SELECT pg_ripple.delete_by_subject('test_crm', 'https://crm.example.com/contacts/42') = 0
+    AS delete_by_subject_noop;
+
+-- 6b. delete_mapped_predicates returns 0 when no triples exist.
+SELECT pg_ripple.delete_mapped_predicates(
+    'test_crm', 'https://crm.example.com/contacts/42'
+) = 0 AS delete_mapped_noop;
+
+-- --- Part 7: BIDI-CAS-01 — assert_cas ------------------------------------
+
+-- 7a. assert_cas with empty base is a no-op.
+SELECT pg_ripple.assert_cas(
+    '{"base": {}, "after": {"ex:name": "Alice"}}'::jsonb,
+    '{"ex:name": "Bob"}'::jsonb
+);
+
+-- 7b. assert_cas where after matches actual is a no-op (idempotent delivery).
+SELECT pg_ripple.assert_cas(
+    '{"base": {"ex:name": "Alice"}, "after": {"ex:name": "Bob"}}'::jsonb,
+    '{"ex:name": "Bob"}'::jsonb
+);
+
+-- --- Part 8: BIDI-LINKBACK-01 — abandon_linkback noop --------------------
+
+-- 8a. abandon_linkback on unknown event_id emits a NOTICE and returns void.
+--     Suppress the NOTICE so expected output stays stable.
+SET client_min_messages = warning;
+SELECT pg_ripple.abandon_linkback('00000000-0000-0000-0000-000000000001'::uuid);
+RESET client_min_messages;
+
+-- --- Part 9: BIDI-INBOX-01 — install_bidi_inbox ---------------------------
+
+-- 9a. install_bidi_inbox creates the table and trigger.
+SELECT pg_ripple.install_bidi_inbox('pg_ripple_inbox.test_inbox');
+
+SELECT COUNT(*) = 1 AS inbox_table_exists
+FROM information_schema.tables
+WHERE table_schema = 'pg_ripple_inbox'
+  AND table_name = 'test_inbox';
+
+-- --- Part 10: BIDI-ATTR-01 — ingest_jsonld with mode param ----------------
+
+-- 10a. ingest_jsonld append mode returns non-negative count.
+SELECT pg_ripple.ingest_jsonld(
+    '{"@context": {"ex": "http://example.org/"}, "@id": "ex:test", "ex:label": "hello"}'::jsonb,
+    NULL,
+    'append'
+) >= 0 AS ingest_jsonld_ok;
+
+-- --- Part 11: Extension version -------------------------------------------
+
+-- 11a. Extension version is 0.77.0.
+SELECT extversion = '0.77.0' AS version_ok
+FROM pg_extension
+WHERE extname = 'pg_ripple';
+
+-- --- Cleanup ---------------------------------------------------------------
+SELECT pg_ripple.drop_conflict_policy('http://schema.org/email');
