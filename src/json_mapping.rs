@@ -223,14 +223,24 @@ pub fn ingest_json_impl(
 
     let resolved_graph = effective_graph.or(default_g_owned.as_deref());
 
-    match resolved_graph {
-        None | Some("") => crate::bulk_load::load_ntriples(&ntriples, false),
+    let (inserted, graph_id) = match resolved_graph {
+        None | Some("") => {
+            let n = crate::bulk_load::load_ntriples(&ntriples, false);
+            (n, 0i64)
+        }
         Some(g) => {
             let g_clean = g.trim_matches(|c| c == '<' || c == '>');
             let g_id = crate::dictionary::encode(g_clean, crate::dictionary::KIND_IRI);
-            crate::bulk_load::load_ntriples_into_graph(&ntriples, g_id)
+            let n = crate::bulk_load::load_ntriples_into_graph(&ntriples, g_id);
+            (n, g_id)
         }
+    };
+
+    if inserted > 0 {
+        crate::bidi::update_graph_metrics_triple_count(graph_id, inserted);
     }
+
+    inserted
 }
 
 /// Internal: export a subject as JSON using a named mapping.
