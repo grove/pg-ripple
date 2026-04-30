@@ -201,8 +201,11 @@ fn run_sequential(
         }
     };
 
-    // Install pg_ripple extension if not already present.
-    let _ = client.execute("CREATE EXTENSION IF NOT EXISTS pg_ripple CASCADE", &[]);
+    // Install pg_ripple extension — always ensure latest schema is active.
+    // DROP + CREATE mirrors pg_regress/sql/setup.sql so that a pgrx PostgreSQL
+    // data directory restored from cache gets a fresh schema (hash_hi, etc.).
+    let _ = client.execute("DROP EXTENSION IF EXISTS pg_ripple CASCADE", &[]);
+    let _ = client.execute("CREATE EXTENSION pg_ripple CASCADE", &[]);
 
     let mut report = RunReport::default();
     for tc in tests {
@@ -248,7 +251,10 @@ fn run_parallel(
                     return;
                 }
             };
-            let _ = client.execute("CREATE EXTENSION IF NOT EXISTS pg_ripple CASCADE", &[]);
+            // DROP + CREATE mirrors pg_regress setup so that a cached pgrx DB
+            // gets a fresh schema on each CI run (avoids stale column errors).
+            let _ = client.execute("DROP EXTENSION IF EXISTS pg_ripple CASCADE", &[]);
+            let _ = client.execute("CREATE EXTENSION pg_ripple CASCADE", &[]);
             while let Ok(tc) = work_rx.recv() {
                 let result = run_one_test(&mut client, &tc, &known_failures, timeout);
                 result_tx.send(result).expect("result send");

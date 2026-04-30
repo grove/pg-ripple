@@ -28,7 +28,9 @@ ORDER BY ordinal_position;
  qt_p
  qt_o
  access_count
-(10 rows)
+ hash_hi
+ hash_lo
+(12 rows)
 
 -- ── Columns introduced by 0.3.0 → 0.4.0 migration ───────────────────────────
 -- qt_s, qt_p, qt_o must all exist and be nullable BIGINTs
@@ -67,7 +69,8 @@ ORDER BY ordinal_position;
  promotion_status
  derived
  rule_set
-(11 rows)
+ rule_set_id
+(12 rows)
 
 -- ── vp_rare table (including source column from v0.1.0 base) ─────────────────
 SELECT column_name
