@@ -1,0 +1,151 @@
+{
+  "repo_notes": [
+    {
+      "content": "pg_ripple is a PostgreSQL 18 extension written in Rust (pgrx 0.18) that implements a high-performance RDF triple store with native SPARQL 1.1 query execution. It is the primary product of the repository.\n\nKEY ARCHITECTURE FACTS:\n- All user-visible SQL functions and types live in the `pg_ripple` schema. All internal tables (dictionary, VP tables, SHACL catalog, etc.) live in `_pg_ripple`.\n- Every IRI, blank node, and literal is encoded to a 64-bit integer (i64) via XXH3-128 hashing before being stored. VP tables NEVER contain raw strings — only integer IDs. This is the 'dictionary encoding' layer and is fundamental to correctness.\n- Storage uses Vertical Partitioning (VP): one table per RDF predicate named `_pg_ripple.vp_{predicate_id}`. Rare predicates (below `pg_ripple.vp_promotion_threshold`) go into `_pg_ripple.vp_rare` instead.\n- HTAP split (v0.6.0+): writes land in `vp_{id}_delta` (heap + B-tree). Deletes of main-resident triples go to `vp_{id}_tombstones`. A background merge worker consolidates delta+main-tombstones into a BRIN-indexed `vp_{id}_main`. Query path is `(main EXCEPT tombstones) UNION ALL delta`.\n- SPARQL queries are parsed by the `spargebra` crate into an algebra tree, optimized, then compiled to SQL that runs via pgrx::SpiClient. Result rows are decoded back to RDF terms by batch dictionary lookup.\n- The `pg_ripple_http` subdirectory is a SEPARATE Rust binary (axum+tokio) that acts as an HTTP companion service. It connects to PostgreSQL over `tokio-postgres` and exposes a W3C SPARQL Protocol endpoint, Arrow Flight bulk export, Prometheus metrics, and SSE subscriptions.\n- Safe Rust only in extension code; `unsafe` is only at required pgrx FFI boundaries with `// SAFETY:` comments.\n- Background workers use `pgrx::BackgroundWorker`. Shared memory uses `pgrx::PgSharedMem` for the sharded dictionary LRU cache.\n- Error codes follow the PT001–PT799 scheme defined in `src/error.rs`.\n- The `sql/` directory contains the initial schema (`pg_ripple--0.1.0.sql`) and all upgrade migration scripts (`pg_ripple--X.Y.Z--X.Y.(Z+1).sql`).",
+      "author": "Project Lead"
+    },
+    {
+      "content": "SOURCE TREE GUIDE:\n\nsrc/lib.rs — pgrx entry-points, _PG_init, GUC registration (src/gucs/), background worker registration\nsrc/dictionary/ — IRI/blank-node/literal ↔ i64 encoding: hot.rs (hot-path inline encoder), inline.rs (inline small literals), mod.rs (LRU cache + SPI batch lookup)\nsrc/storage/ — VP table management: catalog.rs (predicates catalog), ops.rs (insert/delete/query/graph management), dictionary_io.rs, vp_rare_io.rs, promote.rs (VP promotion helpers), merge.rs (HTAP merge logic), mutation_journal.rs (per-statement writeback journal), index_advisor.rs, cdc_bridge.rs\nsrc/sparql/ — Full SPARQL 1.1 engine: parse.rs (complexity checks + algebra preprocessing), optimizer.rs (self-join elimination, filter pushdown, SHACL hints), plan.rs (SPARQL algebra → SQL), plan_cache.rs, sqlgen.rs + translate/ (SQL generation helpers), decode.rs (batch dictionary decode), execute.rs (SPI execution, CONSTRUCT/DESCRIBE/UPDATE, explain), cursor.rs (portal-based streaming), federation.rs + federation_planner.rs (SERVICE keyword, cost-based), property_path.rs (WITH RECURSIVE CYCLE), ql_rewrite.rs (OWL-QL BGP rewrite), sparqldl.rs, wcoj.rs, embedding.rs\nsrc/datalog/ — Datalog engine: parser.rs, stratify.rs, compiler.rs, seminaive.rs, magic.rs, demand.rs, wfs.rs (well-founded semantics), dred.rs (Delete-Rederive), tabling.rs, parallel.rs, builtins.rs (RDFS/OWL RL built-in rule sets), coordinator.rs, cache.rs, lattice.rs, rewrite.rs, explain.rs\nsrc/shacl/ — SHACL validation: parser.rs, constraints/ (constraint types), validator.rs (async pipeline), spi.rs (SPI helpers), hints.rs (SHACL optimizer hints), af_rules.rs (sh:SPARQLRule / sh:SPARQLConstraint)\nsrc/construct_rules/ — CONSTRUCT writeback: catalog.rs (ensure_catalog bootstrap), scheduler.rs (topological sort), delta.rs (compile_construct_to_inserts + run_full_recompute), retract.rs (DRed retraction)\nsrc/export.rs + export_api.rs — Turtle / N-Triples / JSON-LD / RDF-XML serialization\nsrc/bulk_load.rs — Turtle / N-Triples / RDF-XML / JSON-LD ingestion, COPY protocol handler\nsrc/json_mapping.rs — Named JSON↔RDF mapping registry (register_json_mapping / ingest_json / export_json_node)\nsrc/r2rml.rs — R2RML relational-to-RDF direct mapping\nsrc/cdc.rs + cdc_bridge_api.rs — CDC subscriptions, NOTIFY channels, lifecycle events\nsrc/subscriptions.rs — SPARQL live subscription API (subscribe_sparql / unsubscribe_sparql / notify_affected_subscriptions)\nsrc/temporal.rs — Temporal RDF / point-in-time queries\nsrc/tenant.rs — Multi-tenant named graph isolation with quota enforcement\nsrc/citus.rs — Citus sharding: shard pruning, rebalance NOTIFY, rebalance progress\nsrc/kge.rs — Knowledge graph embeddings (TransE/RotatE), find_alignments()\nsrc/llm/ — LLM integration: NL-to-SPARQL repair, nl_to_sparql\nsrc/flight.rs — Arrow Flight HMAC-SHA256 signed ticket generation (used by pg_ripple_http)\nsrc/security_api.rs — RLS policy management, role name validation, graph access control\nsrc/prov.rs — W3C PROV-O provenance recording\nsrc/graphrag_admin.rs — Microsoft GraphRAG BYOG Parquet export\nsrc/fts.rs — Full-text search on RDF literals\nsrc/telemetry.rs — OpenTelemetry span tracing, OTLP endpoint\nsrc/stats.rs + stats_admin.rs — pg_stat_statements integration, monitoring\nsrc/worker.rs — HTAP merge background worker entry-point\nsrc/feature_status.rs — feature_status() SQL function\n\npg_ripple_http/src/ — HTTP companion binary:\n  main.rs — startup, COMPAT-01 extension version check\n  routing/ — all HTTP handlers (sparql_handlers.rs, rag_handler.rs, admin_handlers.rs)\n  spi_bridge.rs — execute_sparql_with_traceparent, SELECT/ASK/CONSTRUCT/DESCRIBE helpers\n  arrow_encode.rs — Arrow IPC record batch encoding + streaming Body\n  stream.rs — SSE / chunked-transfer subscription streaming\n  common.rs — AppState, check_auth, env_or, redacted_error\n  datalog.rs — Datalog REST API handlers\n  metrics.rs — Prometheus metrics\n\nsql/ — Initial schema + all migration scripts\ntests/pg_regress/ — pgregress SQL test suites (227 tests as of v0.76.0)\nbenchmarks/ — pgbench/pgrx-bench scripts and baseline JSON\nfuzz/ — cargo-fuzz targets\nplans/ — Architecture and specification documents\ndocs/src/ — mdBook documentation source\ncharts/pg_ripple/ — Helm chart for Kubernetes deployment",
+      "author": "Project Lead"
+    }
+  ],
+  "pages": [
+    {
+      "title": "Architecture Overview",
+      "purpose": "High-level architecture of pg_ripple: how a SPARQL query flows from text through the spargebra algebra, SQL code generation, SPI execution against VP tables, and dictionary-decoded result rows. Cover the relationship between the extension (src/) and the HTTP companion service (pg_ripple_http/). Include the VP storage model, HTAP split, and schema layout (pg_ripple vs _pg_ripple). Reference the architecture diagram in README.md."
+    },
+    {
+      "title": "Getting Started",
+      "purpose": "How to build, install, and test pg_ripple. Cover: prerequisites (PostgreSQL 18, Rust stable, pgrx 0.18), `cargo pgrx init`, `cargo pgrx test pg18`, `cargo pgrx install`, `CREATE EXTENSION pg_ripple`, and a minimal first SPARQL query. Reference the justfile targets. Mention the Docker Compose setup in docker-compose.yml for a batteries-included environment."
+    },
+    {
+      "title": "Extension Versioning and Migration",
+      "purpose": "How pg_ripple releases are versioned and how users upgrade. Cover: the sql/ directory layout (initial schema + per-version migration scripts), pg_ripple.control default_version, ALTER EXTENSION UPDATE path requirements, the release checklist in AGENTS.md, and the migration chain test (tests/test_migration_chain.sh). Emphasize why every release needs a migration script even if empty."
+    },
+    {
+      "title": "Dictionary Encoding",
+      "purpose": "Deep-dive into how every RDF term (IRI, blank node, literal) is mapped to a 64-bit integer ID using XXH3-128 hashing. Cover: src/dictionary/mod.rs (batch encode/decode, LRU cache, SPI batch ON CONFLICT DO NOTHING), src/dictionary/hot.rs (hot-path inline encoder), src/dictionary/inline.rs (small literal inlining), the _pg_ripple.dictionary table schema, the sharded shared-memory cache (pgrx::PgSharedMem), and why string comparisons in VP queries are a bug.",
+      "parent": "Architecture Overview"
+    },
+    {
+      "title": "VP Tables and Vertical Partitioning",
+      "purpose": "Explain the vertical partitioning storage model: one table per RDF predicate, named _pg_ripple.vp_{predicate_id}. Cover: table schema (s, o, g, i, source columns), dual B-tree indices, the _pg_ripple.predicates catalog, the vp_rare fallback for low-cardinality predicates, VP promotion threshold GUC, and how the storage ops layer (src/storage/ops.rs, src/storage/vp_rare_io.rs) inserts and queries triples.",
+      "parent": "Architecture Overview"
+    },
+    {
+      "title": "HTAP Delta/Main Architecture",
+      "purpose": "Explain the HTAP read/write split introduced in v0.6.0. Cover: vp_{id}_delta (heap, B-tree, fast writes), vp_{id}_main (BRIN-indexed, optimised for reads), vp_{id}_tombstones (tracks deletes of main-resident triples), the query path (main EXCEPT tombstones UNION ALL delta), src/storage/merge.rs (merge algorithm), src/storage/mutation_journal.rs (per-statement CWB writeback journal, flush semantics), and src/worker.rs (background merge worker entry-point).",
+      "parent": "Architecture Overview"
+    },
+    {
+      "title": "VP Promotion and Plan Cache",
+      "purpose": "Explain how rare predicates graduate from vp_rare to dedicated VP tables. Cover: src/storage/promote.rs (promote_predicate, promote_rare_predicates), the pg_ripple.vp_promotion_threshold GUC, interrupted-promotion recovery (recover_interrupted_promotions in merge worker startup), and how promotion triggers a plan cache reset (src/sparql/plan_cache.rs) to evict stale query plans.",
+      "parent": "Architecture Overview"
+    },
+    {
+      "title": "SPARQL Engine",
+      "purpose": "Overview of the full SPARQL 1.1 engine pipeline: text input → spargebra algebra → algebra optimization → SQL code generation → SPI execution → result decoding. Mention conformance (100% W3C SPARQL 1.1 Query and Update, Apache Jena ~1,000 tests, WatDiv 100 templates). List the sub-modules in src/sparql/ and what each is responsible for.",
+      "parent": "Architecture Overview"
+    },
+    {
+      "title": "SPARQL Parsing and Algebra Optimization",
+      "purpose": "Cover src/sparql/parse.rs (query complexity checks: sparql_max_algebra_depth, sparql_max_triple_patterns; ARQ aggregate preprocessing; service URL extraction) and src/sparql/optimizer.rs (self-join elimination for star patterns, filter pushdown to encode constants before SQL generation, SHACL hints: sh:maxCount 1 removes DISTINCT, sh:minCount 1 upgrades LEFT JOIN to INNER JOIN). Explain why filter constants must be encoded to i64 at translation time.",
+      "parent": "SPARQL Engine"
+    },
+    {
+      "title": "SPARQL to SQL Translation",
+      "purpose": "Deep-dive into how SPARQL algebra nodes are compiled to PostgreSQL SQL. Cover src/sparql/plan.rs (main algebra → SQL planner, VP table OID lookup), src/sparql/sqlgen.rs and src/sparql/translate/ (SQL expression generation), src/sparql/plan_cache.rs (query plan caching keyed on algebra hash), and the integer-join-everywhere constraint. Explain how BIND, FILTER, GROUP BY, HAVING, and DISTINCT are lowered to SQL.",
+      "parent": "SPARQL Engine"
+    },
+    {
+      "title": "Property Paths and Recursive Queries",
+      "purpose": "Explain how SPARQL property path expressions (ZeroOrMorePath, OneOrMorePath, InversePath, AlternativePath, SequencePath) are compiled to PostgreSQL WITH RECURSIVE ... CYCLE CTEs. Cover src/sparql/property_path.rs, the mandatory use of PostgreSQL 18's CYCLE clause for hash-based cycle detection, and how inline paths are kept flat when no recursion is needed.",
+      "parent": "SPARQL Engine"
+    },
+    {
+      "title": "SPARQL Federation",
+      "purpose": "Explain how the SPARQL SERVICE keyword routes sub-queries to remote SPARQL endpoints. Cover src/sparql/federation.rs (result fetching, XML/JSON response parsing), src/sparql/federation_planner.rs (cost-based source selection, connection pooling via ureq Agent), the federation circuit breaker GUC (pg_ripple.federation_circuit_breaker_threshold), result caching, safe timeout handling, and src/federation_registry.rs (endpoint registry). Mention fuzz testing of the federation result decoder.",
+      "parent": "SPARQL Engine"
+    },
+    {
+      "title": "Streaming Cursors and Result Export",
+      "purpose": "Cover portal-based SPARQL streaming: src/sparql/cursor.rs (sparql_cursor(), PostgreSQL portal API, pg_ripple.export_batch_size GUC bounding peak memory), src/sparql/decode.rs (batch dictionary decode for SPARQL result rows), and result format export (sparql_csv(), sparql_tsv(), streaming_metrics()). Also cover src/sparql/explain.rs and explain_sparql() / explain_datalog() introspection.",
+      "parent": "SPARQL Engine"
+    },
+    {
+      "title": "Datalog and Reasoning Engine",
+      "purpose": "Overview of the Datalog rule engine: rule syntax, evaluation model, stratification, and integration with the VP store. Cover the src/datalog/ directory at a high level. Mention built-in RDFS/OWL RL rule sets (load_rules_builtin()), the infer() / infer_goal() / infer_demand() / infer_wfs() SQL API, owl:sameAs canonicalization, and the explain_datalog() introspection function.",
+      "parent": "Architecture Overview"
+    },
+    {
+      "title": "Rule Parser, Stratifier and Seminaive Evaluation",
+      "purpose": "Detail the Datalog rule processing pipeline: src/datalog/parser.rs (Datalog rule syntax), src/datalog/stratify.rs (stratum assignment for negation safety), src/datalog/compiler.rs (rule → SQL compilation), src/datalog/seminaive.rs (seminaive bottom-up evaluation), src/datalog/parallel.rs (parallel stratum evaluation for independent rule groups), and src/datalog/coordinator.rs (inference coordination).",
+      "parent": "Datalog and Reasoning Engine"
+    },
+    {
+      "title": "Magic Sets, Demand Filtering and Tabling",
+      "purpose": "Explain advanced Datalog evaluation optimizations. Cover src/datalog/magic.rs (magic sets transformation for goal-directed inference), src/datalog/demand.rs (demand-filtered mode, infer_demand()), src/datalog/tabling.rs (sub-goal caching for repeated inference queries, 2–5× speedup), and src/datalog/cache.rs (inference result cache). Explain when to use infer() vs infer_goal() vs infer_demand().",
+      "parent": "Datalog and Reasoning Engine"
+    },
+    {
+      "title": "Well-Founded Semantics and DRed Retraction",
+      "purpose": "Cover src/datalog/wfs.rs (well-founded semantics for non-stratifiable programs with mutual negation, infer_wfs()), src/datalog/dred.rs (Delete-Rederive incremental retraction: keeps derived predicates consistent after deletions without full recomputation), and src/datalog/lattice.rs (three-valued lattice used by WFS). Explain when WFS is required vs. stratified negation.",
+      "parent": "Datalog and Reasoning Engine"
+    },
+    {
+      "title": "Built-in RDFS and OWL RL Rules",
+      "purpose": "Document the pre-packaged rule sets: src/datalog/builtins.rs (load_rules_builtin('rdfs'), load_rules_builtin('owl-rl'), load_rules_builtin('owl-el'), load_rules_builtin('owl-ql')). Cover which entailment patterns each set implements, the OWL 2 RL conformance suite (66/66 tests), OWL 2 QL BGP rewrite at translation time (src/sparql/ql_rewrite.rs), and SPARQL-DL axiom queries (src/sparql/sparqldl.rs).",
+      "parent": "Datalog and Reasoning Engine"
+    },
+    {
+      "title": "SHACL Validation",
+      "purpose": "Explain the full SHACL Core + SHACL Advanced Features implementation. Cover src/shacl/parser.rs (shape graph parsing), src/shacl/constraints/ (constraint type implementations), src/shacl/validator.rs (synchronous and async validation pipeline), src/shacl/spi.rs (SPI helpers), src/shacl/hints.rs (optimizer hints exported to the SPARQL engine), and src/shacl/af_rules.rs (sh:SPARQLRule + sh:SPARQLConstraint evaluation as native SPARQL). Mention load_shacl(), validate_shacl(), and violation reports with decoded focus-node IRIs.",
+      "parent": "Architecture Overview"
+    },
+    {
+      "title": "CONSTRUCT Writeback Rules",
+      "purpose": "Explain SPARQL CONSTRUCT queries used as live writeback rules. Cover src/construct_rules/catalog.rs (ensure_catalog bootstrap, _pg_ripple.construct_rules table), src/construct_rules/scheduler.rs (topological sort of rule dependencies, source-graph parse helpers), src/construct_rules/delta.rs (compile_construct_to_inserts, run_full_recompute, incremental delta maintenance), and src/construct_rules/retract.rs (Delete-Rederive retraction for derived triples). Explain integration with the mutation journal flush hook.",
+      "parent": "Architecture Overview"
+    },
+    {
+      "title": "Data Ingestion and Export",
+      "purpose": "Cover all data import and export paths. Import: src/bulk_load.rs (load_turtle, load_ntriples, load_rdfxml, load_jsonld, COPY rdf FROM protocol handler, W3C PROV-O recording via src/prov.rs), src/json_mapping.rs (register_json_mapping, ingest_json, export_json_node, _pg_ripple.json_mappings table), src/r2rml.rs (R2RML direct mapping from relational tables). Export: src/export.rs + src/export_api.rs (export_turtle, export_ntriples, export_jsonld, export_rdfxml, export_jsonld_node), JSON-LD framing (src/framing/), sparql_construct_jsonld().",
+      "parent": "Architecture Overview"
+    },
+    {
+      "title": "CDC and Live Subscriptions",
+      "purpose": "Cover the two change-notification mechanisms. CDC subscriptions: src/cdc.rs (create_subscription, pg_notify on pg_ripple_cdc_{name} channel, triple-level filtering), src/cdc_bridge_api.rs (CDC bridge API), _pg_ripple.cdc_lifecycle_events. SPARQL live subscriptions: src/subscriptions.rs (subscribe_sparql, unsubscribe_sparql, list_sparql_subscriptions, notify_affected_subscriptions, _pg_ripple.sparql_subscriptions table, >8 KB payload truncation to {\"changed\":true}). Both are surfaced via SSE in pg_ripple_http.",
+      "parent": "Architecture Overview"
+    },
+    {
+      "title": "HTTP Companion Service (pg_ripple_http)",
+      "purpose": "Document the standalone pg_ripple_http Rust binary in pg_ripple_http/src/. Cover: main.rs (startup, COMPAT-01 extension version check against pg_extension, PG_RIPPLE_HTTP_SKIP_COMPAT_CHECK), routing/ (sparql_handlers.rs for SPARQL GET/POST, rag_handler.rs, admin_handlers.rs), spi_bridge.rs (execute_sparql_with_traceparent, execute_select/ask/construct/describe), common.rs (AppState, check_auth, env_or, redacted_error), datalog.rs (Datalog REST API), metrics.rs (Prometheus). Mention W3C SPARQL Protocol, content negotiation (JSON/XML/CSV/Turtle/JSON-LD), authentication, OpenAPI 3.1, and Docker Compose deployment.",
+      "parent": "Architecture Overview"
+    },
+    {
+      "title": "Arrow Flight Bulk Export",
+      "purpose": "Explain the Arrow IPC bulk-export feature. Cover src/flight.rs (HMAC-SHA256 signed ticket generation, nonce replay protection logic), pg_ripple_http/src/arrow_encode.rs (Arrow IPC record batch encoding from SPARQL result rows, Body::from_stream streaming), pg_ripple_http/src/routing/sparql_handlers.rs POST /flight/do_get handler, the nonce_cache DashMap with 5-minute TTL in AppState (common.rs), and the arrow-integration CI job. Mention export_arrow_flight() SQL function and the feature_status() entry.",
+      "parent": "HTTP Companion Service (pg_ripple_http)"
+    },
+    {
+      "title": "Security and Access Control",
+      "purpose": "Cover all security-relevant subsystems. src/security_api.rs (apply_rls_to_vp_table, apply_rls_policy_to_all_dedicated_tables, quote_ident_safe, is_safe_role_name — ASCII-only allowlist, XXH3-128 policy name hash to avoid birthday-paradox collisions). Named graph RLS backed by PostgreSQL row-level security. src/replication.rs (read-replica routing via pg_ripple.read_replica_dsn). Audit log (pg_ripple.audit_log_enabled, _pg_ripple.audit_log, purge_audit_log). HMAC-SHA256 Arrow Flight tickets. cargo audit --deny warnings CI gate. SBOM (CycloneDX, sbom.json). GitHub Actions SHA pinning.",
+      "parent": "Architecture Overview"
+    },
+    {
+      "title": "Advanced Features",
+      "purpose": "Survey of specialised capabilities. Temporal RDF: src/temporal.rs (point_in_time(), session-scoped as-of queries). Multi-tenancy: src/tenant.rs (create_tenant(), quota enforcement triggers, tenant_stats()). GeoSPARQL: src/sparql/expr.rs geof: filter/compute functions via PostGIS. Full-text search: src/fts.rs. Citus sharding: src/citus.rs (citus_sharding_enabled GUC, shard pruning for bound-subject patterns, citus_rebalance(), citus_rebalance_progress(), rebalance NOTIFY for CDC pause). OWL KGE: src/kge.rs (TransE/RotatE embeddings in _pg_ripple.kge_embeddings HNSW index, find_alignments()). GraphRAG: src/graphrag_admin.rs. LLM integration: src/llm/ (nl_to_sparql, llm_sparql_repair). OpenTelemetry: src/telemetry.rs.",
+      "parent": "Architecture Overview"
+    },
+    {
+      "title": "Operations and Monitoring",
+      "purpose": "Operational reference for running pg_ripple in production. Cover: all GUC parameters (src/gucs/registration.rs — sparql_max_algebra_depth, sparql_max_triple_patterns, dictionary_cache_size, export_batch_size, vp_promotion_threshold, prov_enabled, audit_log_enabled, citus_sharding_enabled, federation_circuit_breaker_threshold, tracing_otlp_endpoint, owl_profile, kge_enabled, read_replica_dsn). pg_stat_statements integration (src/stats.rs). feature_status() SQL function (src/feature_status.rs). Admin API: src/stats_admin.rs, src/maintenance_api.rs, src/admin/ (vacuum, reindex, prefix registry). streaming_metrics() live counters. Prometheus via pg_ripple_http /metrics and /metrics/extension.",
+      "parent": "Architecture Overview"
+    },
+    {
+      "title": "Build, Test and Development",
+      "purpose": "Developer workflow reference. Cover: cargo pgrx test pg18 (unit + integration tests in src/lib_tests.rs), cargo pgrx regress pg18 (227 SQL regression tests in tests/pg_regress/), justfile targets (just test-migration, just assess-release, just check-sbom-version), fuzz testing (fuzz/ directory, cargo-fuzz targets: federation result decoder, URL host parser, query pipeline, nightly 120s duration), proptest suites (tests/proptest/ — construct_template, dictionary encode/decode invariants), benchmarks (benchmarks/ — pgbench scripts, merge_throughput_baselines.json, BSBM, WatDiv), W3C conformance runner (w3c_report/), and the CI workflow (.github/workflows/ci.yml — main jobs, citus-integration, arrow-integration, validate-roadmap-status).",
+      "parent": "Architecture Overview"
+    }
+  ]
+}
