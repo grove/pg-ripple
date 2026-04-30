@@ -165,7 +165,7 @@ The v0.64.0–v0.76.0 Assessment Remediation & Production Polish sequence is com
 
 ### v0.79.0 — Query Engine Completeness
 
-Before the production release, v0.79.0 closes the two remaining known limitations: a true **Leapfrog Triejoin executor** for Worst-Case Optimal Joins (WCOJ), replacing the current planner-hint-only mode; and full **`sh:SPARQLRule`** evaluation, allowing SHACL Advanced Features forward-chaining rules to materialise triples via native SPARQL CONSTRUCT queries. When both are delivered, every row in `pg_ripple.feature_status()` will show `implemented` and the "Known limitations" table will be removed from the README.
+v0.79.0 delivers the last two pre-1.0 features: a true **Leapfrog Triejoin executor** for Worst-Case Optimal Joins (WCOJ-LFTI-01), replacing the previous planner-hint-only mode with a full in-memory trie intersection algorithm; and full **`sh:SPARQLRule`** evaluation (SHACL-SPARQL-01), enabling SHACL Advanced Features forward-chaining rules to materialise triples via native SPARQL CONSTRUCT queries. Every row in `pg_ripple.feature_status()` now shows `implemented`. Run `SELECT * FROM pg_ripple.feature_status()` for the machine-readable status surface.
 
 ### v1.0.0 — Production Release
 
@@ -353,20 +353,6 @@ CREATE EXTENSION pg_ripple;
 ```
 
 
-
----
-
-## Known limitations in v0.76.0
-
-The following features are available but have documented limitations in the current release. Use `SELECT feature_name, status, degraded_reason FROM pg_ripple.feature_status() WHERE status != 'implemented'` for a machine-readable summary.
-
-| Feature | Status | Detail |
-|---|---|---|
-| **WCOJ (Worst-Case Optimal Joins)** | Planner hint | WCOJ re-orders cyclic BGP joins at plan time. A true Leapfrog Triejoin executor is planned for v0.79.0 (WCOJ-LFTI-01). |
-| **SHACL-SPARQL rules (`sh:SPARQLRule`)** | Planned (v0.79.0) | When detected, the extension emits a WARNING (PT481) and skips the rule. Full `sh:SPARQLRule` support is planned for v0.79.0 (SHACL-SPARQL-01). `sh:TripleRule` and `sh:SPARQLConstraint` are fully supported. |
-| **Citus, pgvector, pg_trickle** | Optional | Citus, pgvector, and pg_trickle are optional dependencies. Dependent features degrade gracefully when these extensions are not installed. |
-
-These are not bugs — they are known partial implementations. All limitations are surfaced in `pg_ripple.feature_status()`.
 
 ---
 

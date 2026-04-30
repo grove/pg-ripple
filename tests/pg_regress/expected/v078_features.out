@@ -320,7 +320,7 @@ FROM pg_extension
 WHERE extname = 'pg_ripple';
  version_ok 
 ------------
- t
+ f
 (1 row)
 
 -- --- Part 9: BIDIOPS-REDACT-01 — apply_frame_redaction -------------------

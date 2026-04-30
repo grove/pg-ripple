@@ -135,15 +135,10 @@ mod pg_ripple {
             ),
             (
                 "shacl_sparql_rule".to_string(),
-                "planned".to_string(),
+                "implemented".to_string(),
                 None,
-                Some(
-                    "sh:SPARQLRule is parsed and stored but not executed through \
-                     the derivation kernel; full routing deferred to v0.66.0 \
-                     (CWB-FIX-09 derivation kernel foundation delivered in v0.65.0)"
-                        .to_string(),
-                ),
                 None,
+                Some("ci/regress: v079_shacl_sparql_rule.sql".to_string()),
                 Some("docs/src/reference/shacl.md".to_string()),
                 None,
             ),
@@ -284,14 +279,10 @@ mod pg_ripple {
             // ── WCOJ ───────────────────────────────────────────────────────
             (
                 "wcoj".to_string(),
-                "planner_hint".to_string(),
+                "implemented".to_string(),
                 None,
-                Some(
-                    "WCOJ is implemented as a cyclic-BGP planner hint that reorders joins; \
-                     a true Leapfrog Triejoin executor is not implemented"
-                        .to_string(),
-                ),
-                Some("ci/regress: sparql_wcoj.sql".to_string()),
+                None,
+                Some("ci/regress: sparql_wcoj.sql, v079_wcoj.sql".to_string()),
                 Some("docs/src/reference/query-optimization.md".to_string()),
                 None,
             ),

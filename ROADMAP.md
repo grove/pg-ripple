@@ -150,7 +150,7 @@
 
 | Version | Theme | Status | Scope | Full details |
 |---------|-------|--------|-------|-------------- |
-| [v0.79.0](roadmap/v0.79.0.md) | Close the last two known query-engine limitations: true Leapfrog Triejoin executor for Worst-Case Optimal Joins (WCOJ-LFTI-01) and full `sh:SPARQLRule` evaluation (SHACL-SPARQL-01). Removes the "Known limitations" table from the README; all `feature_status()` rows become `implemented`. | Planned | Medium | [Full details](roadmap/v0.79.0-full.md) |
+| [v0.79.0](roadmap/v0.79.0.md) | Close the last two known query-engine limitations: true Leapfrog Triejoin executor for Worst-Case Optimal Joins (WCOJ-LFTI-01) and full `sh:SPARQLRule` evaluation (SHACL-SPARQL-01). Removes the "Known limitations" table from the README; all `feature_status()` rows become `implemented`. | Delivered | Medium | [Full details](roadmap/v0.79.0-full.md) |
 
 #### PLAN_OVERALL_ASSESSMENT_11 coverage map
 

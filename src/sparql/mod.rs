@@ -70,8 +70,14 @@ pub fn sparql(query_text: &str) -> Vec<pgrx::JsonB> {
         .parse_query(query_text)
         .unwrap_or_else(|e| pgrx::error!("SPARQL parse error: {}", e));
 
-    match query {
+    match &query {
         spargebra::Query::Select { .. } => {
+            // v0.79.0: Try the Leapfrog Triejoin executor for cyclic BGPs.
+            // Falls back to the SQL hash-join path when LFTI cannot be applied.
+            if let Some(lfti_bindings) = wcoj::try_leapfrog_select(&query) {
+                return decode_lfti_bindings_to_jsonb(lfti_bindings);
+            }
+
             let (sql, vars, raw_numeric, raw_text, raw_iri, raw_double, wcoj) =
                 prepare_select(query_text);
             execute::execute_select(
@@ -85,7 +91,7 @@ pub fn sparql(query_text: &str) -> Vec<pgrx::JsonB> {
             )
         }
         spargebra::Query::Ask { pattern, .. } => {
-            let sql = sqlgen::translate_ask(&pattern);
+            let sql = sqlgen::translate_ask(pattern);
             let result: bool = Spi::get_one::<bool>(&sql)
                 .unwrap_or_else(|e| pgrx::error!("SPARQL ASK SPI error: {e}"))
                 .unwrap_or(false);
@@ -97,6 +103,40 @@ pub fn sparql(query_text: &str) -> Vec<pgrx::JsonB> {
             pgrx::error!("sparql() supports SELECT and ASK; use sparql_explain() for debugging");
         }
     }
+}
+
+/// Convert Leapfrog Triejoin bindings (encoded i64 IDs) to JSONB rows.
+///
+/// Each binding is decoded via the dictionary and formatted as
+/// `{"var": "<iri>"}` — the same format as `execute_select`.
+fn decode_lfti_bindings_to_jsonb(bindings: Vec<wcoj::LftiBinding>) -> Vec<pgrx::JsonB> {
+    use serde_json::Value as Json;
+
+    if bindings.is_empty() {
+        return vec![];
+    }
+
+    // Collect all unique IDs for batch decode.
+    let mut all_ids: Vec<i64> = bindings.iter().flat_map(|b| b.values().copied()).collect();
+    all_ids.sort_unstable();
+    all_ids.dedup();
+
+    let decode_map = decode::batch_decode(&all_ids);
+
+    bindings
+        .into_iter()
+        .map(|binding| {
+            let mut obj = Map::new();
+            for (var, id) in &binding {
+                let value = decode_map
+                    .get(id)
+                    .cloned()
+                    .unwrap_or_else(|| format!("_id_{id}"));
+                obj.insert(var.clone(), Json::String(value));
+            }
+            pgrx::JsonB(Json::Object(obj))
+        })
+        .collect()
 }
 
 /// Execute a SPARQL ASK query; returns a boolean.

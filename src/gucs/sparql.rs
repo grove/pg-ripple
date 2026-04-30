@@ -36,6 +36,10 @@ pub static WCOJ_ENABLED: pgrx::GucSetting<bool> = pgrx::GucSetting::<bool>::new(
 /// GUC: minimum number of VP table joins before WCOJ analysis is applied (v0.36.0).
 pub static WCOJ_MIN_TABLES: pgrx::GucSetting<i32> = pgrx::GucSetting::<i32>::new(3);
 
+/// GUC: minimum VP table cardinality before LFTI executor is used; below this
+/// threshold the query falls back to the SQL hash-join path (v0.79.0).
+pub static WCOJ_MIN_CARDINALITY: pgrx::GucSetting<i32> = pgrx::GucSetting::<i32>::new(0);
+
 // ─── v0.40.0 SPARQL GUCs ─────────────────────────────────────────────────────
 
 /// GUC: maximum rows returned by a SPARQL SELECT or CONSTRUCT query (v0.40.0).

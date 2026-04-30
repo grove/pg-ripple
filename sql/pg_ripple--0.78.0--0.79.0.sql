@@ -1,0 +1,15 @@
+-- Migration 0.78.0 → 0.79.0: Query Engine Completeness
+--
+-- WCOJ-LFTI-01: True Leapfrog Triejoin executor for cyclic BGP joins.
+--   - Adds GUC: pg_ripple.wcoj_min_cardinality (INT, default 0)
+--   - feature_status() row 'wcoj' updated from 'planner_hint' to 'implemented'
+--
+-- SHACL-SPARQL-01: Full sh:SPARQLRule support.
+--   - Adds GUC: pg_ripple.shacl_rule_max_iterations (INT, default 100)
+--   - Adds GUC: pg_ripple.shacl_rule_cwb (BOOL, default false)
+--   - feature_status() row 'shacl_sparql_rule' updated from 'planned' to 'implemented'
+--
+-- README-LIMITS-01: Known limitations table removed from README.md.
+--
+-- Schema changes: None (all changes are in the Rust implementation only).
+-- GUCs are registered automatically from the Rust extension code.

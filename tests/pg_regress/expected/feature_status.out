@@ -38,22 +38,22 @@ WHERE feature_name = 'arrow_flight';
  experimental
 (1 row)
 
--- wcoj must be planner_hint (not a full triejoin executor).
+-- wcoj must be implemented (v0.79.0 WCOJ-LFTI-01 delivers the true Leapfrog Triejoin executor).
 SELECT status AS wcoj_status
 FROM pg_ripple.feature_status()
 WHERE feature_name = 'wcoj';
- wcoj_status  
---------------
- planner_hint
+ wcoj_status 
+-------------
+ implemented
 (1 row)
 
--- shacl_sparql_rule must not be implemented yet.
-SELECT status NOT IN ('implemented') AS shacl_rule_not_implemented
+-- shacl_sparql_rule must be implemented (v0.79.0 SHACL-SPARQL-01).
+SELECT status AS shacl_rule_status
 FROM pg_ripple.feature_status()
 WHERE feature_name = 'shacl_sparql_rule';
- shacl_rule_not_implemented 
-----------------------------
- t
+ shacl_rule_status 
+-------------------
+ implemented
 (1 row)
 
 -- construct_writeback must be implemented (v0.65.0 closes the delta maintenance gap).

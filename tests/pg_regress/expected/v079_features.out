@@ -1,0 +1,90 @@
+-- pg_regress test: v0.79.0 feature_status() completeness (WCOJ-LFTI-01f, SHACL-SPARQL-01f)
+--
+-- Verifies that after v0.79.0, all feature_status() rows show 'implemented'
+-- (except optional/external dependencies that intentionally remain in
+-- 'experimental', 'degraded', or 'planned').
+SET client_min_messages = warning;
+CREATE EXTENSION IF NOT EXISTS pg_ripple;
+SET client_min_messages = DEFAULT;
+SET search_path TO pg_ripple, public;
+-- ── All core rows must be implemented ────────────────────────────────────────
+-- The wcoj row must be 'implemented' (was 'planner_hint' before v0.79.0).
+SELECT status AS wcoj_status
+FROM pg_ripple.feature_status()
+WHERE feature_name = 'wcoj';
+ wcoj_status 
+-------------
+ implemented
+(1 row)
+
+-- The shacl_sparql_rule row must be 'implemented' (was 'planned' before v0.79.0).
+SELECT status AS shacl_sparql_rule_status
+FROM pg_ripple.feature_status()
+WHERE feature_name = 'shacl_sparql_rule';
+ shacl_sparql_rule_status 
+--------------------------
+ implemented
+(1 row)
+
+-- No core feature rows should still be in 'planned' status after v0.79.0.
+-- (Optional/external features may remain in 'experimental' or 'degraded'.)
+SELECT count(*) AS planned_core_features
+FROM pg_ripple.feature_status()
+WHERE status = 'planned'
+  AND feature_name NOT IN (
+      -- Intentionally planned-only external features
+      'citus_service_pruning',
+      -- sparql_12 is waiting for upstream spargebra SPARQL 1.2 grammar support
+      'sparql_12'
+  );
+ planned_core_features 
+-----------------------
+                     0
+(1 row)
+
+-- shacl_sparql_constraint must remain implemented.
+SELECT status AS shacl_constraint_status
+FROM pg_ripple.feature_status()
+WHERE feature_name = 'shacl_sparql_constraint';
+ shacl_constraint_status 
+-------------------------
+ implemented
+(1 row)
+
+-- sparql_select and sparql_update must be implemented.
+SELECT feature_name, status
+FROM pg_ripple.feature_status()
+WHERE feature_name IN ('sparql_select', 'sparql_update')
+ORDER BY feature_name;
+ feature_name  |   status    
+---------------+-------------
+ sparql_select | implemented
+ sparql_update | implemented
+(2 rows)
+
+-- construct_writeback must be implemented.
+SELECT status AS construct_writeback_status
+FROM pg_ripple.feature_status()
+WHERE feature_name = 'construct_writeback';
+ construct_writeback_status 
+----------------------------
+ implemented
+(1 row)
+
+-- datalog_inference must be implemented.
+SELECT status AS datalog_status
+FROM pg_ripple.feature_status()
+WHERE feature_name = 'datalog_inference';
+ datalog_status 
+----------------
+ implemented
+(1 row)
+
+-- The total number of feature rows must be > 10 (sanity check).
+SELECT count(*) > 10 AS has_enough_features
+FROM pg_ripple.feature_status();
+ has_enough_features 
+---------------------
+ t
+(1 row)
+

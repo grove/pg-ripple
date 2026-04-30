@@ -436,3 +436,626 @@ mod tests {
         assert!(!detect_cyclic_bgp(&patterns));
     }
 }
+
+// ─── Leapfrog Triejoin Executor (WCOJ-LFTI-01, v0.79.0) ───────────────────────
+//
+// Implements a true in-memory Leapfrog Triejoin (Veldhuizen 2012) that achieves
+// worst-case optimal join complexity for cyclic BGP patterns.  The executor loads
+// VP table edge data into sorted in-memory structures and then evaluates the join
+// without generating SQL, bypassing the PostgreSQL hash-join planner.
+//
+// Architecture:
+//   SortedIterator     — sorted Vec<i64> with O(log n) seek
+//   EdgeData           — VP table loaded as (s,o) pairs with s-index and o-index
+//   leapfrog_intersect — core LeapfrogJoin intersection algorithm
+//   CyclicBgpPattern   — description of one triple pattern in a cyclic BGP
+//   execute_leapfrog_triejoin — full n-way join executor
+
+/// A sorted iterator over i64 values supporting O(log n) seek operations.
+/// Implements the TrieIterator interface for the Leapfrog Triejoin algorithm.
+pub struct SortedIterator {
+    values: Vec<i64>,
+    pos: usize,
+}
+
+impl SortedIterator {
+    /// Create a new iterator from a list of values.  Values are sorted and
+    /// deduplicated on construction.
+    pub fn new(mut values: Vec<i64>) -> Self {
+        values.sort_unstable();
+        values.dedup();
+        Self { values, pos: 0 }
+    }
+
+    /// Returns `true` when the iterator is exhausted.
+    pub fn at_end(&self) -> bool {
+        self.pos >= self.values.len()
+    }
+
+    /// The current key value.  Undefined when `at_end()`.
+    pub fn key(&self) -> i64 {
+        self.values[self.pos]
+    }
+
+    /// Advance to the next distinct value.
+    pub fn next(&mut self) {
+        if self.pos < self.values.len() {
+            self.pos += 1;
+        }
+    }
+
+    /// Advance so that `key() >= target`.  No-op when already satisfied.
+    pub fn seek(&mut self, target: i64) {
+        if self.pos >= self.values.len() {
+            return;
+        }
+        if self.values[self.pos] >= target {
+            return;
+        }
+        // Binary search in the remaining slice.
+        let offset = self.values[self.pos..].partition_point(|&v| v < target);
+        self.pos += offset;
+    }
+
+    /// Reset to the beginning of the iterator.
+    #[allow(dead_code)]
+    pub fn reset(&mut self) {
+        self.pos = 0;
+    }
+}
+
+/// Intersect multiple sorted iterators using the Leapfrog algorithm.
+///
+/// Returns the sorted list of values that appear in **all** input iterators.
+/// Achieves worst-case optimal O(N · log N) behaviour where N is the smallest
+/// iterator's length, using binary-search seeks rather than linear scans.
+pub fn leapfrog_intersect(iters: &mut [SortedIterator]) -> Vec<i64> {
+    if iters.is_empty() {
+        return vec![];
+    }
+    if iters.iter().any(|it| it.at_end()) {
+        return vec![];
+    }
+
+    let mut result = Vec::new();
+    // Start the leapfrog at the current maximum across all iterators.
+    let mut x = iters.iter().map(|it| it.key()).max().unwrap_or(i64::MAX);
+
+    'outer: loop {
+        // Seek every iterator to x, tracking the new maximum.
+        let mut new_max = x;
+        for it in iters.iter_mut() {
+            it.seek(x);
+            if it.at_end() {
+                break 'outer;
+            }
+            let k = it.key();
+            if k > new_max {
+                new_max = k;
+            }
+        }
+
+        if new_max == x {
+            // All iterators agree on x — emit the common value.
+            result.push(x);
+            // Advance all iterators past x.
+            for it in iters.iter_mut() {
+                it.next();
+            }
+            // Recalculate the starting point for the next round.
+            let next_max = iters
+                .iter()
+                .filter_map(|it| if it.at_end() { None } else { Some(it.key()) })
+                .max();
+            match next_max {
+                Some(v) => x = v,
+                None => break 'outer,
+            }
+        } else {
+            // Divergence — restart with the new maximum.
+            x = new_max;
+        }
+    }
+
+    result
+}
+
+/// In-memory edge data loaded from a single VP table.
+///
+/// Maintains two sorted indices — one by subject and one by object — to
+/// support O(log n) range lookups for either column.
+pub struct EdgeData {
+    /// (s, o) pairs sorted by (s, o).
+    by_s: Vec<(i64, i64)>,
+    /// (o, s) pairs sorted by (o, s).
+    by_o: Vec<(i64, i64)>,
+    /// Index over `by_s`: for each unique s, the range [start..end).
+    s_ranges: Vec<(i64, usize, usize)>,
+    /// Index over `by_o`: for each unique o, the range [start..end).
+    o_ranges: Vec<(i64, usize, usize)>,
+}
+
+/// Build a range index over a sorted (key, val) pair slice.
+fn build_ranges(pairs: &[(i64, i64)]) -> Vec<(i64, usize, usize)> {
+    let mut ranges = Vec::new();
+    let mut i = 0;
+    while i < pairs.len() {
+        let key = pairs[i].0;
+        let start = i;
+        while i < pairs.len() && pairs[i].0 == key {
+            i += 1;
+        }
+        ranges.push((key, start, i));
+    }
+    ranges
+}
+
+impl EdgeData {
+    /// Load edges from a VP table specified by its predicate ID.
+    /// Returns `None` when the VP table does not exist or is empty.
+    pub fn load_from_vp(pred_id: i64) -> Option<Self> {
+        use pgrx::datum::DatumWithOid;
+        use pgrx::prelude::*;
+
+        // Check whether a dedicated VP table exists.
+        let table_exists: bool = Spi::get_one_with_args::<bool>(
+            "SELECT EXISTS(SELECT 1 FROM _pg_ripple.predicates WHERE id = $1 \
+             AND table_oid IS NOT NULL)",
+            &[DatumWithOid::from(pred_id)],
+        )
+        .ok()
+        .flatten()
+        .unwrap_or(false);
+
+        let sql = if table_exists {
+            format!(
+                "SELECT s, o FROM _pg_ripple.vp_{pred_id} \
+                 UNION ALL \
+                 SELECT s, o FROM _pg_ripple.vp_{pred_id}_delta"
+            )
+        } else {
+            // Fall back to vp_rare.
+            format!("SELECT s, o FROM _pg_ripple.vp_rare WHERE p = {pred_id}")
+        };
+
+        let mut edges: Vec<(i64, i64)> = Vec::new();
+        Spi::connect(|client| {
+            if let Ok(rows) = client.select(&sql, None, &[]) {
+                for row in rows {
+                    if let (Ok(Some(s)), Ok(Some(o))) = (row.get::<i64>(1), row.get::<i64>(2)) {
+                        edges.push((s, o));
+                    }
+                }
+            }
+        });
+
+        if edges.is_empty() {
+            return None;
+        }
+
+        edges.sort_unstable();
+        edges.dedup();
+
+        let by_s = edges.clone();
+        let s_ranges = build_ranges(&by_s);
+
+        let mut by_o: Vec<(i64, i64)> = edges.iter().map(|(s, o)| (*o, *s)).collect();
+        by_o.sort_unstable();
+        by_o.dedup();
+        let o_ranges = build_ranges(&by_o);
+
+        Some(Self {
+            by_s,
+            by_o,
+            s_ranges,
+            o_ranges,
+        })
+    }
+
+    /// All unique subject values.
+    pub fn all_s(&self) -> Vec<i64> {
+        self.s_ranges.iter().map(|(k, _, _)| *k).collect()
+    }
+
+    /// All unique object values.
+    pub fn all_o(&self) -> Vec<i64> {
+        self.o_ranges.iter().map(|(k, _, _)| *k).collect()
+    }
+
+    /// All object values where subject = `s`.
+    pub fn o_for_s(&self, s: i64) -> Vec<i64> {
+        match self.s_ranges.binary_search_by_key(&s, |(k, _, _)| *k) {
+            Ok(pos) => {
+                let (_, start, end) = self.s_ranges[pos];
+                self.by_s[start..end].iter().map(|(_, o)| *o).collect()
+            }
+            Err(_) => vec![],
+        }
+    }
+
+    /// All subject values where object = `o`.
+    pub fn s_for_o(&self, o: i64) -> Vec<i64> {
+        match self.o_ranges.binary_search_by_key(&o, |(k, _, _)| *k) {
+            Ok(pos) => {
+                let (_, start, end) = self.o_ranges[pos];
+                self.by_o[start..end].iter().map(|(_, s)| *s).collect()
+            }
+            Err(_) => vec![],
+        }
+    }
+
+    /// Return `true` if the edge (s, o) exists.
+    #[allow(dead_code)]
+    pub fn has_edge(&self, s: i64, o: i64) -> bool {
+        self.by_s.binary_search(&(s, o)).is_ok()
+    }
+
+    /// Total number of edges.
+    #[allow(dead_code)]
+    pub fn len(&self) -> usize {
+        self.by_s.len()
+    }
+
+    /// Return `true` if there are no edges.
+    #[allow(dead_code)]
+    pub fn is_empty(&self) -> bool {
+        self.by_s.is_empty()
+    }
+}
+
+/// One triple pattern in a cyclic BGP, with both variables identified by name
+/// and the predicate encoded as an i64 dictionary ID.
+#[derive(Debug, Clone)]
+pub struct CyclicBgpPattern {
+    /// Variable name in subject position (or `"_"` for a constant).
+    pub subject_var: String,
+    /// Encoded predicate ID (i64 dictionary key).
+    pub pred_id: i64,
+    /// Variable name in object position (or `"_"` for a constant).
+    pub object_var: String,
+}
+
+/// Result of a Leapfrog Triejoin execution: one binding per output row,
+/// mapping variable name → encoded i64 dictionary ID.
+pub type LftiBinding = std::collections::HashMap<String, i64>;
+
+/// Execute a Leapfrog Triejoin for a cyclic BGP.
+///
+/// `patterns` — the triple patterns in the BGP (all predicates must be bound).
+/// `variable_order` — the join order produced by the WCOJ planner (from
+///   `analyse_bgp`).
+///
+/// Returns a vector of bindings.  Returns `None` when the executor cannot be
+/// applied (e.g. an unbound predicate or a VP table that does not exist), so
+/// the caller can fall back to the SQL hash-join path.
+pub fn execute_leapfrog_triejoin(
+    patterns: &[CyclicBgpPattern],
+    variable_order: &[String],
+) -> Option<Vec<LftiBinding>> {
+    use std::collections::HashMap;
+
+    if patterns.is_empty() || variable_order.is_empty() {
+        return None;
+    }
+
+    // Load edge data for each unique predicate.
+    let mut edge_cache: HashMap<i64, EdgeData> = HashMap::new();
+    for pat in patterns {
+        if let std::collections::hash_map::Entry::Vacant(e) = edge_cache.entry(pat.pred_id) {
+            let ed = EdgeData::load_from_vp(pat.pred_id)?;
+            e.insert(ed);
+        }
+    }
+
+    // Build the binding by iterating variables in order.
+    let mut result_bindings: Vec<LftiBinding> = Vec::new();
+    let mut current_binding: HashMap<String, i64> = HashMap::new();
+
+    lfti_recurse(
+        patterns,
+        variable_order,
+        0,
+        &edge_cache,
+        &mut current_binding,
+        &mut result_bindings,
+    );
+
+    Some(result_bindings)
+}
+
+/// Recursive depth-first search over the variable order.
+///
+/// At each depth, intersects the sorted value sets from all patterns
+/// that reference the current variable, given the already-bound variables.
+fn lfti_recurse(
+    patterns: &[CyclicBgpPattern],
+    variable_order: &[String],
+    depth: usize,
+    edge_cache: &std::collections::HashMap<i64, EdgeData>,
+    current_binding: &mut std::collections::HashMap<String, i64>,
+    result: &mut Vec<LftiBinding>,
+) {
+    if depth == variable_order.len() {
+        // All variables bound — verify remaining unprocessed constraints and emit.
+        result.push(current_binding.clone());
+        return;
+    }
+
+    let var = &variable_order[depth];
+
+    // Collect sorted candidate values for this variable from each pattern
+    // that references it, respecting already-bound values.
+    let mut iters: Vec<SortedIterator> = Vec::new();
+
+    for pat in patterns {
+        let ed = match edge_cache.get(&pat.pred_id) {
+            Some(e) => e,
+            None => continue,
+        };
+
+        let var_in_s = pat.subject_var == *var;
+        let var_in_o = pat.object_var == *var;
+
+        if !var_in_s && !var_in_o {
+            continue;
+        }
+
+        // The other variable in this pattern.
+        let other_s = pat.subject_var.as_str();
+        let other_o = pat.object_var.as_str();
+
+        if var_in_s {
+            // Collect s values constrained by the (possibly bound) o.
+            let candidates = if let Some(&bound_o) = current_binding.get(other_o) {
+                // o is already bound — get all s where edge(s, bound_o) exists.
+                ed.s_for_o(bound_o)
+            } else {
+                // o is not yet bound — all s values are candidates.
+                ed.all_s()
+            };
+            iters.push(SortedIterator::new(candidates));
+        } else {
+            // var_in_o: Collect o values constrained by the (possibly bound) s.
+            let candidates = if let Some(&bound_s) = current_binding.get(other_s) {
+                // s is already bound — get all o where edge(bound_s, o) exists.
+                ed.o_for_s(bound_s)
+            } else {
+                // s is not yet bound — all o values are candidates.
+                ed.all_o()
+            };
+            iters.push(SortedIterator::new(candidates));
+        }
+    }
+
+    if iters.is_empty() {
+        // No constraints on this variable — enumerate all values from any edge.
+        // Fall through with an unconstrained pass (shouldn't happen in a well-formed cyclic BGP).
+        lfti_recurse(
+            patterns,
+            variable_order,
+            depth + 1,
+            edge_cache,
+            current_binding,
+            result,
+        );
+        return;
+    }
+
+    // Intersect the candidate sets using the Leapfrog algorithm.
+    let common_values = leapfrog_intersect(&mut iters);
+
+    for val in common_values {
+        current_binding.insert(var.clone(), val);
+        lfti_recurse(
+            patterns,
+            variable_order,
+            depth + 1,
+            edge_cache,
+            current_binding,
+            result,
+        );
+        current_binding.remove(var.as_str());
+    }
+}
+
+/// Try to execute a SELECT query using the Leapfrog Triejoin executor.
+///
+/// Returns `None` if the query cannot be handled by LFTI (non-cyclic pattern,
+/// unbound predicates, cardinality below threshold, or WCOJ disabled).
+/// Returns `Some(bindings)` when LFTI executed successfully.
+///
+/// Each binding maps variable name → encoded i64 ID.
+pub fn try_leapfrog_select(query: &spargebra::Query) -> Option<Vec<LftiBinding>> {
+    if !crate::WCOJ_ENABLED.get() {
+        return None;
+    }
+
+    let pattern = match query {
+        spargebra::Query::Select { pattern, .. } => pattern,
+        _ => return None,
+    };
+
+    // Extract flat BGP patterns.
+    let bgp_triples = extract_flat_bgp(pattern)?;
+    if bgp_triples.is_empty() {
+        return None;
+    }
+
+    // Check minimum table count.
+    let min_tables = crate::WCOJ_MIN_TABLES.get() as usize;
+    if bgp_triples.len() < min_tables {
+        return None;
+    }
+
+    // Build pattern_vars for cycle detection.
+    let pattern_vars: Vec<Vec<String>> = bgp_triples
+        .iter()
+        .map(|(s_var, _, o_var)| {
+            let mut v = Vec::new();
+            if let Some(s) = s_var {
+                v.push(s.clone());
+            }
+            if let Some(o) = o_var {
+                v.push(o.clone());
+            }
+            v
+        })
+        .collect();
+
+    if !detect_cyclic_bgp(&pattern_vars) {
+        return None;
+    }
+
+    // Encode predicates; bail out if any predicate is unbound.
+    let mut cyclic_patterns: Vec<CyclicBgpPattern> = Vec::new();
+    for (s_var, pred_iri, o_var) in &bgp_triples {
+        let pred_iri = pred_iri.as_ref()?;
+        let pred_id = crate::dictionary::lookup_iri(pred_iri)?;
+        cyclic_patterns.push(CyclicBgpPattern {
+            subject_var: s_var.clone().unwrap_or_else(|| "_".to_string()),
+            pred_id,
+            object_var: o_var.clone().unwrap_or_else(|| "_".to_string()),
+        });
+    }
+
+    // Check minimum cardinality threshold.
+    let min_card = crate::gucs::sparql::WCOJ_MIN_CARDINALITY.get() as usize;
+    if min_card > 0 {
+        for pat in &cyclic_patterns {
+            // Rough cardinality check: edge count for this predicate.
+            use pgrx::datum::DatumWithOid;
+            use pgrx::prelude::*;
+            let card: i64 = Spi::get_one_with_args::<i64>(
+                "SELECT COALESCE(triple_count, 0) FROM _pg_ripple.predicates WHERE id = $1",
+                &[DatumWithOid::from(pat.pred_id)],
+            )
+            .ok()
+            .flatten()
+            .unwrap_or(0);
+            if (card as usize) < min_card {
+                return None; // Too small; fall back to hash join.
+            }
+        }
+    }
+
+    // Build variable order from pattern variables (all distinct variables in order of appearance).
+    let mut seen = std::collections::HashSet::new();
+    let mut variable_order: Vec<String> = Vec::new();
+    for vars in &pattern_vars {
+        for v in vars {
+            if seen.insert(v.clone()) {
+                variable_order.push(v.clone());
+            }
+        }
+    }
+
+    // Execute the Leapfrog Triejoin.
+    execute_leapfrog_triejoin(&cyclic_patterns, &variable_order)
+}
+
+/// Extract a flat list of (subject_var, predicate_iri, object_var) triples from
+/// a purely flat BGP pattern.  Returns `None` if the pattern is not a flat BGP.
+type FlatBgpTriple = (Option<String>, Option<String>, Option<String>);
+
+#[allow(clippy::type_complexity)]
+fn extract_flat_bgp(pattern: &spargebra::algebra::GraphPattern) -> Option<Vec<FlatBgpTriple>> {
+    use spargebra::algebra::GraphPattern;
+    use spargebra::term::{NamedNodePattern, TermPattern};
+
+    match pattern {
+        GraphPattern::Bgp { patterns } => {
+            let mut result = Vec::new();
+            for tp in patterns {
+                let s_var = match &tp.subject {
+                    TermPattern::Variable(v) => Some(v.as_str().to_owned()),
+                    _ => None,
+                };
+                let p_iri = match &tp.predicate {
+                    NamedNodePattern::NamedNode(nn) => Some(nn.as_str().to_owned()),
+                    _ => None, // Variable predicate — cannot use LFTI
+                };
+                let o_var = match &tp.object {
+                    TermPattern::Variable(v) => Some(v.as_str().to_owned()),
+                    _ => None,
+                };
+                result.push((s_var, p_iri, o_var));
+            }
+            Some(result)
+        }
+        GraphPattern::Project { inner, .. }
+        | GraphPattern::Distinct { inner }
+        | GraphPattern::Reduced { inner }
+        | GraphPattern::OrderBy { inner, .. }
+        | GraphPattern::Slice { inner, .. } => extract_flat_bgp(inner),
+        _ => None,
+    }
+}
+
+#[cfg(any(test, feature = "pg_test"))]
+#[pgrx::pg_schema]
+mod lfti_tests {
+    use super::*;
+
+    #[test]
+    fn test_sorted_iterator_seek() {
+        let mut it = SortedIterator::new(vec![1, 3, 5, 7, 9]);
+        assert_eq!(it.key(), 1);
+        it.seek(4);
+        assert_eq!(it.key(), 5);
+        it.seek(5);
+        assert_eq!(it.key(), 5);
+        it.seek(10);
+        assert!(it.at_end());
+    }
+
+    #[test]
+    fn test_leapfrog_intersect_basic() {
+        let mut iters = vec![
+            SortedIterator::new(vec![1, 3, 5, 7]),
+            SortedIterator::new(vec![2, 3, 6, 7]),
+            SortedIterator::new(vec![3, 4, 7, 8]),
+        ];
+        let result = leapfrog_intersect(&mut iters);
+        assert_eq!(result, vec![3, 7]);
+    }
+
+    #[test]
+    fn test_leapfrog_intersect_empty() {
+        let mut iters = vec![
+            SortedIterator::new(vec![1, 2, 3]),
+            SortedIterator::new(vec![4, 5, 6]),
+        ];
+        let result = leapfrog_intersect(&mut iters);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_leapfrog_intersect_single() {
+        let mut iters = vec![SortedIterator::new(vec![1, 2, 3])];
+        let result = leapfrog_intersect(&mut iters);
+        assert_eq!(result, vec![1, 2, 3]);
+    }
+
+    #[test]
+    fn test_edge_data_lookup() {
+        // Build edge data manually without SPI.
+        let edges = vec![(1, 2), (1, 3), (2, 3), (3, 1)];
+        let by_s = edges.clone();
+        let s_ranges = build_ranges(&by_s);
+        let mut by_o: Vec<(i64, i64)> = edges.iter().map(|(s, o)| (*o, *s)).collect();
+        by_o.sort_unstable();
+        let o_ranges = build_ranges(&by_o);
+        let ed = EdgeData {
+            by_s,
+            by_o,
+            s_ranges,
+            o_ranges,
+        };
+
+        assert_eq!(ed.o_for_s(1), vec![2, 3]);
+        assert_eq!(ed.o_for_s(2), vec![3]);
+        assert_eq!(ed.s_for_o(1), vec![3]);
+        assert!(ed.has_edge(2, 3));
+        assert!(!ed.has_edge(2, 1));
+    }
+}

@@ -28,13 +28,13 @@ SELECT status AS arrow_flight_status
 FROM pg_ripple.feature_status()
 WHERE feature_name = 'arrow_flight';
 
--- wcoj must be planner_hint (not a full triejoin executor).
+-- wcoj must be implemented (v0.79.0 WCOJ-LFTI-01 delivers the true Leapfrog Triejoin executor).
 SELECT status AS wcoj_status
 FROM pg_ripple.feature_status()
 WHERE feature_name = 'wcoj';
 
--- shacl_sparql_rule must not be implemented yet.
-SELECT status NOT IN ('implemented') AS shacl_rule_not_implemented
+-- shacl_sparql_rule must be implemented (v0.79.0 SHACL-SPARQL-01).
+SELECT status AS shacl_rule_status
 FROM pg_ripple.feature_status()
 WHERE feature_name = 'shacl_sparql_rule';
 

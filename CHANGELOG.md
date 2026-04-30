@@ -13,6 +13,60 @@ Versions correspond to the milestones in [ROADMAP.md](ROADMAP.md).
 
 ---
 
+## [0.79.0] — 2026-04-30 — Query Engine Completeness
+
+**Implements v0.79.0 roadmap: closes the last two known query-engine limitations
+(WCOJ-LFTI-01 and SHACL-SPARQL-01). All `feature_status()` rows now show
+`implemented`. The "Known limitations" table has been removed from README.md.**
+
+### What's new
+
+- **WCOJ-LFTI-01** — True Leapfrog Triejoin executor for cyclic BGP joins.
+  Implements `TrieIterator` / `SortedIterator`, `leapfrog_intersect`, `EdgeData`,
+  and `execute_leapfrog_triejoin` in `src/sparql/wcoj.rs`. For cyclic patterns
+  (triangles, cliques, social-network paths), the LFTI executor loads VP table edge
+  data into sorted in-memory structures and evaluates n-way joins using the
+  Leapfrog algorithm (Veldhuizen 2012), achieving the worst-case optimal complexity
+  guarantee. The SQL planner-hint path remains as a fallback. New GUC:
+  `pg_ripple.wcoj_min_cardinality` (INT, default 0). `feature_status()` row `wcoj`
+  updated from `planner_hint` to `implemented`.
+
+- **SHACL-SPARQL-01** — Full `sh:SPARQLRule` support. `bridge_shacl_rules()` now
+  parses `sh:construct` / `sh:select` bodies from SHACL shapes, prepends prefix
+  declarations, validates the CONSTRUCT query, and executes it via the existing
+  SPARQL CONSTRUCT engine (`sparql_construct_rows()`). Results are materialised
+  into the target graph via the standard VP insert path. `sh:order` is respected
+  for execution ordering. Fixpoint iteration (up to `shacl_rule_max_iterations`)
+  ensures newly materialised triples can trigger further rules. The PT481 WARNING
+  is now emitted at most once per session (de-dup). New GUCs:
+  `pg_ripple.shacl_rule_max_iterations` (INT, default 100) and
+  `pg_ripple.shacl_rule_cwb` (BOOL, default false). `feature_status()` row
+  `shacl_sparql_rule` updated from `planned` to `implemented`.
+
+- **README-LIMITS-01** — Removed the "Known limitations" section from README.md.
+  Replaced with a note directing users to `pg_ripple.feature_status()` for the
+  machine-readable status surface.
+
+### New GUCs
+
+| GUC | Type | Default | Description |
+|---|---|---|---|
+| `pg_ripple.wcoj_min_cardinality` | INT | 0 | Minimum VP table edge count before LFTI executor is used; 0 = always use LFTI for cyclic patterns |
+| `pg_ripple.shacl_rule_max_iterations` | INT | 100 | Maximum fixpoint iterations for `sh:SPARQLRule` evaluation |
+| `pg_ripple.shacl_rule_cwb` | BOOL | false | When on, `sh:SPARQLRule` rules are registered as CWB rules |
+
+### Migration
+
+No schema changes. Run `ALTER EXTENSION pg_ripple UPDATE TO '0.79.0'` to upgrade.
+
+### Tests
+
+- `tests/pg_regress/sql/v079_wcoj.sql` — LFTI GUC, triangle query, 4-clique
+- `tests/pg_regress/sql/v079_shacl_sparql_rule.sql` — `sh:SPARQLRule` GUCs, materialisation, `sh:order`
+- `tests/pg_regress/sql/v079_features.sql` — `feature_status()` completeness check
+
+---
+
 ## [0.78.0] — 2026-05-22 — Bidirectional Integration Operations
 
 **Implements v0.78.0 roadmap: all BIDIOPS-* deliverables closing the operational gaps

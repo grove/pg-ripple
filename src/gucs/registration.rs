@@ -438,6 +438,30 @@ pub fn register_all_gucs() {
     );
     }
 
+    // ── v0.79.0 SHACL-SPARQL GUCs ────────────────────────────────────────────
+
+    pgrx::GucRegistry::define_int_guc(
+        c"pg_ripple.shacl_rule_max_iterations",
+        c"Maximum fixpoint iterations for sh:SPARQLRule evaluation per validation cycle; \
+      raises an error when the cap is reached (default: 100, min: 1, max: 10000) (v0.79.0)",
+        c"",
+        &crate::gucs::shacl::SHACL_RULE_MAX_ITERATIONS,
+        1,
+        10_000,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+
+    pgrx::GucRegistry::define_bool_guc(
+        c"pg_ripple.shacl_rule_cwb",
+        c"When on, sh:SPARQLRule rules whose target graph matches a CONSTRUCT writeback \
+      pipeline are registered as CWB rules (default: off) (v0.79.0)",
+        c"",
+        &crate::gucs::shacl::SHACL_RULE_CWB,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+
     pgrx::GucRegistry::define_bool_guc(
     c"pg_ripple.dedup_on_merge",
     c"When true, the HTAP generation merge deduplicates (s,o,g) rows keeping the lowest SID (default: false)",
@@ -1010,6 +1034,19 @@ pub fn register_all_gucs() {
         &WCOJ_MIN_TABLES,
         2,
         100,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+
+    pgrx::GucRegistry::define_int_guc(
+        c"pg_ripple.wcoj_min_cardinality",
+        c"Minimum VP table edge count before the Leapfrog Triejoin executor is used; \
+      below this threshold the query falls back to the SQL hash-join path. \
+      0 = always use LFTI when the pattern is cyclic (default: 0, min: 0, max: 1000000000) (v0.79.0)",
+        c"",
+        &crate::gucs::sparql::WCOJ_MIN_CARDINALITY,
+        0,
+        1_000_000_000,
         GucContext::Userset,
         GucFlags::default(),
     );

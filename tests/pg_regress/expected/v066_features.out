@@ -111,9 +111,9 @@ SELECT EXISTS (
 SELECT status AS wcoj_status
 FROM pg_ripple.feature_status()
 WHERE feature_name = 'wcoj';
- wcoj_status  
---------------
- planner_hint
+ wcoj_status 
+-------------
+ implemented
 (1 row)
 
 -- ── Part 6: sparql_cursor() ──────────────────────────────────────────────────
