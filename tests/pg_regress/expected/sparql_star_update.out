@@ -91,7 +91,11 @@ FROM pg_ripple.sparql(
 
 -- ── 4. export_ntriples includes the quoted triples ────────────────────────────
 SELECT length(pg_ripple.export_ntriples()) > 0 AS export_nonempty;
-ERROR:  function pg_ripple.export_ntriples() does not exist at character 15
+ export_nonempty 
+-----------------
+ t
+(1 row)
+
 -- Post-test cleanup: remove all su/* triples so later tests are not polluted.
 DO $$
 DECLARE
