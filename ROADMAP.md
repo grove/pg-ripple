@@ -300,6 +300,60 @@ Second deep-dive audit (SPARQL, storage, HTTP service, Datalog/SHACL, export/GUC
 | [v1.0.0](roadmap/v1.0.0-full.md) | Production hardening: 72-hour continuous load test, third-party security audit, API stability guarantee, documentation final audit and freeze, public BSBM/WatDiv benchmark results published | Planned | Medium | [Full details](roadmap/v1.0.0-full.md) |
 | [v1.1.0](roadmap/v1.1.0.md) | Post-1.0 ecosystem: Cypher/GQL read-only transpiler (`MATCH … RETURN`) + write operations (`CREATE`/`SET`/`DELETE`), Jupyter SPARQL kernel, LangChain/LlamaIndex tool packages, Kafka CDC sink, materialized SPARQL views, dbt adapter | Planned | Large | [Full details](roadmap/v1.1.0-full.md) |
 
+### Advanced Inference (v1.2.0)
+
+| Version | Theme | Status | Scope | Full details |
+|---------|-------|--------|-------|-------------- |
+| v1.2.0 | **Probabilistic Datalog** — soft rules with `@weight(FLOAT)` annotations, multiplicative confidence propagation, noisy-OR combination for multi-path derivations, `pg:confidence()` SPARQL function, `load_triples_with_confidence()`, and a `pg_ripple.probabilistic_datalog` GUC to enable the mode | Planned | Large | — |
+
+#### What is Probabilistic Datalog and why does it matter?
+
+Classical Datalog is binary: a fact is either derived or it isn't. Real-world knowledge is messier — NLP extractors report facts at 87% confidence, sensor readings are "probably anomalous," medical guidelines use "likely" rather than "certain." Probabilistic Datalog bridges that gap by attaching confidence weights to rules and propagating them through the inference engine.
+
+**Core model.** Each rule carries an `@weight(FLOAT)` annotation between 0 and 1. During inference the weight combines with the confidences of the body atoms:
+
+- *Conjunction*: confidences multiply. A rule at weight 0.9 applied to body atoms at 0.95 and 0.80 produces a head at `0.9 × 0.95 × 0.80 = 0.684`.
+- *Multiple derivation paths*: confidences combine via noisy-OR: $p = 1 - \prod_i (1 - p_i)$. Two independent paths at 0.7 yield `1 − 0.3 × 0.3 = 0.91`.
+- *Explicit facts*: triples inserted without a weight have confidence 1.0 by default; `load_triples_with_confidence()` lets operators assign lower confidence to data from unreliable sources (e.g., a sensor reading at 0.72).
+
+This is the same propagation model used by Markov Logic Networks and ProbLog, adapted to the VP-table storage model so confidence scores are stored as an extra `FLOAT8` column alongside the existing `source` flag.
+
+**New SQL surface.**
+
+```sql
+-- Enable the mode
+SET pg_ripple.probabilistic_datalog = on;
+
+-- Weighted rule: managers are probably (95%) decision-makers
+SELECT pg_ripple.add_rule(
+  'decision_maker(X) :- manager(X). @weight(0.95)'
+);
+
+-- Query the derived confidence
+SELECT * FROM pg_ripple.sparql('
+  SELECT ?person ?conf WHERE {
+    ?person ex:isDecisionMaker true .
+    BIND(pg:confidence(?person, ex:isDecisionMaker) AS ?conf)
+  }
+  ORDER BY DESC(?conf)
+');
+```
+
+**What value it brings.**
+
+| Use case | How probabilistic Datalog helps |
+|---|---|
+| NLP / IE pipelines | Facts extracted from text carry extraction confidence; downstream rules inherit and propagate it automatically |
+| Sensor / IoT data | Readings with measurement uncertainty flow into derived alerts without losing the uncertainty signal |
+| Knowledge base completion | Combine Datalog rules with pgvector similarity scores to rank plausible but unconfirmed facts |
+| Soft ontology alignment | `owl:sameAs` suggestions from embedding-based entity alignment carry a confidence that can be thresholded before materialisation |
+| Risk scoring | Chain soft "risk indicator" rules to produce a composite risk score for entities without writing bespoke SQL |
+| Explainability | `explain_inference()` can surface the full derivation tree with per-step confidence, giving auditors a clear lineage from raw input to derived conclusion |
+
+**Implementation plan.** The GUC stub `pg_ripple.probabilistic_datalog` already exists (added in v0.57.0). The v1.2.0 work adds: (1) `@weight()` annotation parsing in the Datalog rule parser, (2) a `confidence FLOAT8` column on VP delta/main tables behind a schema migration gate, (3) confidence-aware SQL generation in the semi-naive evaluation loop, (4) the `pg:confidence()` SPARQL extension function, (5) `load_triples_with_confidence()` bulk-loader, (6) `explain_inference()` confidence annotations, and (7) a ProbLog-compatible test corpus in CI.
+
+**Scope note.** This is a post-1.0 research-grade feature. The exact semantics (multiplicative vs. additive combination, convergence guarantees for cyclic rules) will be validated against ProbLog and PSL reference implementations before the API is stabilised.
+
 ## How these versions fit together
 
 ```
