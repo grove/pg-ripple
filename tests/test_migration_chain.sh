@@ -533,15 +533,20 @@ echo
 # Insert a representative dataset at the v0.51.0 baseline (earliest version
 # after all migration scripts have been applied) and assert triple counts and
 # query results survive through v0.79.0.
+#
+# After v0.73.0→v0.74.0, the dictionary schema splits hash BYTEA into
+# hash_hi BIGINT NOT NULL and hash_lo BIGINT NOT NULL (first and last 8 bytes
+# of the XXH3-128 hash value).  Inserts must supply all three columns.
 
 info "=== J7-2: data round-trip verification ==="
 
 # Load a small representative dataset.
 # hash is BYTEA (16 bytes / 32 hex chars); kind 0=IRI, 2=literal.
+# hash_hi = first 8 bytes as signed bigint; hash_lo = last 8 bytes.
 # Use RETURNING id to capture the auto-generated dictionary IDs.
-ALICE_ID=$(run_sql -c "INSERT INTO _pg_ripple.dictionary (hash, value, kind) VALUES (decode('a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1','hex'), 'https://example.org/Alice', 0) ON CONFLICT (hash) DO UPDATE SET value = EXCLUDED.value RETURNING id")
-NAME_ID=$(run_sql  -c "INSERT INTO _pg_ripple.dictionary (hash, value, kind) VALUES (decode('b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2','hex'), 'https://example.org/name',  0) ON CONFLICT (hash) DO UPDATE SET value = EXCLUDED.value RETURNING id")
-LIT_ID=$(run_sql   -c "INSERT INTO _pg_ripple.dictionary (hash, value, kind) VALUES (decode('c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3','hex'), 'Alice',                     2) ON CONFLICT (hash) DO UPDATE SET value = EXCLUDED.value RETURNING id")
+ALICE_ID=$(run_sql -c "INSERT INTO _pg_ripple.dictionary (hash, hash_hi, hash_lo, value, kind) VALUES (decode('a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1','hex'), ('xa1a1a1a1a1a1a1a1')::bit(64)::bigint, ('xa1a1a1a1a1a1a1a1')::bit(64)::bigint, 'https://example.org/Alice', 0) ON CONFLICT (hash_hi, hash_lo) DO UPDATE SET value = EXCLUDED.value RETURNING id")
+NAME_ID=$(run_sql  -c "INSERT INTO _pg_ripple.dictionary (hash, hash_hi, hash_lo, value, kind) VALUES (decode('b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2','hex'), ('xb2b2b2b2b2b2b2b2')::bit(64)::bigint, ('xb2b2b2b2b2b2b2b2')::bit(64)::bigint, 'https://example.org/name',  0) ON CONFLICT (hash_hi, hash_lo) DO UPDATE SET value = EXCLUDED.value RETURNING id")
+LIT_ID=$(run_sql   -c "INSERT INTO _pg_ripple.dictionary (hash, hash_hi, hash_lo, value, kind) VALUES (decode('c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3','hex'), ('xc3c3c3c3c3c3c3c3')::bit(64)::bigint, ('xc3c3c3c3c3c3c3c3')::bit(64)::bigint, 'Alice',                     2) ON CONFLICT (hash_hi, hash_lo) DO UPDATE SET value = EXCLUDED.value RETURNING id")
 
 run_sql -c "INSERT INTO _pg_ripple.vp_rare (p, s, o, g, source) VALUES (${NAME_ID}, ${ALICE_ID}, ${LIT_ID}, 0, 0) ON CONFLICT DO NOTHING"
 
