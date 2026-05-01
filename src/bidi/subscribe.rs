@@ -636,18 +636,16 @@ pub fn bidi_status_impl() -> Vec<(
             let paused = row["pg_trickle_paused"].value::<bool>()?;
             let pause_reason = row["pg_trickle_pause_reason"].value::<String>()?;
             let dead_letter_count = row["dead_letter_count"].value::<i64>()?.unwrap_or(0);
-            let pending_linkback_count =
-                row["pending_linkback_count"].value::<i64>()?.unwrap_or(0);
+            let pending_linkback_count = row["pending_linkback_count"].value::<i64>()?.unwrap_or(0);
             let reconciliation_open = row["reconciliation_open"].value::<i64>()?.unwrap_or(0);
-            let rewrite_miss_count_24h =
-                row["rewrite_miss_count_24h"].value::<i64>()?.unwrap_or(0);
+            let rewrite_miss_count_24h = row["rewrite_miss_count_24h"].value::<i64>()?.unwrap_or(0);
 
             out.push((
                 sub_name,
                 paused,
                 pause_reason,
-                0i64,  // outbox_depth
-                None,  // outbox_oldest_age
+                0i64, // outbox_depth
+                None, // outbox_oldest_age
                 dead_letter_count,
                 0.0f64, // conflict_rejection_rate
                 pending_linkback_count,

@@ -14,8 +14,7 @@ use rio_turtle::{NTriplesParser, TurtleError};
 
 /// Generate a valid absolute IRI for use in N-Triples.
 fn arb_iri() -> impl Strategy<Value = String> {
-    "[a-z]{3,6}"
-        .prop_map(|s| format!("http://example.org/{s}"))
+    "[a-z]{3,6}".prop_map(|s| format!("http://example.org/{s}"))
 }
 
 /// Generate a plain string literal.
@@ -26,16 +25,12 @@ fn arb_literal() -> impl Strategy<Value = String> {
 
 /// Generate one N-Triples line: <s> <p> <o> .
 fn arb_triple_line() -> impl Strategy<Value = String> {
-    (arb_iri(), arb_iri(), arb_iri()).prop_map(|(s, p, o)| {
-        format!("<{s}> <{p}> <{o}> .\n")
-    })
+    (arb_iri(), arb_iri(), arb_iri()).prop_map(|(s, p, o)| format!("<{s}> <{p}> <{o}> .\n"))
 }
 
 /// Generate one N-Triples line: <s> <p> "literal" .
 fn arb_triple_literal_line() -> impl Strategy<Value = String> {
-    (arb_iri(), arb_iri(), arb_literal()).prop_map(|(s, p, o)| {
-        format!("<{s}> <{p}> \"{o}\" .\n")
-    })
+    (arb_iri(), arb_iri(), arb_literal()).prop_map(|(s, p, o)| format!("<{s}> <{p}> \"{o}\" .\n"))
 }
 
 /// Generate a small N-Triples document (1–8 triples).

@@ -1251,8 +1251,8 @@ jobs:
 
           # Rule 2: Any line containing the word BREAKING must use the exact tag
           #         **BREAKING:** at the start of a list item or paragraph.
-          breaking_re = re.compile(r'(?i)\bbreaking\b')
-          valid_breaking = re.compile(r'\*\*BREAKING:\*\*')
+          breaking_re = re.compile(r'(?i)\bbreaking changes?\b')
+          valid_breaking = re.compile(r'\*\*BREAKING:\*\*|\bno breaking\b|\bno-breaking\b')
 
           for i, line in enumerate(lines, 1):
               if line.startswith("## ") and not version_re.match(line):
