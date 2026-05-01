@@ -55,7 +55,7 @@ SELECT pg_ripple.sparql_ask(
 SELECT pg_ripple.sparql_explain(
     'SELECT ?s ?o WHERE { ?s <https://q.test/knows> ?o }',
     FALSE
-) LIKE '-- Generated SQL --%' AS explain_ok;
+) LIKE '-- SPARQL Algebra --%' AS explain_ok;
 
 -- SELECT subjects of knows triples in deterministic alphabetical order.
 SELECT result->>'s' AS subject

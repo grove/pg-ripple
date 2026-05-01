@@ -2,9 +2,43 @@
 //!
 //! Tracks SPARQL queries, Datalog queries, errors, and cumulative duration.
 //! v0.67.0 FLIGHT-SEC-02: added Arrow Flight batch and rejection counters.
+//! v0.82.0 METRICS-LABELS-01: added query_type and result_size_bucket dimensions.
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
+
+/// Result-size buckets for the `result_size_bucket` Prometheus label.
+#[derive(Clone, Copy)]
+pub enum ResultSizeBucket {
+    /// 0 rows
+    Empty,
+    /// 1–99 rows
+    Small,
+    /// 100–9 999 rows
+    Medium,
+    /// 10 000+ rows
+    Large,
+}
+
+impl ResultSizeBucket {
+    pub fn from_count(n: usize) -> Self {
+        match n {
+            0 => Self::Empty,
+            1..=99 => Self::Small,
+            100..=9_999 => Self::Medium,
+            _ => Self::Large,
+        }
+    }
+
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Empty => "empty",
+            Self::Small => "small",
+            Self::Medium => "medium",
+            Self::Large => "large",
+        }
+    }
+}
 
 pub struct Metrics {
     /// Total SPARQL queries executed.
@@ -19,6 +53,24 @@ pub struct Metrics {
     arrow_batches_sent: AtomicU64,
     /// v0.67.0 FLIGHT-SEC-01: total Arrow ticket rejections.
     arrow_ticket_rejections: AtomicU64,
+
+    // METRICS-LABELS-01 (v0.82.0): per-query-type counters and durations.
+    select_count: AtomicU64,
+    ask_count: AtomicU64,
+    construct_count: AtomicU64,
+    describe_count: AtomicU64,
+    update_count: AtomicU64,
+    select_duration_us: AtomicU64,
+    ask_duration_us: AtomicU64,
+    construct_duration_us: AtomicU64,
+    describe_duration_us: AtomicU64,
+    update_duration_us: AtomicU64,
+
+    // METRICS-LABELS-01: result-size-bucket counters.
+    result_empty: AtomicU64,
+    result_small: AtomicU64,
+    result_medium: AtomicU64,
+    result_large: AtomicU64,
 }
 
 impl Default for Metrics {
@@ -37,6 +89,20 @@ impl Metrics {
             last_query_ts: AtomicU64::new(0),
             arrow_batches_sent: AtomicU64::new(0),
             arrow_ticket_rejections: AtomicU64::new(0),
+            select_count: AtomicU64::new(0),
+            ask_count: AtomicU64::new(0),
+            construct_count: AtomicU64::new(0),
+            describe_count: AtomicU64::new(0),
+            update_count: AtomicU64::new(0),
+            select_duration_us: AtomicU64::new(0),
+            ask_duration_us: AtomicU64::new(0),
+            construct_duration_us: AtomicU64::new(0),
+            describe_duration_us: AtomicU64::new(0),
+            update_duration_us: AtomicU64::new(0),
+            result_empty: AtomicU64::new(0),
+            result_small: AtomicU64::new(0),
+            result_medium: AtomicU64::new(0),
+            result_large: AtomicU64::new(0),
         }
     }
 
@@ -51,6 +117,43 @@ impl Metrics {
                 .as_secs(),
             Ordering::Relaxed,
         );
+    }
+
+    /// METRICS-LABELS-01 (v0.82.0): record query with query_type label and row count.
+    pub fn record_query_typed(&self, duration: Duration, query_type: &str, row_count: usize) {
+        self.record_query(duration);
+        let dur_us = duration.as_micros() as u64;
+        match query_type {
+            "SELECT" => {
+                self.select_count.fetch_add(1, Ordering::Relaxed);
+                self.select_duration_us.fetch_add(dur_us, Ordering::Relaxed);
+            }
+            "ASK" => {
+                self.ask_count.fetch_add(1, Ordering::Relaxed);
+                self.ask_duration_us.fetch_add(dur_us, Ordering::Relaxed);
+            }
+            "CONSTRUCT" => {
+                self.construct_count.fetch_add(1, Ordering::Relaxed);
+                self.construct_duration_us
+                    .fetch_add(dur_us, Ordering::Relaxed);
+            }
+            "DESCRIBE" => {
+                self.describe_count.fetch_add(1, Ordering::Relaxed);
+                self.describe_duration_us
+                    .fetch_add(dur_us, Ordering::Relaxed);
+            }
+            "UPDATE" => {
+                self.update_count.fetch_add(1, Ordering::Relaxed);
+                self.update_duration_us.fetch_add(dur_us, Ordering::Relaxed);
+            }
+            _ => {}
+        }
+        match ResultSizeBucket::from_count(row_count) {
+            ResultSizeBucket::Empty => self.result_empty.fetch_add(1, Ordering::Relaxed),
+            ResultSizeBucket::Small => self.result_small.fetch_add(1, Ordering::Relaxed),
+            ResultSizeBucket::Medium => self.result_medium.fetch_add(1, Ordering::Relaxed),
+            ResultSizeBucket::Large => self.result_large.fetch_add(1, Ordering::Relaxed),
+        };
     }
 
     pub fn record_datalog_query(&self, duration: Duration) {
@@ -105,5 +208,50 @@ impl Metrics {
 
     pub fn arrow_ticket_rejections(&self) -> u64 {
         self.arrow_ticket_rejections.load(Ordering::Relaxed)
+    }
+
+    // METRICS-LABELS-01: accessors for query_type and result_size_bucket labels.
+
+    pub fn select_count(&self) -> u64 {
+        self.select_count.load(Ordering::Relaxed)
+    }
+    pub fn ask_count(&self) -> u64 {
+        self.ask_count.load(Ordering::Relaxed)
+    }
+    pub fn construct_count(&self) -> u64 {
+        self.construct_count.load(Ordering::Relaxed)
+    }
+    pub fn describe_count(&self) -> u64 {
+        self.describe_count.load(Ordering::Relaxed)
+    }
+    pub fn update_count(&self) -> u64 {
+        self.update_count.load(Ordering::Relaxed)
+    }
+    pub fn select_duration_secs(&self) -> f64 {
+        self.select_duration_us.load(Ordering::Relaxed) as f64 / 1_000_000.0
+    }
+    pub fn ask_duration_secs(&self) -> f64 {
+        self.ask_duration_us.load(Ordering::Relaxed) as f64 / 1_000_000.0
+    }
+    pub fn construct_duration_secs(&self) -> f64 {
+        self.construct_duration_us.load(Ordering::Relaxed) as f64 / 1_000_000.0
+    }
+    pub fn describe_duration_secs(&self) -> f64 {
+        self.describe_duration_us.load(Ordering::Relaxed) as f64 / 1_000_000.0
+    }
+    pub fn update_duration_secs(&self) -> f64 {
+        self.update_duration_us.load(Ordering::Relaxed) as f64 / 1_000_000.0
+    }
+    pub fn result_empty_count(&self) -> u64 {
+        self.result_empty.load(Ordering::Relaxed)
+    }
+    pub fn result_small_count(&self) -> u64 {
+        self.result_small.load(Ordering::Relaxed)
+    }
+    pub fn result_medium_count(&self) -> u64 {
+        self.result_medium.load(Ordering::Relaxed)
+    }
+    pub fn result_large_count(&self) -> u64 {
+        self.result_large.load(Ordering::Relaxed)
     }
 }

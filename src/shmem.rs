@@ -63,7 +63,14 @@ pub type EncodeCacheIds = [[i64; 4]; ENCODE_CACHE_SETS];
 pub const ENCODE_CACHE_SETS: usize = 1024;
 
 /// Total encode-cache capacity across all shards.
-pub const ENCODE_CACHE_CAPACITY: usize = ENCODE_CACHE_SETS * 4;
+// SHMEM-SAFE-01 (v0.82.0): use checked_mul to guard against overflow if
+// ENCODE_CACHE_SETS is ever made GUC-configurable.
+pub const ENCODE_CACHE_CAPACITY: usize = {
+    match ENCODE_CACHE_SETS.checked_mul(4) {
+        Some(n) => n,
+        None => panic!("pg_ripple: shmem capacity overflow — ENCODE_CACHE_SETS × 4 exceeds usize"),
+    }
+};
 
 // ─── Layout version guard ─────────────────────────────────────────────────────
 

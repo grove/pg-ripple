@@ -169,6 +169,18 @@ mod pg_ripple {
         "1.0"
     }
 
+    // ── STATS-CACHE-01 (v0.82.0): refresh_stats_cache ────────────────────────
+
+    /// Immediately rebuild `_pg_ripple.predicate_stats_cache` from the current
+    /// `_pg_ripple.predicates` table. Returns the number of cache rows written.
+    ///
+    /// The cache is also refreshed automatically by the merge worker every
+    /// `pg_ripple.stats_refresh_interval_seconds` seconds (default: 300).
+    #[pg_extern]
+    pub fn refresh_stats_cache() -> i64 {
+        crate::bidi::refresh_stats_cache_impl()
+    }
+
     // ── BIDI-ATTR-01: Extended ingest_jsonld ──────────────────────────────────
 
     /// Ingest a full JSON-LD document with optional graph_iri and mode parameters.
@@ -1175,35 +1187,6 @@ pub fn graph_stats_impl(
     Spi::connect(|c| {
         let mut out = Vec::new();
 
-        let (sql, args): (&str, &[pgrx::datum::DatumWithOid]) = if filter_graph_iri.is_some() {
-            (
-                "SELECT d.value AS graph_iri, m.graph_id, \
-                 COALESCE(m.triple_count, 0) AS triple_count, \
-                 m.last_write_at, \
-                 COALESCE(m.conflicts_total, 0) AS conflicts_total, \
-                 COALESCE((SELECT COUNT(*)::int FROM _pg_ripple.subscriptions s \
-                  WHERE s.exclude_graphs IS NULL OR \
-                        $1 != ALL(s.exclude_graphs)), 0) AS subscriptions_active \
-                 FROM _pg_ripple.graph_metrics m \
-                 JOIN _pg_ripple.dictionary d ON d.id = m.graph_id \
-                 WHERE d.value = $1",
-                &[],
-            )
-        } else {
-            (
-                "SELECT d.value AS graph_iri, m.graph_id, \
-                 COALESCE(m.triple_count, 0) AS triple_count, \
-                 m.last_write_at, \
-                 COALESCE(m.conflicts_total, 0) AS conflicts_total, \
-                 COALESCE((SELECT COUNT(*)::int FROM _pg_ripple.subscriptions s \
-                  WHERE s.exclude_graphs IS NULL), 0) AS subscriptions_active \
-                 FROM _pg_ripple.graph_metrics m \
-                 JOIN _pg_ripple.dictionary d ON d.id = m.graph_id \
-                 ORDER BY m.graph_id",
-                &[],
-            )
-        };
-
         // Use a simpler approach: run the query with or without filter.
         let iter = if let Some(giri) = filter_graph_iri {
             c.select(
@@ -1221,8 +1204,6 @@ pub fn graph_stats_impl(
                 &[pgrx::datum::DatumWithOid::from(giri)],
             )?
         } else {
-            let _ = sql;
-            let _ = args;
             c.select(
                 "SELECT d.value AS graph_iri, m.graph_id, \
                  COALESCE(m.triple_count, 0) AS triple_count, \
@@ -1232,9 +1213,12 @@ pub fn graph_stats_impl(
                   WHERE s.exclude_graphs IS NULL), 0) AS subscriptions_active \
                  FROM _pg_ripple.graph_metrics m \
                  JOIN _pg_ripple.dictionary d ON d.id = m.graph_id \
-                 ORDER BY m.graph_id",
+                 ORDER BY m.graph_id \
+                 LIMIT $1",
                 None,
-                &[],
+                &[pgrx::datum::DatumWithOid::from(
+                    crate::STATS_SCAN_LIMIT.get() as i64,
+                )],
             )?
         };
 
@@ -2468,6 +2452,29 @@ fn now_tstz() -> pgrx::datum::TimestampWithTimeZone {
             // SAFETY: using positive_infinity as a safe non-panicking fallback
             pgrx::datum::TimestampWithTimeZone::positive_infinity()
         })
+}
+
+// ─── STATS-CACHE-01 (v0.82.0) ────────────────────────────────────────────────
+
+/// Rebuild `_pg_ripple.predicate_stats_cache` from the current `_pg_ripple.predicates` table.
+///
+/// Exposed as `pg_ripple.refresh_stats_cache()`. The background refresh task in
+/// `worker.rs` calls this when `stats_refresh_interval_seconds` has elapsed.
+pub fn refresh_stats_cache_impl() -> i64 {
+    Spi::run_with_args(
+        "INSERT INTO _pg_ripple.predicate_stats_cache (predicate_id, triple_count, refreshed_at) \
+         SELECT id, COALESCE(triple_count, 0), now() \
+         FROM _pg_ripple.predicates \
+         ON CONFLICT (predicate_id) DO UPDATE SET \
+           triple_count  = EXCLUDED.triple_count, \
+           refreshed_at  = EXCLUDED.refreshed_at",
+        &[],
+    )
+    .unwrap_or_else(|e| pgrx::warning!("refresh_stats_cache: {e}"));
+
+    Spi::get_one::<i64>("SELECT COUNT(*) FROM _pg_ripple.predicate_stats_cache")
+        .unwrap_or(None)
+        .unwrap_or(0)
 }
 
 #[cfg(any(test, feature = "pg_test"))]

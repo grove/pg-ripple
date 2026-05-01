@@ -30,7 +30,11 @@ pub(crate) async fn rag_post(
     let req: RagRequest = match serde_json::from_slice(&body_bytes) {
         Ok(r) => r,
         Err(e) => {
-            return (StatusCode::BAD_REQUEST, format!("invalid JSON: {e}")).into_response();
+            return redacted_error(
+                "invalid_request",
+                &format!("invalid JSON body: {e}"),
+                StatusCode::BAD_REQUEST,
+            );
         }
     };
 

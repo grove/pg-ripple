@@ -142,14 +142,27 @@ mod pg_ripple {
         )
         .unwrap_or_else(|e| pgrx::error!("vacuum_dictionary: insert vp_rare IDs error: {e}"));
 
-        // Insert IDs from each dedicated VP table.
-        for p_id in &pred_ids {
-            let _ = pgrx::Spi::run(&format!(
-                "INSERT INTO _pg_ripple_live_ids \
-                 SELECT s FROM _pg_ripple.vp_{p_id} \
-                 UNION ALL SELECT o FROM _pg_ripple.vp_{p_id} \
-                 UNION ALL SELECT g FROM _pg_ripple.vp_{p_id} WHERE g <> 0"
-            ));
+        // VACUUM-DICT-BATCH-01 (v0.82.0): insert IDs from VP tables in batches
+        // to avoid generating a single multi-megabyte UNION ALL SQL string on
+        // large instances.  Each batch processes up to vacuum_dict_batch_size
+        // predicates in a single SPI call.
+        let batch_size = crate::VACUUM_DICT_BATCH_SIZE.get().max(1) as usize;
+        for chunk in pred_ids.chunks(batch_size) {
+            let union_parts: Vec<String> = chunk
+                .iter()
+                .flat_map(|p_id| {
+                    [
+                        format!("SELECT s FROM _pg_ripple.vp_{p_id}"),
+                        format!("SELECT o FROM _pg_ripple.vp_{p_id}"),
+                        format!("SELECT g FROM _pg_ripple.vp_{p_id} WHERE g <> 0"),
+                    ]
+                })
+                .collect();
+            let sql = format!(
+                "INSERT INTO _pg_ripple_live_ids {}",
+                union_parts.join(" UNION ALL ")
+            );
+            let _ = pgrx::Spi::run(&sql);
         }
 
         // Delete dictionary entries not referenced by any live ID.

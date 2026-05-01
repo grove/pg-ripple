@@ -65,6 +65,17 @@ pub static SPARQL_MAX_ALGEBRA_DEPTH: pgrx::GucSetting<i32> = pgrx::GucSetting::<
 /// GUC: maximum number of triple patterns allowed in a single SPARQL query (v0.51.0).
 pub static SPARQL_MAX_TRIPLE_PATTERNS: pgrx::GucSetting<i32> = pgrx::GucSetting::<i32>::new(4096);
 
+// ─── v0.82.0 SPARQL GUCs ─────────────────────────────────────────────────────
+
+/// GUC: maximum number of cached SPARQL→SQL translations (v0.82.0 CACHE-CAP-01).
+/// Replaces the hardcoded 256 constant in `src/sparql/plan_cache.rs`.
+pub static PLAN_CACHE_CAPACITY: pgrx::GucSetting<i32> = pgrx::GucSetting::<i32>::new(1024);
+
+/// GUC: maximum number of predicates used in a wildcard property-path expansion
+/// (v0.82.0 PROPPATH-UNBOUNDED-01). When the schema has more predicates than this
+/// limit, `build_all_nodes_sql()` uses only the top-N predicates by triple count.
+pub static ALL_NODES_PREDICATE_LIMIT: pgrx::GucSetting<i32> = pgrx::GucSetting::<i32>::new(500);
+
 // ─── v0.81.0 SPARQL GUCs ─────────────────────────────────────────────────────
 
 /// GUC: when `on`, an unknown built-in function name in a FILTER expression raises

@@ -250,6 +250,26 @@ pub(crate) async fn flight_do_get(
         }
     };
 
+    // ARROW-LIMIT-01 (v0.82.0): enforce row export limit before serializing.
+    // Configurable via ARROW_MAX_EXPORT_ROWS env var (default: 10,000,000).
+    let max_export_rows: usize = std::env::var("ARROW_MAX_EXPORT_ROWS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(10_000_000)
+        .max(1);
+    if rows.len() > max_export_rows {
+        return json_response_http(
+            StatusCode::BAD_REQUEST,
+            serde_json::json!({
+                "error": format!(
+                    "Arrow Flight export result ({} rows) exceeds ARROW_MAX_EXPORT_ROWS limit ({}); \
+                     use a more selective query or increase the limit",
+                    rows.len(), max_export_rows
+                )
+            }),
+        );
+    }
+
     // Build Arrow IPC stream with multiple record batches (one per `batch_size` rows).
     let schema = Schema::new(vec![
         Field::new("s", DataType::Int64, false),

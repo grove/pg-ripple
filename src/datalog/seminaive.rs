@@ -102,7 +102,8 @@ pub fn run_inference_seminaive(rule_set_name: &str) -> (i64, i32) {
     };
 
     for &pred_id in &derived_pred_ids {
-        let _ = Spi::run_with_args(&format!("DROP TABLE IF EXISTS _dl_delta_{pred_id}"), &[]);
+        Spi::run_with_args(&format!("DROP TABLE IF EXISTS _dl_delta_{pred_id}"), &[])
+            .unwrap_or_else(|e| pgrx::log!("datalog cleanup: {e}"));
         Spi::run_with_args(
             &format!(
                 "CREATE TEMP TABLE _dl_delta_{pred_id} \
@@ -146,11 +147,13 @@ pub fn run_inference_seminaive(rule_set_name: &str) -> (i64, i32) {
                 .unwrap_or(0);
             if row_cnt >= delta_index_threshold {
                 let idx_name = format!("_dl_delta_{pred_id}_so_idx");
-                let _ = Spi::run_with_args(&format!("DROP INDEX IF EXISTS {idx_name}"), &[]);
-                let _ = Spi::run_with_args(
+                Spi::run_with_args(&format!("DROP INDEX IF EXISTS {idx_name}"), &[])
+                    .unwrap_or_else(|e| pgrx::log!("datalog cleanup: {e}"));
+                Spi::run_with_args(
                     &format!("CREATE INDEX {idx_name} ON _dl_delta_{pred_id} (s, o)"),
                     &[],
-                );
+                )
+                .unwrap_or_else(|e| pgrx::log!("datalog cleanup: {e}"));
             }
         }
     }
@@ -169,10 +172,11 @@ pub fn run_inference_seminaive(rule_set_name: &str) -> (i64, i32) {
         iteration_count += 1;
 
         for &pred_id in &derived_pred_ids {
-            let _ = Spi::run_with_args(
+            Spi::run_with_args(
                 &format!("DROP TABLE IF EXISTS _dl_delta_new_{pred_id}"),
                 &[],
-            );
+            )
+            .unwrap_or_else(|e| pgrx::log!("datalog cleanup: {e}"));
             Spi::run_with_args(
                 &format!(
                     "CREATE TEMP TABLE _dl_delta_new_{pred_id} \
@@ -231,17 +235,19 @@ pub fn run_inference_seminaive(rule_set_name: &str) -> (i64, i32) {
         }
 
         for &pred_id in &derived_pred_ids {
-            let _ = Spi::run_with_args(
+            Spi::run_with_args(
                 &format!(
                     "INSERT INTO _dl_delta_{pred_id} (s, o, g) \
                      SELECT s, o, g FROM _dl_delta_new_{pred_id} ON CONFLICT DO NOTHING"
                 ),
                 &[],
-            );
-            let _ = Spi::run_with_args(
+            )
+            .unwrap_or_else(|e| pgrx::log!("datalog cleanup: {e}"));
+            Spi::run_with_args(
                 &format!("DROP TABLE IF EXISTS _dl_delta_new_{pred_id}"),
                 &[],
-            );
+            )
+            .unwrap_or_else(|e| pgrx::log!("datalog cleanup: {e}"));
         }
 
         if new_this_iter == 0 {
@@ -262,7 +268,7 @@ pub fn run_inference_seminaive(rule_set_name: &str) -> (i64, i32) {
         .unwrap_or(0);
         total_derived += cnt;
         if cnt > 0 {
-            let _ = Spi::run_with_args(
+            Spi::run_with_args(
                 "INSERT INTO _pg_ripple.predicates (id, table_oid, triple_count) \
                  VALUES ($1, NULL, $2) \
                  ON CONFLICT (id) DO UPDATE \
@@ -271,7 +277,8 @@ pub fn run_inference_seminaive(rule_set_name: &str) -> (i64, i32) {
                     pgrx::datum::DatumWithOid::from(pred_id),
                     pgrx::datum::DatumWithOid::from(cnt),
                 ],
-            );
+            )
+            .unwrap_or_else(|e| pgrx::log!("datalog cleanup: {e}"));
         }
     }
 
@@ -304,11 +311,13 @@ pub fn run_inference_seminaive(rule_set_name: &str) -> (i64, i32) {
     }
 
     for &pred_id in &derived_pred_ids {
-        let _ = Spi::run_with_args(&format!("DROP TABLE IF EXISTS _dl_delta_{pred_id}"), &[]);
-        let _ = Spi::run_with_args(
+        Spi::run_with_args(&format!("DROP TABLE IF EXISTS _dl_delta_{pred_id}"), &[])
+            .unwrap_or_else(|e| pgrx::log!("datalog cleanup: {e}"));
+        Spi::run_with_args(
             &format!("DROP TABLE IF EXISTS _dl_delta_new_{pred_id}"),
             &[],
-        );
+        )
+        .unwrap_or_else(|e| pgrx::log!("datalog cleanup: {e}"));
     }
 
     (total_derived, iteration_count)
@@ -670,7 +679,8 @@ pub(crate) fn run_seminaive_inner(rules: &[Rule], rule_set_name: &str) -> (i64, 
     }
 
     for &pred_id in &derived_pred_ids {
-        let _ = Spi::run_with_args(&format!("DROP TABLE IF EXISTS _dl_delta_{pred_id}"), &[]);
+        Spi::run_with_args(&format!("DROP TABLE IF EXISTS _dl_delta_{pred_id}"), &[])
+            .unwrap_or_else(|e| pgrx::log!("datalog cleanup: {e}"));
         Spi::run_with_args(
             &format!("CREATE TEMP TABLE _dl_delta_{pred_id} \
                  (s BIGINT NOT NULL, o BIGINT NOT NULL, g BIGINT NOT NULL DEFAULT 0, UNIQUE (s, o, g))"),
@@ -712,10 +722,11 @@ pub(crate) fn run_seminaive_inner(rules: &[Rule], rule_set_name: &str) -> (i64, 
         iteration_count += 1;
 
         for &pred_id in &derived_pred_ids {
-            let _ = Spi::run_with_args(
+            Spi::run_with_args(
                 &format!("DROP TABLE IF EXISTS _dl_delta_new_{pred_id}"),
                 &[],
-            );
+            )
+            .unwrap_or_else(|e| pgrx::log!("datalog cleanup: {e}"));
             Spi::run_with_args(
                 &format!("CREATE TEMP TABLE _dl_delta_new_{pred_id} \
                      (s BIGINT NOT NULL, o BIGINT NOT NULL, g BIGINT NOT NULL DEFAULT 0, UNIQUE (s, o, g))"),
@@ -765,16 +776,17 @@ pub(crate) fn run_seminaive_inner(rules: &[Rule], rule_set_name: &str) -> (i64, 
         }
 
         for &pred_id in &derived_pred_ids {
-            let _ = Spi::run_with_args(
+            Spi::run_with_args(
                 &format!(
                     "INSERT INTO _dl_delta_{pred_id} (s,o,g) SELECT s,o,g FROM _dl_delta_new_{pred_id} ON CONFLICT DO NOTHING"
                 ),
                 &[],
-            );
-            let _ = Spi::run_with_args(
+            ).unwrap_or_else(|e| pgrx::log!("datalog cleanup: {e}"));
+            Spi::run_with_args(
                 &format!("DROP TABLE IF EXISTS _dl_delta_new_{pred_id}"),
                 &[],
-            );
+            )
+            .unwrap_or_else(|e| pgrx::log!("datalog cleanup: {e}"));
         }
 
         if new_this_iter == 0 {
@@ -793,23 +805,25 @@ pub(crate) fn run_seminaive_inner(rules: &[Rule], rule_set_name: &str) -> (i64, 
         .unwrap_or(0);
         total += cnt;
         if cnt > 0 {
-            let _ = Spi::run_with_args(
+            Spi::run_with_args(
                 "INSERT INTO _pg_ripple.predicates (id, table_oid, triple_count) VALUES ($1, NULL, $2) \
                  ON CONFLICT (id) DO UPDATE SET triple_count = _pg_ripple.predicates.triple_count + EXCLUDED.triple_count",
                 &[
                     pgrx::datum::DatumWithOid::from(pred_id),
                     pgrx::datum::DatumWithOid::from(cnt),
                 ],
-            );
+            ).unwrap_or_else(|e| pgrx::log!("datalog cleanup: {e}"));
         }
     }
 
     for &pred_id in &derived_pred_ids {
-        let _ = Spi::run_with_args(&format!("DROP TABLE IF EXISTS _dl_delta_{pred_id}"), &[]);
-        let _ = Spi::run_with_args(
+        Spi::run_with_args(&format!("DROP TABLE IF EXISTS _dl_delta_{pred_id}"), &[])
+            .unwrap_or_else(|e| pgrx::log!("datalog cleanup: {e}"));
+        Spi::run_with_args(
             &format!("DROP TABLE IF EXISTS _dl_delta_new_{pred_id}"),
             &[],
-        );
+        )
+        .unwrap_or_else(|e| pgrx::log!("datalog cleanup: {e}"));
     }
 
     (total, iteration_count)

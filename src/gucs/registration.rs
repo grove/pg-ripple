@@ -296,10 +296,10 @@ pub fn register_all_gucs() {
 
     pgrx::GucRegistry::define_int_guc(
     c"pg_ripple.vp_promotion_threshold",
-    c"Minimum triple count before a predicate gets its own VP table (default: 1000, range: 10–10,000,000)",
+    c"Minimum triple count before a predicate gets its own VP table (default: 1000, range: 100–10,000,000)",
     c"",
     &VPP_THRESHOLD,
-    10,
+    100,
     10_000_000,
     GucContext::Userset,
     GucFlags::default(),
@@ -1834,6 +1834,106 @@ pub fn register_all_gucs() {
         GucFlags::default(),
     );
 
+    // ── v0.82.0 GUCs ──────────────────────────────────────────────────────────
+
+    pgrx::GucRegistry::define_int_guc(
+        c"pg_ripple.plan_cache_capacity",
+        c"Maximum number of cached SPARQL-to-SQL plan translations (default: 1024, range: 64–65536). \
+      Replaces the hardcoded constant in plan_cache.rs. (v0.82.0 CACHE-CAP-01)",
+        c"",
+        &crate::gucs::sparql::PLAN_CACHE_CAPACITY,
+        64,
+        65536,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+
+    pgrx::GucRegistry::define_int_guc(
+        c"pg_ripple.merge_lock_timeout_ms",
+        c"Milliseconds to wait for the merge fence lock before skipping this cycle \
+      (default: 5000, range: 100–60000). (v0.82.0 MERGE-LOCK-GUC-01)",
+        c"",
+        &crate::gucs::storage::MERGE_LOCK_TIMEOUT_MS,
+        100,
+        60000,
+        GucContext::Sighup,
+        GucFlags::default(),
+    );
+
+    pgrx::GucRegistry::define_int_guc(
+        c"pg_ripple.merge_heartbeat_interval_seconds",
+        c"Seconds between merge worker heartbeat log lines (default: 60, range: 10–3600). \
+      (v0.82.0 MERGE-HBEAT-01)",
+        c"",
+        &crate::gucs::storage::MERGE_HEARTBEAT_INTERVAL_SECONDS,
+        10,
+        3600,
+        GucContext::Sighup,
+        GucFlags::default(),
+    );
+
+    pgrx::GucRegistry::define_int_guc(
+        c"pg_ripple.stats_scan_limit",
+        c"Maximum number of VP tables scanned per graph_stats() call \
+      (default: 1000, range: 1–100000). (v0.82.0 STATS-DOC-01)",
+        c"",
+        &crate::gucs::storage::STATS_SCAN_LIMIT,
+        1,
+        100_000,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+
+    pgrx::GucRegistry::define_int_guc(
+        c"pg_ripple.stats_refresh_interval_seconds",
+        c"Seconds between background refreshes of predicate_stats_cache \
+      (default: 300, range: 10–86400). (v0.82.0 STATS-CACHE-01)",
+        c"",
+        &crate::gucs::storage::STATS_REFRESH_INTERVAL_SECONDS,
+        10,
+        86400,
+        GucContext::Sighup,
+        GucFlags::default(),
+    );
+
+    pgrx::GucRegistry::define_int_guc(
+        c"pg_ripple.vacuum_dict_batch_size",
+        c"Number of predicates processed per batch in vacuum_dictionary() \
+      (default: 200, range: 10–10000). (v0.82.0 VACUUM-DICT-BATCH-01)",
+        c"",
+        &crate::gucs::storage::VACUUM_DICT_BATCH_SIZE,
+        10,
+        10000,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+
+    pgrx::GucRegistry::define_int_guc(
+        c"pg_ripple.all_nodes_predicate_limit",
+        c"Maximum number of predicates in a wildcard property-path UNION ALL expansion \
+      (default: 500, range: 10–50000). Excess predicates sorted by triple count and truncated. \
+      (v0.82.0 PROPPATH-UNBOUNDED-01)",
+        c"",
+        &crate::gucs::sparql::ALL_NODES_PREDICATE_LIMIT,
+        10,
+        50000,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+
+    // GUC-BOUNDS-01 (v0.82.0): merge_batch_size — controls merge worker batch size.
+    pgrx::GucRegistry::define_int_guc(
+        c"pg_ripple.merge_batch_size",
+        c"Maximum rows processed per merge worker INSERT…SELECT batch (default: 1000000, \
+          range: 100–100,000,000). (v0.82.0 GUC-BOUNDS-01)",
+        c"",
+        &crate::gucs::storage::MERGE_BATCH_SIZE,
+        100,
+        100_000_000,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+
     // PGC_POSTMASTER GUCs can only be registered during shared_preload_libraries
     // loading.  `process_shared_preload_libraries_in_progress` is the correct
     // flag — `IsPostmasterEnvironment` is true in every server process and
@@ -1841,11 +1941,11 @@ pub fn register_all_gucs() {
     if unsafe { pg_sys::process_shared_preload_libraries_in_progress } {
         pgrx::GucRegistry::define_int_guc(
             c"pg_ripple.dictionary_cache_size",
-            c"Shared-memory encode-cache capacity in entries (default: 4096; startup only)",
+            c"Shared-memory encode-cache capacity in entries (default: 4096; startup only; range: 1024–1,073,741,824)",
             c"",
             &DICTIONARY_CACHE_SIZE,
-            0,
-            1_000_000,
+            1024,
+            1_073_741_824,
             GucContext::Postmaster,
             GucFlags::default(),
         );

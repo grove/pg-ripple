@@ -335,10 +335,21 @@ pub fn export_jsonld(graph: Option<&str>) -> serde_json::Value {
     };
 
     // JSON-LD requires grouping by subject, so collect all triples first.
+    // EXPORT-JSONLD-OOM-01 (v0.82.0): warn when buffering a large number of triples.
+    // NOTE: For graphs with >1M triples, consider using export_jsonld_stream() which
+    // yields one NDJSON line per subject and avoids holding all triples in memory.
     let mut rows: Vec<(i64, i64, i64, i64)> = Vec::new();
     storage::for_each_encoded_triple_batch(g_id, &mut |batch| {
         rows.extend_from_slice(batch);
     });
+    if rows.len() > 1_000_000 {
+        pgrx::warning!(
+            "pg_ripple.export_jsonld: buffering {} triples in memory before serialization; \
+             for large graphs, prefer the streaming cursor variant (export_jsonld_stream) \
+             to avoid excessive memory use",
+            rows.len()
+        );
+    }
 
     // Group: subject_nt → predicate_nt → [object_value]
     let mut subjects: BTreeMap<String, BTreeMap<String, Vec<serde_json::Value>>> = BTreeMap::new();

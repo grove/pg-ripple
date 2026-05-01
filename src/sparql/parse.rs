@@ -176,3 +176,145 @@ fn utf8_char_len(b: u8) -> usize {
         4
     }
 }
+
+// ─── PGSS-NORM-01: SPARQL query normalisation ─────────────────────────────────
+
+/// Normalise a SPARQL query text for use as a `pg_stat_statements` query key.
+///
+/// Replaces:
+/// - String literals (`"…"` and `'…'`) with `$S`
+/// - IRI literals (`<…>`) with `$I`
+/// - Numeric literals (integer and float) with `$N`
+///
+/// The result groups structurally equivalent queries so that `pg_stat_statements`
+/// (and the plan cache) treat them as the same query class. (v0.82.0 PGSS-NORM-01)
+pub(crate) fn normalise_sparql_for_pgss(query: &str) -> String {
+    let bytes = query.as_bytes();
+    let len = bytes.len();
+    let mut out = String::with_capacity(len);
+    let mut i = 0;
+
+    while i < len {
+        match bytes[i] {
+            // Double-quoted string literal
+            b'"' => {
+                i += 1;
+                // Check for triple-quoted
+                if i + 1 < len && bytes[i] == b'"' && bytes[i + 1] == b'"' {
+                    i += 2;
+                    // Scan for closing """
+                    while i + 2 < len
+                        && !(bytes[i] == b'"' && bytes[i + 1] == b'"' && bytes[i + 2] == b'"')
+                    {
+                        i += 1;
+                    }
+                    i += 3;
+                } else {
+                    while i < len && bytes[i] != b'"' {
+                        if bytes[i] == b'\\' {
+                            i += 1;
+                        }
+                        i += 1;
+                    }
+                    i += 1; // closing "
+                }
+                out.push_str("$S");
+            }
+            // Single-quoted string literal
+            b'\'' => {
+                i += 1;
+                if i + 1 < len && bytes[i] == b'\'' && bytes[i + 1] == b'\'' {
+                    i += 2;
+                    while i + 2 < len
+                        && !(bytes[i] == b'\'' && bytes[i + 1] == b'\'' && bytes[i + 2] == b'\'')
+                    {
+                        i += 1;
+                    }
+                    i += 3;
+                } else {
+                    while i < len && bytes[i] != b'\'' {
+                        if bytes[i] == b'\\' {
+                            i += 1;
+                        }
+                        i += 1;
+                    }
+                    i += 1;
+                }
+                out.push_str("$S");
+            }
+            // IRI literal <…>
+            b'<' => {
+                // Peek: if the next char is a space or = it is a comparison operator
+                let next = if i + 1 < len { bytes[i + 1] } else { 0 };
+                if next == b' ' || next == b'=' || next == b'\t' || next == b'\n' {
+                    out.push('<');
+                    i += 1;
+                } else {
+                    // Skip until closing >
+                    i += 1;
+                    while i < len && bytes[i] != b'>' {
+                        i += 1;
+                    }
+                    i += 1; // skip >
+                    out.push_str("$I");
+                }
+            }
+            // Hash comment: skip to end of line
+            b'#' => {
+                while i < len && bytes[i] != b'\n' {
+                    i += 1;
+                }
+            }
+            // Numeric literal (standalone digit, possibly preceded by space)
+            b if b.is_ascii_digit() => {
+                // Check word boundary: previous non-space char should not be alnum/?/:
+                let prev_is_id = out.ends_with(|c: char| {
+                    c.is_ascii_alphanumeric() || c == '_' || c == ':' || c == '?'
+                });
+                if prev_is_id {
+                    let char_len = utf8_char_len(bytes[i]);
+                    out.push_str(&query[i..i + char_len]);
+                    i += char_len;
+                } else {
+                    // Consume full number including decimal / exponent
+                    while i < len
+                        && (bytes[i].is_ascii_digit()
+                            || bytes[i] == b'.'
+                            || bytes[i] == b'e'
+                            || bytes[i] == b'E'
+                            || ((bytes[i] == b'+' || bytes[i] == b'-')
+                                && i > 0
+                                && (bytes[i - 1] == b'e' || bytes[i - 1] == b'E')))
+                    {
+                        i += 1;
+                    }
+                    out.push_str("$N");
+                }
+            }
+            // Everything else: copy verbatim
+            _ => {
+                let char_len = utf8_char_len(bytes[i]);
+                out.push_str(&query[i..i + char_len]);
+                i += char_len;
+            }
+        }
+    }
+    out
+}
+
+#[cfg(test)]
+mod normalise_tests {
+    use super::normalise_sparql_for_pgss;
+
+    #[test]
+    fn test_normalise_literals() {
+        let q = r#"SELECT ?s WHERE { ?s <http://example.org/name> "Alice" . ?s <http://schema.org/age> 42 }"#;
+        let n = normalise_sparql_for_pgss(q);
+        assert!(!n.contains("Alice"), "string literal should be replaced");
+        assert!(!n.contains("42"), "numeric literal should be replaced");
+        assert!(!n.contains("http://"), "IRI should be replaced");
+        assert!(n.contains("$S"), "should have $S placeholder");
+        assert!(n.contains("$I"), "should have $I placeholder");
+        assert!(n.contains("$N"), "should have $N placeholder");
+    }
+}

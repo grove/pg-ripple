@@ -358,8 +358,13 @@ pub fn merge_predicate(pred_id: i64) -> i64 {
     .unwrap_or_else(|e| pgrx::error!("merge: advisory lock (swap phase) error: {e}"));
 
     // Use lock_timeout to avoid blocking the query path for too long.
-    Spi::run_with_args("SET LOCAL lock_timeout = '5s'", &[])
-        .unwrap_or_else(|e| pgrx::error!("merge: set lock_timeout error: {e}"));
+    // MERGE-LOCK-GUC-01 (v0.82.0): use GUC value instead of hardcoded 5s.
+    let lock_timeout_ms = crate::MERGE_LOCK_TIMEOUT_MS.get();
+    Spi::run_with_args(
+        &format!("SET LOCAL lock_timeout = '{lock_timeout_ms}ms'"),
+        &[],
+    )
+    .unwrap_or_else(|e| pgrx::error!("merge: set lock_timeout error: {e}"));
 
     let main_old = format!("_pg_ripple.vp_{pred_id}_main_old");
 

@@ -81,7 +81,12 @@ pub(super) fn execute_select(
                 } else {
                     // Read as i64 (dictionary ID or numeric aggregate)
                     let val = row.get::<i64>(i).ok().flatten();
-                    if let Some(id) = val {
+                    // DECODE-WARN-01: only push to all_ids if this variable is not
+                    // a raw numeric aggregate (COUNT/SUM/etc.). Raw numeric values
+                    // are not dictionary IDs and must not be passed to batch_decode.
+                    if let Some(id) = val
+                        && !raw_numeric_vars.contains(var)
+                    {
                         all_ids.push(id);
                     }
                     row_vals.push(val.map(Ok));

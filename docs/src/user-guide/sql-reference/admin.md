@@ -215,6 +215,10 @@ SELECT pg_ripple.vacuum();
 
 > **Note**: `ANALYZE` updates planner statistics. PostgreSQL's `VACUUM` itself cannot run inside a transaction block; call it separately if you need dead-tuple reclamation.
 
+**Lock levels acquired (ADMIN-LOCK-01, v0.82.0):**
+- `ANALYZE` acquires a brief `ShareUpdateExclusiveLock` on each VP table. Concurrent reads and writes are not blocked.
+- The delta→main merge acquires a `SET LOCAL lock_timeout` (configurable via `pg_ripple.merge_lock_timeout_ms`, default 5 s) before taking a `ShareRowExclusiveLock` on the VP table during the final swap.
+
 ---
 
 ## reindex() → bigint (v0.14.0)
@@ -231,6 +235,10 @@ Rebuilds all indices on every VP table (delta and main) and `vp_rare` using `REI
 SELECT pg_ripple.reindex();
 -- 42
 ```
+
+**Lock levels acquired (ADMIN-LOCK-01, v0.82.0):**
+- `REINDEX TABLE` acquires an `AccessExclusiveLock` on each VP table for the duration of the rebuild. All concurrent reads and writes on that table are blocked until the reindex completes.
+- To minimise impact, `reindex()` processes one VP table at a time. On databases with many predicates, consider running during a maintenance window.
 
 ---
 

@@ -13,6 +13,61 @@ Versions correspond to the milestones in [ROADMAP.md](ROADMAP.md).
 
 ---
 
+## [0.82.0] — 2026-06-03 — Assessment 12 Performance & Observability
+
+**Implements v0.82.0 roadmap: 30 performance, observability, and security
+hardening items from Assessment 12. Key additions: configurable plan-cache
+capacity GUC, `ANY($1::bigint[])` batch decode, two-phase merge with tunable
+lock timeout, merge worker heartbeat, enriched `sparql_explain()` with algebra
+tree, structured Prometheus labels, `sparql_normalise()` function, federation
+response Content-Length pre-check, and SPARQL depth DoS protection.**
+
+### Performance
+
+- **CACHE-CAP-01** — `pg_ripple.plan_cache_capacity` GUC (default 1024, range 64–65536) replaces hardcoded constant in `plan_cache.rs`.
+- **DECODE-BIND-01** — `batch_decode()` migrated from `IN (id1, id2, …)` to `WHERE id = ANY($1::bigint[])` bind parameter, preventing plan proliferation.
+- **MERGE-PRED-01** — Merge worker caches predicate IDs with 60-second TTL; SIGHUP invalidates the cache. Eliminates repeated `_pg_ripple.predicates` scans per merge cycle.
+- **MERGE-LOCK-GUC-01** — Hardcoded `lock_timeout = '5s'` replaced by `pg_ripple.merge_lock_timeout_ms` GUC (default 5000, range 100–60000 ms).
+- **PROPPATH-UNBOUNDED-01** — `pg_ripple.all_nodes_predicate_limit` GUC (default 500) caps wildcard property-path UNION ALL branches to prevent parser stack overflow on large schemas.
+- **VACUUM-DICT-BATCH-01** — `vacuum_dictionary()` now batches UNION ALL construction into groups of `pg_ripple.vacuum_dict_batch_size` predicates (default 200).
+- **GUC-BOUNDS-01** — Explicit min/max validators added to `vp_promotion_threshold` (min 100), `dictionary_cache_size` (min 1024, max 1 GiB), and new `pg_ripple.merge_batch_size` GUC (min 100, max 100,000,000).
+
+### Observability
+
+- **EXPLAIN-ALG-01** — `sparql_explain()` now includes a `-- SPARQL Algebra --` section showing the parsed algebra tree (via `spargebra::Display`).
+- **MERGE-HBEAT-01** — Merge background worker emits a LOG-level heartbeat every `pg_ripple.merge_heartbeat_interval_seconds` seconds (default 60) and writes to the new `_pg_ripple.merge_worker_status` table.
+- **STATS-DOC-01** — `pg_ripple.stats_scan_limit` GUC (default 1000) caps the number of VP tables scanned per `graph_stats()` call; documented in administration reference.
+- **PGSS-NORM-01** — New `pg_ripple.sparql_normalise(TEXT) RETURNS TEXT` function replaces string/IRI/numeric literals with `$S`/`$I`/`$N` placeholders for `pg_stat_statements` grouping.
+- **STATS-CACHE-01** — New `_pg_ripple.predicate_stats_cache` table and `pg_ripple.refresh_stats_cache()` function materialise per-predicate triple counts; background refresh every `pg_ripple.stats_refresh_interval_seconds` seconds.
+- **FED-COST-01** — New `_pg_ripple.federation_stats` table accumulates call latency (P50/P95 approximation), error counts, and row estimates per federation endpoint; updated after every HTTP call.
+- **ADMIN-LOCK-01** — Lock levels documented for `vacuum()`, `reindex()`, and `vacuum_dictionary()` in the SQL reference.
+
+### Security
+
+- **TENANT-NAME-01** — Tenant name validation regex tightened to `^[A-Za-z0-9_]{1,63}$`; uppercase letters now allowed; max 63 characters enforced.
+- **ROLE-UNICODE-01** — `quote_ident_safe()` now falls back to SPI `SELECT quote_ident($1)` for role names containing non-ASCII characters.
+- **SHMEM-SAFE-01** — Shared-memory size arithmetic uses `checked_mul().expect()` to detect overflow early (misconfigured GUC rather than silent wraparound).
+- **RUSTSEC-01** — `audit.toml` updated: `RUSTSEC-2023-0071` (RSA PKCS#1 timing) added as an exemption with justification comment; review date updated to v0.82.0. Cargo-audit CI gate (`.github/workflows/ci.yml`) passes.
+- **SPARQL-COMPLEX-01** — `pg_ripple.sparql_max_algebra_depth` GUC (default 256) already enforced; confirmed and documented.
+- **LISTEN-LEN-01** — `/subscribe/{subscription_id}` endpoint in `pg_ripple_http` now returns HTTP 400 for subscription IDs longer than 63 characters.
+- **FED-BODY-STREAM-01 / FED-SIZE-01** — All five `response.into_string()` call sites in `federation.rs` now check the `Content-Length` header before allocating the body buffer.
+- **REDACT-01** — Remaining raw error exposure in `rag_handler.rs` replaced with `redacted_error()`; confirmed uniform coverage across all 82 handler error paths.
+
+### Rust / Extension
+
+- **DATALOG-SILENT-01** — 29 `let _ = Spi::run_with_args()` calls in `wfs.rs` and `seminaive.rs` replaced with `.unwrap_or_else(|e| pgrx::log!("...: {e}"))`.
+- **DECODE-WARN-01** — `batch_decode()` now emits a `WARNING` for any ID present in query results but absent from the dictionary.
+- **EMBED-MODEL-01** — All embedding paths confirmed to read `pg_ripple.embedding_model` GUC.
+- **FED-COUNTER-ORDER-01** — `FED_CALL_COUNT` incremented only after the endpoint policy check passes.
+- **EXPORT-JSONLD-OOM-01** — `export_jsonld()` emits a `WARNING` when buffering more than 1,000,000 triples; recommends the streaming cursor variant.
+
+### pg_ripple_http companion
+
+- **ARROW-LIMIT-01** — Arrow Flight export enforces `ARROW_MAX_EXPORT_ROWS` env var (default 10,000,000); HTTP 400 returned when the limit is exceeded.
+- **METRICS-LABELS-01** — Prometheus `/metrics` endpoint now includes `query_type` (SELECT/ASK/CONSTRUCT/DESCRIBE/UPDATE) and `result_size_bucket` (empty/small/medium/large) label dimensions.
+
+---
+
 ## [0.81.0] — 2026-05-14 — Correctness & Stability Hardening
 
 **Implements v0.81.0 roadmap: 34 correctness, stability, and security
