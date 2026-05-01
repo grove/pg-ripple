@@ -22,15 +22,12 @@ hardening items. No breaking schema changes; one new internal table
 
 ### Correctness
 
-- **MERGE-SID-01** — `ORDER BY i ASC` added before `DISTINCT ON` in the HTAP
-  merge CTE template, fixing non-deterministic SID selection during merge.
+- **MERGE-SID-01** — `ORDER BY i ASC` added before `DISTINCT ON` in HTAP merge CTE template (tests/pg_regress/sql/htap_merge.sql), fixing non-deterministic SID selection during merge.
 - **DRED-FIXPOINT-01** — DRed re-derive phase now runs a full semi-naïve
   fixpoint instead of a single seed pass, correcting incomplete re-derivation
   after retraction.
-- **DL-AGG-01** — Guard added in `stratify()` to reject aggregation functions
-  in recursive Datalog rule heads with a descriptive error (PT511).
-- **DL-PAR-01** — Intra-stratum cycle detection added to the parallel group
-  partition step, preventing non-terminating stratum evaluation.
+- **DL-AGG-01** — Guard added in `stratify()` to reject aggregation functions in recursive Datalog rule heads (tests/pg_regress/sql/datalog_agg.sql), with a descriptive error (PT511).
+- **DL-PAR-01** — Intra-stratum cycle detection added to the parallel group partition step (tests/pg_regress/sql/datalog_parallel.sql), preventing non-terminating stratum evaluation.
 - **DL-PAR-02** — Parallel Datalog SCC scheduling now uses topological order
   (Kahn's BFS) instead of stratum order, ensuring producers run before consumers.
 - **OPT-INNER-01** — OPTIONAL→INNER JOIN optimisation extended to multi-predicate
@@ -91,8 +88,9 @@ hardening items. No breaking schema changes; one new internal table
 - **PRELOAD-WARN-01** — `_PG_init` emits a WARNING when the extension is loaded
   via `CREATE EXTENSION` without `shared_preload_libraries`, preventing silent
   misconfiguration.
-- **PGFINI-01** — `_PG_fini` added to unregister SubXact callback, ExecutorEnd
-  hook, and transaction callback when the extension library is unloaded.
+- **PGFINI-01** — `_PG_fini` added (roadmap/v0.81.0.md) to unregister SubXact
+  callback, ExecutorEnd hook, and transaction callback when the extension library
+  is unloaded.
 - **REPL-UNWRAP-01** — All `.unwrap()` calls in `src/replication.rs` replaced
   with `unwrap_or_else(...)` or `pgrx::error!()` to avoid Rust panics on SPI errors.
 - **FEATURE-STATUS-BIDI-01** — 12 missing rows for BIDI (v0.77.0) and BIDIOPS
