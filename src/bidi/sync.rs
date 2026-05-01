@@ -27,15 +27,14 @@ pub fn register_conflict_policy_impl(
 
     let config_json = config.map(|j| j.0.clone()).unwrap_or(serde_json::json!({}));
 
-    if strategy == "latest_wins" {
-        if let Some(norm) = config_json.get("normalize").and_then(|v| v.as_str()) {
-            if let Err(e) = super::protocol::validate_normalize_expression(norm) {
-                pgrx::error!(
-                    "register_conflict_policy: invalid normalize expression: {}",
-                    e
-                );
-            }
-        }
+    if strategy == "latest_wins"
+        && let Some(norm) = config_json.get("normalize").and_then(|v| v.as_str())
+        && let Err(e) = super::protocol::validate_normalize_expression(norm)
+    {
+        pgrx::error!(
+            "register_conflict_policy: invalid normalize expression: {}",
+            e
+        );
     }
 
     Spi::run_with_args(

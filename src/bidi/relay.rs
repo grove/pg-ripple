@@ -248,19 +248,19 @@ fn resolve_diff_timestamp(
     )
     .unwrap_or(None);
 
-    if let Some(field) = ts_path_opt.as_deref().and_then(|s| s.strip_prefix("$.")) {
-        if let Some(val) = payload.get(field) {
-            if let Some(s) = val.as_str() {
-                return Some(s.to_string());
-            }
-            if let Some(n) = val.as_i64() {
-                return Some(n.to_string());
-            }
-            pgrx::error!(
-                "ingest_json_diff: timestamp_path evaluated to a non-string value; \
-                 expected an ISO 8601 datetime string"
-            );
+    if let Some(field) = ts_path_opt.as_deref().and_then(|s| s.strip_prefix("$."))
+        && let Some(val) = payload.get(field)
+    {
+        if let Some(s) = val.as_str() {
+            return Some(s.to_string());
         }
+        if let Some(n) = val.as_i64() {
+            return Some(n.to_string());
+        }
+        pgrx::error!(
+            "ingest_json_diff: timestamp_path evaluated to a non-string value; \
+                 expected an ISO 8601 datetime string"
+        );
     }
 
     None
