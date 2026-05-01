@@ -293,66 +293,18 @@ Second deep-dive audit (SPARQL, storage, HTTP service, Datalog/SHACL, export/GUC
 | N-Triples export passes blank node labels through without validating N-Triples `BLANK_NODE_LABEL` production | Low | v0.83.0 EXPORT-BNODE-VALID-01 |
 | Semi-naive max-iteration guard (10,000 iterations → PT501) has no regression test | Low | v0.83.0 DATALOG-MAXITER-TEST-01 |
 
+### Uncertain Knowledge & Soft Reasoning (v0.84.0)
+
+| Version | Theme | Status | Scope | Full details |
+|---------|-------|--------|-------|-------------- |
+| v0.84.0 | **Uncertain knowledge engine** — Probabilistic Datalog with `@weight(FLOAT)` rule annotations, multiplicative confidence propagation, and noisy-OR multi-path combination; `pg:confidence()` SPARQL function and `load_triples_with_confidence()` bulk-loader; fuzzy SPARQL filters (`pg:fuzzy_match()` trigram/token-set similarity, confidence-threshold edge filtering in property paths via `pg:confPath()`); soft SHACL scoring with numerical `sh:severityWeight` annotations and `pg_ripple.shacl_score()` composite data-quality function; provenance-weighted confidence derived automatically from PROV-O source trust metadata via Datalog rules | Planned | Very Large | [Full details](plans/probabilistic-features.md) |
+
 ### Stable Release & Ecosystem (v1.0.0 – v1.1.0)
 
 | Version | Theme | Status | Scope | Full details |
 |---------|-------|--------|-------|-------------- |
 | [v1.0.0](roadmap/v1.0.0-full.md) | Production hardening: 72-hour continuous load test, third-party security audit, API stability guarantee, documentation final audit and freeze, public BSBM/WatDiv benchmark results published | Planned | Medium | [Full details](roadmap/v1.0.0-full.md) |
 | [v1.1.0](roadmap/v1.1.0.md) | Post-1.0 ecosystem: Cypher/GQL read-only transpiler (`MATCH … RETURN`) + write operations (`CREATE`/`SET`/`DELETE`), Jupyter SPARQL kernel, LangChain/LlamaIndex tool packages, Kafka CDC sink, materialized SPARQL views, dbt adapter | Planned | Large | [Full details](roadmap/v1.1.0-full.md) |
-
-### Advanced Inference (v1.2.0)
-
-| Version | Theme | Status | Scope | Full details |
-|---------|-------|--------|-------|-------------- |
-| v1.2.0 | **Probabilistic Datalog** — soft rules with `@weight(FLOAT)` annotations, multiplicative confidence propagation, noisy-OR combination for multi-path derivations, `pg:confidence()` SPARQL function, `load_triples_with_confidence()`, and a `pg_ripple.probabilistic_datalog` GUC to enable the mode | Planned | Large | — |
-
-#### What is Probabilistic Datalog and why does it matter?
-
-Classical Datalog is binary: a fact is either derived or it isn't. Real-world knowledge is messier — NLP extractors report facts at 87% confidence, sensor readings are "probably anomalous," medical guidelines use "likely" rather than "certain." Probabilistic Datalog bridges that gap by attaching confidence weights to rules and propagating them through the inference engine.
-
-**Core model.** Each rule carries an `@weight(FLOAT)` annotation between 0 and 1. During inference the weight combines with the confidences of the body atoms:
-
-- *Conjunction*: confidences multiply. A rule at weight 0.9 applied to body atoms at 0.95 and 0.80 produces a head at `0.9 × 0.95 × 0.80 = 0.684`.
-- *Multiple derivation paths*: confidences combine via noisy-OR: $p = 1 - \prod_i (1 - p_i)$. Two independent paths at 0.7 yield `1 − 0.3 × 0.3 = 0.91`.
-- *Explicit facts*: triples inserted without a weight have confidence 1.0 by default; `load_triples_with_confidence()` lets operators assign lower confidence to data from unreliable sources (e.g., a sensor reading at 0.72).
-
-This is the same propagation model used by Markov Logic Networks and ProbLog, adapted to the VP-table storage model so confidence scores are stored as an extra `FLOAT8` column alongside the existing `source` flag.
-
-**New SQL surface.**
-
-```sql
--- Enable the mode
-SET pg_ripple.probabilistic_datalog = on;
-
--- Weighted rule: managers are probably (95%) decision-makers
-SELECT pg_ripple.add_rule(
-  'decision_maker(X) :- manager(X). @weight(0.95)'
-);
-
--- Query the derived confidence
-SELECT * FROM pg_ripple.sparql('
-  SELECT ?person ?conf WHERE {
-    ?person ex:isDecisionMaker true .
-    BIND(pg:confidence(?person, ex:isDecisionMaker) AS ?conf)
-  }
-  ORDER BY DESC(?conf)
-');
-```
-
-**What value it brings.**
-
-| Use case | How probabilistic Datalog helps |
-|---|---|
-| NLP / IE pipelines | Facts extracted from text carry extraction confidence; downstream rules inherit and propagate it automatically |
-| Sensor / IoT data | Readings with measurement uncertainty flow into derived alerts without losing the uncertainty signal |
-| Knowledge base completion | Combine Datalog rules with pgvector similarity scores to rank plausible but unconfirmed facts |
-| Soft ontology alignment | `owl:sameAs` suggestions from embedding-based entity alignment carry a confidence that can be thresholded before materialisation |
-| Risk scoring | Chain soft "risk indicator" rules to produce a composite risk score for entities without writing bespoke SQL |
-| Explainability | `explain_inference()` can surface the full derivation tree with per-step confidence, giving auditors a clear lineage from raw input to derived conclusion |
-
-**Implementation plan.** The GUC stub `pg_ripple.probabilistic_datalog` already exists (added in v0.57.0). The v1.2.0 work adds: (1) `@weight()` annotation parsing in the Datalog rule parser, (2) a `confidence FLOAT8` column on VP delta/main tables behind a schema migration gate, (3) confidence-aware SQL generation in the semi-naive evaluation loop, (4) the `pg:confidence()` SPARQL extension function, (5) `load_triples_with_confidence()` bulk-loader, (6) `explain_inference()` confidence annotations, and (7) a ProbLog-compatible test corpus in CI.
-
-**Scope note.** This is a post-1.0 research-grade feature. The exact semantics (multiplicative vs. additive combination, convergence guarantees for cyclic rules) will be validated against ProbLog and PSL reference implementations before the API is stabilised.
 
 ## How these versions fit together
 
@@ -434,6 +386,16 @@ v0.77–v0.78    ─── Bidirectional integration: source attribution, CAS co
 v0.79          ─── Query engine completeness: true Leapfrog Triejoin executor (WCOJ),
                │   full sh:SPARQLRule evaluation; all feature_status() rows → implemented
        │
+v0.80–v0.83    ─── Assessment 12 critical/high/medium/low remediation: SPARQL Update
+               │   flush, R2RML/CDC journal, property-path cycle detection, SQL injection
+               │   fixes, SSRF blocklist, plan cache GUC keys, HTAP determinism,
+               │   federation correctness, migration chain assertions, SBOM gates
+       │
+v0.84          ─── Uncertain knowledge: probabilistic Datalog (@weight, noisy-OR,
+               │   pg:confidence), fuzzy SPARQL (pg:fuzzy_match, pg:confPath threshold),
+               │   soft SHACL scoring (shacl_score), provenance-weighted confidence
+               │   from PROV-O source trust via Datalog rules
+       │
 v1.0.0         ─── Stable release: 72-hour continuous load test, third-party security audit, documentation freeze, public benchmarks
        │
 v1.1           ─── Post-stable: Cypher/GQL transpiler (read-only + write ops), Jupyter kernel, LangChain/LlamaIndex tools, Kafka CDC sink, materialized SPARQL views, dbt adapter
@@ -509,6 +471,29 @@ protection, and tests the Datalog→CWB interaction chain; v0.73.0 tracks SPARQL
 delivers a live SPARQL subscription API prototype via SSE, and completes the
 ecosystem hardening items (CONTRIBUTING.md, Helm chart SHA pinning, feature status
 taxonomy, and R2RML scope documentation).
+v0.74.0 through v0.76.0 address Assessment 11 findings: evidence-path truthfulness
+(twelve doc stubs, CI gate fix), mutation journal wiring for Datalog/R2RML/CDC,
+HTTP companion version alignment, unwrap/panic audit, URL parser fuzz target, RLS
+hash widening, Rust toolchain pin, and benchmark baseline refresh. v0.77.0 and
+v0.78.0 deliver bidirectional RDF integration: source attribution, conflict
+resolution, linkback, outbox/inbox transport, per-subscription side-band auth,
+write-time redaction, audit trail, and the non-blocking draft RDF Bidirectional
+Integration Profile v1. v0.79.0 closes the last two known query-engine limitations
+— true Leapfrog Triejoin executor (WCOJ) and full `sh:SPARQLRule` evaluation — so
+every `feature_status()` row reads `implemented`. v0.80.0 through v0.83.0 address
+all findings from PLAN_OVERALL_ASSESSMENT_12: critical SQL injection and SSRF
+security hardening, property-path cycle detection, SPARQL Update and Datalog
+mutation journal wiring, HTAP merge SID determinism, federation URL/truncation
+correctness, plan cache GUC completeness, migration chain test assertions through
+the latest release, SBOM CI gate, and full regression coverage for all previously
+untested `pg_extern` functions. v0.84.0 delivers the uncertain knowledge engine:
+probabilistic Datalog with `@weight(FLOAT)` rule annotations and noisy-OR multi-path
+confidence combination; `pg:confidence()` SPARQL function and
+`load_triples_with_confidence()` bulk-loader; fuzzy SPARQL filters
+(`pg:fuzzy_match()`, `pg:token_set_ratio()`, and confidence-threshold
+`pg:confPath()` property-path queries); soft SHACL scoring via
+`pg_ripple.shacl_score()`; and provenance-weighted confidence derived
+automatically from PROV-O source trust metadata via Datalog rules.
 v1.0.0 is the stable release: a 72-hour continuous load test, a
 third-party security audit, documentation final audit and freeze, an API stability
 guarantee, and public BSBM/WatDiv benchmark results. v1.1.0 delivers
