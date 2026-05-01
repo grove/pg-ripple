@@ -116,7 +116,6 @@ RUN curl -fsSL \
     && cd /tmp/postgis-${POSTGIS_VERSION} \
     && ./configure \
          --with-pgconfig=/usr/lib/postgresql/18/bin/pg_config \
-         --without-raster \
          --without-topology \
          --without-address-standardizer \
     && make -j"$(nproc)" \
