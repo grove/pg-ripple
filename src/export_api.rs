@@ -9,14 +9,14 @@ mod pg_ripple {
     /// Export triples to N-Triples format.
     /// Pass a graph IRI to export a specific named graph, or NULL for the default graph.
     #[pg_extern]
-    fn export_ntriples(graph: Option<&str>) -> String {
+    fn export_ntriples(graph: default!(Option<&str>, "NULL")) -> String {
         crate::export::export_ntriples(graph)
     }
 
     /// Export triples to N-Quads format.
     /// Pass a graph IRI to export a specific graph, or NULL to export all graphs.
     #[pg_extern]
-    fn export_nquads(graph: Option<&str>) -> String {
+    fn export_nquads(graph: default!(Option<&str>, "NULL")) -> String {
         crate::export::export_nquads(graph)
     }
 

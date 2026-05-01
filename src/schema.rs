@@ -1897,3 +1897,43 @@ pgrx::extension_sql!(
     name = "v078_schema_version_stamp",
     requires = ["v078_schema_additions"]
 );
+
+// ─────────────────────────────────────────────────────────────────────────────
+// v0.82.0 — Performance & Observability (fresh-install tables)
+// ─────────────────────────────────────────────────────────────────────────────
+// NOTE: migration-only tables (federation_stats, predicate_stats_cache) are
+// added here so that fresh installs (CREATE EXTENSION) also get them.
+// The migration script pg_ripple--0.81.0--0.82.0.sql handles upgrade paths.
+
+pgrx::extension_sql!(
+    r#"
+-- STATS-CACHE-01a: Predicate stats cache table.
+-- Materialised cache of per-predicate triple counts.
+-- Refreshed by pg_ripple.refresh_stats_cache() and the merge background worker.
+CREATE TABLE IF NOT EXISTS _pg_ripple.predicate_stats_cache (
+    predicate_id    BIGINT       PRIMARY KEY,
+    triple_count    BIGINT       NOT NULL DEFAULT 0,
+    refreshed_at    TIMESTAMPTZ  NOT NULL DEFAULT now()
+);
+COMMENT ON TABLE _pg_ripple.predicate_stats_cache IS
+    'Per-predicate triple-count cache. Refreshed by refresh_stats_cache(). (v0.82.0 STATS-CACHE-01)';
+
+-- FED-COST-01b: Federation call statistics.
+-- Accumulates call counts and latency for cost-based SERVICE clause planning.
+CREATE TABLE IF NOT EXISTS _pg_ripple.federation_stats (
+    endpoint_url        TEXT         PRIMARY KEY,
+    call_count          BIGINT       NOT NULL DEFAULT 0,
+    error_count         BIGINT       NOT NULL DEFAULT 0,
+    total_latency_ms    FLOAT8       NOT NULL DEFAULT 0,
+    max_latency_ms      FLOAT8       NOT NULL DEFAULT 0,
+    p50_ms              FLOAT8,
+    p95_ms              FLOAT8,
+    row_estimate        BIGINT       NOT NULL DEFAULT 0,
+    updated_at          TIMESTAMPTZ  NOT NULL DEFAULT now()
+);
+COMMENT ON TABLE _pg_ripple.federation_stats IS
+    'Per-endpoint federation call statistics. (v0.82.0 FED-COST-01)';
+"#,
+    name = "v082_schema_additions",
+    requires = ["v078_schema_version_stamp"]
+);

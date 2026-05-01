@@ -43,8 +43,7 @@ pub fn register_conflict_policy_impl(
          VALUES ($1, $2, $3) \
          ON CONFLICT (predicate_iri) DO UPDATE SET \
              strategy = EXCLUDED.strategy, \
-             config   = EXCLUDED.config, \
-             updated_at = now()",
+             config   = EXCLUDED.config",
         &[
             pgrx::datum::DatumWithOid::from(predicate),
             pgrx::datum::DatumWithOid::from(strategy),

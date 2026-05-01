@@ -13,8 +13,8 @@ SET search_path TO pg_ripple, public;
 
 -- ── Part 1: load_jsonld() is callable (API-RENAME-01) ────────────────────────
 
--- 1a. load_jsonld() exists and accepts JSONB.
-SELECT pg_ripple.load_jsonld('{"@context": {}, "@type": "http://schema.org/Thing"}'::jsonb) >= 0
+-- 1a. load_jsonld() exists and accepts JSONB with an @id.
+SELECT pg_ripple.load_jsonld('{"@context": {"ex": "http://example.org/"}, "@id": "ex:thing1", "@type": "http://schema.org/Thing"}'::jsonb) >= 0
   AS load_jsonld_works;
 
 -- 1b. load_jsonld() with a named graph IRI.

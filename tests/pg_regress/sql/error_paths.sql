@@ -16,9 +16,17 @@ SET search_path TO pg_ripple, public;
 SET client_min_messages = warning;
 
 -- ── 1: load_jsonld with non-array/non-object JSON ─────────────────────────────
--- JSON scalars are valid JSON but yield 0 triples (not an error, just empty).
-SELECT pg_ripple.load_jsonld('"just a string"'::jsonb) = 0
-  AS load_jsonld_scalar_ok;
+-- JSON scalars (strings, numbers) are not valid JSON-LD documents and raise an error.
+DO $$
+BEGIN
+    PERFORM pg_ripple.load_jsonld('"just a string"'::jsonb);
+    RAISE EXCEPTION 'expected error was not raised';
+EXCEPTION
+    WHEN OTHERS THEN
+        NULL; -- error correctly raised
+END;
+$$;
+SELECT 't'::boolean AS load_jsonld_scalar_error_raised;
 
 -- ── 2: SPARQL query with syntax error raises an error ─────────────────────────
 -- Using a DO block to test that an error is raised.

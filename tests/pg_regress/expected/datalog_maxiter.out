@@ -37,9 +37,9 @@ SELECT pg_ripple.insert_triple(
 (1 row)
 
 -- Load a rule that creates a transitive closure over the step predicate.
+-- Use full IRIs (load_rules does not support Turtle @prefix syntax).
 SELECT pg_ripple.load_rules(
-    '@prefix maxiter: <https://maxiter.test/> .
-     maxiter:step(?x, ?z) :- maxiter:step(?x, ?y), maxiter:step(?y, ?z) .',
+    '<https://maxiter.test/step>(?x, ?z) :- <https://maxiter.test/step>(?x, ?y), <https://maxiter.test/step>(?y, ?z) .',
     'maxiter_tc'
 ) >= 0 AS rule_loaded;
  rule_loaded 
