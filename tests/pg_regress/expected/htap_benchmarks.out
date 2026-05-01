@@ -35,6 +35,7 @@ BEGIN
     END LOOP;
     PERFORM pg_ripple.load_ntriples(nt);
 END $$;
+WARNING:  50 is outside the valid range for parameter "pg_ripple.vp_promotion_threshold" (100 .. 10000000)
 WARNING:  pg_ripple: loaded without shared_preload_libraries; HTAP merge worker, CONSTRUCT writeback, and dictionary cache are disabled. Add pg_ripple to shared_preload_libraries in postgresql.conf.
 -- ── 2. All 500 triples visible immediately (delta path) ───────────────────────
 SELECT pg_ripple.triple_count() >= 500 AS bulk_load_visible;

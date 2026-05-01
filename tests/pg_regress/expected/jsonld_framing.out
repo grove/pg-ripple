@@ -249,8 +249,6 @@ ERROR:  PT711: unrecognised @embed value: "@invalid_embed_mode"; expected @once,
 -- ── Cleanup ───────────────────────────────────────────────────────────────────
 -- Remove test triples so they do not affect later tests' row-count assertions.
 SELECT pg_ripple.sparql_update('DELETE WHERE { ?s ?p ?o }') >= 0 AS cleanup_done;
-WARNING:  pg_ripple: loaded without shared_preload_libraries; HTAP merge worker, CONSTRUCT writeback, and dictionary cache are disabled. Add pg_ripple to shared_preload_libraries in postgresql.conf.
-WARNING:  pg_ripple: loaded without shared_preload_libraries; HTAP merge worker, CONSTRUCT writeback, and dictionary cache are disabled. Add pg_ripple to shared_preload_libraries in postgresql.conf.
  cleanup_done 
 --------------
  t

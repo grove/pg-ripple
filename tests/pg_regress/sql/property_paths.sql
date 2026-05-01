@@ -87,4 +87,4 @@ RESET pg_ripple.max_path_depth;
 SELECT pg_ripple.sparql_explain(
     'SELECT ?x WHERE { <https://pp.test/a> <https://pp.test/follows>+ ?x }',
     FALSE
-) LIKE '-- Generated SQL --%' AS path_explain_ok;
+) LIKE '-- SPARQL Algebra --%' AS path_explain_ok;

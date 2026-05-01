@@ -155,7 +155,11 @@ impl CursorIter {
                         row_vals.push(text_val);
                     } else {
                         let val = row.get::<i64>(i).ok().flatten();
-                        if let Some(id) = val {
+                        // Only collect IDs that need dictionary lookup — skip raw
+                        // numeric aggregates (COUNT/SUM/etc.).
+                        if let Some(id) = val
+                            && !raw_numeric_vars.contains(var)
+                        {
                             all_ids.push(id);
                         }
                         row_vals.push(val.map(Ok));

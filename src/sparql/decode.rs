@@ -96,7 +96,12 @@ pub(crate) fn batch_decode(ids: &[i64]) -> HashMap<i64, String> {
 
     // DECODE-WARN-01 (v0.82.0): warn on any requested ID absent from the dictionary.
     // This detects dictionary corruption without changing fallback behaviour.
+    // Skip id=0: that is the well-known default-graph sentinel which is intentionally
+    // not stored in the dictionary.  Also skip negative IDs (error sentinels).
     for id in &dict_ids {
+        if *id <= 0 {
+            continue;
+        }
         if !result.contains_key(id) {
             pgrx::warning!(
                 "batch_decode: dictionary entry missing for id {id}; \
