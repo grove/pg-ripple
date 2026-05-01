@@ -7,11 +7,42 @@ use axum::response::{IntoResponse, Response};
 use constant_time_eq::constant_time_eq;
 use dashmap::DashMap;
 use deadpool_postgres::Pool;
+use serde::Serialize;
 use std::sync::atomic::AtomicBool;
 use std::time::Instant;
 use uuid::Uuid;
 
 use crate::metrics::Metrics;
+
+// ─── HTTP-ERR-01 (v0.80.0): structured JSON error response ───────────────────
+
+/// Standard JSON error body for all 4xx/5xx HTTP responses from pg_ripple_http.
+///
+/// Serialises as `{"error": "<code>", "message": "<human-readable text>"}`.
+/// All HTTP error responses must use this type (not plain-text bodies) so that
+/// API clients can reliably parse error details without checking Content-Type.
+#[derive(Serialize)]
+pub struct ErrorResponse {
+    pub error: &'static str,
+    pub message: String,
+}
+
+/// Build a standard JSON error response for a client error (4xx).
+///
+/// Sets `Content-Type: application/json`.
+pub fn json_error(code: &'static str, message: impl Into<String>, status: StatusCode) -> Response {
+    let body = serde_json::to_string(&ErrorResponse {
+        error: code,
+        message: message.into(),
+    })
+    .unwrap_or_else(|_| format!(r#"{{"error":"{code}","message":"serialisation error"}}"#));
+    // SAFETY: status and header values are compile-time constants; builder never fails.
+    Response::builder()
+        .status(status)
+        .header("content-type", "application/json")
+        .body(Body::from(body))
+        .expect("infallible: hardcoded valid HTTP headers")
+}
 
 // ─── Application state ───────────────────────────────────────────────────────
 

@@ -1,0 +1,57 @@
+-- Migration 0.79.0 → 0.80.0: Assessment 12 Critical/High Remediation
+--
+-- Changes in this release:
+--
+-- FLUSH-02-01: `sparql_update()` and `execute_delete_insert()` now call
+--   `mutation_journal::flush()` at the end of every SPARQL UPDATE statement so
+--   CONSTRUCT writeback rules fire correctly for the primary mutation path.
+--
+-- JOURNAL-R2RML-01: R2RML and CDC write paths were already wired to
+--   `mutation_journal` via `bulk_load::load_ntriples()` (confirmed v0.70.0+);
+--   no SQL schema change required.
+--
+-- PROPPATH-CYCLE-01: Property-path `CYCLE` clause already uses `CYCLE s, o SET`
+--   in `src/sparql/property_path.rs` (introduced v0.77.0+); module comment
+--   updated to reflect this. No SQL change required.
+--
+-- CACHE-RLS-01: Plan cache key now includes the current PostgreSQL role OID and
+--   `pg_ripple.inference_mode` GUC to prevent cross-user plan leakage.
+--   No SQL change required (in-memory cache invalidated on extension reload).
+--
+-- SQL-INJ-01: All catalog INSERT statements in `src/views.rs` migrated from
+--   `Spi::run(&format!(...))` with manual quote-escaping to
+--   `Spi::run_with_args()` with typed `$1, $2, …` parameters.
+--   No SQL schema change required.
+--
+-- SQL-INJ-02: `src/sparql/embedding.rs` model_tag filter replaced with
+--   parameterised `AND e.model = $1` predicate.
+--   No SQL schema change required.
+--
+-- SSRF-RFC1918-01: `is_blocked_host()` in `src/sparql/federation.rs` now also
+--   blocks IPv6 Unique Local addresses (fc00::/7, including fd::/8).
+--   No SQL schema change required.
+--
+-- MIGCHAIN-01: `tests/test_migration_chain.sh` extended with checkpoint
+--   assertions at v0.65.0, v0.70.0, v0.75.0, v0.79.0 and a script-count
+--   verification for all 18 migrations from v0.62.0 to v0.79.0.
+--   No SQL schema change required.
+--
+-- SBOM-04: `sbom.json` regenerated at v0.80.0.
+--   CI SBOM version gate added to `.github/workflows/ci.yml`.
+--
+-- HTTP-ERR-01: All 4xx/5xx HTTP responses from `pg_ripple_http` now return
+--   `application/json` with `{"error":"PTxxx","message":"..."}` bodies.
+--   No SQL schema change required.
+--
+-- COMPAT-MIN-01: `COMPATIBLE_EXTENSION_MIN` in `pg_ripple_http/src/main.rs`
+--   updated from "0.75.0" to "0.79.0".
+--   No SQL schema change required.
+--
+-- COMPAT-MATRIX-01: `docs/src/operations/compatibility.md` updated with rows
+--   for pg_ripple_http v0.73.0–v0.76.0 (now v0.77.0).
+--
+-- EXPLORER-AUTH-01: `GET /explorer` now requires authentication via
+--   `check_auth()`. Unauthenticated clients receive HTTP 401.
+--   No SQL schema change required.
+--
+-- Schema changes: None (all changes are in Rust implementation only).

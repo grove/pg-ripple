@@ -275,6 +275,12 @@ fn is_blocked_host(host: &str) -> bool {
     if host.to_lowercase().starts_with("fe80") {
         return true;
     }
+    // SSRF-RFC1918-01 (v0.80.0): IPv6 Unique Local addresses fc00::/7
+    // (includes both fc::/8 and fd::/8 subnets used for private networks).
+    let h_lower = host.to_lowercase();
+    if h_lower.starts_with("fc") || h_lower.starts_with("fd") {
+        return true;
+    }
     // RFC-1918: 10.x.x.x
     if host.starts_with("10.") {
         return true;

@@ -7,7 +7,7 @@ use axum::extract::{Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 
-use crate::common::{AppState, check_auth, redacted_error};
+use crate::common::{AppState, check_auth, json_error, redacted_error};
 use crate::spi_bridge::execute_sparql_with_traceparent;
 // Re-use types and constants declared in parent routing module.
 use super::{
@@ -31,7 +31,12 @@ pub(crate) async fn sparql_get(
     let query = match params.query {
         Some(q) => q,
         None => {
-            return (StatusCode::BAD_REQUEST, "missing 'query' parameter").into_response();
+            // HTTP-ERR-01 (v0.80.0): return JSON error instead of plain text.
+            return json_error(
+                "PT400",
+                "missing 'query' parameter",
+                StatusCode::BAD_REQUEST,
+            );
         }
     };
 
@@ -128,18 +133,19 @@ pub(crate) async fn sparql_post(
             )
             .await;
         }
-        return (
-            StatusCode::BAD_REQUEST,
+        // HTTP-ERR-01 (v0.80.0): JSON error response.
+        return json_error(
+            "PT400",
             "missing 'query' or 'update' parameter in form body",
-        )
-            .into_response();
+            StatusCode::BAD_REQUEST,
+        );
     }
 
-    (
-        StatusCode::UNSUPPORTED_MEDIA_TYPE,
+    json_error(
+        "PT415",
         "expected application/sparql-query, application/sparql-update, or application/x-www-form-urlencoded",
+        StatusCode::UNSUPPORTED_MEDIA_TYPE,
     )
-        .into_response()
 }
 
 // ─── SPARQL /stream handler (v0.51.0) ────────────────────────────────────────

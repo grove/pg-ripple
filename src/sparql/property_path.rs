@@ -16,10 +16,13 @@
 //!
 //! # Cycle detection
 //!
-//! Uses PostgreSQL 18's `CYCLE` clause for O(1) membership checks:
+//! Uses PostgreSQL 18's `CYCLE` clause for O(1) membership checks.
+//! PROPPATH-CYCLE-01 (v0.80.0): the CYCLE clause tracks both `s` and `o` so
+//! that directed graphs with parallel edges (same s, same o via different
+//! intermediate predicates) and self-loops are correctly detected as cycles:
 //! ```sql
 //! WITH RECURSIVE _path(s, o) AS (...)
-//! CYCLE o SET _is_cycle USING _cycle_path
+//! CYCLE s, o SET _is_cycle USING _cycle_path
 //! SELECT s, o FROM _path WHERE NOT _is_cycle
 //! ```
 

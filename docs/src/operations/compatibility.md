@@ -19,6 +19,10 @@ extension version is outside its known-compatible range.
 
 | pg_ripple_http version | pg_ripple extension range | Notes |
 |------------------------|---------------------------|-------|
+| 0.76.x | ≥ 0.79.0 | COMPAT-MIN-01 (v0.80.0): requires `sparql_update_cursor()` (v0.76.0) and `feature_status()` wcoj/shacl_sparql entries (v0.79.0); `/explorer` now requires auth (EXPLORER-AUTH-01) |
+| 0.75.x | ≥ 0.78.0 | Bidirectional integration operations (v0.78.0), SPARQL subscription SSE (v0.73.0) |
+| 0.74.x | ≥ 0.77.0 | Bidirectional integration primitives (v0.77.0), SPARQL 1.2 tracking (v0.73.0) |
+| 0.73.x | ≥ 0.76.0 | Fuzz hardening (v0.76.0), CONTRIBUTING.md (v0.73.0), Helm chart SHA pin |
 | 0.16.x | ≥ 0.70.0 | First version with `Body::from_stream` Arrow Flight; compatibility check added (v0.71.0 COMPAT-01) |
 | 0.15.x | 0.66.0 – 0.69.x | Arrow Flight security (FLIGHT-SEC-02), SPARQL cursor streaming (STREAM-01) |
 | 0.14.x | 0.63.0 – 0.65.x | CONSTRUCT writeback rules (v0.63.0), Datalog REST API (v0.39.0) |

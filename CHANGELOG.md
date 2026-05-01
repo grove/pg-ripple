@@ -13,6 +13,67 @@ Versions correspond to the milestones in [ROADMAP.md](ROADMAP.md).
 
 ---
 
+## [0.80.0] — 2026-05-07 — Assessment 12 Critical/High Remediation
+
+**Implements v0.80.0 roadmap: addresses all 13 critical and high findings from
+Security Assessment 12. No new SQL schema changes; all fixes are in the Rust
+implementation and companion HTTP service.**
+
+### Security fixes
+
+- **FLUSH-02-01** — `sparql_update()` and `execute_delete_insert()` now call
+  `mutation_journal::flush()` at the end of every SPARQL UPDATE statement, ensuring
+  CONSTRUCT writeback rules fire correctly for the primary mutation path.
+
+- **CACHE-RLS-01** — Plan cache key now includes the current PostgreSQL role OID and
+  `pg_ripple.inference_mode` GUC value to prevent cross-user plan leakage via shared
+  plan cache entries.
+
+- **SQL-INJ-01** — All five catalog INSERT statements in `src/views.rs`
+  (`create_sparql_view`, `create_datalog_view`, `create_datalog_view_from_rule_set`,
+  `create_framing_view`, `create_construct_view`) migrated from `Spi::run(&format!())`
+  with manual quote-escaping to `Spi::run_with_args()` with typed `$1, $2, …` parameters.
+
+- **SQL-INJ-02** — `model_tag` filter in `src/sparql/embedding.rs` replaced from
+  `AND e.model = '{}'` string interpolation to parameterised `AND e.model = $1`.
+
+- **SSRF-RFC1918-01** — `is_blocked_host()` in `src/sparql/federation.rs` now also
+  blocks IPv6 Unique Local addresses (fc00::/7, i.e. `fc`/`fd` prefix hosts).
+
+- **EXPLORER-AUTH-01** — `GET /explorer` in `pg_ripple_http` now requires
+  authentication via `check_auth()`. Unauthenticated clients receive HTTP 401.
+
+### Improvements
+
+- **HTTP-ERR-01** — All 4xx/5xx HTTP responses from `pg_ripple_http` now return
+  `application/json` with `{"error":"PTxxx","message":"..."}` bodies. New
+  `ErrorResponse` struct and `json_error()` helper added to `pg_ripple_http/src/common.rs`.
+
+- **COMPAT-MIN-01** — `COMPATIBLE_EXTENSION_MIN` in `pg_ripple_http/src/main.rs`
+  updated from `"0.75.0"` to `"0.79.0"`. `pg_ripple_http` now at v0.77.0.
+
+- **COMPAT-MATRIX-01** — Compatibility matrix in `docs/src/operations/compatibility.md`
+  updated with rows for `pg_ripple_http` v0.73.x, v0.74.x, v0.75.x, and v0.76.x.
+
+- **PROPPATH-CYCLE-01** — Module comment in `src/sparql/property_path.rs` updated to
+  document that `CYCLE s, o SET` is required (and already in use) to prevent infinite
+  recursion in recursive property-path CTEs.
+
+- **JOURNAL-R2RML-01** — Confirmed and documented that R2RML and CDC write paths route
+  through `bulk_load::load_ntriples()` which already calls `mutation_journal::flush()`.
+
+### Infrastructure
+
+- **MIGCHAIN-01** — `tests/test_migration_chain.sh` extended with checkpoint assertions
+  at v0.65.0, v0.70.0, v0.75.0, v0.79.0 and a script-count verification for all 18
+  migration scripts from v0.62.0 to v0.79.0.
+
+- **SBOM-04** — `sbom.json` regenerated at v0.80.0. CI SBOM version gate added to
+  `.github/workflows/ci.yml` to fail the build if `sbom.json` version does not match
+  `Cargo.toml` version.
+
+---
+
 ## [0.79.0] — 2026-04-30 — Query Engine Completeness
 
 **Implements v0.79.0 roadmap: closes the last two known query-engine limitations

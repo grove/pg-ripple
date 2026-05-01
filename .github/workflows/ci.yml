@@ -122,6 +122,19 @@ jobs:
       - name: GitHub Actions pinning lint
         run: bash scripts/check_github_actions_pinned.sh
 
+      # SBOM-04 (v0.80.0): Verify sbom.json version matches Cargo.toml version.
+      - name: SBOM version check
+        run: |
+          SBOM_VER=$(python3 -c "import json,sys; d=json.load(open('sbom.json')); print(d.get('metadata',{}).get('component',{}).get('version','MISSING'))")
+          CARGO_VER=$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')
+          echo "SBOM version: ${SBOM_VER}"
+          echo "Cargo version: ${CARGO_VER}"
+          if [ "${SBOM_VER}" != "${CARGO_VER}" ]; then
+            echo "ERROR: sbom.json version (${SBOM_VER}) does not match Cargo.toml (${CARGO_VER})"
+            echo "Run 'cargo cyclonedx --format json --spec-version 1.4' to regenerate sbom.json before releasing."
+            exit 1
+          fi
+
       - name: Run pg_test suite
         env:
           RUST_TEST_THREADS: "1"

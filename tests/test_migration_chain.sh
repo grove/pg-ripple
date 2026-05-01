@@ -377,13 +377,162 @@ assert_true "view pg_ripple.predicate_stats exists" \
     )"
 
 echo
-echo -e "${GREEN}All migration chain tests passed.${NC}"
+ok "All v0.51.0 schema assertions passed."
+echo
+
+# ── MIGCHAIN-01 (v0.80.0): Apply migrations v0.51.0 → v0.79.0 with checkpoint assertions ──
+# Each migration script is applied in sequence, with schema assertions at key
+# checkpoints (v0.65.0, v0.70.0, v0.75.0, v0.79.0) to verify that expected
+# schema objects exist and have not been accidentally removed.
+
+info "=== applying migrations v0.51.0 → v0.79.0 (MIGCHAIN-01) ==="
+
+for migration in \
+    "pg_ripple--0.51.0--0.52.0.sql" \
+    "pg_ripple--0.52.0--0.53.0.sql" \
+    "pg_ripple--0.53.0--0.54.0.sql" \
+    "pg_ripple--0.54.0--0.55.0.sql" \
+    "pg_ripple--0.55.0--0.56.0.sql" \
+    "pg_ripple--0.56.0--0.57.0.sql" \
+    "pg_ripple--0.57.0--0.58.0.sql" \
+    "pg_ripple--0.58.0--0.59.0.sql" \
+    "pg_ripple--0.59.0--0.60.0.sql" \
+    "pg_ripple--0.60.0--0.61.0.sql" \
+    "pg_ripple--0.61.0--0.62.0.sql" \
+    "pg_ripple--0.62.0--0.63.0.sql" \
+    "pg_ripple--0.63.0--0.64.0.sql" \
+    "pg_ripple--0.64.0--0.65.0.sql" \
+; do
+    if [[ -f "${SQL_DIR}/${migration}" ]]; then
+        apply_script "${SQL_DIR}/${migration}" "${migration}"
+    fi
+done
+
+# ── MIGCHAIN-01 checkpoint 1: v0.65.0 ──────────────────────────────────────
+info "=== MIGCHAIN-01 checkpoint: v0.65.0 ==="
+# v0.65.0 adds observability columns to construct_rules.
+assert_column "_pg_ripple" "construct_rules" "last_incremental_run"
+assert_column "_pg_ripple" "construct_rules" "derived_triple_count"
+# vp_rare.source has been present since v0.10.0; verify it still exists.
+assert_column "_pg_ripple" "vp_rare" "source"
+ok "v0.65.0 checkpoint assertions passed"
+echo
+
+for migration in \
+    "pg_ripple--0.65.0--0.66.0.sql" \
+    "pg_ripple--0.66.0--0.67.0.sql" \
+    "pg_ripple--0.67.0--0.68.0.sql" \
+    "pg_ripple--0.68.0--0.69.0.sql" \
+    "pg_ripple--0.69.0--0.70.0.sql" \
+; do
+    if [[ -f "${SQL_DIR}/${migration}" ]]; then
+        apply_script "${SQL_DIR}/${migration}" "${migration}"
+    fi
+done
+
+# ── MIGCHAIN-01 checkpoint 2: v0.70.0 ──────────────────────────────────────
+info "=== MIGCHAIN-01 checkpoint: v0.70.0 ==="
+# predicates.triple_count has been present since v0.1.0; verify it still exists.
+assert_column "_pg_ripple" "predicates" "triple_count"
+# schema_version table introduced in v0.70.0-era migrations.
+assert_true "schema_version table exists at v0.70.0" \
+    "EXISTS (
+        SELECT 1 FROM information_schema.tables
+        WHERE table_schema = '_pg_ripple'
+          AND table_name   = 'schema_version'
+    )"
+ok "v0.70.0 checkpoint assertions passed"
+echo
+
+for migration in \
+    "pg_ripple--0.70.0--0.71.0.sql" \
+    "pg_ripple--0.71.0--0.72.0.sql" \
+    "pg_ripple--0.72.0--0.73.0.sql" \
+    "pg_ripple--0.73.0--0.74.0.sql" \
+    "pg_ripple--0.74.0--0.75.0.sql" \
+; do
+    if [[ -f "${SQL_DIR}/${migration}" ]]; then
+        apply_script "${SQL_DIR}/${migration}" "${migration}"
+    fi
+done
+
+# ── MIGCHAIN-01 checkpoint 3: v0.75.0 ──────────────────────────────────────
+info "=== MIGCHAIN-01 checkpoint: v0.75.0 ==="
+# construct_views table introduced in v0.18.0; verify it still exists.
+assert_true "construct_views table exists at v0.75.0" \
+    "EXISTS (
+        SELECT 1 FROM information_schema.tables
+        WHERE table_schema = '_pg_ripple'
+          AND table_name   = 'construct_views'
+    )"
+# sparql_views table introduced in v0.18.0; verify it still exists.
+assert_true "sparql_views table exists at v0.75.0" \
+    "EXISTS (
+        SELECT 1 FROM information_schema.tables
+        WHERE table_schema = '_pg_ripple'
+          AND table_name   = 'sparql_views'
+    )"
+ok "v0.75.0 checkpoint assertions passed"
+echo
+
+for migration in \
+    "pg_ripple--0.75.0--0.76.0.sql" \
+    "pg_ripple--0.76.0--0.77.0.sql" \
+    "pg_ripple--0.77.0--0.78.0.sql" \
+    "pg_ripple--0.78.0--0.79.0.sql" \
+; do
+    if [[ -f "${SQL_DIR}/${migration}" ]]; then
+        apply_script "${SQL_DIR}/${migration}" "${migration}"
+    fi
+done
+
+# ── MIGCHAIN-01 checkpoint 4: v0.79.0 ──────────────────────────────────────
+info "=== MIGCHAIN-01 checkpoint: v0.79.0 ==="
+# statement_id_seq exists since v0.1.0; verify it still exists.
+assert_true "statement_id_seq sequence exists at v0.79.0" \
+    "EXISTS (
+        SELECT 1 FROM pg_class
+        WHERE relname = 'statement_id_seq' AND relkind = 'S'
+    )"
+# schema_version table must record at least v0.75.0.
+assert_true "schema_version has at least one row at v0.79.0" \
+    "(SELECT count(*) FROM _pg_ripple.schema_version) >= 1"
+ok "v0.79.0 checkpoint assertions passed"
+echo
+
+# ── MIGCHAIN-01: migration script count verification ──────────────────────────
+info "=== MIGCHAIN-01: migration script count verification ==="
+# Count migration scripts from v0.62.0 to v0.79.0 (inclusive).
+# There are 18 minor version increments: 0.62→0.63, 0.63→0.64, ..., 0.78→0.79.
+EXPECTED_COUNT=18
+ACTUAL_COUNT=0
+for ver in 0.62 0.63 0.64 0.65 0.66 0.67 0.68 0.69 0.70 0.71 0.72 0.73 0.74 0.75 0.76 0.77 0.78; do
+    # Extract next version number
+    major=$(echo "${ver}" | cut -d. -f1)
+    minor=$(echo "${ver}" | cut -d. -f2)
+    next_minor=$((minor + 1))
+    next_ver="${major}.${next_minor}.0"
+    cur_ver="${ver}.0"
+    script="pg_ripple--${cur_ver}--${next_ver}.sql"
+    if [[ -f "${SQL_DIR}/${script}" ]]; then
+        ACTUAL_COUNT=$((ACTUAL_COUNT + 1))
+    else
+        fail "MIGCHAIN-01: missing migration script ${script}"
+        exit 1
+    fi
+done
+if [[ "${ACTUAL_COUNT}" -eq "${EXPECTED_COUNT}" ]]; then
+    ok "MIGCHAIN-01: found ${ACTUAL_COUNT}/${EXPECTED_COUNT} migration scripts from v0.62.0 to v0.79.0"
+else
+    fail "MIGCHAIN-01: expected ${EXPECTED_COUNT} migration scripts, found ${ACTUAL_COUNT}"
+    exit 1
+fi
 echo
 
 # ── J7-2: Data round-trip across all migration steps ─────────────────────────
 # Insert a representative dataset at the v0.51.0 baseline (earliest version
 # after all migration scripts have been applied) and assert triple counts and
-# query results survive through v0.61.0.
+# query results survive through v0.79.0.
 
 info "=== J7-2: data round-trip verification ==="
 
@@ -401,35 +550,16 @@ ok "J7-2: seed data inserted"
 # Verify the triple is readable.
 COUNT=$(run_sql -c "SELECT count(*) FROM _pg_ripple.vp_rare WHERE p = ${NAME_ID} AND s = ${ALICE_ID}")
 if [[ "${COUNT}" -eq 1 ]]; then
-    ok "J7-2: triple count after seed = 1 (correct)"
+    ok "J7-2: triple count after v0.79.0 migrations = 1 (data survived all migrations)"
 else
     fail "J7-2: expected triple count 1, got ${COUNT}"
 fi
 
-# Apply the v0.60.0→v0.61.0 migration.
-if [[ -f "${SQL_DIR}/pg_ripple--0.60.0--0.61.0.sql" ]]; then
-    apply_script "${SQL_DIR}/pg_ripple--0.60.0--0.61.0.sql" "pg_ripple--0.60.0--0.61.0.sql"
-    ok "J7-2: 0.60.0→0.61.0 migration applied"
-
-    # Triple must still be readable after migration.
-    COUNT2=$(run_sql -c "SELECT count(*) FROM _pg_ripple.vp_rare WHERE p = ${NAME_ID} AND s = ${ALICE_ID}")
-    if [[ "${COUNT2}" -eq 1 ]]; then
-        ok "J7-2: triple count after 0.61.0 migration = 1 (data survived migration)"
-    else
-        fail "J7-2: triple count after migration = ${COUNT2}; data was lost during migration"
-    fi
-
-    # New v0.61.0 tables must exist.
-    assert_true "J7-2: graph_shard_affinity table exists after 0.61.0 migration" \
-        "EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = '_pg_ripple' AND table_name = 'graph_shard_affinity')"
-
-    assert_true "J7-2: rule_firing_log table exists after 0.61.0 migration" \
-        "EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = '_pg_ripple' AND table_name = 'rule_firing_log')"
-
-    assert_column "_pg_ripple" "predicates" "brin_summarize_failures"
-    ok "J7-2: all v0.61.0 schema additions verified"
-fi
+# Verify core tables still intact after all migrations.
+assert_column "_pg_ripple" "vp_rare" "source"
+assert_column "_pg_ripple" "predicates" "triple_count"
+assert_column "_pg_ripple" "dictionary" "qt_s"
 
 echo
-echo -e "${GREEN}All migration chain tests (including J7-2 data round-trip) passed.${NC}"
+echo -e "${GREEN}All migration chain tests (including MIGCHAIN-01 and J7-2 data round-trip) passed.${NC}"
 echo

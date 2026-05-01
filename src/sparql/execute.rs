@@ -647,6 +647,11 @@ pub(crate) fn sparql_update(query_text: &str) -> i64 {
         );
     }
 
+    // FLUSH-02-01 (v0.80.0): flush the mutation journal so CONSTRUCT writeback
+    // rules fire after every SPARQL UPDATE statement.  This must run after all
+    // graph mutations have been committed to the VP tables.
+    crate::storage::mutation_journal::flush();
+
     affected
 }
 

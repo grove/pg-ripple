@@ -193,31 +193,38 @@ pub(crate) fn create_sparql_view(name: &str, sparql: &str, schedule: &str, decod
     let var_count = variables.len() as i64;
     let variables_json = serde_json::to_string(&variables).unwrap_or_else(|_| "[]".to_owned());
 
-    // Escape single quotes in the stored SQL for the catalog INSERT.
-    let escaped_sparql = sparql.replace('\'', "''");
-    let escaped_sql = view_sql.replace('\'', "''");
-    let escaped_schedule = schedule.replace('\'', "''");
     let stream_table = format!("pg_ripple.{name}");
-    let escaped_stream_table = stream_table.replace('\'', "''");
 
-    // Store the view in the catalog.
-    Spi::run(&format!(
+    // SQL-INJ-01 (v0.80.0): use parameterised INSERT to prevent SQL injection
+    // via user-supplied view name, SPARQL text, schedule, or generated SQL.
+    Spi::run_with_args(
         "INSERT INTO _pg_ripple.sparql_views \
          (name, sparql, generated_sql, schedule, decode, stream_table, variables) \
-         VALUES ('{name}', '{escaped_sparql}', '{escaped_sql}', \
-                 '{escaped_schedule}', {decode}, '{escaped_stream_table}', \
-                 '{variables_json}'::jsonb) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb) \
          ON CONFLICT (name) DO UPDATE \
          SET sparql = EXCLUDED.sparql, \
              generated_sql = EXCLUDED.generated_sql, \
              schedule = EXCLUDED.schedule, \
              decode = EXCLUDED.decode, \
              stream_table = EXCLUDED.stream_table, \
-             variables = EXCLUDED.variables"
-    ))
+             variables = EXCLUDED.variables",
+        &[
+            pgrx::datum::DatumWithOid::from(name),
+            pgrx::datum::DatumWithOid::from(sparql),
+            pgrx::datum::DatumWithOid::from(view_sql.as_str()),
+            pgrx::datum::DatumWithOid::from(schedule),
+            pgrx::datum::DatumWithOid::from(decode),
+            pgrx::datum::DatumWithOid::from(stream_table.as_str()),
+            pgrx::datum::DatumWithOid::from(variables_json.as_str()),
+        ],
+    )
     .unwrap_or_else(|e| pgrx::error!("failed to register SPARQL view: {e}"));
 
-    // Create the pg_trickle stream table.
+    // Create the pg_trickle stream table.  The view SQL is passed via a
+    // dollar-quoted literal so the schedule and stream_table name need their
+    // own escaping for the function-call argument list.
+    let escaped_stream_table = stream_table.replace('\'', "''");
+    let escaped_schedule = schedule.replace('\'', "''");
     let pgt_sql = format!(
         "SELECT pgtrickle.create_stream_table(\
             name => '{escaped_stream_table}', \
@@ -309,22 +316,13 @@ pub(crate) fn create_datalog_view_from_rules(
     let var_count = variables.len() as i64;
     let variables_json = serde_json::to_string(&variables).unwrap_or_else(|_| "[]".to_owned());
 
-    let escaped_name = name.replace('\'', "''");
-    let escaped_rules = rules.replace('\'', "''");
-    let escaped_goal = goal.replace('\'', "''");
-    let escaped_sql = goal_sql.replace('\'', "''");
-    let escaped_schedule = schedule.replace('\'', "''");
-    let escaped_rule_set = rule_set_name.replace('\'', "''");
     let stream_table = format!("pg_ripple.{name}");
-    let escaped_stream_table = stream_table.replace('\'', "''");
 
-    // Store in catalog.
-    Spi::run(&format!(
+    // SQL-INJ-01 (v0.80.0): parameterised INSERT to prevent SQL injection.
+    Spi::run_with_args(
         "INSERT INTO _pg_ripple.datalog_views \
          (name, rules, rule_set, goal, generated_sql, schedule, decode, stream_table, variables) \
-         VALUES ('{escaped_name}', '{escaped_rules}', '{escaped_rule_set}', \
-                 '{escaped_goal}', '{escaped_sql}', '{escaped_schedule}', \
-                 {decode}, '{escaped_stream_table}', '{variables_json}'::jsonb) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb) \
          ON CONFLICT (name) DO UPDATE \
          SET rules = EXCLUDED.rules, \
              rule_set = EXCLUDED.rule_set, \
@@ -333,11 +331,24 @@ pub(crate) fn create_datalog_view_from_rules(
              schedule = EXCLUDED.schedule, \
              decode = EXCLUDED.decode, \
              stream_table = EXCLUDED.stream_table, \
-             variables = EXCLUDED.variables"
-    ))
+             variables = EXCLUDED.variables",
+        &[
+            pgrx::datum::DatumWithOid::from(name),
+            pgrx::datum::DatumWithOid::from(rules),
+            pgrx::datum::DatumWithOid::from(rule_set_name),
+            pgrx::datum::DatumWithOid::from(goal),
+            pgrx::datum::DatumWithOid::from(goal_sql.as_str()),
+            pgrx::datum::DatumWithOid::from(schedule),
+            pgrx::datum::DatumWithOid::from(decode),
+            pgrx::datum::DatumWithOid::from(stream_table.as_str()),
+            pgrx::datum::DatumWithOid::from(variables_json.as_str()),
+        ],
+    )
     .unwrap_or_else(|e| pgrx::error!("failed to register Datalog view: {e}"));
 
     // Create the pg_trickle stream table.
+    let escaped_stream_table = stream_table.replace('\'', "''");
+    let escaped_schedule = schedule.replace('\'', "''");
     let pgt_sql = format!(
         "SELECT pgtrickle.create_stream_table(\
             name => '{escaped_stream_table}', \
@@ -388,21 +399,13 @@ pub(crate) fn create_datalog_view_from_rule_set(
     let var_count = variables.len() as i64;
     let variables_json = serde_json::to_string(&variables).unwrap_or_else(|_| "[]".to_owned());
 
-    let escaped_name = name.replace('\'', "''");
-    let escaped_goal = goal.replace('\'', "''");
-    let escaped_sql = goal_sql.replace('\'', "''");
-    let escaped_schedule = schedule.replace('\'', "''");
-    let escaped_rule_set = rule_set.replace('\'', "''");
     let stream_table = format!("pg_ripple.{name}");
-    let escaped_stream_table = stream_table.replace('\'', "''");
 
-    // Store in catalog (no inline rules — reference the rule set by name).
-    Spi::run(&format!(
+    // SQL-INJ-01 (v0.80.0): parameterised INSERT; NULL rules (rule-set-based view).
+    Spi::run_with_args(
         "INSERT INTO _pg_ripple.datalog_views \
          (name, rules, rule_set, goal, generated_sql, schedule, decode, stream_table, variables) \
-         VALUES ('{escaped_name}', NULL, '{escaped_rule_set}', \
-                 '{escaped_goal}', '{escaped_sql}', '{escaped_schedule}', \
-                 {decode}, '{escaped_stream_table}', '{variables_json}'::jsonb) \
+         VALUES ($1, NULL, $2, $3, $4, $5, $6, $7, $8::jsonb) \
          ON CONFLICT (name) DO UPDATE \
          SET rules = EXCLUDED.rules, \
              rule_set = EXCLUDED.rule_set, \
@@ -411,11 +414,23 @@ pub(crate) fn create_datalog_view_from_rule_set(
              schedule = EXCLUDED.schedule, \
              decode = EXCLUDED.decode, \
              stream_table = EXCLUDED.stream_table, \
-             variables = EXCLUDED.variables"
-    ))
+             variables = EXCLUDED.variables",
+        &[
+            pgrx::datum::DatumWithOid::from(name),
+            pgrx::datum::DatumWithOid::from(rule_set),
+            pgrx::datum::DatumWithOid::from(goal),
+            pgrx::datum::DatumWithOid::from(goal_sql.as_str()),
+            pgrx::datum::DatumWithOid::from(schedule),
+            pgrx::datum::DatumWithOid::from(decode),
+            pgrx::datum::DatumWithOid::from(stream_table.as_str()),
+            pgrx::datum::DatumWithOid::from(variables_json.as_str()),
+        ],
+    )
     .unwrap_or_else(|e| pgrx::error!("failed to register Datalog view: {e}"));
 
     // Create the pg_trickle stream table.
+    let escaped_stream_table = stream_table.replace('\'', "''");
+    let escaped_schedule = schedule.replace('\'', "''");
     let pgt_sql = format!(
         "SELECT pgtrickle.create_stream_table(\
             name => '{escaped_stream_table}', \
@@ -613,12 +628,11 @@ pub(crate) fn create_framing_view(
     let construct_query = crate::framing::frame_to_sparql(frame, None)
         .unwrap_or_else(|e| pgrx::error!("frame translation error: {e}"));
 
-    let escaped_name = name.replace('\'', "''");
     let frame_json = serde_json::to_string(frame).unwrap_or_else(|_| "{}".to_owned());
+    // For stream_sql, the frame JSON is embedded in a dollar-quoted SQL literal
+    // (used as pg_trickle query body), so we keep the escaped version there.
     let escaped_frame = frame_json.replace('\'', "''");
-    let escaped_construct = construct_query.replace('\'', "''");
     let escaped_schedule = schedule.replace('\'', "''");
-    let escaped_format = output_format.replace('\'', "''");
 
     // Stream table SQL: run the CONSTRUCT query, embed and compact each root node.
     // Since pg_trickle executes raw SQL, we use the underlying SPARQL execution
@@ -634,19 +648,26 @@ pub(crate) fn create_framing_view(
          FROM (SELECT pg_ripple.export_jsonld_framed('{escaped_frame}'::jsonb) AS tree) r"
     );
 
-    // Register in the catalog.
-    Spi::run(&format!(
+    // SQL-INJ-01 (v0.80.0): parameterised INSERT for framing view catalog entry.
+    Spi::run_with_args(
         "INSERT INTO _pg_ripple.framing_views \
          (name, frame, generated_construct, schedule, output_format, decode, created_at) \
-         VALUES ('{escaped_name}', '{escaped_frame}'::jsonb, '{escaped_construct}', \
-                 '{escaped_schedule}', '{escaped_format}', {decode}, now()) \
+         VALUES ($1, $2::jsonb, $3, $4, $5, $6, now()) \
          ON CONFLICT (name) DO UPDATE \
          SET frame = EXCLUDED.frame, \
              generated_construct = EXCLUDED.generated_construct, \
              schedule = EXCLUDED.schedule, \
              output_format = EXCLUDED.output_format, \
-             decode = EXCLUDED.decode"
-    ))
+             decode = EXCLUDED.decode",
+        &[
+            pgrx::datum::DatumWithOid::from(name),
+            pgrx::datum::DatumWithOid::from(frame_json.as_str()),
+            pgrx::datum::DatumWithOid::from(construct_query.as_str()),
+            pgrx::datum::DatumWithOid::from(schedule),
+            pgrx::datum::DatumWithOid::from(output_format),
+            pgrx::datum::DatumWithOid::from(decode),
+        ],
+    )
     .unwrap_or_else(|e| pgrx::error!("failed to register framing view: {e}"));
 
     // Create the pg_trickle stream table.
@@ -902,30 +923,35 @@ pub(crate) fn create_construct_view(name: &str, sparql: &str, schedule: &str, de
         compile_construct_for_view(sparql).unwrap_or_else(|e| pgrx::error!("{e}"));
 
     let template_count_i64 = template_count as i64;
-    let escaped_name = name.replace('\'', "''");
-    let escaped_sparql = sparql.replace('\'', "''");
-    let escaped_sql = view_sql.replace('\'', "''");
-    let escaped_schedule = schedule.replace('\'', "''");
     let stream_table = format!("pg_ripple.construct_view_{name}");
-    let escaped_stream_table = stream_table.replace('\'', "''");
 
-    // Store in catalog.
-    Spi::run(&format!(
+    // SQL-INJ-01 (v0.80.0): parameterised INSERT for construct view catalog entry.
+    Spi::run_with_args(
         "INSERT INTO _pg_ripple.construct_views \
          (name, sparql, generated_sql, schedule, decode, template_count, stream_table) \
-         VALUES ('{escaped_name}', '{escaped_sparql}', '{escaped_sql}', \
-                 '{escaped_schedule}', {decode}, {template_count_i64}, '{escaped_stream_table}') \
+         VALUES ($1, $2, $3, $4, $5, $6, $7) \
          ON CONFLICT (name) DO UPDATE \
          SET sparql = EXCLUDED.sparql, \
              generated_sql = EXCLUDED.generated_sql, \
              schedule = EXCLUDED.schedule, \
              decode = EXCLUDED.decode, \
              template_count = EXCLUDED.template_count, \
-             stream_table = EXCLUDED.stream_table"
-    ))
+             stream_table = EXCLUDED.stream_table",
+        &[
+            pgrx::datum::DatumWithOid::from(name),
+            pgrx::datum::DatumWithOid::from(sparql),
+            pgrx::datum::DatumWithOid::from(view_sql.as_str()),
+            pgrx::datum::DatumWithOid::from(schedule),
+            pgrx::datum::DatumWithOid::from(decode),
+            pgrx::datum::DatumWithOid::from(template_count_i64),
+            pgrx::datum::DatumWithOid::from(stream_table.as_str()),
+        ],
+    )
     .unwrap_or_else(|e| pgrx::error!("failed to register CONSTRUCT view: {e}"));
 
     // Create the pg_trickle stream table.
+    let escaped_stream_table = stream_table.replace('\'', "''");
+    let escaped_schedule = schedule.replace('\'', "''");
     let pgt_sql = format!(
         "SELECT pgtrickle.create_stream_table(\
             name => '{escaped_stream_table}', \

@@ -27,11 +27,15 @@ use common::{AppState, env_or};
 
 // ─── Compatibility constants (COMPAT-01, v0.71.0) ────────────────────────────
 
-/// The minimum pg_ripple extension version this HTTP companion supports.
+/// The minimum pg_ripple extension version required by this build of pg_ripple_http.
+///
+/// COMPAT-MIN-01 (v0.80.0): bumped to 0.79.0 — requires:
+///   - `sparql_update_cursor()` (added v0.76.0)
+///   - `feature_status()` returning wcoj/shacl_sparql entries (v0.79.0)
 ///
 /// Connections to older extension versions log a prominent warning.  The extension
 /// is still served (degraded mode) so that rolling upgrades do not hard-fail.
-const COMPATIBLE_EXTENSION_MIN: &str = "0.75.0";
+const COMPATIBLE_EXTENSION_MIN: &str = "0.79.0";
 
 /// Check that the installed pg_ripple extension version is within the known-compatible
 /// range for this pg_ripple_http build.  Logs a warning if it is not; does NOT exit.

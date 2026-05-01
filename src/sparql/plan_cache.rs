@@ -89,14 +89,30 @@ pub fn reset() {
 /// Using the algebra IR (via `spargebra::Query`'s `Display` impl) instead of
 /// the raw query text means whitespace variants and prefix-form variants share
 /// the same cache slot.  Falls back to the raw text hash when parsing fails.
+///
+/// # CACHE-RLS-01 (v0.80.0)
+/// The key also includes the current PostgreSQL role (user ID) and the
+/// `inference_mode` GUC so that two roles with different RLS policies or
+/// inference settings never share a cached plan.
 fn cache_key(query_text: &str) -> String {
     let max_depth = crate::MAX_PATH_DEPTH.get();
     let bgp_reorder = crate::BGP_REORDER.get();
+    // CACHE-RLS-01: include current role OID so cross-user plan leakage is
+    // impossible.  GetUserId() is signal-safe and never fails.
+    // SAFETY: GetUserId() is a pure accessor with no side effects; always safe.
+    let role_oid: u32 = unsafe { pgrx::pg_sys::GetUserId().into() };
+    // Include inference_mode GUC in key.
+    let inference_mode = crate::INFERENCE_MODE
+        .get()
+        .and_then(|c| c.to_str().ok().map(|s| s.to_owned()))
+        .unwrap_or_else(|| "off".to_string());
     // Normalise via spargebra Display → canonical SPARQL → hash.
     let text_to_hash = match spargebra::SparqlParser::new().parse_query(query_text) {
         Ok(q) => format!("{q}"),
         Err(_) => query_text.to_owned(),
     };
     let digest = xxhash_rust::xxh3::xxh3_128(text_to_hash.as_bytes());
-    format!("{digest:x}\x00max_depth={max_depth}\x00bgp_reorder={bgp_reorder}")
+    format!(
+        "{digest:x}\x00max_depth={max_depth}\x00bgp_reorder={bgp_reorder}\x00role={role_oid}\x00inference_mode={inference_mode}"
+    )
 }

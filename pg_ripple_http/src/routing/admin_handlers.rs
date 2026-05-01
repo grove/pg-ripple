@@ -4,11 +4,11 @@ use std::sync::Arc;
 
 use axum::body::Body;
 use axum::extract::State;
-use axum::http::StatusCode;
+use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 
 use super::sparql_handlers::json_response_http;
-use crate::common::{AppState, redacted_error};
+use crate::common::{AppState, check_auth, redacted_error};
 
 // Re-import routing types for ApiDoc
 use super::ApiDoc;
@@ -397,10 +397,21 @@ pub(crate) fn strip_angle(s: &str) -> &str {
 
 /// Serve the browser-based visual graph explorer at `/explorer`.
 ///
+/// EXPLORER-AUTH-01 (v0.80.0): authentication is required. Unauthenticated
+/// requests receive HTTP 401 so that the full RDF graph cannot be browsed
+/// without credentials.
+///
 /// The explorer is a single-page application that accepts a SPARQL CONSTRUCT
 /// query, renders the resulting triples as a force-directed graph using
 /// sigma.js, and allows clicking any node to expand its neighbourhood.
-pub(crate) async fn explorer_page() -> Response {
+pub(crate) async fn explorer_page(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+) -> Response {
+    // EXPLORER-AUTH-01: require authentication before serving the explorer UI.
+    if let Err(resp) = check_auth(&state, &headers) {
+        return resp;
+    }
     let html = r#"<!DOCTYPE html>
 <html lang="en">
 <head>

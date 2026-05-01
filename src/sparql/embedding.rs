@@ -471,8 +471,7 @@ pub fn refresh_embeddings(graph_iri: Option<&str>, model: Option<&str>, force: b
                 .to_owned()
         });
 
-    let model_filter = format!("AND e.model = '{}'", model_tag.replace('\'', "''"));
-
+    // SQL-INJ-02 (v0.80.0): use parameterised query for model_tag; $1 bound below.
     let graph_filter = if let Some(g) = graph_iri.filter(|s| !s.is_empty()) {
         let g_id = crate::dictionary::encode(
             crate::storage::strip_angle_brackets_pub(g),
@@ -486,14 +485,14 @@ pub fn refresh_embeddings(graph_iri: Option<&str>, model: Option<&str>, force: b
     // Find stale entities: those with an existing embedding that was updated
     // before the most recent triple involving that entity as subject.
     // When force=true, return all entities that have any embedding.
+    // $1 = model_tag (parameterised to prevent SQL injection).
     let stale_sql = if force {
-        format!(
-            "SELECT e.entity_id, d.value \
-             FROM _pg_ripple.embeddings e \
-             JOIN _pg_ripple.dictionary d ON d.id = e.entity_id \
-             WHERE TRUE {model_filter} \
-             LIMIT 10000"
-        )
+        "SELECT e.entity_id, d.value \
+         FROM _pg_ripple.embeddings e \
+         JOIN _pg_ripple.dictionary d ON d.id = e.entity_id \
+         WHERE e.model = $1 \
+         LIMIT 10000"
+            .to_string()
     } else {
         // Identify entities whose embedding is older than the most recent
         // triple insertion.  We use the max statement ID as a proxy for
@@ -513,20 +512,24 @@ pub fn refresh_embeddings(graph_iri: Option<&str>, model: Option<&str>, force: b
                              (SELECT EXTRACT(EPOCH FROM e.updated_at)::bigint) \
                    ) \
              ) \
-             {model_filter} \
+             AND e.model = $1 \
              LIMIT 10000"
         )
     };
 
     let stale_entities: Vec<(i64, String)> = pgrx::Spi::connect(|c| {
-        c.select(&stale_sql, None, &[])
-            .unwrap_or_else(|e| pgrx::error!("refresh_embeddings: SPI error: {e}"))
-            .map(|row| {
-                let id: i64 = row.get::<i64>(1).ok().flatten().unwrap_or(0);
-                let value: String = row.get::<String>(2).ok().flatten().unwrap_or_default();
-                (id, value)
-            })
-            .collect()
+        c.select(
+            &stale_sql,
+            None,
+            &[pgrx::datum::DatumWithOid::from(model_tag.as_str())],
+        )
+        .unwrap_or_else(|e| pgrx::error!("refresh_embeddings: SPI error: {e}"))
+        .map(|row| {
+            let id: i64 = row.get::<i64>(1).ok().flatten().unwrap_or(0);
+            let value: String = row.get::<String>(2).ok().flatten().unwrap_or_default();
+            (id, value)
+        })
+        .collect()
     });
 
     if stale_entities.is_empty() {
