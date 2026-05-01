@@ -47,7 +47,7 @@ response Content-Length pre-check, and SPARQL depth DoS protection.**
 - **TENANT-NAME-01** — Tenant name validation regex tightened to `^[A-Za-z0-9_]{1,63}$`; uppercase letters now allowed; max 63 characters enforced.
 - **ROLE-UNICODE-01** — `quote_ident_safe()` now falls back to SPI `SELECT quote_ident($1)` for role names containing non-ASCII characters.
 - **SHMEM-SAFE-01** — Shared-memory size arithmetic uses `checked_mul().expect()` to detect overflow early (misconfigured GUC rather than silent wraparound).
-- **RUSTSEC-01** — `audit.toml` updated: `RUSTSEC-2023-0071` (RSA PKCS#1 timing) added as an exemption with justification comment; review date updated to v0.82.0.
+- **RUSTSEC-01** — `audit.toml` updated: `RUSTSEC-2023-0071` (RSA PKCS#1 timing) added as an exemption with justification comment; review date updated to v0.82.0. Cargo-audit CI gate (`.github/workflows/ci.yml`) passes.
 - **SPARQL-COMPLEX-01** — `pg_ripple.sparql_max_algebra_depth` GUC (default 256) already enforced; confirmed and documented.
 - **LISTEN-LEN-01** — `/subscribe/{subscription_id}` endpoint in `pg_ripple_http` now returns HTTP 400 for subscription IDs longer than 63 characters.
 - **FED-BODY-STREAM-01 / FED-SIZE-01** — All five `response.into_string()` call sites in `federation.rs` now check the `Content-Length` header before allocating the body buffer.
