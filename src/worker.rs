@@ -231,17 +231,29 @@ pub extern "C-unwind" fn pg_ripple_merge_worker_main(arg: pg_sys::Datum) {
                 "pg_ripple merge worker: merge cycle panicked ({consecutive_errors}): {e:?}"
             );
 
+            // MERGE-BACKOFF-01 (v0.83.0): exponential backoff capped at
+            // `pg_ripple.merge_max_backoff_secs`.  First error doubles the
+            // wait; each subsequent error doubles again until the cap is reached.
+            // This reduces log noise from transient errors while preserving fast
+            // recovery when the failure is short-lived.
+            let max_backoff = crate::MERGE_MAX_BACKOFF_SECS.get().max(10) as u64;
+            let backoff_secs = if consecutive_errors > 0 {
+                let exp = consecutive_errors.saturating_sub(1).min(8);
+                (interval_secs.saturating_mul(2u64.pow(exp))).min(max_backoff)
+            } else {
+                interval_secs
+            };
+
             if consecutive_errors >= 5 {
                 pgrx::log!(
                     "pg_ripple merge worker: {consecutive_errors} consecutive errors, \
-                     backing off to full interval"
+                     backing off for {backoff_secs}s (max {max_backoff}s)"
                 );
             }
 
             // v0.51.0: use wait_latch for correct SIGTERM response during backoff (S1-3).
             // If SIGTERM is received, wait_latch returns false and the outer while loop exits.
-            // If SIGHUP triggers an immediate return, consecutive_errors > 5 prevents spin-looping.
-            if !BackgroundWorker::wait_latch(Some(Duration::from_secs(interval_secs))) {
+            if !BackgroundWorker::wait_latch(Some(Duration::from_secs(backoff_secs))) {
                 break;
             }
             continue;

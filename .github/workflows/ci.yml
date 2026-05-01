@@ -1227,6 +1227,52 @@ jobs:
           print(f'All {len(data)} dependencies use allowed licences.')
           " $ALLOWED
 
+  # v0.83.0 CHANGELOG-FMT-01 / CHANGELOG-BREAK-01: CHANGELOG format and BREAKING tag lint
+  lint-changelog:
+    name: Lint — CHANGELOG format and BREAKING tags (v0.83.0)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6
+      - name: Validate CHANGELOG.md headings and BREAKING tags
+        run: |
+          python3 - <<'EOF'
+          import re, sys
+
+          with open("CHANGELOG.md") as f:
+              lines = f.readlines()
+
+          errors = []
+
+          # Rule 1: Every ## heading must be either [Unreleased] or a version
+          #         in the form ## [X.Y.Z] – YYYY-MM-DD
+          version_re = re.compile(
+              r'^## \[(Unreleased|\d+\.\d+\.\d+)\]( – \d{4}-\d{2}-\d{2})?'
+          )
+
+          # Rule 2: Any line containing the word BREAKING must use the exact tag
+          #         **BREAKING:** at the start of a list item or paragraph.
+          breaking_re = re.compile(r'(?i)\bbreaking\b')
+          valid_breaking = re.compile(r'\*\*BREAKING:\*\*')
+
+          for i, line in enumerate(lines, 1):
+              if line.startswith("## ") and not version_re.match(line):
+                  errors.append(f"L{i}: malformed version heading: {line.rstrip()}")
+              if breaking_re.search(line) and not valid_breaking.search(line):
+                  # Ignore comment lines and the format documentation itself
+                  stripped = line.strip()
+                  if not stripped.startswith('#') and 'BREAKING' not in stripped[:3]:
+                      errors.append(
+                          f"L{i}: 'breaking' found but not tagged **BREAKING:** — {stripped[:80]}"
+                      )
+
+          if errors:
+              print("CHANGELOG lint failures:")
+              for e in errors:
+                  print(" ", e)
+              sys.exit(1)
+          print(f"CHANGELOG.md lint passed ({len(lines)} lines checked).")
+          EOF
+
   # v0.67.0 GATE-02: Validate feature_status() evidence after each CI run.
   validate-feature-status:
     name: Validate feature status evidence (v0.67.0)

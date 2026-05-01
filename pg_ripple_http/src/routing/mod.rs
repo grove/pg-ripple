@@ -131,6 +131,13 @@ pub(crate) fn build_router(state: Arc<AppState>, max_body_bytes: usize, cors: Co
         // v0.60.0 H7-5: Kubernetes readiness probe — 503 until first PG connection.
         .route("/ready", get(admin_handlers::ready))
         .route("/metrics", get(admin_handlers::metrics_endpoint))
+        // SECURITY (METRICS-AUTH-DOC-01, v0.83.0): /metrics and /metrics/extension
+        // are intentionally unauthenticated to support Prometheus scraping from a
+        // trusted internal network without requiring a token.  These routes expose
+        // only aggregate counters — no user data — so the risk is information
+        // disclosure of query throughput figures.  Operators who need authentication
+        // should place a reverse proxy (nginx, Caddy, Envoy) in front with an
+        // IP-allowlist or mTLS.  See docs/src/operations/metrics.md.
         // v0.72.0 OBS-02: Extension streaming metrics endpoint.
         .route(
             "/metrics/extension",

@@ -1934,6 +1934,50 @@ pub fn register_all_gucs() {
         GucFlags::default(),
     );
 
+    // ── v0.83.0 GUCs ──────────────────────────────────────────────────────────
+
+    // DL-COST-GUC-01 (v0.83.0): Datalog cost-model divisors for rule body ordering.
+    pgrx::GucRegistry::define_int_guc(
+        c"pg_ripple.datalog_cost_bound_s_divisor",
+        c"Synthetic cardinality divisor for Datalog rule atoms with subject bound to a constant \
+      (default: 100, range: 1–10000). Larger values push single-bound atoms earlier in the join \
+      order. Replaces hardcoded divisor 100 in compiler.rs. (v0.83.0 DL-COST-GUC-01)",
+        c"",
+        &crate::gucs::datalog::DATALOG_COST_BOUND_S_DIVISOR,
+        1,
+        10000,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+
+    pgrx::GucRegistry::define_int_guc(
+        c"pg_ripple.datalog_cost_bound_so_divisor",
+        c"Synthetic cardinality divisor for Datalog rule atoms with both subject and object bound \
+      to constants (default: 10, range: 1–1000). Larger values push dual-bound atoms earlier. \
+      Replaces hardcoded divisor 10 in compiler.rs. (v0.83.0 DL-COST-GUC-01)",
+        c"",
+        &crate::gucs::datalog::DATALOG_COST_BOUND_SO_DIVISOR,
+        1,
+        1000,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+
+    // MERGE-BACKOFF-01 (v0.83.0): merge worker exponential backoff cap.
+    pgrx::GucRegistry::define_int_guc(
+        c"pg_ripple.merge_max_backoff_secs",
+        c"Maximum backoff duration in seconds for the merge worker exponential backoff \
+      after consecutive errors (default: same as merge_interval_secs=60, range: 10–3600). \
+      First error doubles the wait; each subsequent error doubles again; capped here. \
+      (v0.83.0 MERGE-BACKOFF-01)",
+        c"",
+        &crate::gucs::storage::MERGE_MAX_BACKOFF_SECS,
+        10,
+        3600,
+        GucContext::Sighup,
+        GucFlags::default(),
+    );
+
     // PGC_POSTMASTER GUCs can only be registered during shared_preload_libraries
     // loading.  `process_shared_preload_libraries_in_progress` is the correct
     // flag — `IsPostmasterEnvironment` is true in every server process and

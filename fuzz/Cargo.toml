@@ -105,3 +105,22 @@ name = "url_host_parser"
 path = "fuzz_targets/url_host_parser.rs"
 test = false
 doc = false
+
+# v0.83.0 FUZZ-BULK-01 — bulk-loader input fuzz targets
+[[bin]]
+name = "ntriples_load"
+path = "fuzz_targets/ntriples_load.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "nquads_load"
+path = "fuzz_targets/nquads_load.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "trig_load"
+path = "fuzz_targets/trig_load.rs"
+test = false
+doc = false

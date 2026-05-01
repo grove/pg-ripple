@@ -1,0 +1,43 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:base"
+  ],
+  "packageRules": [
+    {
+      "description": "Group all pgrx updates together",
+      "matchPackageNames": ["pgrx", "pgrx-tests", "pgrx-macros"],
+      "groupName": "pgrx"
+    },
+    {
+      "description": "Group RDF/SPARQL parsing libraries",
+      "matchPackageNames": [
+        "spargebra", "sparopt",
+        "rio_turtle", "rio_xml", "rio_api",
+        "oxrdf"
+      ],
+      "groupName": "rdf-parsing"
+    },
+    {
+      "description": "Pin pgrx to exact versions (PGRX strict semver contract)",
+      "matchPackageNames": ["pgrx", "pgrx-tests"],
+      "rangeStrategy": "pin"
+    },
+    {
+      "description": "Auto-merge non-breaking patch updates for utility crates",
+      "matchUpdateTypes": ["patch"],
+      "matchPackageNames": [
+        "serde", "serde_json",
+        "xxhash-rust",
+        "sha2", "hex",
+        "url", "chrono"
+      ],
+      "automerge": true
+    }
+  ],
+  "labels": ["dependencies"],
+  "assignees": [],
+  "prHourlyLimit": 2,
+  "prConcurrentLimit": 5,
+  "minimumReleaseAge": "3 days"
+}

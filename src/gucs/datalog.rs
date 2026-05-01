@@ -108,3 +108,22 @@ pub static PROBABILISTIC_DATALOG: pgrx::GucSetting<bool> = pgrx::GucSetting::<bo
 /// `run_command_on_all_nodes` for parallel worker execution (v0.62.0 CITUS-27).
 /// Requires `citus_sharding_enabled = on`. Default off.
 pub static DATALOG_CITUS_DISPATCH: pgrx::GucSetting<bool> = pgrx::GucSetting::<bool>::new(false);
+
+// ─── v0.83.0 Datalog cost-model GUCs (DL-COST-GUC-01) ────────────────────────
+
+/// GUC: synthetic cardinality divisor applied when a Datalog rule atom has the
+/// subject position bound to a constant (v0.83.0 DL-COST-GUC-01).
+///
+/// A larger value makes single-bound atoms appear cheaper, sorting them earlier
+/// in the join order.  Useful on datasets where the subject fanout is very low.
+/// Replaces the hardcoded `100` divisor in `src/datalog/compiler.rs`.
+pub static DATALOG_COST_BOUND_S_DIVISOR: pgrx::GucSetting<i32> =
+    pgrx::GucSetting::<i32>::new(100);
+
+/// GUC: synthetic cardinality divisor applied when a Datalog rule atom has both
+/// the subject and object positions bound to constants (v0.83.0 DL-COST-GUC-01).
+///
+/// A larger value makes dual-bound atoms appear cheaper relative to other atoms.
+/// Replaces the hardcoded `10` divisor in `src/datalog/compiler.rs`.
+pub static DATALOG_COST_BOUND_SO_DIVISOR: pgrx::GucSetting<i32> =
+    pgrx::GucSetting::<i32>::new(10);

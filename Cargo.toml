@@ -3,7 +3,7 @@ members = [".", "pg_ripple_http"]
 
 [package]
 name = "pg_ripple"
-version = "0.82.0"
+version = "0.83.0"
 edition = "2024"
 description = "High-performance RDF triple store with native SPARQL query execution for PostgreSQL 18"
 license = "Apache-2.0"
@@ -47,6 +47,7 @@ sparopt = "0.3"
 postgres = { version = "0.19", features = ["with-serde_json-1"] }
 crossbeam-channel = "0.5"
 proptest = "1"
+oxigraph = { version = "0.4", default-features = false }
 
 [profile.dev]
 panic = "unwind"

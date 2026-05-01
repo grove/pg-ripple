@@ -1,4 +1,4 @@
-/// Property-based test suite for pg_ripple (v0.46.0 + v0.78.0).
+/// Property-based test suite for pg_ripple (v0.46.0 + v0.78.0 + v0.83.0).
 ///
 /// Suites:
 ///
@@ -11,6 +11,9 @@
 /// 4. **Bidi convergence** (v0.78.0 BIDIOPS-PROPTEST-01) — random insert/update/delete
 ///    sequences from N sources satisfy determinism, order-independence, no-loss,
 ///    source-priority, linkback round-trip, and retry-convergence properties.
+/// 5. **N-Triples oxigraph comparison** (v0.83.0 PROPTEST-02) — rio_turtle and
+///    oxigraph parse identical triple counts from randomly generated N-Triples
+///    documents, validating pg_ripple's parser against a reference implementation.
 ///
 /// No database connection is required — all tests run in pure Rust.
 ///
@@ -34,5 +37,7 @@ mod construct_template;
 mod dictionary;
 #[path = "proptest/jsonld_framing.rs"]
 mod jsonld_framing;
+#[path = "proptest/ntriples_oxigraph.rs"]
+mod ntriples_oxigraph;
 #[path = "proptest/sparql_roundtrip.rs"]
 mod sparql_roundtrip;

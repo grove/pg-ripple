@@ -125,9 +125,32 @@ mod pg_ripple {
     /// Use this function in relay triggers when the inbound JSON-LD payload
     /// contains multiple subjects, instead of looping over
     /// `json_to_ntriples_and_load()`.
+    ///
+    /// **Deprecated (v0.83.0 API-RENAME-01)**: use `load_jsonld()` instead.
+    /// This function emits a NOTICE and delegates to `load_jsonld()`.
+    /// It will be removed in v1.0.0.
     #[pg_extern]
     fn json_ld_load(document: pgrx::JsonB, default_graph: default!(Option<&str>, "NULL")) -> i64 {
+        pgrx::warning!(
+            "json_ld_load is deprecated; use load_jsonld() instead. \
+             json_ld_load will be removed in v1.0.0 (API-RENAME-01)"
+        );
         crate::bulk_load::json_ld_load(&document.0, default_graph)
+    }
+
+    /// Load a JSON-LD document and store all triples in the RDF graph store.
+    ///
+    /// This is the canonical name for the JSON-LD bulk loader.
+    /// `json_ld_load()` is the deprecated alias.
+    ///
+    /// `document` is a JSONB value containing a JSON-LD document.
+    /// `graph_uri` optionally specifies the named graph to load into;
+    /// when NULL the default graph (g = 0) is used.
+    ///
+    /// Returns the number of triples loaded.  (API-RENAME-01, v0.83.0)
+    #[pg_extern]
+    fn load_jsonld(document: pgrx::JsonB, graph_uri: default!(Option<&str>, "NULL")) -> i64 {
+        crate::bulk_load::json_ld_load(&document.0, graph_uri)
     }
 
     // ── v0.52.0: Vocabulary template loader ───────────────────────────────────
