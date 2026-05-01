@@ -61,7 +61,9 @@ https://apt.postgresql.org/pub/repos/apt bookworm-pgdg main" \
        libproj-dev \
        libgdal-dev \
        libjson-c-dev \
+       libxml2-dev \
        libprotobuf-c-dev \
+       protobuf-c-compiler \
        git \
        cmake \
     && rm -rf /var/lib/apt/lists/*
