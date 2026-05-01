@@ -503,8 +503,8 @@ echo
 # ── MIGCHAIN-01: migration script count verification ──────────────────────────
 info "=== MIGCHAIN-01: migration script count verification ==="
 # Count migration scripts from v0.62.0 to v0.79.0 (inclusive).
-# There are 18 minor version increments: 0.62→0.63, 0.63→0.64, ..., 0.78→0.79.
-EXPECTED_COUNT=18
+# There are 17 minor version increments: 0.62→0.63, 0.63→0.64, ..., 0.78→0.79.
+EXPECTED_COUNT=17
 ACTUAL_COUNT=0
 for ver in 0.62 0.63 0.64 0.65 0.66 0.67 0.68 0.69 0.70 0.71 0.72 0.73 0.74 0.75 0.76 0.77 0.78; do
     # Extract next version number
