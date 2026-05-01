@@ -497,12 +497,17 @@ fn build_all_nodes_sql(graph_filter: Option<i64>, include_g: bool) -> String {
         .unwrap_or_default();
     let g_sel = if include_g { ", g" } else { "" };
 
+    // PROPPATH-UNBOUNDED-01 (v0.82.0): limit the number of predicates scanned
+    // to avoid generating an unbounded UNION ALL on large schemas.
+    let pred_limit = crate::ALL_NODES_PREDICATE_LIMIT.get().max(1) as i64;
+
     Spi::connect(|client| {
         let rows = client
             .select(
-                "SELECT id FROM _pg_ripple.predicates WHERE table_oid IS NOT NULL",
+                "SELECT id FROM _pg_ripple.predicates WHERE table_oid IS NOT NULL \
+                 ORDER BY triple_count DESC NULLS LAST LIMIT $1",
                 None,
-                &[],
+                &[pgrx::datum::DatumWithOid::from(pred_limit)],
             )
             .unwrap_or_else(|e| pgrx::error!("all-nodes SPI error: {e}"));
         for row in rows {
@@ -516,6 +521,21 @@ fn build_all_nodes_sql(graph_filter: Option<i64>, include_g: bool) -> String {
             }
         }
     });
+
+    // Warn if predicate count in DB exceeds the limit — the UNION ALL has been truncated.
+    let total_pred_count: i64 = Spi::get_one::<i64>(
+        "SELECT count(*)::bigint FROM _pg_ripple.predicates WHERE table_oid IS NOT NULL",
+    )
+    .unwrap_or(None)
+    .unwrap_or(0);
+    if total_pred_count > pred_limit {
+        pgrx::warning!(
+            "pg_ripple: all-nodes property path limited to {} of {} predicates \
+             (pg_ripple.all_nodes_predicate_limit); query may miss nodes",
+            pred_limit,
+            total_pred_count
+        );
+    }
 
     // Always include vp_rare.
     let rare_g = if g_cond.is_empty() {
@@ -547,12 +567,16 @@ fn build_all_predicates_with_p() -> String {
     use pgrx::prelude::*;
     let mut branches: Vec<String> = Vec::new();
 
+    // PROPPATH-UNBOUNDED-01 (v0.82.0): limit predicates in NegatedPropertySet scan.
+    let pred_limit = crate::ALL_NODES_PREDICATE_LIMIT.get().max(1) as i64;
+
     Spi::connect(|client| {
         let rows = client
             .select(
-                "SELECT id FROM _pg_ripple.predicates WHERE table_oid IS NOT NULL",
+                "SELECT id FROM _pg_ripple.predicates WHERE table_oid IS NOT NULL \
+                 ORDER BY triple_count DESC NULLS LAST LIMIT $1",
                 None,
-                &[],
+                &[pgrx::datum::DatumWithOid::from(pred_limit)],
             )
             .unwrap_or_else(|e| pgrx::error!("negated property set SPI error: {e}"));
         for row in rows {

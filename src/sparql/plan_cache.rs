@@ -32,10 +32,19 @@ pub type CacheEntry = (
 const DEFAULT_CAPACITY: usize = 256;
 
 thread_local! {
-    // SAFETY: DEFAULT_CAPACITY is a compile-time non-zero literal (256).
+    // SAFETY: Capacity is initialised from the PLAN_CACHE_CAPACITY GUC at first use.
+    // If the GUC is 0 or the process is not inside PostgreSQL (e.g. unit tests),
+    // DEFAULT_CAPACITY is used as a safe fallback.
     #[allow(clippy::expect_used)]
     static PLAN_CACHE: RefCell<LruCache<String, CacheEntry>> = RefCell::new(
-        LruCache::new(NonZeroUsize::new(DEFAULT_CAPACITY).expect("capacity > 0"))
+        // CACHE-CAP-01 (v0.82.0): initialise from GUC; fall back to DEFAULT_CAPACITY.
+        // The GUC may not be readable before _PG_init sets it, so we catch panics.
+        {
+            let cap = std::panic::catch_unwind(|| crate::PLAN_CACHE_CAPACITY.get())
+                .unwrap_or(DEFAULT_CAPACITY as i32)
+                .max(1) as usize;
+            LruCache::new(NonZeroUsize::new(cap).expect("capacity > 0"))
+        }
     );
 }
 

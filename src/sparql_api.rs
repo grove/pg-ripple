@@ -29,6 +29,17 @@ mod pg_ripple {
         crate::sparql::sparql_explain(query, analyze)
     }
 
+    /// Normalise a SPARQL query text for `pg_stat_statements` grouping.
+    ///
+    /// Replaces string literals with `$S`, IRIs with `$I`, and numeric literals
+    /// with `$N` so that structurally identical queries with different literal
+    /// values produce the same normalised key.  Useful for auditing query classes
+    /// and as a stable cache key. (v0.82.0 PGSS-NORM-01)
+    #[pg_extern]
+    fn sparql_normalise(query: &str) -> String {
+        crate::sparql::parse::normalise_sparql_for_pgss(query)
+    }
+
     /// Explain a SPARQL query with flexible output format (v0.23.0).
     ///
     /// `format` may be one of:

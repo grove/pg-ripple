@@ -61,7 +61,7 @@ pub(crate) async fn execute_sparql_with_traceparent(
         {
             Ok(_) => {
                 let elapsed = start.elapsed();
-                state.metrics.record_query(elapsed);
+                state.metrics.record_query_typed(elapsed, "UPDATE", 0);
                 (StatusCode::NO_CONTENT, "").into_response()
             }
             Err(e) => {
@@ -123,7 +123,9 @@ async fn execute_select(
         .collect();
 
     let elapsed = start.elapsed();
-    state.metrics.record_query(elapsed);
+    state
+        .metrics
+        .record_query_typed(elapsed, "SELECT", results.len());
 
     format_select_results(&results, accept)
 }
@@ -152,7 +154,9 @@ async fn execute_ask(
 
     let result: bool = row.get(0);
     let elapsed = start.elapsed();
-    state.metrics.record_query(elapsed);
+    state
+        .metrics
+        .record_query_typed(elapsed, "ASK", if result { 1 } else { 0 });
 
     format_ask_result(result, accept)
 }
@@ -193,7 +197,9 @@ async fn execute_construct(
         .collect();
 
     let elapsed = start.elapsed();
-    state.metrics.record_query(elapsed);
+    state
+        .metrics
+        .record_query_typed(elapsed, "CONSTRUCT", triples.len());
 
     format_graph_results(&triples, accept)
 }
@@ -234,7 +240,9 @@ async fn execute_describe(
         .collect();
 
     let elapsed = start.elapsed();
-    state.metrics.record_query(elapsed);
+    state
+        .metrics
+        .record_query_typed(elapsed, "DESCRIBE", triples.len());
 
     format_graph_results(&triples, accept)
 }

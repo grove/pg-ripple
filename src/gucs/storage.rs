@@ -132,6 +132,27 @@ pub static COPY_RDF_ALLOWED_PATHS: pgrx::GucSetting<Option<std::ffi::CString>> =
 pub static READ_REPLICA_DSN: pgrx::GucSetting<Option<std::ffi::CString>> =
     pgrx::GucSetting::<Option<std::ffi::CString>>::new(None);
 
+// ─── v0.82.0 storage GUCs ────────────────────────────────────────────────────
+
+/// GUC: merge fence lock timeout in milliseconds (v0.82.0 MERGE-LOCK-GUC-01).
+/// Replaces the hardcoded `SET LOCAL lock_timeout = '5s'` in merge.rs.
+pub static MERGE_LOCK_TIMEOUT_MS: pgrx::GucSetting<i32> = pgrx::GucSetting::<i32>::new(5000);
+
+/// GUC: seconds between merge worker heartbeat log lines (v0.82.0 MERGE-HBEAT-01).
+pub static MERGE_HEARTBEAT_INTERVAL_SECONDS: pgrx::GucSetting<i32> =
+    pgrx::GucSetting::<i32>::new(60);
+
+/// GUC: maximum number of VP tables scanned per `graph_stats()` call (v0.82.0 STATS-DOC-01).
+pub static STATS_SCAN_LIMIT: pgrx::GucSetting<i32> = pgrx::GucSetting::<i32>::new(1000);
+
+/// GUC: seconds between background refreshes of `_pg_ripple.predicate_stats_cache`
+/// (v0.82.0 STATS-CACHE-01).
+pub static STATS_REFRESH_INTERVAL_SECONDS: pgrx::GucSetting<i32> =
+    pgrx::GucSetting::<i32>::new(300);
+
+/// GUC: batch size for `vacuum_dictionary()` UNION ALL construction (v0.82.0 VACUUM-DICT-BATCH-01).
+pub static VACUUM_DICT_BATCH_SIZE: pgrx::GucSetting<i32> = pgrx::GucSetting::<i32>::new(200);
+
 // ─── v0.57.0 storage GUCs ────────────────────────────────────────────────────
 
 /// GUC: triple count threshold above which the HTAP merge converts vp_{id}_main
@@ -226,3 +247,10 @@ pub static STRICT_DICTIONARY: pgrx::GucSetting<bool> = pgrx::GucSetting::<bool>:
 /// orphaned replication slot. Default: 3600. (v0.81.0 CDC-SLOT-01)
 pub static CDC_SLOT_IDLE_TIMEOUT_SECONDS: pgrx::GucSetting<i32> =
     pgrx::GucSetting::<i32>::new(3600);
+
+// ─── v0.82.0 storage GUCs ────────────────────────────────────────────────────
+
+/// GUC: maximum number of rows the merge worker processes in a single INSERT…SELECT
+/// batch. Allows tuning merge pressure vs. transaction duration.
+/// Default: 1,000,000. Min: 100. Max: 100,000,000. (v0.82.0 GUC-BOUNDS-01)
+pub static MERGE_BATCH_SIZE: pgrx::GucSetting<i32> = pgrx::GucSetting::<i32>::new(1_000_000);

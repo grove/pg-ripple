@@ -25,15 +25,17 @@ use pgrx::prelude::*;
 /// Requires superuser privileges.
 #[pg_extern(schema = "pg_ripple", name = "create_tenant")]
 pub fn create_tenant(tenant_name: &str, graph_iri: &str, quota_triples: default!(i64, "0")) {
-    // Validate tenant name: only lowercase alphanumeric + underscore.
-    if !tenant_name
-        .chars()
-        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
-        || tenant_name.is_empty()
+    // TENANT-NAME-01 (v0.82.0): Validate tenant name with ^[A-Za-z0-9_]{1,63}$ regex.
+    // Uppercase letters are now allowed; length capped at 63 (PostgreSQL identifier limit).
+    if tenant_name.is_empty()
+        || tenant_name.len() > 63
+        || !tenant_name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_')
     {
         pgrx::error!(
             "PT701: create_tenant: invalid tenant name '{}'; \
-             use only lowercase letters, digits, and underscores",
+             use only ASCII letters, digits, and underscores (max 63 chars)",
             tenant_name
         );
     }

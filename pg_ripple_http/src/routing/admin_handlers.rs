@@ -193,12 +193,46 @@ pub(crate) async fn metrics_endpoint(State(state): State<Arc<AppState>>) -> Resp
          pg_ripple_http_query_duration_seconds_total {:.6}\n\
          # HELP pg_ripple_http_pool_size Current connection pool size\n\
          # TYPE pg_ripple_http_pool_size gauge\n\
-         pg_ripple_http_pool_size {}\n",
+         pg_ripple_http_pool_size {}\n\
+         # HELP pg_ripple_http_sparql_query_duration_seconds Total SPARQL query duration by type (METRICS-LABELS-01)\n\
+         # TYPE pg_ripple_http_sparql_query_duration_seconds counter\n\
+         pg_ripple_http_sparql_query_duration_seconds{{query_type=\"SELECT\"}} {:.6}\n\
+         pg_ripple_http_sparql_query_duration_seconds{{query_type=\"ASK\"}} {:.6}\n\
+         pg_ripple_http_sparql_query_duration_seconds{{query_type=\"CONSTRUCT\"}} {:.6}\n\
+         pg_ripple_http_sparql_query_duration_seconds{{query_type=\"DESCRIBE\"}} {:.6}\n\
+         pg_ripple_http_sparql_query_duration_seconds{{query_type=\"UPDATE\"}} {:.6}\n\
+         # HELP pg_ripple_http_sparql_queries_by_type_total SPARQL queries by query type (METRICS-LABELS-01)\n\
+         # TYPE pg_ripple_http_sparql_queries_by_type_total counter\n\
+         pg_ripple_http_sparql_queries_by_type_total{{query_type=\"SELECT\"}} {}\n\
+         pg_ripple_http_sparql_queries_by_type_total{{query_type=\"ASK\"}} {}\n\
+         pg_ripple_http_sparql_queries_by_type_total{{query_type=\"CONSTRUCT\"}} {}\n\
+         pg_ripple_http_sparql_queries_by_type_total{{query_type=\"DESCRIBE\"}} {}\n\
+         pg_ripple_http_sparql_queries_by_type_total{{query_type=\"UPDATE\"}} {}\n\
+         # HELP pg_ripple_http_sparql_queries_by_result_size_total SPARQL queries by result size bucket (METRICS-LABELS-01)\n\
+         # TYPE pg_ripple_http_sparql_queries_by_result_size_total counter\n\
+         pg_ripple_http_sparql_queries_by_result_size_total{{result_size_bucket=\"empty\"}} {}\n\
+         pg_ripple_http_sparql_queries_by_result_size_total{{result_size_bucket=\"small\"}} {}\n\
+         pg_ripple_http_sparql_queries_by_result_size_total{{result_size_bucket=\"medium\"}} {}\n\
+         pg_ripple_http_sparql_queries_by_result_size_total{{result_size_bucket=\"large\"}} {}\n",
         m.sparql_query_count(),
         m.datalog_query_count(),
         m.error_count(),
         m.total_duration_secs(),
         state.pool.status().size,
+        m.select_duration_secs(),
+        m.ask_duration_secs(),
+        m.construct_duration_secs(),
+        m.describe_duration_secs(),
+        m.update_duration_secs(),
+        m.select_count(),
+        m.ask_count(),
+        m.construct_count(),
+        m.describe_count(),
+        m.update_count(),
+        m.result_empty_count(),
+        m.result_small_count(),
+        m.result_medium_count(),
+        m.result_large_count(),
     );
 
     Response::builder()

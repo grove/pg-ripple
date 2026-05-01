@@ -242,6 +242,18 @@ async fn sparql_subscription_sse(
             .into_response();
     }
 
+    // LISTEN-LEN-01 (v0.82.0): enforce 63-character limit.
+    // PostgreSQL silently truncates LISTEN channel names longer than 63 bytes,
+    // which can cause channel-name collisions between subscription IDs that
+    // share the same first 63 characters.
+    if subscription_id.len() > 63 {
+        return (
+            StatusCode::BAD_REQUEST,
+            "invalid subscription_id: maximum length is 63 characters",
+        )
+            .into_response();
+    }
+
     // Spawn a background task that polls for subscription notifications and
     // sends them over an mpsc channel.
     let (tx, rx) = tokio::sync::mpsc::channel::<String>(32);

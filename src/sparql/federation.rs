@@ -612,6 +612,9 @@ pub(crate) fn execute_remote(
     let pool_size = crate::FEDERATION_POOL_SIZE.get().max(1) as usize;
     let agent = get_agent(timeout, pool_size);
 
+    // FED-COST-01 (v0.82.0): measure HTTP call latency for federation stats.
+    let call_start = std::time::Instant::now();
+
     let response = agent
         .get(url)
         .query("query", sparql_text)
@@ -626,6 +629,21 @@ pub(crate) fn execute_remote(
             msg
         })?;
 
+    // FED-BODY-STREAM-01 (v0.82.0): pre-check Content-Length before buffering body.
+    // Reject immediately if Content-Length exceeds federation_max_response_bytes
+    // rather than allocating a large buffer and checking after.
+    let max_bytes = crate::FEDERATION_MAX_RESPONSE_BYTES.get();
+    if max_bytes >= 0
+        && let Some(cl_str) = response.header("content-length")
+        && let Ok(content_len) = cl_str.parse::<i64>()
+        && content_len > max_bytes as i64
+    {
+        circuit_record_failure(url);
+        return Err(format!(
+            "PT543: federation response from {url} Content-Length {content_len} \
+                         exceeds pg_ripple.federation_max_response_bytes ({max_bytes})"
+        ));
+    }
     let body = response.into_string().map_err(|e| {
         format!(
             "federation response read error from {url}: {}",
@@ -633,10 +651,8 @@ pub(crate) fn execute_remote(
         )
     })?;
 
-    // FED-TRUNC-01 (v0.81.0): replace hard error with WARNING + partial parse.
-    // The previous pgrx::error!() aborted the transaction when the body exceeded
-    // max_bytes; now we emit a warning and attempt partial materialisation.
-    let max_bytes = crate::FEDERATION_MAX_RESPONSE_BYTES.get();
+    // FED-TRUNC-01 (v0.81.0): post-read truncation check (handles cases where
+    // Content-Length was absent or inaccurate).
     let body = if max_bytes >= 0 && body.len() > max_bytes as usize {
         pgrx::warning!(
             "PT543: federation response from {url} is {} bytes, exceeding \
@@ -666,6 +682,13 @@ pub(crate) fn execute_remote(
         cache_store(url, sparql_text, &body);
         // G-3 (v0.56.0): record success to reset circuit breaker failure counter.
         circuit_record_success(url);
+        // FED-COST-01b (v0.82.0): update federation_stats with call latency.
+        let latency_ms = call_start.elapsed().as_millis() as f64;
+        let row_count = result
+            .as_ref()
+            .map(|(_, rows)| rows.len() as i64)
+            .unwrap_or(0);
+        update_federation_stats(url, latency_ms, row_count, false);
     } else if crate::shmem::SHMEM_READY.load(std::sync::atomic::Ordering::Relaxed) {
         // v0.55.0 G-4: increment error counter on parse failure.
         crate::shmem::FED_ERROR_COUNT
@@ -673,6 +696,9 @@ pub(crate) fn execute_remote(
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         // G-3 (v0.56.0): parse failure counts as a circuit breaker failure.
         circuit_record_failure(url);
+        // FED-COST-01b: record error latency.
+        let latency_ms = call_start.elapsed().as_millis() as f64;
+        update_federation_stats(url, latency_ms, 0, true);
     }
 
     result
@@ -714,6 +740,15 @@ pub(crate) fn execute_remote_partial(
         }
     };
 
+    // FED-BODY-STREAM-01 (v0.82.0): pre-check Content-Length before buffering.
+    let fed_max = crate::FEDERATION_MAX_RESPONSE_BYTES.get();
+    if fed_max >= 0
+        && let Some(cl_str) = response.header("content-length")
+        && let Ok(content_len) = cl_str.parse::<i64>()
+        && content_len > fed_max as i64
+    {
+        return Ok((vec![], vec![]));
+    }
     // Read body — on truncation, attempt partial parse.
     let body = match response.into_string() {
         Ok(b) => b,
@@ -983,6 +1018,36 @@ fn split_typed_literal(term: &str) -> Option<(&str, &str)> {
 }
 
 // ─── Health monitoring ───────────────────────────────────────────────────────
+
+/// FED-COST-01b (v0.82.0): update `_pg_ripple.federation_stats` after a federation call.
+///
+/// Uses an upsert to accumulate call_count, error_count, and latency for P50/P95
+/// approximation. P50 is approximated as the running average; P95 uses the max.
+/// No-op when the table doesn't exist (older migration not run yet).
+fn update_federation_stats(url: &str, latency_ms: f64, row_count: i64, is_error: bool) {
+    let error_delta: i64 = if is_error { 1 } else { 0 };
+    let _ = Spi::run_with_args(
+        "INSERT INTO _pg_ripple.federation_stats AS fs \
+           (endpoint_url, call_count, error_count, \
+            total_latency_ms, max_latency_ms, row_estimate, updated_at) \
+         VALUES ($1, 1, $2, $3, $3, $4, now()) \
+         ON CONFLICT (endpoint_url) DO UPDATE SET \
+           call_count      = fs.call_count + 1, \
+           error_count     = fs.error_count + $2, \
+           total_latency_ms = fs.total_latency_ms + $3, \
+           max_latency_ms  = GREATEST(fs.max_latency_ms, $3), \
+           p50_ms          = (fs.total_latency_ms + $3) / (fs.call_count + 1), \
+           p95_ms          = GREATEST(fs.max_latency_ms, $3), \
+           row_estimate    = CASE WHEN $2 = 0 THEN $4 ELSE fs.row_estimate END, \
+           updated_at      = now()",
+        &[
+            DatumWithOid::from(url),
+            DatumWithOid::from(error_delta),
+            DatumWithOid::from(latency_ms),
+            DatumWithOid::from(row_count),
+        ],
+    );
+}
 
 /// Record a probe outcome in `_pg_ripple.federation_health`.
 ///
@@ -1333,6 +1398,16 @@ fn query_weaviate_endpoint(
         }
     };
 
+    // FED-BODY-STREAM-01 (v0.82.0): pre-check Content-Length before buffering.
+    if let Some(cl_str) = response.header("content-length")
+        && let Ok(cl) = cl_str.parse::<i64>()
+    {
+        let limit = crate::FEDERATION_MAX_RESPONSE_BYTES.get();
+        if limit >= 0 && cl > limit as i64 {
+            pgrx::warning!("query_weaviate_endpoint: Content-Length {cl} exceeds limit");
+            return Vec::new();
+        }
+    }
     let body = match response.into_string() {
         Ok(s) => s,
         Err(e) => {
@@ -1435,6 +1510,16 @@ fn query_qdrant_endpoint(
         }
     };
 
+    // FED-BODY-STREAM-01 (v0.82.0): pre-check Content-Length before buffering.
+    if let Some(cl_str) = response.header("content-length")
+        && let Ok(cl) = cl_str.parse::<i64>()
+    {
+        let limit = crate::FEDERATION_MAX_RESPONSE_BYTES.get();
+        if limit >= 0 && cl > limit as i64 {
+            pgrx::warning!("query_qdrant_endpoint: Content-Length {cl} exceeds limit");
+            return Vec::new();
+        }
+    }
     let body = match response.into_string() {
         Ok(s) => s,
         Err(e) => {
@@ -1540,6 +1625,16 @@ fn query_pinecone_endpoint(
         }
     };
 
+    // FED-BODY-STREAM-01 (v0.82.0): pre-check Content-Length before buffering.
+    if let Some(cl_str) = response.header("content-length")
+        && let Ok(cl) = cl_str.parse::<i64>()
+    {
+        let limit = crate::FEDERATION_MAX_RESPONSE_BYTES.get();
+        if limit >= 0 && cl > limit as i64 {
+            pgrx::warning!("query_pinecone_endpoint: Content-Length {cl} exceeds limit");
+            return Vec::new();
+        }
+    }
     let body = match response.into_string() {
         Ok(s) => s,
         Err(e) => {

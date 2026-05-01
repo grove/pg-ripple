@@ -2,15 +2,23 @@
 # See: https://github.com/rustsec/rustsec/tree/main/cargo-audit
 
 [advisories]
-# Pre-existing advisories acknowledged and triaged for v0.51.0.
+# Pre-existing advisories acknowledged and triaged for v0.82.0 (RUSTSEC-01).
 # These affect transitive dependencies only and are not exploitable in
 # the pg_ripple use-case (server-side PostgreSQL extension with no untrusted
 # external input to the affected code paths).
 ignore = [
     # serde_cbor: unmaintained (replaced by ciborium).  No direct dep.
+    # Status: still present as transitive dep; no upstream fix expected.
     "RUSTSEC-2021-0127",
-    # rsa: timing side-channel in RSA decryption.  Not used for RSA in pg_ripple.
+    # rsa: timing side-channel in RSA decryption (Marvin attack).
+    # pg_ripple does not use RSA decryption for external-party data.
+    # Status: no patched version available as of v0.82.0 review.
     "RUSTSEC-2024-0436",
+    # rsa: PKCS#1 v1.5 timing side-channel (closely related to RUSTSEC-2024-0436).
+    # Same mitigation applies: RSA not used for untrusted external input.
+    # Status: no patched version available as of v0.82.0 review.
+    "RUSTSEC-2023-0071",
     # paste: proc-macro crate unsoundness.  Only used at compile time.
+    # Status: compile-time only, no runtime impact.
     "RUSTSEC-2026-0104",
 ]

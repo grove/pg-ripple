@@ -164,20 +164,26 @@ pub fn sparql_explain(query_text: &str, analyze: bool) -> String {
         .parse_query(query_text)
         .unwrap_or_else(|e| pgrx::error!("SPARQL parse error: {}", e));
 
-    let (inner_sql, vars) = match query {
+    // EXPLAIN-ALG-01 (v0.82.0): extract algebra + SQL in one pass.
+    let (inner_sql, vars, algebra_json) = match query {
         spargebra::Query::Select { pattern, .. } => {
+            // Display the parsed SPARQL algebra tree before SQL translation.
+            let alg_str = format!("{pattern}");
             let trans = sqlgen::translate_select(&pattern, None);
-            (trans.sql, trans.variables)
+            (trans.sql, trans.variables, alg_str)
         }
         spargebra::Query::Ask { pattern, .. } => {
+            let alg_str = format!("{pattern}");
             let sql = sqlgen::translate_ask(&pattern);
-            (sql, vec!["result".to_owned()])
+            (sql, vec!["result".to_owned()], alg_str)
         }
         _ => pgrx::error!("sparql_explain() supports SELECT and ASK queries"),
     };
 
     if !analyze {
-        return format!("-- Generated SQL --\n{inner_sql}\n-- Variables: {vars:?}");
+        return format!(
+            "-- SPARQL Algebra --\n{algebra_json}\n\n-- Generated SQL --\n{inner_sql}\n-- Variables: {vars:?}"
+        );
     }
 
     // EXPLAIN ANALYZE the generated SQL.
@@ -192,7 +198,9 @@ pub fn sparql_explain(query_text: &str, analyze: bool) -> String {
         lines.join("\n")
     });
 
-    format!("-- Generated SQL --\n{inner_sql}\n\n-- EXPLAIN ANALYZE --\n{plan}")
+    format!(
+        "-- SPARQL Algebra --\n{algebra_json}\n\n-- Generated SQL --\n{inner_sql}\n\n-- EXPLAIN ANALYZE --\n{plan}"
+    )
 }
 
 /// Execute a SPARQL SELECT query and return the result as a JSON string.

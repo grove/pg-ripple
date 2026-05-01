@@ -169,15 +169,17 @@ fn run_rules_into_temp(
         // Still create empty tables so callers can reference them safely.
         for &pid in derived {
             let tbl = format!("{prefix}{pid}");
-            let _ = Spi::run_with_args(&format!("DROP TABLE IF EXISTS {tbl}"), &[]);
-            let _ = Spi::run_with_args(
+            Spi::run_with_args(&format!("DROP TABLE IF EXISTS {tbl}"), &[])
+                .unwrap_or_else(|e| pgrx::log!("datalog cleanup: {e}"));
+            Spi::run_with_args(
                 &format!(
                     "CREATE TEMP TABLE {tbl} \
                      (s BIGINT NOT NULL, o BIGINT NOT NULL, \
                       g BIGINT NOT NULL DEFAULT 0, UNIQUE (s, o, g))"
                 ),
                 &[],
-            );
+            )
+            .unwrap_or_else(|e| pgrx::log!("datalog cleanup: {e}"));
         }
         return (0, true);
     }
@@ -185,7 +187,8 @@ fn run_rules_into_temp(
     // ── Create temp tables ────────────────────────────────────────────────────
     for &pid in derived {
         let tbl = format!("{prefix}{pid}");
-        let _ = Spi::run_with_args(&format!("DROP TABLE IF EXISTS {tbl}"), &[]);
+        Spi::run_with_args(&format!("DROP TABLE IF EXISTS {tbl}"), &[])
+            .unwrap_or_else(|e| pgrx::log!("datalog cleanup: {e}"));
         Spi::run_with_args(
             &format!(
                 "CREATE TEMP TABLE {tbl} \
@@ -211,7 +214,8 @@ fn run_rules_into_temp(
         let target = format!("{prefix}{hpid}");
         match compile_single_rule_to(rule, &target) {
             Ok(sql) => {
-                let _ = Spi::run_with_args(&sql, &[]);
+                Spi::run_with_args(&sql, &[])
+                    .unwrap_or_else(|e| pgrx::log!("datalog cleanup: {e}"));
             }
             Err(e) => pgrx::warning!("wfs: seed compile error: {e}"),
         }
@@ -225,7 +229,8 @@ fn run_rules_into_temp(
         // Create "new delta" temp tables.
         for &pid in derived {
             let new_tbl = format!("{prefix}new_{pid}");
-            let _ = Spi::run_with_args(&format!("DROP TABLE IF EXISTS {new_tbl}"), &[]);
+            Spi::run_with_args(&format!("DROP TABLE IF EXISTS {new_tbl}"), &[])
+                .unwrap_or_else(|e| pgrx::log!("datalog cleanup: {e}"));
             Spi::run_with_args(
                 &format!(
                     "CREATE TEMP TABLE {new_tbl} \
@@ -253,7 +258,8 @@ fn run_rules_into_temp(
             match compile_rule_delta_variants_to(rule, derived, &delta_fn, Some(&new_delta_fn)) {
                 Ok(sqls) => {
                     for sql in &sqls {
-                        let _ = Spi::run_with_args(sql, &[]);
+                        Spi::run_with_args(sql, &[])
+                            .unwrap_or_else(|e| pgrx::log!("datalog cleanup: {e}"));
                     }
                 }
                 Err(e) => pgrx::warning!("wfs: fixpoint compile error: {e}"),
@@ -275,14 +281,16 @@ fn run_rules_into_temp(
             .unwrap_or(0);
             new_this_iter += cnt;
 
-            let _ = Spi::run_with_args(
+            Spi::run_with_args(
                 &format!(
                     "INSERT INTO {tbl} (s, o, g) \
                      SELECT s, o, g FROM {new_tbl} ON CONFLICT DO NOTHING"
                 ),
                 &[],
-            );
-            let _ = Spi::run_with_args(&format!("DROP TABLE IF EXISTS {new_tbl}"), &[]);
+            )
+            .unwrap_or_else(|e| pgrx::log!("datalog cleanup: {e}"));
+            Spi::run_with_args(&format!("DROP TABLE IF EXISTS {new_tbl}"), &[])
+                .unwrap_or_else(|e| pgrx::log!("datalog cleanup: {e}"));
         }
 
         if new_this_iter == 0 {
@@ -406,7 +414,7 @@ fn wfs_non_stratifiable(_rule_set_name: &str, all_rules: &[Rule]) -> (i64, i64, 
         .unwrap_or(0);
 
         if cnt > 0 {
-            let _ = Spi::run_with_args(
+            Spi::run_with_args(
                 "INSERT INTO _pg_ripple.predicates (id, table_oid, triple_count) \
                  VALUES ($1, NULL, $2) ON CONFLICT (id) DO UPDATE \
                      SET triple_count = \
@@ -415,16 +423,21 @@ fn wfs_non_stratifiable(_rule_set_name: &str, all_rules: &[Rule]) -> (i64, i64, 
                     pgrx::datum::DatumWithOid::from(pid),
                     pgrx::datum::DatumWithOid::from(cnt),
                 ],
-            );
+            )
+            .unwrap_or_else(|e| pgrx::log!("datalog cleanup: {e}"));
         }
     }
 
     // ── Cleanup temp tables ───────────────────────────────────────────────────
     for &pid in &derived {
-        let _ = Spi::run_with_args(&format!("DROP TABLE IF EXISTS _wfs_pos_{pid}"), &[]);
-        let _ = Spi::run_with_args(&format!("DROP TABLE IF EXISTS _wfs_all_{pid}"), &[]);
-        let _ = Spi::run_with_args(&format!("DROP TABLE IF EXISTS _wfs_pos_new_{pid}"), &[]);
-        let _ = Spi::run_with_args(&format!("DROP TABLE IF EXISTS _wfs_all_new_{pid}"), &[]);
+        Spi::run_with_args(&format!("DROP TABLE IF EXISTS _wfs_pos_{pid}"), &[])
+            .unwrap_or_else(|e| pgrx::log!("datalog cleanup: {e}"));
+        Spi::run_with_args(&format!("DROP TABLE IF EXISTS _wfs_all_{pid}"), &[])
+            .unwrap_or_else(|e| pgrx::log!("datalog cleanup: {e}"));
+        Spi::run_with_args(&format!("DROP TABLE IF EXISTS _wfs_pos_new_{pid}"), &[])
+            .unwrap_or_else(|e| pgrx::log!("datalog cleanup: {e}"));
+        Spi::run_with_args(&format!("DROP TABLE IF EXISTS _wfs_all_new_{pid}"), &[])
+            .unwrap_or_else(|e| pgrx::log!("datalog cleanup: {e}"));
     }
 
     let total = certain_count + unknown_count;

@@ -62,9 +62,26 @@ fn is_safe_role_name(role: &str) -> bool {
 /// wrapping in double-quotes ensures the role is treated as an identifier
 /// even if it happens to match an SQL keyword.
 fn quote_ident_safe(name: &str) -> String {
-    // Escape any embedded double-quote characters per SQL standard.
-    let escaped = name.replace('"', "\"\"");
-    format!("\"{escaped}\"")
+    // ROLE-UNICODE-01 (v0.82.0): if the name contains non-ASCII characters,
+    // fall back to PostgreSQL's own quote_ident() via SPI to handle Unicode
+    // correctly (e.g. accented letters, CJK, emoji in role names).
+    if name.is_ascii() {
+        // Fast path for the common case: escape embedded double-quotes.
+        let escaped = name.replace('"', "\"\"");
+        format!("\"{escaped}\"")
+    } else {
+        // SPI fallback for non-ASCII names.
+        pgrx::Spi::get_one_with_args::<String>(
+            "SELECT quote_ident($1)",
+            &[pgrx::datum::DatumWithOid::from(name)],
+        )
+        .unwrap_or(None)
+        .unwrap_or_else(|| {
+            // If SPI fails, fall back to manual quoting (best-effort).
+            let escaped = name.replace('"', "\"\"");
+            format!("\"{escaped}\"")
+        })
+    }
 }
 
 /// Returns `true` if graph-level RLS has been enabled (the sentinel row exists).

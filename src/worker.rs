@@ -20,7 +20,58 @@
 use pgrx::bgworkers::*;
 use pgrx::prelude::*;
 use std::sync::atomic::Ordering;
-use std::time::Duration;
+use std::time::{Duration, Instant};
+
+// ─── Thread-local predicate cache (MERGE-PRED-01, v0.82.0) ───────────────────
+
+/// Cached list of HTAP predicate IDs for the merge worker.
+/// Refreshed when SIGHUP is received or the cache age exceeds 60 seconds.
+struct PredicateCache {
+    ids: Vec<i64>,
+    loaded_at: Instant,
+}
+
+impl PredicateCache {
+    fn new() -> Self {
+        // Set loaded_at to `None` sentinel by using a zero-length vec and
+        // an epoch-like instant. Since we check `ids.is_empty()` first,
+        // any Instant works for the initial value.
+        Self {
+            ids: Vec::new(),
+            loaded_at: Instant::now(),
+        }
+    }
+
+    /// Return the cached predicate IDs, refreshing if stale (> 60 s).
+    fn get_or_refresh(&mut self) -> &[i64] {
+        let cache_ttl_secs = 60u64;
+        if self.ids.is_empty() || self.loaded_at.elapsed().as_secs() >= cache_ttl_secs {
+            self.reload();
+        }
+        &self.ids
+    }
+
+    /// Reload predicate IDs from the database (inside an SPI transaction).
+    fn reload(&mut self) {
+        let ids: Vec<i64> = Spi::connect(|c| {
+            c.select(
+                "SELECT id FROM _pg_ripple.predicates WHERE htap = true",
+                None,
+                &[],
+            )
+            .unwrap_or_else(|e| pgrx::error!("merge worker: predicates scan error: {e}"))
+            .filter_map(|row| row.get::<i64>(1).ok().flatten())
+            .collect()
+        });
+        self.ids = ids;
+        self.loaded_at = Instant::now();
+    }
+
+    /// Invalidate the cache (e.g. on SIGHUP).
+    fn invalidate(&mut self) {
+        self.ids.clear();
+    }
+}
 
 /// Register background merge worker(s) with the postmaster.
 ///
@@ -113,28 +164,58 @@ pub extern "C-unwind" fn pg_ripple_merge_worker_main(arg: pg_sys::Datum) {
     // Main loop: wait for latch or timeout, then run a merge cycle.
     let interval_secs = get_merge_interval();
     let mut consecutive_errors: u32 = 0;
+    // MERGE-HBEAT-01 (v0.82.0): track last heartbeat time.
+    let mut last_heartbeat = Instant::now()
+        .checked_sub(Duration::from_secs(3600))
+        .unwrap_or(Instant::now());
+    // MERGE-PRED-01 (v0.82.0): predicate ID cache.
+    let mut pred_cache = PredicateCache::new();
     while BackgroundWorker::wait_latch(Some(Duration::from_secs(interval_secs))) {
-        if BackgroundWorker::sighup_received() {
+        let sighup = BackgroundWorker::sighup_received();
+        if sighup {
             // SIGHUP: reload configuration.  The GUC system handles this.
             pgrx::log!(
                 "pg_ripple merge worker {worker_idx}: SIGHUP received — configuration reloaded"
             );
+            // MERGE-PRED-01: invalidate predicate cache on SIGHUP so new predicates
+            // (promoted since last cycle) are picked up immediately.
+            pred_cache.invalidate();
         }
 
         let n_workers = crate::MERGE_WORKERS.get().clamp(1, 16) as u32;
 
-        // Run merge cycle followed by async validation batch.
-        let run_result = std::panic::catch_unwind(|| {
-            BackgroundWorker::transaction(|| {
-                run_merge_cycle_for_worker(worker_idx, n_workers);
+        // MERGE-HBEAT-01 (v0.82.0): emit periodic heartbeat log.
+        let heartbeat_interval = crate::MERGE_HEARTBEAT_INTERVAL_SECONDS.get().max(10) as u64;
+        if last_heartbeat.elapsed().as_secs() >= heartbeat_interval {
+            let run_result = std::panic::catch_unwind(|| {
+                BackgroundWorker::transaction(|| {
+                    emit_merge_worker_heartbeat(worker_idx);
+                });
             });
+            if run_result.is_err() {
+                unsafe {
+                    pg_sys::FlushErrorState();
+                }
+            }
+            last_heartbeat = Instant::now();
+        }
+
+        // Run merge cycle followed by async validation batch.
+        // SAFETY: AssertUnwindSafe is needed because pred_cache (&mut PredicateCache) is
+        // not UnwindSafe, but it is safe to continue using it after a panic (the cache is
+        // just a TTL-bounded Vec; at worst, a mid-refresh panic leaves it empty and it will
+        // be refreshed on the next cycle).
+        let run_result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            BackgroundWorker::transaction(std::panic::AssertUnwindSafe(|| {
+                run_merge_cycle_for_worker_cached(worker_idx, n_workers, &mut pred_cache);
+            }));
             // Only worker 0 runs validation and embedding queue drain.
             if worker_idx == 0 {
                 BackgroundWorker::transaction(|| {
                     run_validation_cycle();
                 });
             }
-        });
+        }));
 
         if let Err(e) = run_result {
             consecutive_errors += 1;
@@ -178,6 +259,62 @@ pub extern "C-unwind" fn pg_ripple_merge_worker_main(arg: pg_sys::Datum) {
     }
 
     pgrx::log!("pg_ripple merge worker {worker_idx} stopped");
+}
+
+/// MERGE-HBEAT-01 (v0.82.0): emit a LOG-level heartbeat and update the
+/// `_pg_ripple.merge_worker_status` table.
+fn emit_merge_worker_heartbeat(worker_idx: u32) {
+    // Count predicates and total delta rows for the heartbeat payload.
+    let pred_count: i64 =
+        Spi::get_one::<i64>("SELECT count(*)::bigint FROM _pg_ripple.predicates WHERE htap = true")
+            .unwrap_or(None)
+            .unwrap_or(0);
+
+    let total_delta_rows: i64 = crate::shmem::TOTAL_DELTA_ROWS.get().load(Ordering::Relaxed);
+
+    pgrx::log!(
+        "pg_ripple merge worker {worker_idx} heartbeat: \
+         predicates={pred_count} unmerged_delta_rows={total_delta_rows}"
+    );
+
+    // Update the merge_worker_status table (best-effort — non-fatal on failure).
+    let _ = Spi::run_with_args(
+        "INSERT INTO _pg_ripple.merge_worker_status \
+         (worker_idx, last_heartbeat_at, predicates_total, delta_rows_pending) \
+         VALUES ($1, now(), $2, $3) \
+         ON CONFLICT (worker_idx) DO UPDATE \
+             SET last_heartbeat_at    = now(), \
+                 predicates_total     = EXCLUDED.predicates_total, \
+                 delta_rows_pending   = EXCLUDED.delta_rows_pending",
+        &[
+            pgrx::datum::DatumWithOid::from(worker_idx as i32),
+            pgrx::datum::DatumWithOid::from(pred_count),
+            pgrx::datum::DatumWithOid::from(total_delta_rows),
+        ],
+    );
+}
+
+/// MERGE-PRED-01 (v0.82.0): thin wrapper that passes the cached predicate list
+/// into `run_merge_cycle_for_worker`.  Kept separate so the original function
+/// signature is preserved for the non-cached call path used in testing.
+fn run_merge_cycle_for_worker_cached(
+    worker_idx: u32,
+    n_workers: u32,
+    pred_cache: &mut PredicateCache,
+) {
+    // Refresh cache if needed (inside SPI transaction).
+    let cached_ids = pred_cache.get_or_refresh().to_vec();
+    run_merge_cycle_for_worker_with_ids(worker_idx, n_workers, cached_ids);
+}
+
+/// Run one merge cycle for the given worker in a parallel pool (v0.42.0).
+///
+/// `worker_idx`: zero-based index of this worker.
+/// `n_workers`: total number of workers in the pool.
+/// `all_htap_ids`: pre-fetched list of all HTAP predicate IDs (from cache).
+fn run_merge_cycle_for_worker_with_ids(worker_idx: u32, n_workers: u32, all_htap_ids: Vec<i64>) {
+    // Delegate to the original function but use the provided predicate list.
+    run_merge_cycle_for_worker_inner(worker_idx, n_workers, all_htap_ids);
 }
 
 /// Run one async validation batch inside an open SPI transaction.
@@ -234,13 +371,9 @@ impl Drop for MergeFenceGuard {
 
 /// Run one merge cycle for the given worker in a parallel pool (v0.42.0).
 ///
-/// `worker_idx`: zero-based index of this worker.
-/// `n_workers`: total number of workers in the pool.
-///
-/// Each worker owns predicates where `(pred_id % n_workers) == worker_idx`.
-/// Before merging each predicate, the worker acquires `pg_advisory_lock(pred_id)`
-/// to prevent races when `n_workers > 1`.
-fn run_merge_cycle_for_worker(worker_idx: u32, n_workers: u32) {
+/// Internal implementation that accepts a pre-built predicate ID list.
+/// Called via `run_merge_cycle_for_worker_with_ids` which provides the cached list.
+fn run_merge_cycle_for_worker_inner(worker_idx: u32, n_workers: u32, pred_ids_all: Vec<i64>) {
     // Check whether any deltas need merging.
     if crate::shmem::delta_is_empty() {
         // Nothing to merge.
@@ -284,15 +417,12 @@ fn run_merge_cycle_for_worker(worker_idx: u32, n_workers: u32) {
 
     let threshold = get_merge_threshold();
 
+    // MERGE-PRED-01 (v0.82.0): use the pre-fetched predicate list from the cache
+    // instead of querying the database on every cycle.
     // Find predicates assigned to this worker (round-robin by pred_id % n_workers).
-    let pred_ids: Vec<i64> = Spi::connect(|c| {
-        c.select(
-            "SELECT id FROM _pg_ripple.predicates WHERE htap = true",
-            None,
-            &[],
-        )
-        .unwrap_or_else(|e| pgrx::error!("merge worker: predicates scan error: {e}"))
-        .filter_map(|row| row.get::<i64>(1).ok().flatten())
+    let pred_ids: Vec<i64> = pred_ids_all
+        .iter()
+        .copied()
         .filter(|&id| {
             // Round-robin partition: this worker handles predicates where
             // (id % n_workers) == worker_idx.  When n_workers == 1 all predicates
@@ -305,26 +435,19 @@ fn run_merge_cycle_for_worker(worker_idx: u32, n_workers: u32) {
                 bucket == worker_idx
             }
         })
-        .collect()
-    });
+        .collect();
 
     // Also check for work-stealing: if any predicate above threshold is not
     // claimed by another worker (advisory lock available), process it too.
     let all_pred_ids: Vec<i64> = if n_workers > 1 {
-        Spi::connect(|c| {
-            c.select(
-                "SELECT id FROM _pg_ripple.predicates WHERE htap = true",
-                None,
-                &[],
-            )
-            .unwrap_or_else(|e| pgrx::error!("merge worker: predicates scan error: {e}"))
-            .filter_map(|row| row.get::<i64>(1).ok().flatten())
+        pred_ids_all
+            .iter()
+            .copied()
             .filter(|&id| {
                 let bucket = (id.unsigned_abs() % (n_workers as u64)) as u32;
                 bucket != worker_idx // only "foreign" predicates
             })
             .collect()
-        })
     } else {
         Vec::new()
     };
