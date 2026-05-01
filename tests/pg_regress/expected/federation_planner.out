@@ -67,7 +67,7 @@ WHERE table_schema = '_pg_ripple'
 SELECT count(*) AS initial_stats_count FROM pg_ripple.list_federation_stats();
  initial_stats_count 
 ---------------------
-                   7
+                   2
 (1 row)
 
 -- ── Part 3: Register a mock endpoint and verify stats entry ──────────────────

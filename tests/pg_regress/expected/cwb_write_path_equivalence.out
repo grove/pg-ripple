@@ -35,12 +35,16 @@ SELECT pg_ripple.create_construct_rule(
      } }',
     'https://cwbequiv.test/derived/'
 ) IS NULL AS rule_created;
-ERROR:  cannot insert into view "vp_7"
+ rule_created 
+--------------
+ t
+(1 row)
+
 -- Confirm rule is listed.
 SELECT jsonb_array_length(pg_ripple.list_construct_rules()) >= 1 AS rule_registered;
  rule_registered 
 -----------------
- f
+ t
 (1 row)
 
 -- Path 1: insert_triple()
