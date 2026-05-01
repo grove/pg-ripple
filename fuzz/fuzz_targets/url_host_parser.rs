@@ -39,7 +39,13 @@ fn extract_url_host(url: &str) -> String {
     };
     if rest.starts_with('[') {
         if let Some(close) = rest.find(']') {
-            return rest[..=close].to_owned();
+            let candidate = &rest[..=close];
+            // A valid IPv6 literal cannot contain '/'; if it does the input is
+            // malformed (e.g. a second URL scheme embedded inside brackets).
+            if candidate.contains('/') {
+                return String::new();
+            }
+            return candidate.to_owned();
         }
         return String::new();
     }
