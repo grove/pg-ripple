@@ -1798,6 +1798,42 @@ pub fn register_all_gucs() {
         GucFlags::default(),
     );
 
+    // ── v0.81.0 GUCs ──────────────────────────────────────────────────────────
+
+    pgrx::GucRegistry::define_bool_guc(
+        c"pg_ripple.strict_dictionary",
+        c"When on, decode() returns an error for missing dictionary IDs instead of \
+      the _unknown_<id> placeholder string. Useful for strict data-quality contexts. \
+      Default off. (v0.81.0 DICT-STRICT-01)",
+        c"",
+        &crate::gucs::storage::STRICT_DICTIONARY,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+
+    pgrx::GucRegistry::define_bool_guc(
+        c"pg_ripple.strict_sparql_filters",
+        c"When on, unknown built-in function names in FILTER expressions raise \
+      ERROR (PT422) rather than evaluating to UNDEF. Default off. \
+      (v0.81.0 FILTER-STRICT-01)",
+        c"",
+        &crate::gucs::sparql::STRICT_SPARQL_FILTERS,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+
+    pgrx::GucRegistry::define_int_guc(
+        c"pg_ripple.cdc_slot_idle_timeout_seconds",
+        c"Seconds of no LSN advance before the CDC slot cleanup worker drops an \
+      orphaned replication slot. Default: 3600. (v0.81.0 CDC-SLOT-01)",
+        c"",
+        &crate::gucs::storage::CDC_SLOT_IDLE_TIMEOUT_SECONDS,
+        60,
+        86400,
+        GucContext::Suset,
+        GucFlags::default(),
+    );
+
     // PGC_POSTMASTER GUCs can only be registered during shared_preload_libraries
     // loading.  `process_shared_preload_libraries_in_progress` is the correct
     // flag — `IsPostmasterEnvironment` is true in every server process and

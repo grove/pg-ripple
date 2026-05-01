@@ -8,6 +8,7 @@ SELECT pg_ripple.load_ntriples(
     '<https://example.org/Bob>   <https://schema.org/age> "25"^^<http://www.w3.org/2001/XMLSchema#integer> .' || E'\n' ||
     '<https://example.org/Bob>   <https://schema.org/name> "Bob" .'
 ) = 4 AS data_loaded;
+WARNING:  pg_ripple: loaded without shared_preload_libraries; HTAP merge worker, CONSTRUCT writeback, and dictionary cache are disabled. Add pg_ripple to shared_preload_libraries in postgresql.conf.
  data_loaded 
 -------------
  t

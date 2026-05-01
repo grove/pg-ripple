@@ -20,6 +20,7 @@ SELECT pg_ripple.sparql_update(
        }
      }'
 ) = 2 AS two_in_src;
+WARNING:  pg_ripple: loaded without shared_preload_libraries; HTAP merge worker, CONSTRUCT writeback, and dictionary cache are disabled. Add pg_ripple to shared_preload_libraries in postgresql.conf.
  two_in_src 
 ------------
  t

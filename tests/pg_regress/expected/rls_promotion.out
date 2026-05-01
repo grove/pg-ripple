@@ -32,6 +32,7 @@ SELECT EXISTS (
 
 -- Enable global RLS.
 SELECT pg_ripple.enable_graph_rls() AS rls_enabled;
+WARNING:  pg_ripple: loaded without shared_preload_libraries; HTAP merge worker, CONSTRUCT writeback, and dictionary cache are disabled. Add pg_ripple to shared_preload_libraries in postgresql.conf.
  rls_enabled 
 -------------
  t

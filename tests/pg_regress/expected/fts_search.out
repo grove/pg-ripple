@@ -15,6 +15,7 @@ SELECT pg_ripple.load_ntriples(
     '<https://fts.test/doc3> <https://fts.test/abstract> "SPARQL enables semantic graph queries over RDF" .' || E'\n' ||
     '<https://fts.test/doc4> <https://fts.test/title>    "Introduction to semantic web"  .'
 ) = 4 AS four_triples_loaded;
+WARNING:  pg_ripple: loaded without shared_preload_libraries; HTAP merge worker, CONSTRUCT writeback, and dictionary cache are disabled. Add pg_ripple to shared_preload_libraries in postgresql.conf.
  four_triples_loaded 
 ---------------------
  t

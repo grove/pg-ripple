@@ -771,4 +771,58 @@ mod pg_ripple {
     fn r2rml_load(mapping_iri: &str) -> i64 {
         crate::r2rml::r2rml_load(mapping_iri)
     }
+
+    // ── VP Promotion Recovery (v0.81.0 PROMO-STUCK-01) ───────────────────────
+
+    /// Detect and recover VP table promotions that were abandoned mid-flight.
+    ///
+    /// A promotion is considered "stuck" if `_pg_ripple.predicates` has a row
+    /// with `promotion_status = 'promoting'` and no backend currently holds the
+    /// corresponding per-predicate advisory lock (meaning the promoting backend
+    /// exited without completing the operation).
+    ///
+    /// For each stuck promotion found, this function re-runs the promotion from
+    /// Phase 1 so the predicate ends up in its own HTAP VP table.
+    ///
+    /// Returns the number of promotions recovered.
+    ///
+    /// ```sql
+    /// SELECT pg_ripple.recover_stuck_promotions();
+    /// ```
+    #[pg_extern]
+    fn recover_stuck_promotions() -> i64 {
+        // Find predicates whose promotion was started but never finished.
+        // Use pg_try_advisory_lock to detect whether any session is actively
+        // promoting: if we can acquire the lock, the original promoter is gone.
+        let stuck_ids: Vec<i64> = pgrx::Spi::connect(|c| {
+            c.select(
+                "SELECT id \
+                 FROM _pg_ripple.predicates \
+                 WHERE promotion_status = 'promoting' \
+                   AND pg_try_advisory_xact_lock(id) \
+                 ORDER BY id",
+                None,
+                &[],
+            )
+            .unwrap_or_else(|e| pgrx::error!("recover_stuck_promotions: query error: {e}"))
+            .filter_map(|row| row.get::<i64>(1).ok().flatten())
+            .collect()
+        });
+
+        let count = stuck_ids.len() as i64;
+        for p_id in stuck_ids {
+            pgrx::notice!(
+                "pg_ripple.recover_stuck_promotions: recovering stuck promotion for predicate {p_id}"
+            );
+            crate::storage::promote::promote_predicate_pub(p_id);
+        }
+
+        if count > 0 {
+            pgrx::log!(
+                "pg_ripple.recover_stuck_promotions: recovered {} stuck promotion(s)",
+                count
+            );
+        }
+        count
+    }
 }

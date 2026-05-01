@@ -18,6 +18,7 @@ SET search_path TO pg_ripple, public;
 -- pg_trickle is not installed in the standard test environment.
 -- The function must return 0 and emit a WARNING (not ERROR).
 SELECT pg_ripple.enable_shacl_dag_monitors() = 0 AS returns_zero_without_pg_trickle;
+WARNING:  pg_ripple: loaded without shared_preload_libraries; HTAP merge worker, CONSTRUCT writeback, and dictionary cache are disabled. Add pg_ripple to shared_preload_libraries in postgresql.conf.
 WARNING:  pg_trickle is not installed; SHACL DAG monitors are unavailable. Install pg_trickle and run SELECT pg_ripple.enable_shacl_dag_monitors() to enable.
  returns_zero_without_pg_trickle 
 ---------------------------------

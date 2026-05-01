@@ -7,6 +7,7 @@ SET client_min_messages = DEFAULT;
 SET search_path TO pg_ripple, public;
 -- canary() must return a JSONB object.
 SELECT jsonb_typeof(pg_ripple.canary()) AS canary_type;
+WARNING:  pg_ripple: loaded without shared_preload_libraries; HTAP merge worker, CONSTRUCT writeback, and dictionary cache are disabled. Add pg_ripple to shared_preload_libraries in postgresql.conf.
  canary_type 
 -------------
  object

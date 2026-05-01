@@ -12,6 +12,7 @@ SELECT pg_ripple.json_to_ntriples_and_load(
     NULL,
     '{"@context": {"intval": "https://example.org/intval", "floatval": "https://example.org/floatval"}}'::jsonb
 ) > 0 AS rt_fix_06_loaded;
+WARNING:  pg_ripple: loaded without shared_preload_libraries; HTAP merge worker, CONSTRUCT writeback, and dictionary cache are disabled. Add pg_ripple to shared_preload_libraries in postgresql.conf.
  rt_fix_06_loaded 
 ------------------
  t

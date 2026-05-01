@@ -64,3 +64,10 @@ pub static SPARQL_MAX_ALGEBRA_DEPTH: pgrx::GucSetting<i32> = pgrx::GucSetting::<
 
 /// GUC: maximum number of triple patterns allowed in a single SPARQL query (v0.51.0).
 pub static SPARQL_MAX_TRIPLE_PATTERNS: pgrx::GucSetting<i32> = pgrx::GucSetting::<i32>::new(4096);
+
+// ─── v0.81.0 SPARQL GUCs ─────────────────────────────────────────────────────
+
+/// GUC: when `on`, an unknown built-in function name in a FILTER expression raises
+/// ERROR (PT422) rather than evaluating to UNDEF. Default: `off`.
+/// (v0.81.0 FILTER-STRICT-01)
+pub static STRICT_SPARQL_FILTERS: pgrx::GucSetting<bool> = pgrx::GucSetting::<bool>::new(false);

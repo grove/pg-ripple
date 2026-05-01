@@ -14,6 +14,7 @@ CREATE TEMP TABLE _sl_strict_baseline AS
 SELECT pg_ripple.load_ntriples('
 <http://strict.test/alice> <http://strict.test/name> "Alice" .
 ') > 0 AS lenient_load_ok;
+WARNING:  pg_ripple: loaded without shared_preload_libraries; HTAP merge worker, CONSTRUCT writeback, and dictionary cache are disabled. Add pg_ripple to shared_preload_libraries in postgresql.conf.
  lenient_load_ok 
 -----------------
  t

@@ -57,6 +57,7 @@ SELECT pg_ripple.load_ntriples(
     '<https://w3c.sparql.query.test/bob>   <https://w3c.sparql.query.test/score> "80"^^<http://www.w3.org/2001/XMLSchema#integer> .' || E'\n' ||
     '<https://w3c.sparql.query.test/carol> <https://w3c.sparql.query.test/score> "70"^^<http://www.w3.org/2001/XMLSchema#integer> .'
 ) = 17 AS dataset_loaded;
+WARNING:  pg_ripple: loaded without shared_preload_libraries; HTAP merge worker, CONSTRUCT writeback, and dictionary cache are disabled. Add pg_ripple to shared_preload_libraries in postgresql.conf.
  dataset_loaded 
 ----------------
  t

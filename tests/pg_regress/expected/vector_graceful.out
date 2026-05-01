@@ -16,6 +16,7 @@ SELECT pg_ripple.store_embedding(
     'https://example.org/test',
     ARRAY[0.1, 0.2, 0.3]::float8[]
 ) IS NULL AS store_embedding_void_when_disabled;
+WARNING:  pg_ripple: loaded without shared_preload_libraries; HTAP merge worker, CONSTRUCT writeback, and dictionary cache are disabled. Add pg_ripple to shared_preload_libraries in postgresql.conf.
 WARNING:  pg_ripple.store_embedding: pgvector disabled (pg_ripple.pgvector_enabled = false); returning empty results
  store_embedding_void_when_disabled 
 ------------------------------------

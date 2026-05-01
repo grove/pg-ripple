@@ -89,12 +89,22 @@ pub(super) fn retract_exclusive_triples(rule_name: &str) {
                     .unwrap_or_else(|e| pgrx::warning!("retract tombstone insert: {e}"));
                 }
             } else {
-                // Flat VP table — direct DELETE is correct.
-                let sql = format!(
-                    "DELETE FROM _pg_ripple.vp_{pred_id} \
-                     WHERE s = {s} AND o = {o} AND g = {g} AND source = 1"
-                );
-                Spi::run(&sql).unwrap_or_else(|e| pgrx::warning!("retract VP: {e}"));
+                // Flat VP table — direct DELETE is correct (non-HTAP path).
+                // RETRACT-PARAM-01 (v0.81.0): use parameterised query for WHERE
+                // clause values; the table name is safe (integer pred_id).
+                let table = format!("_pg_ripple.vp_{pred_id}");
+                Spi::run_with_args(
+                    &format!(
+                        "DELETE FROM {table} \
+                         WHERE s = $1 AND o = $2 AND g = $3 AND source = 1"
+                    ),
+                    &[
+                        DatumWithOid::from(s),
+                        DatumWithOid::from(o),
+                        DatumWithOid::from(g),
+                    ],
+                )
+                .unwrap_or_else(|e| pgrx::warning!("retract VP: {e}"));
             }
         } else {
             // vp_rare is always a flat table — direct DELETE is correct.

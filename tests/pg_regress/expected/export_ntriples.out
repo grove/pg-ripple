@@ -5,6 +5,7 @@ SELECT pg_ripple.load_ntriples(
     '<https://example.org/bob> <https://example.org/knows> <https://example.org/carol> .' || chr(10) ||
     '<https://example.org/alice> <https://example.org/age> "30"^^<http://www.w3.org/2001/XMLSchema#integer> .' || chr(10)
 ) = 3 AS loaded_three_triples;
+WARNING:  pg_ripple: loaded without shared_preload_libraries; HTAP merge worker, CONSTRUCT writeback, and dictionary cache are disabled. Add pg_ripple to shared_preload_libraries in postgresql.conf.
  loaded_three_triples 
 ----------------------
  t

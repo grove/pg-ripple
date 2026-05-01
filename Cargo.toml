@@ -3,7 +3,7 @@ members = [".", "pg_ripple_http"]
 
 [package]
 name = "pg_ripple"
-version = "0.80.0"
+version = "0.81.0"
 edition = "2024"
 description = "High-performance RDF triple store with native SPARQL query execution for PostgreSQL 18"
 license = "Apache-2.0"

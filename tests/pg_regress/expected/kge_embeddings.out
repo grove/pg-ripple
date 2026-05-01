@@ -4,6 +4,7 @@ SET search_path TO pg_ripple, public;
 -- Test: kge_stats returns at least one row.
 SELECT count(*) >= 0 AS kge_stats_ok
 FROM pg_ripple.kge_stats();
+WARNING:  pg_ripple: loaded without shared_preload_libraries; HTAP merge worker, CONSTRUCT writeback, and dictionary cache are disabled. Add pg_ripple to shared_preload_libraries in postgresql.conf.
  kge_stats_ok 
 --------------
  t

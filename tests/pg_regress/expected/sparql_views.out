@@ -8,6 +8,7 @@ SET search_path TO pg_ripple, public;
 -- pg_trickle_available() always returns a BOOLEAN; the exact value depends on
 -- whether pg_trickle is installed in the test database.
 SELECT pg_ripple.pg_trickle_available() IN (true, false) AS available_is_boolean;
+WARNING:  pg_ripple: loaded without shared_preload_libraries; HTAP merge worker, CONSTRUCT writeback, and dictionary cache are disabled. Add pg_ripple to shared_preload_libraries in postgresql.conf.
  available_is_boolean 
 ----------------------
  t

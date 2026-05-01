@@ -122,7 +122,7 @@ mod pg_ripple {
 
     /// Install the standard bidi inbox table, dispatch function, and trigger.
     #[pg_extern]
-    pub fn install_bidi_inbox(inbox_table: default!(&str, "'pg_ripple_inbox.linkback_inbox'")) {
+    pub fn install_bidi_inbox(inbox_table: default!(&str, "'ripple_inbox.linkback_inbox'")) {
         crate::bidi::install_bidi_inbox_impl(inbox_table);
     }
 

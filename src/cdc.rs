@@ -90,6 +90,36 @@ $$
         &[],
     )
     .unwrap_or_else(|e| pgrx::error!("cdc notify function creation error: {e}"));
+
+    // CDC-LSN-01 (v0.81.0): LSN watermark table so consumers can track progress.
+    Spi::run_with_args(
+        "CREATE TABLE IF NOT EXISTS _pg_ripple.cdc_lsn_watermark ( \
+             slot_name  TEXT PRIMARY KEY, \
+             last_lsn   PG_LSN NOT NULL, \
+             updated_at TIMESTAMPTZ NOT NULL DEFAULT now() \
+         )",
+        &[],
+    )
+    .unwrap_or_else(|e| pgrx::error!("cdc_lsn_watermark table creation error: {e}"));
+}
+
+/// Update the CDC LSN watermark for `slot_name` to `lsn`.
+///
+/// Called after each CDC batch is committed so that consumers and the
+/// slot-cleanup worker can observe the replication progress.
+#[allow(dead_code)]
+pub fn update_lsn_watermark(slot_name: &str, lsn: &str) {
+    let _ = Spi::run_with_args(
+        "INSERT INTO _pg_ripple.cdc_lsn_watermark (slot_name, last_lsn, updated_at) \
+         VALUES ($1, $2::pg_lsn, now()) \
+         ON CONFLICT (slot_name) DO UPDATE \
+             SET last_lsn = EXCLUDED.last_lsn, \
+                 updated_at = now()",
+        &[
+            pgrx::datum::DatumWithOid::from(slot_name),
+            pgrx::datum::DatumWithOid::from(lsn),
+        ],
+    );
 }
 
 /// Install the CDC notify trigger on a VP delta table for `pred_id`.
@@ -303,5 +333,82 @@ pub fn notify_named_subscriptions(op: &str, s: i64, p: i64, o: i64, g: i64) {
                 DatumWithOid::from(payload.as_str()),
             ],
         );
+    }
+}
+
+// ─── CDC-SLOT-01: orphaned-slot cleanup background worker ─────────────────────
+
+/// Register the CDC slot-cleanup background worker with the postmaster.
+///
+/// Registered from `_PG_init` during `shared_preload_libraries` phase.
+/// The worker wakes every `pg_ripple.cdc_slot_idle_timeout_seconds` and drops
+/// any pg_ripple CDC replication slots that have been idle for longer than that
+/// interval.
+pub fn register_cdc_slot_cleanup_worker() {
+    use pgrx::bgworkers::*;
+    use std::time::Duration;
+
+    BackgroundWorkerBuilder::new("pg_ripple cdc slot cleanup worker")
+        .set_function("pg_ripple_cdc_slot_cleanup_main")
+        .set_library("pg_ripple")
+        .enable_shmem_access(None)
+        .enable_spi_access()
+        .set_start_time(BgWorkerStartTime::RecoveryFinished)
+        .set_restart_time(Some(Duration::from_secs(60)))
+        .load();
+}
+
+/// Entry point for the CDC slot cleanup worker process.
+///
+/// # Safety
+///
+/// Called by PostgreSQL's background worker mechanism as a C entry point.
+/// `#[pg_guard]` ensures proper PG error handling.
+#[pg_guard]
+#[unsafe(no_mangle)]
+pub extern "C-unwind" fn pg_ripple_cdc_slot_cleanup_main(_arg: pg_sys::Datum) {
+    use pgrx::bgworkers::*;
+    use std::time::Duration;
+
+    BackgroundWorker::attach_signal_handlers(SignalWakeFlags::SIGHUP | SignalWakeFlags::SIGTERM);
+
+    let db_name = crate::WORKER_DATABASE
+        .get()
+        .as_ref()
+        .and_then(|c| c.to_str().ok())
+        .unwrap_or("postgres")
+        .to_owned();
+
+    BackgroundWorker::connect_worker_to_spi(Some(&db_name), None);
+
+    loop {
+        // Read the idle-timeout GUC (in seconds) on each wake.
+        let timeout_secs = crate::CDC_SLOT_IDLE_TIMEOUT_SECONDS.get() as u64;
+        let wait_secs = timeout_secs.max(60); // poll at most every 60s
+
+        if !BackgroundWorker::wait_latch(Some(Duration::from_secs(wait_secs))) {
+            break; // postmaster died
+        }
+        if BackgroundWorker::sigterm_received() {
+            break;
+        }
+        if BackgroundWorker::sighup_received() {
+            // GUCs may have changed; re-read on next iteration.
+        }
+
+        // Drop orphaned pg_ripple CDC slots inactive for > timeout_secs.
+        BackgroundWorker::transaction(|| {
+            Spi::run_with_args(
+                "SELECT pg_drop_replication_slot(slot_name) \
+                 FROM pg_replication_slots \
+                 WHERE plugin = 'pgoutput' \
+                   AND slot_name LIKE 'pg_ripple_cdc_%' \
+                   AND inactive_since < now() - make_interval(secs := $1::float8)",
+                &[pgrx::datum::DatumWithOid::from(timeout_secs as i64)],
+            )
+            .unwrap_or_else(|e| {
+                pgrx::warning!("cdc slot cleanup error: {e}");
+            });
+        });
     }
 }

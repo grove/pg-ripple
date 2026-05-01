@@ -297,9 +297,20 @@ pub extern "C-unwind" fn _PG_init() {
         if crate::REPLICATION_ENABLED.get() {
             replication::register_logical_apply_worker();
         }
+        // CDC-SLOT-01 (v0.81.0): register the CDC slot cleanup background worker.
+        cdc::register_cdc_slot_cleanup_worker();
         // Register ExecutorEnd hook to poke the merge worker latch when the
         // accumulated unmerged delta row count crosses the trigger threshold.
         register_executor_end_hook();
+    } else {
+        // PRELOAD-WARN-01 (v0.81.0): warn when loaded without shared_preload_libraries.
+        // HTAP merge worker, CONSTRUCT writeback, and the dictionary shmem cache are
+        // all disabled in this mode.
+        pgrx::warning!(
+            "pg_ripple: loaded without shared_preload_libraries; \
+             HTAP merge worker, CONSTRUCT writeback, and dictionary cache are disabled. \
+             Add pg_ripple to shared_preload_libraries in postgresql.conf."
+        );
     }
 
     // ── Transaction callbacks (v0.22.0) ───────────────────────────────────────
@@ -412,6 +423,45 @@ unsafe extern "C-unwind" fn sub_xact_callback_c(
     // Clear the mutation journal so phantom CWB writes do not fire.
     if event == pgrx::pg_sys::SubXactEvent::SUBXACT_EVENT_ABORT_SUB {
         crate::storage::mutation_journal::clear();
+        // DICT-SUBXACT-01 (v0.81.0): also invalidate the dictionary decode cache
+        // so that stale id→string mappings from the aborted subtransaction
+        // cannot be returned by subsequent decode() calls.
+        crate::dictionary::invalidate_decode_cache();
+    }
+}
+
+/// Called when the extension shared library is unloaded (e.g. DROP EXTENSION).
+///
+/// PGFINI-01 (v0.81.0): unregisters all PostgreSQL callbacks registered in
+/// `_PG_init` so they do not fire after the shared library is unloaded.
+/// Without this, stale callback pointers in PostgreSQL's hook lists cause
+/// undefined behaviour or crashes when the extension is recreated in the same
+/// backend session.
+#[allow(non_snake_case)]
+#[pg_guard]
+pub extern "C-unwind" fn _PG_fini() {
+    // Unregister the transaction-level and subtransaction-level callbacks.
+    // SAFETY: UnregisterXactCallback and UnregisterSubXactCallback are standard
+    // PostgreSQL C APIs that safely remove callback entries from their respective
+    // linked lists.  They are no-ops if the callback is not registered.
+    unsafe {
+        pg_sys::UnregisterXactCallback(Some(xact_callback_c), std::ptr::null_mut());
+        pg_sys::UnregisterSubXactCallback(Some(sub_xact_callback_c), std::ptr::null_mut());
+    }
+    // Unregister the ExecutorEnd hook (storage/mod.rs).
+    crate::unregister_executor_end_hook();
+}
+
+/// Unregister the ExecutorEnd hook installed in `_PG_init`.
+///
+/// Restores `pg_sys::ExecutorEnd_hook` to NULL (the standard handler).
+/// Called from `_PG_fini` before the shared library is unloaded.
+fn unregister_executor_end_hook() {
+    // SAFETY: ExecutorEnd_hook is a PostgreSQL global hook pointer.  Setting it
+    // to None restores the standard handler.  Only called from _PG_fini which
+    // runs in the backend process holding the extension lock.
+    unsafe {
+        pg_sys::ExecutorEnd_hook = None;
     }
 }
 

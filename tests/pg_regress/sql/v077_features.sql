@@ -173,11 +173,11 @@ RESET client_min_messages;
 -- --- Part 9: BIDI-INBOX-01 — install_bidi_inbox ---------------------------
 
 -- 9a. install_bidi_inbox creates the table and trigger.
-SELECT pg_ripple.install_bidi_inbox('pg_ripple_inbox.test_inbox');
+SELECT pg_ripple.install_bidi_inbox('ripple_inbox.test_inbox');
 
 SELECT COUNT(*) = 1 AS inbox_table_exists
 FROM information_schema.tables
-WHERE table_schema = 'pg_ripple_inbox'
+WHERE table_schema = 'ripple_inbox'
   AND table_name = 'test_inbox';
 
 -- --- Part 10: BIDI-ATTR-01 — ingest_jsonld with mode param ----------------

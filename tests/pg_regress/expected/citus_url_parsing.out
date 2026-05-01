@@ -10,6 +10,7 @@ SET client_min_messages = DEFAULT;
 SET search_path TO pg_ripple, public;
 -- Verify that citus_available() is callable (returns boolean, no panic).
 SELECT pg_ripple.citus_available() AS citus_available;
+WARNING:  pg_ripple: loaded without shared_preload_libraries; HTAP merge worker, CONSTRUCT writeback, and dictionary cache are disabled. Add pg_ripple to shared_preload_libraries in postgresql.conf.
  citus_available 
 -----------------
  f

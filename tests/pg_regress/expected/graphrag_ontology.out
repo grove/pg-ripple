@@ -13,6 +13,7 @@ SET search_path TO pg_ripple, public;
 -- ── 1. Register the gr: prefix ───────────────────────────────────────────────
 SELECT pg_ripple.register_prefix('gr', 'https://graphrag.org/ns/') IS NOT NULL
     AS prefix_registered;
+WARNING:  pg_ripple: loaded without shared_preload_libraries; HTAP merge worker, CONSTRUCT writeback, and dictionary cache are disabled. Add pg_ripple to shared_preload_libraries in postgresql.conf.
  prefix_registered 
 -------------------
  t

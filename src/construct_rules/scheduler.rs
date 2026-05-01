@@ -158,9 +158,14 @@ pub(super) fn compute_rule_order(
         // Find all rules that have n as a predecessor.
         for (rule, preds) in &predecessors {
             if preds.contains(&n) {
-                let deg = in_degree.get_mut(rule).unwrap_or_else(|| {
-                    pgrx::error!("construct rule stratification error: in_degree entry missing for rule \"{rule}\" — internal invariant violated");
-                });
+                // SCHEDULER-ERR-01 (v0.81.0): return Err instead of pgrx::error!()
+                // so the caller can add context and handle the condition gracefully.
+                let deg = in_degree.get_mut(rule).ok_or_else(|| {
+                    format!(
+                        "construct rule stratification: in_degree entry missing for rule \
+                         \"{rule}\" — internal invariant violated"
+                    )
+                })?;
                 *deg -= 1;
                 if *deg == 0 {
                     queue.push_back(rule.clone());

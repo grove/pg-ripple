@@ -159,6 +159,12 @@ pub extern "C-unwind" fn pg_ripple_logical_apply_worker_main(_arg: pg_sys::Datum
                  SET processed_at = now() \
                  WHERE processed_at IS NULL",
             );
+            // CDC-LSN-01 (v0.81.0): update the LSN watermark after each batch commit.
+            let lsn: Option<String> =
+                pgrx::Spi::get_one::<String>("SELECT pg_current_wal_lsn()::text").unwrap_or(None);
+            if let Some(lsn_str) = lsn {
+                crate::cdc::update_lsn_watermark("pg_ripple_logical_apply", &lsn_str);
+            }
         });
     }
 
@@ -179,15 +185,17 @@ mod tests {
     fn test_replication_stats_disabled() {
         // replication_enabled defaults to off, so we should get one NULL row.
         // Collect owned values inside the closure to avoid SpiHeapTupleData lifetime issues.
+        // REPL-UNWRAP-01 (v0.81.0): use unwrap_or_default instead of unwrap() to
+        // avoid panics on SPI errors; a panic here surfaces as FATAL in PostgreSQL.
         let slot_names: Vec<Option<String>> = pgrx::Spi::connect(|c| {
             c.select(
                 "SELECT slot_name FROM pg_ripple.replication_stats()",
                 None,
                 &[],
             )
-            .unwrap()
+            .unwrap_or_else(|e| pgrx::error!("replication stats SPI error: {e}"))
             .into_iter()
-            .map(|row| row["slot_name"].value::<String>().unwrap())
+            .map(|row| row["slot_name"].value::<String>().unwrap_or(None))
             .collect()
         });
         assert_eq!(

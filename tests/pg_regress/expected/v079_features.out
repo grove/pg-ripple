@@ -12,6 +12,7 @@ SET search_path TO pg_ripple, public;
 SELECT status AS wcoj_status
 FROM pg_ripple.feature_status()
 WHERE feature_name = 'wcoj';
+WARNING:  pg_ripple: loaded without shared_preload_libraries; HTAP merge worker, CONSTRUCT writeback, and dictionary cache are disabled. Add pg_ripple to shared_preload_libraries in postgresql.conf.
  wcoj_status 
 -------------
  implemented

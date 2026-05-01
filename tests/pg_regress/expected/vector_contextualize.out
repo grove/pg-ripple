@@ -13,6 +13,7 @@ SELECT pg_ripple.load_ntriples(
     '<https://pharma.example/Headache>  <http://www.w3.org/2000/01/rdf-schema#label> "headache" .' || chr(10) ||
     '<https://pharma.example/Fever>     <http://www.w3.org/2000/01/rdf-schema#label> "fever" .' || chr(10)
 ) >= 6 AS pharma_triples_loaded;
+WARNING:  pg_ripple: loaded without shared_preload_libraries; HTAP merge worker, CONSTRUCT writeback, and dictionary cache are disabled. Add pg_ripple to shared_preload_libraries in postgresql.conf.
  pharma_triples_loaded 
 -----------------------
  t

@@ -3,6 +3,7 @@
 -- keys and that no values are NULL.
 -- diagnostic_report() must return rows
 SELECT count(*) > 0 AS has_rows FROM pg_ripple.diagnostic_report();
+WARNING:  pg_ripple: loaded without shared_preload_libraries; HTAP merge worker, CONSTRUCT writeback, and dictionary cache are disabled. Add pg_ripple to shared_preload_libraries in postgresql.conf.
  has_rows 
 ----------
  t
@@ -55,7 +56,7 @@ SELECT
     (SELECT value FROM pg_ripple.diagnostic_report() WHERE key = 'compiled_version') AS cv;
    sv   |   cv   
 --------+--------
- 0.78.0 | 0.80.0
+ 0.78.0 | 0.81.0
 (1 row)
 
 -- GUC values should be valid

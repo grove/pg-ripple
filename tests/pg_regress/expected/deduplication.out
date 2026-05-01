@@ -15,6 +15,7 @@ SELECT pg_ripple.insert_triple(
     '<http://dedup.test/P1>',
     '<http://dedup.test/O1>'
 ) > 0 AS dup1_ok;
+WARNING:  pg_ripple: loaded without shared_preload_libraries; HTAP merge worker, CONSTRUCT writeback, and dictionary cache are disabled. Add pg_ripple to shared_preload_libraries in postgresql.conf.
  dup1_ok 
 ---------
  t

@@ -500,6 +500,130 @@ mod pg_ripple {
                 Some("docs/src/reference/storage.md".to_string()),
                 Some("src/storage/mutation_journal.rs".to_string()),
             ),
+            // ── BIDI bidirectional integration (v0.77.0 FEATURE-STATUS-BIDI-01) ──
+            (
+                "bidi_integration".to_string(),
+                "implemented".to_string(),
+                None,
+                Some("BIDI-SPEC-01 (v0.77.0): source attribution, conflict resolution, \
+                     late-binding IRI rewrite, sparse-CAS events, linkback with \
+                     target-assigned IDs, pg-trickle outbox/inbox transport.".to_string()),
+                Some("ci/regress: bidi_integration.sql".to_string()),
+                Some("docs/src/features/cdc.md".to_string()),
+                Some("src/bidi.rs".to_string()),
+            ),
+            (
+                "bidi_conflict_policy".to_string(),
+                "implemented".to_string(),
+                None,
+                Some("BIDI (v0.77.0): conflict resolution with echo-aware normalize \
+                     strategy for write-side deduplication.".to_string()),
+                Some("ci/regress: bidi_integration.sql".to_string()),
+                Some("docs/src/features/cdc.md".to_string()),
+                Some("src/bidi.rs".to_string()),
+            ),
+            (
+                "bidi_upsert_mode".to_string(),
+                "implemented".to_string(),
+                None,
+                Some("BIDI (v0.77.0): upsert mode for idempotent writes from \
+                     upstream systems.".to_string()),
+                Some("ci/regress: bidi_integration.sql".to_string()),
+                Some("docs/src/features/cdc.md".to_string()),
+                Some("src/bidi.rs".to_string()),
+            ),
+            (
+                "bidi_diff_mode".to_string(),
+                "implemented".to_string(),
+                None,
+                Some("BIDI (v0.77.0): diff mode emits only changed triples \
+                     to downstream consumers.".to_string()),
+                Some("ci/regress: bidi_integration.sql".to_string()),
+                Some("docs/src/features/cdc.md".to_string()),
+                Some("src/bidi.rs".to_string()),
+            ),
+            (
+                "bidi_linkback".to_string(),
+                "implemented".to_string(),
+                None,
+                Some("BIDI (v0.77.0): linkback with target-assigned IDs maps \
+                     external system identifiers back to RDF subjects.".to_string()),
+                Some("ci/regress: bidi_integration.sql".to_string()),
+                Some("docs/src/features/cdc.md".to_string()),
+                Some("src/bidi.rs".to_string()),
+            ),
+            // ── BIDIOPS bidirectional operations (v0.78.0 FEATURE-STATUS-BIDI-01) ─
+            (
+                "bidiops_queue_depth_limits".to_string(),
+                "implemented".to_string(),
+                None,
+                Some("BIDIOPS (v0.78.0): write-side outbox policy with queue \
+                     depth limits and back-pressure signalling.".to_string()),
+                Some("ci/regress: bidiops.sql".to_string()),
+                Some("docs/src/features/cdc.md".to_string()),
+                Some("src/bidi.rs".to_string()),
+            ),
+            (
+                "bidiops_pause_resume".to_string(),
+                "implemented".to_string(),
+                None,
+                Some("BIDIOPS (v0.78.0): per-subscription pause/resume \
+                     for maintenance windows.".to_string()),
+                Some("ci/regress: bidiops.sql".to_string()),
+                Some("docs/src/features/cdc.md".to_string()),
+                Some("src/bidi.rs".to_string()),
+            ),
+            (
+                "bidiops_schema_evolution".to_string(),
+                "implemented".to_string(),
+                None,
+                Some("BIDIOPS (v0.78.0): new-events-only schema evolution \
+                     for backward-compatible subscription changes.".to_string()),
+                Some("ci/regress: bidiops.sql".to_string()),
+                Some("docs/src/features/cdc.md".to_string()),
+                Some("src/bidi.rs".to_string()),
+            ),
+            (
+                "bidiops_per_subscription_auth".to_string(),
+                "implemented".to_string(),
+                None,
+                Some("BIDIOPS (v0.78.0): per-subscription side-band auth \
+                     for isolated credential management.".to_string()),
+                Some("ci/regress: bidiops.sql".to_string()),
+                Some("docs/src/features/cdc.md".to_string()),
+                Some("src/bidi.rs".to_string()),
+            ),
+            (
+                "bidiops_frame_redaction".to_string(),
+                "implemented".to_string(),
+                None,
+                Some("BIDIOPS (v0.78.0): write-time field redaction for \
+                     PII/sensitive data masking before export.".to_string()),
+                Some("ci/regress: bidiops.sql".to_string()),
+                Some("docs/src/features/cdc.md".to_string()),
+                Some("src/bidi.rs".to_string()),
+            ),
+            (
+                "bidiops_audit_trail".to_string(),
+                "implemented".to_string(),
+                None,
+                Some("BIDIOPS (v0.78.0): per-event audit trail for \
+                     compliance and forensics.".to_string()),
+                Some("ci/regress: bidiops.sql".to_string()),
+                Some("docs/src/features/cdc.md".to_string()),
+                Some("src/bidi.rs".to_string()),
+            ),
+            (
+                "bidiops_reconciliation".to_string(),
+                "implemented".to_string(),
+                None,
+                Some("BIDIOPS (v0.78.0): reconciliation toolkit for \
+                     detecting and resolving divergence between graph and \
+                     upstream systems.".to_string()),
+                Some("ci/regress: bidiops.sql".to_string()),
+                Some("docs/src/features/cdc.md".to_string()),
+                Some("src/bidi.rs".to_string()),
+            ),
         ];
 
         TableIterator::new(rows)

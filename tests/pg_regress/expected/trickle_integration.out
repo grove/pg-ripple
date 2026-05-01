@@ -28,6 +28,7 @@ SELECT pg_ripple.json_to_ntriples_and_load(
     'https://schema.org/Order',
     '{"@vocab": "https://example.org/vocab/"}'::jsonb
 ) >= 0 AS order_loaded;
+WARNING:  pg_ripple: loaded without shared_preload_libraries; HTAP merge worker, CONSTRUCT writeback, and dictionary cache are disabled. Add pg_ripple to shared_preload_libraries in postgresql.conf.
  order_loaded 
 --------------
  t

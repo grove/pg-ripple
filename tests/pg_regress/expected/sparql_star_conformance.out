@@ -25,6 +25,7 @@ SELECT pg_ripple.load_ntriples(
     '<http://example.org/star/bob> <http://example.org/star/name> "Bob" .' || E'\n' ||
     '<http://example.org/star/alice> <http://example.org/star/knows> <http://example.org/star/bob> .'
 ) = 3 AS nt_standard_parse_ok;
+WARNING:  pg_ripple: loaded without shared_preload_libraries; HTAP merge worker, CONSTRUCT writeback, and dictionary cache are disabled. Add pg_ripple to shared_preload_libraries in postgresql.conf.
  nt_standard_parse_ok 
 ----------------------
  t

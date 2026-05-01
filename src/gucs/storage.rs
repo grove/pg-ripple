@@ -213,3 +213,16 @@ pub static CITUS_SERVICE_PRUNING: pgrx::GucSetting<bool> = pgrx::GucSetting::<bo
 /// copied from vp_rare to the shadow tables per iteration.  Default: 10000.
 /// (v0.68.0 PROMO-01)
 pub static VP_PROMOTION_BATCH_SIZE: pgrx::GucSetting<i32> = pgrx::GucSetting::<i32>::new(10_000);
+
+// ─── v0.81.0 storage GUCs ────────────────────────────────────────────────────
+
+/// GUC: when `on`, `decode()` returns an error for missing dictionary IDs instead
+/// of the `_unknown_<id>` placeholder string. Useful for strict data-quality
+/// contexts where missing entries indicate incomplete bulk loads. Default: `off`.
+/// (v0.81.0 DICT-STRICT-01)
+pub static STRICT_DICTIONARY: pgrx::GucSetting<bool> = pgrx::GucSetting::<bool>::new(false);
+
+/// GUC: seconds of no LSN advance before the CDC slot cleanup worker drops an
+/// orphaned replication slot. Default: 3600. (v0.81.0 CDC-SLOT-01)
+pub static CDC_SLOT_IDLE_TIMEOUT_SECONDS: pgrx::GucSetting<i32> =
+    pgrx::GucSetting::<i32>::new(3600);

@@ -18,6 +18,7 @@ SELECT pg_ripple.load_ntriples_into_graph(
   E'<http://example.org/s2> <http://example.org/p1> "v2" .\n',
   'http://example.org/g1'
 ) >= 0 AS loaded;
+WARNING:  pg_ripple: loaded without shared_preload_libraries; HTAP merge worker, CONSTRUCT writeback, and dictionary cache are disabled. Add pg_ripple to shared_preload_libraries in postgresql.conf.
  loaded 
 --------
  t

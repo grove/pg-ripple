@@ -73,7 +73,10 @@ pub(crate) fn bind_term(
             conditions.push(format!("{col_expr} = {id}"));
         }
         TermPattern::BlankNode(bnode) => {
-            let vname = sanitize_sql_ident(&format!("_bn_{}", bnode));
+            // BN-SCOPE-01 (v0.81.0): prefix blank-node variable names with the
+            // per-query scope prefix so that blank nodes from different subqueries
+            // or different calls to sparql_query() never alias.
+            let vname = sanitize_sql_ident(&format!("_bn_{}_{}", ctx.bn_scope_prefix, bnode));
             if let Some(existing) = bindings.get(&vname) {
                 conditions.push(format!("{col_expr} = {existing}"));
             } else {
@@ -363,16 +366,21 @@ pub(crate) fn shacl_right_is_mandatory(pattern: &GraphPattern) -> bool {
     let GraphPattern::Bgp { patterns } = pattern else {
         return false;
     };
-    if patterns.len() != 1 {
+    if patterns.is_empty() {
         return false;
     }
-    let spargebra::term::NamedNodePattern::NamedNode(nn) = &patterns[0].predicate else {
-        return false;
-    };
-    let Some(pred_id) = crate::dictionary::lookup_iri(nn.as_str()) else {
-        return false;
-    };
-    crate::shacl::hints::has_min_count_1(pred_id)
+    // OPT-INNER-01 (v0.81.0): extend OPTIONAL→INNER JOIN promotion to
+    // multi-predicate BGPs.  If ALL predicates in the block have sh:minCount 1,
+    // promote the entire block to INNER JOIN.
+    patterns.iter().all(|tp| {
+        let spargebra::term::NamedNodePattern::NamedNode(nn) = &tp.predicate else {
+            return false;
+        };
+        let Some(pred_id) = crate::dictionary::lookup_iri(nn.as_str()) else {
+            return false;
+        };
+        crate::shacl::hints::has_min_count_1(pred_id)
+    })
 }
 
 /// Check if ALL predicates in a BGP have sh:maxCount <= 1.

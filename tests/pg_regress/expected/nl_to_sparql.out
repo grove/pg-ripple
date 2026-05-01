@@ -62,6 +62,7 @@ EXCEPTION
         END IF;
 END;
 $$;
+WARNING:  pg_ripple: loaded without shared_preload_libraries; HTAP merge worker, CONSTRUCT writeback, and dictionary cache are disabled. Add pg_ripple to shared_preload_libraries in postgresql.conf.
 -- ── Part 4: Mock endpoint — returns parseable SPARQL ─────────────────────────
 SET pg_ripple.llm_endpoint = 'mock';
 -- sparql_from_nl() with mock endpoint must return a non-empty string.

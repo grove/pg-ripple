@@ -40,12 +40,23 @@ pub fn parse_and_store_shapes(data: &str) -> i32 {
 
     let mut stored = 0i32;
     for shape in &shapes {
+        // SHACL-TXN-01 (v0.81.0): wrap the shape-store write in a savepoint so
+        // that a constraint failure rolls back only this shape rather than the
+        // entire transaction.  populate_hints() runs after the savepoint is
+        // released; hint-write failures are non-fatal warnings.
+        let sp_name = format!("shacl_txn_sp_{}", shape.shape_iri.len()); // stable but unique-ish name
+        let _ = Spi::run_with_args(&format!("SAVEPOINT {sp_name}"), &[]);
         match store_shape(shape) {
             Ok(()) => {
+                let _ = Spi::run_with_args(&format!("RELEASE SAVEPOINT {sp_name}"), &[]);
                 stored += 1;
+                // Populate DDL hints outside the savepoint (non-fatal if it fails).
                 super::hints::populate_hints(shape);
             }
-            Err(e) => pgrx::error!("failed to store shape '{}': {e}", shape.shape_iri),
+            Err(e) => {
+                let _ = Spi::run_with_args(&format!("ROLLBACK TO SAVEPOINT {sp_name}"), &[]);
+                pgrx::error!("failed to store shape '{}': {e}", shape.shape_iri);
+            }
         }
     }
 

@@ -47,6 +47,7 @@ SELECT pg_ripple.sparql_update($$
             <https://w3c.sparql.update.test/name> "Carol" .
     }
 $$) = 3 AS insert_data_three;
+WARNING:  pg_ripple: loaded without shared_preload_libraries; HTAP merge worker, CONSTRUCT writeback, and dictionary cache are disabled. Add pg_ripple to shared_preload_libraries in postgresql.conf.
  insert_data_three 
 -------------------
  t

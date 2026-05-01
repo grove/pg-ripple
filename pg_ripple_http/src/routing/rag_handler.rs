@@ -34,7 +34,9 @@ pub(crate) async fn rag_post(
         }
     };
 
-    // v0.22.0 S-4: parameterized queries prevent SQL injection.
+    // v0.22.0 S-4 (fixed v0.81.0 RAG-SQL-INJECT-02): parameterized queries prevent SQL injection.
+    // The previous implementation used format!() + replace('\'', "''") which is not
+    // parameterized query execution and fails under standard_conforming_strings=off.
     let client = match state.pool.get().await {
         Ok(c) => c,
         Err(e) => {
@@ -46,36 +48,29 @@ pub(crate) async fn rag_post(
         }
     };
 
-    let sparql_filter = req.sparql_filter.as_deref().unwrap_or("NULL");
-    let model = req.model.as_deref().unwrap_or("NULL");
-    let sparql_filter_param = if sparql_filter == "NULL" {
-        "NULL::text".to_owned()
-    } else {
-        format!("'{}'", sparql_filter.replace('\'', "''"))
-    };
-    let model_param = if model == "NULL" {
-        "NULL::text".to_owned()
-    } else {
-        format!("'{}'", model.replace('\'', "''"))
-    };
-    let question = req.question.replace('\'', "''");
+    let sparql_filter_val: Option<String> = req.sparql_filter.clone();
+    let model_val: Option<String> = req.model.clone();
     let output_format = if req.output_format == "jsonld" {
         "jsonld"
     } else {
         "jsonb"
     };
 
-    let sql = format!(
-        "SELECT entity_iri, label, context_json, distance \
-         FROM pg_ripple.rag_retrieve('{question}', \
-           sparql_filter := {sparql_filter_param}, \
-           k := {k}, \
-           model := {model_param}, \
-           output_format := '{output_format}')",
-        k = req.k,
-    );
-
-    let rows = match client.query(&sql, &[]).await {
+    let rows = match client
+        .query(
+            "SELECT entity_iri, label, context_json, distance \
+         FROM pg_ripple.rag_retrieve($1, sparql_filter := $2::text, \
+           k := $3, model := $4::text, output_format := $5)",
+            &[
+                &req.question,
+                &sparql_filter_val,
+                &req.k,
+                &model_val,
+                &output_format,
+            ],
+        )
+        .await
+    {
         Ok(r) => r,
         Err(e) => {
             return redacted_error(

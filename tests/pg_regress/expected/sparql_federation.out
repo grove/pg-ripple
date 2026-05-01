@@ -8,6 +8,7 @@
 -- ─── Endpoint management API ─────────────────────────────────────────────────
 -- Register an endpoint; it should appear in list_endpoints().
 SELECT pg_ripple.register_endpoint('http://sparql.test/endpoint');
+WARNING:  pg_ripple: loaded without shared_preload_libraries; HTAP merge worker, CONSTRUCT writeback, and dictionary cache are disabled. Add pg_ripple to shared_preload_libraries in postgresql.conf.
  register_endpoint 
 -------------------
  

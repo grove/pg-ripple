@@ -13,6 +13,93 @@ Versions correspond to the milestones in [ROADMAP.md](ROADMAP.md).
 
 ---
 
+## [0.81.0] — 2026-05-14 — Correctness & Stability Hardening
+
+**Implements v0.81.0 roadmap: 34 correctness, stability, and security
+hardening items. No breaking schema changes; one new internal table
+(`_pg_ripple.cdc_lsn_watermark`) and one new public function
+(`pg_ripple.recover_stuck_promotions()`).**
+
+### Correctness
+
+- **MERGE-SID-01** — `ORDER BY i ASC` added before `DISTINCT ON` in the HTAP
+  merge CTE template, fixing non-deterministic SID selection during merge.
+- **DRED-FIXPOINT-01** — DRed re-derive phase now runs a full semi-naïve
+  fixpoint instead of a single seed pass, correcting incomplete re-derivation
+  after retraction.
+- **DL-AGG-01** — Guard added in `stratify()` to reject aggregation functions
+  in recursive Datalog rule heads with a descriptive error (PT511).
+- **DL-PAR-01** — Intra-stratum cycle detection added to the parallel group
+  partition step, preventing non-terminating stratum evaluation.
+- **DL-PAR-02** — Parallel Datalog SCC scheduling now uses topological order
+  (Kahn's BFS) instead of stratum order, ensuring producers run before consumers.
+- **OPT-INNER-01** — OPTIONAL→INNER JOIN optimisation extended to multi-predicate
+  BGPs (previously only applied to single-predicate BGPs).
+- **BN-SCOPE-01** — Blank-node variable names are now prefixed with a
+  query-scoped hex nonce to prevent aliasing across subqueries.
+- **RETRACT-PARAM-01** — Flat-VP `DELETE` in `src/construct_rules/retract.rs`
+  parameterised with `$1`–`$4` bind variables (previously used string interpolation).
+- **SCHEDULER-ERR-01** — Topological sort in `construct_rules/scheduler.rs` now
+  propagates errors via `Result` instead of calling `pgrx::error!()`, giving callers
+  cleaner error handling.
+- **DICT-RACE-01** — `encode_inner()` now raises a PostgreSQL error (PT501) on
+  0-row RETURNING (hash collision or concurrent dict truncation) instead of panicking.
+- **DICT-SUBXACT-01** — A `SubXactCallback` registered in `_PG_init` now invalidates
+  both the decode and encode LRU caches on subtransaction abort.
+
+### Security
+
+- **RAG-SQL-INJECT-02** — `rag_retrieve()` in `pg_ripple_http` migrated from
+  `format!()` with manual quote-escaping to fully parameterised tokio-postgres
+  `$1`–`$5` query parameters.
+- **FED-URL-01** — Federation endpoint URLs normalised to lowercase scheme+host
+  before allowlist comparison, preventing case-bypass attacks.
+- **FILTER-STRICT-01** — New `pg_ripple.strict_sparql_filters` GUC; when enabled,
+  unknown SPARQL built-in function names raise error PT422 instead of evaluating
+  to `UNDEF`.
+
+### Stability
+
+- **SHACL-TXN-01** — SHACL shape-store write wrapped in a savepoint so a
+  constraint failure rolls back only the failing shape rather than the entire
+  transaction.
+- **FED-TRUNC-01** — Federation JSON results exceeding `federation_result_max_bytes`
+  now emit a WARNING and partially materialise instead of raising a fatal error.
+- **FED-CACHE-01** — Federation query cache key normalised to canonical SPARQL
+  form via `spargebra::Display`, preventing spurious cache misses.
+- **MERGE-FENCE-01** — HTAP merge advisory lock acquisition moved to just before
+  the rename-swap phase (Phase 2), reducing the ExclusiveLock hold time from
+  minutes to milliseconds.
+- **PROMO-LOCK-01** — Per-predicate `pg_advisory_xact_lock(pred_id)` confirmed
+  as the exclusive coordination mechanism for VP promotion (no table-level lock).
+- **PROMO-ATOMIC-01** — `predicates` catalog status update is part of the atomic
+  CTE that inserts the new VP table, eliminating the TOCTOU window.
+- **PROMO-STUCK-01** — New `pg_ripple.recover_stuck_promotions()` SQL function
+  detects and re-runs VP promotions abandoned mid-flight (without a server restart).
+- **CDC-SLOT-01** — New background worker (`pg_ripple_cdc_slot_cleanup_main`)
+  drops orphaned CDC replication slots idle longer than
+  `pg_ripple.cdc_slot_idle_timeout_seconds`.
+- **CDC-LSN-01** — New `_pg_ripple.cdc_lsn_watermark(slot_name, last_lsn)` table
+  tracks CDC replication progress; updated after each batch commit.
+- **DICT-STRICT-01** — New `pg_ripple.strict_dictionary` GUC; when enabled,
+  `decode()` raises a PostgreSQL error for unrecognised IDs.
+- **PLAN-CACHE-GUC-02** — Plan-cache key extended to include
+  `NORMALIZE_IRIS`, `WCOJ_ENABLED`, `WCOJ_MIN_TABLES`, `TOPN_PUSHDOWN`,
+  `SPARQL_MAX_ROWS`, `SPARQL_OVERFLOW_ACTION`, `FEDERATION_TIMEOUT`,
+  `PGVECTOR_ENABLED`, and `INFERENCE_MODE`. Changing any of these GUCs
+  mid-session now invalidates the per-backend plan cache.
+- **PRELOAD-WARN-01** — `_PG_init` emits a WARNING when the extension is loaded
+  via `CREATE EXTENSION` without `shared_preload_libraries`, preventing silent
+  misconfiguration.
+- **PGFINI-01** — `_PG_fini` added to unregister SubXact callback, ExecutorEnd
+  hook, and transaction callback when the extension library is unloaded.
+- **REPL-UNWRAP-01** — All `.unwrap()` calls in `src/replication.rs` replaced
+  with `unwrap_or_else(...)` or `pgrx::error!()` to avoid Rust panics on SPI errors.
+- **FEATURE-STATUS-BIDI-01** — 12 missing rows for BIDI (v0.77.0) and BIDIOPS
+  (v0.78.0) features added to `feature_status()`.
+
+---
+
 ## [0.80.0] — 2026-05-07 — Assessment 12 Critical/High Remediation
 
 **Implements v0.80.0 roadmap: addresses all 13 critical and high findings from

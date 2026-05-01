@@ -34,6 +34,7 @@ ORDER BY column_name;
 
 -- ── list_construct_views: empty initially ─────────────────────────────────────
 SELECT pg_ripple.list_construct_views() = '[]'::jsonb AS construct_views_initially_empty;
+WARNING:  pg_ripple: loaded without shared_preload_libraries; HTAP merge worker, CONSTRUCT writeback, and dictionary cache are disabled. Add pg_ripple to shared_preload_libraries in postgresql.conf.
  construct_views_initially_empty 
 ---------------------------------
  t

@@ -18,6 +18,7 @@ SELECT pg_ripple.json_to_ntriples_and_load(
     NULL,
     '{"@context": {"temp": {"@id": "https://saref.etsi.org/core/hasValue"}}}'::jsonb
 ) > 0 AS object_form_loaded;
+WARNING:  pg_ripple: loaded without shared_preload_libraries; HTAP merge worker, CONSTRUCT writeback, and dictionary cache are disabled. Add pg_ripple to shared_preload_libraries in postgresql.conf.
  object_form_loaded 
 --------------------
  t

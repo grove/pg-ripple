@@ -13,6 +13,7 @@ CREATE TEMP TABLE _ss_test_baseline AS
     SELECT COALESCE(MAX(i), 0) AS max_i FROM _pg_ripple.vp_rare;
 -- 1. infer_with_stats returns a JSONB object with the eliminated_rules key.
 SELECT pg_ripple.load_rules_builtin('rdfs') > 0 AS rdfs_loaded;
+WARNING:  pg_ripple: loaded without shared_preload_libraries; HTAP merge worker, CONSTRUCT writeback, and dictionary cache are disabled. Add pg_ripple to shared_preload_libraries in postgresql.conf.
  rdfs_loaded 
 -------------
  t

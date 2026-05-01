@@ -2,7 +2,7 @@
 # See: https://www.postgresql.org/docs/current/extend-extensions.html
 
 comment = 'High-performance RDF triple store with SPARQL 1.1, live subscriptions, named JSON mappings, true Leapfrog Triejoin executor for WCOJ (WCOJ-LFTI-01), full sh:SPARQLRule evaluation (SHACL-SPARQL-01), all feature_status() rows show implemented (v0.79.0)'
-default_version = '0.80.0'
+default_version = '0.81.0'
 # MUST match the current release version (keep in sync with Cargo.toml)
 module_pathname = '$libdir/pg_ripple'
 relocatable = false

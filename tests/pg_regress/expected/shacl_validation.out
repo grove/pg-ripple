@@ -31,6 +31,7 @@ ex:PersonShape
         sh:maxCount 1 ;
     ] .
 $SHACL$) AS shapes_loaded;
+WARNING:  pg_ripple: loaded without shared_preload_libraries; HTAP merge worker, CONSTRUCT writeback, and dictionary cache are disabled. Add pg_ripple to shared_preload_libraries in postgresql.conf.
  shapes_loaded 
 ---------------
              1

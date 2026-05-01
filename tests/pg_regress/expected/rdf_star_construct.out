@@ -15,6 +15,7 @@ SELECT pg_ripple.load_ntriples(
     '<https://rdfstar.construct.test/bob>   <https://rdfstar.construct.test/name> "Bob" .' || E'\n' ||
     '<https://rdfstar.construct.test/stmt1> <https://rdfstar.construct.test/annotates> << <https://rdfstar.construct.test/alice> <https://rdfstar.construct.test/knows> <https://rdfstar.construct.test/bob> >> .'
 ) = 4 AS four_triples_loaded;
+WARNING:  pg_ripple: loaded without shared_preload_libraries; HTAP merge worker, CONSTRUCT writeback, and dictionary cache are disabled. Add pg_ripple to shared_preload_libraries in postgresql.conf.
  four_triples_loaded 
 ---------------------
  t

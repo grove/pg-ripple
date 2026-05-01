@@ -3,6 +3,7 @@
 -- This test must pass in all CI environments, including those without pgvector.
 SET client_min_messages = warning;
 CREATE EXTENSION IF NOT EXISTS pg_ripple;
+WARNING:  pg_ripple: loaded without shared_preload_libraries; HTAP merge worker, CONSTRUCT writeback, and dictionary cache are disabled. Add pg_ripple to shared_preload_libraries in postgresql.conf.
 SET client_min_messages = DEFAULT;
 SET search_path TO pg_ripple, public;
 -- Force the pg_ripple shared library to load in this session so that GUC

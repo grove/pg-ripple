@@ -3,6 +3,7 @@
 SET search_path TO pg_ripple, public;
 -- Load OWL EL built-in rule set.
 SELECT pg_ripple.load_rules_builtin('owl-el') > 0 AS owl_el_rules_loaded;
+WARNING:  pg_ripple: loaded without shared_preload_libraries; HTAP merge worker, CONSTRUCT writeback, and dictionary cache are disabled. Add pg_ripple to shared_preload_libraries in postgresql.conf.
  owl_el_rules_loaded 
 ---------------------
  t

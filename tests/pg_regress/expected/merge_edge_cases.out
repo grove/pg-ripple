@@ -16,6 +16,7 @@
 SET search_path TO pg_ripple, public;
 -- ── 1. compact() does not crash and returns non-negative ───────────────────────
 SELECT pg_ripple.compact() >= 0 AS compact_nonneg_ok;
+WARNING:  pg_ripple: loaded without shared_preload_libraries; HTAP merge worker, CONSTRUCT writeback, and dictionary cache are disabled. Add pg_ripple to shared_preload_libraries in postgresql.conf.
  compact_nonneg_ok 
 -------------------
  t

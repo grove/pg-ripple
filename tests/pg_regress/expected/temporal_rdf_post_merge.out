@@ -6,6 +6,7 @@ SELECT pg_ripple.load_ntriples(
     '<https://example.org/Alice> <https://schema.org/name> "Alice"^^<http://www.w3.org/2001/XMLSchema#string> .' || E'\n' ||
     '<https://example.org/Alice> <https://schema.org/age>  "30"^^<http://www.w3.org/2001/XMLSchema#integer> .'
 ) = 2 AS delta_loaded;
+WARNING:  pg_ripple: loaded without shared_preload_libraries; HTAP merge worker, CONSTRUCT writeback, and dictionary cache are disabled. Add pg_ripple to shared_preload_libraries in postgresql.conf.
  delta_loaded 
 --------------
  t

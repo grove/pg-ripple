@@ -16,6 +16,7 @@ WHERE (r::jsonb)->>'rule_set' = 'negation_test';
 ERROR:  cannot cast type record to jsonb at character 102
 -- Cleanup.
 SELECT pg_ripple.drop_rules('negation_test') >= 0 AS cleanup_ok;
+WARNING:  pg_ripple: loaded without shared_preload_libraries; HTAP merge worker, CONSTRUCT writeback, and dictionary cache are disabled. Add pg_ripple to shared_preload_libraries in postgresql.conf.
  cleanup_ok 
 ------------
  t

@@ -425,6 +425,51 @@ pub fn stratify(rules: &[Rule]) -> Result<StratifiedProgram, String> {
         return Ok(StratifiedProgram { strata: vec![] });
     }
 
+    // DL-AGG-01 (v0.81.0): guard against aggregation in recursive rule heads.
+    // A rule is problematic if:
+    //   1. The head predicate appears in a body Aggregate literal's inner atom (recursive aggregation), OR
+    //   2. The head predicate appears in a body Positive literal AND there is also an Aggregate literal (accumulative agg).
+    for rule in rules {
+        let Some(h_pred) = head_pred(rule) else {
+            continue;
+        };
+        // Check if the head predicate also appears as a body Positive literal.
+        let is_recursive = rule.body.iter().any(|lit| {
+            if let BodyLiteral::Positive(atom) = lit {
+                atom_pred(atom) == Some(h_pred)
+            } else {
+                false
+            }
+        });
+        // Check if there is any Aggregate literal in the body.
+        let has_body_agg = rule
+            .body
+            .iter()
+            .any(|lit| matches!(lit, BodyLiteral::Aggregate(_)));
+        if is_recursive && has_body_agg {
+            return Err(format!(
+                "PT511: aggregation in recursive rule head is not supported; \
+                 rule predicate {} appears in both the head and a body aggregate literal; \
+                 use a two-step rule: first derive the base facts, then aggregate in a \
+                 non-recursive rule",
+                h_pred
+            ));
+        }
+        // Also check for direct recursive aggregation (aggregate body pattern targets head predicate).
+        for lit in &rule.body {
+            if let BodyLiteral::Aggregate(agg) = lit
+                && atom_pred(&agg.atom) == Some(h_pred)
+            {
+                return Err(format!(
+                    "PT511: DL-AGG-01: aggregation in recursive rule head is not supported; \
+                     the aggregate body atom references the head predicate {}; \
+                     this creates a recursive aggregation cycle that produces incorrect results",
+                    h_pred
+                ));
+            }
+        }
+    }
+
     let nodes = collect_predicates(rules);
     let edges = build_dependency_graph(rules);
 

@@ -13,6 +13,18 @@ pub(super) fn vp_promotion_threshold() -> i64 {
 }
 /// Promote a single predicate from vp_rare to its own VP table (HTAP split).
 ///
+/// This is the `pub(super)` version called from within the storage module.
+/// For external callers (e.g., `pg_ripple.recover_stuck_promotions()`), use
+/// [`promote_predicate_pub`].
+pub(super) fn promote_predicate(p_id: i64) {
+    promote_predicate_impl(p_id)
+}
+
+/// Public entry point for `promote_predicate` — used by PROMO-STUCK-01.
+pub fn promote_predicate_pub(p_id: i64) {
+    promote_predicate_impl(p_id)
+}
+
 /// v0.68.0 (PROMO-01): Uses a nonblocking shadow-table pattern:
 ///
 /// **Phase 1 (shadow copy, no DDL lock):**
@@ -30,7 +42,7 @@ pub(super) fn vp_promotion_threshold() -> i64 {
 /// **Crash recovery:**
 /// On startup, `recover_interrupted_promotions()` scans for any predicate with
 /// `promotion_status = 'promoting'` and restarts promotion from Phase 1.
-pub(super) fn promote_predicate(p_id: i64) {
+fn promote_predicate_impl(p_id: i64) {
     // v0.37.0: Acquire a per-predicate advisory lock before promotion to ensure
     // exactly one backend races to promote the same predicate. CREATE TABLE IF NOT
     // EXISTS is idempotent, but the data move must not be executed twice.

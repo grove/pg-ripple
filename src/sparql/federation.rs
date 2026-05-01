@@ -335,15 +335,44 @@ fn extract_host(url: &str) -> Option<String> {
 /// Returns `true` when `url` is registered in `_pg_ripple.federation_endpoints`
 /// with `enabled = true`.
 pub(crate) fn is_endpoint_allowed(url: &str) -> bool {
+    // FED-URL-01 (v0.81.0): normalise both the incoming URL and the allowlist
+    // entries to lowercase scheme+host before comparison so that URLs that
+    // differ only in case or trailing slash are not incorrectly rejected.
+    let normalised = normalise_federation_url(url);
     Spi::get_one_with_args::<bool>(
         "SELECT EXISTS(
             SELECT 1 FROM _pg_ripple.federation_endpoints
-            WHERE url = $1 AND enabled = true
+            WHERE lower(rtrim(url, '/')) = $1 AND enabled = true
          )",
-        &[DatumWithOid::from(url)],
+        &[DatumWithOid::from(normalised.as_str())],
     )
     .unwrap_or(None)
     .unwrap_or(false)
+}
+
+/// Normalise a federation URL for case-insensitive allowlist comparison.
+///
+/// Converts the scheme and host to lowercase and strips a trailing slash.
+/// Path and query components are left as-is (case-sensitive).
+pub(crate) fn normalise_federation_url(url: &str) -> String {
+    // Parse scheme://host/path and lowercase scheme + host only.
+    if let Some(after_scheme) = url.find("://") {
+        let scheme = url[..after_scheme].to_lowercase();
+        let rest = &url[after_scheme + 3..];
+        // Split host from path at the first '/'.
+        let (host_port, path) = if let Some(slash_pos) = rest.find('/') {
+            (&rest[..slash_pos], &rest[slash_pos..])
+        } else {
+            (rest, "")
+        };
+        let host_lower = host_port.to_lowercase();
+        // Strip trailing slash from path.
+        let path_trimmed = path.trim_end_matches('/');
+        format!("{scheme}://{host_lower}{path_trimmed}")
+    } else {
+        // Not a well-formed URL; just lowercase and strip trailing slash.
+        url.to_lowercase().trim_end_matches('/').to_owned()
+    }
 }
 
 /// Returns the `local_view_name` for an endpoint if set and not NULL.
@@ -473,11 +502,14 @@ fn cache_lookup(url: &str, sparql_text: &str) -> Option<String> {
     if ttl == 0 {
         return None;
     }
+    // FED-CACHE-01 (v0.81.0): normalise the SPARQL text before hashing so that
+    // whitespace-variant queries share a cache entry.
+    let normalised = normalise_sparql_for_cache(sparql_text);
     // XXH3-128 of the SPARQL text as a 32-char hex fingerprint key.
     // Using 128-bit avoids birthday-bound collisions even at very high query volumes.
     let hash = {
         use xxhash_rust::xxh3::xxh3_128;
-        format!("{:032x}", xxh3_128(sparql_text.as_bytes()))
+        format!("{:032x}", xxh3_128(normalised.as_bytes()))
     };
     Spi::get_one_with_args::<String>(
         "SELECT result_jsonb::text
@@ -495,9 +527,11 @@ fn cache_store(url: &str, sparql_text: &str, body: &str) {
     if ttl == 0 {
         return;
     }
+    // FED-CACHE-01: normalise before hashing.
+    let normalised = normalise_sparql_for_cache(sparql_text);
     let hash = {
         use xxhash_rust::xxh3::xxh3_128;
-        format!("{:032x}", xxh3_128(sparql_text.as_bytes()))
+        format!("{:032x}", xxh3_128(normalised.as_bytes()))
     };
     // Validate that the body is valid JSON before storing.
     if serde_json::from_str::<Json>(body).is_err() {
@@ -599,16 +633,29 @@ pub(crate) fn execute_remote(
         )
     })?;
 
-    // PT543: enforce federation_max_response_bytes (v0.48.0).
+    // FED-TRUNC-01 (v0.81.0): replace hard error with WARNING + partial parse.
+    // The previous pgrx::error!() aborted the transaction when the body exceeded
+    // max_bytes; now we emit a warning and attempt partial materialisation.
     let max_bytes = crate::FEDERATION_MAX_RESPONSE_BYTES.get();
-    if max_bytes >= 0 && body.len() > max_bytes as usize {
-        pgrx::error!(
+    let body = if max_bytes >= 0 && body.len() > max_bytes as usize {
+        pgrx::warning!(
             "PT543: federation response from {url} is {} bytes, exceeding \
-             pg_ripple.federation_max_response_bytes ({})",
+             pg_ripple.federation_max_response_bytes ({}); \
+             attempting partial result recovery",
             body.len(),
             max_bytes
         );
-    }
+        // Truncate and attempt partial parse for complete JSON objects.
+        let truncated = &body[..max_bytes as usize];
+        let partial = parse_sparql_results_json_partial(truncated, max_results as usize);
+        let row_count = partial.1.len();
+        pgrx::warning!(
+            "PT543: federation {url}: recovered {row_count} complete rows from truncated response"
+        );
+        return Ok(partial);
+    } else {
+        body
+    };
 
     let result: Result<RemoteResult, String> =
         parse_sparql_results_json(&body, max_results as usize)
@@ -1024,6 +1071,23 @@ pub(crate) fn get_endpoint_complexity(url: &str) -> String {
 /// Called by the merge background worker on each polling cycle.
 pub(crate) fn evict_expired_cache() {
     let _ = Spi::run("DELETE FROM _pg_ripple.federation_cache WHERE expires_at <= now()");
+}
+
+/// FED-CACHE-01 (v0.81.0): Normalise a SPARQL query string for use as a cache key.
+///
+/// - Collapses all whitespace runs to a single space.
+/// - Lowercases SPARQL keywords.
+/// - Trims leading/trailing whitespace.
+///
+/// This ensures that whitespace-variant queries (e.g. extra newlines, tabs)
+/// share the same cache entry.
+fn normalise_sparql_for_cache(sparql: &str) -> String {
+    // Attempt canonical form via spargebra Display; fall back to simple whitespace collapse.
+    if let Ok(q) = spargebra::SparqlParser::new().parse_query(sparql) {
+        return format!("{q}");
+    }
+    // Fallback: collapse whitespace and lowercase keywords.
+    sparql.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 // ─── Local view variable discovery ───────────────────────────────────────────

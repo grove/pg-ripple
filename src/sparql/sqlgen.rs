@@ -262,10 +262,38 @@ pub(crate) struct Ctx {
     /// WCOJ optimisation is activated (v0.62.0).  When set, the query executor
     /// runs the WCOJ SET LOCAL preamble before the main query.
     pub(crate) wcoj_preamble: bool,
+    /// BN-SCOPE-01 (v0.81.0): per-query blank-node scope prefix.
+    ///
+    /// Blank-node variable names (e.g. `_:b0`) are prefixed with this short
+    /// hex tag so that the same blank-node name in different subqueries or in
+    /// two separate calls to `sparql_query()` never aliases to the same SQL
+    /// variable.  Generated once per `Ctx::new()` call.
+    pub(crate) bn_scope_prefix: String,
 }
 
 impl Ctx {
     pub(crate) fn new() -> Self {
+        // BN-SCOPE-01: generate a short 8-character scope prefix from a
+        // fast hash of the current process time and a thread-local counter.
+        // Using xxh3-64 of a nonce rather than a UUID to keep variable names
+        // compact enough for PostgreSQL's 63-byte identifier limit.
+        let nonce = {
+            use std::time::{SystemTime, UNIX_EPOCH};
+            thread_local! {
+                static CTR: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+            }
+            let t = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|d| d.as_nanos() as u64)
+                .unwrap_or(0);
+            let c = CTR.with(|ctr| {
+                let v = ctr.get();
+                ctr.set(v.wrapping_add(1));
+                v
+            });
+            t ^ (c.wrapping_mul(0x9e3779b97f4a7c15))
+        };
+        let prefix = format!("{:08x}", xxhash_rust::xxh3::xxh3_64(&nonce.to_le_bytes()));
         Self {
             alias_counter: 0,
             opt_counter: 0,
@@ -280,6 +308,7 @@ impl Ctx {
             base_iri: None,
             service_graph_exclude: federation::get_service_graph_ids(),
             wcoj_preamble: false,
+            bn_scope_prefix: prefix,
         }
     }
 

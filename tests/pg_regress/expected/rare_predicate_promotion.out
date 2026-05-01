@@ -21,6 +21,7 @@ SELECT current_setting('pg_ripple.vp_promotion_threshold')::int = 10 AS threshol
 
 -- ── 2. Insert triples below the threshold (stay in vp_rare) ───────────────────
 SELECT pg_ripple.insert_triple('<http://promo.test/S1>','<http://promo.test/RARE_P>','<http://promo.test/O1>') > 0 AS i1;
+WARNING:  pg_ripple: loaded without shared_preload_libraries; HTAP merge worker, CONSTRUCT writeback, and dictionary cache are disabled. Add pg_ripple to shared_preload_libraries in postgresql.conf.
  i1 
 ----
  t

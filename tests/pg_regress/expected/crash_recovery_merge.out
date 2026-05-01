@@ -82,6 +82,7 @@ SELECT pg_ripple.load_ntriples(
     '<https://crash.recovery.test/s2> <https://crash.recovery.test/p1> <https://crash.recovery.test/o2> .' || E'\n' ||
     '<https://crash.recovery.test/s3> <https://crash.recovery.test/p1> <https://crash.recovery.test/o3> .'
 ) = 3 AS vp_write_ok;
+WARNING:  pg_ripple: loaded without shared_preload_libraries; HTAP merge worker, CONSTRUCT writeback, and dictionary cache are disabled. Add pg_ripple to shared_preload_libraries in postgresql.conf.
  vp_write_ok 
 -------------
  t

@@ -5,6 +5,7 @@ SELECT pg_ripple.load_rules(
     '# Arithmetic built-ins test\n# Rule bodies with > and >= are parsed\n',
     'arith_test'
 ) >= 0 AS arith_rules_ok;
+WARNING:  pg_ripple: loaded without shared_preload_libraries; HTAP merge worker, CONSTRUCT writeback, and dictionary cache are disabled. Add pg_ripple to shared_preload_libraries in postgresql.conf.
  arith_rules_ok 
 ----------------
  t

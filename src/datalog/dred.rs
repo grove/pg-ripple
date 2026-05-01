@@ -89,7 +89,7 @@ pub fn run_dred_on_delete(pred_id: i64, s_val: i64, o_val: i64, _g_val: i64) -> 
         .flatten()
         .is_some();
 
-        let derived_table = if has_dedicated {
+        let _derived_table = if has_dedicated {
             // Union main + delta tables for writes.
             // For DRed we target the delta table (inferred triples go there).
             format!("_pg_ripple.vp_{d}_delta")
@@ -170,8 +170,16 @@ pub fn run_dred_on_delete(pred_id: i64, s_val: i64, o_val: i64, _g_val: i64) -> 
         }
 
         // ── Phase 2: Re-derive ───────────────────────────────────────────────
-        // Re-run the rules that derive `d` and check which over-deleted rows
-        // can be re-derived from surviving base triples.
+        // DRED-FIXPOINT-01 (v0.81.0): run the full stratified fixpoint for all
+        // affected rule sets, not just a single seed pass.  This is necessary
+        // because deleted facts can have multi-level dependent derivations:
+        //   Rule 1: C(x) :- A(x,y)        Rule 2: D(x) :- C(x), B(x,z)
+        // Deleting A(1,2) retracts C(1) (via Rule 1) AND D(1) (via Rule 2).
+        // A single seed pass misses the cascade to Rule 2.
+        //
+        // Approach: for each affected rule set, re-run the full seminaive
+        // fixpoint.  The over-deleted rows have already been removed, so the
+        // fixpoint starts from a clean slate and re-derives all surviving facts.
         let rule_set_names: Vec<String> = affected_rules
             .iter()
             .map(|(_, _, rset)| rset.clone())
@@ -180,63 +188,29 @@ pub fn run_dred_on_delete(pred_id: i64, s_val: i64, o_val: i64, _g_val: i64) -> 
             .collect();
 
         for rset_name in &rule_set_names {
-            // Run one semi-naive pass to re-derive any surviving facts.
-            // We only do the seed pass (not the full fixpoint) for DRed —
-            // this is sufficient because the deleted triple can only break
-            // derivations that directly reference it (depth-1).
-            let rule_rows: Vec<String> = {
-                let sql = "SELECT rule_text FROM _pg_ripple.rules \
-                           WHERE rule_set = $1 AND active = true AND head_pred = $2";
-                Spi::connect(|client| {
-                    client
-                        .select(
-                            sql,
-                            None,
-                            &[
-                                DatumWithOid::from(rset_name.as_str()),
-                                DatumWithOid::from(d),
-                            ],
-                        )
-                        .unwrap_or_else(|e| pgrx::error!("dred: re-derive rules error: {e}"))
-                        .map(|row| row.get::<String>(1).ok().flatten().unwrap_or_default())
-                        .collect::<Vec<_>>()
-                })
-            };
+            // Load all active rules for this rule set.
+            let rule_rows: Vec<String> = Spi::connect(|client| {
+                client
+                    .select(
+                        "SELECT rule_text FROM _pg_ripple.rules \
+                         WHERE rule_set = $1 AND active = true",
+                        None,
+                        &[DatumWithOid::from(rset_name.as_str())],
+                    )
+                    .unwrap_or_else(|e| pgrx::error!("dred: load rules error: {e}"))
+                    .map(|row| row.get::<String>(1).ok().flatten().unwrap_or_default())
+                    .collect::<Vec<_>>()
+            });
 
             for rule_text in &rule_rows {
                 let parsed = crate::datalog::parse_rules(rule_text, rset_name);
                 if let Ok(rs) = parsed {
-                    for rule in &rs.rules {
-                        if rule.head.is_none() {
-                            continue;
-                        }
-                        // Re-insert into the target table (ON CONFLICT DO NOTHING).
-                        match crate::datalog::compile_single_rule_to(rule, &derived_table) {
-                            Ok(sql) => {
-                                if let Err(e) = Spi::run_with_args(&sql, &[]) {
-                                    pgrx::warning!("dred: re-derive SQL error: {e}");
-                                }
-                                // Rows that survived via alternative paths are now reinserted.
-                                // The final count is (over-deleted - reinserted).
-                                let reinserted = Spi::get_one_with_args::<i64>(
-                                    &format!(
-                                        "SELECT count(*) FROM {temp_over} tmp \
-                                         WHERE EXISTS ( \
-                                             SELECT 1 FROM {derived_table} dt \
-                                             WHERE dt.s = tmp.s AND dt.o = tmp.o AND dt.g = tmp.g \
-                                         )"
-                                    ),
-                                    &[],
-                                )
-                                .unwrap_or(None)
-                                .unwrap_or(0);
-                                // Subtract reinserted from the permanently retracted count.
-                                total_retracted -= reinserted;
-                                total_retracted = total_retracted.max(0);
-                            }
-                            Err(e) => pgrx::warning!("dred: rule compile error: {e}"),
-                        }
-                    }
+                    // Run full seminaive fixpoint to re-derive all surviving facts.
+                    let (re_derived, _iterations) =
+                        crate::datalog::run_seminaive_inner(&rs.rules, rset_name);
+                    // Subtract re-derived rows from the permanently retracted count.
+                    total_retracted -= re_derived;
+                    total_retracted = total_retracted.max(0);
                 }
             }
         }

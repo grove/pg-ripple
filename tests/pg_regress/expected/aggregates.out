@@ -20,6 +20,7 @@ SELECT pg_ripple.load_ntriples(
     '<https://agg.test/bob>   <https://agg.test/name> "Bob" .'                         || E'\n' ||
     '<https://agg.test/carol> <https://agg.test/name> "Carol" .'
 ) = 6 AS six_triples_loaded;
+WARNING:  pg_ripple: loaded without shared_preload_libraries; HTAP merge worker, CONSTRUCT writeback, and dictionary cache are disabled. Add pg_ripple to shared_preload_libraries in postgresql.conf.
  six_triples_loaded 
 --------------------
  t

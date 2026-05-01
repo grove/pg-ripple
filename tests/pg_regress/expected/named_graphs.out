@@ -1,6 +1,7 @@
 -- pg_regress test: named graphs
 -- Create two named graphs
 SELECT pg_ripple.create_graph('<https://example.org/graph1>') > 0 AS graph1_created;
+WARNING:  pg_ripple: loaded without shared_preload_libraries; HTAP merge worker, CONSTRUCT writeback, and dictionary cache are disabled. Add pg_ripple to shared_preload_libraries in postgresql.conf.
  graph1_created 
 ----------------
  t

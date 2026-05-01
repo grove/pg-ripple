@@ -25,6 +25,7 @@ RESET pg_ripple.normalize_iris;
 -- character should succeed and return a positive dictionary ID.
 -- NFC form of "café": caf\u00e9 (precomposed e-acute)
 SELECT pg_ripple.encode_term('<http://example.org/caf\u00e9>', 0::smallint) > 0 AS nfc_encoded;
+WARNING:  pg_ripple: loaded without shared_preload_libraries; HTAP merge worker, CONSTRUCT writeback, and dictionary cache are disabled. Add pg_ripple to shared_preload_libraries in postgresql.conf.
  nfc_encoded 
 -------------
  t

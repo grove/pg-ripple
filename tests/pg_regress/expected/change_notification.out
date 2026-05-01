@@ -14,6 +14,7 @@
 SET search_path TO pg_ripple, public;
 -- ── 1. subscribe() returns a bigint ID ────────────────────────────────────────
 SELECT pg_ripple.subscribe('*', 'test_channel_a') > 0 AS sub_a_ok;
+WARNING:  pg_ripple: loaded without shared_preload_libraries; HTAP merge worker, CONSTRUCT writeback, and dictionary cache are disabled. Add pg_ripple to shared_preload_libraries in postgresql.conf.
  sub_a_ok 
 ----------
  t

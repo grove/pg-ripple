@@ -35,6 +35,7 @@ BEGIN
     END LOOP;
     PERFORM pg_ripple.load_ntriples(nt);
 END $$;
+WARNING:  pg_ripple: loaded without shared_preload_libraries; HTAP merge worker, CONSTRUCT writeback, and dictionary cache are disabled. Add pg_ripple to shared_preload_libraries in postgresql.conf.
 -- ── 2. All 500 triples visible immediately (delta path) ───────────────────────
 SELECT pg_ripple.triple_count() >= 500 AS bulk_load_visible;
  bulk_load_visible 

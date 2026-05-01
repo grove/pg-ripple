@@ -41,6 +41,7 @@ ex:AgentShape
     sh:targetClass ex:Agent ;
     sh:or (ex:PersonShape ex:OrgShape) .
 $SHACL$) AS shapes_loaded;
+WARNING:  pg_ripple: loaded without shared_preload_libraries; HTAP merge worker, CONSTRUCT writeback, and dictionary cache are disabled. Add pg_ripple to shared_preload_libraries in postgresql.conf.
  shapes_loaded 
 ---------------
              3

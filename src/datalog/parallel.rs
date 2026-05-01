@@ -161,14 +161,11 @@ pub fn partition_into_parallel_groups(rules: &[Rule], parallel_workers: i32) -> 
         });
     }
 
-    // Sort groups by descending rule count for predictable ordering in tests.
-    groups.sort_by(|a, b| {
-        b.rules.len().cmp(&a.rules.len()).then(
-            a.derived_predicates
-                .first()
-                .cmp(&b.derived_predicates.first()),
-        )
-    });
+    // DL-PAR-02 (v0.81.0): topologically sort groups so that a group whose
+    // output feeds another group's input is executed before the consuming group.
+    // This prevents non-terminating evaluation when groups have inter-group
+    // dependencies (bug in previous code which sorted by rule count only).
+    groups = topological_sort_groups(groups);
 
     let parallel_groups = groups.len();
     let max_concurrent = if parallel_workers <= 0 {
@@ -182,6 +179,109 @@ pub fn partition_into_parallel_groups(rules: &[Rule], parallel_workers: i32) -> 
         parallel_groups,
         max_concurrent,
     }
+}
+
+/// DL-PAR-02 (v0.81.0): topologically sort parallel groups so that groups
+/// producing derived predicates consumed by other groups come first.
+///
+/// Uses Kahn's algorithm (BFS-based topological sort with in-degree tracking).
+/// Groups that form cycles (mutually recursive, detected by DL-PAR-01 union-find)
+/// are preserved in their original order since they must execute together.
+fn topological_sort_groups(groups: Vec<ParallelGroup>) -> Vec<ParallelGroup> {
+    let n = groups.len();
+    if n <= 1 {
+        return groups;
+    }
+
+    // Build a set of derived predicates per group index.
+    let derived_by_group: Vec<HashSet<i64>> = groups
+        .iter()
+        .map(|g| g.derived_predicates.iter().copied().collect())
+        .collect();
+
+    // Build a set of body predicates per group index.
+    let body_preds_by_group: Vec<HashSet<i64>> = groups
+        .iter()
+        .map(|g| {
+            let all_derived: HashSet<i64> = groups
+                .iter()
+                .flat_map(|gg| gg.derived_predicates.iter().copied())
+                .collect();
+            g.rules
+                .iter()
+                .flat_map(|r| body_derived_preds(r, &all_derived))
+                .collect()
+        })
+        .collect();
+
+    // Compute edges: group i → group j if i produces predicates that j consumes.
+    let mut in_degree = vec![0usize; n];
+    let mut adj: Vec<Vec<usize>> = vec![vec![]; n];
+
+    for i in 0..n {
+        for j in 0..n {
+            if i == j {
+                continue;
+            }
+            // Does group i produce any predicate that group j consumes?
+            if derived_by_group[i]
+                .iter()
+                .any(|p| body_preds_by_group[j].contains(p))
+            {
+                adj[i].push(j);
+                in_degree[j] += 1;
+            }
+        }
+    }
+
+    // Kahn's BFS.
+    let mut queue: std::collections::VecDeque<usize> =
+        (0..n).filter(|&i| in_degree[i] == 0).collect();
+    // Sort for determinism.
+    let mut q_sorted: Vec<usize> = queue.drain(..).collect();
+    q_sorted.sort_unstable_by_key(|&i| {
+        groups[i]
+            .derived_predicates
+            .iter()
+            .copied()
+            .min()
+            .unwrap_or(i64::MAX)
+    });
+    queue.extend(q_sorted);
+
+    let mut order: Vec<usize> = Vec::with_capacity(n);
+    while let Some(i) = queue.pop_front() {
+        order.push(i);
+        let mut next: Vec<usize> = adj[i]
+            .iter()
+            .filter_map(|&j| {
+                in_degree[j] -= 1;
+                if in_degree[j] == 0 { Some(j) } else { None }
+            })
+            .collect();
+        next.sort_unstable_by_key(|&j| {
+            groups[j]
+                .derived_predicates
+                .iter()
+                .copied()
+                .min()
+                .unwrap_or(i64::MAX)
+        });
+        queue.extend(next);
+    }
+
+    if order.len() < n {
+        // Cycle in group dependency graph (shouldn't happen after DL-PAR-01 fix,
+        // but preserve original order as fallback rather than losing groups).
+        return groups;
+    }
+
+    // Reorder groups according to topological order.
+    let mut indexed: Vec<Option<ParallelGroup>> = groups.into_iter().map(Some).collect();
+    order
+        .into_iter()
+        .filter_map(|i| indexed[i].take())
+        .collect()
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────

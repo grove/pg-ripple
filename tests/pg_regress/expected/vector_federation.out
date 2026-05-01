@@ -21,6 +21,7 @@ SELECT pg_ripple.register_vector_endpoint(
     'http://test-qdrant.example:6333',
     'qdrant'
 ) IS NULL AS qdrant_endpoint_registered;
+WARNING:  pg_ripple: loaded without shared_preload_libraries; HTAP merge worker, CONSTRUCT writeback, and dictionary cache are disabled. Add pg_ripple to shared_preload_libraries in postgresql.conf.
  qdrant_endpoint_registered 
 ----------------------------
  f

@@ -12,6 +12,7 @@ BEGIN;
     pg_ripple.encode_term('http://example.org/test1', 0::int2),
     'http://example.org/test1'
   );
+WARNING:  pg_ripple: loaded without shared_preload_libraries; HTAP merge worker, CONSTRUCT writeback, and dictionary cache are disabled. Add pg_ripple to shared_preload_libraries in postgresql.conf.
 ROLLBACK;
 -- The term should still be in the dictionary (INSERT succeeded at storage level
 -- during the transaction), but the cache should be cleared. On the next encode

@@ -6,6 +6,7 @@ SELECT pg_ripple.encode_triple(
     '<https://example.org/knows>',
     '<https://example.org/bob>'
 ) > 0 AS quoted_triple_encoded;
+WARNING:  pg_ripple: loaded without shared_preload_libraries; HTAP merge worker, CONSTRUCT writeback, and dictionary cache are disabled. Add pg_ripple to shared_preload_libraries in postgresql.conf.
  quoted_triple_encoded 
 -----------------------
  t

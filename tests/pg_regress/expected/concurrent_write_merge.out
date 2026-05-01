@@ -19,6 +19,7 @@
 SET search_path TO pg_ripple, public;
 -- ── 1. Bulk insert: 20 triples via 4 predicates ──────────────────────────────
 SELECT pg_ripple.insert_triple('<http://cwm.test/S1>', '<http://cwm.test/P1>', '<http://cwm.test/O1>') > 0 AS i1;
+WARNING:  pg_ripple: loaded without shared_preload_libraries; HTAP merge worker, CONSTRUCT writeback, and dictionary cache are disabled. Add pg_ripple to shared_preload_libraries in postgresql.conf.
  i1 
 ----
  t

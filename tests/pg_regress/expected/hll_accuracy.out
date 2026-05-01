@@ -32,6 +32,7 @@ SHOW pg_ripple.approx_distinct;
 -- ── Part 2: Setup test data ────────────────────────────────────────────────────
 -- 2a. Create test graph.
 SELECT create_graph('https://hll-test.example/g/') > 0 AS graph_created;
+WARNING:  pg_ripple: loaded without shared_preload_libraries; HTAP merge worker, CONSTRUCT writeback, and dictionary cache are disabled. Add pg_ripple to shared_preload_libraries in postgresql.conf.
  graph_created 
 ---------------
  t

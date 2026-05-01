@@ -18,6 +18,7 @@ ERROR:  syntax error at or near "E'@prefix ex: <https://example.org/> .\n'" at c
 -- Verify shape was stored.
 SELECT count(*) >= 1 AS shape_present
 FROM pg_ripple.list_shapes();
+WARNING:  pg_ripple: loaded without shared_preload_libraries; HTAP merge worker, CONSTRUCT writeback, and dictionary cache are disabled. Add pg_ripple to shared_preload_libraries in postgresql.conf.
  shape_present 
 ---------------
  f

@@ -29,6 +29,7 @@ SELECT pg_ripple.sparql_update(
     '  ex:carol ex:believes << ex:alice ex:knows ex:bob >> . '
     '}'
 ) AS inserted_quoted_object;
+WARNING:  pg_ripple: loaded without shared_preload_libraries; HTAP merge worker, CONSTRUCT writeback, and dictionary cache are disabled. Add pg_ripple to shared_preload_libraries in postgresql.conf.
  inserted_quoted_object 
 ------------------------
                       2

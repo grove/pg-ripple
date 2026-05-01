@@ -41,6 +41,7 @@ SELECT EXISTS (
 
 -- clear_point_in_time should succeed without error.
 DO $$ BEGIN PERFORM pg_ripple.clear_point_in_time(); END $$;
+WARNING:  pg_ripple: loaded without shared_preload_libraries; HTAP merge worker, CONSTRUCT writeback, and dictionary cache are disabled. Add pg_ripple to shared_preload_libraries in postgresql.conf.
 SELECT TRUE AS clear_ok;
  clear_ok 
 ----------

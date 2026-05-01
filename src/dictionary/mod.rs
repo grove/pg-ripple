@@ -137,6 +137,10 @@ fn encode_inner(term: &str, kind: i16) -> i64 {
     // Tier 3: upsert + lookup in a single SPI round-trip.  The CTE inserts the
     // term when it is new (ON CONFLICT DO NOTHING) and the outer COALESCE
     // returns the id whether the row was just inserted or already existed.
+    // DICT-RACE-01 (v0.81.0): If BOTH the INSERT and the fallback SELECT return
+    // NULL (possible during concurrent dictionary truncation or a genuine hash
+    // collision), raise a PostgreSQL error rather than panicking.  The CTE also
+    // returns the `inserted` flag so callers can emit a debug notice on conflict.
     let id: i64 = Spi::get_one_with_args::<i64>(
         "WITH ins AS ( \
              INSERT INTO _pg_ripple.dictionary (hash_hi, hash_lo, value, kind) \
@@ -156,7 +160,15 @@ fn encode_inner(term: &str, kind: i16) -> i64 {
         ],
     )
     .unwrap_or_else(|e| pgrx::error!("dictionary encode SPI error: {e}"))
-    .unwrap_or_else(|| pgrx::error!("dictionary encode: no id returned for term"));
+    .unwrap_or_else(|| {
+        // DICT-RACE-01: 0 rows returned — the INSERT was a no-op (hash conflict
+        // or concurrent truncation) and the fallback SELECT also returned nothing.
+        // This is a non-panic error path; raise a recoverable PostgreSQL error.
+        pgrx::error!(
+            "dictionary encode: 0 rows returned for term {:?} (hash collision or concurrent dict truncation — PT501)",
+            term
+        )
+    });
 
     // Populate both caches.
     crate::shmem::encode_cache_insert(hash128, id);
@@ -641,6 +653,14 @@ pub fn decode(id: i64) -> Option<String> {
         DECODE_CACHE.with(|c| {
             c.borrow_mut().put(id, v.clone());
         });
+    } else if crate::STRICT_DICTIONARY.get() {
+        // DICT-STRICT-01 (v0.81.0): when strict_dictionary=on, a missing ID
+        // is an error rather than a silent fallback.
+        pgrx::error!(
+            "dictionary decode: id {} not found; \
+             set pg_ripple.strict_dictionary = off to use placeholder strings",
+            id
+        );
     }
 
     value
@@ -674,6 +694,19 @@ pub(crate) fn clear_caches() {
     DECODE_CACHE.with(|c| {
         c.borrow_mut().clear();
     });
+}
+
+/// Clear per-backend decode cache on subtransaction abort.
+///
+/// DICT-SUBXACT-01 (v0.81.0): if a subtransaction encoded a new IRI and then
+/// aborted, the LRU decode cache retains the (now-invalid) id→string mapping.
+/// This function is called from the SubXactCallback on SUBXACT_EVENT_ABORT_SUB
+/// to purge those stale entries.
+pub(crate) fn invalidate_decode_cache() {
+    DECODE_CACHE.with(|c| c.borrow_mut().clear());
+    // Also clear encode cache to prevent encode → decode inconsistency within
+    // the same backend after a subtransaction abort.
+    ENCODE_CACHE.with(|c| c.borrow_mut().clear());
 }
 
 /// Clear the per-transaction shmem-insert tracking list after a successful

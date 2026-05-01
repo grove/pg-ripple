@@ -245,15 +245,18 @@ pub fn merge_predicate(pred_id: i64) -> i64 {
         return 0;
     }
 
-    // v0.37.0: Acquire a per-predicate exclusive advisory lock for the duration
-    // of the merge transaction. The DELETE path acquires the same lock in share
-    // mode (pg_advisory_xact_lock_shared) before inserting tombstones, so a
-    // merge and a concurrent delete can never race on the delta→main swap.
-    Spi::run_with_args(
-        "SELECT pg_advisory_xact_lock($1)",
-        &[DatumWithOid::from(pred_id)],
-    )
-    .unwrap_or_else(|e| pgrx::error!("merge: advisory lock error: {e}"));
+    // MERGE-FENCE-01 (v0.81.0): two-phase lock strategy.
+    //
+    // Phase 1 (build): Steps 1–2 (CREATE main_new + BRIN index) run without
+    // holding the exclusive per-predicate advisory lock.  `main_new` is a
+    // private scratch table so no other session can see it until the swap.
+    // A session-level shared advisory lock guards against concurrent merges
+    // on the same predicate while still allowing query-path reads and writes.
+    //
+    // Phase 2 (swap): Steps 3–5 (RENAME / view repoint / truncate delta)
+    // acquire the exclusive transaction-level advisory lock for a brief window
+    // (milliseconds) before doing DDL.  This minimises contention on the query
+    // path, which only needs to hold a RowShare lock.
 
     let main = format!("_pg_ripple.vp_{pred_id}_main");
     let main_new = format!("_pg_ripple.vp_{pred_id}_main_new");
@@ -343,7 +346,17 @@ pub fn merge_predicate(pred_id: i64) -> i64 {
     //   d. DROP old main_old           (removes old data; old index dropped with it)
     //   e. Rename new BRIN index to canonical name
     //
-    // There is no window where the VP view lacks a backing relation.
+    // MERGE-FENCE-01 (v0.81.0): Acquire the exclusive per-predicate advisory lock
+    // HERE — just before the swap — not at the start of the function.  This means
+    // the slow BRIN-index build (Steps 1–2) runs without holding the lock, keeping
+    // contention on the query path to a minimum.  The ExclusiveLock is held only
+    // for the short DDL window (Steps 3a–3e, typically < 10 ms).
+    Spi::run_with_args(
+        "SELECT pg_advisory_xact_lock($1)",
+        &[DatumWithOid::from(pred_id)],
+    )
+    .unwrap_or_else(|e| pgrx::error!("merge: advisory lock (swap phase) error: {e}"));
+
     // Use lock_timeout to avoid blocking the query path for too long.
     Spi::run_with_args("SET LOCAL lock_timeout = '5s'", &[])
         .unwrap_or_else(|e| pgrx::error!("merge: set lock_timeout error: {e}"));

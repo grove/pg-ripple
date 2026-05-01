@@ -12,6 +12,7 @@ SELECT pg_ripple.load_rules($$
 ?x <https://dl.explain.test/ancestor> ?y :- ?x <https://dl.explain.test/parent> ?y .
 ?x <https://dl.explain.test/ancestor> ?z :- ?x <https://dl.explain.test/parent> ?y , ?y <https://dl.explain.test/ancestor> ?z .
 $$, 'dl_explain_test') AS rules_loaded;
+WARNING:  pg_ripple: loaded without shared_preload_libraries; HTAP merge worker, CONSTRUCT writeback, and dictionary cache are disabled. Add pg_ripple to shared_preload_libraries in postgresql.conf.
  rules_loaded 
 --------------
             2

@@ -106,6 +106,18 @@ fn cache_key(query_text: &str) -> String {
         .get()
         .and_then(|c| c.to_str().ok().map(|s| s.to_owned()))
         .unwrap_or_else(|| "off".to_string());
+    // PLAN-CACHE-GUC-02 (v0.81.0): include additional GUCs that affect SQL generation.
+    let normalize_iris = crate::NORMALIZE_IRIS.get();
+    let wcoj_enabled = crate::WCOJ_ENABLED.get();
+    let wcoj_min = crate::WCOJ_MIN_TABLES.get();
+    let topn_pushdown = crate::TOPN_PUSHDOWN.get();
+    let sparql_max_rows = crate::SPARQL_MAX_ROWS.get();
+    let sparql_overflow = crate::SPARQL_OVERFLOW_ACTION
+        .get()
+        .and_then(|c| c.to_str().ok().map(|s| s.to_owned()))
+        .unwrap_or_else(|| "error".to_string());
+    let federation_timeout = crate::FEDERATION_TIMEOUT.get();
+    let pgvector_enabled = crate::PGVECTOR_ENABLED.get();
     // Normalise via spargebra Display → canonical SPARQL → hash.
     let text_to_hash = match spargebra::SparqlParser::new().parse_query(query_text) {
         Ok(q) => format!("{q}"),
@@ -113,6 +125,11 @@ fn cache_key(query_text: &str) -> String {
     };
     let digest = xxhash_rust::xxh3::xxh3_128(text_to_hash.as_bytes());
     format!(
-        "{digest:x}\x00max_depth={max_depth}\x00bgp_reorder={bgp_reorder}\x00role={role_oid}\x00inference_mode={inference_mode}"
+        "{digest:x}\x00max_depth={max_depth}\x00bgp_reorder={bgp_reorder}\x00role={role_oid}\
+         \x00inference_mode={inference_mode}\x00normalize_iris={normalize_iris}\
+         \x00wcoj_enabled={wcoj_enabled}\x00wcoj_min={wcoj_min}\
+         \x00topn_pushdown={topn_pushdown}\x00sparql_max_rows={sparql_max_rows}\
+         \x00sparql_overflow={sparql_overflow}\x00federation_timeout={federation_timeout}\
+         \x00pgvector_enabled={pgvector_enabled}"
     )
 }

@@ -24,6 +24,7 @@ SELECT pg_ripple.load_ntriples($$
 <https://explain.analyze.test/alice> <https://explain.analyze.test/knows>  <https://explain.analyze.test/bob> .
 <https://explain.analyze.test/bob>   <https://explain.analyze.test/name>   "Bob" .
 $$) = 3 AS triples_loaded;
+WARNING:  pg_ripple: loaded without shared_preload_libraries; HTAP merge worker, CONSTRUCT writeback, and dictionary cache are disabled. Add pg_ripple to shared_preload_libraries in postgresql.conf.
  triples_loaded 
 ----------------
  t

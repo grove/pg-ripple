@@ -13,6 +13,7 @@ SELECT pg_ripple.apply_patch(
     'A <https://patch.example/s2> <https://patch.example/p1> <https://patch.example/o2> .' || chr(10) ||
     'TC'
 ) >= 0 AS patch_add_ok;
+WARNING:  pg_ripple: loaded without shared_preload_libraries; HTAP merge worker, CONSTRUCT writeback, and dictionary cache are disabled. Add pg_ripple to shared_preload_libraries in postgresql.conf.
  patch_add_ok 
 --------------
  t

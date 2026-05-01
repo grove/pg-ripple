@@ -8,6 +8,7 @@ SELECT pg_ripple.load_ntriples(
     '<https://example.org/Alice> <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> <https://example.org/Person> .' || E'\n' ||
     '<https://example.org/Person> <http://www.w3.org/2000/01/rdf-schema#subClassOf> <https://example.org/Agent> .'
 ) = 2 AS base_triples_loaded;
+WARNING:  pg_ripple: loaded without shared_preload_libraries; HTAP merge worker, CONSTRUCT writeback, and dictionary cache are disabled. Add pg_ripple to shared_preload_libraries in postgresql.conf.
  base_triples_loaded 
 ---------------------
  t

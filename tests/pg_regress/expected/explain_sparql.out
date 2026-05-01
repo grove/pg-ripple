@@ -15,6 +15,7 @@ SELECT pg_ripple.load_ntriples(
     '<https://explain.test/alice> <https://explain.test/knows> <https://explain.test/bob> .' || E'\n' ||
     '<https://explain.test/bob>   <https://explain.test/name>  "Bob" .'
 ) = 3 AS triples_loaded;
+WARNING:  pg_ripple: loaded without shared_preload_libraries; HTAP merge worker, CONSTRUCT writeback, and dictionary cache are disabled. Add pg_ripple to shared_preload_libraries in postgresql.conf.
  triples_loaded 
 ----------------
  t

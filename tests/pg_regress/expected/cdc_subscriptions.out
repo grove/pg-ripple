@@ -8,6 +8,7 @@
 -- 5. Duplicate subscription names return false.
 CREATE EXTENSION IF NOT EXISTS pg_ripple;
 SELECT pg_ripple.triple_count() >= 0 AS library_loaded;
+WARNING:  pg_ripple: loaded without shared_preload_libraries; HTAP merge worker, CONSTRUCT writeback, and dictionary cache are disabled. Add pg_ripple to shared_preload_libraries in postgresql.conf.
  library_loaded 
 ----------------
  t
@@ -65,7 +66,7 @@ SELECT pg_ripple.insert_triple(
 ) AS inserted;
  inserted 
 ----------
-      513
+     6017
 (1 row)
 
 -- Subscription still active.

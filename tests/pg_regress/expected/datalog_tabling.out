@@ -9,6 +9,7 @@
 -- NOTE: setup.sql already does DROP/CREATE EXTENSION before this file.
 CREATE EXTENSION IF NOT EXISTS pg_ripple;
 SELECT pg_ripple.triple_count() >= 0 AS library_loaded;
+WARNING:  pg_ripple: loaded without shared_preload_libraries; HTAP merge worker, CONSTRUCT writeback, and dictionary cache are disabled. Add pg_ripple to shared_preload_libraries in postgresql.conf.
  library_loaded 
 ----------------
  t

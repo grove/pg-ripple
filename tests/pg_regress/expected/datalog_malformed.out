@@ -2,6 +2,7 @@
 SET search_path TO pg_ripple, public;
 -- Test: empty rule set (valid).
 SELECT pg_ripple.load_rules('', 'empty_test') >= 0 AS empty_rules_ok;
+WARNING:  pg_ripple: loaded without shared_preload_libraries; HTAP merge worker, CONSTRUCT writeback, and dictionary cache are disabled. Add pg_ripple to shared_preload_libraries in postgresql.conf.
  empty_rules_ok 
 ----------------
  t

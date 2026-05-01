@@ -10,6 +10,7 @@
 --   BIDI-ATTR-01:     ingest_jsonld with mode parameter
 CREATE EXTENSION IF NOT EXISTS pg_ripple;
 SELECT pg_ripple.triple_count() >= 0 AS library_loaded;
+WARNING:  pg_ripple: loaded without shared_preload_libraries; HTAP merge worker, CONSTRUCT writeback, and dictionary cache are disabled. Add pg_ripple to shared_preload_libraries in postgresql.conf.
  library_loaded 
 ----------------
  t
@@ -263,7 +264,7 @@ SELECT pg_ripple.abandon_linkback('00000000-0000-0000-0000-000000000001'::uuid);
 RESET client_min_messages;
 -- --- Part 9: BIDI-INBOX-01 — install_bidi_inbox ---------------------------
 -- 9a. install_bidi_inbox creates the table and trigger.
-SELECT pg_ripple.install_bidi_inbox('pg_ripple_inbox.test_inbox');
+SELECT pg_ripple.install_bidi_inbox('ripple_inbox.test_inbox');
  install_bidi_inbox 
 --------------------
  
@@ -271,7 +272,7 @@ SELECT pg_ripple.install_bidi_inbox('pg_ripple_inbox.test_inbox');
 
 SELECT COUNT(*) = 1 AS inbox_table_exists
 FROM information_schema.tables
-WHERE table_schema = 'pg_ripple_inbox'
+WHERE table_schema = 'ripple_inbox'
   AND table_name = 'test_inbox';
  inbox_table_exists 
 --------------------

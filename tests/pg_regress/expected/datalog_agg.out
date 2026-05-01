@@ -7,6 +7,7 @@
 CREATE EXTENSION IF NOT EXISTS pg_ripple;
 -- Load library and register GUCs by calling any pg_ripple function first.
 SELECT pg_ripple.triple_count() >= 0 AS library_loaded;
+WARNING:  pg_ripple: loaded without shared_preload_libraries; HTAP merge worker, CONSTRUCT writeback, and dictionary cache are disabled. Add pg_ripple to shared_preload_libraries in postgresql.conf.
  library_loaded 
 ----------------
  t

@@ -2,6 +2,7 @@
 -- Basic IRI round-trip
 SELECT pg_ripple.decode_id(pg_ripple.encode_term('https://example.org/subject', 0::smallint))
     = 'https://example.org/subject' AS iri_roundtrip;
+WARNING:  pg_ripple: loaded without shared_preload_libraries; HTAP merge worker, CONSTRUCT writeback, and dictionary cache are disabled. Add pg_ripple to shared_preload_libraries in postgresql.conf.
  iri_roundtrip 
 ---------------
  t

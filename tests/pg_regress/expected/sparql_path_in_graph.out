@@ -11,6 +11,7 @@ SELECT pg_ripple.load_ntriples_into_graph($$
 <https://path.graph.test/b> <https://path.graph.test/knows> <https://path.graph.test/c> .
 <https://path.graph.test/c> <https://path.graph.test/knows> <https://path.graph.test/d> .
 $$, 'https://path.graph.test/g1') = 3 AS g1_loaded;
+WARNING:  pg_ripple: loaded without shared_preload_libraries; HTAP merge worker, CONSTRUCT writeback, and dictionary cache are disabled. Add pg_ripple to shared_preload_libraries in postgresql.conf.
  g1_loaded 
 -----------
  t

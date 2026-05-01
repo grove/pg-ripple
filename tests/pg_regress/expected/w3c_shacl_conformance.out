@@ -57,6 +57,7 @@ ex:PersonShape
         sh:datatype xsd:integer ;
     ] .
 $SHACL$) >= 1 AS person_shape_loaded;
+WARNING:  pg_ripple: loaded without shared_preload_libraries; HTAP merge worker, CONSTRUCT writeback, and dictionary cache are disabled. Add pg_ripple to shared_preload_libraries in postgresql.conf.
  person_shape_loaded 
 ---------------------
  t

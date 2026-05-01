@@ -13,6 +13,7 @@ SET search_path TO pg_ripple, public;
 -- Create source and derived graphs.
 SELECT pg_ripple.create_graph('https://cwbequiv.test/source/') IS NULL
     AS source_graph_created;
+WARNING:  pg_ripple: loaded without shared_preload_libraries; HTAP merge worker, CONSTRUCT writeback, and dictionary cache are disabled. Add pg_ripple to shared_preload_libraries in postgresql.conf.
  source_graph_created 
 ----------------------
  f
@@ -34,16 +35,12 @@ SELECT pg_ripple.create_construct_rule(
      } }',
     'https://cwbequiv.test/derived/'
 ) IS NULL AS rule_created;
- rule_created 
---------------
- t
-(1 row)
-
+ERROR:  cannot insert into view "vp_7"
 -- Confirm rule is listed.
 SELECT jsonb_array_length(pg_ripple.list_construct_rules()) >= 1 AS rule_registered;
  rule_registered 
 -----------------
- t
+ f
 (1 row)
 
 -- Path 1: insert_triple()

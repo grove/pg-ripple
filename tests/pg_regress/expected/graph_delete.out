@@ -9,6 +9,7 @@ SELECT pg_ripple.load_ntriples_into_graph(
 ',
     'https://example.org/gdelete'
 ) AS loaded;
+WARNING:  pg_ripple: loaded without shared_preload_libraries; HTAP merge worker, CONSTRUCT writeback, and dictionary cache are disabled. Add pg_ripple to shared_preload_libraries in postgresql.conf.
  loaded 
 --------
       3

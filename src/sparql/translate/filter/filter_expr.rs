@@ -105,17 +105,19 @@ fn translate_function_call_filter(
     {
         return Some(format!("({val_sql} IS NOT NULL)"));
     }
-    let strict = crate::SPARQL_STRICT.get();
+    // FILTER-STRICT-01 (v0.81.0): honour both sparql_strict and strict_sparql_filters.
+    // strict_sparql_filters specifically targets unknown built-in function names.
+    let strict = crate::SPARQL_STRICT.get() || crate::STRICT_SPARQL_FILTERS.get();
     if strict {
         pgrx::error!(
-            "SPARQL function {} is not supported; \
-             set pg_ripple.sparql_strict = off to warn-and-skip instead",
+            "SPARQL function {} is not supported (PT422); \
+             set pg_ripple.sparql_strict = off and pg_ripple.strict_sparql_filters = off to warn-and-skip instead",
             expr::function_name(func)
         );
     } else {
         pgrx::warning!(
             "SPARQL function {} is not yet supported — FILTER predicate dropped \
-             (set pg_ripple.sparql_strict = on to raise an error instead)",
+             (set pg_ripple.sparql_strict = on or pg_ripple.strict_sparql_filters = on to raise an error instead)",
             expr::function_name(func)
         );
         None

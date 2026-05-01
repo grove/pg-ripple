@@ -42,6 +42,7 @@ SELECT pg_ripple.store_embedding(
     'https://example.org/half_test',
     ARRAY[0.1, 0.2, 0.3]::float8[]
 ) IS NULL AS store_embedding_void;
+WARNING:  pg_ripple: loaded without shared_preload_libraries; HTAP merge worker, CONSTRUCT writeback, and dictionary cache are disabled. Add pg_ripple to shared_preload_libraries in postgresql.conf.
 WARNING:  pg_ripple.store_embedding: pgvector extension not installed (PT603); install pgvector and run the 0.27.0 migration to enable hybrid search
  store_embedding_void 
 ----------------------
