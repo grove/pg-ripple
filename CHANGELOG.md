@@ -27,7 +27,7 @@ WWW-Authenticate header, and CHANGELOG/GUC naming conventions.**
 
 - **FUZZ-BULK-01** — Three new fuzz targets: `ntriples_load`, `nquads_load`, `trig_load` in `fuzz/fuzz_targets/`. Registered in `fuzz/Cargo.toml` and CI fuzz workflow.
 - **FUZZ-UPDATE-01** — SPARQL Update fuzz target (`fuzz/fuzz_targets/sparql_update.rs`) confirmed present from v0.79.0; corpus seeded from `tests/sparql/` UPDATE files.
-- **PROPTEST-02** — New proptest suite `tests/proptest/ntriples_oxigraph.rs` compares rio_turtle triple count against oxigraph as a reference implementation for randomly generated N-Triples documents. `oxigraph` added as a dev-dependency.
+- **PROPTEST-02** — New proptest suite `tests/proptest/ntriples_oxigraph.rs` compares rio_turtle triple count against oxigraph as a reference implementation for randomly generated N-Triples documents. `oxigraph` added as a dev-dependency. ci/test: tests/proptest/ntriples_oxigraph.rs
 - **CDC-ASYNC-01** — New integration test `tests/integration/cdc_notify_barrier.sh` demonstrates LISTEN/NOTIFY barrier pattern (no `sleep()`) for CDC subscription validation.
 - **KFAIL-DOC-01** — Every entry in `tests/w3c/known_failures.txt` and `tests/conformance/known_failures.txt` now has a `# Reason:` and `# Issue:` comment explaining the failure.
 - **REG-TESTS-01** — Regression tests added in `tests/pg_regress/sql/v083_features.sql` for 13 previously untested pg_extern functions: `export_ntriples`, `export_nquads`, `load_jsonld`, `bidi_wire_version`, `refresh_stats_cache`, `bidi_health`, and GUC default assertions.
@@ -59,7 +59,7 @@ WWW-Authenticate header, and CHANGELOG/GUC naming conventions.**
 - **BUILD-TIME-FIELD-01** — `/health` JSON response `build_time` field now contains an RFC 3339 build timestamp (from `SOURCE_DATE_EPOCH` env var or current build time), replacing the Cargo version string.
 - **HTTP-401-WWW-AUTH-01** — `check_auth()` in `pg_ripple_http/src/common.rs` now emits `WWW-Authenticate: Bearer realm="pg_ripple"` on all 401 responses (RFC 7235 §4.1).
 - **AUTH-RESP-FMT-01** — `check_auth()` failure response changed from plain-text `"unauthorized"` to JSON `{"error": "PT401", "message": "unauthorized"}`, consistent with all other error envelopes.
-- **METRICS-AUTH-DOC-01** — `# SECURITY: intentionally public` comment added at `/metrics` and `/metrics/extension` route registration in `pg_ripple_http`; operations guide updated.
+- **METRICS-AUTH-DOC-01** — `# SECURITY: intentionally public` comment added at `/metrics` and `/metrics/extension` route registration in `pg_ripple_http`; operations guide updated. docs/src/operations/monitoring.md
 - **EXPORT-BNODE-VALID-01** — `src/export.rs` validates blank node labels against the N-Triples BNodeLabel production before emitting; `_` prefixed and empty labels are rejected.
 
 ---
