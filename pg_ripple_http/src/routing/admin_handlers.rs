@@ -18,8 +18,10 @@ use utoipa::OpenApi as _;
 /// BUILD-TIME-FIELD-01 (v0.83.0): populated by build.rs with an RFC-3339
 /// timestamp, or falls back to the Cargo package version string prefixed with
 /// "build-version=" when SOURCE_DATE_EPOCH is unset.
-const BUILD_TIME: &str =
-    option_env!("BUILD_TIMESTAMP").unwrap_or(concat!("build-version=", env!("CARGO_PKG_VERSION")));
+const BUILD_TIME: &str = match option_env!("BUILD_TIMESTAMP") {
+    Some(ts) => ts,
+    None => concat!("build-version=", env!("CARGO_PKG_VERSION")),
+};
 
 pub(crate) async fn health(State(state): State<Arc<AppState>>) -> Response {
     // v0.55.0 I-3: return structured JSON with version, git_sha, postgres_connected, last_query_ts.
