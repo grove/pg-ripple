@@ -373,3 +373,48 @@ Based on the audit, no error path in the current codebase logs raw HMAC keys, co
 ### Connection Strings
 
 PostgreSQL connection strings (DSN) containing passwords may appear in `pg_log` via `log_connections = on`. Use `pg_hba.conf` with `scram-sha-256` and a connection pooler (e.g., PgBouncer) that authenticates separately so application DSNs never include inline passwords.
+
+---
+
+## Supported Authentication Schemes (S13-10, v0.86.0)
+
+`pg_ripple_http` accepts **Bearer token** authentication only.
+
+| Scheme | Supported | Notes |
+|---|---|---|
+| Bearer (RFC 6750) | ✅ Yes | Set `PG_RIPPLE_HTTP_AUTH_TOKEN` env var; pass `Authorization: Bearer <token>` |
+| Basic (RFC 7617) | ❌ No | Not accepted; Basic sends credentials in cleartext (even over TLS, base64 is trivially reversible) |
+| API Key (header) | ❌ No | Not a standard HTTP auth scheme; use Bearer instead |
+| mTLS | ⏳ Future | Planned for v1.x |
+
+**Recommendation**: rotate the Bearer token regularly. Use a 32-byte (256-bit) or larger random secret:
+
+```bash
+openssl rand -base64 32
+```
+
+Set the token as an environment variable or via Docker secrets — never hardcode it in `docker-compose.yml` or configuration files.
+
+---
+
+## Metrics Port Isolation (S13-09, v0.86.0)
+
+```admonish warning title="Network isolation required for /metrics"
+The `GET /metrics` endpoint exposes Prometheus-format operational data including query counts,
+error rates, cache statistics, and federation endpoint information. **This endpoint does not
+require authentication** — it relies on network-level isolation instead.
+
+**Do not expose the metrics port (default: same as the API port 7878) to untrusted networks.**
+
+In production deployments:
+- Run `pg_ripple_http` in a private network (e.g., Kubernetes pod network, Docker internal network).
+- Use a reverse proxy (nginx, Envoy, Traefik) to expose only `/sparql`, `/datalog`, and `/health` externally.
+- Restrict `/metrics` to Prometheus scraper IPs via the reverse proxy ACL.
+- Consider deploying `pg_ripple_http` with a separate metrics port binding (future feature).
+
+**CORS permissive mode warning**: when `PG_RIPPLE_HTTP_CORS_ORIGINS=*` is set, every
+cross-origin request increments the `pg_ripple_http_cors_permissive_requests_total` Prometheus
+counter. Monitor this counter to detect unexpected cross-origin traffic. Use a specific origin
+allowlist in production (e.g., `PG_RIPPLE_HTTP_CORS_ORIGINS=https://app.example.com`).
+```
+

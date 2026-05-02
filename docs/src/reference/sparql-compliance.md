@@ -274,10 +274,11 @@ pg_ripple extends the SPARQL standard with additional capabilities:
 
 ---
 
-## DESCRIBE Strategy Reference (v0.55.0)
+## DESCRIBE Strategy Reference (SC13-04, v0.86.0 — supersedes v0.55.0)
 
-pg_ripple supports four DESCRIBE algorithms, selectable via the
-`pg_ripple.describe_strategy` GUC (default: `cbd`):
+pg_ripple supports three DESCRIBE algorithms selectable via the **`pg_ripple.describe_form`**
+GUC (default: `cbd`), introduced in v0.86.0. The older `pg_ripple.describe_strategy` GUC is
+deprecated (see [deprecated-gucs.md](deprecated-gucs.md)) and will be removed in v1.0.0.
 
 ### `cbd` — Concise Bounded Description (default)
 
@@ -286,7 +287,7 @@ plus all triples reachable by following blank-node objects recursively.
 This is the minimal W3C-defined DESCRIBE semantics.
 
 ```sql
-SET pg_ripple.describe_strategy = 'cbd';
+SET pg_ripple.describe_form = 'cbd';
 SELECT * FROM pg_ripple.sparql('DESCRIBE <https://example.org/Alice>');
 ```
 
@@ -297,41 +298,42 @@ appears as **object**. This captures both outgoing and incoming edges.
 Suitable when you need the full neighbourhood of a resource.
 
 ```sql
-SET pg_ripple.describe_strategy = 'scbd';
+SET pg_ripple.describe_form = 'scbd';
 SELECT * FROM pg_ripple.sparql('DESCRIBE <https://example.org/Alice>');
 ```
 
-### `simple` — Subject-Only (forward-star)
+### `symmetric` — Alias for `scbd`
 
-Returns only triples where the described resource is the **subject** —
-no blank-node following. Fastest strategy; use when you only need
-direct properties of a resource and do not need blank-node closures.
+`symmetric` is a normalised alias for `scbd` for readability:
 
 ```sql
-SET pg_ripple.describe_strategy = 'simple';
+SET pg_ripple.describe_form = 'symmetric';
 SELECT * FROM pg_ripple.sparql('DESCRIBE <https://example.org/Alice>');
 ```
 
-### Choosing a Strategy
+### Choosing a Form
 
-| Strategy | Outgoing edges | Incoming edges | Blank-node closure | Speed |
+| Form | Outgoing edges | Incoming edges | Blank-node closure | Speed |
 |---|---|---|---|---|
 | `cbd` | ✅ | ❌ | ✅ | Medium |
-| `scbd` | ✅ | ✅ | ✅ | Slower |
-| `simple` | ✅ | ❌ | ❌ | Fastest |
+| `scbd` / `symmetric` | ✅ | ✅ | ✅ | Slower |
 
 The GUC can be set at the session or transaction level:
 
 ```sql
 -- Session-level
-SET pg_ripple.describe_strategy = 'scbd';
+SET pg_ripple.describe_form = 'scbd';
 
 -- Transaction-level
 BEGIN;
-SET LOCAL pg_ripple.describe_strategy = 'simple';
+SET LOCAL pg_ripple.describe_form = 'cbd';
 SELECT * FROM pg_ripple.sparql('DESCRIBE <https://example.org/Bob>');
 COMMIT;
 ```
+
+> **Migration note**: Replace `SET pg_ripple.describe_strategy = 'simple'` with
+> `SET pg_ripple.describe_form = 'cbd'` (the `simple` strategy is now the CBD default).
+> The strategy `scbd` maps directly to `describe_form = 'scbd'`.
 
 ---
 

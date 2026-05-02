@@ -150,10 +150,15 @@ pub(super) fn get_agent(timeout: Duration, pool_size: usize) -> ureq::Agent {
             );
         }
         // opt is Some(…) because we just set it above when it was None.
-        // Using unwrap_or_else with unreachable! avoids both clippy::unwrap_used
-        // and clippy::expect_used while preserving the invariant documentation.
+        // Q13-07 (v0.86.0): use pgrx::error! instead of unreachable! so a
+        // regression in the invariant produces a catchable PostgreSQL error
+        // rather than a backend panic.
         opt.as_ref()
-            .unwrap_or_else(|| unreachable!("get_agent: agent should be Some after init"))
+            .unwrap_or_else(|| {
+                pgrx::error!(
+                    "internal: get_agent: agent should be Some after init -- please report"
+                )
+            })
             .clone()
     })
 }

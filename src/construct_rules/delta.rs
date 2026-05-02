@@ -108,7 +108,10 @@ pub(super) fn compile_construct_to_inserts(
                 format!("{id}::bigint")
             }
             TermPattern::Variable(v) => var_col(v.as_str()),
-            _ => unreachable!("validated above"),
+            _ => return Err(
+                "internal: blank node or RDF-star subject reached template encoder — please report"
+                    .to_owned(),
+            ),
         };
 
         // Resolve predicate expression and extract pred_id.
@@ -135,7 +138,12 @@ pub(super) fn compile_construct_to_inserts(
                 format!("{id}::bigint")
             }
             TermPattern::Variable(v) => var_col(v.as_str()),
-            TermPattern::BlankNode(_) => unreachable!("validated above"),
+            TermPattern::BlankNode(_) => {
+                return Err(
+                    "internal: blank node object reached template encoder — please report"
+                        .to_owned(),
+                );
+            }
             TermPattern::Triple(_) => {
                 return Err("CONSTRUCT template contains an RDF-star quoted triple; \
                      RDF-star template terms are not supported in writeback rules"

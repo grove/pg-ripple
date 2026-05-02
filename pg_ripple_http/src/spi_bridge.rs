@@ -9,7 +9,7 @@ use std::time::Instant;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 
-use crate::common::{AppState, redacted_error};
+use crate::common::{AppState, json_error, redacted_error};
 use crate::routing::{format_ask_result, format_graph_results, format_select_results};
 
 // ─── SPARQL execution ────────────────────────────────────────────────────────
@@ -21,6 +21,19 @@ use crate::routing::{format_ask_result, format_graph_results, format_select_resu
 fn is_valid_traceparent(tp: &str) -> bool {
     // Total length: 2 + 1 + 32 + 1 + 16 + 1 + 2 = 55 characters
     tp.len() == 55 && tp.starts_with("00-") && tp.chars().all(|c| c.is_ascii_hexdigit() || c == '-')
+}
+
+/// A13-06 (v0.86.0): Detect whether a PostgreSQL error message is a SPARQL
+/// parse error emitted by the pg_ripple extension.
+///
+/// The extension calls `pgrx::error!("SPARQL parse error: {e}")` for query
+/// parse failures.  We match on that prefix so the HTTP companion can return
+/// the standardised `PT400_SPARQL_PARSE` error code.
+fn is_sparql_parse_error(e: &tokio_postgres::Error) -> bool {
+    let msg = e.to_string().to_lowercase();
+    msg.contains("sparql parse error")
+        || msg.contains("sparql_parse_error")
+        || msg.contains("pt400_sparql_parse")
 }
 
 pub(crate) async fn execute_sparql_with_traceparent(
@@ -106,6 +119,13 @@ async fn execute_select(
         Ok(r) => r,
         Err(e) => {
             state.metrics.record_error();
+            if is_sparql_parse_error(&e) {
+                return json_error(
+                    "PT400_SPARQL_PARSE",
+                    "SPARQL parse error — check query syntax",
+                    StatusCode::BAD_REQUEST,
+                );
+            }
             return redacted_error(
                 "sparql_query_error",
                 &format!("SPARQL query error: {e}"),
@@ -144,6 +164,13 @@ async fn execute_ask(
         Ok(r) => r,
         Err(e) => {
             state.metrics.record_error();
+            if is_sparql_parse_error(&e) {
+                return json_error(
+                    "PT400_SPARQL_PARSE",
+                    "SPARQL parse error — check query syntax",
+                    StatusCode::BAD_REQUEST,
+                );
+            }
             return redacted_error(
                 "sparql_ask_error",
                 &format!("SPARQL ASK error: {e}"),
@@ -178,6 +205,13 @@ async fn execute_construct(
         Ok(r) => r,
         Err(e) => {
             state.metrics.record_error();
+            if is_sparql_parse_error(&e) {
+                return json_error(
+                    "PT400_SPARQL_PARSE",
+                    "SPARQL parse error — check query syntax",
+                    StatusCode::BAD_REQUEST,
+                );
+            }
             return redacted_error(
                 "sparql_construct_error",
                 &format!("SPARQL CONSTRUCT error: {e}"),
@@ -221,6 +255,13 @@ async fn execute_describe(
         Ok(r) => r,
         Err(e) => {
             state.metrics.record_error();
+            if is_sparql_parse_error(&e) {
+                return json_error(
+                    "PT400_SPARQL_PARSE",
+                    "SPARQL parse error — check query syntax",
+                    StatusCode::BAD_REQUEST,
+                );
+            }
             return redacted_error(
                 "sparql_describe_error",
                 &format!("SPARQL DESCRIBE error: {e}"),

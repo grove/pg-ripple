@@ -33,6 +33,15 @@
         "url", "chrono"
       ],
       "automerge": true
+    },
+    {
+      "description": "DS13-04 (v0.86.0): auto-update Rust toolchain via rust-toolchain.toml. \
+        Renovate detects the channel pin in rust-toolchain.toml and proposes updates. \
+        Merged after manual review (no automerge — toolchain changes need CI validation).",
+      "matchFileNames": ["rust-toolchain.toml"],
+      "enabled": true,
+      "automerge": false,
+      "labels": ["toolchain", "dependencies"]
     }
   ],
   "labels": ["dependencies"],

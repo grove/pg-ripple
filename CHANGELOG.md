@@ -13,6 +13,80 @@ Versions correspond to the milestones in [ROADMAP.md](ROADMAP.md).
 
 ---
 
+## [0.86.0] — 2026-05-02 — Assessment 13 Tests, API Polish, Observability, Supply Chain & Standards
+
+**Implements v0.86.0 roadmap: closes the remaining 30+ Low-priority and backlog findings from
+Assessment 13. All 82 A13 findings are now resolved. Key additions: SSE streaming cursor
+(`HTTP-02`), axum graceful shutdown (`O13-05`), structured JSON log output (`O13-04`),
+new Prometheus metrics (`O13-02`, `S13-03`), Arrow Flight 413 guard before materialisation
+(`S13-08`), CONSTRUCT/SHACL-SPARQL fuzz targets (`T13-03`), conformance trend CSV artifact
+(`T13-04`), `describe_form` GUC (`SC13-04`), `unreachable!` → `pgrx::error!` conversions
+(`Q13-07`/`CC13-05`), POSTGRES_PASSWORD_FILE docker-compose pattern (`S13-07`), audit.toml
+expiry dates (`DS13-02`/`S13-04`), Renovate rust-toolchain update config (`DS13-04`),
+error-codes registry (`A13-03`), deprecated-gucs docs (`A13-04`), GeoSPARQL function
+inventory (`SC13-03`), compatibility matrix v0.80–v0.86 rows (`D13-01`), blog post version
+index (`D13-04`), and CDC slot cleanup crash-recovery test (`T13-07`).**
+
+### Tests (T13-02 – T13-07)
+
+- **T13-03** — added `fuzz/fuzz_targets/construct_rule.rs` and `fuzz/fuzz_targets/shacl_sparql.rs`; registered in `fuzz/Cargo.toml`; wired into weekly fuzz CI job.
+- **T13-04** — added CI artifact `tests/conformance/history.csv` tracking per-version pass rates across all five conformance suites; added `docs/src/reference/conformance-trends.md` page.
+- **T13-05** — `#[pg_extern]` coverage gap re-audited; gap confirmed closed by v0.85.0 REG-TESTS-01.
+- **T13-06** — `scripts/bench_check_regression.py --fail-on-regression 10` confirmed in benchmark workflow; gate active.
+- **T13-07** — added `tests/crash_recovery/cdc_slot_cleanup_during_kill.sh`; creates a slot, simulates SIGKILL mid-cleanup, asserts slot is reclaimed on restart.
+
+### API Polish (A13-01 – A13-06)
+
+- **A13-01** — `json_ld_load` alias doc comment updated to note `-- removal scheduled for v1.0.0`; deprecation warning already present since v0.83.0.
+- **A13-03** — created `docs/src/reference/error-codes.md` listing every PT code with meaning and source file.
+- **A13-04** — created `docs/src/reference/deprecated-gucs.md` listing deprecated GUCs with replacement names and removal versions.
+- **A13-06** — SPARQL parse errors consistently return `PT400` error code across HTTP companion and extension.
+
+### Documentation (D13-01 – D13-05)
+
+- **D13-01** — `docs/src/operations/compatibility.md` updated with v0.80–v0.86 rows.
+- **D13-04** — `blog/README.md` updated with a "Posts by Version" index.
+- **D13-05** — `plans/probabilistic-features.md` linked from ROADMAP.md v0.87.0 section header.
+
+### Supply Chain (DS13-02 – DS13-04)
+
+- **DS13-01 (triage)** — Dependency upgrade triage decisions documented:
+  - `ureq` stays at 2.x: ureq 3.x has breaking API changes (`AgentBuilder` removed, all `send_*` call sites affected across federation code); upgrade deferred to v0.87.0+ after API migration.
+  - `parquet` stays at 58.x / `arrow` stays at 55.x: arrow 56.x not yet available on crates.io as of 2026-05-02; will upgrade when available.
+  - `tokio-stream` is now justified by the SSE streaming implementation in `pg_ripple_http/src/stream.rs` (HTTP-02); previously it was a potential removal candidate.
+- **DS13-02/S13-04** — `audit.toml` expiry dates added to all four RUSTSEC ignores; structured ignore objects replace plain strings.
+- **DS13-04** — `renovate.json` updated with `matchFileNames: ["rust-toolchain.toml"]` rule for automatic toolchain update proposals (manual merge required).
+
+### Observability (O13-02 – O13-05)
+
+- **O13-02** — added Prometheus metrics: `pg_ripple_federation_endpoint_requests_total`, `pg_ripple_federation_endpoint_duration_seconds`, `pg_ripple_dictionary_cache_hit_ratio`, `pg_ripple_merge_worker_delta_rows_pending`.
+- **O13-04** — `pg_ripple_http` respects `RUST_LOG_FORMAT=json` env var to switch `tracing-subscriber` to JSON layer for structured log output.
+- **O13-05** — added `axum::serve(...).with_graceful_shutdown(shutdown_signal())` for 30-second SIGTERM drain window.
+
+### Security (S13-03, S13-06, S13-07 – S13-10)
+
+- **S13-03** — added `pg_ripple_http_cors_permissive_requests_total` Prometheus counter; incremented when `PG_RIPPLE_HTTP_CORS_ORIGINS=*` is active; documented in `docs/src/operations/security.md`.
+- **S13-07** — `docker-compose.yml` updated to use `POSTGRES_PASSWORD_FILE` Docker secrets pattern; secrets directory gitignored.
+- **S13-08** — Arrow Flight endpoint runs a `COUNT(*)` pre-check before materialising results; returns HTTP 413 with a generic message (no row count) if `ARROW_MAX_EXPORT_ROWS` exceeded; actual count logged server-side only.
+- **S13-09** — `pg_ripple_http/README.md` top-level note warns operators to network-isolate the metrics endpoint.
+- **S13-10** — `docs/src/operations/security.md` documents supported auth schemes (Bearer only; Basic not accepted).
+
+### Standards Conformance (SC13-03, SC13-04)
+
+- **SC13-03** — created `docs/src/reference/geosparql-functions.md` with status table for all ~30 GeoSPARQL 1.1 functions.
+- **SC13-04** — added `pg_ripple.describe_form` GUC (values: `cbd`, `scbd`, `symmetric`; `symmetric` is an alias for `scbd`); supersedes `pg_ripple.describe_strategy` when set.
+
+### HTTP Companion (HTTP-02, DS13-05)
+
+- **HTTP-02** — `pg_ripple_http/src/stream.rs` implemented with SSE streaming SELECT cursor (`stream_sparql_select()`); justifies `tokio-stream` dependency.
+- **DS13-05** — `tokio-stream` dependency is now fully justified by the SSE implementation using `ReceiverStream`; the previous "remove if no streaming" triage decision is closed.
+
+### Code Quality (Q13-07)
+
+- **Q13-07/CC13-05** — all 9 `unreachable!` calls in production code converted to `pgrx::error!("internal: <description> — please report")` at: `src/datalog/explain.rs:115`, `src/sparql/federation/circuit.rs:157`, `src/views.rs:839,869`, `src/construct_rules/mod.rs:239,257`, `src/construct_rules/delta.rs:111,138`, `src/replication.rs:78`.
+
+---
+
 ## [0.85.0] — 2026-07-17 — Assessment 13 Medium Findings
 
 **Implements v0.85.0 roadmap: all 22 medium-priority findings from Assessment 13

@@ -78,6 +78,9 @@ pub struct AppState {
     /// Maximum number of nonce entries in the replay-protection cache.
     /// Configurable via `ARROW_NONCE_CACHE_MAX` env var (default: 10000).
     pub arrow_nonce_cache_max: usize,
+    /// S13-03 (v0.86.0): whether the CORS wildcard-origin policy (*) is active.
+    /// When `true`, every request increments `cors_permissive_requests_total`.
+    pub cors_is_permissive: bool,
 }
 
 // ─── Configuration ────────────────────────────────────────────────────────────

@@ -101,6 +101,13 @@ jobs:
             | tee vector_bench_raw.txt
           python3 scripts/bench_check_vector_recall.py
 
+      # T13-06 (v0.86.0): Aggregate regression gate — fails CI if any benchmark
+      # result drops more than 10% vs. the stored baseline in benchmark_results.json.
+      - name: Check aggregate benchmark regression (T13-06)
+        continue-on-error: false
+        run: |
+          python3 scripts/bench_check_regression.py --fail-on-regression 10
+
       - name: Upload benchmark results
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         with:

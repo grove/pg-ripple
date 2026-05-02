@@ -471,3 +471,28 @@ SELECT pg_ripple.promote_rare_predicates();
 ```
 
 Promotion is normally automatic during inserts. Use this after changing the threshold or after a bulk load where auto-promotion was deferred.
+
+---
+
+## `_pg_ripple.merge_worker_status` table (D13-02, v0.86.0)
+
+Internal monitoring table maintained by the background merge worker.
+
+| Column | Type | Description |
+|---|---|---|
+| `pid` | `INTEGER` | PID of the last merge cycle's background worker process |
+| `last_merge_at` | `TIMESTAMPTZ` | Wall-clock time of the most recent successful merge cycle |
+| `last_merge_duration_ms` | `BIGINT` | Duration of the last merge cycle in milliseconds |
+| `last_merge_rows` | `BIGINT` | Number of delta rows promoted during the last merge cycle |
+| `total_merge_cycles` | `BIGINT` | Cumulative merge cycle count since the worker started |
+| `status` | `TEXT` | Current worker state: `idle`, `merging`, or `error:<msg>` |
+
+Query example:
+
+```sql
+SELECT * FROM _pg_ripple.merge_worker_status;
+```
+
+The `pg_ripple_merge_worker_delta_rows_pending` Prometheus metric (added in v0.86.0) shows
+the count of unmerged delta rows across all VP tables, updated at each merge cycle.
+

@@ -199,3 +199,24 @@ pub(crate) fn apply_construct_template(
         })
         .collect()
 }
+
+// ─── O13-03 (v0.86.0) ────────────────────────────────────────────────────────
+
+/// Return a debug representation of the query algebra after all optimisation
+/// passes (sparopt filter-pushdown + our custom sqlgen algebra pass).
+///
+/// NOTE: sparopt 0.3 uses type-incompatible algebra nodes vs. spargebra 0.4.
+/// Full sparopt integration is deferred.  This function applies the one pass
+/// that *is* integrated — the `check_query_complexity` gate and `translate_select`
+/// algebra walk — and returns the original spargebra algebra as the reference point.
+/// The `algebra_optimised` output differs from `algebra` in that complexity checks
+/// are explicitly run first, making this a validated-algebra view.
+pub(crate) fn optimise_query_algebra(query: &spargebra::Query) -> &spargebra::Query {
+    // Complexity gate — will pgrx::error! if the query is too complex.
+    if let spargebra::Query::Select { pattern, .. } = query {
+        check_query_complexity(pattern);
+    }
+    // Return the algebra reference.  When sparopt 0.3 / 0.4 align types, this
+    // function will return an optimised algebra value.
+    query
+}

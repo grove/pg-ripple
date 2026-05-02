@@ -597,3 +597,53 @@ Supported values:
 | Value | Behaviour |
 |-------|-----------|
 | `last_writer_wins` | Keep the row with the highest Statement ID (SID). This is the default and matches eventual-consistency semantics. |
+
+---
+
+### `pg_ripple.strict_dictionary` (D13-02, v0.86.0)
+
+| | |
+|---|---|
+| Type | Boolean |
+| Default | `off` |
+| Context | `userset` |
+
+When `on`, all dictionary lookups fail with a `PT400` error rather than silently inserting
+new dictionary entries for unknown IRIs and literals. This is useful for read-only replicas
+and validation pipelines where unknown terms indicate a data-quality problem.
+
+When `off` (default), unknown terms are inserted into the dictionary on first access (lazy
+encoding). This is appropriate for most write workloads.
+
+---
+
+### `pg_ripple.plan_cache_capacity` (D13-02, v0.86.0)
+
+| | |
+|---|---|
+| Type | Integer |
+| Default | `1024` |
+| Min / Max | `1` / `32768` |
+| Context | `sighup` |
+
+Maximum number of compiled SPARQL query plans held in the in-process LRU plan cache. Each
+entry stores the SQL string, projected variable list, and decoded type metadata. Cache hit
+rate is visible via `pg_ripple.explain_sparql(query, 'plan_cache_stats')` or through the
+`pg_ripple_plan_cache_hit_ratio` Prometheus metric.
+
+---
+
+### `pg_ripple.cdc_slot_cleanup_timeout_ms` (D13-02, v0.86.0)
+
+| | |
+|---|---|
+| Type | Integer |
+| Default | `5000` |
+| Min / Max | `100` / `300000` |
+| Context | `sighup` |
+
+Timeout in milliseconds for CDC replication slot cleanup during extension uninstall or when
+the `pg_ripple.cleanup_cdc_slot()` function is called. If the slot is active (a subscriber
+is connected), the cleanup will wait up to this many milliseconds before returning an error.
+The crash-recovery test for this scenario is in `tests/crash_recovery/cdc_slot_cleanup_during_kill.sh`.
+

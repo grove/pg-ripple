@@ -65,6 +65,14 @@ Prometheus-compatible metrics.
 curl http://localhost:7878/metrics
 ```
 
+> **⚠ Network isolation required** (S13-09, v0.86.0): the `/metrics` endpoint exposes
+> operational data (query counts, error rates, cache statistics, federation endpoint info)
+> **without authentication**. Do not expose the metrics port to untrusted networks.
+> In production, restrict `/metrics` to your Prometheus scraper IP via a reverse proxy ACL
+> and keep the metrics endpoint on a private network.
+>
+> See [Security → Metrics Port Isolation](../docs/src/operations/security.md) for details.
+
 ### `GET /sparql?query=…`
 
 Run a SPARQL query via URL parameter.

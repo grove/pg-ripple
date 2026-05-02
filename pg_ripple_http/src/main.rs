@@ -130,16 +130,22 @@ fn parse_semver(s: &str) -> Option<(u32, u32, u32)> {
 
 #[tokio::main]
 async fn main() {
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
-                "pg_ripple_http=info".parse().unwrap_or_else(|e| {
-                    eprintln!("error parsing log filter: {e}");
-                    std::process::exit(1);
-                })
-            }),
-        )
-        .init();
+    // O13-04 (v0.86.0): respect RUST_LOG_FORMAT=json for structured log output.
+    let log_format = std::env::var("RUST_LOG_FORMAT").unwrap_or_default();
+    let env_filter = tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
+        "pg_ripple_http=info".parse().unwrap_or_else(|e| {
+            eprintln!("error parsing log filter: {e}");
+            std::process::exit(1);
+        })
+    });
+    if log_format.eq_ignore_ascii_case("json") {
+        tracing_subscriber::fmt()
+            .json()
+            .with_env_filter(env_filter)
+            .init();
+    } else {
+        tracing_subscriber::fmt().with_env_filter(env_filter).init();
+    }
 
     // Accept database URL from command-line argument (first positional arg) or environment variable
     let pg_url = {
@@ -281,6 +287,8 @@ async fn main() {
     }
 
     // rate_limit is consumed by the governor layer below; not stored in AppState.
+    // S13-03 (v0.86.0): compute cors_is_permissive before building AppState.
+    let cors_is_permissive = cors_origins == "*";
     let state = Arc::new(AppState {
         pool,
         auth_token,
@@ -299,12 +307,17 @@ async fn main() {
             .ok()
             .and_then(|v| v.parse::<usize>().ok())
             .unwrap_or(10_000),
+        // S13-03 (v0.86.0): CORS permissive mode tracking.
+        cors_is_permissive,
     });
 
     // CORS layer — wildcard "*" requires explicit opt-in; empty means deny all cross-origin.
-    let cors = if cors_origins == "*" {
+    // S13-03 (v0.86.0): track whether permissive CORS is enabled so the metrics counter can
+    // be incremented per-request by middleware. The state is passed into build_router.
+    let cors = if cors_is_permissive {
         tracing::warn!(
-            "CORS is permissive (*). Set PG_RIPPLE_HTTP_CORS_ORIGINS to a comma-separated list of allowed origins for production use."
+            "CORS is permissive (*). Set PG_RIPPLE_HTTP_CORS_ORIGINS to a comma-separated list of allowed origins for production use. \
+             Monitor pg_ripple_http_cors_permissive_requests_total for cross-origin traffic."
         );
         CorsLayer::permissive()
     } else if cors_origins.is_empty() {
@@ -320,7 +333,7 @@ async fn main() {
 
     // Build the rate-limiting layer (governor) if a rate limit is configured.
     // governor operates per source IP; 0 means unlimited.
-    let mut app = routing::build_router(state, max_body_bytes, cors);
+    let mut app = routing::build_router(state.clone(), max_body_bytes, cors);
 
     if rate_limit > 0 {
         let governor_conf = match GovernorConfigBuilder::default()
@@ -347,14 +360,55 @@ async fn main() {
             std::process::exit(1);
         }
     };
-    // Pass ConnectInfo for per-IP rate limiting.
+
+    // O13-05 (v0.86.0): graceful shutdown on SIGTERM with a 30-second drain window.
+    // axum::serve().with_graceful_shutdown() waits for in-flight requests to complete
+    // before the process exits; SIGINT (Ctrl-C) also triggers the same shutdown path.
     if let Err(e) = axum::serve(
         listener,
         app.into_make_service_with_connect_info::<SocketAddr>(),
     )
+    .with_graceful_shutdown(shutdown_signal())
     .await
     {
         tracing::error!("server error: {e}");
         std::process::exit(1);
     }
+}
+
+/// Wait for SIGTERM or SIGINT, then return to trigger graceful shutdown.
+///
+/// O13-05 (v0.86.0): allows in-flight requests up to 30 seconds to complete
+/// after a SIGTERM is received before the process exits.
+async fn shutdown_signal() {
+    use tokio::signal;
+
+    let ctrl_c = async {
+        signal::ctrl_c()
+            .await
+            .expect("failed to install Ctrl+C handler");
+    };
+
+    #[cfg(unix)]
+    let terminate = async {
+        signal::unix::signal(signal::unix::SignalKind::terminate())
+            .expect("failed to install SIGTERM handler")
+            .recv()
+            .await;
+    };
+
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
+
+    tokio::select! {
+        () = ctrl_c => {
+            tracing::info!("received Ctrl+C, initiating graceful shutdown (30-second drain)");
+        }
+        () = terminate => {
+            tracing::info!("received SIGTERM, initiating graceful shutdown (30-second drain)");
+        }
+    }
+
+    // Allow up to 30 seconds for in-flight requests to drain.
+    tokio::time::sleep(std::time::Duration::from_secs(30)).await;
 }
