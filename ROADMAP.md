@@ -181,7 +181,7 @@
 
 | Version | Theme | Status | Scope | Full details |
 |---------|-------|--------|-------|-------------- |
-| [v0.88.0](roadmap/v0.88.0.md) | **Datalog-native PageRank** — iterative PageRank computed entirely via pg_ripple's Datalog engine; `pg:pagerank()` SPARQL function returning ranked nodes; personalized PageRank with a seed-node bias vector; convergence-aware early termination using tabling and subsumptive caching; `pg_ripple.pagerank_run()` SQL function with configurable damping factor, iteration cap, convergence threshold, and edge-predicate filter; materialized `pagerank_scores` VP-aligned view with `stale`/`stale_since` columns and BRIN index for top-N lookups; **pg-trickle incremental refresh** via bounded K-hop Z-set propagation (score deltas applied in milliseconds on edge insert/delete, full recompute on schedule); integration with magic sets for goal-directed partial-graph PageRank; dangling-node redistribution and blank-node exclusion policies; `pg:topN()` aggregate for ranked result windows; `pg:isStale()` SPARQL function; PT0401–PT0408 error catalog | Planned | Large | [Full details](roadmap/v0.88.0-full.md) |
+| [v0.88.0](roadmap/v0.88.0.md) | **Datalog-native PageRank & graph analytics** — iterative PageRank via Datalog^agg + tabling; `pg:pagerank()` / `pg:pagerank(?node, ?topic)` SPARQL functions; personalized + predicate-scoped PR; magic-sets partial-graph PR; `pg_ripple.pagerank_run()` SQL function; **pg-trickle incremental refresh** (K-hop Z-set, score bounds, staleness columns, selective recomputation); confidence-weighted edges (v0.87 integration); topic-sensitive multi-run; edge-weight predicates; reverse/in-degree direction; temporal decay; SHACL constraint-aware ranking (`sh:importance`, `sh:excludeFromRanking`); sketch-based `pg:topN_approx()`; score-explanation trees (`explain_pagerank()`); graph-partitioned parallel computation; standard-format export (Turtle/JSON-LD/CSV/N-Triples); federation blend mode; four alternative centrality measures via `pg:centrality()` (betweenness, closeness, eigenvector, Katz); IVM queue metrics; PT0401–PT0420 error catalog | Planned | Very Large | [Full details](roadmap/v0.88.0-full.md) |
 
 ### Stable Release & Ecosystem (v1.0.0 – v1.1.0)
 
@@ -287,11 +287,14 @@ v0.87          ─── Uncertain knowledge: probabilistic Datalog (@weight, no
                │   soft SHACL scoring (shacl_score), provenance-weighted confidence
                │   from PROV-O source trust via Datalog rules
        │
-v0.88          ─── Graph analytics: Datalog-native PageRank (pg:pagerank(), personalized PR,
-               │   convergence-aware tabling, pg_ripple.pagerank_run(), materialized
-               │   pagerank_scores view with stale/stale_since, pg-trickle K-hop
-               │   incremental refresh, magic-sets partial-graph PR, pg:topN(),
-               │   pg:isStale(), PT0401–PT0408)
+v0.88          ─── Graph analytics: Datalog-native PageRank + four centrality measures;
+               │   confidence-weighted, topic-sensitive, temporal, SHACL-aware PR;
+               │   predicate-scoped personalization; edge-weight predicates;
+               │   reverse/in-degree direction; pg-trickle K-hop incremental refresh
+               │   (score bounds, selective recompute, IVM metrics); sketch top-K;
+               │   explain_pagerank(); federation blend; Turtle/JSON-LD/CSV export;
+               │   pg:centrality() (betweenness/closeness/eigenvector/Katz);
+               │   PT0401–PT0420
        │
 v1.0.0         ─── Stable release: 72-hour continuous load test, third-party security audit, documentation freeze, public benchmarks
        │
@@ -407,21 +410,25 @@ confidence combination; `pg:confidence()` SPARQL function and
 `pg:confPath()` property-path queries); soft SHACL scoring via
 `pg_ripple.shacl_score()`; and provenance-weighted confidence derived
 automatically from PROV-O source trust metadata via Datalog rules.
-v0.88.0 delivers Datalog-native PageRank: iterative PageRank computed entirely
-inside pg_ripple's Datalog engine using aggregation, tabling, and convergence-aware
-early termination; a `pg:pagerank()` SPARQL function that returns ranked nodes
-inline; personalized PageRank with a configurable seed-node bias vector;
-the `pg_ripple.pagerank_run()` SQL function with damping factor, iteration cap,
-convergence threshold, and edge-predicate filter parameters; a materialized
-`pagerank_scores` VP-aligned view with `stale`/`stale_since` columns and a BRIN
-index for fast top-N lookups; a **pg-trickle incremental refresh path** that
-propagates rank deltas via bounded K-hop Z-set local push (decaying at rate
-$d^k$, terminating when the delta falls below the convergence threshold) so
-single edge insertions and deletions update scores in milliseconds without a full
-recompute; magic-sets integration for goal-directed partial-graph PageRank;
-dangling-node redistribution and blank-node exclusion policies; a `pg:topN()`
-aggregate for ranked result windows; `pg:isStale()` for staleness-aware queries;
-and PT0401–PT0408 error codes.
+v0.88.0 delivers Datalog-native PageRank and a comprehensive graph analytics layer:
+iterative PageRank computed entirely inside pg_ripple's Datalog engine using
+aggregation, tabling, and convergence-aware early termination; `pg:pagerank()` and
+`pg:pagerank(?node, ?topic)` SPARQL functions; personalized PageRank with
+predicate-scoped bias; `pg_ripple.pagerank_run()` with damping factor, iteration cap,
+convergence threshold, direction, edge-weight predicate, topic, temporal decay, and
+seed parameters; a materialized `pagerank_scores` view with `topic`, `score_lower`,
+`score_upper`, `stale`, and `stale_since` columns; a **pg-trickle incremental
+refresh path** (K-hop Z-set local push, score-bounds propagation, selective
+recomputation, IVM queue metrics); confidence-weighted edges integrating with
+v0.87.0's uncertain knowledge engine; topic-sensitive multi-run scoring;
+reverse/in-degree ranking for hub-and-authority decomposition; temporal edge-weight
+decay; SHACL constraint-aware ranking via `sh:importance` and `sh:excludeFromRanking`;
+sketch-based `pg:topN_approx()` for sub-millisecond approximate top-K; score
+explanation trees via `pg_ripple.explain_pagerank()`; graph-partitioned parallel
+computation; standard-format export (Turtle/JSON-LD/CSV/N-Triples); federation blend
+mode for global-graph ranking across federated sources; and four alternative centrality
+measures (betweenness, closeness, eigenvector, Katz) via `pg:centrality()` and
+`pg_ripple.centrality_run()`; PT0401–PT0420 error catalog.
 v1.0.0 is the stable release: a 72-hour continuous load test, a
 third-party security audit, documentation final audit and freeze, an API stability
 guarantee, and public BSBM/WatDiv benchmark results. v1.1.0 delivers
