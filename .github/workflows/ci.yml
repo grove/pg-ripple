@@ -702,6 +702,7 @@ jobs:
     name: Property-based tests (v0.46.0)
     runs-on: ubuntu-latest
     needs: [test]
+    continue-on-error: false
 
     steps:
       - name: Checkout
