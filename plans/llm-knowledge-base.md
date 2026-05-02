@@ -38,9 +38,11 @@ wiki. They could build a **living knowledge compiler** inside PostgreSQL:
 4. SHACL and Datalog check the result for quality, contradictions, and derived
    knowledge.
 5. pg_trickle keeps everything fresh as sources change.
-6. Agents and applications query the compiled knowledge instead of searching raw
+6. PageRank and centrality measures (v0.88.0) rank compiled entities by importance,
+   freshness, and source trust, keeping the knowledge index prioritised automatically.
+7. Agents and applications query the compiled knowledge instead of searching raw
    text chunks.
-7. Downstream systems receive semantic change events when the knowledge changes.
+8. Downstream systems receive semantic change events when the knowledge changes.
 
 The big opportunity is not simply "RAG with RDF". It is **compiled operational
 knowledge**: a knowledge base with sources, tests, diffs, review workflows,
@@ -107,6 +109,7 @@ Some of the terms are technical, so this table explains them in practical terms.
 | Infer more knowledge | Datalog and OWL/RDFS rules |
 | Resolve duplicate entities | `owl:sameAs` canonicalization and alignment helpers |
 | Combine graph and vector retrieval | pgvector integration and graph-contextualized embeddings |
+| Rank compiled knowledge automatically | PageRank and centrality measures (v0.88.0): importance, betweenness, closeness, temporal decay, topic-sensitive and confidence-weighted scoring |
 | Export to GraphRAG tools | GraphRAG Parquet export and community detection |
 | Stream changes | CDC subscriptions and JSON-LD event output |
 
@@ -362,6 +365,8 @@ more than a text page. It should be an entity-centered graph bundle:
 - source coverage
 - known contradictions
 - confidence score
+- pagerank score (v0.88.0) and topic-specific scores (e.g., importance within healthcare vs. finance)
+- centrality metrics: betweenness (bridge concepts), closeness (hub proximity) (v0.88.0)
 - embedding vector
 - related entities and communities
 
@@ -419,6 +424,23 @@ The index graph could contain:
 This gives agents a map. They can start with the index graph, choose relevant
 topics, and then follow exact graph links to evidence.
 
+With v0.88.0, the index graph gains a natural priority ordering computed from
+the structure of the compiled knowledge itself. `pg_ripple.pagerank_run()` ranks
+every entity by how heavily it is referenced by other important entities.
+Temporal decay (PR-TEMPORAL-01) means recently compiled facts push more
+importance than stale ones. Confidence-weighted edges (PR-CONF-01) mean facts
+extracted from high-trust sources carry more weight than low-confidence
+extractions. Topic-sensitive scoring (PR-TOPIC-01) lets a healthcare agent and
+a finance agent each receive a relevance-ordered index without needing separate
+graphs. Betweenness centrality (PR-CENTRALITY-01) surfaces the bridge concepts
+that connect otherwise separate topic clusters — exactly the entities an index
+graph must include so agents can reason across domains. SHACL-aware ranking
+(PR-SHACL-01) automatically excludes or downranks entities that failed quality
+checks, keeping low-quality compiled facts from inflating the index. The
+pg-trickle incremental refresh (PR-TRICKLE-01) means every new compiled source
+ripples its importance contribution outward in milliseconds, so the index stays
+fresh without a nightly full recompute.
+
 ## 9. How users would query it
 
 The query-time rule should be simple:
@@ -448,8 +470,11 @@ Some questions are broad:
 - Which research areas are converging?
 - What are the biggest unresolved product risks?
 
-These should start with the index graph, communities, and summaries, then drill
-down into exact facts and evidence.
+These should start with the PageRank-ordered index graph (v0.88.0), communities,
+and summaries, then drill down into exact facts and evidence. Topic-sensitive
+PageRank (PR-TOPIC-01) ensures the ordering reflects the agent's current domain,
+not a global average. The `pg:topN_approx()` sketch function returns approximate
+top-K entities sub-millisecond for interactive sensemaking queries.
 
 ### 9.3 Hybrid fallback
 
@@ -531,6 +556,12 @@ That lets the system say things like:
 
 That is much better than pretending every extracted fact is equally true.
 
+v0.88.0's confidence-weighted PageRank (PR-CONF-01) closes the loop further:
+the importance ranking of every entity in the knowledge base now reflects not
+just how many things point to it, but how *trustworthy* those pointers are.
+A policy backed by three high-confidence extractions outranks one backed by
+five uncertain ones, automatically, without manual curation.
+
 ### 10.5 An agent memory bus
 
 pg_trickle can publish semantic events for agents:
@@ -587,6 +618,13 @@ support makes another design possible:
 
 This could be valuable for regulated or privacy-sensitive environments.
 
+v0.88.0's federation blend mode (PR-FED-01) makes this more powerful at query
+time: `pg_ripple.pagerank_run()` can pull edge triples from remote SERVICE
+endpoints into a temporary local graph, compute a single global importance
+ranking across all departments, then discard the raw remote triples. Each
+department keeps its source documents private while contributing to a shared
+knowledge ranking.
+
 ## 11. Example use cases
 
 ### 11.1 Enterprise documentation
@@ -614,6 +652,9 @@ Why it matters:
 
 Policy questions often require exact scope, dates, exceptions, and ownership.
 Those are hard for raw chunk retrieval and much better as structured facts.
+PageRank (v0.88.0) with temporal decay surfaces the most recently updated and
+most heavily cross-referenced policies at the top of the index, so agents and
+users find the authoritative current policy before older superseded versions.
 
 ### 11.2 Product intelligence
 
@@ -642,6 +683,9 @@ Why it matters:
 The result is not just a pile of feedback summaries. It is a live product graph:
 which accounts asked for what, how confident we are, what evidence supports it,
 how the trend changed, and which downstream systems should be notified.
+Topic-sensitive PageRank (v0.88.0) ranks features by how heavily they are
+requested across accounts within a given product area, surfacing the top pain
+points automatically as the feedback graph grows.
 
 ### 11.3 Research library
 
@@ -668,7 +712,10 @@ Why it matters:
 
 A new paper can strengthen, weaken, or contradict existing claims. The system
 can show what changed in the research map instead of only summarizing the new
-paper in isolation.
+paper in isolation. Eigenvector centrality (v0.88.0) surfaces the most
+fundamentally important claims — those backed by strong chains of mutually
+corroborating evidence — distinguishing them from popular but weakly-supported
+assertions.
 
 ### 11.4 Operations memory
 
@@ -714,7 +761,8 @@ without trying to become a full workflow platform.
 8. Statement-level provenance and confidence.
 9. SHACL validation before publishing compiled facts.
 10. Named graph write modes: append, replace, review, and later diff.
-11. Simple index graph for topics and entity navigation.
+11. Simple index graph for topics and entity navigation, with top-N entries
+    ranked by PageRank (v0.88.0) using `pg:topN()` and temporal decay.
 12. pg_trickle inbox attachment for source events.
 13. pg_trickle outbox publication for diagnostics and artifact changes.
 
@@ -755,6 +803,9 @@ is published.
 
 - Generate entity pages.
 - Generate topic index graphs.
+- Rank entity pages and index graph topics by PageRank, topic-sensitive scoring,
+  and centrality measures (v0.88.0); expose via `pg:pagerank(?entity, ?topic)`
+  and `pg:centrality(?entity, 'betweenness')` in SPARQL.
 - Generate multi-level summaries.
 - Generate question-answer pairs.
 - Integrate compiled artifacts into `rag_context()`.
@@ -767,6 +818,10 @@ is published.
 - Add source trust scores.
 - Use probabilistic Datalog for confidence propagation.
 - Add semantic diffs for reviewers.
+- Enable confidence-weighted PageRank (v0.88.0, PR-CONF-01) so entity importance
+  reflects both graph structure and source trust simultaneously.
+- Use `explain_pagerank()` (v0.88.0, PR-EXPLAIN-SCORE-01) in semantic-diff
+  reviews to show why an entity's importance changed after a source update.
 
 ### Phase 5: Agent ecosystem
 
@@ -804,7 +859,8 @@ chatbot.
 
 ### Query-time measures
 
-- answer latency
+- ranking relevance on sensemaking queries (PageRank top-10 precision vs. human judgement)
+- index freshness after source change: time for PageRank scores to stabilise (target: < 5 s via PR-TRICKLE-01 K-hop propagation)
 - facts retrieved per answer
 - raw snippets needed per answer
 - evidence coverage
@@ -883,7 +939,11 @@ assertions, and resolved projections clearly separated.
 5. Add a deterministic mock compiler profile for CI.
 6. Show one incremental update from start to finish: source change, partial
    recompile, graph update, validation, and pg_trickle outbox event.
-7. Compare the result against raw vector RAG on questions that require exact
+7. Run `pg_ripple.pagerank_run()` with temporal decay over the compiled graph
+   and verify that the top-10 index entities match domain-expert expectations;
+   enable PR-TRICKLE-01 incremental refresh and confirm scores update within
+   seconds of a new source compile.
+8. Compare the result against raw vector RAG on questions that require exact
    relationships, contradictions, or change awareness.
 
 The strongest demo would show what the article only hints at: a knowledge base
