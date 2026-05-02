@@ -1773,11 +1773,11 @@ jobs:
           fi
           # Validate it is parseable YAML using python3
           python3 -c "
-import sys, yaml
-with open('pg_ripple_http/openapi.yaml') as f:
-    doc = yaml.safe_load(f)
-assert doc.get('openapi', '').startswith('3.'), f'Expected openapi 3.x, got: {doc.get(\"openapi\")}'
-assert 'paths' in doc, 'openapi.yaml missing paths'
-print(f'PASS: openapi.yaml is valid YAML, openapi={doc[\"openapi\"]}, paths={list(doc[\"paths\"].keys())}')
-"
+          import sys, yaml
+          with open('pg_ripple_http/openapi.yaml') as f:
+              doc = yaml.safe_load(f)
+          assert doc.get('openapi', '').startswith('3.'), f'Expected openapi 3.x, got: {doc.get(\"openapi\")}'
+          assert 'paths' in doc, 'openapi.yaml missing paths'
+          print(f'PASS: openapi.yaml is valid YAML, openapi={doc[\"openapi\"]}, paths={list(doc[\"paths\"].keys())}')
+          "
 
