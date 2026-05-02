@@ -161,97 +161,9 @@
 | [v0.82.0](roadmap/v0.82.0.md) | Assessment 12 performance & observability + consistency audit: plan cache capacity GUC (P-01), batch decode ANY($1) (P-02), merge worker predicate cache (P-03), federation cost stats (P-04), predicate stats cache table (P-08), Arrow row limit GUC (P-09), pg_stat_statements normalisation (P-10), GUC bounds validators (P-12), Prometheus structured labels (P-13), SPARQL algebra tree in EXPLAIN (O-01), merge worker heartbeat (O-02), graph_stats scan limit GUC (O-03), redacted_error uniformity (O-06), admin lock docs (O-07), SPARQL depth DoS GUC (S-05), tenant name validation (S-06), Unicode role fallback (S-07), federation response cap (S-09), shmem overflow check (S-12), RUSTSEC audit refresh (S-04); **new (audit-1)**: SSE subscription_id length check (LISTEN-LEN-01), property-path predicate limit GUC (PROPPATH-UNBOUNDED-01), vacuum_dictionary batch size (VACUUM-DICT-BATCH-01), merge lock timeout GUC (MERGE-LOCK-GUC-01), datalog cleanup error visibility (DATALOG-SILENT-01), embedding model GUC consistency (EMBED-MODEL-01), federation call counter ordering (FED-COUNTER-ORDER-01); **new (audit-2)**: federation response pre-read size check (FED-BODY-STREAM-01), batch_decode missing-ID warning (DECODE-WARN-01), export_jsonld OOM documentation (EXPORT-JSONLD-OOM-01) | Released ✅ | Large | [Full details](roadmap/v0.82.0-full.md) |
 | [v0.83.0](roadmap/v0.83.0.md) | Assessment 12 test coverage, API polish & code quality + consistency audit: 8 error-path regression tests (T-02), N-Triples/N-Quads/TriG fuzz targets (T-03), sparql_update fuzz target (T-04), proptest reference-impl comparisons (T-05), CDC async test barriers (T-06), known_failures.txt annotations (T-07), 13 missing pg_extern regression tests (T-08), json_ld_load deprecation/rename (A-02), RETURNS TABLE graph column (A-04), GUC naming convention docs (A-05), BREAKING changelog tags (A-06), serde_cbor evaluation (DS-02), Renovate config (DS-03), bidi.rs module split (Q-01), shared-memory dict cache evaluation (P-05); **new (audit-1)**: health endpoint build_time field fix (BUILD-TIME-FIELD-01), datalog cost-model divisor GUCs (DL-COST-GUC-01), CHANGELOG heading format lint (CHANGELOG-FMT-01); **new (audit-2)**: merge worker exponential backoff (MERGE-BACKOFF-01), metrics route auth documentation (METRICS-AUTH-DOC-01), WWW-Authenticate header on 401 (HTTP-401-WWW-AUTH-01), JSON auth error envelope (AUTH-RESP-FMT-01), blank node label export validation (EXPORT-BNODE-VALID-01), Datalog max-iteration test (DATALOG-MAXITER-TEST-01) | Released ✅ | Large | [Full details](roadmap/v0.83.0-full.md) |
 
-#### PLAN_OVERALL_ASSESSMENT_12 coverage map
-
-Every finding and recommendation from [plans/PLAN_OVERALL_ASSESSMENT_12.md](plans/PLAN_OVERALL_ASSESSMENT_12.md) is assigned to one or more post-v0.79.0 roadmap milestones:
-
-| Assessment finding | Severity | Roadmap coverage |
-|---|---|---|
-| C-01: `sparql_update()` / `execute_delete_insert()` never flush mutation journal | Critical | v0.80.0 FLUSH-02-01 |
-| C-02: R2RML and CDC write paths not wired to mutation journal | High | v0.80.0 JOURNAL-R2RML-01 |
-| C-03: Property-path `CYCLE` clause tracks only object, not (subject, object) pair | High | v0.80.0 PROPPATH-CYCLE-01 |
-| C-04: HTAP merge DISTINCT ON without ORDER BY → non-deterministic SID | Medium | v0.81.0 MERGE-SID-01 |
-| C-05: Promotion TOCTOU — table created, catalog update separate statement | Medium | v0.81.0 PROMO-ATOMIC-01 |
-| C-06: `encode()` 0-row RETURNING silently falls back to incorrect SELECT | Medium | v0.81.0 DICT-RACE-01 |
-| C-07: SHACL shape store write and DDL hint not in same subtransaction | Medium | v0.81.0 SHACL-TXN-01 |
-| C-08: Federation URL allowlist comparison is case-sensitive | Medium | v0.81.0 FED-URL-01 |
-| C-09: Federation JSON truncation is silent; result is incorrect subset | Medium | v0.81.0 FED-TRUNC-01 |
-| C-10: OPTIONAL→INNER JOIN promotion limited to single-predicate patterns | Low | v0.81.0 OPT-INNER-01 |
-| C-11: Datalog aggregation in recursive rule heads accepted silently | Medium | v0.81.0 DL-AGG-01 |
-| C-12: Datalog parallel group partition intra-stratum cycle check wrong | Medium | v0.81.0 DL-PAR-01 |
-| C-13: Blank-node variable names not query-scoped; cross-subquery aliasing | Medium | v0.81.0 BN-SCOPE-01 |
-| C-14: Plan cache key does not include RLS role context | Low | v0.80.0 CACHE-RLS-01 |
-| C-15: Federation query cache key not normalised | Low | v0.81.0 FED-CACHE-01 |
-| C-16: No `strict_dictionary` GUC; decode() returns placeholder for unknown IDs | Low | v0.81.0 DICT-STRICT-01 |
-| CC-01: Dictionary decode LRU cache not invalidated on SubXact abort | High | v0.81.0 DICT-SUBXACT-01 |
-| CC-02: CDC replication slot lifecycle not managed; orphaned slots consume WAL | High | v0.81.0 CDC-SLOT-01 |
-| CC-03: Per-table lock for promotion serialises all concurrent promotions | Medium | v0.81.0 PROMO-LOCK-01 |
-| CC-04: Merge fence lock held for entire BRIN reindex + swap | Medium | v0.81.0 MERGE-FENCE-01 |
-| CC-05: Datalog parallel SCC cycle check uses stratum order not topological order | Medium | v0.81.0 DL-PAR-02 |
-| CC-06: No CDC LSN watermark; restart must replay from slot start | Medium | v0.81.0 CDC-LSN-01 |
-| CC-07: Stuck promotion requires server restart to recover | Low | v0.81.0 PROMO-STUCK-01 |
-| P-01: `plan_cache_capacity` hardcoded to 1024 | Medium | v0.82.0 CACHE-CAP-01 |
-| P-02: `batch_decode()` uses `IN (id1,id2,…)` causing plan proliferation | Medium | v0.82.0 DECODE-BIND-01 |
-| P-03: Merge worker re-queries `_pg_ripple.predicates` every cycle | Medium | v0.82.0 MERGE-PRED-01 |
-| P-04: Federation cost model uses static constants | Low | v0.82.0 FED-COST-01 |
-| P-05: Dictionary decode LRU is per-backend, not shared | Low | v0.83.0 P-05-EVAL |
-| P-08: `graph_stats()` scans all VP tables on every call | Medium | v0.82.0 STATS-CACHE-01 |
-| P-09: Arrow Flight export has no row-count limit | Medium | v0.82.0 ARROW-LIMIT-01 |
-| P-10: SPARQL queries not normalised for `pg_stat_statements` | Low | v0.82.0 PGSS-NORM-01 |
-| P-11: CDC slot lifecycle monitoring absent | Medium | v0.81.0 CDC-SLOT-01 (combined with CC-02) |
-| P-12: `vp_promotion_threshold` GUC has no min/max bounds | Low | v0.82.0 GUC-BOUNDS-01 |
-| P-13: Prometheus histogram has no `query_type` or `result_size` labels | Low | v0.82.0 METRICS-LABELS-01 |
-| O-01: `sparql_explain()` output omits SPARQL algebra tree | High | v0.82.0 EXPLAIN-ALG-01 |
-| O-02: Merge background worker produces no heartbeat log | Medium | v0.82.0 MERGE-HBEAT-01 |
-| O-03: `graph_stats()` scan strategy undocumented | Low | v0.82.0 STATS-DOC-01 |
-| O-04: Prometheus histogram unlabelled by query type | Low | v0.82.0 METRICS-LABELS-01 (combined with P-13) |
-| O-05: SPARQL text not normalised for `pg_stat_statements` | Low | v0.82.0 PGSS-NORM-01 (combined with P-10) |
-| O-06: `redacted_error()` not used consistently in all HTTP handlers | Medium | v0.82.0 REDACT-01 |
-| O-07: Admin function lock levels undocumented | Low | v0.82.0 ADMIN-LOCK-01 |
-| S-01: SQL injection via `format!()` in `src/views.rs` catalog inserts | High | v0.80.0 SQL-INJ-01 |
-| S-02: SQL injection via unescaped `model_tag` in `src/sparql/embedding.rs` | High | v0.80.0 SQL-INJ-02 |
-| S-03: SSRF blocklist omits `172.16.0.0/12`, `192.168.0.0/16`, IPv6 private ranges | High | v0.80.0 SSRF-RFC1918-01 |
-| S-04: `audit.toml` RUSTSEC exemptions not reviewed since v0.74.0 | Medium | v0.82.0 RUSTSEC-01 |
-| S-05: No SPARQL algebra depth limit; deeply nested queries cause OOM | Medium | v0.82.0 SPARQL-COMPLEX-01 |
-| S-06: `tenant_name` not validated before trigger name construction | Medium | v0.82.0 TENANT-NAME-01 |
-| S-07: `quote_ident_safe()` silently fails for Unicode role names | Low | v0.82.0 ROLE-UNICODE-01 |
-| S-08: Arrow Flight export has no row-count limit (same as P-09) | Medium | v0.82.0 ARROW-LIMIT-01 (combined with P-09) |
-| S-09: Federation HTTP response size cap applied post-read | Medium | v0.82.0 FED-SIZE-01 |
-| S-10: CORS configuration undocumented | Low | v0.82.0 CORS-DOC-01 |
-| S-11: `redacted_error()` not consistently used in HTTP handlers | Medium | v0.82.0 REDACT-01 (combined with O-06) |
-| S-12: Shared-memory size calculations use unchecked multiplication | Low | v0.82.0 SHMEM-SAFE-01 |
-| S-13: `/metrics/extension` auth requirements undocumented | Low | v0.82.0 METRICS-DOC-01 |
-| S-14: `docker-compose.yml` has insecure example password | Low | v0.82.0 METRICS-DOCKER-01 |
-| S-15: Basic auth enabled without TLS warning | Low | v0.82.0 AUTH-TLS-01 |
-| T-01: Migration chain test assertions stop at v0.62.0 | High | v0.80.0 MIGCHAIN-01 |
-| T-02: 8 error-path scenarios have no regression tests | Medium | v0.83.0 ERRPATH-01 |
-| T-03: N-Triples, N-Quads, TriG bulk loaders not fuzz-tested | Medium | v0.83.0 FUZZ-BULK-01 |
-| T-04: `sparql_update()` executor path not fuzz-tested | Medium | v0.83.0 FUZZ-UPDATE-01 |
-| T-05: Proptest suites check invariants only, no reference-impl comparison | Low | v0.83.0 PROPTEST-02 |
-| T-06: CDC integration tests use sleep() instead of notification barriers | Low | v0.83.0 CDC-ASYNC-01 |
-| T-07: `known_failures.txt` entries have no explanatory comments | Low | v0.83.0 KFAIL-DOC-01 |
-| T-08: 13 `pg_extern` functions have zero regression test coverage | Medium | v0.83.0 REG-TESTS-01 |
-| A-01: HTTP 500 / plain-text errors returned for SPARQL syntax errors | Medium | v0.80.0 HTTP-ERR-01 |
-| A-02: `json_ld_load` does not follow `load_*` naming convention | Low | v0.83.0 API-RENAME-01 |
-| A-03: `COMPATIBLE_EXTENSION_MIN` in pg_ripple_http is `"0.75.0"` not `"0.79.0"` | Low | v0.80.0 COMPAT-MIN-01 |
-| A-04: VP-row `RETURNS TABLE` functions missing `g BIGINT` column | Low | v0.83.0 API-GRAPH-COL-01 |
-| A-05: GUC naming convention inconsistent across subsystems | Low | v0.83.0 GUC-NAME-01 |
-| A-06: Breaking changes in v0.73.0–v0.79.0 not tagged `BREAKING:` | Low | v0.83.0 CHANGELOG-BREAK-01 |
-| D-01: Compatibility matrix missing entries for pg_ripple_http v0.73.0–v0.76.0 | Low | v0.80.0 COMPAT-MATRIX-01 |
-| DS-01: `sbom.json` version is `0.74.0`; 5 releases stale | Medium | v0.80.0 SBOM-04 |
-| DS-02: `serde_cbor` dependency is unmaintained | Low | v0.83.0 DEPAUDIT-01 |
-| DS-03: No Renovate/Dependabot config for automated dependency updates | Low | v0.83.0 RENOVATE-01 |
-| SC-01: Unknown SPARQL built-in functions silently evaluate to UNDEF | Medium | v0.81.0 FILTER-STRICT-01 |
-| SC-02: Property-path cycle detection (same as C-03) | High | v0.80.0 PROPPATH-CYCLE-01 (combined with C-03) |
-| SC-03: `quote_ident_safe()` fallback for Unicode names | Low | v0.82.0 ROLE-UNICODE-01 (combined with S-07) |
-| Q-01: `src/bidi.rs` is 2,509 lines; no sub-module split | Low | v0.83.0 MOD-BIDI-01 |
-| Q-02: `src/replication.rs` contains 7 `.unwrap()` + 3 `.expect()` calls | Medium | v0.81.0 REPL-UNWRAP-01 |
-| Q-03: GUC naming convention inconsistent | Low | v0.83.0 GUC-NAME-01 (combined with A-05) |
-| Q-04: SBOM CI gate absent | Medium | v0.80.0 SBOM-04 (combined with DS-01) |
-
 #### Consistency & Coherence Audit coverage map (2026-05-01)
 
-Every finding from the 2026-05-01 deep-dive consistency audit (6 parallel subagent explorations, v0.79.0 codebase) is assigned to a post-v0.79.0 roadmap milestone:
+Every finding from the 2026-05-01 deep-dive consistency audit (6 parallel subagent explorations, v0.79.0 codebase) is assigned to a post-v0.79.0 roadmap milestone. All items are now covered by Released versions v0.80.0–v0.83.0.
 
 | Audit finding | Severity | Roadmap coverage |
 |---|---|---|
@@ -297,7 +209,7 @@ Second deep-dive audit (SPARQL, storage, HTTP service, Datalog/SHACL, export/GUC
 
 | Version | Theme | Status | Scope | Full details |
 |---------|-------|--------|-------|-------------- |
-| v0.84.0 | **Uncertain knowledge engine** — Probabilistic Datalog with `@weight(FLOAT)` rule annotations, multiplicative confidence propagation, and noisy-OR multi-path combination; `pg:confidence()` SPARQL function and `load_triples_with_confidence()` bulk-loader; fuzzy SPARQL filters (`pg:fuzzy_match()` trigram/token-set similarity, confidence-threshold edge filtering in property paths via `pg:confPath()`); soft SHACL scoring with numerical `sh:severityWeight` annotations and `pg_ripple.shacl_score()` composite data-quality function; provenance-weighted confidence derived automatically from PROV-O source trust metadata via Datalog rules | Planned | Very Large | [Full details](plans/probabilistic-features.md) |
+| [v0.84.0](roadmap/v0.84.0.md) | **Uncertain knowledge engine** — Probabilistic Datalog with `@weight(FLOAT)` rule annotations, multiplicative confidence propagation, and noisy-OR multi-path combination; `pg:confidence()` SPARQL function and `load_triples_with_confidence()` bulk-loader; fuzzy SPARQL filters (`pg:fuzzy_match()` trigram/token-set similarity, confidence-threshold edge filtering in property paths via `pg:confPath()`); soft SHACL scoring with numerical `sh:severityWeight` annotations and `pg_ripple.shacl_score()` composite data-quality function; provenance-weighted confidence derived automatically from PROV-O source trust metadata via Datalog rules | Planned | Very Large | [Full details](roadmap/v0.84.0-full.md) |
 
 ### Stable Release & Ecosystem (v1.0.0 – v1.1.0)
 
