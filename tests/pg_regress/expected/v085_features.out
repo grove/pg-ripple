@@ -85,7 +85,7 @@ $$);
 SELECT pg_ripple.load_ntriples(
     E'<http://dt.v085.test/s1> <http://dt.v085.test/value> "2024-01-01T12:00:00.123456789Z"^^<http://www.w3.org/2001/XMLSchema#dateTime> .'
 ) = 1 AS subsecond_dateTime_loaded;
- subsecond_dateTime_loaded 
+ subsecond_datetime_loaded 
 ---------------------------
  t
 (1 row)
@@ -95,7 +95,7 @@ SELECT COUNT(*) >= 1 AS subsecond_dateTime_queryable
 FROM pg_ripple.sparql($$
     SELECT ?v WHERE { <http://dt.v085.test/s1> <http://dt.v085.test/value> ?v }
 $$);
- subsecond_dateTime_queryable 
+ subsecond_datetime_queryable 
 ------------------------------
  t
 (1 row)
