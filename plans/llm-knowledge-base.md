@@ -2,7 +2,7 @@
 
 > **Date:** 2026-05-02  
 > **Status:** Strategy document — not a committed roadmap item  
-> **Inspiration:** [Karpathy's compiler analogy for LLM knowledge bases](https://www.mindstudio.ai/blog/karpathy-llm-knowledge-base-architecture-compiler-analogy)  
+> **Inspiration:** [Karpathy's LLM Wiki gist](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f) · [companion blog post](https://www.mindstudio.ai/blog/karpathy-llm-knowledge-base-architecture-compiler-analogy)  
 > **Related plans:** [GraphRAG synergy](graphrag.md) · [pg-trickle relay](pg_trickle_relay_integration.md) · [future directions](future-directions.md) · [ROADMAP](../ROADMAP.md)
 
 ---
@@ -54,6 +54,43 @@ Compilation does more work before query time:
 The hardest part of this design is **incremental compilation**: when one
 document changes, only the knowledge that depends on that document should
 rebuild. That is exactly what pg_ripple and pg_trickle solve together.
+
+---
+
+## 2.1 Karpathy's three-layer structure
+
+Karpathy's LLM Wiki document names three layers precisely. Understanding them
+clarifies where pg_ripple_compile sits and where it goes further.
+
+**Raw sources** are immutable. The LLM reads them and never modifies them. They
+are the source of truth — a quarantine boundary that prevents the compiled layer
+from silently corrupting its own inputs.
+
+**The wiki** (in our terms, the compiled graph) is entirely LLM-owned. It is
+created, updated, and maintained by the compiler. Humans read it; the LLM writes
+it. This division is important: humans should not need to hand-edit compiled
+artifacts any more than they hand-edit a compiled binary.
+
+**The schema** is a configuration document — CLAUDE.md, AGENTS.md, or in our
+design, the compiler profile (§7.3). It tells the LLM how the compiled layer is
+structured, what conventions apply, and what workflows to follow when ingesting,
+querying, or linting. Karpathy's key insight is that the schema is
+**co-evolved** with the LLM over time as you discover what works for your domain.
+Our compiler profiles extend this: they are versioned, diffable, and
+audit-trailed — the schema cannot drift silently.
+
+Karpathy names three operations that map directly to pg_ripple_compile
+primitives:
+
+| Operation | Description | pg_ripple_compile equivalent |
+|---|---|---|
+| **Ingest** | Read a source, discuss key takeaways, write pages, update index and log | Source hash check → fragment extraction → LLM compile → ingest gate → SHACL gate → graph write → outbox event |
+| **Query** | Ask against the compiled wiki; file good answers back as pages | SPARQL + `rag_context()` → synthesis artifact filed as `pgc:Synthesis` node (§9.5) |
+| **Lint** | Health-check: contradictions, stale claims, orphan pages, missing cross-references, data gaps | Scheduled lint pass → `pgc:LintFinding` graph → watchpoint triggers (§10.21) |
+
+The lint operation in particular is underweighted in most RAG and compiled-wiki
+implementations. It is not a background diagnostic — it is a first-class
+operation that domain experts should be able to initiate, review, and act on.
 
 ---
 
@@ -195,6 +232,48 @@ is a batch re-indexer. With it, it is a build system.
 
 ## 7. What gets stored
 
+### 7.0 Ingest gate
+
+Before any source reaches the compilation step, it must pass a gate. The gate
+has three components that compose into a strong barrier against hallucination
+propagation and low-quality extraction.
+
+**Editorial policy scoring.** Each compiler profile declares acceptance
+criteria: minimum expected fact density, required field coverage, topic
+relevance threshold. A source is scored against the policy before LLM extraction
+begins. Below-threshold sources are kept in the `_pg_ripple.compile_rejected`
+named graph with the policy score and rejection rationale — they are not
+deleted, so the policy can be revised and the source reconsidered — but they
+never influence the trusted graph, Datalog inference, or PageRank computation.
+The editorial policy is expressed as a structured YAML document within the
+compiler profile. It can be bootstrapped from a research prompt (the LLM
+translates criteria into YAML at project start) and sharpened by operator
+corrections pinned to an example bank.
+
+**Write-time citation grounding.** Every extracted fact triple must carry a
+`prov:wasDerivedFrom` edge pointing to the exact source fragment that produced
+it, with an evidence span (character offsets or paragraph identifier). A triple
+without traceable provenance is quarantined to the `_pg_ripple.compile_draft`
+named graph and cannot be promoted to the trusted graph, influence Datalog
+rules, or contribute to PageRank without explicit operator approval. This
+constraint is enforced by the `pg_ripple_compile` worker before any write
+reaches the database. The difference from a soft confidence threshold: a
+low-confidence fact with evidence can be reviewed, corrected, and promoted; a
+fact with no evidence anchor cannot be trusted regardless of its score, because
+there is no source to verify it against.
+
+**Ingest-time schema validation.** The LLM's structured output is validated
+against the compiler profile's JSON Schema before any SQL is executed. Output
+that does not conform is rejected entirely — not stored with a low confidence
+score — and the rejection is recorded in the compiler run diagnostics (§7.4).
+This is the strongest single defense against hallucinated facts entering the
+graph: a confabulated entity reference that does not resolve to an ingested
+source fails at write time, not at review time.
+
+The gate ensures that the decision to quarantine or reject is made when
+provenance is freshest, not weeks later when an operator must reconstruct why a
+suspicious fact was admitted.
+
 ### 7.1 Source records
 
 For every source document or event, the registry stores:
@@ -335,6 +414,34 @@ Assumption records are attached to facts, entity pages, and argument records.
 At query time, `rag_context()` surfaces applicable assumptions alongside the
 answer, so the LLM and the human reviewer see the caveats rather than
 discovering them from a downstream failure.
+
+### 7.10 Audit log
+
+Every meaningful operation on the compiled knowledge base is appended as a
+structured event triple to a dedicated named log graph:
+`_pg_ripple.compile_log`. The log is append-only; entries are never modified or
+deleted.
+
+Each entry records:
+
+- Operation type: `pgc:Ingest`, `pgc:Query` (with synthesis), `pgc:Lint`,
+  `pgc:BranchMerge`, `pgc:ContractFailure`, `pgc:GateRejection`
+- Timestamp (transaction time, from pg_ripple's bi-temporal machinery)
+- Subject: which source, fragment, query, branch, or contract was involved
+- Outcome: success, failure, warning count, cost estimate
+- Operator or agent identifier
+
+This is the graph-native equivalent of Karpathy's `log.md` — a chronological
+record of what happened and when, parseable with a SPARQL filter rather than
+`grep`. The key operational value: a new compiler session (or a new agent taking
+over from a previous one) can query the log to understand what has already been
+ingested, what was recently linted, and which contracts last failed. Without
+this, every session rediscovers state from first principles.
+
+The log feeds the cost trend dashboards (§7.6) directly. It also powers the
+quality regression view: plot mean extraction confidence, contradiction rate,
+and SHACL score over time, and a drop after a model upgrade becomes a visible
+signal rather than a user complaint.
 
 ---
 
@@ -551,6 +658,34 @@ honest assessment of the answer's own reliability:
 This mode is surfaced via `rag_context(mode => 'explain_analyze')` and is
 especially valuable for agent handoff: the downstream LLM receives the facts
 plus a structured meta-assessment of their reliability.
+
+### 9.5 Queries that compound the knowledge base
+
+The act of querying can itself extend the compiled graph. When a query
+synthesizes across multiple entity pages and produces a comparison, cross-source
+conclusion, or explanatory summary that was not directly extractable from any
+single source, that synthesis can be filed back as a compiled artifact:
+
+```sql
+SELECT pgc_file_synthesis(
+    query_text  => $$ SELECT ... $$,
+    result_json => :answer,
+    label       => 'competitor-comparison-2026-05',
+    depends_on  => ARRAY[...artifact_iris...]);
+```
+
+The resulting `pgc:Synthesis` node records the SPARQL query that produced it,
+the entity pages and source fragments it drew on, the operator or agent that
+requested it, and a confidence score. When any of the underlying source facts
+change, synthesis nodes that depend on them are automatically flagged as stale
+and regenerated in the next lint pass.
+
+This is the graph-native form of Karpathy's insight that "good answers can be
+filed back into the wiki as new pages." The effect: querying compounds the
+knowledge base just as ingestion does. Each synthesis reduces future retrieval
+cost (the cross-source reasoning is already done and indexed) and adds a new
+node to the coverage map (§8.7). Over time, frequently asked questions become
+first-class knowledge nodes rather than recomputed on every call.
 
 ---
 
@@ -985,6 +1120,50 @@ The coverage map closes a fundamental gap in knowledge system design: most
 systems can tell you what they know; few can tell you, with evidence, what they
 do not know and why.
 
+### 10.21 Lint as a first-class operation
+
+The lint operation is not a background health check. It is a named, schedulable,
+operator-initiated workflow that produces actionable structured output.
+
+A lint pass examines the compiled graph for:
+
+- **Contradictions** between entity pages or across source graphs — surfaced
+  with minimal contradiction explanations (§10.18)
+- **Stale claims** whose source has been superseded by a newer compilation since
+  the fact was written
+- **Orphan artifacts** — entity pages or summaries with no inbound links from
+  the topic index graph
+- **Missing cross-references** — entities mentioned across multiple pages but
+  not connected by a named relationship triple
+- **Data gaps** — topics with low source density, high unanswered-question
+  count, or mean confidence below the coverage threshold (§8.7)
+- **Expired facts** — facts whose `sh:validUntil` has passed but have not been
+  moved to the archive graph
+
+Lint output is a structured named graph of `pgc:LintFinding` nodes, each
+linking to the affected artifact, the rule that triggered it, and a suggested
+resolution. High-severity findings fire semantic watchpoints (§10.15). Lint
+findings are queryable in SPARQL:
+
+```sparql
+SELECT ?artifact ?severity ?rule ?suggestion WHERE {
+    GRAPH pgc:lintFindings {
+        ?finding a pgc:LintFinding ;
+                 pgc:severity ?severity ;
+                 pgc:affects  ?artifact ;
+                 pgc:rule     ?rule ;
+                 pgc:suggests ?suggestion .
+    }
+    FILTER(?severity IN ("high", "critical"))
+}
+ORDER BY DESC(?severity)
+```
+
+Lint runs automatically after each batch ingest and on a configurable schedule.
+But it is also an explicit operator-initiated command — "lint the compliance
+corpus" is a thing a domain expert can request, review, and act on as a unit of
+work, not just a background metric trend.
+
 ---
 
 ## 11. Example use cases
@@ -1294,6 +1473,28 @@ threshold go to a named review graph, not the trusted graph. `pg:confidence()`
 surfaces below-threshold facts for human inspection. Accepted facts can be
 promoted with an updated confidence score without full recompilation.
 
+### Lossy compilation and hallucination propagation
+
+An LLM knowledge compiler is lossy by design: it takes raw documents and
+rewrites them into derived facts, summaries, and entity pages. That compression
+can drop caveats, dates, minority views, exact wording, and source context. Once
+people query the compiled form instead of the original, summary errors become
+embedded in the knowledge base and propagate into downstream inferences.
+
+The triple-level model is materially less lossy than prose rewrite for three
+reasons: facts are stored and correctable at the triple level rather than the
+paragraph level (each fact can be independently revised without rewriting a
+page); the raw source is always retained and linked via `prov:wasDerivedFrom`
+(the source of truth is always one hop away); and the confidence score encodes
+uncertainty explicitly rather than embedding it in hedging prose that downstream
+summaries may or may not reproduce.
+
+The ingest gate (§7.0) is the primary structural defense against hallucination
+propagation. A confabulated citation that does not resolve to an ingested source
+fails at write time. A fact without an evidence anchor cannot be promoted from
+the draft graph. Contradiction detection runs on every compile. These combine
+to make error propagation a diagnosable failure mode rather than a silent one.
+
 ### Destructive recompilation
 
 Deleting and rebuilding a whole source graph is risky in production. Production
@@ -1338,6 +1539,32 @@ declare a hard cap on maximum N per run; and cost estimates must be shown before
 a profile is enabled in production. The per-run cost records (section 7.6)
 should include an ensemble multiplier field so dashboards can distinguish
 ensemble cost from single-model baseline cost.
+
+### Multi-agent coordination
+
+When multiple agents compile the same knowledge base across sessions — or when
+multiple compiler workers run in parallel — predictable coordination failures
+emerge: duplicate extraction of the same fragment, conflicting entity
+resolutions, and schema drift where each agent interprets the compiler profile
+slightly differently.
+
+Three guardrails compose into a practical solution. **Fragment-level
+idempotency:** every compilation run is keyed by source IRI + content hash +
+profile version + model name (§7.4). A second agent that attempts to recompile
+the same unchanged fragment finds the run record already present and skips.
+**Transaction-level isolation:** the `pg_ripple_compile` worker takes a
+PostgreSQL advisory lock per source IRI during compilation; two workers cannot
+race on the same source. **Profile-as-schema:** the compiler profile is stored
+in the database, versioned, and fetched by each worker at the start of a run —
+it is not a file each agent reads fresh and interprets independently. Schema
+drift is structurally prevented: all workers at the same profile version see
+the same schema.
+
+These guardrails make multi-agent compilation a design requirement for any team
+deployment, not an afterthought. They also directly address the six-failure
+pattern observed in flat-file multi-agent wiki deployments: duplicate pages,
+hidden parallel work, per-agent schema drift, inconsistent policy boundaries,
+and open questions that die between sessions.
 
 ---
 
@@ -1387,3 +1614,71 @@ rebuilds. The system validates the result, explains what changed, and publishes
 a semantic event. That is where pg_ripple and pg_trickle become more than an
 implementation of the compiler analogy. They become the runtime for living
 knowledge.
+
+---
+
+## 17. Where the graph beats the flat-file wiki at scale
+
+The community that has built on Karpathy's pattern — SwarmVault, Kompl,
+TheKnowledge, and a dozen others — has converged on the flat-file markdown vault
+as the storage primitive. It is portable, human-readable, and integrates with
+Obsidian's graph view. At small-to-medium scale (~100–500 sources) it works
+well.
+
+At larger scale, or in team, multi-agent, or high-stakes deployments, the
+pattern runs into five structural limits. This section states them plainly,
+because understanding them clarifies why pg_ripple_compile is not just a heavier
+implementation of the same idea.
+
+**The scale problem: similarity vs. traversal.** At ~100 sources the index file
+is enough. At 1,500+ sources, text similarity search finds pages that mention
+the same words — but traversal finds pages that are structurally connected even
+when they share no text. The community implementing Karpathy's pattern at that
+scale independently discovered they needed graph traversal, not search. That is
+exactly what pg_ripple's SPARQL engine provides: it does not find entities that
+mention "VP tables"; it finds entities that participate in the same decision
+graph as VP tables, connected via named relationships, regardless of what words
+appear on any page.
+
+**The provenance problem: prose citations vs. machine-readable edges.** Flat-file
+wikis embed citations as `[[wikilink]]` syntax. Parsing and validating them
+requires another LLM or NLP pass. In pg_ripple, every fact triple carries a
+`prov:wasDerivedFrom` edge that is a first-class graph edge — queryable,
+joinable, and enforceable at write time. Orphaned citations are structurally
+prevented by the ingest gate (§7.0): if the source is not in the ingested graph,
+the write is rejected.
+
+**The temporal problem: frontmatter vs. bi-temporal facts.** A markdown file can
+carry a `date:` frontmatter field. It cannot represent that a fact was valid from
+2023-01-01 to 2024-06-30, was compiled on 2025-03-10, and was superseded by a
+different fact on 2026-01-01. pg_ripple's bi-temporal model (§10.10) handles all
+four timestamps as structured data, not prose metadata — and makes every
+historical state queryable without snapshots.
+
+**The multi-agent problem: drift and duplication.** When multiple agents maintain
+the same flat-file vault across sessions, the community has documented six
+predictable failures: schema drift between agents, silent parallel creation of
+duplicate pages, self-attributed canonical status that other agents ignore,
+inconsistent policy boundaries, no structured back-channel for in-session
+observations, and open questions that die in chat history. pg_ripple's
+named-graph model and versioned compiler profiles eliminate these by design: the
+schema is a versioned database artifact, not a markdown file each agent reads
+fresh and interprets independently (§15: Multi-agent coordination).
+
+**The inference problem: links vs. rules.** A flat-file wiki can record that
+entity A is related to entity B via a wikilink. It cannot derive that a
+compliance rule applies to a new contract because the contract matches three
+conditions defined in three separate documents. pg_ripple's Datalog layer closes
+this gap: facts inferred by rules are first-class triples with confidence scores,
+provenance, and epistemic status labels, distinguishable from directly extracted
+facts and ineligible for promotion without evidence anchors.
+
+The right summary: the flat-file wiki is an excellent **output format** for human
+consumption and an excellent **input format** for LLM context. It is not the
+right **storage format** for a knowledge system that must be queried, inferred
+over, validated, incrementally updated, and audited.
+`pg_ripple_compile` uses graph-native storage internally and generates flat-file
+output (Turtle, JSON-LD, Markdown entity pages) as a rendering step — giving
+human readers the familiar wiki surface while keeping the durable store
+machine-queryable.
+
