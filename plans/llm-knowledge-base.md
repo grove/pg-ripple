@@ -83,6 +83,8 @@ pg_ripple already covers most of what a compiled knowledge base needs.
 | Incremental importance updates | pg-trickle K-hop rank propagation in milliseconds (v0.88) |
 | Hybrid graph + vector retrieval | pgvector integration and graph-contextualized embeddings |
 | GraphRAG export | GraphRAG Parquet export and community detection |
+| Bi-temporal fact management | Named-graph time-travel + RDF-star valid/transaction time |
+| Prioritize human review | Centrality × confidence review queue — maximum leverage per review hour |
 | Stream knowledge changes | CDC subscriptions and JSON-LD event output |
 
 The missing product layer is the step that takes raw human-readable sources and
@@ -255,6 +257,30 @@ changes, the system asks: which facts came from this ticket? Which entity pages
 used those facts? Which summaries mentioned those entities? Only those artifacts
 rebuild.
 
+### 7.6 Compiler cost accounting
+
+Every compiler run leaves a cost record alongside its diagnostics:
+
+- Token counts (prompt and completion), the model name, and the estimated dollar
+  cost for each LLM call
+- Fragment skip count — how many fragments were unchanged and not resubmitted to
+  the LLM, directly measuring incremental compilation savings
+- Per-run quality metrics: mean extraction confidence, contradiction count,
+  SHACL score, and schema validation failure rate
+
+These records enable three operational capabilities. **Cost dashboards** per
+source, profile, and team reveal when one noisy source is consuming a
+disproportionate share of LLM budget and can be scheduled less aggressively.
+**Quality regression detection** makes a drop in mean extraction confidence or a
+rise in SHACL failures after a prompt version update immediately visible as a
+query over run history — before users notice wrong answers. **Cost-aware
+scheduling** lets the incremental planner deprioritize expensive profiles for
+low-importance sources (ranked by PageRank) and prioritize them for
+high-centrality ones, aligning spend with structural importance.
+
+Without this data, costs grow silently and quality regressions are invisible
+until the damage is done.
+
 ---
 
 ## 8. The compiled knowledge
@@ -398,7 +424,7 @@ multi-hop reasoning chains fed to the LLM.
 ## 10. What makes this novel
 
 The article describes a compiled knowledge base. pg_ripple + pg_trickle go
-further on seven fronts.
+further on ten fronts.
 
 ### 10.1 Live incremental compilation
 
@@ -536,6 +562,79 @@ departments, then discards the raw remote triples. Confidence-gated federation
 (PR-FED-CONF-01) filters remote edges below `federation_minimum_confidence`
 before they influence the ranking, preventing low-quality external sources from
 distorting global scores.
+
+### 10.9 Active-learning review prioritization
+
+Human expert time is the scarcest resource in any large-scale compilation
+pipeline. v0.87 and v0.88 together enable a principled review queue that
+maximizes the value of each correction.
+
+The prioritization logic is: surface facts that are highly structurally important
+*and* weakly supported by evidence. `pg_ripple.centrality_run('betweenness')`
+identifies entities that serve as bridges between topic clusters — the concepts
+most likely to propagate errors into unrelated parts of the knowledge base if
+they are wrong. `pg:confidence(?s, ?p, ?o)` identifies facts that are uncertain.
+Multiplying centrality by the uncertainty mass gives an actionable priority score,
+expressible directly in SPARQL:
+
+```sparql
+SELECT ?entity ?type ?centrality ?confidence ?priority WHERE {
+    ?entity a ?type .
+    BIND(pg:centrality(?entity, 'betweenness') AS ?centrality)
+    BIND(pg:confidence(?entity, rdf:type, ?type)   AS ?confidence)
+    BIND(?centrality * (1.0 - ?confidence)         AS ?priority)
+    FILTER(?centrality > 0.05 && ?confidence < 0.8)
+}
+ORDER BY DESC(?priority)
+LIMIT 50
+```
+
+A human correcting a high-centrality, low-confidence fact eliminates the most
+potential error propagation per review hour. When the correction lands — stored
+in the human-review named graph at higher priority — pg-trickle propagates the
+updated confidence through all downstream derivations, Datalog rules re-evaluate,
+and the review queue re-ranks automatically.
+
+This is active learning applied to knowledge compilation: the system directs
+reviewer attention to where it has the highest expected value, rather than
+presenting facts in arrival order.
+
+### 10.10 Bi-temporal knowledge management
+
+The compiler pipeline introduces two distinct time dimensions that must not be
+conflated.
+
+**Valid time** is when a fact was true in the world. "The policy required MFA
+from 2024-01-01 to 2024-12-31" has a finite valid interval. After expiry the
+fact is not wrong — it is archived. An agent asking "what are the current
+requirements?" should not see it; an auditor asking "what applied in March 2024?"
+must.
+
+**Transaction time** is when the fact was compiled into the knowledge base.
+"We compiled this triple on 2026-02-15, from a page last modified on
+2026-02-12" captures when the system *knew* what it knew.
+
+pg_ripple's existing named-graph time-travel queries and RDF-star annotations
+support both dimensions. The compiler pipeline connects them: every compiled
+artifact records its source timestamp as the start of the valid interval (when
+extractable), and its compile timestamp as the transaction time. Temporal
+PageRank decay (PR-TEMPORAL-01) uses the valid-time edge weight rather than the
+compile time, so recently re-compiled but factually stale facts do not
+artificially inflate importance scores.
+
+Three operational capabilities follow from maintaining both dimensions:
+
+- **Fact expiry.** SHACL shapes can declare `sh:validUntil` on named graphs. The
+  incremental planner automatically retires facts whose valid time has passed to
+  an archive graph — without deleting them — so audits remain answerable over
+  the full history.
+- **Temporal audit.** "What did the knowledge base believe on date X?" is
+  answerable via a named-graph time-travel query, with no special backup or
+  snapshot machinery required.
+- **Staleness detection.** The gap between source modification time and compile
+  time is a staleness signal. Sources where compile latency has grown well
+  beyond the typical median are candidates for an out-of-cycle recompile before
+  their facts distort importance rankings.
 
 ---
 
@@ -721,15 +820,69 @@ The combined approach should do especially well on multi-hop questions,
 aggregation, contradiction detection, change-awareness queries, and broad
 sensemaking that still requires structured evidence.
 
+### Evaluation framework: making the metrics verifiable
+
+Targets in a table are aspirational until there is a repeatable way to measure
+them. Three practices make the metrics above into verified properties of the
+system.
+
+**Golden corpus and SPARQL assertions.** Maintain a small, human-curated corpus
+of source documents with hand-verified expected facts, relationships, and
+summaries. Express each expectation as a SPARQL `ASK` or `SELECT` assertion
+stored in `tests/knowledge_base/`. Every compiler profile change, model version
+bump, or pg_ripple upgrade runs this suite as part of CI. A regression means
+something measurable broke, not that a summary "feels worse".
+
+**QA pair consistency checking.** The compiler generates Q&A pairs (section 8.4)
+from source material. After each recompile, re-run every pair through the
+inference path and verify the answer still matches. A `shacl_score()` above
+threshold says the graph is structurally valid; a QA regression says it answers
+differently than before. Both signals are needed, because structural validity
+and answer correctness can diverge.
+
+**Compiler run trend dashboards.** Query the compiler run history (sections 7.4
+and 7.6) to plot mean extraction confidence, contradiction rate, SHACL score,
+and fragment skip rate over time. A decline after a model upgrade is a deployment
+signal. A rise after a prompt improvement confirms the change was worth the cost.
+Without these trends, the quality metrics in the tables above are spot-checked
+at best.
+
 ---
 
 ## 15. Risks and guardrails
 
 ### Prompt injection
 
-Raw documents may contain instructions aimed at the LLM. Compiler prompts must
-frame source text as data, not instructions. Structured output must be validated
-before it enters the trusted graph.
+Raw documents may contain instructions aimed at the LLM. This is a structural
+threat, not an edge case: a public support ticket, a scraped web page, or a
+third-party document feed can include carefully crafted text designed to override
+the extraction prompt. Four defenses compose into a practical barrier.
+
+**Framing.** Compiler profile templates wrap source text inside a clearly
+delimited data block with an explicit instruction that the content is data to be
+processed, not instructions to be followed. Role-based prompting that separates
+the system persona from the source material further reduces susceptibility.
+
+**Structured output as a type boundary.** Requiring JSON Schema output from the
+LLM and validating it strictly against the compiler profile's schema before any
+content enters the database is the strongest single defense. A fact that does not
+match the schema is rejected, not interpreted. The `pg_ripple_compile` worker
+validates LLM output before calling any pg_ripple SQL function.
+
+**Named graph quarantine.** LLM output that passes schema validation but fails
+SHACL checks or falls below the `shacl_score()` threshold is written to a
+quarantine named graph, not the trusted graph. An operator reviews and approves
+promotion. This provides defense-in-depth: even if a prompt injection produces a
+syntactically valid but semantically malicious fact — for example, a false
+`owl:sameAs` link that merges two distinct entities — it lands in quarantine
+where it cannot influence Datalog inference, PageRank computation, or outbound
+pg-trickle events until a human approves it.
+
+**Evidence anchoring.** Every compiled fact carries an evidence span pointing to
+the exact source fragment that generated it. When a suspicious fact appears in
+the review queue, an operator can inspect the source quote. Facts without
+traceable evidence can be rejected by policy, making evidence anchoring both a
+provenance feature and a security control.
 
 ### Hallucinated facts
 
@@ -797,6 +950,12 @@ side table directly.
    of a new compile.
 9. Compare against raw vector RAG on multi-hop questions, aggregation,
    contradiction detection, and change-awareness queries.
+10. Build the compiler cost dashboard: query the run history (section 7.6) to
+    plot extraction confidence, SHACL score, and estimated cost over time; set
+    up quality regression alerts.
+11. Establish a golden SPARQL assertion suite for the demo corpus and run it in
+    CI; add a QA consistency check that re-runs generated Q&A pairs after every
+    recompile.
 
 The strongest demo shows what the article only hints at: a knowledge base that
 behaves like a real build system. A source changes. Only the dependent knowledge
