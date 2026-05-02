@@ -181,7 +181,7 @@
 
 | Version | Theme | Status | Scope | Full details |
 |---------|-------|--------|-------|-------------- |
-| [v0.88.0](roadmap/v0.88.0.md) | **Datalog-native PageRank & graph analytics** — iterative PageRank via Datalog^agg + tabling; `pg:pagerank()` / `pg:pagerank(?node, ?topic)` SPARQL functions; personalized + predicate-scoped PR; magic-sets partial-graph PR; `pg_ripple.pagerank_run()` SQL function; **pg-trickle incremental refresh** (K-hop Z-set, score bounds, staleness columns, selective recomputation); confidence-weighted edges (v0.87 integration); topic-sensitive multi-run; edge-weight predicates; reverse/in-degree direction; temporal decay; SHACL constraint-aware ranking (`sh:importance`, `sh:excludeFromRanking`); sketch-based `pg:topN_approx()`; score-explanation trees (`explain_pagerank()`); graph-partitioned parallel computation; standard-format export (Turtle/JSON-LD/CSV/N-Triples); federation blend mode; four alternative centrality measures via `pg:centrality()` (betweenness, closeness, eigenvector, Katz); IVM queue metrics; PT0401–PT0420 error catalog | Planned | Very Large | [Full details](roadmap/v0.88.0-full.md) |
+| [v0.88.0](roadmap/v0.88.0.md) | **Datalog-native PageRank & graph analytics** — iterative PageRank via Datalog^agg + tabling; `pg:pagerank()` / `pg:pagerank(?node, ?topic)` SPARQL functions; personalized + predicate-scoped PR; magic-sets partial-graph PR; `pg_ripple.pagerank_run()` SQL function; **pg-trickle incremental refresh** (K-hop Z-set, score bounds, staleness columns, selective recomputation); confidence-weighted edges (v0.87 integration); topic-sensitive multi-run; edge-weight predicates; reverse/in-degree direction; temporal decay; SHACL constraint-aware ranking (`sh:importance`, `sh:excludeFromRanking`, `shacl_score()` threshold); sketch-based `pg:topN_approx()`; score-explanation trees (`explain_pagerank()`); graph-partitioned parallel computation; standard-format export (Turtle/JSON-LD/CSV/N-Triples); federation blend mode; four alternative centrality measures via `pg:centrality()` (betweenness, closeness, eigenvector, Katz); IVM queue metrics; **six v0.87×v0.88 synergies**: confidence-attenuated K-hop propagation (PR-TRICKLE-CONF-01), probabilistic PageRank via `@weight` rules (PR-PROB-DATALOG-01), centrality-guided entity deduplication (PR-ENTITY-RESOLUTION-01), source-trust-weighted eigenvector centrality (PR-TRUST-EIGEN-01), confidence-gated federation edges (PR-FED-CONF-01), temporal authority via Katz centrality (PR-KATZ-TEMPORAL-01); PT0401–PT0423 error catalog | Planned | Very Large | [Full details](roadmap/v0.88.0-full.md) |
 
 ### Stable Release & Ecosystem (v1.0.0 – v1.1.0)
 
@@ -422,13 +422,21 @@ refresh path** (K-hop Z-set local push, score-bounds propagation, selective
 recomputation, IVM queue metrics); confidence-weighted edges integrating with
 v0.87.0's uncertain knowledge engine; topic-sensitive multi-run scoring;
 reverse/in-degree ranking for hub-and-authority decomposition; temporal edge-weight
-decay; SHACL constraint-aware ranking via `sh:importance` and `sh:excludeFromRanking`;
-sketch-based `pg:topN_approx()` for sub-millisecond approximate top-K; score
-explanation trees via `pg_ripple.explain_pagerank()`; graph-partitioned parallel
-computation; standard-format export (Turtle/JSON-LD/CSV/N-Triples); federation blend
-mode for global-graph ranking across federated sources; and four alternative centrality
+decay; SHACL constraint-aware ranking via `sh:importance`, `sh:excludeFromRanking`,
+and `shacl_score()` quality threshold; sketch-based `pg:topN_approx()` for
+sub-millisecond approximate top-K; score explanation trees via
+`pg_ripple.explain_pagerank()`; graph-partitioned parallel computation;
+standard-format export (Turtle/JSON-LD/CSV/N-Triples); federation blend mode with
+confidence-gated remote edge filtering (PR-FED-CONF-01); four alternative centrality
 measures (betweenness, closeness, eigenvector, Katz) via `pg:centrality()` and
-`pg_ripple.centrality_run()`; PT0401–PT0420 error catalog.
+`pg_ripple.centrality_run()`; and six cross-version synergies that deepen the
+v0.87.0 integration: confidence-attenuated K-hop propagation (PR-TRICKLE-CONF-01),
+probabilistic PageRank rules via `@weight` Datalog annotations (PR-PROB-DATALOG-01),
+centrality-guided entity deduplication combining betweenness + `pg:fuzzy_match()`
+(PR-ENTITY-RESOLUTION-01), source-trust-weighted eigenvector centrality seeded by
+`pg:sourceTrust` values (PR-TRUST-EIGEN-01), confidence-gated federation edges
+(PR-FED-CONF-01), and temporal authority detection via Katz centrality with
+time-aware edge weights (PR-KATZ-TEMPORAL-01); PT0401–PT0423 error catalog.
 v1.0.0 is the stable release: a 72-hour continuous load test, a
 third-party security audit, documentation final audit and freeze, an API stability
 guarantee, and public BSBM/WatDiv benchmark results. v1.1.0 delivers
