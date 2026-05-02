@@ -104,6 +104,7 @@ pub(crate) struct RagResponse {
 // MOD-01 (v0.72.0): extracted handler submodules
 pub(crate) mod admin_handlers;
 pub(crate) mod confidence_handlers;
+pub(crate) mod pagerank_handlers;
 pub(crate) mod rag_handler;
 pub(crate) mod sparql_handlers;
 
@@ -232,6 +233,35 @@ pub(crate) fn build_router(state: Arc<AppState>, max_body_bytes: usize, cors: Co
         .route(
             "/confidence/vacuum",
             post(confidence_handlers::vacuum_confidence),
+        )
+        // v0.88.0: PageRank & Graph Analytics (PR-HTTP-01)
+        .route("/pagerank/run", post(pagerank_handlers::pagerank_run))
+        .route(
+            "/pagerank/results",
+            get(pagerank_handlers::pagerank_results),
+        )
+        .route("/pagerank/status", get(pagerank_handlers::pagerank_status))
+        .route(
+            "/pagerank/vacuum-dirty",
+            post(pagerank_handlers::vacuum_dirty),
+        )
+        .route("/pagerank/export", get(pagerank_handlers::pagerank_export))
+        .route(
+            "/pagerank/explain/{node_iri}",
+            get(pagerank_handlers::pagerank_explain),
+        )
+        .route(
+            "/pagerank/queue-stats",
+            get(pagerank_handlers::pagerank_queue_stats),
+        )
+        .route("/centrality/run", post(pagerank_handlers::centrality_run))
+        .route(
+            "/centrality/results",
+            get(pagerank_handlers::centrality_results),
+        )
+        .route(
+            "/pagerank/find-duplicates",
+            post(pagerank_handlers::find_duplicates),
         )
         .layer(RequestBodyLimitLayer::new(max_body_bytes))
         .layer(cors)

@@ -6,6 +6,7 @@
 pub mod datalog;
 pub mod federation;
 pub mod observability;
+pub mod pagerank;
 pub mod security;
 pub mod sparql;
 pub mod storage;
@@ -19,4 +20,5 @@ pub fn register_all_gucs() {
     datalog::register();
     security::register();
     observability::register();
+    pagerank::register();
 }
