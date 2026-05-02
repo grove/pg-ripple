@@ -1700,16 +1700,21 @@ jobs:
         run: |
           failed=0
           while IFS= read -r -d '' f; do
-            count=$(grep -c '\.unwrap()\|\.expect(' "$f" || true)
+            # Skip files that are entirely test helpers
+            case "$f" in *_tests.rs|*_test.rs) continue ;; esac
+            # Only count production code: stop at the first #[cfg(test)] or
+            # 'mod tests {' line so that in-file test modules are excluded.
+            count=$(awk '/^#\[cfg\(test\)\]/{exit} /^mod tests /{exit} {print}' "$f" \
+                    | grep -c '\.unwrap()\|\.expect(' || true)
             if [ "$count" -gt 3 ]; then
-              echo "FAIL: $f has $count unwrap/expect calls (limit 3)"
+              echo "FAIL: $f has $count unwrap/expect calls in production code (limit 3)"
               failed=1
             fi
           done < <(find src -name '*.rs' -print0)
           if [ "$failed" -eq 1 ]; then
             exit 1
           fi
-          echo "PASS: all src/**/*.rs files are within the unwrap/expect cap (≤3)"
+          echo "PASS: all src/**/*.rs files are within the unwrap/expect cap (≤3) in production code"
 
 
   unsafe-audit:
