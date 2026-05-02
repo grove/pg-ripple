@@ -2,9 +2,9 @@
   "bomFormat": "CycloneDX",
   "specVersion": "1.4",
   "version": 1,
-  "serialNumber": "urn:uuid:ea5c2ef7-2466-4368-a54d-412d242ce6f0",
+  "serialNumber": "urn:uuid:6c3402ca-bf5f-43d9-894e-9235946bec8f",
   "metadata": {
-    "timestamp": "2026-05-01T20:48:58.826382000Z",
+    "timestamp": "2026-05-02T21:28:36.979670000Z",
     "tools": [
       {
         "vendor": "CycloneDX",
@@ -14,9 +14,9 @@
     ],
     "component": {
       "type": "application",
-      "bom-ref": "path+file:///Users/geir.gronmo/projects/pg_ripple/pg_ripple_http#0.77.0",
+      "bom-ref": "path+file:///Users/geir.gronmo/projects/pg_ripple/pg_ripple_http#0.87.0",
       "name": "pg_ripple_http",
-      "version": "0.77.0",
+      "version": "0.87.0",
       "description": "SPARQL 1.1 Protocol HTTP endpoint for pg_ripple",
       "scope": "required",
       "licenses": [
@@ -24,7 +24,7 @@
           "expression": "Apache-2.0"
         }
       ],
-      "purl": "pkg:cargo/pg_ripple_http@0.77.0?download_url=file://.",
+      "purl": "pkg:cargo/pg_ripple_http@0.87.0?download_url=file://.",
       "externalReferences": [
         {
           "type": "vcs",
@@ -34,10 +34,10 @@
       "components": [
         {
           "type": "application",
-          "bom-ref": "path+file:///Users/geir.gronmo/projects/pg_ripple/pg_ripple_http#0.77.0 bin-target-0",
+          "bom-ref": "path+file:///Users/geir.gronmo/projects/pg_ripple/pg_ripple_http#0.87.0 bin-target-0",
           "name": "pg_ripple_http",
-          "version": "0.77.0",
-          "purl": "pkg:cargo/pg_ripple_http@0.77.0?download_url=file://.#src/main.rs"
+          "version": "0.87.0",
+          "purl": "pkg:cargo/pg_ripple_http@0.87.0?download_url=file://.#src/main.rs"
         }
       ]
     },
@@ -6979,6 +6979,37 @@
     },
     {
       "type": "library",
+      "bom-ref": "registry+https://github.com/rust-lang/crates.io-index#tracing-serde@0.2.0",
+      "author": "Tokio Contributors <team@tokio.rs>",
+      "name": "tracing-serde",
+      "version": "0.2.0",
+      "description": "A compatibility layer for serializing trace data with `serde` ",
+      "scope": "required",
+      "hashes": [
+        {
+          "alg": "SHA-256",
+          "content": "704b1aeb7be0d0a84fc9828cae51dab5970fee5088f83d1dd7ee6f6246fc6ff1"
+        }
+      ],
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:cargo/tracing-serde@0.2.0",
+      "externalReferences": [
+        {
+          "type": "website",
+          "url": "https://tokio.rs"
+        },
+        {
+          "type": "vcs",
+          "url": "https://github.com/tokio-rs/tracing"
+        }
+      ]
+    },
+    {
+      "type": "library",
       "bom-ref": "registry+https://github.com/rust-lang/crates.io-index#tracing-subscriber@0.3.23",
       "author": "Eliza Weisman <eliza@buoyant.io>, David Barsky <me@davidbarsky.com>, Tokio Contributors <team@tokio.rs>",
       "name": "tracing-subscriber",
@@ -7942,7 +7973,7 @@
   ],
   "dependencies": [
     {
-      "ref": "path+file:///Users/geir.gronmo/projects/pg_ripple/pg_ripple_http#0.77.0",
+      "ref": "path+file:///Users/geir.gronmo/projects/pg_ripple/pg_ripple_http#0.87.0",
       "dependsOn": [
         "registry+https://github.com/rust-lang/crates.io-index#arrow@55.2.0",
         "registry+https://github.com/rust-lang/crates.io-index#axum@0.8.9",
@@ -9607,18 +9638,28 @@
       ]
     },
     {
+      "ref": "registry+https://github.com/rust-lang/crates.io-index#tracing-serde@0.2.0",
+      "dependsOn": [
+        "registry+https://github.com/rust-lang/crates.io-index#serde@1.0.228",
+        "registry+https://github.com/rust-lang/crates.io-index#tracing-core@0.1.36"
+      ]
+    },
+    {
       "ref": "registry+https://github.com/rust-lang/crates.io-index#tracing-subscriber@0.3.23",
       "dependsOn": [
         "registry+https://github.com/rust-lang/crates.io-index#matchers@0.2.0",
         "registry+https://github.com/rust-lang/crates.io-index#nu-ansi-term@0.50.3",
         "registry+https://github.com/rust-lang/crates.io-index#once_cell@1.21.4",
         "registry+https://github.com/rust-lang/crates.io-index#regex-automata@0.4.14",
+        "registry+https://github.com/rust-lang/crates.io-index#serde@1.0.228",
+        "registry+https://github.com/rust-lang/crates.io-index#serde_json@1.0.149",
         "registry+https://github.com/rust-lang/crates.io-index#sharded-slab@0.1.7",
         "registry+https://github.com/rust-lang/crates.io-index#smallvec@1.15.1",
         "registry+https://github.com/rust-lang/crates.io-index#thread_local@1.1.9",
         "registry+https://github.com/rust-lang/crates.io-index#tracing@0.1.44",
         "registry+https://github.com/rust-lang/crates.io-index#tracing-core@0.1.36",
-        "registry+https://github.com/rust-lang/crates.io-index#tracing-log@0.2.0"
+        "registry+https://github.com/rust-lang/crates.io-index#tracing-log@0.2.0",
+        "registry+https://github.com/rust-lang/crates.io-index#tracing-serde@0.2.0"
       ]
     },
     {

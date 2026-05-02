@@ -47,7 +47,7 @@ SELECT pg_ripple.create_construct_rule(
      WHERE    { ?s <https://example.org/cwb_dl/knows> ?o }',
     'https://example.org/cwb_dl_derived'
 ) IS NULL AS construct_rule_created;
-ERROR:  cannot insert into view "vp_321"
+ERROR:  cannot insert into view "vp_327"
 -- The CONSTRUCT writeback rule is registered. This verifies the API plumbing.
 SELECT COUNT(*) > 0 AS construct_rule_exists
 FROM   pg_catalog.pg_proc p

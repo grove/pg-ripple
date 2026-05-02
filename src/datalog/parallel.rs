@@ -574,6 +574,7 @@ mod tests {
             head: Some(head),
             body,
             rule_text: format!("?x <{head_pred}> ?y :- ..."),
+            weight: None,
         }
     }
 

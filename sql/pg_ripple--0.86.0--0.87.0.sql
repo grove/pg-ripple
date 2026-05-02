@@ -51,3 +51,21 @@ CREATE TABLE IF NOT EXISTS _pg_ripple.shacl_score_log (
 --   pg:fuzzy_match(a, b)              — trigram similarity via pg_trgm.similarity()
 --   pg:token_set_ratio(a, b)          — word-set similarity via pg_trgm.word_similarity()
 --   pg:confPath(predicate, threshold) — confidence-threshold property path operator
+
+-- CONF-RLS-01: Row Level Security policies for _pg_ripple.confidence
+-- Allow all authenticated users to read confidence rows
+ALTER TABLE _pg_ripple.confidence ENABLE ROW LEVEL SECURITY;
+CREATE POLICY confidence_select ON _pg_ripple.confidence
+    FOR SELECT USING (true);
+-- Only superuser / pg_ripple role may insert/update/delete
+CREATE POLICY confidence_write ON _pg_ripple.confidence
+    FOR ALL USING (pg_has_role(current_user, 'pg_ripple', 'USAGE'))
+    WITH CHECK (pg_has_role(current_user, 'pg_ripple', 'USAGE'));
+
+-- CONF-RLS-01: Row Level Security for shacl_score_log
+ALTER TABLE _pg_ripple.shacl_score_log ENABLE ROW LEVEL SECURITY;
+CREATE POLICY shacl_score_log_select ON _pg_ripple.shacl_score_log
+    FOR SELECT USING (true);
+CREATE POLICY shacl_score_log_write ON _pg_ripple.shacl_score_log
+    FOR ALL USING (pg_has_role(current_user, 'pg_ripple', 'USAGE'))
+    WITH CHECK (pg_has_role(current_user, 'pg_ripple', 'USAGE'));

@@ -132,7 +132,7 @@ LABEL org.opencontainers.image.licenses="Apache-2.0"
 # built version to eliminate HIGH/CRITICAL stdlib CVEs (CVE-2025-68121 et al.).
 COPY --from=gosu-builder /go/bin/gosu /usr/local/bin/gosu
 
-# Runtime deps for PostGIS and pgvector
+# Runtime deps for PostGIS, pgvector, and pg_trgm (CONF-SBOM-01c: required for fuzzy SPARQL v0.87.0)
 RUN apt-get update -qq \
     && apt-get install -y --no-install-recommends \
        libgeos-dev \
@@ -140,6 +140,7 @@ RUN apt-get update -qq \
        libgdal-dev \
        libjson-c-dev \
        libprotobuf-c-dev \
+       postgresql-contrib \
     && rm -rf /var/lib/apt/lists/*
 
 # ── pg_ripple ─────────────────────────────────────────────────────────────────

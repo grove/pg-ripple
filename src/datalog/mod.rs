@@ -180,6 +180,9 @@ pub struct Rule {
     pub body: Vec<BodyLiteral>,
     /// Original text of this rule (for catalog storage).
     pub rule_text: String,
+    /// Optional `@weight(FLOAT)` annotation for probabilistic Datalog (v0.87.0).
+    /// Value must be in [0.0, 1.0]. `None` means confidence 1.0 (deterministic).
+    pub weight: Option<f64>,
 }
 
 /// A named collection of rules.

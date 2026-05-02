@@ -282,6 +282,41 @@ pub fn run_inference_seminaive(rule_set_name: &str) -> (i64, i32) {
         }
     }
 
+    // v0.87.0 PROB-DATALOG-01: propagate confidence scores when probabilistic_datalog = on.
+    if crate::PROBABILISTIC_DATALOG.get() {
+        for rule in &active_rules {
+            let rule_weight = rule.weight.unwrap_or(1.0);
+            let Some(head_atom) = &rule.head else {
+                continue;
+            };
+            let head_pred = match &head_atom.p {
+                Term::Const(id) => *id,
+                _ => continue,
+            };
+            if !derived_pred_ids.contains(&head_pred) {
+                continue;
+            }
+            // Insert confidence rows for all newly-derived SIDs using noisy-OR merge.
+            // Confidence = rule_weight * COALESCE(body atom confidence, 1.0) ... (conjunction).
+            // ON CONFLICT implements noisy-OR: 1 - (1-existing) * (1-new).
+            let conf_sql = format!(
+                "INSERT INTO _pg_ripple.confidence (statement_id, confidence, model) \
+                 SELECT vp.i, \
+                   LEAST(1.0, {rule_weight}::float8), \
+                   'datalog' \
+                 FROM _pg_ripple.vp_rare vp \
+                 WHERE vp.p = {head_pred}::bigint AND vp.source = 1 \
+                 ON CONFLICT (statement_id, model) DO UPDATE \
+                   SET confidence = 1.0 - \
+                     (1.0 - EXCLUDED.confidence) * \
+                     (1.0 - _pg_ripple.confidence.confidence)"
+            );
+            if let Err(e) = Spi::run_with_args(&conf_sql, &[]) {
+                pgrx::warning!("probabilistic confidence insert error: {e}");
+            }
+        }
+    }
+
     // JOURNAL-DATALOG-01: collect affected graph IDs from delta tables before
     // dropping them, then record writes for CONSTRUCT writeback rules (CF-D fix).
     if total_derived > 0 {
@@ -525,6 +560,7 @@ fn substitute_pred_var(rule: &Rule, var_name: &str, pred_id: i64) -> Rule {
         head: new_head,
         body: new_body,
         rule_text: format!("/* {var_name}={pred_id} */ {}", rule.rule_text),
+        weight: rule.weight,
     }
 }
 

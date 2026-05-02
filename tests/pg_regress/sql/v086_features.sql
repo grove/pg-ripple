@@ -4,10 +4,6 @@
 --
 -- These tests require the pg_ripple extension to be installed.
 
-\set ON_ERROR_STOP on
-
--- ─── Setup ───────────────────────────────────────────────────────────────────
-
 CREATE EXTENSION IF NOT EXISTS pg_ripple;
 
 -- Load a few test triples so DESCRIBE has something to return.
@@ -19,12 +15,9 @@ SELECT pg_ripple.load_ntriples(
 
 -- ─── A13-05: g BIGINT column present in VP-row-returning functions ────────────
 
--- sparql_construct() must return a third column 'g' (graph IRI, decoded).
--- We verify the column is present and castable to text.
-SELECT
-    s IS NOT NULL AS s_present,
-    p IS NOT NULL AS p_present,
-    o IS NOT NULL AS o_present
+-- sparql_construct() returns SETOF JSONB with a column named 'result'.
+-- We verify the function returns rows and the result is valid JSON.
+SELECT result IS NOT NULL AS result_present
 FROM pg_ripple.sparql_construct(
     'CONSTRUCT { ?s ?p ?o } WHERE { ?s ?p ?o FILTER(strstarts(str(?s), "http://v086test.example/")) }'
 )

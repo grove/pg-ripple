@@ -406,4 +406,94 @@ pub fn register() {
         GucContext::Userset,
         GucFlags::default(),
     );
+
+    // ── v0.87.0 Uncertain Knowledge Engine GUCs ───────────────────────────────
+
+    pgrx::GucRegistry::define_bool_guc(
+        c"pg_ripple.prob_datalog_cyclic",
+        c"Allow probabilistic evaluation on cyclic Datalog rule sets. Approximate evaluation; \
+      requires explicit opt-in. Default off. (v0.87.0 CONF-CYCLIC-01)",
+        c"",
+        &crate::gucs::datalog::PROB_DATALOG_CYCLIC,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+
+    pgrx::GucRegistry::define_int_guc(
+        c"pg_ripple.prob_datalog_max_iterations",
+        c"Maximum semi-naive inference rounds when prob_datalog_cyclic = on. \
+      After this limit the evaluator emits a WARNING and returns the partial result. \
+      Default 100, range 1–10000. (v0.87.0 CONF-CYCLIC-01)",
+        c"",
+        &crate::gucs::datalog::PROB_DATALOG_MAX_ITERATIONS,
+        1,
+        10000,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+
+    pgrx::GucRegistry::define_float_guc(
+        c"pg_ripple.prob_datalog_convergence_delta",
+        c"Early-exit threshold for cyclic probabilistic Datalog: iteration stops when the \
+      maximum confidence delta is below this value. Default 0.001. (v0.87.0 CONF-CYCLIC-01)",
+        c"",
+        &crate::gucs::datalog::PROB_DATALOG_CONVERGENCE_DELTA,
+        0.0,
+        1.0,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+
+    pgrx::GucRegistry::define_bool_guc(
+        c"pg_ripple.prob_datalog_cyclic_strict",
+        c"When on, promote max-iterations-exceeded from WARNING to ERROR (PT0307). \
+      Default off. (v0.87.0 CONF-CYCLIC-01)",
+        c"",
+        &crate::gucs::datalog::PROB_DATALOG_CYCLIC_STRICT,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+
+    pgrx::GucRegistry::define_float_guc(
+        c"pg_ripple.default_fuzzy_threshold",
+        c"Default similarity threshold for pg:fuzzy_match() and pg:confPath() when no \
+      explicit threshold is provided. Default 0.7. (v0.87.0 FUZZY-SPARQL-01)",
+        c"",
+        &crate::gucs::datalog::DEFAULT_FUZZY_THRESHOLD,
+        0.0,
+        1.0,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+
+    pgrx::GucRegistry::define_bool_guc(
+        c"pg_ripple.prov_confidence",
+        c"Enable automatic confidence propagation from PROV-O pg:sourceTrust predicates. \
+      Default off. (v0.87.0 PROV-CONF-01)",
+        c"",
+        &crate::gucs::datalog::PROV_CONFIDENCE,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+
+    pgrx::GucRegistry::define_bool_guc(
+        c"pg_ripple.export_confidence",
+        c"Enable confidence annotations in RDF export functions (RDF* and JSON-LD 1.1). \
+      Default off. (v0.87.0 CONF-EXPORT-01)",
+        c"",
+        &crate::gucs::datalog::EXPORT_CONFIDENCE,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+
+    pgrx::GucRegistry::define_string_guc(
+        c"pg_ripple.cwb_confidence_propagation",
+        c"CONSTRUCT writeback confidence propagation mode: 'explicit' (default, implicit 1.0) \
+      or 'inherit' (propagate source confidence weighted by rule weight). \
+      (v0.87.0 CONF-CWB-01)",
+        c"",
+        &crate::gucs::datalog::CWB_CONFIDENCE_PROPAGATION,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
 }

@@ -284,6 +284,7 @@ pub fn apply_sameas_to_rules(rules: &[Rule], map: &HashMap<i64, i64>) -> Vec<Rul
                 .map(|lit| rewrite_body_literal(lit, map))
                 .collect(),
             rule_text: rule.rule_text.clone(),
+            weight: rule.weight,
         })
         .collect()
 }

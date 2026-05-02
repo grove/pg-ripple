@@ -3,10 +3,63 @@
 //! Error code ranges:
 //! - PT001–PT099: dictionary errors
 //! - PT100–PT199: storage errors
+//! - PT301–PT307: uncertain knowledge engine errors (v0.87.0)
 //! - PT601–PT607: embedding / vector errors (v0.27.0)
 //! - PT640–PT642: result-set / export overflow errors (v0.40.0)
 
 use thiserror::Error;
+
+/// Uncertain knowledge engine errors (PT0301–PT0307) — v0.87.0.
+#[allow(dead_code)]
+#[derive(Debug, Error)]
+pub enum UncertainKnowledgeError {
+    /// PT0301 — `@weight` value outside [0.0, 1.0] or NaN.
+    #[error("rule weight must be in [0.0, 1.0]; got {value} (PT0301)")]
+    InvalidWeight { value: f64 },
+
+    /// PT0302 — `pg:fuzzy_match()` or `pg:token_set_ratio()` called when `pg_trgm` is not installed.
+    #[error(
+        "pg_trgm extension is required for pg:fuzzy_match(); \
+         install it with CREATE EXTENSION pg_trgm (PT0302)"
+    )]
+    PgTrgmNotInstalled,
+
+    /// PT0303 — Cyclic Datalog rule set detected with `prob_datalog_cyclic = off`.
+    #[error(
+        "cyclic rule set detected with probabilistic_datalog on; \
+         set pg_ripple.prob_datalog_cyclic = on to allow approximate evaluation (PT0303)"
+    )]
+    CyclicRuleSetWithoutFlag,
+
+    /// PT0304 — `pg:confidence()` called with all three arguments unbound.
+    #[error(
+        "pg:confidence() requires at least one bound argument \
+         to prevent a full confidence table scan (PT0304)"
+    )]
+    ConfidenceAllUnbound,
+
+    /// PT0305 — `pg:confidence()` or other `pg:` confidence function inside a SERVICE clause.
+    #[error(
+        "{fn_name}() cannot be evaluated at a remote SERVICE endpoint; \
+         move the expression outside the SERVICE clause (PT0305)"
+    )]
+    ConfidenceFunctionInService { fn_name: String },
+
+    /// PT0306 — `sh:severityWeight` value outside [0.0, ∞) or NaN.
+    #[error(
+        "sh:severityWeight must be a non-negative finite number; \
+         got {value} (PT0306)"
+    )]
+    InvalidSeverityWeight { value: f64 },
+
+    /// PT0307 — `prob_datalog_max_iterations` reached without convergence.
+    #[error(
+        "probabilistic Datalog did not converge after {max_iter} iterations \
+         (final delta: {final_delta}); set pg_ripple.prob_datalog_cyclic_strict = off \
+         to use partial result (PT0307)"
+    )]
+    ConvergenceTimeout { max_iter: i32, final_delta: f64 },
+}
 
 /// Dictionary-layer errors (PT001–PT099).
 #[allow(dead_code)]

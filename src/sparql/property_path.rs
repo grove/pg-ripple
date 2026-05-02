@@ -124,7 +124,24 @@ pub fn compile_path(
     match path {
         // ── Simple predicate (degenerate case) ──────────────────────────────
         PropertyPathExpression::NamedNode(nn) => {
+            let iri = nn.as_str();
             let null_g = if include_g { ", NULL::bigint AS g" } else { "" };
+
+            // v0.87.0 FUZZY-PATH-01: pg:confPath special IRI prefix.
+            // Encoded as: <http://pg-ripple.org/conf_path/{predicate_iri}/{min_confidence}>
+            // e.g. <http://pg-ripple.org/conf_path/http://example.org/relatedTo/0.7>
+            if let Some(rest) = iri.strip_prefix("http://pg-ripple.org/conf_path/") {
+                return compile_conf_path(
+                    rest,
+                    s_filter,
+                    o_filter,
+                    ctx,
+                    max_depth,
+                    graph_filter,
+                    g_sel,
+                );
+            }
+
             let base = match pred_table_expr(nn, graph_filter, include_g) {
                 Some(e) => e,
                 None => format!("SELECT NULL::bigint AS s, NULL::bigint AS o{null_g} LIMIT 0"),
@@ -617,4 +634,110 @@ fn depth_guard_clause(max_depth: i32, cte_name: &str) -> String {
     } else {
         format!("WHERE {cte_name}._depth < {max_depth} ")
     }
+}
+
+// ─── v0.87.0 FUZZY-PATH-01: confidence-threshold property path ────────────────
+
+/// Compile a `pg:confPath/predicate_iri/min_confidence` special IRI to a
+/// confidence-filtered `WITH RECURSIVE … CYCLE` CTE.
+///
+/// `rest` is the portion after the `http://pg-ripple.org/conf_path/` prefix, in
+/// the form `{predicate_iri}/{min_confidence}` (last path component is the float).
+///
+/// Edges without a confidence row in `_pg_ripple.confidence` are treated as
+/// `confidence = 1.0` (explicit facts are always confident — CONF-GC-01c).
+fn compile_conf_path(
+    rest: &str,
+    s_filter: Option<&str>,
+    o_filter: Option<&str>,
+    ctx: &mut PathCtx,
+    max_depth: i32,
+    graph_filter: Option<i64>,
+    g_sel: &str,
+) -> String {
+    // Split off the last "/" component as the min_confidence threshold.
+    let (pred_part, threshold_str) = match rest.rfind('/') {
+        Some(pos) => (&rest[..pos], &rest[pos + 1..]),
+        None => (rest, ""),
+    };
+
+    let min_conf: f64 = threshold_str
+        .parse()
+        .unwrap_or_else(|_| crate::DEFAULT_FUZZY_THRESHOLD.get());
+
+    // Resolve the predicate IRI to a VP table expression.
+    let pred_id = crate::dictionary::lookup_iri(pred_part);
+
+    let vp_expr = match pred_id {
+        Some(id) => {
+            let g_cond = graph_filter
+                .map(|gid| format!(" AND vp.g = {gid}"))
+                .unwrap_or_default();
+            // Check for dedicated VP table.
+            let has_dedicated: bool = pgrx::Spi::get_one_with_args::<i64>(
+                "SELECT table_oid::bigint FROM _pg_ripple.predicates WHERE id = $1",
+                &[pgrx::datum::DatumWithOid::from(id)],
+            )
+            .map(|v| v.is_some())
+            .unwrap_or(false);
+            if has_dedicated {
+                format!(
+                    "SELECT vp.s, vp.o, vp.i AS _sid FROM _pg_ripple.vp_{id} vp WHERE 1=1{g_cond}"
+                )
+            } else {
+                format!(
+                    "SELECT vp.s, vp.o, vp.i AS _sid FROM _pg_ripple.vp_rare vp \
+                     WHERE vp.p = {id}{g_cond}"
+                )
+            }
+        }
+        None => {
+            // Unknown predicate — return empty result.
+            return format!("(SELECT NULL::bigint AS s, NULL::bigint AS o{g_sel} LIMIT 0)");
+        }
+    };
+
+    let n = ctx.next_alias();
+    let depth_guard = if max_depth > 0 {
+        format!("AND _cp{n}._depth < {max_depth}")
+    } else {
+        String::new()
+    };
+
+    let s_anchor_cond = s_filter
+        .map(|sf| format!("AND edge_anchor.s = {sf}"))
+        .unwrap_or_default();
+    let o_final_cond = o_filter
+        .map(|of| format!("AND NOT _cp{n}._is_cycle AND _cp{n}.o = {of}"))
+        .unwrap_or_default();
+
+    // Confidence filter: edges without a row are treated as confidence = 1.0.
+    let conf_cond = format!(
+        "COALESCE((\
+           SELECT MAX(c.confidence) FROM _pg_ripple.confidence c \
+           WHERE c.statement_id = edge.\"_sid\"\
+         ), 1.0) >= {min_conf}"
+    );
+    let conf_cond2 = format!(
+        "COALESCE((\
+           SELECT MAX(c.confidence) FROM _pg_ripple.confidence c \
+           WHERE c.statement_id = edge2.\"_sid\"\
+         ), 1.0) >= {min_conf}"
+    );
+
+    format!(
+        "(WITH RECURSIVE _cp{n}(s, o, _depth) AS (\
+           SELECT edge.s, edge.o, 1 \
+           FROM ({vp_expr}) edge \
+           WHERE {conf_cond} {s_anchor_cond} \
+           UNION ALL \
+           SELECT _cp{n}.s, edge2.o, _cp{n}._depth + 1 \
+           FROM _cp{n} \
+           JOIN ({vp_expr}) edge2 ON edge2.s = _cp{n}.o \
+           WHERE {conf_cond2} {depth_guard} \
+         ) CYCLE s, o SET _is_cycle USING _cp{n}_path \
+         SELECT s, o{g_sel} FROM _cp{n} \
+         WHERE NOT _is_cycle {o_final_cond}\
+        )",
+    )
 }

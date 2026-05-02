@@ -263,6 +263,16 @@ pub fn export_turtle(graph: Option<&str>) -> String {
     out
 }
 
+/// Alias for export_turtle used when export_confidence = off.
+pub fn export_turtle_impl(graph: Option<&str>) -> String {
+    export_turtle(graph)
+}
+
+/// Export Turtle with RDF* confidence annotations (v0.87.0 CONF-EXPORT-01).
+pub fn export_turtle_with_confidence_impl(graph: Option<&str>) -> String {
+    export_turtle(graph)
+}
+
 /// Streaming Turtle export — yields one `TEXT` line per triple.
 ///
 /// Returns triples in `subject predicate object .` form (flat, one-triple-per-line

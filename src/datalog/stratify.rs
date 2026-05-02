@@ -786,6 +786,7 @@ mod tests {
                 })
             }],
             rule_text: String::new(),
+            weight: None,
         }
     }
 

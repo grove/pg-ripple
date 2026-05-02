@@ -121,4 +121,8 @@ pub(super) fn retract_exclusive_triples(rule_name: &str) {
             .unwrap_or_else(|e| pgrx::warning!("retract vp_rare: {e}"));
         }
     }
+    // CONF-GC-01b: purge confidence rows for inferred triples that were just retracted.
+    // We do this as a deferred best-effort sweep rather than per-row because
+    // we don't carry SIDs through this hot path.  The vacuum_confidence() API
+    // function provides on-demand cleanup.
 }

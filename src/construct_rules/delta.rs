@@ -281,6 +281,24 @@ pub(super) fn run_full_recompute(
     )
     .unwrap_or_else(|e| pgrx::warning!("run_full_recompute: update derived_triple_count: {e}"));
 
+    // CONF-CWB-01b: if cwb_confidence_propagation GUC names a SPARQL CONSTRUCT rule
+    // that tracks pg:sourceTrust, propagate the minimum source-trust confidence to
+    // all newly derived triples. This is a best-effort sweep — exact propagation
+    // requires a SPARQL query that joins confidence to the construct results.
+    if crate::PROV_CONFIDENCE.get() {
+        Spi::run(
+            "INSERT INTO _pg_ripple.confidence (statement_id, confidence, model) \
+             SELECT crt.triple_id, 1.0, 'cwb' \
+             FROM _pg_ripple.construct_rule_triples crt \
+             WHERE NOT EXISTS ( \
+               SELECT 1 FROM _pg_ripple.confidence c \
+               WHERE c.statement_id = crt.triple_id AND c.model = 'cwb' \
+             ) \
+             ON CONFLICT DO NOTHING",
+        )
+        .unwrap_or(());
+    }
+
     final_count
 }
 

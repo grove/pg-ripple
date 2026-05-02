@@ -29,3 +29,9 @@ ignore = [
     # Expiry: 2027-01-01 — re-audit when paste releases a fixed version.
     { id = "RUSTSEC-2026-0104", reason = "paste is a compile-time proc-macro only; no runtime impact", expires = "2027-01-01" },
 ]
+
+# pg_trgm: PostgreSQL contrib module used for fuzzy SPARQL (v0.87.0 CONF-SBOM-01)
+# pg_trgm is a PostgreSQL extension (not a Rust crate) and is not tracked in cargo-audit.
+# It is an optional runtime dependency: fuzzy SPARQL functions return an error when
+# pg_trgm is not installed rather than failing silently.
+# The module is included in postgresql-18-contrib on all supported platforms.
