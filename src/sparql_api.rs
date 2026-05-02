@@ -309,12 +309,16 @@ mod pg_ripple {
     }
 
     // ── v0.47.0: individual cache hit-rate SRFs ───────────────────────────────
+    // NOTE: dictionary_cache_stats() was moved to dict_api.rs in v0.85.0 (P13-08).
+    // It now returns JSONB with hot_cache_hits/hot_cache_misses counters instead of
+    // the old TableIterator signature.
 
-    /// Return dictionary encode-cache statistics as a single row.
+    /// Return shared-memory encode-cache statistics as a single row (v0.47.0).
     ///
     /// Columns: hits, misses, evictions, hit_rate.
+    /// This function exposes the shared-memory LRU counters via `shmem::get_cache_stats()`.
     #[pg_extern]
-    fn dictionary_cache_stats() -> TableIterator<
+    fn shmem_cache_stats() -> TableIterator<
         'static,
         (
             name!(hits, i64),

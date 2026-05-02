@@ -332,3 +332,41 @@ SET LOCAL pg_ripple.describe_strategy = 'simple';
 SELECT * FROM pg_ripple.sparql('DESCRIBE <https://example.org/Bob>');
 COMMIT;
 ```
+
+---
+
+## Blank-Node Limitations in RDF-star Quoted Triples (C13-03, v0.85.0)
+
+Blank nodes inside RDF-star quoted triples (e.g., `<< _:b1 :p :o >>`) do not
+have a canonical round-trip form in pg_ripple. When an anonymous blank node
+appears as the subject or object of a quoted triple, encoding and then decoding
+the same triple may produce a different blank-node label.
+
+**Workaround:** Use named IRIs or well-known blank-node identifiers (e.g., `_:b1`
+with a stable label) as subjects/objects of quoted triples. Alternatively, avoid
+blank nodes entirely in the subject/object positions of `<< >>` patterns.
+
+**Impact:** This limitation only affects blank-node-in-quoted-triple patterns.
+Regular blank nodes in non-quoted triples round-trip correctly.
+
+---
+
+## `GRAPH ?g` Default-Graph Exclusion (C13-06, v0.85.0)
+
+Per SPARQL 1.1 specification §8.3, when `GRAPH ?g { ... }` is used, the
+variable `?g` is bound only to **named variable `?g` is bound only to **named variable `?g` is bound only to **named variable `This is conformavariable `?g` is bound only to **named variable `?g` is bound only to wivariable `?g` is bound only to **named variable `?g` is bound only to **na ?pvariable `?g` is bound only to **named variable `?g` is bound only to **naatvariable `?g` is bound only to **named variable `?g` is bound only to **named ns triples.
+
+To query the default graph specifically, use:
+`````````````````````````````````````````````````````````````````````````````` WHERE`````````````````````````````````````````````````````````````````````````````` nd```````````````````````````````````````````````````````````````````````valu````````````````````````````````````````````````````````````````````````````cis``````````````````````````````````````````````````````````````truncate```````````````````````````````````````````````````seconds)
+when serializing `xsd:dateTime` literals back to N-Triples format.
+
+**Example:**
+```
+# Input:  "2024-01-01T12:00:00.123456789Z"^^xsd:dateTime
+# Stored: 2024-01-01 12:00:00.123457+00  (rounded to microseconds by PG)
+# Output: "2024-01-01T12:00:00.123"^^xsd:dateTime  (truncated to 3 decimal places)
+```
+
+Sub-millisecond precision is silently dropped in the output. If you require
+sub-millisecond precision, store the value as a plain string literal and
+perform comparisons manually.

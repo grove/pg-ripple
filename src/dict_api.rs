@@ -535,4 +535,68 @@ mod pg_ripple {
             ),
         }
     }
+
+    /// Return dictionary hot-cache statistics (hits and misses).
+    ///
+    /// # P13-08 (v0.85.0)
+    /// Returns the cumulative backend-local LRU cache hit and miss counts since
+    /// the backend started.  These are exposed via the HTTP Prometheus endpoint
+    /// as `dictionary_hot_cache_hits_total` and `dictionary_hot_cache_misses_total`.
+    ///
+    /// ```sql
+    /// SELECT * FROM pg_ripple.dictionary_cache_stats();
+    /// ```
+    #[pg_extern]
+    fn dictionary_cache_stats() -> pgrx::JsonB {
+        use std::sync::atomic::Ordering;
+        let hits = crate::dictionary::DICT_HOT_CACHE_HITS.load(Ordering::Relaxed);
+        let misses = crate::dictionary::DICT_HOT_CACHE_MISSES.load(Ordering::Relaxed);
+        let obj = serde_json::json!({
+            "hot_cache_hits": hits,
+            "hot_cache_misses": misses
+        });
+        pgrx::JsonB(obj)
+    }
+
+    /// Batch-encode multiple terms into dictionary IDs in a single SPI round-trip.
+    ///
+    /// # P13-02 (v0.85.0)
+    /// Accepts parallel `TEXT[]` and `SMALLINT[]` arrays of the same length and
+    /// returns a `BIGINT[]` of dictionary IDs, one per input term.  Terms already
+    /// in the backend-local or shared-memory cache are resolved without SPI;
+    /// all cache misses are flushed to the dictionary in one CTE INSERT.
+    ///
+    /// `kind` values: 0 = IRI, 1 = blank node, 2 = plain literal,
+    /// 3 = typed literal, 4 = language-tagged literal.
+    ///
+    /// ```sql
+    /// SELECT pg_ripple.batch_encode_terms(
+    ///     ARRAY['https://example.org/Alice', '"Alice"'],
+    ///     ARRAY[0::smallint, 2::smallint]
+    /// );
+    /// ```
+    #[pg_extern]
+    fn batch_encode_terms(terms: Vec<Option<String>>, kinds: Vec<Option<i16>>) -> Vec<Option<i64>> {
+        if terms.len() != kinds.len() {
+            pgrx::error!(
+                "batch_encode_terms: terms ({}) and kinds ({}) arrays must be the same length",
+                terms.len(),
+                kinds.len()
+            );
+        }
+        // Build (term, kind) pairs, skipping NULLs.
+        let pairs: Vec<(String, i16)> = terms
+            .into_iter()
+            .zip(kinds)
+            .map(|(t, k)| {
+                (
+                    t.unwrap_or_default(),
+                    k.unwrap_or(crate::dictionary::KIND_IRI),
+                )
+            })
+            .collect();
+        let refs: Vec<(&str, i16)> = pairs.iter().map(|(t, k)| (t.as_str(), *k)).collect();
+        let ids = crate::dictionary::encode_batch(&refs);
+        ids.into_iter().map(Some).collect()
+    }
 }

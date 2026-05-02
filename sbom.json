@@ -14,9 +14,9 @@
     ],
     "component": {
       "type": "library",
-      "bom-ref": "path+file:///Users/geir.gronmo/projects/pg_ripple#0.83.0",
+      "bom-ref": "path+file:///Users/geir.gronmo/projects/pg_ripple#0.85.0",
       "name": "pg_ripple",
-      "version": "0.84.0",
+      "version": "0.85.0",
       "description": "High-performance RDF triple store with native SPARQL query execution for PostgreSQL 18",
       "scope": "required",
       "licenses": [
@@ -24,7 +24,7 @@
           "expression": "Apache-2.0"
         }
       ],
-      "purl": "pkg:cargo/pg_ripple@0.83.0?download_url=file://.",
+      "purl": "pkg:cargo/pg_ripple@0.85.0?download_url=file://.",
       "externalReferences": [
         {
           "type": "vcs",
@@ -34,10 +34,10 @@
       "components": [
         {
           "type": "library",
-          "bom-ref": "path+file:///Users/geir.gronmo/projects/pg_ripple#0.83.0 bin-target-0",
+          "bom-ref": "path+file:///Users/geir.gronmo/projects/pg_ripple#0.85.0 bin-target-0",
           "name": "pg_ripple",
-          "version": "0.83.0",
-          "purl": "pkg:cargo/pg_ripple@0.83.0?download_url=file://.#src/lib.rs"
+          "version": "0.85.0",
+          "purl": "pkg:cargo/pg_ripple@0.85.0?download_url=file://.#src/lib.rs"
         }
       ]
     },

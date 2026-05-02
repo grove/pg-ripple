@@ -60,6 +60,13 @@ pub const KIND_LANG_LITERAL: i16 = 4;
 /// `qt_s`, `qt_p`, `qt_o` hold the component dictionary IDs.
 pub const KIND_QUOTED_TRIPLE: i16 = 5;
 
+// P13-08 (v0.85.0): hot-cache hit/miss counters.
+// Thread-local atomics track backend-local LRU cache performance; exposed via
+// `pg_ripple.dictionary_cache_stats()` and the HTTP Prometheus endpoint.
+use std::sync::atomic::{AtomicU64, Ordering as AOrdering};
+pub(crate) static DICT_HOT_CACHE_HITS: AtomicU64 = AtomicU64::new(0);
+pub(crate) static DICT_HOT_CACHE_MISSES: AtomicU64 = AtomicU64::new(0);
+
 thread_local! {
     /// Encode cache: full XXH3-128 hash → sequence-generated id.
     static ENCODE_CACHE: RefCell<LruCache<u128, i64>> = RefCell::new(
@@ -127,8 +134,12 @@ fn encode_inner(term: &str, kind: i16) -> i64 {
 
     // Tier 2: backend-local LRU cache.
     if let Some(id) = ENCODE_CACHE.with(|c| c.borrow_mut().get(&hash128).copied()) {
+        // P13-08: record hot-cache hit.
+        DICT_HOT_CACHE_HITS.fetch_add(1, AOrdering::Relaxed);
         return id;
     }
+    // P13-08: record hot-cache miss (fell through to SPI tier).
+    DICT_HOT_CACHE_MISSES.fetch_add(1, AOrdering::Relaxed);
 
     // DICT-01: split u128 into (hi, lo) i64 pair — avoids varlena BYTEA overhead.
     let hash_hi = (hash128 >> 64) as i64;
@@ -305,6 +316,152 @@ pub fn encode_lang_literal(value: &str, lang: &str) -> i64 {
 /// Encode a plain literal (no datatype, no language tag).
 pub fn encode_plain_literal(value: &str) -> i64 {
     encode(value, KIND_LITERAL)
+}
+
+// ─── Batch encoding (P13-02, v0.85.0) ────────────────────────────────────────
+
+/// Encode multiple `(term, kind)` pairs in a single SPI round-trip for all
+/// cache misses.
+///
+/// # P13-02 (v0.85.0)
+/// Reduces SPI overhead in bulk-load paths by batching cache-miss terms into
+/// one CTE INSERT instead of N individual round-trips.  Terms already in the
+/// backend-local or shared-memory caches are resolved without any SPI call.
+///
+/// Returns a `Vec<i64>` with one ID per input pair, preserving input order.
+///
+/// # Panics
+///
+/// Raises a PostgreSQL error if any term fails to produce an ID (e.g., on
+/// concurrent dictionary truncation or a genuine hash collision — see PT501).
+pub fn encode_batch(terms_and_kinds: &[(&str, i16)]) -> Vec<i64> {
+    if terms_and_kinds.is_empty() {
+        return Vec::new();
+    }
+
+    // Step 1: hash all inputs and check caches tier-1 (shmem) and tier-2 (LRU).
+    let mut hashes: Vec<u128> = Vec::with_capacity(terms_and_kinds.len());
+    let mut results: Vec<Option<i64>> = vec![None; terms_and_kinds.len()];
+    let mut miss_indices: Vec<usize> = Vec::new();
+
+    for (i, (term, kind)) in terms_and_kinds.iter().enumerate() {
+        let hash = term_hash(term, *kind);
+        hashes.push(hash);
+
+        // Tier 1: shared-memory encode cache.
+        if let Some(id) = crate::shmem::encode_cache_lookup(hash) {
+            ENCODE_CACHE.with(|c| c.borrow_mut().put(hash, id));
+            results[i] = Some(id);
+            continue;
+        }
+        // Tier 2: backend-local LRU cache.
+        if let Some(id) = ENCODE_CACHE.with(|c| c.borrow_mut().get(&hash).copied()) {
+            DICT_HOT_CACHE_HITS.fetch_add(1, AOrdering::Relaxed);
+            results[i] = Some(id);
+            continue;
+        }
+        DICT_HOT_CACHE_MISSES.fetch_add(1, AOrdering::Relaxed);
+        miss_indices.push(i);
+    }
+
+    if miss_indices.is_empty() {
+        // All resolved from caches — no SPI needed.
+        return results.into_iter().flatten().collect();
+    }
+
+    // Step 2: build a JSON array for cache-miss terms and issue a single CTE.
+    // We use JSON to pass a variable-length array without dynamic parameter lists.
+    let json_arr: Vec<serde_json::Value> = miss_indices
+        .iter()
+        .map(|&i| {
+            let hash = hashes[i];
+            let hi = (hash >> 64) as i64;
+            let lo = hash as i64;
+            let (term, kind) = terms_and_kinds[i];
+            serde_json::json!({ "hi": hi, "lo": lo, "v": term, "k": kind as i64 })
+        })
+        .collect();
+    let json_str = serde_json::to_string(&json_arr)
+        .unwrap_or_else(|e| pgrx::error!("encode_batch JSON serialization error: {e}"));
+
+    // Single CTE INSERT for all cache-miss terms.
+    // The unnest-via-jsonb_array_elements approach keeps the plan stable
+    // regardless of batch size.
+    let sql = "WITH input AS ( \
+                   SELECT \
+                       (j->>'hi')::bigint     AS hash_hi, \
+                       (j->>'lo')::bigint     AS hash_lo, \
+                       j->>'v'                AS value,   \
+                       (j->>'k')::smallint    AS kind     \
+                   FROM jsonb_array_elements($1::jsonb) j \
+               ), \
+               ins AS ( \
+                   INSERT INTO _pg_ripple.dictionary (hash_hi, hash_lo, value, kind) \
+                   SELECT hash_hi, hash_lo, value, kind FROM input \
+                   ON CONFLICT (hash_hi, hash_lo) DO NOTHING \
+                   RETURNING id, hash_hi, hash_lo \
+               ) \
+               SELECT \
+                   input.hash_hi, \
+                   input.hash_lo, \
+                   COALESCE( \
+                       ins.id, \
+                       (SELECT d.id FROM _pg_ripple.dictionary d \
+                        WHERE d.hash_hi = input.hash_hi AND d.hash_lo = input.hash_lo) \
+                   ) AS id \
+               FROM input \
+               LEFT JOIN ins ON ins.hash_hi = input.hash_hi AND ins.hash_lo = input.hash_lo";
+
+    let mut hash_to_id: std::collections::HashMap<u128, i64> =
+        std::collections::HashMap::with_capacity(miss_indices.len());
+
+    Spi::connect(|client| {
+        let rows = client
+            .select(sql, None, &[DatumWithOid::from(json_str.as_str())])
+            .unwrap_or_else(|e| pgrx::error!("encode_batch SPI error: {e}"));
+        for row in rows {
+            let hash_hi: i64 = row.get::<i64>(1).ok().flatten().unwrap_or(0);
+            let hash_lo: i64 = row.get::<i64>(2).ok().flatten().unwrap_or(0);
+            let id: i64 = row.get::<i64>(3).ok().flatten().unwrap_or(0);
+            let hash = ((hash_hi as u128) << 64) | (hash_lo as u128);
+            if id != 0 {
+                hash_to_id.insert(hash, id);
+            }
+        }
+    });
+
+    // Step 3: populate caches and fill in results for cache misses.
+    for &i in &miss_indices {
+        let hash = hashes[i];
+        let id = *hash_to_id.get(&hash).unwrap_or_else(|| {
+            pgrx::error!(
+                "encode_batch: term {:?} (index {}) returned no ID — \
+                 hash collision or concurrent dictionary truncation (PT501)",
+                terms_and_kinds[i].0,
+                i
+            )
+        });
+        crate::shmem::encode_cache_insert(hash, id);
+        TX_SHMEM_INSERTS.with(|v| v.borrow_mut().push(hash));
+        ENCODE_CACHE.with(|c| c.borrow_mut().put(hash, id));
+        let term = terms_and_kinds[i].0;
+        DECODE_CACHE.with(|c| c.borrow_mut().put(id, term.to_owned()));
+        results[i] = Some(id);
+    }
+
+    results
+        .into_iter()
+        .enumerate()
+        .map(|(i, opt)| {
+            opt.unwrap_or_else(|| {
+                pgrx::error!(
+                    "encode_batch: term {:?} at index {} has no result",
+                    terms_and_kinds[i].0,
+                    i
+                )
+            })
+        })
+        .collect()
 }
 
 // ─── Quoted triple (RDF-star) encoding ───────────────────────────────────────

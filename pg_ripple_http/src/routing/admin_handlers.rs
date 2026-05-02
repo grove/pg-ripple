@@ -293,7 +293,13 @@ pub(crate) async fn metrics_endpoint(State(state): State<Arc<AppState>>) -> Resp
          pg_ripple_http_sparql_queries_by_result_size_total{{result_size_bucket=\"empty\"}} {}\n\
          pg_ripple_http_sparql_queries_by_result_size_total{{result_size_bucket=\"small\"}} {}\n\
          pg_ripple_http_sparql_queries_by_result_size_total{{result_size_bucket=\"medium\"}} {}\n\
-         pg_ripple_http_sparql_queries_by_result_size_total{{result_size_bucket=\"large\"}} {}\n",
+         pg_ripple_http_sparql_queries_by_result_size_total{{result_size_bucket=\"large\"}} {}\n\
+         # HELP pg_ripple_dictionary_hot_cache_hits_total Backend-local dictionary LRU cache hits (P13-08)\n\
+         # TYPE pg_ripple_dictionary_hot_cache_hits_total counter\n\
+         pg_ripple_dictionary_hot_cache_hits_total {}\n\
+         # HELP pg_ripple_dictionary_hot_cache_misses_total Backend-local dictionary LRU cache misses (P13-08)\n\
+         # TYPE pg_ripple_dictionary_hot_cache_misses_total counter\n\
+         pg_ripple_dictionary_hot_cache_misses_total {}\n",
         m.sparql_query_count(),
         m.datalog_query_count(),
         m.error_count(),
@@ -313,6 +319,8 @@ pub(crate) async fn metrics_endpoint(State(state): State<Arc<AppState>>) -> Resp
         m.result_small_count(),
         m.result_medium_count(),
         m.result_large_count(),
+        m.dictionary_hot_cache_hits(),
+        m.dictionary_hot_cache_misses(),
     );
 
     Response::builder()

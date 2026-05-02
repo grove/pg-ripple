@@ -102,11 +102,25 @@ pub(crate) fn parse_nt_triple(line: &str) -> Option<(String, String, String)> {
             '<' => {
                 chars.next();
                 let mut buf = String::from("<");
+                let mut closed = false;
                 for c in chars.by_ref() {
+                    // C13-09 (v0.85.0): reject IRIs longer than 4 KiB (4096 chars of content
+                    // not counting the surrounding `<>`).  At this size the content beyond `<` is
+                    // 1 (initial `<`) + up to 4096 content chars = 4097; reject once we exceed it.
+                    if buf.len() > 4097 {
+                        pgrx::warning!("parse_nt_triple: IRI exceeds 4 KiB limit; line rejected");
+                        return None;
+                    }
                     buf.push(c);
                     if c == '>' {
+                        closed = true;
                         break;
                     }
+                }
+                // C13-09: require closing `>` for IRI tokens; reject malformed input.
+                if !closed {
+                    pgrx::warning!("parse_nt_triple: IRI token missing closing `>`; line rejected");
+                    return None;
                 }
                 terms.push(buf);
             }

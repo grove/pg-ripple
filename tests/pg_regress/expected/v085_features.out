@@ -1,0 +1,152 @@
+-- pg_regress test: v0.85.0 feature gate
+--   C13-03:  blank-node-in-quoted-triple limitation (does not crash)
+--   C13-06:  GRAPH ?g excludes default graph (SPARQL 1.1 §8.3)
+--   C13-10:  xsd:dateTime sub-millisecond precision truncation
+--   C13-11:  describe_max_depth GUC exists and is readable
+--   P13-08:  dictionary_cache_stats() returns JSON
+CREATE EXTENSION IF NOT EXISTS pg_ripple;
+SELECT pg_ripple.triple_count() >= 0 AS library_loaded;
+WARNING:  pg_ripple: loaded without shared_preload_libraries; HTAP merge worker, CONSTRUCT writeback, and dictionary cache are disabled. Add pg_ripple to shared_preload_libraries in postgresql.conf.
+ library_loaded 
+----------------
+ t
+(1 row)
+
+SET search_path TO pg_ripple, public;
+-- ── Part 1: blank node in quoted triple does not crash (C13-03) ──────────────
+-- 1a. Load a quoted triple with a blank-node subject — this should succeed
+--     (load returns the count of statements inserted; blank-node canonicalization
+--     is documented as a limitation in docs/src/reference/sparql-compliance.md).
+SELECT pg_ripple.load_ntriples(
+    E'<< _:b1 <http://v085.test/p1> <http://v085.test/o1> >> <http://v085.test/reified> "true" .'
+) >= 0 AS blank_node_in_quoted_triple_accepted;
+ blank_node_in_quoted_triple_accepted 
+--------------------------------------
+ t
+(1 row)
+
+-- 1b. Load a quoted triple with a blank-node object — also should not crash.
+SELECT pg_ripple.load_ntriples(
+    E'<http://v085.test/subject> <http://v085.test/said> << <http://v085.test/s2> <http://v085.test/p2> _:b2 >> .'
+) >= 0 AS blank_node_object_in_quoted_triple_accepted;
+ blank_node_object_in_quoted_triple_accepted 
+---------------------------------------------
+ t
+(1 row)
+
+-- ── Part 2: GRAPH ?g excludes default graph (C13-06) ─────────────────────────
+-- 2a. Insert a triple into the default graph (no named graph).
+SELECT pg_ripple.load_ntriples(
+    '<http://graph.v085.test/s1> <http://graph.v085.test/p1> <http://graph.v085.test/o1> .'
+) = 1 AS default_graph_triple_loaded;
+ default_graph_triple_loaded 
+-----------------------------
+ t
+(1 row)
+
+-- 2b. Insert a triple into a named graph.
+SELECT pg_ripple.load_nquads(
+    '<http://graph.v085.test/s2> <http://graph.v085.test/p2> <http://graph.v085.test/o2> <http://graph.v085.test/g1> .'
+) = 1 AS named_graph_triple_loaded;
+ named_graph_triple_loaded 
+---------------------------
+ t
+(1 row)
+
+-- 2c. GRAPH ?g should NOT return the default graph (SPARQL 1.1 §8.3).
+--     The default-graph triple uses predicate p1; GRAPH ?g with that predicate
+--     should bind zero graphs because the triple is in the default graph (g=0).
+SELECT COUNT(*) = 0 AS graph_var_excludes_default_graph
+FROM pg_ripple.sparql($$
+    SELECT ?g WHERE {
+        GRAPH ?g { <http://graph.v085.test/s1> <http://graph.v085.test/p1> ?o }
+    }
+$$);
+ graph_var_excludes_default_graph 
+----------------------------------
+ t
+(1 row)
+
+-- 2d. GRAPH ?g should bind the named graph for the named-graph triple.
+SELECT COUNT(*) = 1 AS graph_var_includes_named_graph
+FROM pg_ripple.sparql($$
+    SELECT ?g WHERE {
+        GRAPH ?g { <http://graph.v085.test/s2> <http://graph.v085.test/p2> ?o }
+    }
+$$);
+ graph_var_includes_named_graph 
+--------------------------------
+ t
+(1 row)
+
+-- ── Part 3: xsd:dateTime sub-millisecond precision (C13-10) ──────────────────
+-- 3a. Load a dateTime literal with 9-decimal-place fractional seconds.
+--     Documented limitation: sub-millisecond digits are truncated.
+SELECT pg_ripple.load_ntriples(
+    E'<http://dt.v085.test/s1> <http://dt.v085.test/value> "2024-01-01T12:00:00.123456789Z"^^<http://www.w3.org/2001/XMLSchema#dateTime> .'
+) = 1 AS subsecond_dateTime_loaded;
+ subsecond_datetime_loaded 
+---------------------------
+ t
+(1 row)
+
+-- 3b. The triple is queryable after load (no crash or silent loss).
+SELECT COUNT(*) >= 1 AS subsecond_dateTime_queryable
+FROM pg_ripple.sparql($$
+    SELECT ?v WHERE { <http://dt.v085.test/s1> <http://dt.v085.test/value> ?v }
+$$);
+ subsecond_datetime_queryable 
+------------------------------
+ t
+(1 row)
+
+-- ── Part 4: describe_max_depth GUC is registered (C13-11) ────────────────────
+-- 4a. The GUC exists and returns its default value (16).
+SELECT current_setting('pg_ripple.describe_max_depth')::integer = 16
+    AS describe_max_depth_default_is_16;
+ describe_max_depth_default_is_16 
+----------------------------------
+ t
+(1 row)
+
+-- 4b. The GUC can be changed at session level.
+SET pg_ripple.describe_max_depth = 8;
+SELECT current_setting('pg_ripple.describe_max_depth')::integer = 8
+    AS describe_max_depth_set_to_8;
+ describe_max_depth_set_to_8 
+-----------------------------
+ t
+(1 row)
+
+RESET pg_ripple.describe_max_depth;
+-- ── Part 5: dictionary_cache_stats() returns valid JSON (P13-08) ─────────────
+-- 5a. Function exists and returns JSONB.
+SELECT pg_typeof(pg_ripple.dictionary_cache_stats()) = 'jsonb'::regtype
+    AS cache_stats_returns_jsonb;
+ cache_stats_returns_jsonb 
+---------------------------
+ t
+(1 row)
+
+-- 5b. Result includes expected keys.
+SELECT (pg_ripple.dictionary_cache_stats() ? 'hot_cache_hits')
+    AS cache_stats_has_hits_key;
+ cache_stats_has_hits_key 
+--------------------------
+ t
+(1 row)
+
+SELECT (pg_ripple.dictionary_cache_stats() ? 'hot_cache_misses')
+    AS cache_stats_has_misses_key;
+ cache_stats_has_misses_key 
+----------------------------
+ t
+(1 row)
+
+-- ── Cleanup ───────────────────────────────────────────────────────────────────
+SELECT pg_ripple.drop_graph('http://graph.v085.test/g1');
+ drop_graph 
+------------
+          1
+(1 row)
+

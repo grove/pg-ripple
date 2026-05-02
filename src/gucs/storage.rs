@@ -258,3 +258,10 @@ pub static CDC_SLOT_IDLE_TIMEOUT_SECONDS: pgrx::GucSetting<i32> =
 /// batch. Allows tuning merge pressure vs. transaction duration.
 /// Default: 1,000,000. Min: 100. Max: 100,000,000. (v0.82.0 GUC-BOUNDS-01)
 pub static MERGE_BATCH_SIZE: pgrx::GucSetting<i32> = pgrx::GucSetting::<i32>::new(1_000_000);
+
+// ─── v0.85.0 storage GUCs ────────────────────────────────────────────────────
+
+/// GUC: maximum recursion depth for `describe_cbd()` CBD traversal.
+/// Prevents runaway recursion on cyclic or very deep graphs.
+/// Default: 16. Min: 1. Max: 256. (v0.85.0 C13-11)
+pub static DESCRIBE_MAX_DEPTH: pgrx::GucSetting<i32> = pgrx::GucSetting::<i32>::new(16);

@@ -70,7 +70,8 @@ fn pred_table_expr(nn: &NamedNode, graph_filter: Option<i64>, include_g: bool) -
 
 /// Counter to make CTE names unique within a query.
 pub struct PathCtx {
-    pub counter: u32,
+    /// P13-07 (v0.85.0): field is private; use `next_alias()` as the sole mutation point.
+    counter: u32,
 }
 
 impl PathCtx {
@@ -78,10 +79,20 @@ impl PathCtx {
         Self { counter: start }
     }
 
+    /// Return the current counter value and advance it.
+    pub fn next_alias(&mut self) -> u32 {
+        self.next()
+    }
+
     fn next(&mut self) -> u32 {
         let n = self.counter;
         self.counter += 1;
         n
+    }
+
+    /// Read the current counter value (e.g. to sync back to the parent context).
+    pub fn value(&self) -> u32 {
+        self.counter
     }
 }
 
@@ -147,13 +158,13 @@ pub fn compile_path(
             );
             format!(
                 "(SELECT o AS s, s AS o{g_sel} FROM {inner_sql} _prev{})",
-                ctx.next()
+                ctx.next_alias()
             )
         }
 
         // ── Sequence: a/b → join on intermediate node ────────────────────────
         PropertyPathExpression::Sequence(left, right) => {
-            let n = ctx.next();
+            let n = ctx.next_alias();
             // left returns (?x, ?mid[, ?g]); right returns (?mid, ?y[, ?g])
             let left_sql = compile_path(
                 left,
@@ -209,7 +220,7 @@ pub fn compile_path(
                 graph_filter,
                 include_g,
             );
-            let n = ctx.next();
+            let n = ctx.next_alias();
             let mut conditions = Vec::new();
             if let Some(sf) = s_filter {
                 conditions.push(format!("s = {sf}"));
@@ -233,7 +244,7 @@ pub fn compile_path(
 
         // ── OneOrMore (p+) ───────────────────────────────────────────────────
         PropertyPathExpression::OneOrMore(inner) => {
-            let n = ctx.next();
+            let n = ctx.next_alias();
             let cte_name = format!("_opm{n}");
             let base_sql = compile_path(inner, None, None, ctx, max_depth, graph_filter, include_g);
             let depth_guard = depth_guard_clause(max_depth, &cte_name);
@@ -276,7 +287,7 @@ pub fn compile_path(
 
         // ── ZeroOrMore (p*) ──────────────────────────────────────────────────
         PropertyPathExpression::ZeroOrMore(inner) => {
-            let n = ctx.next();
+            let n = ctx.next_alias();
             let cte_name = format!("_zom{n}");
             let base_sql = compile_path(inner, None, None, ctx, max_depth, graph_filter, include_g);
             let depth_guard = depth_guard_clause(max_depth, &cte_name);
@@ -393,7 +404,7 @@ pub fn compile_path(
 
         // ── ZeroOrOne (p?) ───────────────────────────────────────────────────
         PropertyPathExpression::ZeroOrOne(inner) => {
-            let n = ctx.next();
+            let n = ctx.next_alias();
             let base_sql = compile_path(
                 inner,
                 s_filter,
@@ -451,7 +462,7 @@ pub fn compile_path(
 
         // ── NegatedPropertySet !(p1|p2|...) ────────────────────────────────
         PropertyPathExpression::NegatedPropertySet(excluded) => {
-            let n = ctx.next();
+            let n = ctx.next_alias();
             let excluded_ids: Vec<String> = excluded
                 .iter()
                 .filter_map(|nn| dictionary::lookup_iri(nn.as_str()))
