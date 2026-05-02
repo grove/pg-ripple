@@ -161,50 +161,6 @@
 | [v0.82.0](roadmap/v0.82.0.md) | Assessment 12 performance & observability + consistency audit: plan cache capacity GUC (P-01), batch decode ANY($1) (P-02), merge worker predicate cache (P-03), federation cost stats (P-04), predicate stats cache table (P-08), Arrow row limit GUC (P-09), pg_stat_statements normalisation (P-10), GUC bounds validators (P-12), Prometheus structured labels (P-13), SPARQL algebra tree in EXPLAIN (O-01), merge worker heartbeat (O-02), graph_stats scan limit GUC (O-03), redacted_error uniformity (O-06), admin lock docs (O-07), SPARQL depth DoS GUC (S-05), tenant name validation (S-06), Unicode role fallback (S-07), federation response cap (S-09), shmem overflow check (S-12), RUSTSEC audit refresh (S-04); **new (audit-1)**: SSE subscription_id length check (LISTEN-LEN-01), property-path predicate limit GUC (PROPPATH-UNBOUNDED-01), vacuum_dictionary batch size (VACUUM-DICT-BATCH-01), merge lock timeout GUC (MERGE-LOCK-GUC-01), datalog cleanup error visibility (DATALOG-SILENT-01), embedding model GUC consistency (EMBED-MODEL-01), federation call counter ordering (FED-COUNTER-ORDER-01); **new (audit-2)**: federation response pre-read size check (FED-BODY-STREAM-01), batch_decode missing-ID warning (DECODE-WARN-01), export_jsonld OOM documentation (EXPORT-JSONLD-OOM-01) | Released ✅ | Large | [Full details](roadmap/v0.82.0-full.md) |
 | [v0.83.0](roadmap/v0.83.0.md) | Assessment 12 test coverage, API polish & code quality + consistency audit: 8 error-path regression tests (T-02), N-Triples/N-Quads/TriG fuzz targets (T-03), sparql_update fuzz target (T-04), proptest reference-impl comparisons (T-05), CDC async test barriers (T-06), known_failures.txt annotations (T-07), 13 missing pg_extern regression tests (T-08), json_ld_load deprecation/rename (A-02), RETURNS TABLE graph column (A-04), GUC naming convention docs (A-05), BREAKING changelog tags (A-06), serde_cbor evaluation (DS-02), Renovate config (DS-03), bidi.rs module split (Q-01), shared-memory dict cache evaluation (P-05); **new (audit-1)**: health endpoint build_time field fix (BUILD-TIME-FIELD-01), datalog cost-model divisor GUCs (DL-COST-GUC-01), CHANGELOG heading format lint (CHANGELOG-FMT-01); **new (audit-2)**: merge worker exponential backoff (MERGE-BACKOFF-01), metrics route auth documentation (METRICS-AUTH-DOC-01), WWW-Authenticate header on 401 (HTTP-401-WWW-AUTH-01), JSON auth error envelope (AUTH-RESP-FMT-01), blank node label export validation (EXPORT-BNODE-VALID-01), Datalog max-iteration test (DATALOG-MAXITER-TEST-01) | Released ✅ | Large | [Full details](roadmap/v0.83.0-full.md) |
 
-#### Consistency & Coherence Audit coverage map (2026-05-01)
-
-Every finding from the 2026-05-01 deep-dive consistency audit (6 parallel subagent explorations, v0.79.0 codebase) is assigned to a post-v0.79.0 roadmap milestone. All items are now covered by Released versions v0.80.0–v0.83.0.
-
-| Audit finding | Severity | Roadmap coverage |
-|---|---|---|
-| `/explorer` endpoint has no authentication — any unauthenticated client can view the full RDF graph | High | v0.80.0 EXPLORER-AUTH-01 |
-| `_PG_init` registers SubXact/ExecutorEnd/xact callbacks but no `_PG_fini` exists to unregister them on `DROP EXTENSION` | High | v0.81.0 PGFINI-01 |
-| Plan cache key missing `NORMALIZE_IRIS`, `WCOJ_ENABLED`, `WCOJ_MIN_TABLES`, `INFERENCE_MODE` — stale plans after GUC changes | High | v0.81.0 PLAN-CACHE-GUC-02 |
-| `feature_status()` missing 12 rows for BIDI (v0.77.0) and BIDIOPS (v0.78.0) features | High | v0.81.0 FEATURE-STATUS-BIDI-01 |
-| No WARNING when pg_ripple loaded via `CREATE EXTENSION` instead of `shared_preload_libraries`; HTAP/CWB/dict cache silently disabled | High | v0.81.0 PRELOAD-WARN-01 |
-| `src/datalog/dred.rs` re-derivation runs only one seed pass — incorrect for multi-level rule dependencies | High | v0.81.0 DRED-FIXPOINT-01 |
-| `src/construct_rules/retract.rs` flat-VP DELETE executes even in HTAP mode — orphans triples in `_main` | High | v0.81.0 RETRACT-HTAP-01 |
-| `LISTEN "{channel}"` in SSE endpoint — subscription_id length not validated; silent PostgreSQL truncation at 63 chars | Medium | v0.82.0 LISTEN-LEN-01 |
-| `build_all_nodes_sql()` builds unbounded UNION ALL over all predicates — can exhaust parser stack | Medium | v0.82.0 PROPPATH-UNBOUNDED-01 |
-| `vacuum_dictionary()` builds single unbounded UNION ALL SQL string over all VP tables | Medium | v0.82.0 VACUUM-DICT-BATCH-01 |
-| `SET LOCAL lock_timeout = '5s'` hardcoded in merge.rs | Medium | v0.82.0 MERGE-LOCK-GUC-01 |
-| 29 `let _ = Spi::run_with_args()` DROP TABLE cleanup calls in wfs.rs and seminaive.rs — failures invisible | Medium | v0.82.0 DATALOG-SILENT-01 |
-| `embedding.rs` hardcodes `"text-embedding-3-small"` fallback instead of reading `pg_ripple.embedding_model` GUC | Medium | v0.82.0 EMBED-MODEL-01 |
-| `src/construct_rules/retract.rs` flat-VP DELETE uses `format!()` — inconsistent with parameterised query policy | Medium | v0.81.0 RETRACT-PARAM-01 |
-| `construct_rules/scheduler.rs` topological sort calls `pgrx::error!()` — should return `Result` | Medium | v0.81.0 SCHEDULER-ERR-01 |
-| `FED_CALL_COUNT` incremented before endpoint policy check — inflates metrics for blocked requests | Low | v0.82.0 FED-COUNTER-ORDER-01 |
-| `/health` endpoint `"build_time"` field contains Cargo version string, not a timestamp | Low | v0.83.0 BUILD-TIME-FIELD-01 |
-| Datalog compiler cost-model divisors (100, 10, 1) hardcoded — should be GUCs | Low | v0.83.0 DL-COST-GUC-01 |
-| `CHANGELOG.md` has one version heading without brackets (`## 0.X.Y`) | Low | v0.83.0 CHANGELOG-FMT-01 |
-
-#### Consistency & Coherence Audit #2 coverage map (2026-05-01)
-
-Second deep-dive audit (SPARQL, storage, HTTP service, Datalog/SHACL, export/GUC subsystems) found 10 additional verified findings:
-
-| Audit finding | Severity | Roadmap coverage |
-|---|---|---|
-| `rag_handler.rs` uses `format!()` + single-quote escape, not parameterized queries; comment claims otherwise | Medium | v0.81.0 RAG-SQL-INJECT-02 |
-| Plan cache key missing `TOPN_PUSHDOWN`, `SPARQL_MAX_ROWS`, `SPARQL_OVERFLOW_ACTION`, `FEDERATION_TIMEOUT`, `PGVECTOR_ENABLED` | High | v0.81.0 PLAN-CACHE-GUC-02 (extended) |
-| Five `federation.rs` `into_string()` call sites read full body into memory before size check | Medium | v0.82.0 FED-BODY-STREAM-01 |
-| `batch_decode()` silently drops result bindings for VP table IDs missing from dictionary — no warning | Medium | v0.82.0 DECODE-WARN-01 |
-| `export_jsonld()` buffers all triples in memory with no documentation warning for large graphs | Low | v0.82.0 EXPORT-JSONLD-OOM-01 |
-| Merge worker uses flat full-interval backoff instead of exponential backoff after consecutive errors | Low | v0.83.0 MERGE-BACKOFF-01 |
-| `/metrics` and `/metrics/extension` routes intentionally unauthenticated but not documented as such | Low | v0.83.0 METRICS-AUTH-DOC-01 |
-| `401 Unauthorized` responses missing `WWW-Authenticate` header (RFC 7235 violation) | Low | v0.83.0 HTTP-401-WWW-AUTH-01 |
-| `check_auth()` returns plain-text `"unauthorized"` while all other handlers return JSON | Low | v0.83.0 AUTH-RESP-FMT-01 |
-| N-Triples export passes blank node labels through without validating N-Triples `BLANK_NODE_LABEL` production | Low | v0.83.0 EXPORT-BNODE-VALID-01 |
-| Semi-naive max-iteration guard (10,000 iterations → PT501) has no regression test | Low | v0.83.0 DATALOG-MAXITER-TEST-01 |
-
 ### Uncertain Knowledge & Soft Reasoning (v0.84.0)
 
 | Version | Theme | Status | Scope | Full details |
