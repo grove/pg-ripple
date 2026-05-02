@@ -1,4 +1,4 @@
--- Migration 0.83.2 → 0.83.3: Assessment 13 tests, API polish, observability,
+-- Migration 0.85.0 → 0.86.0: Assessment 13 tests, API polish, observability,
 --   supply chain, standards conformance, HTTP companion security
 --
 -- New GUC registered at extension load time:

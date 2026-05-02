@@ -1,4 +1,4 @@
--- Migration 0.83.1 → 0.83.2: Assessment 13 correctness, performance & code quality
+-- Migration 0.84.0 → 0.85.0: Assessment 13 correctness, performance & code quality
 --
 -- New GUC registered at extension load time (available immediately after ALTER EXTENSION UPDATE):
 --   pg_ripple.describe_depth_limit  integer  default 64  (min 1, max 1024)

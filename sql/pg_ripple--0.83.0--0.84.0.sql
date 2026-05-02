@@ -1,4 +1,4 @@
--- Migration 0.83.0 → 0.83.1: Assessment 13 critical/high & operational remediation
+-- Migration 0.83.0 → 0.84.0: Assessment 13 critical/high & operational remediation
 --
 -- New capabilities delivered (Rust-compiled, no SQL schema changes required):
 --   • pg_ripple_http bumped to 0.83.0; COMPATIBLE_EXTENSION_MIN raised to "0.83.0"
