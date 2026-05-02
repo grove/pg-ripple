@@ -43,7 +43,7 @@ counters, and VP-promotion crash-recovery regression test.**
 - **P13-05** — Datalog inference in `src/datalog/seminaive.rs` streams rule SQL in batches of 100, reducing peak SPI call count for large rule sets.
 - **P13-06** — `partition_into_parallel_groups()` in `src/datalog/parallel.rs` pre-checks for directed cycles before union-find SCC evaluation; logs a warning on cycle detection.
 - **P13-07** — `PathCtx.counter` field made private; `next_alias()` mutation method and `value()` accessor added to `src/sparql/property_path.rs`.
-- **P13-08** — `dictionary_hot_cache_hits_total` and `dictionary_hot_cache_misses_total` Prometheus counters added. Exposed in-database via `pg_ripple.dictionary_cache_stats()` and in the HTTP `/metrics` Prometheus endpoint.
+- **P13-08** — `dictionary_hot_cache_hits_total` and `dictionary_hot_cache_misses_total` Prometheus counters added. Exposed in-database via `pg_ripple.dictionary_cache_stats()` and in the HTTP `/metrics` Prometheus endpoint. The legacy shared-memory cache statistics function (previously also named `dictionary_cache_stats`) is now exposed as `pg_ripple.shmem_cache_stats()` to avoid a naming conflict; it continues to return the same four-column table (hits, misses, evictions, hit_rate) as introduced in v0.47.0.
 
 ### Code Quality
 
