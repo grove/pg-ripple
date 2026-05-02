@@ -281,6 +281,61 @@ high-centrality ones, aligning spend with structural importance.
 Without this data, costs grow silently and quality regressions are invisible
 until the damage is done.
 
+### 7.7 Negative knowledge records
+
+Not finding something is information. The system explicitly distinguishes three
+kinds of absence:
+
+- **Explicit denial**: a source directly states something is not true — "this
+  product does not support SAML," "contractors are excluded from this policy."
+  Stored as a negation triple with source attribution and confidence.
+- **Exhaustive search failure**: the compiler searched all relevant sources for
+  an owner, a date, or a required value and found none. The search scope — which
+  sources were checked, when, with which profile — is recorded alongside the
+  absence, so the claim "we searched and found nothing" is itself auditable.
+- **Superseded fact**: a later source retracted or updated an earlier claim.
+  The old fact is archived rather than deleted; audits can reconstruct what the
+  system believed at any past point.
+
+Without negative knowledge, queries return silence where they should return a
+confident "no." An agent asking "which accounts have not signed the DPA?" needs
+to distinguish "no signature found after searching those sources" from "we have
+not yet checked" from "the source explicitly records no agreement."
+
+### 7.8 Argument records
+
+For corpora where the structure of reasoning matters as much as the conclusion —
+policy documents, research papers, legal texts, strategy memos — the compiler
+can extract the full shape of an argument rather than just its final claim.
+
+An argument record stores:
+
+- A central claim with confidence and source attribution
+- Supporting evidence with exact evidence spans
+- Objections raised in the source or flagged by the compiler
+- Rebuttals to those objections, if present
+- Explicit assumptions the argument depends on (linked to assumption records,
+  section 7.9)
+
+Argument records are first-class named graphs in pg_ripple. SPARQL can navigate
+them: "which policy conclusions have a recorded objection but no rebuttal?" or
+"which research claims share a contested assumption?"
+
+### 7.9 Assumption records
+
+Many compiled facts are only true under conditions the source never states
+explicitly. The compiler extracts and stores these as first-class records:
+
+- "Applies to EU jurisdiction only."
+- "Assumes customer is on the Enterprise plan."
+- "Valid from 2025-01-01 onwards."
+- "Assumes no PII data is involved."
+
+Assumption records are attached to facts, entity pages, and argument records.
+At query time, `rag_context()` surfaces applicable assumptions alongside the
+answer, so the LLM and the human reviewer see the caveats rather than
+discovering them from a downstream failure.
+
 ---
 
 ## 8. The compiled knowledge
@@ -381,6 +436,56 @@ structure of the knowledge itself.
   on `pagerank_scores` let applications distinguish exact from approximate
   scores.
 
+### 8.6 Epistemic status layer
+
+A confidence score tells you *how much* to trust a fact. An epistemic status
+label tells you *what kind of thing* it is. The two are orthogonal and should
+not be conflated: a `verified` fact at confidence 0.7 is treated very
+differently from a `speculative` fact at 0.7.
+
+Supported statuses:
+
+| Status | Meaning |
+|---|---|
+| `observed` | Directly recorded from a source, not interpreted |
+| `extracted` | AI-extracted from a document; subject to interpretation error |
+| `inferred` | Derived by Datalog rules or RDFS/OWL reasoning |
+| `verified` | Reviewed and confirmed by a human expert |
+| `deprecated` | Previously true; superseded by a newer fact |
+| `normative` | A rule, policy, or standard — prescriptive, not descriptive |
+| `predicted` | A forecast or expected future state |
+| `disputed` | Two or more sources conflict; not yet resolved |
+| `speculative` | Low-confidence hypothesis included for completeness |
+
+Status is stored as an RDF-star annotation alongside confidence. SPARQL queries
+can filter by status: `FILTER(pg:status(?s, ?p, ?o) = "verified")`. Datalog
+rules can be scoped to operate only on `verified` or `observed` facts, blocking
+uncertain extractions from contaminating high-stakes inference chains.
+
+### 8.7 Knowledge coverage maps
+
+A compiled knowledge base should be explicit about what it does not know, not
+just what it does. Coverage maps provide a structured record of what topics are
+well-covered, where coverage is weak, and where it is absent entirely.
+
+Coverage is measured per topic cluster by:
+
+- Source count and recency
+- Mean extraction confidence and contradiction rate
+- Number of questions the compiler generated but could not answer
+- Entities with no human-verified facts
+
+This powers a "where are we blind?" query: surface topics where source density
+is low, confidence is weak, or important entities have no verified facts. Teams
+can prioritize documentation investment rather than waiting for a user to
+discover a gap at query time.
+
+`rag_context()` uses the coverage map when framing answers. If a targeted topic
+is in a low-coverage zone, the context block includes an explicit warning:
+"this topic has two sources, last updated 14 months ago — answer confidence is
+limited by source freshness, not extraction quality." The knowledge base is
+honest about the limits of its own knowledge.
+
 ---
 
 ## 9. Query paths
@@ -418,6 +523,34 @@ index, enable fuzzy entity-name matching so a query for "SSO" finds
 `pg:confPath(predicate, min_confidence)` traverses the compiled graph along
 confidence-gated paths, preventing low-confidence edges from contaminating
 multi-hop reasoning chains fed to the LLM.
+
+### 9.4 Counterfactual and explanatory queries
+
+Beyond factual retrieval, the compiled knowledge graph supports two higher-order
+query modes that make it useful for decision support and root-cause analysis.
+
+**Counterfactual.** "What answers would change if this source were removed?" or
+"What if vendor documents were trusted only up to 0.6?" The system executes the
+query against a hypothetical graph — the specified source excluded or the trust
+threshold adjusted — and returns the delta: facts that appear, facts that
+disappear, importance scores that shift. This is useful during source audits,
+trust recalibration, and policy impact analysis without modifying the live graph.
+
+**Explain Analyze.** Instead of just returning an answer, this mode returns an
+honest assessment of the answer's own reliability:
+
+- **Answer:** yes, this policy applies.
+- **Evidence strength:** medium — two sources, one dated 2023.
+- **Weak point:** all evidence comes from the same document family.
+- **Unresolved:** one contradicting source not yet reviewed.
+- **Missing:** no current policy owner found in the knowledge base.
+- **Assumption:** applies only if customer is on the Enterprise plan.
+- **Coverage:** low-coverage zone — two sources, 14 months old.
+- **Recommended:** review fragment X before relying on this in production.
+
+This mode is surfaced via `rag_context(mode => 'explain_analyze')` and is
+especially valuable for agent handoff: the downstream LLM receives the facts
+plus a structured meta-assessment of their reliability.
 
 ---
 
@@ -636,6 +769,222 @@ Three operational capabilities follow from maintaining both dimensions:
   beyond the typical median are candidates for an out-of-cycle recompile before
   their facts distort importance rankings.
 
+### 10.11 Semantic branches
+
+Knowledge bases change. Not every change should go directly into production.
+Semantic branches let teams run compilation experiments safely:
+
+- "What does the KB look like if we recompile all sources with the new model?"
+- "What if we reduce vendor trust to 0.6?"
+- "What if we accept the disputed entity merge for customer A?"
+
+A branch is a named copy of a named-graph set. Compilation runs against the
+branch without touching the live graph. The system produces a semantic diff:
+facts added, facts removed, relationships changed, summaries invalidated,
+PageRank scores shifted and why. Domain experts review the *knowledge change* —
+not a raw source text diff — and approve the merge when satisfied.
+
+This is a semantic pull request. It turns knowledge governance from a policing
+activity into a structured, reviewable workflow, identical in spirit to the code
+review process that production software depends on.
+
+### 10.12 Negative knowledge and epistemic status
+
+The existing pipeline excels at recording what it knows. This extends it to
+record what it knowingly does not know, and what *kind of thing* everything it
+knows is.
+
+**Negative knowledge** (section 7.7) closes the open-world assumption that
+causes most knowledge bases to return silence when they should return a
+confident "no." Three categories — explicit source denials, exhaustive-search
+failures with documented scope, and superseded facts archived rather than deleted
+— give the system a complete picture. An agent working from a knowledge base
+that distinguishes "not found after searching" from "explicitly denied" produces
+far fewer confident wrong answers.
+
+**Epistemic status** (section 8.6) adds a dimension orthogonal to confidence.
+A `verified` fact at confidence 0.7 is fundamentally different from a
+`speculative` fact at 0.7. A `normative` rule should never be treated the same
+as an `extracted` observation. Status labels let SPARQL queries, Datalog rules,
+and LLM context builders filter by the *kind* of knowledge they need, not just
+its degree of certainty.
+
+Together they make the compiled graph honest about the shape of its own
+ignorance — which turns out to be the most important quality for a system that
+downstream agents will trust with real decisions.
+
+### 10.13 Argument graphs and assumption registries
+
+For any corpus where reasoning matters — legal, compliance, research, strategy —
+flat facts are necessary but insufficient. The structure of an argument is
+itself knowledge: how does a conclusion follow from its premises? What objections
+does the source acknowledge? What assumptions does it rely on without stating?
+
+Storing argument structure (section 7.8) enables queries that fact extraction
+alone cannot answer:
+
+- "Which policy conclusions have acknowledged objections without rebuttals?"
+- "Which research claims rest on contested assumptions?"
+- "Where do two documents reach the same conclusion via incompatible reasoning?"
+
+The **assumption registry** (section 7.9) is the most practically valuable
+output: every condition that scopes the validity of a compiled fact is surfaced
+at query time via `rag_context()`. Downstream agents and human reviewers see the
+caveats alongside the answer rather than having to rediscover them from a
+production failure.
+
+This is the difference between a knowledge base that gives an answer and one
+that gives an answer the reader can actually reason about.
+
+### 10.14 Answer contracts
+
+Generated Q&A pairs (section 8.4) test whether the knowledge base *can* answer
+a question. Answer contracts test whether it *still* answers it *correctly* —
+as defined by a domain expert.
+
+When a human expert corrects an answer, that correction becomes a binding
+contract. Every recompile re-runs every contract. A contract that breaks —
+because a source changed, a new contradiction arrived, or a compiler profile was
+updated — surfaces immediately as a test failure in CI, not as a user complaint
+weeks later.
+
+The key distinction from generated Q&A: answer contracts capture real user
+intent and real failure modes. They express what a domain expert agreed the
+system must always say. That makes them the highest signal-to-noise regression
+test a knowledge system can have. Like a unit test suite, their value compounds
+over time: the more contracts are registered, the harder it is to silently
+regress the quality of the knowledge base.
+
+### 10.15 Semantic watchpoints
+
+pg-trickle already publishes events when knowledge changes (section 10.5).
+Semantic watchpoints let users subscribe to *conditions*, not just change types.
+
+Instead of "notify me when any triple changes in graph G," a watchpoint
+registers a SPARQL query against pg-trickle's outbox:
+
+- "Alert me if any policy affecting contractors in Germany changes."
+- "Warn me if confidence on any SOC 2 control drops below 0.8."
+- "Notify me if a human-verified fact gets contradicted by a new source."
+- "Alert me if a top-20 customer account gets linked to a churn risk signal."
+
+When a recompile produces results that satisfy the watchpoint query, an event
+fires. This makes the knowledge base proactive: it tells people what changed
+that matters to them, rather than requiring them to poll, search, or wait for
+an agent to notice. High-importance watchpoints can also block a branch merge
+until a domain expert reviews the triggered condition.
+
+### 10.16 Learned source reputation
+
+Static source trust scores are useful but brittle. A source that was reliable in
+2023 may have drifted; a source initially treated with skepticism may have proved
+itself consistently accurate.
+
+Learned reputation closes the loop between the review queue (section 10.6) and
+future compilation. The system observes correction outcomes over time:
+
+- If a reviewer consistently lowers confidence for facts from source S, that
+  source's baseline trust score decreases for future compiles.
+- If a source's facts consistently survive review unchanged, its trust score
+  rises toward the maximum permitted by its tier.
+- Changes are gradual and bounded — no single correction swings a whole source.
+
+The effect compounds. High-reputation sources get facts compiled with higher
+initial confidence, pass SHACL gates more easily, and contribute more weight to
+PageRank. Low-reputation sources feed the review queue more aggressively.
+The system's behaviour improves as humans use it: curation activity becomes a
+form of ongoing training, not just correction.
+
+### 10.17 Model ensemble disagreement
+
+LLM extraction is probabilistic. Running a single model over a source once is
+not the same as knowing what the source says. For high-stakes corpora —
+compliance documents, safety policies, contract terms — ensemble compilation
+provides a practical reliability guarantee.
+
+The compiler runs N model or prompt variants over the same source fragment:
+
+- **All agree**: confidence bonus applied; fact fast-tracked to the trusted graph.
+- **Majority agree**: majority result taken; dissenting positions recorded as
+  `disputed` RDF-star annotations.
+- **No consensus**: entire fragment routed to the human review queue with all
+  N outputs shown side-by-side.
+
+Ensemble compilation is controlled per compiler profile. It is an explicit
+opt-in for high-value corpora, not the default path, because it multiplies LLM
+cost by N. The cost is recorded per run (section 7.6) and surfaced in cost
+dashboards before a profile is enabled in production.
+
+### 10.18 Minimal contradiction explanations
+
+When the graph detects a contradiction, the current behaviour is to flag it.
+That is necessary but not sufficient: "the graph contains a contradiction" tells
+a reviewer almost nothing about where to look or what to fix.
+
+Minimal contradiction explanation computes the smallest set of facts and rules
+that together produce the conflict — analogous to an unsatisfiable core in
+formal verification. The system presents the contradiction as a structured
+review record:
+
+- **Contradiction location:** policy-de-contractors
+- **Minimal cause (3 facts):**
+  1. `:policyDE applies_to :contractors` — policy-de-v3, confidence 0.9
+  2. `:contractors subClassOf :excluded_workers` — extracted 2024-11, confidence 0.6
+  3. `:policyDE excludes :excluded_workers` — policy-de-v1, confidence 0.85
+- **Likely fix:** fact 2 is the lowest-confidence and most recent extraction;
+  review fragment `policy-excerpt-2024-11-contractors` to resolve.
+
+The explanation is stored as a named graph, surfaced in the review UI, and
+included in semantic diff output for branch merges. It turns a contradiction
+from a problem requiring full graph archaeology into a three-line action item
+with a clear suggested starting point.
+
+### 10.19 Privacy-preserving views
+
+The same underlying graph needs to be exposed differently to different audiences.
+A support agent, a sales engineer, an executive, a regulator, and a public API
+consumer each need a different window onto the same facts — and inferring beyond
+that window should be impossible, not just unlikely.
+
+Privacy-preserving views are named projections with explicit per-view rules:
+
+| View | Allowed predicates | Confidence threshold | Redaction |
+|---|---|---|---|
+| `view:support` | product, policy, status | ≥ 0.7 | PII masked |
+| `view:sales` | product, customer-segment | ≥ 0.8 | competitor refs removed |
+| `view:exec` | summaries, KPIs, risk | ≥ 0.85 | no raw evidence |
+| `view:audit` | all, including archived | any | full provenance visible |
+| `view:public` | published subset only | ≥ 0.9 | max 1-hop from entry |
+
+Views are enforced at query time by row-level policy on VP tables and named-graph
+ACLs. pg-trickle outboxes publish only to views a subscription is permitted to
+see. This is stronger than access control alone: it limits what can be
+*inferred*, not just what can be read directly. A support agent cannot
+reconstruct a competitor analysis from permitted support facts.
+
+### 10.20 Knowledge coverage maps
+
+A knowledge base that cannot describe its own gaps will surprise users at the
+worst moments. Coverage maps (section 8.7) make ignorance explicit, queryable,
+and actionable.
+
+The coverage map is a compiled artifact updated alongside the main graph:
+topic clusters annotated with source density, mean confidence, recency,
+contradiction rate, and unanswered-question count. It is queryable in SPARQL,
+includable in `rag_context()`, and renderable as a dashboard.
+
+Three operational uses follow. **Documentation targeting**: coverage gaps surface
+as a prioritized list — the topics where adding one good source would reduce the
+most uncertainty. **Answer framing**: `rag_context()` embeds coverage warnings
+so downstream consumers know when an answer is limited by source availability
+rather than extraction quality. **Watchpoints**: a coverage map below a
+threshold for a critical topic fires a semantic watchpoint (section 10.15),
+prompting a documentation review before users encounter the gap.
+
+The coverage map closes a fundamental gap in knowledge system design: most
+systems can tell you what they know; few can tell you, with evidence, what they
+do not know and why.
+
 ---
 
 ## 11. Example use cases
@@ -689,6 +1038,34 @@ remediation steps, runbook links.
 evidence from previous incidents, deployments, and runbooks — exactly what
 structured graph reasoning over compiled operational knowledge provides.
 
+### 11.5 Compliance and governance workflows
+
+**Sources:** Regulatory texts, legal contracts, policy amendments, audit reports,
+compliance questionnaires, exception logs, evidence packages
+
+**Compiled:** Regulatory requirements with scope, effective dates, and applicable
+entities; control owners; exception history; contradictions between policy
+versions; argument structure behind compliance decisions including acknowledged
+objections; assumption records scoping each rule's applicability.
+
+**Why it matters:** Compliance questions are not fuzzy similarity problems. They
+require exact scope resolution ("does Article 17 apply to this data category?"),
+temporal precision ("what was the policy on 2024-03-15?"), and audit-grade
+evidence trails. The advanced epistemic features are what make the difference:
+
+- **Argument graphs** capture the full reasoning behind compliance decisions,
+  including acknowledged objections and rebuttal chains — not just the
+  conclusion an auditor is asked to accept.
+- **Assumption records** surface the conditions under which a policy applies,
+  preventing it from being applied in the wrong jurisdiction or plan tier.
+- **Answer contracts** lock in the answers to recurring compliance questions; a
+  regulatory update that changes an answer surfaces immediately as a contract
+  failure before any user is affected.
+- **Negative knowledge** handles the "prove you searched and found no exemption"
+  requirement that pure retrieval systems cannot meet.
+- **Privacy-preserving views** let auditors see the full evidence trail while
+  limiting what the support and engineering teams can infer from the same graph.
+
 ---
 
 ## 12. First version
@@ -722,6 +1099,9 @@ validation runs, and a meaningful change event is published.
 - No automatic trust in LLM-extracted facts.
 - No full-corpus re-summarization on every change.
 - No hidden destructive deletes during recompilation.
+- No semantic branching — branch/diff/merge workflows are Phase 6.
+- No model ensemble compilation — deferred until the single-model pipeline is stable.
+- No argument graph extraction — too structurally complex for an MVP.
 
 ---
 
@@ -772,6 +1152,23 @@ validation runs, and a meaningful change event is published.
 - Federated compiled knowledge with confidence-gated remote edges.
 - Benchmark against vector RAG and static GraphRAG.
 
+### Phase 6 — Advanced epistemic features
+
+- Negative knowledge records: explicit denials, search failures, superseded facts.
+- Epistemic status layer: `observed`, `extracted`, `inferred`, `verified`,
+  `deprecated`, `normative`, `predicted`, `disputed`, `speculative`.
+- Argument graphs and assumption registry: claim, evidence, objection, rebuttal,
+  and assumption as first-class named graphs.
+- Semantic branches: create, diff, and merge named knowledge versions.
+- Answer contracts: human-verified answers running as CI regression tests.
+- Semantic watchpoints: SPARQL-condition subscriptions via pg-trickle outbox.
+- Learned source reputation: trust scores that evolve from correction history.
+- Model ensemble compilation: opt-in per profile for high-stakes corpora.
+- Minimal contradiction explanation engine: smallest-cause conflict resolution.
+- Privacy-preserving views: purpose-scoped projections with per-view redaction.
+- Counterfactual and Explain Analyze query modes via `rag_context()`.
+- Knowledge coverage maps queryable from SPARQL and surfaced in `rag_context()`.
+
 ---
 
 ## 14. How to measure success
@@ -786,6 +1183,9 @@ validation runs, and a meaningful change event is published.
 | `shacl_score()` of published graphs | > 0.9 |
 | Contradiction rate | < 2% |
 | Facts with evidence attached | > 95% |
+| Negative knowledge coverage (explicit absent/denied fields recorded) | > 50% of expected-absent fields |
+| Epistemic status annotation rate | > 95% of compiled facts |
+| Answer contract pass rate | 100% |
 
 ### Incremental-update metrics
 
@@ -806,6 +1206,8 @@ validation runs, and a meaningful change event is published.
 | Accuracy on generated QA sets | > 85% |
 | Accuracy on multi-hop questions | Outperform vector RAG |
 | Contradiction disclosure rate | 100% |
+| Coverage map gap identification rate (before user-reported) | > 90% |
+| Explain Analyze evidence-strength disclosure rate | 100% |
 
 ### Comparison benchmark
 
@@ -926,6 +1328,17 @@ security mirrors the named-graph VP-table policies. `pg:confidence()` returns
 the highest-confidence row; callers who need the per-model breakdown query the
 side table directly.
 
+### Model ensemble cost
+
+Model ensemble compilation (section 10.17) multiplies LLM cost by N per
+fragment. Without explicit profile-level configuration it can silently inflate
+costs to unacceptable levels. Three guardrails are required: ensemble
+compilation must be an explicit opt-in per compiler profile; each profile must
+declare a hard cap on maximum N per run; and cost estimates must be shown before
+a profile is enabled in production. The per-run cost records (section 7.6)
+should include an ensemble multiplier field so dashboards can distinguish
+ensemble cost from single-model baseline cost.
+
 ---
 
 ## 16. Recommended next steps
@@ -956,6 +1369,17 @@ side table directly.
 11. Establish a golden SPARQL assertion suite for the demo corpus and run it in
     CI; add a QA consistency check that re-runs generated Q&A pairs after every
     recompile.
+12. Extend the `pgc:` vocabulary for negative knowledge, argument records,
+    assumption records, and epistemic status; document the expected RDF-star
+    annotation structure for each.
+13. Prototype semantic branches as named-graph copies; implement a
+    `pg_ripple_branch_diff()` SQL function that returns a semantic diff — facts
+    added, removed, confidence changed — between two branch graphs.
+14. Register three answer contracts against the demo corpus and verify they run
+    as CI assertions on every recompile; confirm that a deliberate source change
+    triggers a contract failure.
+15. Define one coverage map shape and verify that `rag_context()` emits a
+    coverage warning when a queried topic is below the density threshold.
 
 The strongest demo shows what the article only hints at: a knowledge base that
 behaves like a real build system. A source changes. Only the dependent knowledge
