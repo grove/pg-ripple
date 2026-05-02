@@ -1,4 +1,5 @@
 //! pg_ripple — High-performance RDF triple store for PostgreSQL 18.
+//! v0.87.0: Uncertain Knowledge Engine
 //!
 //! # Architecture
 //!
