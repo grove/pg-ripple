@@ -109,16 +109,16 @@ use spargebra::Query;
 /// Subject, predicate, object — all IRIs or plain literals.
 fn reference_triples() -> Vec<(String, String, String)> {
     vec![
-        ("http://ex/alice", "http://ex/knows", "http://ex/bob"),
-        ("http://ex/alice", "http://ex/age", "http://ex/v30"),
-        ("http://ex/bob", "http://ex/knows", "http://ex/carol"),
-        ("http://ex/bob", "http://ex/age", "http://ex/v25"),
-        ("http://ex/carol", "http://ex/knows", "http://ex/alice"),
-        ("http://ex/carol", "http://ex/age", "http://ex/v22"),
-        ("http://ex/dave", "http://ex/knows", "http://ex/bob"),
-        ("http://ex/dave", "http://ex/age", "http://ex/v40"),
-        ("http://ex/eve", "http://ex/likes", "http://ex/carol"),
-        ("http://ex/alice", "http://ex/likes", "http://ex/dave"),
+        ("http://ex/alice".to_string(), "http://ex/knows".to_string(), "http://ex/bob".to_string()),
+        ("http://ex/alice".to_string(), "http://ex/age".to_string(), "http://ex/v30".to_string()),
+        ("http://ex/bob".to_string(), "http://ex/knows".to_string(), "http://ex/carol".to_string()),
+        ("http://ex/bob".to_string(), "http://ex/age".to_string(), "http://ex/v25".to_string()),
+        ("http://ex/carol".to_string(), "http://ex/knows".to_string(), "http://ex/alice".to_string()),
+        ("http://ex/carol".to_string(), "http://ex/age".to_string(), "http://ex/v22".to_string()),
+        ("http://ex/dave".to_string(), "http://ex/knows".to_string(), "http://ex/bob".to_string()),
+        ("http://ex/dave".to_string(), "http://ex/age".to_string(), "http://ex/v40".to_string()),
+        ("http://ex/eve".to_string(), "http://ex/likes".to_string(), "http://ex/carol".to_string()),
+        ("http://ex/alice".to_string(), "http://ex/likes".to_string(), "http://ex/dave".to_string()),
     ]
 }
 
@@ -139,8 +139,8 @@ proptest! {
             "SELECT ?s ?o WHERE {{ ?s <http://ex/{suffix}> ?o }}",
         );
         match Query::parse(&q, None) {
-            Ok(Query::Select { algebra, .. }) => {
-                let algebra_str = format!("{algebra:?}");
+            Ok(Query::Select { pattern, .. }) => {
+                let algebra_str = format!("{pattern:?}");
                 prop_assert!(
                     algebra_str.contains("\"s\"") || algebra_str.contains("s"),
                     "algebra must reference variable ?s; got: {algebra_str}"
@@ -166,7 +166,7 @@ proptest! {
             "SELECT ?s WHERE {{ ?s <http://ex/{suffix}> ?o FILTER(BOUND(?o)) }}",
         );
         match (Query::parse(&q_base, None), Query::parse(&q_filter, None)) {
-            (Ok(Query::Select { algebra: a_base, .. }), Ok(Query::Select { algebra: a_filter, .. })) => {
+            (Ok(Query::Select { pattern: a_base, .. }), Ok(Query::Select { pattern: a_filter, .. })) => {
                 let base_str = format!("{a_base:?}");
                 let filter_str = format!("{a_filter:?}");
                 prop_assert!(
