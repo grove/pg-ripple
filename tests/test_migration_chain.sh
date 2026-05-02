@@ -521,12 +521,11 @@ echo
 
 # ── T13-01 checkpoint: v0.80.0 ────────────────────────────────────────────────
 info "=== T13-01 checkpoint: v0.80.0 ==="
-# v0.80.0 adds CDC slot cleanup infrastructure; schema_version should record the version.
-assert_true "schema_version records v0.80.0 migration" \
-    "(SELECT count(*) FROM _pg_ripple.schema_version WHERE version >= '0.80.0') >= 1" || true
-# cdc_lsn_watermark table was introduced in v0.81.0 migration; check predicates table.
+# v0.80.0 has no DDL schema changes (pure Rust/GUC additions).
+# Verify the core tables remain intact.
 assert_column "_pg_ripple" "predicates" "triple_count"
-ok "v0.80.0 checkpoint assertions passed"
+assert_column "_pg_ripple" "dictionary" "qt_s"
+ok "v0.80.0 checkpoint assertions passed (no DDL changes in this release)"
 echo
 
 # ── T13-01 checkpoint: v0.81.0 ────────────────────────────────────────────────

@@ -71,7 +71,7 @@ FROM pg_ripple.sparql($$
     }
 $$);
  filter_not_exists_selects_correctly 
---------------------------------------
+-------------------------------------
  t
 (1 row)
 
@@ -91,7 +91,7 @@ FROM pg_ripple.sparql($$
 $$)
 WHERE result->>'project' IS NOT NULL;
  nested_optional_exists_binds_correctly 
------------------------------------------
+----------------------------------------
  t
 (1 row)
 

@@ -16,7 +16,7 @@
       "type": "library",
       "bom-ref": "path+file:///Users/geir.gronmo/projects/pg_ripple#0.83.0",
       "name": "pg_ripple",
-      "version": "0.83.0",
+      "version": "0.84.0",
       "description": "High-performance RDF triple store with native SPARQL query execution for PostgreSQL 18",
       "scope": "required",
       "licenses": [
@@ -325,7 +325,7 @@
     {
       "type": "library",
       "bom-ref": "registry+https://github.com/rust-lang/crates.io-index#bindgen@0.72.1",
-      "author": "Jyun-Yan You <jyyou.tw@gmail.com>, Emilio Cobos Álvarez <emilio@crisal.io>, Nick Fitzgerald <fitzgen@gmail.com>, The Servo project developers",
+      "author": "Jyun-Yan You <jyyou.tw@gmail.com>, Emilio Cobos \u00c1lvarez <emilio@crisal.io>, Nick Fitzgerald <fitzgen@gmail.com>, The Servo project developers",
       "name": "bindgen",
       "version": "0.72.1",
       "description": "Automatically generates Rust FFI bindings to C and C++ libraries.",
@@ -1413,7 +1413,7 @@
     {
       "type": "library",
       "bom-ref": "registry+https://github.com/rust-lang/crates.io-index#generic-array@0.14.7",
-      "author": "Bartłomiej Kamiński <fizyk20@gmail.com>, Aaron Trent <novacrazy@gmail.com>",
+      "author": "Bart\u0142omiej Kami\u0144ski <fizyk20@gmail.com>, Aaron Trent <novacrazy@gmail.com>",
       "name": "generic-array",
       "version": "0.14.7",
       "description": "Generic types implementing functionality of arrays",
@@ -1769,7 +1769,7 @@
     {
       "type": "library",
       "bom-ref": "registry+https://github.com/rust-lang/crates.io-index#iana-time-zone@0.1.65",
-      "author": "Andrew Straw <strawman@astraw.com>, René Kijewski <rene.kijewski@fu-berlin.de>, Ryan Lopopolo <rjl@hyperbo.la>",
+      "author": "Andrew Straw <strawman@astraw.com>, Ren\u00e9 Kijewski <rene.kijewski@fu-berlin.de>, Ryan Lopopolo <rjl@hyperbo.la>",
       "name": "iana-time-zone",
       "version": "0.1.65",
       "description": "get the IANA time zone for the current system",
@@ -2171,7 +2171,7 @@
     {
       "type": "library",
       "bom-ref": "registry+https://github.com/rust-lang/crates.io-index#is_ci@1.2.0",
-      "author": "Kat Marchán <kzm@zkat.tech>",
+      "author": "Kat March\u00e1n <kzm@zkat.tech>",
       "name": "is_ci",
       "version": "1.2.0",
       "description": "Super lightweight CI environment checker. Just tells you if you're in CI or not without much fuss.",
@@ -4529,7 +4529,7 @@
     {
       "type": "library",
       "bom-ref": "registry+https://github.com/rust-lang/crates.io-index#supports-color@3.0.2",
-      "author": "Kat Marchán <kzm@zkat.tech>",
+      "author": "Kat March\u00e1n <kzm@zkat.tech>",
       "name": "supports-color",
       "version": "3.0.2",
       "description": "Detects whether a terminal supports color, and gives details about that support.",
@@ -5546,7 +5546,7 @@
       "author": "myrrlyn <self@myrrlyn.dev>",
       "name": "wyz",
       "version": "0.5.1",
-      "description": "myrrlyn’s utility collection",
+      "description": "myrrlyn\u2019s utility collection",
       "scope": "required",
       "hashes": [
         {
