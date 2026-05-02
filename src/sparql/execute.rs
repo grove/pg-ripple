@@ -42,26 +42,29 @@ pub(super) fn execute_select(
         // computed join order by disabling join reordering heuristics.
         // Use connect_mut + update() (read_only=false) so that SET LOCAL is
         // accepted by PostgreSQL's SPI layer.
-        if crate::BGP_REORDER.get() {
-            let _ = client.update("SET LOCAL join_collapse_limit = 1", None, &[]);
-            let _ = client.update("SET LOCAL enable_mergejoin = on", None, &[]);
-        }
-
-        // v0.62.0: WCOJ Leapfrog-Triejoin preamble for cyclic BGPs.
-        // When a cyclic BGP was detected, force sort-merge joins to exploit
-        // the (s,o) B-tree indices on VP tables.
-        if wcoj_preamble {
-            let _ = client.update(crate::sparql::wcoj::wcoj_session_preamble(), None, &[]);
-        }
-
-        // v0.13.0: Enable parallel query for queries that join multiple VP tables.
-        // Count approximate number of VP-table scans by alias pattern in the SQL.
+        // P13-04 (v0.85.0): batch all planner-hint SET LOCAL calls into a single
+        // SPI round-trip to reduce per-query SPI overhead.
+        let bgp_reorder = crate::BGP_REORDER.get();
         let min_joins = crate::PARALLEL_QUERY_MIN_JOINS.get() as usize;
         let join_count = sql.matches(" AS _t").count();
-        if join_count >= min_joins {
-            let _ = client.update("SET LOCAL max_parallel_workers_per_gather = 4", None, &[]);
-            let _ = client.update("SET LOCAL enable_parallel_hash = on", None, &[]);
-            let _ = client.update("SET LOCAL parallel_setup_cost = 10", None, &[]);
+        let wants_parallel = join_count >= min_joins;
+        let mut set_stmts: Vec<&str> = Vec::new();
+        if bgp_reorder {
+            set_stmts.push("SET LOCAL join_collapse_limit = 1");
+            set_stmts.push("SET LOCAL enable_mergejoin = on");
+        }
+        if wcoj_preamble {
+            // v0.62.0: WCOJ Leapfrog-Triejoin preamble; each statement is included individually.
+            let _ = client.update(crate::sparql::wcoj::wcoj_session_preamble(), None, &[]);
+        }
+        if wants_parallel {
+            set_stmts.push("SET LOCAL max_parallel_workers_per_gather = 4");
+            set_stmts.push("SET LOCAL enable_parallel_hash = on");
+            set_stmts.push("SET LOCAL parallel_setup_cost = 10");
+        }
+        if !set_stmts.is_empty() {
+            let batched = set_stmts.join("; ");
+            let _ = client.update(&batched, None, &[]);
         }
         let rows = client
             .select(sql, None, &[])
@@ -486,14 +489,26 @@ pub(crate) fn sparql_describe(query_text: &str, strategy: &str) -> Vec<pgrx::Jso
 
 /// Collect CBD triples for a subject ID.
 /// Returns `(s_id, p_id, o_id)` tuples.
+///
+/// # C13-11 (v0.85.0)
+/// Recursion depth is capped by `pg_ripple.describe_max_depth` GUC (default 16).
+/// Raises a `PT_DEPTH_LIMIT` error when exceeded to prevent runaway traversal on
+/// cyclic or very deep graphs.
 fn describe_cbd(subject_id: i64, symmetric: bool) -> Vec<(i64, i64, i64)> {
+    let max_depth = crate::gucs::storage::DESCRIBE_MAX_DEPTH.get() as usize;
     let mut triples: Vec<(i64, i64, i64)> = Vec::new();
     let mut visited: std::collections::HashSet<i64> = std::collections::HashSet::new();
-    let mut queue: Vec<i64> = vec![subject_id];
+    let mut queue: Vec<(i64, usize)> = vec![(subject_id, 0)]; // (id, depth)
 
-    while let Some(s_id) = queue.pop() {
+    while let Some((s_id, depth)) = queue.pop() {
         if !visited.insert(s_id) {
             continue;
+        }
+        if depth > max_depth {
+            pgrx::error!(
+                "PT_DEPTH_LIMIT: DESCRIBE CBD traversal exceeded describe_max_depth={max_depth}; \
+                 set pg_ripple.describe_max_depth to a higher value or use DESCRIBE SIMPLE strategy"
+            );
         }
         // Outgoing arcs from s_id across all predicates.
         let outgoing = storage::triples_for_subject(s_id);
@@ -501,7 +516,7 @@ fn describe_cbd(subject_id: i64, symmetric: bool) -> Vec<(i64, i64, i64)> {
             triples.push((s_id, p_id, o_id));
             // Recurse on blank node objects.
             if dictionary::is_blank_node(o_id) && !visited.contains(&o_id) {
-                queue.push(o_id);
+                queue.push((o_id, depth + 1));
             }
         }
         // Symmetric CBD: also fetch incoming arcs.
@@ -510,7 +525,7 @@ fn describe_cbd(subject_id: i64, symmetric: bool) -> Vec<(i64, i64, i64)> {
             for (s2_id, p_id) in incoming {
                 triples.push((s2_id, p_id, s_id));
                 if dictionary::is_blank_node(s2_id) && !visited.contains(&s2_id) {
-                    queue.push(s2_id);
+                    queue.push((s2_id, depth + 1));
                 }
             }
         }
@@ -964,6 +979,15 @@ fn execute_load(url: &str, destination: &GraphName) -> Result<i64, String> {
 
 // ─── SPARQL CLEAR ────────────────────────────────────────────────────────────
 
+/// Execute a SPARQL CLEAR operation.
+///
+/// # C13-04 (v0.85.0) — mutation journal flush obligation
+/// The caller (`sparql_update`) is responsible for calling
+/// `crate::storage::mutation_journal::flush()` after all graph update operations
+/// have completed.  `execute_clear` records deletes implicitly through
+/// `storage::clear_graph_by_id` but does NOT flush the journal itself.
+/// This design allows batching multiple CLEAR/DROP operations in a single
+/// UPDATE request before one flush at the end.
 fn execute_clear(target: &spargebra::algebra::GraphTarget) -> Result<i64, String> {
     match target {
         spargebra::algebra::GraphTarget::NamedNode(nn) => {
@@ -992,6 +1016,11 @@ fn execute_clear(target: &spargebra::algebra::GraphTarget) -> Result<i64, String
 
 // ─── SPARQL DROP ─────────────────────────────────────────────────────────────
 
+/// Execute a SPARQL DROP operation.
+///
+/// # C13-04 (v0.85.0) — mutation journal flush obligation
+/// See `execute_clear`: the caller (`sparql_update`) flushes the mutation journal
+/// after all operations complete.  `execute_drop` does NOT flush itself.
 fn execute_drop(target: &spargebra::algebra::GraphTarget) -> Result<i64, String> {
     match target {
         spargebra::algebra::GraphTarget::NamedNode(nn) => Ok(storage::drop_graph(nn.as_str())),

@@ -402,6 +402,31 @@ pub fn run_inference(rule_set_name: &str) -> i64 {
     }
 
     let mut total_derived = 0i64;
+    // P13-05 (v0.85.0): batch rule SQL statements in groups of 100 before sending to SPI,
+    // reducing peak memory and SPI round-trip overhead for large rule sets.
+    let mut sql_batch: Vec<String> = Vec::with_capacity(100);
+
+    let flush_batch = |batch: &mut Vec<String>, derived: &mut i64| {
+        if batch.is_empty() {
+            return;
+        }
+        let combined = batch.join("; ");
+        match Spi::run(&combined) {
+            Ok(()) => *derived += batch.len() as i64,
+            Err(e) => {
+                // Fall back to individual execution on batch error.
+                for sql in batch.iter() {
+                    match Spi::run_with_args(sql, &[]) {
+                        Ok(()) => *derived += 1,
+                        Err(e2) => pgrx::warning!("inference SQL error: {e2}: SQL={sql}"),
+                    }
+                }
+                let _ = e; // suppress unused-variable warning
+            }
+        }
+        batch.clear();
+    };
+
     for (rule_text, _stratum, _recursive) in rule_rows {
         let rules = match parse_rules(&rule_text, rule_set_name) {
             Ok(rs) => rs.rules,
@@ -412,14 +437,15 @@ pub fn run_inference(rule_set_name: &str) -> i64 {
         };
         for rule in &rules {
             if has_variable_pred(rule) {
+                flush_batch(&mut sql_batch, &mut total_derived);
                 total_derived += run_var_pred_rule(rule);
             } else {
                 match compile_rule_set(std::slice::from_ref(rule)) {
                     Ok(sqls) => {
                         for sql in sqls {
-                            match Spi::run_with_args(&sql, &[]) {
-                                Ok(()) => total_derived += 1,
-                                Err(e) => pgrx::warning!("inference SQL error: {e}: SQL={sql}"),
+                            sql_batch.push(sql);
+                            if sql_batch.len() >= 100 {
+                                flush_batch(&mut sql_batch, &mut total_derived);
                             }
                         }
                     }
@@ -428,6 +454,7 @@ pub fn run_inference(rule_set_name: &str) -> i64 {
             }
         }
     }
+    flush_batch(&mut sql_batch, &mut total_derived);
     // JOURNAL-DATALOG-01: flush mutation journal so CONSTRUCT writeback fires
     // after simple (non-seminaive) inference (CF-D fix).
     if total_derived > 0 {

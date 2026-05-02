@@ -13,6 +13,52 @@ Versions correspond to the milestones in [ROADMAP.md](ROADMAP.md).
 
 ---
 
+## [0.85.0] — 2026-07-17 — Assessment 13 Medium Findings
+
+**Implements v0.85.0 roadmap: all 22 medium-priority findings from Assessment 13
+(correctness, performance, code quality, and concurrency). Key additions:
+`batch_decode` respects `strict_dictionary` GUC, `schema.rs` and `federation.rs`
+module splits, CI 1,800-line lint gate, `describe_cbd` depth GUC, per-predicate
+merge fence lock, `encode_batch` single-CTE API, dictionary hot-cache Prometheus
+counters, and VP-promotion crash-recovery regression test.**
+
+### Correctness
+
+- **C13-02** — `batch_decode` now raises a PostgreSQL error (`PT512`) when a dictionary ID is missing and `pg_ripple.strict_dictionary = on`. Previously returned a silent empty string. Graceful-degradation `WARNING` path retained for `strict_dictionary = off`.
+- **C13-03** — Blank-node-in-quoted-triple limitation documented in `docs/src/reference/sparql-compliance.md`. Regression test added in `tests/pg_regress/sql/v085_features.sql`.
+- **C13-04** — `execute_drop` and `execute_clear` in `src/sparql/execute.rs` annotated with doc comments documenting the mutation journal flush obligation.
+- **C13-05** — Plan cache key for `INFERENCE_MODE` now trimmed and lowercased before hashing, preventing spurious cache misses from capitalisation or padding differences.
+- **C13-06** — `GRAPH ?g` default-graph exclusion behaviour documented in `docs/src/reference/sparql-compliance.md`. Regression test verifies `?g` binds only named graphs (SPARQL 1.1 §8.3).
+- **C13-07** — `batch_decode` warning guard tightened from `id <= 0` to `id == 0`. Negative IDs (inline-encoded integers) are now correctly passed through.
+- **C13-08** — `encode_token` in `src/datalog/magic.rs` now detects typed literals (`^^<` suffix) and routes to `encode_typed_literal()` instead of plain string encoding.
+- **C13-09** — `parse_nt_triple` in `src/lib.rs` now rejects IRIs longer than 4 KiB (emits a `WARNING` and returns `None`) and requires the IRI to end with `>`.
+- **C13-10** — `xsd:dateTime` sub-millisecond precision truncation documented in `docs/src/reference/sparql-compliance.md`. Regression test added.
+- **C13-11** — `describe_cbd` recursion depth capped by new GUC `pg_ripple.describe_max_depth` (default 16, range 1–256). Prevents runaway recursion on cyclic or deep graphs.
+
+### Performance
+
+- **P13-02** — New `encode_batch(terms: &[(&str, i16)]) → Vec<i64>` internal API in `src/dictionary/mod.rs`. Uses a single CTE INSERT for all cache-miss terms. Exposed via `pg_ripple.batch_encode_terms(TEXT[], SMALLINT[]) → BIGINT[]`.
+- **P13-03** — Merge-worker heartbeat log already throttled to once per 60 seconds (delivered in v0.83.0); confirmed as done.
+- **P13-04** — `execute_select()` in `src/sparql/execute.rs` batches all `SET LOCAL` calls into a single SPI round-trip.
+- **P13-05** — Datalog inference in `src/datalog/seminaive.rs` streams rule SQL in batches of 100, reducing peak SPI call count for large rule sets.
+- **P13-06** — `partition_into_parallel_groups()` in `src/datalog/parallel.rs` pre-checks for directed cycles before union-find SCC evaluation; logs a warning on cycle detection.
+- **P13-07** — `PathCtx.counter` field made private; `next_alias()` mutation method and `value()` accessor added to `src/sparql/property_path.rs`.
+- **P13-08** — `dictionary_hot_cache_hits_total` and `dictionary_hot_cache_misses_total` Prometheus counters added. Exposed in-database via `pg_ripple.dictionary_cache_stats()` and in the HTTP `/metrics` Prometheus endpoint.
+
+### Code Quality
+
+- **Q13-02** — `src/schema.rs` (1,939 lines) split into `src/schema/{tables,views,triggers,rls}.rs`.
+- **Q13-03** — `src/sparql/federation.rs` (1,693 lines) split into `src/sparql/federation/{circuit,policy,http,decode}.rs`.
+- **Q13-04** — CI lint gate (`lint-file-size` job in `.github/workflows/ci.yml`): any `src/**/*.rs` file exceeding 1,800 lines fails the build unless it contains an `// @allow-large-file: <reason>` annotation.
+- **Q13-05** — All `#[allow(dead_code)]` markers audited. Each now carries a `// Q13-05` comment explaining the justification (BGW indirection, public API surface, etc.).
+
+### Concurrency
+
+- **CC13-01** — New VP-promotion crash-recovery regression test `tests/crash_recovery/promote_sigkill.sh`. SIGKILLs a backend during rare-predicate promotion and asserts `recover_interrupted_promotions()` returns a consistent state.
+- **CC13-02** — Merge fence advisory lock namespaced per-predicate (`predicate_id + 0x5052_5000`). Eliminates global lock contention between concurrent merge workers on different predicates.
+
+---
+
 ## [0.84.0] — 2026-07-16 — Assessment 13 Critical/High & Operational Remediation
 
 **Implements v0.84.0 roadmap: 13 items addressing all Critical and High findings

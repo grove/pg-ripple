@@ -860,5 +860,19 @@ pub fn register() {
             GucContext::Suset,
             GucFlags::default(),
         );
+
+        // C13-11 (v0.85.0): DESCRIBE CBD recursion depth cap.
+        pgrx::GucRegistry::define_int_guc(
+            c"pg_ripple.describe_max_depth",
+            c"Maximum recursion depth for DESCRIBE CBD traversal. \
+              Prevents runaway traversal on cyclic or deep graphs (v0.85.0 C13-11). \
+              Default: 16. Range: 1–256.",
+            c"",
+            &crate::gucs::storage::DESCRIBE_MAX_DEPTH,
+            1,
+            256,
+            GucContext::Userset,
+            GucFlags::default(),
+        );
     }
 }

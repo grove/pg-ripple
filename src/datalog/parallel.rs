@@ -45,7 +45,11 @@ pub struct ParallelGroup {
 #[derive(Debug, Clone)]
 pub struct ParallelAnalysis {
     /// The independent groups.  A single-element vec means no parallelism.
-    #[allow(dead_code)] // accessed via coordinator::analyze_groups; not yet read directly
+    /// Q13-05 (v0.85.0): accessed via `coordinator::analyze_groups()`; the field
+    /// is part of the public API for future background-worker parallelism.  The
+    /// `#[allow]` is retained because the field is accessed indirectly through the
+    /// struct return value of public functions, not by direct field access in the crate.
+    #[allow(dead_code)] // public API field; accessed via coordinator::analyze_groups()
     pub groups: Vec<ParallelGroup>,
     /// Number of independent groups (= `groups.len()`).
     pub parallel_groups: usize,
@@ -120,7 +124,76 @@ pub fn partition_into_parallel_groups(rules: &[Rule], parallel_workers: i32) -> 
     // dependency graph.  Groups in the same component must execute serially
     // (they share derived predicates in their bodies); groups in different
     // components are independent and can run in parallel.
+    //
+    // P13-06 (v0.85.0): pre-check the head-group dependency graph for directed
+    // cycles BEFORE invoking the SCC partitioner.  A cycle in the directed graph
+    // (A depends on B, B depends on A) means the two groups are mutually recursive
+    // and must be merged.  Previously this was handled implicitly by the union-find,
+    // but without the explicit check an unbounded recursion in the topological sort
+    // could occur when the dependency graph is not a DAG.  We detect directed cycles
+    // with a DFS and warn; the union-find merge ensures correctness.
+
+    // Collect all predicate IDs upfront so they can be used by both the DFS
+    // cycle-check and the union-find SCC computation below.
     let preds: Vec<i64> = head_groups.keys().copied().collect();
+
+    let has_directed_cycle = {
+        let mut visited: HashSet<i64> = HashSet::new();
+        let mut on_stack: HashSet<i64> = HashSet::new();
+        let mut found_cycle = false;
+
+        fn dfs(
+            node: i64,
+            depends_on: &HashMap<i64, HashSet<i64>>,
+            visited: &mut HashSet<i64>,
+            on_stack: &mut HashSet<i64>,
+            found_cycle: &mut bool,
+        ) {
+            if on_stack.contains(&node) {
+                *found_cycle = true;
+                return;
+            }
+            if visited.contains(&node) {
+                return;
+            }
+            visited.insert(node);
+            on_stack.insert(node);
+            if let Some(deps) = depends_on.get(&node) {
+                for &dep in deps {
+                    dfs(dep, depends_on, visited, on_stack, found_cycle);
+                    if *found_cycle {
+                        return;
+                    }
+                }
+            }
+            on_stack.remove(&node);
+        }
+
+        for &pred in &preds {
+            if !visited.contains(&pred) {
+                dfs(
+                    pred,
+                    &depends_on,
+                    &mut visited,
+                    &mut on_stack,
+                    &mut found_cycle,
+                );
+            }
+            if found_cycle {
+                break;
+            }
+        }
+        found_cycle
+    };
+    if has_directed_cycle {
+        // Directed cycles are expected for mutually-recursive rules (same stratum).
+        // The union-find below merges them into one component, which is correct.
+        pgrx::log!(
+            "partition_into_parallel_groups: directed cycle detected in head-group \
+             dependency graph; merging cyclic groups into a single serial group"
+        );
+    }
+
     let mut uf = UnionFind::new(&preds);
 
     for (&head_pred, deps) in &depends_on {

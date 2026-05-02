@@ -1,0 +1,772 @@
+//! Federation result decoding, health monitoring, cache maintenance, vector endpoint (v0.16.0+).
+//!
+//! Split from `federation.rs` in v0.85.0 (Q13-03).
+
+use super::*;
+
+/// Encode remote query results into dictionary IDs.
+///
+/// Each N-Triples–formatted term string is encoded via the dictionary so that
+/// the resulting IDs are join-compatible with locally stored triples.
+///
+/// Returns `(variables, encoded_rows)`.
+///
+/// # Deduplication (v0.19.0)
+///
+/// A per-call `HashMap<String, i64>` avoids redundant dictionary lookups for
+/// the same term appearing in multiple rows.  Particularly effective for result
+/// sets with high-cardinality repeated values (e.g. a common subject IRI).
+pub(crate) fn encode_results(
+    variables: Vec<String>,
+    rows: Vec<Vec<Option<String>>>,
+) -> (Vec<String>, Vec<Vec<Option<i64>>>) {
+    // Per-call deduplication cache (v0.19.0).
+    let mut term_cache: HashMap<String, i64> = HashMap::new();
+
+    let encoded: Vec<Vec<Option<i64>>> = rows
+        .into_iter()
+        .map(|row| {
+            row.into_iter()
+                .map(|cell| {
+                    cell.map(|s| {
+                        if let Some(&id) = term_cache.get(&s) {
+                            id
+                        } else {
+                            let id = encode_ntriples_term(&s);
+                            term_cache.insert(s, id);
+                            id
+                        }
+                    })
+                })
+                .collect()
+        })
+        .collect();
+    (variables, encoded)
+}
+
+/// Encode a single N-Triples–formatted term to a dictionary ID.
+///
+/// Handles IRIs (`<…>`), blank nodes (`_:…`), plain literals (`"…"`),
+/// language-tagged literals (`"…"@lang`), and typed literals (`"…"^^<dt>`).
+fn encode_ntriples_term(term: &str) -> i64 {
+    if let Some(iri) = term.strip_prefix('<').and_then(|s| s.strip_suffix('>')) {
+        dictionary::encode(iri, dictionary::KIND_IRI)
+    } else if let Some(bnode) = term.strip_prefix("_:") {
+        dictionary::encode(bnode, dictionary::KIND_BLANK)
+    } else if term.starts_with('"') {
+        // Literal — may have lang tag or datatype.
+        if let Some((lit_body, lang)) = split_lang_literal(term) {
+            dictionary::encode_lang_literal(lit_body, lang)
+        } else if let Some((lit_body, dt_iri)) = split_typed_literal(term) {
+            dictionary::encode_typed_literal(lit_body, dt_iri)
+        } else {
+            // Plain string literal — strip outer quotes.
+            let plain = term
+                .strip_prefix('"')
+                .and_then(|s| s.strip_suffix('"'))
+                .unwrap_or(term);
+            dictionary::encode(plain, dictionary::KIND_LITERAL)
+        }
+    } else {
+        // Unrecognised format — encode as-is as a plain literal.
+        dictionary::encode(term, dictionary::KIND_LITERAL)
+    }
+}
+
+/// Split `"value"@lang` into `("value", "lang")`.
+fn split_lang_literal(term: &str) -> Option<(&str, &str)> {
+    // term looks like: "value"@lang
+    let at = term.rfind("\"@")?;
+    let lit = &term[1..at]; // strip leading '"' and trailing '"@...'
+    let lang = &term[at + 2..];
+    if lang.is_empty() {
+        None
+    } else {
+        Some((lit, lang))
+    }
+}
+
+/// Split `"value"^^<dt>` into `("value", "dt_iri")`.
+fn split_typed_literal(term: &str) -> Option<(&str, &str)> {
+    // term looks like: "value"^^<dt>
+    let hat = term.rfind("\"^^<")?;
+    let lit = &term[1..hat];
+    let rest = &term[hat + 4..]; // skip '^^<'
+    let dt = rest.strip_suffix('>')?;
+    if dt.is_empty() { None } else { Some((lit, dt)) }
+}
+
+// ─── Health monitoring ───────────────────────────────────────────────────────
+
+/// FED-COST-01b (v0.82.0): update `_pg_ripple.federation_stats` after a federation call.
+///
+/// Uses an upsert to accumulate call_count, error_count, and latency for P50/P95
+/// approximation. P50 is approximated as the running average; P95 uses the max.
+/// No-op when the table doesn't exist (older migration not run yet).
+pub(super) fn update_federation_stats(url: &str, latency_ms: f64, row_count: i64, is_error: bool) {
+    let error_delta: i64 = if is_error { 1 } else { 0 };
+    let _ = Spi::run_with_args(
+        "INSERT INTO _pg_ripple.federation_stats AS fs \
+           (endpoint_url, call_count, error_count, \
+            total_latency_ms, max_latency_ms, row_estimate, updated_at) \
+         VALUES ($1, 1, $2, $3, $3, $4, now()) \
+         ON CONFLICT (endpoint_url) DO UPDATE SET \
+           call_count      = fs.call_count + 1, \
+           error_count     = fs.error_count + $2, \
+           total_latency_ms = fs.total_latency_ms + $3, \
+           max_latency_ms  = GREATEST(fs.max_latency_ms, $3), \
+           p50_ms          = (fs.total_latency_ms + $3) / (fs.call_count + 1), \
+           p95_ms          = GREATEST(fs.max_latency_ms, $3), \
+           row_estimate    = CASE WHEN $2 = 0 THEN $4 ELSE fs.row_estimate END, \
+           updated_at      = now()",
+        &[
+            DatumWithOid::from(url),
+            DatumWithOid::from(error_delta),
+            DatumWithOid::from(latency_ms),
+            DatumWithOid::from(row_count),
+        ],
+    );
+}
+
+/// Record a probe outcome in `_pg_ripple.federation_health`.
+///
+/// No-op when the table doesn't exist (pg_trickle not installed or
+/// `enable_federation_health()` not yet called).
+pub(crate) fn record_health(url: &str, success: bool, latency_ms: i64) {
+    let _ = Spi::run_with_args(
+        "INSERT INTO _pg_ripple.federation_health (url, success, latency_ms, probed_at)
+         VALUES ($1, $2, $3, now())
+         ON CONFLICT DO NOTHING",
+        &[
+            DatumWithOid::from(url),
+            DatumWithOid::from(success),
+            DatumWithOid::from(latency_ms),
+        ],
+    );
+}
+
+/// Returns `true` when the federation_health table exists.
+pub(crate) fn has_health_table() -> bool {
+    Spi::get_one::<bool>(
+        "SELECT EXISTS(
+            SELECT 1 FROM pg_class c
+            JOIN pg_namespace n ON n.oid = c.relnamespace
+            WHERE n.nspname = '_pg_ripple' AND c.relname = 'federation_health'
+         )",
+    )
+    .unwrap_or(None)
+    .unwrap_or(false)
+}
+
+/// Returns `true` when the endpoint's recent success rate is above 10%.
+/// Always returns `true` when the health table doesn't exist.
+pub(crate) fn is_endpoint_healthy(url: &str) -> bool {
+    if !has_health_table() {
+        return true;
+    }
+    // Look at last 5 minutes; if success rate < 10%, skip.
+    let rate = Spi::get_one_with_args::<f64>(
+        "SELECT COALESCE(
+            AVG(CASE WHEN success THEN 1.0 ELSE 0.0 END),
+            1.0  -- assume healthy if no data
+         ) AS success_rate
+         FROM _pg_ripple.federation_health
+         WHERE url = $1
+           AND probed_at >= now() - INTERVAL '5 minutes'",
+        &[DatumWithOid::from(url)],
+    )
+    .unwrap_or(None)
+    .unwrap_or(1.0);
+
+    rate >= 0.1
+}
+
+// ─── Endpoint complexity hints (v0.19.0) ─────────────────────────────────────
+
+/// Returns the complexity hint for an endpoint: `"fast"`, `"normal"`, or `"slow"`.
+///
+/// Falls back to `"normal"` when the column doesn't exist (pre-migration DB)
+/// or the endpoint is not registered.
+///
+/// ENUM-02 (v0.74.0): complexity column is now SMALLINT (1=fast, 2=normal, 3=slow).
+/// The query casts back to text for backward-compatible return type.
+#[allow(dead_code)]
+pub(crate) fn get_endpoint_complexity(url: &str) -> String {
+    Spi::get_one_with_args::<String>(
+        "SELECT CASE complexity
+              WHEN 1 THEN 'fast'
+              WHEN 2 THEN 'normal'
+              WHEN 3 THEN 'slow'
+              ELSE 'normal'
+          END
+          FROM _pg_ripple.federation_endpoints
+          WHERE url = $1 AND enabled = true",
+        &[DatumWithOid::from(url)],
+    )
+    .ok()
+    .flatten()
+    .unwrap_or_else(|| "normal".to_owned())
+}
+
+// ─── Cache maintenance (v0.19.0) ─────────────────────────────────────────────
+
+/// Remove expired rows from `_pg_ripple.federation_cache`.
+///
+/// Called by the merge background worker on each polling cycle.
+pub(crate) fn evict_expired_cache() {
+    let _ = Spi::run("DELETE FROM _pg_ripple.federation_cache WHERE expires_at <= now()");
+}
+
+/// FED-CACHE-01 (v0.81.0): Normalise a SPARQL query string for use as a cache key.
+///
+/// - Collapses all whitespace runs to a single space.
+/// - Lowercases SPARQL keywords.
+/// - Trims leading/trailing whitespace.
+///
+/// This ensures that whitespace-variant queries (e.g. extra newlines, tabs)
+/// share the same cache entry.
+pub(super) fn normalise_sparql_for_cache(sparql: &str) -> String {
+    // Attempt canonical form via spargebra Display; fall back to simple whitespace collapse.
+    if let Ok(q) = spargebra::SparqlParser::new().parse_query(sparql) {
+        return format!("{q}");
+    }
+    // Fallback: collapse whitespace and lowercase keywords.
+    sparql.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+// ─── Local view variable discovery ───────────────────────────────────────────
+
+/// Retrieve the variable names exposed by a local SPARQL view stream table.
+///
+/// Returns an ordered list of variable names (without the `_v_` prefix) as
+/// they appear in `_pg_ripple.sparql_views.variables` for the given stream
+/// table name.
+pub(crate) fn get_view_variables(stream_table: &str) -> Vec<String> {
+    // variables is stored as a JSONB array of strings, e.g. '["s","p","o"]'.
+    let json_str = Spi::get_one_with_args::<pgrx::JsonB>(
+        "SELECT variables FROM _pg_ripple.sparql_views WHERE stream_table = $1",
+        &[DatumWithOid::from(stream_table)],
+    )
+    .ok()
+    .flatten();
+
+    match json_str {
+        Some(jb) => {
+            if let serde_json::Value::Array(arr) = jb.0 {
+                arr.into_iter()
+                    .filter_map(|v| v.as_str().map(str::to_owned))
+                    .collect()
+            } else {
+                vec![]
+            }
+        }
+        None => vec![],
+    }
+}
+
+// ─── Variable collection for query rewriting (v0.19.0) ───────────────────────
+
+/// Collect all variable names that appear in a `GraphPattern`.
+///
+/// Used by the SERVICE translator to build an explicit `SELECT ?v1 ?v2 …`
+/// instead of `SELECT *`, which enables endpoints to project only the needed
+/// columns and reduces data transfer when combined with caller context.
+pub(crate) fn collect_pattern_variables(pattern: &GraphPattern) -> HashSet<String> {
+    let mut vars = HashSet::new();
+    collect_vars_recursive(pattern, &mut vars);
+    vars
+}
+
+fn collect_vars_recursive(pattern: &GraphPattern, out: &mut HashSet<String>) {
+    use spargebra::algebra::GraphPattern::*;
+    use spargebra::term::TermPattern;
+    match pattern {
+        Bgp { patterns } => {
+            for tp in patterns {
+                if let TermPattern::Variable(v) = &tp.subject {
+                    out.insert(v.as_str().to_owned());
+                }
+                if let NamedNodePattern::Variable(v) = &tp.predicate {
+                    out.insert(v.as_str().to_owned());
+                }
+                if let TermPattern::Variable(v) = &tp.object {
+                    out.insert(v.as_str().to_owned());
+                }
+            }
+        }
+        Join { left, right }
+        | LeftJoin { left, right, .. }
+        | Union { left, right }
+        | Minus { left, right } => {
+            collect_vars_recursive(left, out);
+            collect_vars_recursive(right, out);
+        }
+        Filter { inner, .. }
+        | Graph { inner, .. }
+        | Extend { inner, .. }
+        | Distinct { inner }
+        | Reduced { inner }
+        | Slice { inner, .. }
+        | OrderBy { inner, .. } => {
+            collect_vars_recursive(inner, out);
+        }
+        Project { variables, inner } => {
+            for v in variables {
+                out.insert(v.as_str().to_owned());
+            }
+            collect_vars_recursive(inner, out);
+        }
+        Group {
+            inner, variables, ..
+        } => {
+            for v in variables {
+                out.insert(v.as_str().to_owned());
+            }
+            collect_vars_recursive(inner, out);
+        }
+        Values { variables, .. } => {
+            for v in variables {
+                out.insert(v.as_str().to_owned());
+            }
+        }
+        Service { inner, .. } => {
+            collect_vars_recursive(inner, out);
+        }
+        Path {
+            subject, object, ..
+        } => {
+            if let spargebra::term::TermPattern::Variable(v) = subject {
+                out.insert(v.as_str().to_owned());
+            }
+            if let spargebra::term::TermPattern::Variable(v) = object {
+                out.insert(v.as_str().to_owned());
+            }
+        }
+    }
+}
+
+// ─── v0.28.0: Vector endpoint federation ─────────────────────────────────────
+
+/// Register an external vector service endpoint for SPARQL SERVICE federation.
+///
+/// `api_type` must be one of `'pgvector'`, `'weaviate'`, `'qdrant'`, or `'pinecone'`.
+///
+/// Returns a WARNING (not ERROR) if the URL is already registered (idempotent upsert).
+pub fn register_vector_endpoint(url: &str, api_type: &str) {
+    let valid_types = ["pgvector", "weaviate", "qdrant", "pinecone"];
+    if !valid_types.contains(&api_type) {
+        pgrx::warning!(
+            "pg_ripple.register_vector_endpoint: unknown api_type '{}'; \
+             must be one of: pgvector, weaviate, qdrant, pinecone",
+            api_type
+        );
+        return;
+    }
+
+    pgrx::Spi::run_with_args(
+        "INSERT INTO _pg_ripple.vector_endpoints (url, api_type, enabled) \
+         VALUES ($1, $2, true) \
+         ON CONFLICT (url) DO UPDATE SET api_type = EXCLUDED.api_type, enabled = true",
+        &[
+            pgrx::datum::DatumWithOid::from(url),
+            pgrx::datum::DatumWithOid::from(api_type),
+        ],
+    )
+    .unwrap_or_else(|e| pgrx::warning!("register_vector_endpoint: SPI error: {e}"));
+}
+
+/// Returns `true` when `url` is registered in `_pg_ripple.vector_endpoints`
+/// with `enabled = true`.
+#[allow(dead_code)]
+pub fn is_vector_endpoint_registered(url: &str) -> bool {
+    pgrx::Spi::get_one_with_args::<bool>(
+        "SELECT EXISTS(
+            SELECT 1 FROM _pg_ripple.vector_endpoints
+            WHERE url = $1 AND enabled = true
+         )",
+        &[pgrx::datum::DatumWithOid::from(url)],
+    )
+    .unwrap_or(None)
+    .unwrap_or(false)
+}
+
+/// Query an external vector service endpoint with a similarity query.
+///
+/// Returns a list of `(entity_id, entity_iri, score)` triples by:
+/// 1. Calling the external API with `query_text` and `k`.
+/// 2. Resolving returned IRIs against the local dictionary.
+/// 3. Returning only entities known to the local dictionary.
+///
+/// When the endpoint is unavailable or times out, emits a WARNING and returns
+/// an empty vector (graceful degradation per the v0.28.0 spec).
+///
+/// Currently supports Weaviate GraphQL, Qdrant REST, and Pinecone REST APIs.
+/// The `pgvector` api_type is handled locally (no HTTP call needed).
+#[allow(dead_code)]
+pub fn query_vector_endpoint(url: &str, query_text: &str, k: i32) -> Vec<(i64, String, f64)> {
+    if !is_vector_endpoint_registered(url) {
+        pgrx::warning!(
+            "pg_ripple.vector_endpoint: endpoint not registered (PT607): {url}; \
+             use pg_ripple.register_vector_endpoint() to register it"
+        );
+        return Vec::new();
+    }
+
+    // Get api_type for this endpoint.
+    let api_type: String = pgrx::Spi::get_one_with_args::<String>(
+        "SELECT api_type FROM _pg_ripple.vector_endpoints WHERE url = $1",
+        &[pgrx::datum::DatumWithOid::from(url)],
+    )
+    .unwrap_or(None)
+    .unwrap_or_else(|| "unknown".to_owned());
+
+    let timeout_ms = crate::VECTOR_FEDERATION_TIMEOUT_MS.get() as u64;
+    let timeout = std::time::Duration::from_millis(timeout_ms);
+
+    match api_type.as_str() {
+        "pgvector" => {
+            // pgvector is local — fall back to the local embeddings table.
+            pgrx::warning!(
+                "pg_ripple.query_vector_endpoint: api_type 'pgvector' is local; \
+                 use pg_ripple.similar_entities() instead"
+            );
+            Vec::new()
+        }
+        "weaviate" => query_weaviate_endpoint(url, query_text, k, timeout),
+        "qdrant" => query_qdrant_endpoint(url, query_text, k, timeout),
+        "pinecone" => query_pinecone_endpoint(url, query_text, k, timeout),
+        other => {
+            pgrx::warning!("pg_ripple.query_vector_endpoint: unsupported api_type '{other}'");
+            Vec::new()
+        }
+    }
+}
+
+/// Query a Weaviate v4 GraphQL `/v1/graphql` endpoint.
+#[allow(dead_code)]
+fn query_weaviate_endpoint(
+    base_url: &str,
+    query_text: &str,
+    k: i32,
+    timeout: std::time::Duration,
+) -> Vec<(i64, String, f64)> {
+    let endpoint = format!("{}/v1/graphql", base_url.trim_end_matches('/'));
+    let gql = serde_json::json!({
+        "query": format!(
+            r#"{{ Get {{ Entity(nearText: {{concepts: ["{query_text}"]}}, limit: {k}) {{ _additional {{ id certainty }} iri }} }} }}"#
+        )
+    });
+    let body_str = match serde_json::to_string(&gql) {
+        Ok(s) => s,
+        Err(e) => {
+            pgrx::warning!("query_weaviate_endpoint: JSON serialization error: {e}");
+            return Vec::new();
+        }
+    };
+
+    let agent = ureq::AgentBuilder::new().timeout(timeout).build();
+    let response = match agent
+        .post(&endpoint)
+        .set("Content-Type", "application/json")
+        .send_string(&body_str)
+    {
+        Ok(r) => r,
+        Err(e) => {
+            pgrx::warning!("pg_ripple.query_vector_endpoint (weaviate): request failed: {e}");
+            return Vec::new();
+        }
+    };
+
+    // FED-BODY-STREAM-01 (v0.82.0): pre-check Content-Length before buffering.
+    if let Some(cl_str) = response.header("content-length")
+        && let Ok(cl) = cl_str.parse::<i64>()
+    {
+        let limit = crate::FEDERATION_MAX_RESPONSE_BYTES.get();
+        if limit >= 0 && cl > limit as i64 {
+            pgrx::warning!("query_weaviate_endpoint: Content-Length {cl} exceeds limit");
+            return Vec::new();
+        }
+    }
+    let body = match response.into_string() {
+        Ok(s) => s,
+        Err(e) => {
+            pgrx::warning!("query_weaviate_endpoint: response read error: {e}");
+            return Vec::new();
+        }
+    };
+
+    let json: serde_json::Value = match serde_json::from_str(&body) {
+        Ok(v) => v,
+        Err(e) => {
+            pgrx::warning!("query_weaviate_endpoint: JSON parse error: {e}");
+            return Vec::new();
+        }
+    };
+
+    // Parse Weaviate response: data.Get.Entity[].{iri, _additional.certainty}
+    let entities = json
+        .pointer("/data/Get/Entity")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+
+    resolve_iri_scores(entities, "iri", "_additional/certainty")
+}
+
+/// Query a Qdrant REST `/collections/{name}/points/search` endpoint.
+#[allow(dead_code)]
+fn query_qdrant_endpoint(
+    base_url: &str,
+    query_text: &str,
+    k: i32,
+    timeout: std::time::Duration,
+) -> Vec<(i64, String, f64)> {
+    // Qdrant requires a pre-embedded query vector. We embed via the local API
+    // if configured, otherwise we return empty with a WARNING.
+    let api_url_guc = crate::EMBEDDING_API_URL.get();
+    let api_url = api_url_guc
+        .as_ref()
+        .and_then(|s| s.to_str().ok())
+        .unwrap_or("");
+
+    if api_url.is_empty() {
+        pgrx::warning!(
+            "pg_ripple.query_vector_endpoint (qdrant): embedding API URL not configured; \
+             set pg_ripple.embedding_api_url to enable Qdrant federation"
+        );
+        return Vec::new();
+    }
+
+    let api_key_guc = crate::EMBEDDING_API_KEY.get();
+    let api_key = api_key_guc
+        .as_ref()
+        .and_then(|s| s.to_str().ok())
+        .unwrap_or("");
+
+    let model_guc = crate::EMBEDDING_MODEL.get();
+    let model = model_guc
+        .as_ref()
+        .and_then(|s| s.to_str().ok())
+        .unwrap_or("text-embedding-3-small");
+
+    let embedding =
+        match crate::sparql::embedding::call_embedding_api_pub(query_text, model, api_url, api_key)
+        {
+            Ok(v) => v,
+            Err(e) => {
+                pgrx::warning!("query_qdrant_endpoint: embedding API error: {e}");
+                return Vec::new();
+            }
+        };
+
+    let endpoint = format!(
+        "{}/collections/entities/points/search",
+        base_url.trim_end_matches('/')
+    );
+    let body = serde_json::json!({
+        "vector": embedding,
+        "limit": k,
+        "with_payload": true
+    });
+    let body_str = match serde_json::to_string(&body) {
+        Ok(s) => s,
+        Err(e) => {
+            pgrx::warning!("query_qdrant_endpoint: JSON serialization error: {e}");
+            return Vec::new();
+        }
+    };
+
+    let agent = ureq::AgentBuilder::new().timeout(timeout).build();
+    let response = match agent
+        .post(&endpoint)
+        .set("Content-Type", "application/json")
+        .send_string(&body_str)
+    {
+        Ok(r) => r,
+        Err(e) => {
+            pgrx::warning!("pg_ripple.query_vector_endpoint (qdrant): request failed: {e}");
+            return Vec::new();
+        }
+    };
+
+    // FED-BODY-STREAM-01 (v0.82.0): pre-check Content-Length before buffering.
+    if let Some(cl_str) = response.header("content-length")
+        && let Ok(cl) = cl_str.parse::<i64>()
+    {
+        let limit = crate::FEDERATION_MAX_RESPONSE_BYTES.get();
+        if limit >= 0 && cl > limit as i64 {
+            pgrx::warning!("query_qdrant_endpoint: Content-Length {cl} exceeds limit");
+            return Vec::new();
+        }
+    }
+    let body = match response.into_string() {
+        Ok(s) => s,
+        Err(e) => {
+            pgrx::warning!("query_qdrant_endpoint: response read error: {e}");
+            return Vec::new();
+        }
+    };
+
+    let json: serde_json::Value = match serde_json::from_str(&body) {
+        Ok(v) => v,
+        Err(e) => {
+            pgrx::warning!("query_qdrant_endpoint: JSON parse error: {e}");
+            return Vec::new();
+        }
+    };
+
+    let results = json
+        .pointer("/result")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+
+    resolve_iri_scores(results, "payload/iri", "score")
+}
+
+/// Query a Pinecone REST `/query` endpoint.
+#[allow(dead_code)]
+fn query_pinecone_endpoint(
+    base_url: &str,
+    query_text: &str,
+    k: i32,
+    timeout: std::time::Duration,
+) -> Vec<(i64, String, f64)> {
+    // Like Qdrant, Pinecone requires a pre-embedded vector.
+    let api_url_guc = crate::EMBEDDING_API_URL.get();
+    let api_url = api_url_guc
+        .as_ref()
+        .and_then(|s| s.to_str().ok())
+        .unwrap_or("");
+
+    if api_url.is_empty() {
+        pgrx::warning!(
+            "pg_ripple.query_vector_endpoint (pinecone): embedding API URL not configured"
+        );
+        return Vec::new();
+    }
+
+    let api_key_guc = crate::EMBEDDING_API_KEY.get();
+    let api_key = api_key_guc
+        .as_ref()
+        .and_then(|s| s.to_str().ok())
+        .unwrap_or("");
+
+    let model_guc = crate::EMBEDDING_MODEL.get();
+    let model = model_guc
+        .as_ref()
+        .and_then(|s| s.to_str().ok())
+        .unwrap_or("text-embedding-3-small");
+
+    let embedding =
+        match crate::sparql::embedding::call_embedding_api_pub(query_text, model, api_url, api_key)
+        {
+            Ok(v) => v,
+            Err(e) => {
+                pgrx::warning!("query_pinecone_endpoint: embedding API error: {e}");
+                return Vec::new();
+            }
+        };
+
+    let endpoint = format!("{}/query", base_url.trim_end_matches('/'));
+    let body = serde_json::json!({
+        "vector": embedding,
+        "topK": k,
+        "includeMetadata": true
+    });
+    let body_str = match serde_json::to_string(&body) {
+        Ok(s) => s,
+        Err(e) => {
+            pgrx::warning!("query_pinecone_endpoint: JSON serialization error: {e}");
+            return Vec::new();
+        }
+    };
+
+    let pinecone_key_guc = crate::EMBEDDING_API_KEY.get();
+    let pinecone_key = pinecone_key_guc
+        .as_ref()
+        .and_then(|s| s.to_str().ok())
+        .unwrap_or("");
+
+    let agent = ureq::AgentBuilder::new().timeout(timeout).build();
+    let mut req = agent
+        .post(&endpoint)
+        .set("Content-Type", "application/json");
+    if !pinecone_key.is_empty() {
+        req = req.set("Api-Key", pinecone_key);
+    }
+
+    let response = match req.send_string(&body_str) {
+        Ok(r) => r,
+        Err(e) => {
+            pgrx::warning!("pg_ripple.query_vector_endpoint (pinecone): request failed: {e}");
+            return Vec::new();
+        }
+    };
+
+    // FED-BODY-STREAM-01 (v0.82.0): pre-check Content-Length before buffering.
+    if let Some(cl_str) = response.header("content-length")
+        && let Ok(cl) = cl_str.parse::<i64>()
+    {
+        let limit = crate::FEDERATION_MAX_RESPONSE_BYTES.get();
+        if limit >= 0 && cl > limit as i64 {
+            pgrx::warning!("query_pinecone_endpoint: Content-Length {cl} exceeds limit");
+            return Vec::new();
+        }
+    }
+    let body = match response.into_string() {
+        Ok(s) => s,
+        Err(e) => {
+            pgrx::warning!("query_pinecone_endpoint: response read error: {e}");
+            return Vec::new();
+        }
+    };
+
+    let json: serde_json::Value = match serde_json::from_str(&body) {
+        Ok(v) => v,
+        Err(e) => {
+            pgrx::warning!("query_pinecone_endpoint: JSON parse error: {e}");
+            return Vec::new();
+        }
+    };
+
+    let matches = json
+        .pointer("/matches")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+
+    // Pinecone: matches[].{id (iri), score, metadata.iri}
+    resolve_iri_scores(matches, "metadata/iri", "score")
+}
+
+/// Resolve a list of JSON result objects with IRI and score fields into
+/// dictionary-encoded `(entity_id, entity_iri, score)` triples.
+///
+/// `iri_path` is a JSON pointer relative to each result object.
+/// `score_path` is a JSON pointer for the score field.
+#[allow(dead_code)]
+fn resolve_iri_scores(
+    items: Vec<serde_json::Value>,
+    iri_path: &str,
+    score_path: &str,
+) -> Vec<(i64, String, f64)> {
+    items
+        .iter()
+        .filter_map(|item| {
+            let iri_ptr = format!("/{}", iri_path.replace('.', "/"));
+            let score_ptr = format!("/{}", score_path.replace('.', "/"));
+            let iri = item.pointer(&iri_ptr).and_then(|v| v.as_str())?.to_owned();
+            let score = item
+                .pointer(&score_ptr)
+                .and_then(|v| v.as_f64())
+                .unwrap_or(0.0);
+            let bare_iri = iri.trim_start_matches('<').trim_end_matches('>');
+            let entity_id = crate::dictionary::encode(bare_iri, crate::dictionary::KIND_IRI);
+            if entity_id == 0 {
+                return None; // Not in local dictionary — skip.
+            }
+            Some((entity_id, iri, score))
+        })
+        .collect()
+}

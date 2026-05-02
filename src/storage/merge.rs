@@ -351,9 +351,17 @@ pub fn merge_predicate(pred_id: i64) -> i64 {
     // the slow BRIN-index build (Steps 1–2) runs without holding the lock, keeping
     // contention on the query path to a minimum.  The ExclusiveLock is held only
     // for the short DDL window (Steps 3a–3e, typically < 10 ms).
+    //
+    // CC13-02 (v0.85.0): namespace the lock key with the pg_ripple merge fence
+    // prefix (0x5052_5000) so that the per-predicate locks do not clash with
+    // advisory locks held by Citus, pg_partman, or other extensions.
+    // The global key 0x5052_5000 itself is reserved for Citus rebalance events.
+    // lock_key = 0x5052_5000 + pred_id (wrapping to stay within i64 range).
+    const MERGE_FENCE_NAMESPACE: i64 = 0x5052_5000;
+    let merge_lock_key = MERGE_FENCE_NAMESPACE.wrapping_add(pred_id);
     Spi::run_with_args(
         "SELECT pg_advisory_xact_lock($1)",
-        &[DatumWithOid::from(pred_id)],
+        &[DatumWithOid::from(merge_lock_key)],
     )
     .unwrap_or_else(|e| pgrx::error!("merge: advisory lock (swap phase) error: {e}"));
 

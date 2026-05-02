@@ -71,6 +71,13 @@ pub struct Metrics {
     result_small: AtomicU64,
     result_medium: AtomicU64,
     result_large: AtomicU64,
+
+    // P13-08 (v0.85.0): dictionary hot-cache counters.
+    // Populated by querying pg_ripple.dictionary_cache_stats() in the extension.
+    /// Cumulative dictionary backend-local LRU cache hits.
+    dictionary_hot_cache_hits: AtomicU64,
+    /// Cumulative dictionary backend-local LRU cache misses.
+    dictionary_hot_cache_misses: AtomicU64,
 }
 
 impl Default for Metrics {
@@ -103,6 +110,8 @@ impl Metrics {
             result_small: AtomicU64::new(0),
             result_medium: AtomicU64::new(0),
             result_large: AtomicU64::new(0),
+            dictionary_hot_cache_hits: AtomicU64::new(0),
+            dictionary_hot_cache_misses: AtomicU64::new(0),
         }
     }
 
@@ -253,5 +262,22 @@ impl Metrics {
     }
     pub fn result_large_count(&self) -> u64 {
         self.result_large.load(Ordering::Relaxed)
+    }
+
+    // P13-08 (v0.85.0): dictionary hot-cache accessors and updaters.
+
+    pub fn dictionary_hot_cache_hits(&self) -> u64 {
+        self.dictionary_hot_cache_hits.load(Ordering::Relaxed)
+    }
+    pub fn dictionary_hot_cache_misses(&self) -> u64 {
+        self.dictionary_hot_cache_misses.load(Ordering::Relaxed)
+    }
+
+    /// Update the dictionary hot-cache counters from values queried from the extension.
+    pub fn update_dictionary_cache_stats(&self, hits: u64, misses: u64) {
+        self.dictionary_hot_cache_hits
+            .store(hits, Ordering::Relaxed);
+        self.dictionary_hot_cache_misses
+            .store(misses, Ordering::Relaxed);
     }
 }

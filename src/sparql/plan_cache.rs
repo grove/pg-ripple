@@ -144,9 +144,11 @@ fn cache_key_inner(canonical: &str) -> String {
     // SAFETY: GetUserId() is a pure accessor with no side effects; always safe.
     let role_oid: u32 = unsafe { pgrx::pg_sys::GetUserId().into() };
     // Include inference_mode GUC in key.
+    // C13-05 (v0.85.0): trim whitespace and lowercase before hashing so that
+    //   `inference_mode: NONE` and `inference_mode: none` share the same cache slot.
     let inference_mode = crate::INFERENCE_MODE
         .get()
-        .and_then(|c| c.to_str().ok().map(|s| s.to_owned()))
+        .and_then(|c| c.to_str().ok().map(|s| s.trim().to_lowercase()))
         .unwrap_or_else(|| "off".to_string());
     // PLAN-CACHE-GUC-02 (v0.81.0): include additional GUCs that affect SQL generation.
     let normalize_iris = crate::NORMALIZE_IRIS.get();

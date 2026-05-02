@@ -1661,3 +1661,29 @@ jobs:
         run: cargo pgrx stop pg18 2>/dev/null || true
 
 
+
+  lint-file-size:
+    name: File-size lint gate — 1,800-line limit (Q13-04, v0.85.0)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6
+
+      - name: Check no src/**/*.rs file exceeds 1,800 lines
+        run: |
+          failed=0
+          while IFS= read -r -d '' f; do
+            lines=$(wc -l < "$f")
+            if [ "$lines" -gt 1800 ]; then
+              if grep -q '@allow-large-file' "$f"; then
+                echo "SKIP (annotated): $f ($lines lines)"
+              else
+                echo "FAIL: $f has $lines lines (limit 1,800; add '// @allow-large-file: <reason>' to exempt)"
+                failed=1
+              fi
+            fi
+          done < <(find src -name '*.rs' -print0)
+          if [ "$failed" -eq 1 ]; then
+            exit 1
+          fi
+          echo "PASS: all src/**/*.rs files are within the 1,800-line limit"

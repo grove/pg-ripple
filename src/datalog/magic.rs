@@ -69,12 +69,23 @@ pub fn parse_goal(goal: &str) -> Result<GoalPattern, String> {
         if tok.starts_with('?') {
             None // free variable
         } else if tok.starts_with('"') {
-            // Literal
+            // Literal — may be plain, lang-tagged, or typed.
+            // C13-08 (v0.85.0): detect typed literals (`^^<` suffix) and route to
+            // `encode_typed_literal()` to preserve the type annotation; previously
+            // typed literals were encoded as plain strings and lost their datatype.
             let resolved = crate::datalog::resolve_prefix(tok);
-            Some(crate::dictionary::encode(
-                &resolved,
-                crate::dictionary::KIND_LITERAL,
-            ))
+            if let Some(caret_pos) = resolved.find("^^<") {
+                // Typed literal: `"value"^^<datatype>`
+                let value = resolved[..caret_pos].trim_matches('"');
+                let datatype = &resolved[caret_pos + 3..]; // after `^^<`
+                let datatype = datatype.trim_end_matches('>');
+                Some(crate::dictionary::encode_typed_literal(value, datatype))
+            } else {
+                Some(crate::dictionary::encode(
+                    &resolved,
+                    crate::dictionary::KIND_LITERAL,
+                ))
+            }
         } else {
             // IRI or prefixed IRI
             let resolved = crate::datalog::resolve_prefix(tok);

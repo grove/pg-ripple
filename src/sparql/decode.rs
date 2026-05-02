@@ -95,18 +95,30 @@ pub(crate) fn batch_decode(ids: &[i64]) -> HashMap<i64, String> {
     });
 
     // DECODE-WARN-01 (v0.82.0): warn on any requested ID absent from the dictionary.
-    // This detects dictionary corruption without changing fallback behaviour.
-    // Skip id=0: that is the well-known default-graph sentinel which is intentionally
-    // not stored in the dictionary.  Also skip negative IDs (error sentinels).
+    // C13-02 (v0.85.0): respect pg_ripple.strict_dictionary GUC — raise PT512 error
+    //   when strict mode is on and an ID is missing; keep the graceful-degradation
+    //   WARNING otherwise.
+    // C13-07 (v0.85.0): guard is `id == 0` (not `id <= 0`); negative IDs should not
+    //   exist after the v0.81.0 dict-subxact fix but were previously silently passed.
+    //   Skip id=0: well-known default-graph sentinel not stored in the dictionary.
+    let strict = crate::gucs::storage::STRICT_DICTIONARY.get();
     for id in &dict_ids {
-        if *id <= 0 {
+        if *id == 0 {
             continue;
         }
         if !result.contains_key(id) {
-            pgrx::warning!(
-                "batch_decode: dictionary entry missing for id {id}; \
-                 result binding will be empty string (possible dictionary corruption)"
-            );
+            if strict {
+                pgrx::error!(
+                    "PT512: dictionary entry missing for id {id}; \
+                     cannot decode result (set pg_ripple.strict_dictionary = off \
+                     to use empty-string placeholders instead)"
+                );
+            } else {
+                pgrx::warning!(
+                    "batch_decode: dictionary entry missing for id {id}; \
+                     result binding will be empty string (possible dictionary corruption)"
+                );
+            }
         }
     }
 

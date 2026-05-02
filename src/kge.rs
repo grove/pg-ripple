@@ -15,6 +15,10 @@
 //! - `pg_ripple.kge_enabled` (bool, default off) — enable the KGE worker
 //! - `pg_ripple.kge_model` (text) — `'transe'` or `'rotate'`
 
+// Q13-05 (v0.85.0): The file-wide #![allow(dead_code)] covers internal training
+// constants and helper functions used only by the two `pg_extern` endpoints
+// (`kge_stats` and `find_alignments`).  These are legitimate future-API surfaces
+// that are compiled but not exposed as top-level SQL functions yet.
 #![allow(dead_code)]
 
 use pgrx::prelude::*;

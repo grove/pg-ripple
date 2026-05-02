@@ -585,7 +585,7 @@ pub(crate) fn translate_pattern(pattern: &GraphPattern, ctx: &mut Ctx) -> Fragme
                 ctx.graph_filter,
                 include_g,
             );
-            ctx.path_counter = path_ctx.counter;
+            ctx.path_counter = path_ctx.value();
 
             let alias = ctx.next_alias();
             let mut frag = Fragment::empty();

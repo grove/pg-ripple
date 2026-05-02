@@ -1,6 +1,6 @@
 [package]
 name = "pg_ripple_http"
-version = "0.84.0"
+version = "0.85.0"
 edition = "2024"
 description = "SPARQL 1.1 Protocol HTTP endpoint for pg_ripple"
 license = "Apache-2.0"
