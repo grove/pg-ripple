@@ -718,6 +718,12 @@ fn compile_conf_path(
            WHERE c.statement_id = edge.\"_sid\"\
          ), 1.0) >= {min_conf}"
     );
+    let conf_cond2 = format!(
+        "COALESCE((\
+           SELECT MAX(c.confidence) FROM _pg_ripple.confidence c \
+           WHERE c.statement_id = edge2.\"_sid\"\
+         ), 1.0) >= {min_conf}"
+    );
 
     format!(
         "(WITH RECURSIVE _cp{n}(s, o, _depth) AS (\
@@ -733,11 +739,5 @@ fn compile_conf_path(
          SELECT s, o{g_sel} FROM _cp{n} \
          WHERE NOT _is_cycle {o_final_cond}\
         )",
-        conf_cond2 = format!(
-            "COALESCE((\
-               SELECT MAX(c.confidence) FROM _pg_ripple.confidence c \
-               WHERE c.statement_id = edge2.\"_sid\"\
-             ), 1.0) >= {min_conf}"
-        ),
     )
 }

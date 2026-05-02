@@ -48,6 +48,8 @@ mod pg_ripple {
     /// ```
     #[pg_extern]
     fn vacuum_confidence() -> i64 {
+        // Ensure the confidence table exists (idempotent).
+        crate::bulk_load::ensure_confidence_catalog();
         // Collect all VP tables and build a multi-UNION EXISTS check.
         let pred_rows: Vec<(i64, bool)> = Spi::connect(|c| {
             c.select(

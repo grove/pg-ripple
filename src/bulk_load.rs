@@ -1048,6 +1048,31 @@ pub fn json_ld_load(document: &serde_json::Value, default_graph: Option<&str>) -
 
 // ─── v0.87.0 LOAD-CONF-01: confidence-aware bulk loader ──────────────────────
 
+/// Ensure `_pg_ripple.confidence` table and its index exist.
+///
+/// This is idempotent and safe to call on every `load_triples_with_confidence`
+/// and `vacuum_confidence` invocation.  On a fresh install (before the v0.87.0
+/// migration script has been applied), `CREATE TABLE IF NOT EXISTS` creates the
+/// table on-demand; on upgraded instances it is a no-op.
+pub(crate) fn ensure_confidence_catalog() {
+    pgrx::Spi::run(
+        "CREATE TABLE IF NOT EXISTS _pg_ripple.confidence ( \
+            statement_id BIGINT  NOT NULL, \
+            confidence   FLOAT8  NOT NULL CHECK (confidence >= 0.0 AND confidence <= 1.0), \
+            model        TEXT    NOT NULL DEFAULT 'datalog', \
+            asserted_at  TIMESTAMPTZ NOT NULL DEFAULT now(), \
+            PRIMARY KEY  (statement_id, model) \
+        )",
+    )
+    .unwrap_or_else(|e| pgrx::warning!("confidence catalog creation: {e}"));
+
+    pgrx::Spi::run(
+        "CREATE INDEX IF NOT EXISTS confidence_stmt_idx \
+         ON _pg_ripple.confidence (statement_id)",
+    )
+    .unwrap_or_else(|e| pgrx::warning!("confidence_stmt_idx creation: {e}"));
+}
+
 /// Load triples with an explicit uniform confidence score.
 ///
 /// After inserting triples, inserts confidence rows with the given confidence
@@ -1070,6 +1095,9 @@ pub fn load_triples_with_confidence(
             confidence
         );
     }
+
+    // Ensure the confidence catalog table exists (idempotent; works on fresh installs).
+    ensure_confidence_catalog();
 
     // Load the triples using the appropriate loader.
     let count = match format.to_ascii_lowercase().as_str() {

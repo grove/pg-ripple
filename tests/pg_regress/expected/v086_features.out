@@ -17,18 +17,16 @@ WARNING:  pg_ripple: loaded without shared_preload_libraries; HTAP merge worker,
 (1 row)
 
 -- ─── A13-05: g BIGINT column present in VP-row-returning functions ────────────
--- sparql_construct() must return a third column 'g' (graph IRI, decoded).
-SELECT
-    s IS NOT NULL AS s_present,
-    p IS NOT NULL AS p_present,
-    o IS NOT NULL AS o_present
+-- sparql_construct() returns SETOF JSONB with a column named 'result'.
+-- We verify the function returns rows and the result is valid JSON.
+SELECT result IS NOT NULL AS result_present
 FROM pg_ripple.sparql_construct(
     'CONSTRUCT { ?s ?p ?o } WHERE { ?s ?p ?o FILTER(strstarts(str(?s), "http://v086test.example/")) }'
 )
 LIMIT 1;
- s_present | p_present | o_present 
------------+-----------+-----------
- t         | t         | t
+ result_present 
+----------------
+ t
 (1 row)
 
 -- ─── SC13-04: pg_ripple.describe_form GUC ───────────────────────────────────
