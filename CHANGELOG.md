@@ -38,7 +38,7 @@ counters, and VP-promotion crash-recovery regression test.**
 ### Performance
 
 - **P13-02** — New `encode_batch(terms: &[(&str, i16)]) → Vec<i64>` internal API in `src/dictionary/mod.rs`. Uses a single CTE INSERT for all cache-miss terms. Exposed via `pg_ripple.batch_encode_terms(TEXT[], SMALLINT[]) → BIGINT[]`.
-- **P13-03** — Merge-worker heartbeat log already throttled to once per 60 seconds (delivered in v0.83.0); confirmed as done.
+- **P13-03** — Merge-worker heartbeat log already throttled to once per 60 seconds (delivered in v0.83.0); confirmed as done. See `src/merge_worker.rs` throttle guard and `roadmap/v0.83.0.md`.
 - **P13-04** — `execute_select()` in `src/sparql/execute.rs` batches all `SET LOCAL` calls into a single SPI round-trip.
 - **P13-05** — Datalog inference in `src/datalog/seminaive.rs` streams rule SQL in batches of 100, reducing peak SPI call count for large rule sets.
 - **P13-06** — `partition_into_parallel_groups()` in `src/datalog/parallel.rs` pre-checks for directed cycles before union-find SCC evaluation; logs a warning on cycle detection.
