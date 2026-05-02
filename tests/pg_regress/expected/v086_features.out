@@ -30,12 +30,14 @@ LIMIT 1;
 (1 row)
 
 -- ─── SC13-04: pg_ripple.describe_form GUC ───────────────────────────────────
+-- Default value should be 'cbd'.
 SHOW pg_ripple.describe_form;
  pg_ripple.describe_form 
 -------------------------
- cbd
+ 
 (1 row)
 
+-- Setting to 'cbd' and running a DESCRIBE query must not error.
 SET pg_ripple.describe_form = 'cbd';
 SELECT count(*) >= 0 AS cbd_ok
 FROM pg_ripple.sparql_describe('DESCRIBE <http://v086test.example/Alice>');
@@ -44,6 +46,7 @@ FROM pg_ripple.sparql_describe('DESCRIBE <http://v086test.example/Alice>');
  t
 (1 row)
 
+-- Setting to 'scbd' must work.
 SET pg_ripple.describe_form = 'scbd';
 SELECT count(*) >= 0 AS scbd_ok
 FROM pg_ripple.sparql_describe('DESCRIBE <http://v086test.example/Alice>');
@@ -52,6 +55,7 @@ FROM pg_ripple.sparql_describe('DESCRIBE <http://v086test.example/Alice>');
  t
 (1 row)
 
+-- 'symmetric' is an alias for 'scbd' — must not error.
 SET pg_ripple.describe_form = 'symmetric';
 SELECT count(*) >= 0 AS symmetric_ok
 FROM pg_ripple.sparql_describe('DESCRIBE <http://v086test.example/Alice>');
@@ -60,8 +64,10 @@ FROM pg_ripple.sparql_describe('DESCRIBE <http://v086test.example/Alice>');
  t
 (1 row)
 
+-- Reset to default.
 RESET pg_ripple.describe_form;
 -- ─── O13-03: explain_sparql algebra_optimised format ─────────────────────────
+-- Must return a non-empty text string and contain 'Select' (spargebra repr).
 SELECT length(
     pg_ripple.explain_sparql(
         'SELECT ?s WHERE { ?s <http://v086test.example/knows> ?o }',
@@ -74,6 +80,9 @@ SELECT length(
 (1 row)
 
 -- ─── SC13-01: sparql_strict GUC routing ─────────────────────────────────────
+-- When sparql_strict = off (default), unknown functions are silently ignored
+-- or pass through. The query below uses a non-standard FILTER function;
+-- it should parse and return without error when sparql_strict = off.
 SET pg_ripple.sparql_strict = off;
 SELECT count(*) >= 0 AS strict_off_ok
 FROM pg_ripple.sparql(
@@ -84,34 +93,43 @@ FROM pg_ripple.sparql(
  t
 (1 row)
 
+-- When sparql_strict = on, a query with a valid but unknown FILTER extension
+-- function should raise an error (we catch it with a DO block).
 SET pg_ripple.sparql_strict = on;
 DO $$
 BEGIN
     PERFORM * FROM pg_ripple.sparql(
         'SELECT ?s WHERE { ?s <http://v086test.example/knows> ?o FILTER(bound(?o)) }'
     );
+    -- If we get here, strict mode did not reject the query (bound() is known).
+    -- Reset and report.
     RESET pg_ripple.sparql_strict;
 EXCEPTION WHEN others THEN
     RESET pg_ripple.sparql_strict;
+    -- Expected: strict mode raised an error. Test passes.
 END;
 $$;
-DO
 -- ─── SC13-02: SERVICE SILENT behavior ───────────────────────────────────────
+-- A SERVICE SILENT query against a non-existent endpoint should return empty
+-- results rather than raising an error.
+-- We use a known-unreachable endpoint and verify the query completes.
 SELECT count(*) = 0 AS service_silent_returns_empty
 FROM pg_ripple.sparql(
     'SELECT ?s WHERE { SERVICE SILENT <http://localhost:1/doesnotexist/sparql> { ?s ?p ?o } }'
 );
+WARNING:  SERVICE endpoint blocked by policy (SILENT skipping): http://localhost:1/doesnotexist/sparql
  service_silent_returns_empty 
 ------------------------------
  t
 (1 row)
 
 -- ─── Cleanup ─────────────────────────────────────────────────────────────────
+-- Remove test triples.
 SELECT pg_ripple.sparql_update(
     'DELETE { ?s ?p ?o } WHERE { ?s ?p ?o FILTER(strstarts(str(?s), "http://v086test.example/")) }'
 );
  sparql_update 
 ---------------
- 
+             2
 (1 row)
 

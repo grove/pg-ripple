@@ -268,8 +268,10 @@ pub fn merge_predicate(pred_id: i64) -> i64 {
     // will have statement IDs > max_sid_at_snapshot, so their tombstones will not
     // be truncated in this cycle, surviving to the next merge cycle where they can
     // correctly filter out the resurrected deletes.
+    // Use last_value (not currval) to avoid the "currval not yet defined in session"
+    // error when compact() is called in a fresh session (e.g., admin_api vacuum()).
     let max_sid_at_snapshot: i64 =
-        Spi::get_one_with_args::<i64>("SELECT currval('_pg_ripple.statement_id_seq')", &[])
+        Spi::get_one::<i64>("SELECT last_value FROM _pg_ripple.statement_id_seq")
             .unwrap_or_else(|e| pgrx::error!("merge: capture max_sid error: {e}"))
             .unwrap_or(0);
 

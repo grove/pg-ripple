@@ -147,12 +147,10 @@ pub(crate) fn translate_service(
     silent: bool,
     ctx: &mut Ctx,
 ) -> Fragment {
-    let service_silent_fallback = |ctx: &mut Ctx| -> Fragment {
-        let alias = ctx.next_alias();
-        let mut frag = Fragment::empty();
-        frag.from_items
-            .push((alias, "(SELECT 1 AS _dummy)".to_owned()));
-        frag
+    let service_silent_fallback = |_ctx: &mut Ctx| -> Fragment {
+        // SERVICE SILENT must return 0 rows when the endpoint is blocked/unreachable.
+        // Fragment::zero_rows() generates `FROM (SELECT 1 LIMIT 0) AS _zero` → 0 rows.
+        Fragment::zero_rows()
     };
 
     let url = match name {

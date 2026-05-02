@@ -54,8 +54,6 @@ SHOW pg_ripple.approx_distinct;
 SET pg_ripple.approx_distinct = on;
 SELECT count(*) = 1 AS hll_count_returns_aggregate
 FROM pg_ripple.sparql('SELECT (COUNT(DISTINCT ?s) AS ?n) WHERE { ?s ?p ?o }');
-WARNING:  pg_ripple: loaded without shared_preload_libraries; HTAP merge worker, CONSTRUCT writeback, and dictionary cache are disabled. Add pg_ripple to shared_preload_libraries in postgresql.conf.
-WARNING:  pg_ripple: loaded without shared_preload_libraries; HTAP merge worker, CONSTRUCT writeback, and dictionary cache are disabled. Add pg_ripple to shared_preload_libraries in postgresql.conf.
  hll_count_returns_aggregate 
 -----------------------------
  t

@@ -124,7 +124,7 @@ FROM pg_ripple.sparql(
 WARNING:  SERVICE endpoint not registered (SILENT skipping): http://also-unregistered.test/sparql
  silent_unregistered_count 
 ---------------------------
-                         1
+                         0
 (1 row)
 
 -- ─── Direct _pg_ripple.federation_endpoints table checks ─────────────────────
@@ -245,8 +245,7 @@ SELECT pg_ripple.sparql(
 ) AS silent_cb_result;
  silent_cb_result 
 ------------------
- {"s": null}
-(1 row)
+(0 rows)
 
 RESET client_min_messages;
 SELECT 'SERVICE SILENT swallows PT605 circuit-breaker-open' AS b7_4_check;
