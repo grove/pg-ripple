@@ -354,10 +354,10 @@ jobs:
         run: cargo pgrx stop pg18
 
   w3c-suite:
-    name: W3C SPARQL 1.1 full suite (informational)
+    name: W3C SPARQL 1.1 full suite (required)
     runs-on: ubuntu-latest
     needs: [test]
-    continue-on-error: true
+    continue-on-error: false
 
     steps:
       - name: Checkout
@@ -843,12 +843,12 @@ jobs:
         if: always()
         run: cargo pgrx stop pg18
 
-  # v0.61.0: SPARQL Entailment Regime test suite (informational; blocking in v1.0.0)
+  # v0.61.0: SPARQL Entailment Regime test suite (blocking)
   entailment-suite:
-    name: SPARQL Entailment Regime suite (informational, v0.61.0)
+    name: SPARQL Entailment Regime suite (required, v0.61.0)
     runs-on: ubuntu-latest
     needs: [test]
-    continue-on-error: true
+    continue-on-error: false
 
     steps:
       - name: Checkout
@@ -898,11 +898,10 @@ jobs:
             -c "SET client_min_messages = warning;" || true
 
       - name: Run SPARQL entailment regime suite
-        continue-on-error: true
         run: |
           PGDATABASE=pg_ripple PGHOST=/tmp PGPORT=28818 PGUSER=runner \
-            bash tests/sparql_entailment/runner.sh || true
-          echo "Entailment suite complete (non-blocking)"
+            bash tests/sparql_entailment/runner.sh
+          echo "Entailment suite complete"
 
       - name: Stop pgrx PostgreSQL 18
         if: always()
@@ -912,7 +911,7 @@ jobs:
     name: Datalog convergence suite (v0.46.0)
     runs-on: ubuntu-latest
     needs: [test]
-    continue-on-error: true
+    continue-on-error: false
 
     steps:
       - name: Checkout
