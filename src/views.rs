@@ -836,12 +836,10 @@ fn compile_construct_for_view(query_text: &str) -> Result<(String, usize, usize)
                 Ok(format!("{id}::bigint"))
             }
             spargebra::term::TermPattern::Variable(v) => Ok(var_col(v.as_str())),
-            _ => {
-                return Err(
-                    "internal: blank node or RDF-star subject reached resolver — please report"
-                        .to_owned(),
-                );
-            }
+            _ => Err(
+                "internal: blank node or RDF-star subject reached resolver — please report"
+                    .to_owned(),
+            ),
         }
     };
 
@@ -871,9 +869,7 @@ fn compile_construct_for_view(query_text: &str) -> Result<(String, usize, usize)
             }
             spargebra::term::TermPattern::Variable(v) => Ok(var_col(v.as_str())),
             spargebra::term::TermPattern::BlankNode(_) => {
-                return Err(
-                    "internal: blank node object reached resolver — please report".to_owned(),
-                );
+                Err("internal: blank node object reached resolver — please report".to_owned())
             }
             spargebra::term::TermPattern::Triple(_) => {
                 Err("CONSTRUCT template contains an RDF-star quoted triple; \

@@ -624,6 +624,57 @@ mod pg_ripple {
                 Some("docs/src/features/cdc.md".to_string()),
                 Some("src/bidi/mod.rs".to_string()),
             ),
+            // v0.87.0 — Uncertain Knowledge Engine
+            (
+                "probabilistic_datalog".to_string(),
+                "implemented".to_string(),
+                None,
+                Some("PROB-DATALOG-01 (v0.87.0): @weight rule annotations and \
+                     confidence propagation in semi-naive Datalog evaluation.".to_string()),
+                Some("ci/regress: probabilistic.sql".to_string()),
+                Some("docs/src/features/uncertain-knowledge.md".to_string()),
+                Some("src/datalog/seminaive.rs".to_string()),
+            ),
+            (
+                "fuzzy_sparql".to_string(),
+                "implemented".to_string(),
+                None,
+                Some("FUZZY-SPARQL-01 (v0.87.0): pg:fuzzy_match(), pg:token_set_ratio(), \
+                     and pg:confPath() SPARQL extension functions backed by pg_trgm.".to_string()),
+                Some("ci/regress: probabilistic.sql".to_string()),
+                Some("docs/src/features/uncertain-knowledge.md".to_string()),
+                Some("src/sparql/expr.rs".to_string()),
+            ),
+            (
+                "confidence_side_table".to_string(),
+                "implemented".to_string(),
+                None,
+                Some("CONF-TABLE-01 (v0.87.0): _pg_ripple.confidence side table for \
+                     per-statement probabilistic scores with model column.".to_string()),
+                Some("sql/pg_ripple--0.86.0--0.87.0.sql".to_string()),
+                Some("docs/src/features/uncertain-knowledge.md".to_string()),
+                Some("src/uncertain_knowledge_api.rs".to_string()),
+            ),
+            (
+                "soft_shacl_scoring".to_string(),
+                "implemented".to_string(),
+                None,
+                Some("SOFT-SHACL-01 (v0.87.0): weighted SHACL data-quality scoring \
+                     via sh:severityWeight and pg_ripple.shacl_score().".to_string()),
+                Some("ci/regress: shacl.sql".to_string()),
+                Some("docs/src/features/uncertain-knowledge.md".to_string()),
+                Some("src/shacl_scoring.rs".to_string()),
+            ),
+            (
+                "prov_confidence".to_string(),
+                "implemented".to_string(),
+                None,
+                Some("PROV-CONF-01 (v0.87.0): automatic confidence propagation from \
+                     PROV-O pg:sourceTrust predicates.".to_string()),
+                Some("ci/regress: probabilistic.sql".to_string()),
+                Some("docs/src/features/uncertain-knowledge.md".to_string()),
+                Some("src/gucs/datalog.rs".to_string()),
+            ),
         ];
 
         TableIterator::new(rows)

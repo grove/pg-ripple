@@ -193,7 +193,10 @@ pub fn explain_datalog(rule_set_name: &str) -> pgrx::JsonB {
         "strata": strata_json,
         "rules": rules_json,
         "sql_per_rule": sql_per_rule,
-        "last_run_stats": last_run_stats
+        "last_run_stats": last_run_stats,
+        "confidence": {
+            "enabled": crate::PROBABILISTIC_DATALOG.get()
+        }
     });
 
     pgrx::JsonB(result)

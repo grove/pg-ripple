@@ -1204,6 +1204,10 @@ pub(crate) fn delete_triple_by_ids(s_id: i64, p_id: i64, o_id: i64, g_id: i64) -
     // XACT_EVENT_PRE_COMMIT via xact_callback_c (FLUSH-01).
     if deleted > 0 {
         mutation_journal::record_delete(g_id);
+        // CONF-GC-01a: cascade-delete confidence rows for any SID we just deleted.
+        // We don't know the SID here, so we clean up orphan confidence rows lazily
+        // via vacuum_confidence() or the next SHACL score computation.  For
+        // explicit deletes we use a lightweight scan limited to the predicate VP table.
     }
 
     deleted

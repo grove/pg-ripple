@@ -360,6 +360,17 @@ pub(super) fn translate_function_filter(
 /// `pg:similar` IRI constant.
 pub(super) const PG_SIMILAR_IRI: &str = "http://pg-ripple.org/functions/similar";
 
+// ─── v0.87.0 uncertain-knowledge extension function IRI constants ─────────────
+
+/// `pg:confidence(?s, ?p, ?o)` IRI — returns highest confidence score across models (v0.87.0).
+pub(super) const PG_CONFIDENCE_IRI: &str = "http://pg-ripple.org/functions/confidence";
+
+/// `pg:fuzzy_match(a, b)` IRI — trigram similarity via pg_trgm (v0.87.0).
+pub(super) const PG_FUZZY_MATCH_IRI: &str = "http://pg-ripple.org/functions/fuzzy_match";
+
+/// `pg:token_set_ratio(a, b)` IRI — word-set similarity via pg_trgm (v0.87.0).
+pub(super) const PG_TOKEN_SET_RATIO_IRI: &str = "http://pg-ripple.org/functions/token_set_ratio";
+
 /// Translate an argument expression to a SQL text expression.
 ///
 /// For variable arguments: decode the dictionary ID to lexical text.
@@ -1373,6 +1384,107 @@ pub(super) fn translate_function_value(
                         &query_text,
                         k,
                     ))
+                }
+
+                // ── v0.87.0: pg:confidence(?s, ?p, ?o) ────────────────────────
+                // Returns the highest confidence score across all models for a triple,
+                // or 1.0 if no confidence row exists (explicit facts are always confident).
+                // Requires at least one bound argument (CONF-FED-01 PT0304 guard handled
+                // in translate_expr_value caller; here we emit SQL for the bound case).
+                PG_CONFIDENCE_IRI => {
+                    *is_numeric = true;
+                    // When called as a BIND or ORDER BY value, treat as a correlated
+                    // subquery against _pg_ripple.confidence.
+                    // Minimal: return a constant 1.0 when arguments are not resolvable
+                    // (degenerate/unbound case — caller should emit PT0304 for all-unbound).
+                    let s_sql = args
+                        .first()
+                        .and_then(|a| translate_arg_value(a, bindings, ctx));
+                    let p_sql = args
+                        .get(1)
+                        .and_then(|a| translate_arg_value(a, bindings, ctx));
+                    let o_sql = args
+                        .get(2)
+                        .and_then(|a| translate_arg_value(a, bindings, ctx));
+
+                    match (s_sql, p_sql, o_sql) {
+                        (None, None, None) => {
+                            // All unbound — PT0304
+                            pgrx::error!(
+                                "pg:confidence() requires at least one bound argument \
+                                 to prevent a full confidence table scan (PT0304)"
+                            );
+                        }
+                        (s_opt, p_opt, o_opt) => {
+                            // Build JOIN conditions for the VP table lookup.
+                            let p_cond = match &p_opt {
+                                Some(p) => {
+                                    // Predicate is bound — we can look up the VP table.
+                                    format!(
+                                        "COALESCE((\
+                                           SELECT MAX(c.confidence) \
+                                           FROM _pg_ripple.vp_rare vp \
+                                           JOIN _pg_ripple.confidence c \
+                                             ON c.statement_id = vp.i \
+                                           WHERE vp.p = ({p}) \
+                                           {s_filter} {o_filter} \
+                                           LIMIT 1\
+                                         ), 1.0)",
+                                        s_filter = s_opt
+                                            .as_ref()
+                                            .map(|s| format!("AND vp.s = ({s})"))
+                                            .unwrap_or_default(),
+                                        o_filter = o_opt
+                                            .as_ref()
+                                            .map(|o| format!("AND vp.o = ({o})"))
+                                            .unwrap_or_default(),
+                                    )
+                                }
+                                None => {
+                                    // Predicate unbound — scan all VP tables via vp_rare.
+                                    format!(
+                                        "COALESCE((\
+                                           SELECT MAX(c.confidence) \
+                                           FROM _pg_ripple.vp_rare vp \
+                                           JOIN _pg_ripple.confidence c \
+                                             ON c.statement_id = vp.i \
+                                           WHERE 1=1 \
+                                           {s_filter} {o_filter} \
+                                           LIMIT 1\
+                                         ), 1.0)",
+                                        s_filter = s_opt
+                                            .as_ref()
+                                            .map(|s| format!("AND vp.s = ({s})"))
+                                            .unwrap_or_default(),
+                                        o_filter = o_opt
+                                            .as_ref()
+                                            .map(|o| format!("AND vp.o = ({o})"))
+                                            .unwrap_or_default(),
+                                    )
+                                }
+                            };
+                            Some(p_cond)
+                        }
+                    }
+                }
+
+                // ── v0.87.0: pg:fuzzy_match(a, b) — trigram similarity ─────────
+                // Returns pg_trgm similarity(a_text, b_text) as a raw float.
+                // Requires pg_trgm extension (PT0302 if absent).
+                PG_FUZZY_MATCH_IRI => {
+                    *is_numeric = true;
+                    let a_text = translate_arg_text(args.first()?, bindings, ctx)?;
+                    let b_text = translate_arg_text(args.get(1)?, bindings, ctx)?;
+                    Some(format!("similarity({a_text}, {b_text})"))
+                }
+
+                // ── v0.87.0: pg:token_set_ratio(a, b) — word-set similarity ────
+                // Returns pg_trgm word_similarity(a_text, b_text) as a raw float.
+                PG_TOKEN_SET_RATIO_IRI => {
+                    *is_numeric = true;
+                    let a_text = translate_arg_text(args.first()?, bindings, ctx)?;
+                    let b_text = translate_arg_text(args.get(1)?, bindings, ctx)?;
+                    Some(format!("word_similarity({a_text}, {b_text})"))
                 }
 
                 _ => None,

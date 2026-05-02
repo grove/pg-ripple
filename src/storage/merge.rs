@@ -633,6 +633,27 @@ pub fn merge_all() -> i64 {
             total += merge_predicate(p_id);
         }
     }
+
+    // CONF-GC-01c: after every merge cycle, purge confidence rows whose
+    // statement_id no longer appears in any VP table (orphans from tombstoned
+    // or deleted triples that were merged into the main partition and discarded).
+    // This is a best-effort sweep; vacuum_confidence() provides on-demand cleanup.
+    Spi::run(
+        "DELETE FROM _pg_ripple.confidence c \
+         WHERE NOT EXISTS ( \
+           SELECT 1 FROM _pg_ripple.vp_rare WHERE i = c.statement_id \
+         ) AND NOT EXISTS ( \
+           SELECT 1 FROM _pg_ripple.predicates p2 \
+           WHERE p2.table_oid IS NOT NULL \
+             AND EXISTS ( \
+               SELECT 1 FROM pg_catalog.pg_class pc \
+               WHERE pc.oid = p2.table_oid \
+                 AND pc.relname LIKE 'vp_%_delta' \
+             ) \
+         )",
+    )
+    .unwrap_or(());
+
     total
 }
 

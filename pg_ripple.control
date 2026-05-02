@@ -2,7 +2,7 @@
 # See: https://www.postgresql.org/docs/current/extend-extensions.html
 
 comment = 'High-performance RDF triple store with SPARQL 1.1, SHACL, Datalog, HTAP, federation, and encode_batch (v0.86.0)'
-default_version = '0.86.0'
+default_version = '0.87.0'
 # MUST match the current release version (keep in sync with Cargo.toml)
 module_pathname = '$libdir/pg_ripple'
 relocatable = false

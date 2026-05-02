@@ -13,6 +13,41 @@ Versions correspond to the milestones in [ROADMAP.md](ROADMAP.md).
 
 ---
 
+## [0.87.0] — 2026-05-XX — Uncertain Knowledge Engine
+
+**Implements v0.87.0 roadmap: probabilistic Datalog with `@weight` annotations, confidence
+side table (`_pg_ripple.confidence`), fuzzy SPARQL extension functions (`pg:confidence()`,
+`pg:fuzzy_match()`, `pg:token_set_ratio()`, `pg:confPath()`), soft SHACL quality scoring
+(`pg_ripple.shacl_score()`, `pg_ripple.shacl_report_scored()`), confidence-aware bulk load
+(`pg_ripple.load_triples_with_confidence()`), PROV-O confidence propagation, RDF-star Turtle
+export with confidence annotations, HTTP companion endpoints (`/confidence/*`), and garbage
+collection (`pg_ripple.vacuum_confidence()`).**
+
+### Added
+
+- **PROB-DATALOG-01**: `@weight(F)` annotation on Datalog rules; noisy-OR confidence propagation via `_pg_ripple.confidence` side table.
+- **CONF-TABLE-01**: `_pg_ripple.confidence (statement_id, confidence, model, asserted_at)` side table; `confidence_stmt_idx` index; optional `dict_trgm_idx` GIN index when `pg_trgm` is installed.
+- **FUZZY-SPARQL-01**: `pg:confidence(?s,?p,?o)`, `pg:fuzzy_match(a,b)`, `pg:token_set_ratio(a,b)` SPARQL extension functions; `pg:confPath(pred, threshold)` property path operator.
+- **SOFT-SHACL-01**: `pg_ripple.shacl_score(graph_iri)`, `pg_ripple.shacl_report_scored(graph_iri)`, `pg_ripple.log_shacl_score(graph_iri)` functions; `sh:severityWeight` support; `_pg_ripple.shacl_score_log` table.
+- **LOAD-CONF-01**: `pg_ripple.load_triples_with_confidence(data, confidence, format, graph_uri)` bulk loader.
+- **CONF-EXPORT-01**: `pg_ripple.export_turtle_with_confidence(graph)` with RDF-star confidence annotations; `pg_ripple.export_confidence` GUC.
+- **PROV-CONF-01**: `pg_ripple.prov_confidence` GUC for PROV-O `pg:sourceTrust` confidence propagation.
+- **CONF-CWB-01**: `pg_ripple.cwb_confidence_propagation` GUC; CWB confidence propagation in `run_full_recompute`.
+- **CONF-GC-01**: Orphaned confidence row cleanup in `delete_triple_by_ids`, `run_dred_retraction`, and HTAP `merge_all`.
+- **CONF-HTTP-01**: HTTP endpoints `POST /confidence/load`, `GET /confidence/shacl-score`, `GET /confidence/shacl-report`, `POST /confidence/vacuum`.
+- **CONF-EXPLAIN-01**: `explain_datalog()` now includes a `"confidence"` node with per-rule weights.
+- **CONF-CYCLIC-01**: `prob_datalog_cyclic`, `prob_datalog_max_iterations`, `prob_datalog_convergence_delta`, `prob_datalog_cyclic_strict` GUCs.
+- **CONF-ERR-01**: Error variants PT0301–PT0307 in `UncertainKnowledgeError` enum.
+- **CONF-RLS-01**: Row-level security policies on `_pg_ripple.confidence` and `_pg_ripple.shacl_score_log`.
+- **CONF-DOCS-01**: `docs/src/features/uncertain-knowledge.md`; 9 new GUC entries in `docs/src/operations/configuration.md`.
+- **CONF-PERF-01**: `benchmarks/probabilistic_overhead.sql` and `benchmarks/confidence_join_scale.sql`.
+- **CONF-SBOM-01**: `postgresql-contrib` added to Dockerfile runtime layer; `audit.toml` pg_trgm note.
+- 5 new feature status rows (probabilistic_datalog, fuzzy_sparql, confidence_side_table, soft_shacl_scoring, prov_confidence).
+- `pg_ripple_http` version bumped to 0.87.0; `COMPATIBLE_EXTENSION_MIN` updated to 0.87.0.
+- `tests/pg_regress/sql/probabilistic.sql` regression test.
+
+---
+
 ## [0.86.0] — 2026-05-02 — Assessment 13 Tests, API Polish, Observability, Supply Chain & Standards
 
 **Implements v0.86.0 roadmap: closes the remaining 30+ Low-priority and backlog findings from

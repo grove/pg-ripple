@@ -125,3 +125,36 @@ pub static DATALOG_COST_BOUND_S_DIVISOR: pgrx::GucSetting<i32> = pgrx::GucSettin
 /// A larger value makes dual-bound atoms appear cheaper relative to other atoms.
 /// Replaces the hardcoded `10` divisor in `src/datalog/compiler.rs`.
 pub static DATALOG_COST_BOUND_SO_DIVISOR: pgrx::GucSetting<i32> = pgrx::GucSetting::<i32>::new(10);
+
+// ─── v0.87.0 Uncertain Knowledge Engine GUCs ─────────────────────────────────
+
+/// GUC: allow probabilistic evaluation on cyclic rule sets (v0.87.0).
+/// Cyclic probabilistic rule sets require approximate evaluation; this must be
+/// explicitly enabled. Default off.
+pub static PROB_DATALOG_CYCLIC: pgrx::GucSetting<bool> = pgrx::GucSetting::<bool>::new(false);
+
+/// GUC: maximum semi-naive inference rounds when `prob_datalog_cyclic = on` (v0.87.0).
+/// After this limit, the evaluator emits a WARNING and returns the partial result.
+pub static PROB_DATALOG_MAX_ITERATIONS: pgrx::GucSetting<i32> = pgrx::GucSetting::<i32>::new(100);
+
+/// GUC: early-exit threshold for cyclic probabilistic Datalog convergence (v0.87.0).
+/// Iteration stops when the maximum confidence delta is below this value.
+pub static PROB_DATALOG_CONVERGENCE_DELTA: pgrx::GucSetting<f64> =
+    pgrx::GucSetting::<f64>::new(0.001);
+
+/// GUC: when on, promote max-iterations-exceeded from WARNING to ERROR (v0.87.0).
+pub static PROB_DATALOG_CYCLIC_STRICT: pgrx::GucSetting<bool> =
+    pgrx::GucSetting::<bool>::new(false);
+
+/// GUC: default similarity threshold for `pg:fuzzy_match()` and `pg:confPath()` (v0.87.0).
+pub static DEFAULT_FUZZY_THRESHOLD: pgrx::GucSetting<f64> = pgrx::GucSetting::<f64>::new(0.7);
+
+/// GUC: enable automatic confidence propagation from PROV-O `pg:sourceTrust` predicates (v0.87.0).
+pub static PROV_CONFIDENCE: pgrx::GucSetting<bool> = pgrx::GucSetting::<bool>::new(false);
+
+/// GUC: enable confidence annotations in RDF export functions (v0.87.0).
+pub static EXPORT_CONFIDENCE: pgrx::GucSetting<bool> = pgrx::GucSetting::<bool>::new(false);
+
+/// GUC: CONSTRUCT writeback confidence propagation mode: `'explicit'` or `'inherit'` (v0.87.0).
+pub static CWB_CONFIDENCE_PROPAGATION: pgrx::GucSetting<Option<std::ffi::CString>> =
+    pgrx::GucSetting::<Option<std::ffi::CString>>::new(None);

@@ -261,23 +261,23 @@ pub(crate) async fn flight_do_get(
             None
         }
     };
-    if let Some(count) = row_count_check {
-        if count as usize > max_export_rows {
-            tracing::warn!(
-                graph_id = %graph_id,
-                row_count = %count,
-                limit = %max_export_rows,
-                "Arrow Flight export denied: result exceeds max_export_rows"
-            );
-            return json_response_http(
-                StatusCode::PAYLOAD_TOO_LARGE,
-                serde_json::json!({
-                    "error": "PT413",
-                    "message": "Arrow Flight export result is too large; \
-                                use a more selective query or increase ARROW_MAX_EXPORT_ROWS"
-                }),
-            );
-        }
+    if let Some(count) = row_count_check
+        && count as usize > max_export_rows
+    {
+        tracing::warn!(
+            graph_id = %graph_id,
+            row_count = %count,
+            limit = %max_export_rows,
+            "Arrow Flight export denied: result exceeds max_export_rows"
+        );
+        return json_response_http(
+            StatusCode::PAYLOAD_TOO_LARGE,
+            serde_json::json!({
+                "error": "PT413",
+                "message": "Arrow Flight export result is too large; \
+                            use a more selective query or increase ARROW_MAX_EXPORT_ROWS"
+            }),
+        );
     }
 
     let rows = match client.query(&full_sql, &[]).await {

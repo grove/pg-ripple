@@ -103,6 +103,7 @@ pub(crate) struct RagResponse {
 
 // MOD-01 (v0.72.0): extracted handler submodules
 pub(crate) mod admin_handlers;
+pub(crate) mod confidence_handlers;
 pub(crate) mod rag_handler;
 pub(crate) mod sparql_handlers;
 
@@ -215,6 +216,23 @@ pub(crate) fn build_router(state: Arc<AppState>, max_body_bytes: usize, cors: Co
         .route("/flight/do_get", post(flight_do_get))
         // v0.73.0 SUB-01: Live SPARQL subscription SSE endpoint.
         .route("/subscribe/{subscription_id}", get(sparql_subscription_sse))
+        // v0.87.0: Uncertain Knowledge Engine — confidence API endpoints.
+        .route(
+            "/confidence/load",
+            post(confidence_handlers::load_with_confidence),
+        )
+        .route(
+            "/confidence/shacl-score",
+            get(confidence_handlers::shacl_score),
+        )
+        .route(
+            "/confidence/shacl-report",
+            get(confidence_handlers::shacl_report_scored),
+        )
+        .route(
+            "/confidence/vacuum",
+            post(confidence_handlers::vacuum_confidence),
+        )
         .layer(RequestBodyLimitLayer::new(max_body_bytes))
         .layer(cors)
         .with_state(state)

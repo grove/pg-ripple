@@ -71,6 +71,9 @@ mod json_mapping;
 mod subscriptions;
 // v0.77.0 modules
 mod bidi;
+// v0.87.0 modules — Uncertain Knowledge Engine
+mod shacl_scoring;
+mod uncertain_knowledge_api;
 
 // Re-export all GUC statics at the crate root so that `crate::SOME_GUC` paths
 // in existing code continue to work after the split.

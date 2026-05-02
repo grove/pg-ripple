@@ -51,9 +51,9 @@ pub async fn stream_sparql_select(state: &AppState, query: &str) -> Response {
             return Response::builder()
                 .status(StatusCode::SERVICE_UNAVAILABLE)
                 .header("content-type", "application/json")
-                .body(Body::from(format!(
-                    r#"{{"error":"PT503","message":"database connection unavailable"}}"#
-                )))
+                .body(Body::from(
+                    r#"{"error":"PT503","message":"database connection unavailable"}"#.to_string(),
+                ))
                 .expect("infallible response");
         }
     };
@@ -72,7 +72,7 @@ pub async fn stream_sparql_select(state: &AppState, query: &str) -> Response {
 
     // Build the cursor query. The extension exposes `sparql_stream_cursor(query TEXT)`
     // which returns rows as JSONB objects keyed by variable name.
-    let _cursor_sql = format!("SELECT row_to_json(r)::text FROM pg_ripple.execute_select($1) r");
+    let _cursor_sql = "SELECT row_to_json(r)::text FROM pg_ripple.execute_select($1) r".to_string();
 
     // Execute the query and stream rows.
     let (tx, rx) = mpsc::channel::<String>(SSE_CHANNEL_CAPACITY);

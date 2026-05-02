@@ -227,3 +227,7 @@ fi
 
 echo ""
 echo "=== CI Benchmark complete ==="
+# v0.87.0 note: probabilistic_overhead.sql and confidence_join_scale.sql
+# benchmarks require a running PG instance with test data; they are not run
+# in the automated CI loop by default. Run them manually with pgbench.
+

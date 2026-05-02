@@ -253,3 +253,17 @@ Don't forget to tune PostgreSQL itself alongside pg_ripple. Key PostgreSQL param
 - `random_page_cost` = 1.1 (if using SSDs)
 - `max_parallel_workers_per_gather` = 4
 ```
+
+## Uncertain Knowledge Engine GUCs (v0.87.0)
+
+| GUC | Type | Default | Description |
+|-----|------|---------|-------------|
+| `pg_ripple.probabilistic_datalog` | bool | `off` | Enable @weight rule annotations |
+| `pg_ripple.prob_datalog_cyclic` | bool | `off` | Allow approximate evaluation on cyclic rule sets |
+| `pg_ripple.prob_datalog_max_iterations` | int | `100` | Maximum semi-naive iterations |
+| `pg_ripple.prob_datalog_convergence_delta` | float8 | `0.001` | Early-exit convergence threshold |
+| `pg_ripple.prob_datalog_cyclic_strict` | bool | `off` | Promote non-convergence to ERROR (PT0307) |
+| `pg_ripple.default_fuzzy_threshold` | float8 | `0.7` | Default fuzzy match threshold |
+| `pg_ripple.prov_confidence` | bool | `off` | Enable PROV-O pg:sourceTrust propagation |
+| `pg_ripple.export_confidence` | bool | `off` | Include RDF-star annotations in Turtle export |
+| `pg_ripple.cwb_confidence_propagation` | string | (empty) | CONSTRUCT rule name for CWB trust propagation |
