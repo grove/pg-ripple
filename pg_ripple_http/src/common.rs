@@ -3,7 +3,7 @@
 
 use axum::body::Body;
 use axum::http::{HeaderMap, StatusCode};
-use axum::response::{IntoResponse, Response};
+use axum::response::Response;
 use constant_time_eq::constant_time_eq;
 use dashmap::DashMap;
 use deadpool_postgres::Pool;

@@ -993,7 +993,10 @@ $$;
 CREATE OR REPLACE FUNCTION _pg_ripple.ddl_guard_vp_tables()
     RETURNS event_trigger
     LANGUAGE plpgsql
-    SECURITY DEFINER
+    SECURITY DEFINER -- SECURITY-JUSTIFY: event trigger needs SECURITY DEFINER to call
+    -- pg_event_trigger_dropped_objects(), which requires elevated privilege; the
+    -- function only reads the event trigger context and raises a WARNING/ERROR
+    -- to protect VP tables from accidental DDL drops outside maintenance mode.
 AS $$
 DECLARE
     _obj record;

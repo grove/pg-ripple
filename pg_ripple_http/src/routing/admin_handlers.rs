@@ -180,6 +180,80 @@ pub(crate) async fn ready(State(state): State<Arc<AppState>>) -> Response {
         .unwrap_or_else(|_| (StatusCode::INTERNAL_SERVER_ERROR, "build error").into_response())
 }
 
+// GET /health/ready — Deep readiness probe (O13-01, v0.84.0).
+//
+// Verifies that the pg_ripple extension is installed and responding within
+// a strict 2-second deadline.  Distinct from /health (liveness) and /ready
+// (first-connection readiness):
+//   /health        — process alive + PG reachable
+//   /ready         — process has EVER connected + deep feature snapshot
+//   /health/ready  — extension installed + responding, hard 2-second timeout
+//
+// Returns 200 {"status":"ok"} or 503 {"status":"unavailable","reason":"..."}.
+pub(crate) async fn health_ready(State(state): State<Arc<AppState>>) -> Response {
+    let deadline = tokio::time::timeout(std::time::Duration::from_secs(2), state.pool.get()).await;
+
+    let client = match deadline {
+        Ok(Ok(c)) => c,
+        Ok(Err(e)) => {
+            let body = serde_json::json!({
+                "status": "unavailable",
+                "reason": format!("database connection failed: {e}")
+            });
+            return Response::builder()
+                .status(StatusCode::SERVICE_UNAVAILABLE)
+                .header("content-type", "application/json")
+                .body(Body::from(body.to_string()))
+                .unwrap_or_else(|_| {
+                    (StatusCode::INTERNAL_SERVER_ERROR, "build error").into_response()
+                });
+        }
+        Err(_) => {
+            let body = serde_json::json!({
+                "status": "unavailable",
+                "reason": "database connection timed out after 2 seconds"
+            });
+            return Response::builder()
+                .status(StatusCode::SERVICE_UNAVAILABLE)
+                .header("content-type", "application/json")
+                .body(Body::from(body.to_string()))
+                .unwrap_or_else(|_| {
+                    (StatusCode::INTERNAL_SERVER_ERROR, "build error").into_response()
+                });
+        }
+    };
+
+    let row = match client
+        .query_opt(
+            "SELECT 1 FROM pg_extension WHERE extname = 'pg_ripple'",
+            &[],
+        )
+        .await
+    {
+        Ok(Some(_)) => None,
+        Ok(None) => Some("pg_ripple extension is not installed in this database"),
+        Err(_) => Some("pg_extension query failed"),
+    };
+
+    if let Some(reason) = row {
+        let body = serde_json::json!({ "status": "unavailable", "reason": reason });
+        return Response::builder()
+            .status(StatusCode::SERVICE_UNAVAILABLE)
+            .header("content-type", "application/json")
+            .body(Body::from(body.to_string()))
+            .unwrap_or_else(|_| {
+                (StatusCode::INTERNAL_SERVER_ERROR, "build error").into_response()
+            });
+    }
+
+    let body = serde_json::json!({ "status": "ok" });
+    Response::builder()
+        .status(StatusCode::OK)
+        .header("content-type", "application/json")
+        .body(Body::from(body.to_string()))
+        .unwrap_or_else(|_| (StatusCode::INTERNAL_SERVER_ERROR, "build error").into_response())
+}
+
 // ─── Metrics endpoint ────────────────────────────────────────────────────────
 
 pub(crate) async fn metrics_endpoint(State(state): State<Arc<AppState>>) -> Response {

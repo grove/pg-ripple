@@ -191,6 +191,79 @@ release VERSION:
     @echo "  3. git add -A && git commit -m 'v{{VERSION}}: prepare release'"
     @echo "  4. git tag v{{VERSION}} && git push --tags"
 
+# BUILD-02 (v0.84.0): Bump all version strings atomically.
+# Updates Cargo.toml (root + pg_ripple_http), pg_ripple.control,
+# COMPATIBLE_EXTENSION_MIN in pg_ripple_http/src/main.rs,
+# docker-compose.yml image tag, creates a stub migration script,
+# and appends a CHANGELOG stub for the new version.
+#
+# Usage:  just bump-version 0.85.0
+[group: "release"]
+bump-version NEW_VERSION:
+    @OLD_VERSION=$(grep '^version = ' Cargo.toml | head -1 | grep -oP '"\\K[^"]+'); \
+     echo "Bumping $$OLD_VERSION → {{NEW_VERSION}}"; \
+     sed -i '' "s/^version = \"$$OLD_VERSION\"/version = \"{{NEW_VERSION}}\"/" Cargo.toml; \
+     sed -i '' "s/^version = \"$$OLD_VERSION\"/version = \"{{NEW_VERSION}}\"/" pg_ripple_http/Cargo.toml; \
+     sed -i '' "s/^default_version = '$$OLD_VERSION'/default_version = '{{NEW_VERSION}}'/" pg_ripple.control; \
+     sed -i '' "s/const COMPATIBLE_EXTENSION_MIN: &str = \"$$OLD_VERSION\"/const COMPATIBLE_EXTENSION_MIN: \&str = \"{{NEW_VERSION}}\"/" pg_ripple_http/src/main.rs; \
+     sed -i '' "s|ghcr.io/grove/pg_ripple:$$OLD_VERSION|ghcr.io/grove/pg_ripple:{{NEW_VERSION}}|g" docker-compose.yml; \
+     MIGRATION_FILE="sql/pg_ripple--$$OLD_VERSION--{{NEW_VERSION}}.sql"; \
+     if [ ! -f "$$MIGRATION_FILE" ]; then \
+       echo "-- Migration $$OLD_VERSION → {{NEW_VERSION}}" > "$$MIGRATION_FILE"; \
+       echo "-- Schema changes: TODO" >> "$$MIGRATION_FILE"; \
+       echo "Created $$MIGRATION_FILE"; \
+     else \
+       echo "$$MIGRATION_FILE already exists"; \
+     fi; \
+     echo ""; \
+     echo "=== Version bump complete ==="; \
+     echo "Next: update CHANGELOG.md and sql/$$MIGRATION_FILE"
+
+# BUILD-02 (v0.84.0): Regenerate sbom.json using cargo-cyclonedx.
+# Requires cargo install cargo-cyclonedx.
+[group: "release"]
+regen-sbom:
+    cargo cyclonedx --format json
+    @echo "sbom.json regenerated. Review changes with: git diff sbom.json"
+
+# BUILD-02 (v0.84.0): Check that all version strings are consistent.
+# Verifies: Cargo.toml root, pg_ripple_http/Cargo.toml, pg_ripple.control,
+# COMPATIBLE_EXTENSION_MIN in pg_ripple_http/src/main.rs, docker-compose.yml.
+[group: "release"]
+check-version-sync:
+    @CARGO_VER=$(grep '^version = ' Cargo.toml | head -1 | grep -oP '"\\K[^"]+'); \
+     HTTP_VER=$(grep '^version = ' pg_ripple_http/Cargo.toml | head -1 | grep -oP '"\\K[^"]+'); \
+     CTRL_VER=$(grep '^default_version' pg_ripple.control | grep -oP "'\\K[^']+"); \
+     COMPAT_VER=$(grep 'COMPATIBLE_EXTENSION_MIN' pg_ripple_http/src/main.rs | grep -oP '"\\K[^"]+' | head -1); \
+     DC_VER=$(grep 'ghcr.io/grove/pg_ripple:' docker-compose.yml | grep -oP ':\\K[0-9.]+' | head -1); \
+     FAIL=0; \
+     echo "Cargo.toml:         $$CARGO_VER"; \
+     echo "pg_ripple_http:     $$HTTP_VER"; \
+     echo "pg_ripple.control:  $$CTRL_VER"; \
+     echo "COMPAT_EXTENSION_MIN: $$COMPAT_VER"; \
+     echo "docker-compose.yml: $$DC_VER"; \
+     [ "$$CARGO_VER" = "$$HTTP_VER" ]   || { echo "FAIL: pg_ripple_http version mismatch"; FAIL=1; }; \
+     [ "$$CARGO_VER" = "$$CTRL_VER" ]   || { echo "FAIL: pg_ripple.control version mismatch"; FAIL=1; }; \
+     [ "$$CARGO_VER" = "$$COMPAT_VER" ] || { echo "FAIL: COMPATIBLE_EXTENSION_MIN mismatch"; FAIL=1; }; \
+     [ "$$CARGO_VER" = "$$DC_VER" ]     || { echo "FAIL: docker-compose.yml image tag mismatch"; FAIL=1; }; \
+     if [ $$FAIL -eq 0 ]; then echo "OK: all versions consistent at $$CARGO_VER"; fi; \
+     exit $$FAIL
+
+# BUILD-02 (v0.84.0): Regenerate the OpenAPI spec from the running HTTP service.
+# Requires pg_ripple_http to be running on $PG_RIPPLE_HTTP_URL (default: http://localhost:3000).
+[group: "release"]
+regen-openapi:
+    @URL=$${PG_RIPPLE_HTTP_URL:-http://localhost:3000}; \
+     echo "Fetching OpenAPI spec from $$URL/openapi.json"; \
+     curl -fsSL "$$URL/openapi.json" -o pg_ripple_http/openapi.json && \
+     echo "Saved to pg_ripple_http/openapi.json"; \
+     if command -v yq >/dev/null 2>&1; then \
+       yq -P pg_ripple_http/openapi.json > pg_ripple_http/openapi.yaml && \
+       echo "Converted to pg_ripple_http/openapi.yaml"; \
+     else \
+       echo "(Skipping YAML: yq not installed)"; \
+     fi
+
 # ── Release Quality Gate ──────────────────────────────────────────────────
 
 # SBOM-03: Verify that sbom.json version matches Cargo.toml version.

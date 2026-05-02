@@ -1,0 +1,97 @@
+-- pg_regress test: Nested OPTIONAL with FILTER(EXISTS{}) — C13-01 (v0.84.0)
+-- Regression guard: OPTIONAL { ... FILTER(EXISTS { ... }) } must return correct bindings.
+-- Assessment 13 identified this as a correctness regression candidate.
+CREATE EXTENSION IF NOT EXISTS pg_ripple;
+SELECT pg_ripple.triple_count() >= 0 AS library_loaded;
+WARNING:  pg_ripple: loaded without shared_preload_libraries; HTAP merge worker, CONSTRUCT writeback, and dictionary cache are disabled. Add pg_ripple to shared_preload_libraries in postgresql.conf.
+ library_loaded 
+----------------
+ t
+(1 row)
+
+SET search_path TO pg_ripple, public;
+-- Load test data: persons, some with a project assignment
+SELECT pg_ripple.load_ntriples(
+    '<https://optexists.test/alice> <https://optexists.test/type> <https://optexists.test/Person> .' || E'\n' ||
+    '<https://optexists.test/alice> <https://optexists.test/name> "Alice" .' || E'\n' ||
+    '<https://optexists.test/alice> <https://optexists.test/project> <https://optexists.test/projA> .' || E'\n' ||
+    '<https://optexists.test/bob> <https://optexists.test/type> <https://optexists.test/Person> .' || E'\n' ||
+    '<https://optexists.test/bob> <https://optexists.test/name> "Bob" .' || E'\n' ||
+    '<https://optexists.test/carol> <https://optexists.test/type> <https://optexists.test/Person> .' || E'\n' ||
+    '<https://optexists.test/carol> <https://optexists.test/name> "Carol" .' || E'\n' ||
+    '<https://optexists.test/carol> <https://optexists.test/project> <https://optexists.test/projB> .'
+) = 8 AS eight_triples_loaded;
+ eight_triples_loaded 
+----------------------
+ t
+(1 row)
+
+-- 1. OPTIONAL { ... FILTER(EXISTS { ... }) }
+--    Alice and Carol are in a project; OPTIONAL should bind ?project for them, NULL for Bob.
+SELECT COUNT(*) = 3 AS optional_exists_preserves_all_persons
+FROM pg_ripple.sparql($$
+    SELECT ?person ?project WHERE {
+        ?person <https://optexists.test/type> <https://optexists.test/Person> .
+        OPTIONAL {
+            ?person <https://optexists.test/project> ?project .
+            FILTER(EXISTS {
+                ?person <https://optexists.test/name> ?anyName .
+            })
+        }
+    }
+$$);
+ optional_exists_preserves_all_persons 
+---------------------------------------
+ t
+(1 row)
+
+-- 2. Only persons that have a project (EXISTS used as inline check)
+SELECT COUNT(*) = 2 AS filter_exists_selects_correctly
+FROM pg_ripple.sparql($$
+    SELECT ?person WHERE {
+        ?person <https://optexists.test/type> <https://optexists.test/Person> .
+        FILTER(EXISTS {
+            ?person <https://optexists.test/project> ?proj .
+        })
+    }
+$$);
+ filter_exists_selects_correctly 
+---------------------------------
+ t
+(1 row)
+
+-- 3. NOT EXISTS: persons without a project
+SELECT COUNT(*) = 1 AS filter_not_exists_selects_correctly
+FROM pg_ripple.sparql($$
+    SELECT ?person WHERE {
+        ?person <https://optexists.test/type> <https://optexists.test/Person> .
+        FILTER NOT EXISTS {
+            ?person <https://optexists.test/project> ?proj .
+        }
+    }
+$$);
+ filter_not_exists_selects_correctly 
+--------------------------------------
+ t
+(1 row)
+
+-- 4. Nested OPTIONAL with FILTER(EXISTS) binding check
+--    ?project should be NULL for Bob (no project row), bound for Alice and Carol.
+SELECT COUNT(*) = 2 AS nested_optional_exists_binds_correctly
+FROM pg_ripple.sparql($$
+    SELECT ?person ?project WHERE {
+        ?person <https://optexists.test/type> <https://optexists.test/Person> .
+        OPTIONAL {
+            ?person <https://optexists.test/project> ?project .
+            FILTER(EXISTS {
+                ?person <https://optexists.test/name> ?n .
+            })
+        }
+    }
+$$)
+WHERE result->>'project' IS NOT NULL;
+ nested_optional_exists_binds_correctly 
+-----------------------------------------
+ t
+(1 row)
+

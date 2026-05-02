@@ -39,13 +39,17 @@ pub(crate) fn prepare_select(
     std::collections::HashSet<String>,
     bool,
 ) {
-    if let Some(cached) = plan_cache::get(query_text) {
-        return cached;
-    }
-
+    // P13-01 (v0.84.0): parse first, then check the cache using the canonical
+    // form — eliminates the double-parse that occurred when cache_key() re-parsed
+    // the query text after prepare_select() had already parsed it.
     let query = SparqlParser::new()
         .parse_query(query_text)
         .unwrap_or_else(|e| pgrx::error!("SPARQL parse error: {}", e));
+    let canonical = format!("{query}");
+
+    if let Some(cached) = plan_cache::get_canonical(&canonical) {
+        return cached;
+    }
 
     let base_iri: Option<String> = query.base_iri().map(|b| b.as_str().to_owned());
     // NOTE: sparopt 0.3 uses its own algebra types (distinct from spargebra 0.4);
@@ -75,8 +79,8 @@ pub(crate) fn prepare_select(
     // Skip plan cache for queries that contain SERVICE clauses — remote results
     // are baked into the generated SQL as VALUES literals; caching would return
     // stale data from a previous execution.
-    if !query_text.to_ascii_uppercase().contains("SERVICE") {
-        plan_cache::put(query_text, entry.clone());
+    if !canonical.to_ascii_uppercase().contains("SERVICE") {
+        plan_cache::put_canonical(&canonical, entry.clone());
     }
     entry
 }

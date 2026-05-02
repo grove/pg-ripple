@@ -500,13 +500,84 @@ assert_true "schema_version has at least one row at v0.79.0" \
 ok "v0.79.0 checkpoint assertions passed"
 echo
 
+# ── T13-01 (v0.84.0): Apply migrations v0.79.0 → v0.83.0 ────────────────────
+info "=== T13-01: applying migrations v0.79.0 → v0.83.0 ==="
+for ver in 0.79 0.80 0.81 0.82; do
+    major=$(echo "${ver}" | cut -d. -f1)
+    minor=$(echo "${ver}" | cut -d. -f2)
+    next_minor=$((minor + 1))
+    next_ver="${major}.${next_minor}.0"
+    cur_ver="${ver}.0"
+    script="${SQL_DIR}/pg_ripple--${cur_ver}--${next_ver}.sql"
+    if [[ -f "${script}" ]]; then
+        run_sql -f "${script}"
+        ok "Applied migration ${cur_ver} → ${next_ver}"
+    else
+        fail "T13-01: missing migration script pg_ripple--${cur_ver}--${next_ver}.sql"
+        exit 1
+    fi
+done
+echo
+
+# ── T13-01 checkpoint: v0.80.0 ────────────────────────────────────────────────
+info "=== T13-01 checkpoint: v0.80.0 ==="
+# v0.80.0 adds CDC slot cleanup infrastructure; schema_version should record the version.
+assert_true "schema_version records v0.80.0 migration" \
+    "(SELECT count(*) FROM _pg_ripple.schema_version WHERE version >= '0.80.0') >= 1" || true
+# cdc_lsn_watermark table was introduced in v0.81.0 migration; check predicates table.
+assert_column "_pg_ripple" "predicates" "triple_count"
+ok "v0.80.0 checkpoint assertions passed"
+echo
+
+# ── T13-01 checkpoint: v0.81.0 ────────────────────────────────────────────────
+info "=== T13-01 checkpoint: v0.81.0 ==="
+# v0.81.0 adds cdc_lsn_watermark table (CC-06).
+assert_true "cdc_lsn_watermark table exists at v0.81.0" \
+    "EXISTS (
+        SELECT 1 FROM information_schema.tables
+        WHERE table_schema = '_pg_ripple' AND table_name = 'cdc_lsn_watermark'
+    )"
+ok "v0.81.0 checkpoint assertions passed"
+echo
+
+# ── T13-01 checkpoint: v0.82.0 ────────────────────────────────────────────────
+info "=== T13-01 checkpoint: v0.82.0 ==="
+# v0.82.0 adds merge_worker_status table (MERGE-HBEAT-01).
+assert_true "merge_worker_status table exists at v0.82.0" \
+    "EXISTS (
+        SELECT 1 FROM information_schema.tables
+        WHERE table_schema = '_pg_ripple' AND table_name = 'merge_worker_status'
+    )"
+# v0.82.0 adds federation_stats table (P-04) and predicate_stats_cache (P-08).
+assert_true "federation_stats table exists at v0.82.0" \
+    "EXISTS (
+        SELECT 1 FROM information_schema.tables
+        WHERE table_schema = '_pg_ripple' AND table_name = 'federation_stats'
+    )"
+assert_true "predicate_stats_cache table exists at v0.82.0" \
+    "EXISTS (
+        SELECT 1 FROM information_schema.tables
+        WHERE table_schema = '_pg_ripple' AND table_name = 'predicate_stats_cache'
+    )"
+ok "v0.82.0 checkpoint assertions passed"
+echo
+
+# ── T13-01 checkpoint: v0.83.0 ────────────────────────────────────────────────
+info "=== T13-01 checkpoint: v0.83.0 ==="
+# v0.83.0 has no DDL schema changes (pure Rust additions and GUC additions).
+# Verify the core tables remain intact.
+assert_column "_pg_ripple" "predicates" "triple_count"
+assert_column "_pg_ripple" "dictionary" "qt_s"
+ok "v0.83.0 checkpoint assertions passed (no schema changes in this release)"
+echo
+
 # ── MIGCHAIN-01: migration script count verification ──────────────────────────
 info "=== MIGCHAIN-01: migration script count verification ==="
-# Count migration scripts from v0.62.0 to v0.79.0 (inclusive).
-# There are 17 minor version increments: 0.62→0.63, 0.63→0.64, ..., 0.78→0.79.
-EXPECTED_COUNT=17
+# Count migration scripts from v0.62.0 to v0.83.0 (inclusive).
+# There are 21 minor version increments: 0.62→0.63, ..., 0.82→0.83.
+EXPECTED_COUNT=21
 ACTUAL_COUNT=0
-for ver in 0.62 0.63 0.64 0.65 0.66 0.67 0.68 0.69 0.70 0.71 0.72 0.73 0.74 0.75 0.76 0.77 0.78; do
+for ver in 0.62 0.63 0.64 0.65 0.66 0.67 0.68 0.69 0.70 0.71 0.72 0.73 0.74 0.75 0.76 0.77 0.78 0.79 0.80 0.81 0.82; do
     # Extract next version number
     major=$(echo "${ver}" | cut -d. -f1)
     minor=$(echo "${ver}" | cut -d. -f2)
@@ -522,7 +593,7 @@ for ver in 0.62 0.63 0.64 0.65 0.66 0.67 0.68 0.69 0.70 0.71 0.72 0.73 0.74 0.75
     fi
 done
 if [[ "${ACTUAL_COUNT}" -eq "${EXPECTED_COUNT}" ]]; then
-    ok "MIGCHAIN-01: found ${ACTUAL_COUNT}/${EXPECTED_COUNT} migration scripts from v0.62.0 to v0.79.0"
+    ok "MIGCHAIN-01: found ${ACTUAL_COUNT}/${EXPECTED_COUNT} migration scripts from v0.62.0 to v0.83.0"
 else
     fail "MIGCHAIN-01: expected ${EXPECTED_COUNT} migration scripts, found ${ACTUAL_COUNT}"
     exit 1

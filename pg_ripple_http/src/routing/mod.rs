@@ -130,6 +130,8 @@ pub(crate) fn build_router(state: Arc<AppState>, max_body_bytes: usize, cors: Co
         .route("/health", get(admin_handlers::health))
         // v0.60.0 H7-5: Kubernetes readiness probe — 503 until first PG connection.
         .route("/ready", get(admin_handlers::ready))
+        // O13-01 (v0.84.0): deep extension health-check with 2-second deadline.
+        .route("/health/ready", get(admin_handlers::health_ready))
         .route("/metrics", get(admin_handlers::metrics_endpoint))
         // SECURITY (METRICS-AUTH-DOC-01, v0.83.0): /metrics and /metrics/extension
         // are intentionally unauthenticated to support Prometheus scraping from a

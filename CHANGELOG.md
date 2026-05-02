@@ -13,6 +13,57 @@ Versions correspond to the milestones in [ROADMAP.md](ROADMAP.md).
 
 ---
 
+## [0.84.0] — 2026-07-16 — Assessment 13 Critical/High & Operational Remediation
+
+**Implements v0.84.0 roadmap: 13 items addressing all Critical and High findings
+from Assessment 13. Key additions: HTTP companion version sync (6-version drift
+closed), PG_RIPPLE_HTTP_STRICT_COMPAT env var, docker-compose image tag CI
+gate, SECURITY DEFINER inline annotations, migration-chain v0.80–v0.83 test
+coverage, gucs/registration.rs 6-domain split, nested OPTIONAL+EXISTS
+regression test, /health/ready deep-check endpoint, plan-cache double-parse
+elimination, and justfile automation recipes.**
+
+### HTTP Companion (pg_ripple_http)
+
+- **HTTP-01 / MF-B** — `pg_ripple_http` bumped to `0.84.0`. `COMPATIBLE_EXTENSION_MIN` raised from `"0.79.0"` to `"0.84.0"` in `pg_ripple_http/src/main.rs`.
+- **S13-05** — New `PG_RIPPLE_HTTP_STRICT_COMPAT=1` environment variable. When set, an extension-version mismatch (below `COMPATIBLE_EXTENSION_MIN`) causes the service to exit with code 1 instead of only logging a warning. Default: off (backward-compatible).
+- **O13-01** — New `/health/ready` HTTP endpoint performs a real PostgreSQL round-trip (`SELECT 1 FROM pg_extension WHERE extname='pg_ripple'`) with a hard 2-second deadline. Returns `200 {"status":"ok"}` or `503 {"status":"unavailable","reason":"..."}`. `/health` remains a fast liveness probe; `/ready` remains the deep feature-status probe.
+
+### Security
+
+- **S13-01** — Both `SECURITY DEFINER` occurrences (`src/schema.rs:996` and `sql/pg_ripple--0.55.0--0.56.0.sql:60`) annotated with `-- SECURITY-JUSTIFY:` inline comments explaining the privilege requirement. `scripts/check_no_security_definer.sh` updated to require the marker on any SECURITY DEFINER line.
+- **S13-02** — `scripts/check_no_string_format_in_sql.sh` confirmed as a required CI step in `.github/workflows/ci.yml` (SQL-injection gate).
+
+### Build & Tooling
+
+- **BUILD-01** — `docker-compose.yml` image tags updated from `0.54.0` to `0.84.0`. New `lint-docker-compose-version` CI job asserts the image tag matches `Cargo.toml` version on every PR.
+- **BUILD-02** — `justfile` gains four new automation recipes:
+  - `bump-version NEW_VERSION` — atomically updates Cargo.toml (root + pg_ripple_http), pg_ripple.control, COMPATIBLE_EXTENSION_MIN, docker-compose tag, creates migration script stub
+  - `regen-sbom` — regenerates `sbom.json` via `cargo cyclonedx`
+  - `regen-openapi` — fetches the live OpenAPI spec from the running HTTP service
+  - `check-version-sync` — asserts all version strings are consistent
+- **BUILD-03** — Migration-chain test confirmed as a required CI step.
+
+### Testing
+
+- **T13-01** — `tests/test_migration_chain.sh` extended with checkpoint assertions for v0.80.0–v0.83.0 (21 migration scripts total). Checks: `predicates.triple_count` column (v0.80), `_pg_ripple.cdc_lsn_watermark` table (v0.81), merge-worker and federation stats tables (v0.82), core table column integrity (v0.83).
+- **C13-01** — New pg_regress test `tests/pg_regress/sql/sparql_optional_exists.sql` covering nested `OPTIONAL { ... FILTER(EXISTS { ... }) }` and `FILTER NOT EXISTS` semantics.
+
+### Performance
+
+- **P13-01** — `src/sparql/plan_cache.rs`: new `get_canonical(canonical: &str)` and `put_canonical(canonical: &str, entry)` functions accept the `spargebra::Query` Display form. `src/sparql/plan.rs` updated to parse once and pass the canonical form through, eliminating the double-parse on every cache-miss path.
+
+### Code Quality
+
+- **Q13-01** — `src/gucs/registration.rs` (2,032 lines) split into 6 per-domain submodules under `src/gucs/registration/`: `sparql.rs`, `storage.rs`, `federation.rs`, `datalog.rs`, `security.rs`, `observability.rs`. Public re-exports from `mod.rs` unchanged; callers unaffected.
+
+### Process
+
+- **PROMPT-01** — `plans/overall_assesment_prompt.md` template created. Anchors automated assessments to the latest **tagged** release, preventing prompt-vs-reality gaps like the one identified in Assessment 13.
+- **V084-01** — `ROADMAP.md` scope decision recorded: uncertain knowledge engine (probabilistic Datalog, fuzzy SPARQL, soft SHACL) moved to **v0.87.0**; v0.84.0–v0.86.0 reserved for Assessment 13 remediation.
+
+---
+
 ## [0.83.0] — 2026-07-09 — Assessment 12 Test Coverage, API Polish & Code Quality
 
 **Implements v0.83.0 roadmap: 25 items across test coverage, API polish, code
