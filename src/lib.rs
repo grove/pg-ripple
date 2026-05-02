@@ -499,4 +499,3 @@ pub mod pg_test {
         vec!["allow_system_table_mods = on"]
     }
 }
-
