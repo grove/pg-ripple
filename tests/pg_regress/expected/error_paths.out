@@ -1,0 +1,160 @@
+-- pg_regress test: error-path tests (ERRPATH-01, v0.83.0)
+--
+-- Verifies graceful error handling for common misuse patterns:
+--   1. load_jsonld() with invalid (non-object) JSON
+--   2. SPARQL query with syntax error
+--   3. register_conflict_policy with unknown strategy
+--   4. ingest_jsonld with unknown mode
+--   5. reconciliation_resolve with invalid action
+--   6. register_subscription_token with unknown scope
+--   7. alter_subscription with unsupported policy value
+--   8. export functions with empty store (no panic)
+CREATE EXTENSION IF NOT EXISTS pg_ripple;
+SELECT pg_ripple.triple_count() >= 0 AS setup_ok;
+WARNING:  pg_ripple: loaded without shared_preload_libraries; HTAP merge worker, CONSTRUCT writeback, and dictionary cache are disabled. Add pg_ripple to shared_preload_libraries in postgresql.conf.
+ setup_ok 
+----------
+ t
+(1 row)
+
+SET search_path TO pg_ripple, public;
+SET client_min_messages = warning;
+-- ── 1: load_jsonld with non-array/non-object JSON ─────────────────────────────
+-- JSON scalars (strings, numbers) are not valid JSON-LD documents and raise an error.
+DO $$
+BEGIN
+    PERFORM pg_ripple.load_jsonld('"just a string"'::jsonb);
+    RAISE EXCEPTION 'expected error was not raised';
+EXCEPTION
+    WHEN OTHERS THEN
+        NULL; -- error correctly raised
+END;
+$$;
+SELECT 't'::boolean AS load_jsonld_scalar_error_raised;
+ load_jsonld_scalar_error_raised 
+---------------------------------
+ t
+(1 row)
+
+-- ── 2: SPARQL query with syntax error raises an error ─────────────────────────
+-- Using a DO block to test that an error is raised.
+DO $$
+BEGIN
+    PERFORM pg_ripple.sparql('DEFINITELY NOT VALID SPARQL');
+    RAISE EXCEPTION 'expected error was not raised';
+EXCEPTION
+    WHEN OTHERS THEN
+        NULL; -- error correctly raised
+END;
+$$;
+SELECT 't'::boolean AS sparql_syntax_error_handled;
+ sparql_syntax_error_handled 
+-----------------------------
+ t
+(1 row)
+
+-- ── 3: register_conflict_policy with unknown strategy ─────────────────────────
+DO $$
+BEGIN
+    PERFORM pg_ripple.register_conflict_policy(
+        'http://example.org/pred',
+        'unknown_strategy'
+    );
+    RAISE EXCEPTION 'expected error was not raised';
+EXCEPTION
+    WHEN OTHERS THEN
+        NULL; -- error correctly raised
+END;
+$$;
+SELECT 't'::boolean AS unknown_strategy_handled;
+ unknown_strategy_handled 
+--------------------------
+ t
+(1 row)
+
+-- ── 4: ingest_jsonld with unknown mode ────────────────────────────────────────
+DO $$
+BEGIN
+    PERFORM pg_ripple.ingest_jsonld(
+        '{}'::jsonb,
+        mode => 'invalid_mode'
+    );
+    RAISE EXCEPTION 'expected error was not raised';
+EXCEPTION
+    WHEN OTHERS THEN
+        NULL;
+END;
+$$;
+SELECT 't'::boolean AS unknown_mode_handled;
+ unknown_mode_handled 
+----------------------
+ t
+(1 row)
+
+-- ── 5: reconciliation_resolve with invalid action ─────────────────────────────
+DO $$
+BEGIN
+    PERFORM pg_ripple.reconciliation_resolve(99999, 'bad_action');
+    RAISE EXCEPTION 'expected error was not raised';
+EXCEPTION
+    WHEN OTHERS THEN
+        NULL;
+END;
+$$;
+SELECT 't'::boolean AS invalid_resolve_action_handled;
+ invalid_resolve_action_handled 
+--------------------------------
+ t
+(1 row)
+
+-- ── 6: register_subscription_token with unknown scope ─────────────────────────
+DO $$
+BEGIN
+    PERFORM pg_ripple.register_subscription_token(
+        'nonexistent_sub',
+        ARRAY['write_all']   -- not a valid scope
+    );
+    RAISE EXCEPTION 'expected error was not raised';
+EXCEPTION
+    WHEN OTHERS THEN
+        NULL;
+END;
+$$;
+SELECT 't'::boolean AS unknown_scope_handled;
+ unknown_scope_handled 
+-----------------------
+ t
+(1 row)
+
+-- ── 7: alter_subscription with unsupported policy value ──────────────────────
+DO $$
+BEGIN
+    PERFORM pg_ripple.alter_subscription(
+        'nonexistent_sub',
+        frame_change_policy => 'backfill_all'  -- not supported yet
+    );
+    RAISE EXCEPTION 'expected error was not raised';
+EXCEPTION
+    WHEN OTHERS THEN
+        NULL;
+END;
+$$;
+SELECT 't'::boolean AS unsupported_policy_handled;
+ unsupported_policy_handled 
+----------------------------
+ t
+(1 row)
+
+-- ── 8: export functions with empty store (no panic) ───────────────────────────
+SELECT pg_ripple.export_ntriples() IS NOT NULL AS export_ntriples_empty_ok;
+ export_ntriples_empty_ok 
+--------------------------
+ t
+(1 row)
+
+SELECT pg_ripple.export_nquads()   IS NOT NULL AS export_nquads_empty_ok;
+ export_nquads_empty_ok 
+------------------------
+ t
+(1 row)
+

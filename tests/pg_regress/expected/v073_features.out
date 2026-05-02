@@ -136,6 +136,7 @@ SELECT pg_ripple.json_ld_load(
     '{"@id": "http://example.org/v073/alice", "http://schema.org/name": "Alice"}'::jsonb,
     'http://example.org/v073/graph'
 ) >= 0 AS json_ld_load_returns_count;
+WARNING:  json_ld_load is deprecated; use load_jsonld() instead. json_ld_load will be removed in v1.0.0 (API-RENAME-01)
  json_ld_load_returns_count 
 ----------------------------
  t

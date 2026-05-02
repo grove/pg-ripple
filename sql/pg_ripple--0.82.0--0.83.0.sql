@@ -1,0 +1,47 @@
+-- Migration 0.82.0 → 0.83.0: Assessment 12 Test Coverage, API Polish & Code Quality
+--
+-- Schema changes: None. All changes in v0.83.0 are pure Rust additions
+-- (new SQL functions compiled from Rust), GUC additions, and infrastructure
+-- improvements. No new tables, columns, or indexes are required.
+--
+-- New SQL functions (compiled from Rust — available immediately after upgrade):
+--
+--   API-RENAME-01
+--     pg_ripple.load_jsonld(url TEXT, graph_uri TEXT DEFAULT NULL)
+--     Preferred alias for json_ld_load(). The old name emits a NOTICE
+--     deprecation warning and will be removed in v1.0.0.
+--
+-- New GUCs (available immediately after loading the new .so):
+--
+--   DL-COST-GUC-01
+--     pg_ripple.datalog_cost_bound_s_divisor   — INT, default 100
+--     pg_ripple.datalog_cost_bound_so_divisor  — INT, default 10
+--     Replace hardcoded selectivity divisors in cost-based Datalog rule
+--     reordering (src/datalog/compiler.rs).
+--
+--   MERGE-BACKOFF-01
+--     pg_ripple.merge_max_backoff_secs         — INT, default 60
+--     Cap for the merge worker exponential backoff (1s × 2ⁿ).
+--
+-- Other changes (no DDL required):
+--
+--   FUZZ-BULK-01        — 3 new fuzz targets: ntriples_load, nquads_load, trig_load
+--   FUZZ-UPDATE-01      — sparql_update fuzz target confirmed (from v0.79.0)
+--   PROPTEST-02         — ntriples_oxigraph proptest added
+--   CDC-ASYNC-01        — cdc_notify_barrier integration test added
+--   KFAIL-DOC-01        — known_failures.txt Reason/Issue annotations
+--   REG-TESTS-01        — v083_features.sql pg_regress tests
+--   ERRPATH-01          — error_paths.sql pg_regress tests
+--   DATALOG-MAXITER-TEST-01 — datalog_maxiter.sql pg_regress test
+--   MOD-BIDI-01         — src/bidi.rs split into 5 sub-modules (no API change)
+--   GUC-NAME-01         — CONTRIBUTING.md GUC naming convention
+--   CHANGELOG-BREAK-01  — CONTRIBUTING.md BREAKING: tag convention
+--   CHANGELOG-FMT-01    — CI lint-changelog job added to ci.yml
+--   DEPAUDIT-01         — serde_cbor confirmed absent; parquet crate used instead
+--   RENOVATE-01         — renovate.json configuration added
+--   P-05-EVAL           — plans/p05_shared_dict_eval.md design doc (closed: not worth it)
+--   BUILD-TIME-FIELD-01 — /health build_time field is now RFC 3339
+--   HTTP-401-WWW-AUTH-01 — WWW-Authenticate: Bearer header on 401
+--   AUTH-RESP-FMT-01    — JSON {"error":"PT401"} envelope on 401
+--   METRICS-AUTH-DOC-01 — SECURITY comment on /metrics routes
+--   EXPORT-BNODE-VALID-01 — blank node label validation in export.rs

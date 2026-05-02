@@ -13,6 +13,51 @@
 use crate::{dictionary, storage};
 use std::collections::BTreeMap;
 
+// ─── Blank node label validation (EXPORT-BNODE-VALID-01, v0.83.0) ────────────
+
+/// Validate a blank node label against the N-Triples `BLANK_NODE_LABEL` production:
+/// `[A-Za-z0-9_][A-Za-z0-9_.\-]*`.
+///
+/// If the label is non-conformant (e.g. contains spaces, Unicode outside ASCII,
+/// or forbidden punctuation), replace it with a hash-based safe fallback.
+/// Labels produced by the dictionary encoder (`_:b{id}`) are always valid.
+///
+/// # Arguments
+/// * `nt` — a term string starting with `_:`
+fn validate_bnode_label(nt: &str) -> String {
+    debug_assert!(nt.starts_with("_:"));
+    let label = &nt[2..];
+    if label.is_empty() {
+        // Empty label is non-conformant; use a hash of the original string.
+        return format!("_:b{}", xxhash_rust::xxh3::xxh3_64(nt.as_bytes()));
+    }
+    let mut chars = label.chars();
+    // First char: [A-Za-z0-9_]
+    let first_ok = chars
+        .next()
+        .map(|c| c.is_ascii_alphanumeric() || c == '_')
+        .unwrap_or(false);
+    // Remaining chars: [A-Za-z0-9_.\-]
+    let rest_ok = chars.all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '-'));
+    if first_ok && rest_ok {
+        nt.to_owned()
+    } else {
+        // Non-conformant label: replace with a hash-based safe fallback.
+        format!("_:b{}", xxhash_rust::xxh3::xxh3_64(label.as_bytes()))
+    }
+}
+
+/// Format an N-Triples term, applying blank-node label validation.
+#[inline]
+fn safe_nt_term(id: i64) -> String {
+    let raw = dictionary::format_ntriples(id);
+    if raw.starts_with("_:") {
+        validate_bnode_label(&raw)
+    } else {
+        raw
+    }
+}
+
 // ─── N-Triples ────────────────────────────────────────────────────────────────
 
 /// Export triples as N-Triples text.
@@ -38,9 +83,9 @@ pub fn export_ntriples(graph: Option<&str>) -> String {
     let mut out = String::new();
     storage::for_each_encoded_triple_batch(g_id, &mut |batch| {
         for (s_id, p_id, o_id, _g) in batch {
-            let s = dictionary::format_ntriples(*s_id);
+            let s = safe_nt_term(*s_id);
             let p = dictionary::format_ntriples(*p_id);
-            let o = dictionary::format_ntriples(*o_id);
+            let o = safe_nt_term(*o_id);
             out.push_str(&s);
             out.push(' ');
             out.push_str(&p);
@@ -78,9 +123,9 @@ pub fn export_nquads(graph: Option<&str>) -> String {
     let mut out = String::new();
     storage::for_each_encoded_triple_batch(g_filter, &mut |batch| {
         for (s_id, p_id, o_id, g_id) in batch {
-            let s = dictionary::format_ntriples(*s_id);
+            let s = safe_nt_term(*s_id);
             let p = dictionary::format_ntriples(*p_id);
-            let o = dictionary::format_ntriples(*o_id);
+            let o = safe_nt_term(*o_id);
             out.push_str(&s);
             out.push(' ');
             out.push_str(&p);

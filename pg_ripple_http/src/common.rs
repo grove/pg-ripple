@@ -140,7 +140,17 @@ fn check_token(expected: Option<&str>, headers: &HeaderMap) -> Result<(), Respon
             .unwrap_or(provided);
         // Constant-time comparison prevents timing side-channels (v0.22.0 S-4).
         if !constant_time_eq(token.as_bytes(), expected.as_bytes()) {
-            return Err((StatusCode::UNAUTHORIZED, "unauthorized").into_response());
+            // HTTP-401-WWW-AUTH-01 (v0.83.0): RFC 7235 §4.1 requires WWW-Authenticate
+            // on every 401.  Absence breaks OAuth client auto-retry and browser dialogs.
+            // AUTH-RESP-FMT-01 (v0.83.0): body is structured JSON for client consistency.
+            let body = serde_json::json!({"error": "PT401", "message": "unauthorized"}).to_string();
+            // SAFETY: status code and header values are compile-time constants; builder never fails.
+            return Err(Response::builder()
+                .status(StatusCode::UNAUTHORIZED)
+                .header("www-authenticate", "Bearer realm=\"pg_ripple\"")
+                .header("content-type", "application/json")
+                .body(Body::from(body))
+                .expect("infallible: hardcoded valid HTTP headers"));
         }
     }
     Ok(())

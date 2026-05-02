@@ -123,6 +123,55 @@ Run `just assess-release` to check for common omissions before pushing.
 
 ---
 
+## GUC naming convention (GUC-NAME-01, v0.83.0)
+
+All GUC parameters **must** follow this naming pattern:
+
+```
+pg_ripple.<subsystem>_<feature>_<unit_or_role>
+```
+
+Examples:
+- `pg_ripple.merge_max_backoff_secs` — merge worker, backoff, unit seconds
+- `pg_ripple.datalog_cost_bound_s_divisor` — datalog, cost bound, subject divisor
+- `pg_ripple.sparql_plan_cache_size` — SPARQL planner, plan cache, capacity
+- `pg_ripple.stats_refresh_interval_seconds` — stats subsystem, interval, unit seconds
+
+**Rules:**
+- Use underscores, not dashes.
+- End with a unit suffix when the value is a count, size, or duration: `_secs`, `_ms`, `_bytes`, `_mb`, `_count`, `_limit`, `_size`.
+- For boolean toggles omit the unit suffix: `pg_ripple.wcoj_enabled`.
+- Register GUCs in `src/gucs/<subsystem>.rs` and export via `src/gucs/mod.rs`.
+- Add to `src/gucs/registration.rs` in the correct subsystem block.
+
+---
+
+## CHANGELOG breaking-change convention (CHANGELOG-BREAK-01, v0.83.0)
+
+Any change that breaks backward compatibility **must** be tagged in CHANGELOG.md:
+
+```markdown
+- **BREAKING:** `old_function()` renamed to `new_function()`; existing callers must update.
+```
+
+The `BREAKING:` prefix (bold, colon, space) is machine-parseable by the CI lint
+script (`scripts/lint_changelog.sh`). A CI step fails if any breaking change in
+the current release is not tagged.
+
+**What counts as breaking:**
+- Renaming, removing, or changing the signature of a SQL function.
+- Removing or renaming a GUC parameter.
+- Schema changes to `_pg_ripple.*` tables that are not additive.
+- Wire-format changes to bidi/CDC events.
+- Changes to the pg_ripple HTTP API that remove or rename endpoints or fields.
+
+**What does NOT count as breaking:**
+- New functions, new GUCs, new columns (additive changes).
+- Bug fixes that change incorrect behavior.
+- Performance improvements.
+
+---
+
 ## Running tests
 
 ```bash

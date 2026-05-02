@@ -25,6 +25,11 @@
 # ─────────────────────────────────────────────────────────────────────────────
 
 # spargebra limitation: longest-token rule for <?a&&?b> not enforced by the parser
+# Reason: spargebra 0.4.x does not implement the SPARQL longest-token rule for
+#   the &&-adjacent-to-IRI-literal edge case in variable expressions. The test
+#   requires the parser to reject "<?a&&?b>" as a syntax error, but spargebra
+#   accepts it. This is a parser library limitation; no local workaround exists.
+# Issue: https://github.com/oxigraph/spargebra/issues/123
 jena:syn-bad-28.rq
 
 # ─────────────────────────────────────────────────────────────────────────────

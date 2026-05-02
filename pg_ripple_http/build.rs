@@ -1,14 +1,7 @@
+// BUILD-TIME-FIELD-01 (v0.83.0): emit an RFC-3339 build timestamp so that
+// the /health endpoint can report a real timestamp instead of the package
+// version string.
 fn main() {
-    // pgrx macros (pg_shmem_init!, etc.) emit cfg(feature = "pgNN") checks for
-    // all supported PostgreSQL versions.  We only enable pg18, but Rust 2024's
-    // check-cfg linting requires the other values to be declared as expected.
-    for ver in ["pg13", "pg14", "pg15", "pg16", "pg17"] {
-        println!("cargo::rustc-check-cfg=cfg(feature, values(\"{ver}\"))");
-    }
-    // BUILD-TIME-FIELD-01 (v0.83.0): emit an RFC-3339 build timestamp so that
-    // the /health endpoint can report a real timestamp instead of the package
-    // version string.  `cargo:rerun-if-env-changed` is omitted intentionally:
-    // we want a fresh timestamp on every build.
     let ts = std::env::var("SOURCE_DATE_EPOCH")
         .ok()
         .and_then(|s| s.parse::<u64>().ok())
@@ -20,7 +13,7 @@ fn main() {
             let h = rem / 3600;
             let m = (rem % 3600) / 60;
             let s = rem % 60;
-            // Convert days since epoch to Y-M-D (Gregorian proleptic)
+            // Convert days since Unix epoch to Y-M-D (Gregorian proleptic)
             let z = days + 719468;
             let era = z / 146097;
             let doe = z % 146097;
@@ -33,9 +26,6 @@ fn main() {
             let y = if mo <= 2 { y + 1 } else { y };
             format!("{y:04}-{mo:02}-{d:02}T{h:02}:{m:02}:{s:02}Z")
         })
-        .unwrap_or_else(|| {
-            // Fallback: use the Cargo package version string with a note.
-            format!("build-version={}", env!("CARGO_PKG_VERSION"))
-        });
+        .unwrap_or_else(|| format!("build-version={}", env!("CARGO_PKG_VERSION")));
     println!("cargo::rustc-env=BUILD_TIMESTAMP={ts}");
 }

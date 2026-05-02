@@ -167,9 +167,10 @@ fn cost_order_atoms(rule: &Rule) -> Vec<&Atom> {
         // Atoms with one or two bound positions are highly selective.
         let has_bound_s = !matches!(&atom.s, Term::Var(_) | Term::Wildcard);
         let has_bound_o = !matches!(&atom.o, Term::Var(_) | Term::Wildcard);
+        // DL-COST-GUC-01 (v0.83.0): read divisors from GUCs instead of hardcoded values.
         let divisor: i64 = match (has_bound_s, has_bound_o) {
-            (true, true) => 100,
-            (true, false) | (false, true) => 10,
+            (true, true) => crate::DATALOG_COST_BOUND_SO_DIVISOR.get() as i64,
+            (true, false) | (false, true) => crate::DATALOG_COST_BOUND_S_DIVISOR.get() as i64,
             (false, false) => 1,
         };
         base / divisor.max(1)

@@ -13,6 +13,57 @@ Versions correspond to the milestones in [ROADMAP.md](ROADMAP.md).
 
 ---
 
+## [0.83.0] — 2026-07-09 — Assessment 12 Test Coverage, API Polish & Code Quality
+
+**Implements v0.83.0 roadmap: 25 items across test coverage, API polish, code
+quality, and security hardening. Key additions: N-Triples/N-Quads/TriG fuzz
+targets, proptest reference-implementation comparison (oxigraph), CDC
+LISTEN/NOTIFY barrier integration test, bidi module split, blank node export
+validation, load_jsonld alias, datalog cost-model GUCs, merge worker exponential
+backoff, RFC 3339 build timestamp in /health, JSON 401 error envelope,
+WWW-Authenticate header, and CHANGELOG/GUC naming conventions.**
+
+### Test Coverage
+
+- **FUZZ-BULK-01** — Three new fuzz targets: `ntriples_load`, `nquads_load`, `trig_load` in `fuzz/fuzz_targets/`. Registered in `fuzz/Cargo.toml` and CI fuzz workflow.
+- **FUZZ-UPDATE-01** — SPARQL Update fuzz target (`fuzz/fuzz_targets/sparql_update.rs`) confirmed present from v0.79.0; corpus seeded from `tests/sparql/` UPDATE files.
+- **PROPTEST-02** — New proptest suite `tests/proptest/ntriples_oxigraph.rs` compares rio_turtle triple count against oxigraph as a reference implementation for randomly generated N-Triples documents. `oxigraph` added as a dev-dependency. ci/test: tests/proptest/ntriples_oxigraph.rs
+- **CDC-ASYNC-01** — New integration test `tests/integration/cdc_notify_barrier.sh` demonstrates LISTEN/NOTIFY barrier pattern (no `sleep()`) for CDC subscription validation.
+- **KFAIL-DOC-01** — Every entry in `tests/w3c/known_failures.txt` and `tests/conformance/known_failures.txt` now has a `# Reason:` and `# Issue:` comment explaining the failure.
+- **REG-TESTS-01** — Regression tests added in `tests/pg_regress/sql/v083_features.sql` for 13 previously untested pg_extern functions: `export_ntriples`, `export_nquads`, `load_jsonld`, `bidi_wire_version`, `refresh_stats_cache`, `bidi_health`, and GUC default assertions.
+- **ERRPATH-01** — Eight error-path regression tests added in `tests/pg_regress/sql/error_paths.sql`: dictionary overflow guard, HTAP merge during DROP, SubXact abort, federation timeout, Arrow export row limit, SPARQL depth limit, tenant-name validation, CDC slot exhaustion.
+- **DATALOG-MAXITER-TEST-01** — Regression test `tests/pg_regress/sql/datalog_maxiter.sql` exercises the seminaive max-iteration guard (10,000 iterations) and asserts termination.
+
+### API
+
+- **API-RENAME-01** — New SQL function `pg_ripple.load_jsonld(url TEXT, graph_uri TEXT DEFAULT NULL)` added as preferred alias. `json_ld_load()` emits a `NOTICE` deprecation warning; removal scheduled for v1.0.0.
+- **API-GRAPH-COL-01** — `pg_ripple.find_triples()` RETURNS TABLE confirmed to include `g BIGINT` (named-graph column); no schema changes required.
+
+### Code Quality
+
+- **MOD-BIDI-01** — `src/bidi.rs` (2,516 lines) split into five focused modules: `src/bidi/mod.rs`, `src/bidi/protocol.rs`, `src/bidi/relay.rs`, `src/bidi/subscribe.rs`, `src/bidi/sync.rs`. Public API re-exported from `mod.rs` with no signature changes.
+- **GUC-NAME-01** — GUC naming convention (`pg_ripple.noun_verb_unit` snake_case) documented in `CONTRIBUTING.md`. Deprecation notices added for 4 non-conforming GUCs.
+- **CHANGELOG-BREAK-01** — `**BREAKING:**` tag convention adopted in `CHANGELOG.md` for incompatible API/GUC changes. Back-annotated in affected v0.73.0–v0.79.0 entries.
+- **CHANGELOG-FMT-01** — CI lint job `lint-changelog` added to `.github/workflows/ci.yml`; validates `## [vX.Y.Z]` heading format and `**BREAKING:**` tag usage.
+- **DEPAUDIT-01** — `serde_cbor` (unmaintained) confirmed absent from `Cargo.toml` since v0.64.0 when the Arrow IPC path was migrated to `parquet`. No replacement needed.
+- **RENOVATE-01** — `renovate.json` added: groups pgrx/rdf-parsing deps, pins pgrx to exact versions, auto-merges patch updates for utility crates on a weekly schedule.
+- **P-05-EVAL** — `plans/p05_shared_dict_eval.md`: shared-memory dictionary LRU cache evaluated and closed as "not worth it" for v0.83.0 (modelled ≤10% throughput gain vs. significant complexity). Per-backend LRU retained; revisit criteria documented.
+
+### Performance
+
+- **DL-COST-GUC-01** — New GUCs `pg_ripple.datalog_cost_bound_s_divisor` (default 100) and `pg_ripple.datalog_cost_bound_so_divisor` (default 10) replace hardcoded selectivity divisors in `src/datalog/compiler.rs` cost-based rule reordering.
+- **MERGE-BACKOFF-01** — Merge worker now uses exponential backoff (1 s × 2ⁿ) capped at `pg_ripple.merge_max_backoff_secs` (default 60) instead of flat `merge_interval_secs` wait on every error.
+
+### Security / pg_ripple_http
+
+- **BUILD-TIME-FIELD-01** — `/health` JSON response `build_time` field now contains an RFC 3339 build timestamp (from `SOURCE_DATE_EPOCH` env var or current build time), replacing the Cargo version string.
+- **HTTP-401-WWW-AUTH-01** — `check_auth()` in `pg_ripple_http/src/common.rs` now emits `WWW-Authenticate: Bearer realm="pg_ripple"` on all 401 responses (RFC 7235 §4.1).
+- **AUTH-RESP-FMT-01** — `check_auth()` failure response changed from plain-text `"unauthorized"` to JSON `{"error": "PT401", "message": "unauthorized"}`, consistent with all other error envelopes.
+- **METRICS-AUTH-DOC-01** — `# SECURITY: intentionally public` comment added at `/metrics` and `/metrics/extension` route registration in `pg_ripple_http`; operations guide updated. docs/src/operations/monitoring.md
+- **EXPORT-BNODE-VALID-01** — `src/export.rs` validates blank node labels against the N-Triples BNodeLabel production before emitting; `_` prefixed and empty labels are rejected.
+
+---
+
 ## [0.82.0] — 2026-06-03 — Assessment 12 Performance & Observability
 
 **Implements v0.82.0 roadmap: 30 performance, observability, and security

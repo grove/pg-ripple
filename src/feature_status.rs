@@ -510,7 +510,7 @@ mod pg_ripple {
                      target-assigned IDs, pg-trickle outbox/inbox transport.".to_string()),
                 Some("ci/regress: bidi_integration.sql".to_string()),
                 Some("docs/src/features/cdc.md".to_string()),
-                Some("src/bidi.rs".to_string()),
+                Some("src/bidi/mod.rs".to_string()),
             ),
             (
                 "bidi_conflict_policy".to_string(),
@@ -520,7 +520,7 @@ mod pg_ripple {
                      strategy for write-side deduplication.".to_string()),
                 Some("ci/regress: bidi_integration.sql".to_string()),
                 Some("docs/src/features/cdc.md".to_string()),
-                Some("src/bidi.rs".to_string()),
+                Some("src/bidi/mod.rs".to_string()),
             ),
             (
                 "bidi_upsert_mode".to_string(),
@@ -530,7 +530,7 @@ mod pg_ripple {
                      upstream systems.".to_string()),
                 Some("ci/regress: bidi_integration.sql".to_string()),
                 Some("docs/src/features/cdc.md".to_string()),
-                Some("src/bidi.rs".to_string()),
+                Some("src/bidi/mod.rs".to_string()),
             ),
             (
                 "bidi_diff_mode".to_string(),
@@ -540,7 +540,7 @@ mod pg_ripple {
                      to downstream consumers.".to_string()),
                 Some("ci/regress: bidi_integration.sql".to_string()),
                 Some("docs/src/features/cdc.md".to_string()),
-                Some("src/bidi.rs".to_string()),
+                Some("src/bidi/mod.rs".to_string()),
             ),
             (
                 "bidi_linkback".to_string(),
@@ -550,7 +550,7 @@ mod pg_ripple {
                      external system identifiers back to RDF subjects.".to_string()),
                 Some("ci/regress: bidi_integration.sql".to_string()),
                 Some("docs/src/features/cdc.md".to_string()),
-                Some("src/bidi.rs".to_string()),
+                Some("src/bidi/mod.rs".to_string()),
             ),
             // ── BIDIOPS bidirectional operations (v0.78.0 FEATURE-STATUS-BIDI-01) ─
             (
@@ -561,7 +561,7 @@ mod pg_ripple {
                      depth limits and back-pressure signalling.".to_string()),
                 Some("ci/regress: bidiops.sql".to_string()),
                 Some("docs/src/features/cdc.md".to_string()),
-                Some("src/bidi.rs".to_string()),
+                Some("src/bidi/mod.rs".to_string()),
             ),
             (
                 "bidiops_pause_resume".to_string(),
@@ -571,7 +571,7 @@ mod pg_ripple {
                      for maintenance windows.".to_string()),
                 Some("ci/regress: bidiops.sql".to_string()),
                 Some("docs/src/features/cdc.md".to_string()),
-                Some("src/bidi.rs".to_string()),
+                Some("src/bidi/mod.rs".to_string()),
             ),
             (
                 "bidiops_schema_evolution".to_string(),
@@ -581,7 +581,7 @@ mod pg_ripple {
                      for backward-compatible subscription changes.".to_string()),
                 Some("ci/regress: bidiops.sql".to_string()),
                 Some("docs/src/features/cdc.md".to_string()),
-                Some("src/bidi.rs".to_string()),
+                Some("src/bidi/mod.rs".to_string()),
             ),
             (
                 "bidiops_per_subscription_auth".to_string(),
@@ -591,7 +591,7 @@ mod pg_ripple {
                      for isolated credential management.".to_string()),
                 Some("ci/regress: bidiops.sql".to_string()),
                 Some("docs/src/features/cdc.md".to_string()),
-                Some("src/bidi.rs".to_string()),
+                Some("src/bidi/mod.rs".to_string()),
             ),
             (
                 "bidiops_frame_redaction".to_string(),
@@ -601,7 +601,7 @@ mod pg_ripple {
                      PII/sensitive data masking before export.".to_string()),
                 Some("ci/regress: bidiops.sql".to_string()),
                 Some("docs/src/features/cdc.md".to_string()),
-                Some("src/bidi.rs".to_string()),
+                Some("src/bidi/mod.rs".to_string()),
             ),
             (
                 "bidiops_audit_trail".to_string(),
@@ -611,7 +611,7 @@ mod pg_ripple {
                      compliance and forensics.".to_string()),
                 Some("ci/regress: bidiops.sql".to_string()),
                 Some("docs/src/features/cdc.md".to_string()),
-                Some("src/bidi.rs".to_string()),
+                Some("src/bidi/mod.rs".to_string()),
             ),
             (
                 "bidiops_reconciliation".to_string(),
@@ -622,7 +622,7 @@ mod pg_ripple {
                      upstream systems.".to_string()),
                 Some("ci/regress: bidiops.sql".to_string()),
                 Some("docs/src/features/cdc.md".to_string()),
-                Some("src/bidi.rs".to_string()),
+                Some("src/bidi/mod.rs".to_string()),
             ),
         ];
 

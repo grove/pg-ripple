@@ -153,6 +153,10 @@ pub static STATS_REFRESH_INTERVAL_SECONDS: pgrx::GucSetting<i32> =
 /// GUC: batch size for `vacuum_dictionary()` UNION ALL construction (v0.82.0 VACUUM-DICT-BATCH-01).
 pub static VACUUM_DICT_BATCH_SIZE: pgrx::GucSetting<i32> = pgrx::GucSetting::<i32>::new(200);
 
+/// GUC: maximum backoff in seconds for the merge worker exponential backoff after errors
+/// (v0.83.0 MERGE-BACKOFF-01). Defaults to the same value as `merge_interval_secs`.
+pub static MERGE_MAX_BACKOFF_SECS: pgrx::GucSetting<i32> = pgrx::GucSetting::<i32>::new(60);
+
 // ─── v0.57.0 storage GUCs ────────────────────────────────────────────────────
 
 /// GUC: triple count threshold above which the HTAP merge converts vp_{id}_main
