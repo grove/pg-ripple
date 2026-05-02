@@ -26,7 +26,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: ghcr.io/grove/pg_ripple:0.87.0
+    image: ghcr.io/grove/pg_ripple:0.88.0
     ports:
       - "5432:5432"
     environment:
@@ -47,7 +47,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: ghcr.io/grove/pg_ripple:0.87.0
+    image: ghcr.io/grove/pg_ripple:0.88.0
     entrypoint: ["/usr/local/bin/pg_ripple_http"]
     ports:
       - "7878:7878"

@@ -61,7 +61,7 @@ HTTP companion PageRank/centrality REST API, pg_regress test suite, and benchmar
 - **PR-BENCH-01**: `benchmarks/pagerank.sql` — 10 pgbench scenarios for scale-free graph.
 - **PR-DOCS-01**: `docs/src/features/pagerank.md`.
 - **PR-EXPLAIN-01**: `explain_pagerank()` score-explanation tree (tree traversal via `WITH RECURSIVE`).
-- **PR-ERR-01**: Error constants PT0401–PT0423 for PageRank error catalog.
+- **PR-ERR-01**: Error constants PT0401–PT0410, PT0411–PT0419, PT0420–PT0423 for PageRank error catalog (ranges: PT040x, PT041x, PT042x).
 - **PR-MIGRATE-01**: `sql/pg_ripple--0.87.0--0.88.0.sql` migration script; 3 new tables + BRIN index + RLS policies.
 - 22 new GUC parameters in `src/gucs/pagerank.rs`.
 - 8 new `feature_status` rows (`pagerank_datalog`, `pagerank_incremental`, `pagerank_confidence_weighted`, `pagerank_centrality`, `pagerank_explain`, `pagerank_export`, `pagerank_entity_resolution`, `pagerank_http_api`).
