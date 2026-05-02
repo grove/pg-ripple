@@ -109,16 +109,56 @@ use spargebra::Query;
 /// Subject, predicate, object — all IRIs or plain literals.
 fn reference_triples() -> Vec<(String, String, String)> {
     vec![
-        ("http://ex/alice".to_string(), "http://ex/knows".to_string(), "http://ex/bob".to_string()),
-        ("http://ex/alice".to_string(), "http://ex/age".to_string(), "http://ex/v30".to_string()),
-        ("http://ex/bob".to_string(), "http://ex/knows".to_string(), "http://ex/carol".to_string()),
-        ("http://ex/bob".to_string(), "http://ex/age".to_string(), "http://ex/v25".to_string()),
-        ("http://ex/carol".to_string(), "http://ex/knows".to_string(), "http://ex/alice".to_string()),
-        ("http://ex/carol".to_string(), "http://ex/age".to_string(), "http://ex/v22".to_string()),
-        ("http://ex/dave".to_string(), "http://ex/knows".to_string(), "http://ex/bob".to_string()),
-        ("http://ex/dave".to_string(), "http://ex/age".to_string(), "http://ex/v40".to_string()),
-        ("http://ex/eve".to_string(), "http://ex/likes".to_string(), "http://ex/carol".to_string()),
-        ("http://ex/alice".to_string(), "http://ex/likes".to_string(), "http://ex/dave".to_string()),
+        (
+            "http://ex/alice".to_string(),
+            "http://ex/knows".to_string(),
+            "http://ex/bob".to_string(),
+        ),
+        (
+            "http://ex/alice".to_string(),
+            "http://ex/age".to_string(),
+            "http://ex/v30".to_string(),
+        ),
+        (
+            "http://ex/bob".to_string(),
+            "http://ex/knows".to_string(),
+            "http://ex/carol".to_string(),
+        ),
+        (
+            "http://ex/bob".to_string(),
+            "http://ex/age".to_string(),
+            "http://ex/v25".to_string(),
+        ),
+        (
+            "http://ex/carol".to_string(),
+            "http://ex/knows".to_string(),
+            "http://ex/alice".to_string(),
+        ),
+        (
+            "http://ex/carol".to_string(),
+            "http://ex/age".to_string(),
+            "http://ex/v22".to_string(),
+        ),
+        (
+            "http://ex/dave".to_string(),
+            "http://ex/knows".to_string(),
+            "http://ex/bob".to_string(),
+        ),
+        (
+            "http://ex/dave".to_string(),
+            "http://ex/age".to_string(),
+            "http://ex/v40".to_string(),
+        ),
+        (
+            "http://ex/eve".to_string(),
+            "http://ex/likes".to_string(),
+            "http://ex/carol".to_string(),
+        ),
+        (
+            "http://ex/alice".to_string(),
+            "http://ex/likes".to_string(),
+            "http://ex/dave".to_string(),
+        ),
     ]
 }
 
