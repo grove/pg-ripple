@@ -78,6 +78,20 @@ pub struct Metrics {
     dictionary_hot_cache_hits: AtomicU64,
     /// Cumulative dictionary backend-local LRU cache misses.
     dictionary_hot_cache_misses: AtomicU64,
+
+    // O13-02 (v0.86.0): new observability counters.
+    /// Total federation endpoint request count (used to compute per-endpoint latency).
+    federation_endpoint_requests: AtomicU64,
+    /// Cumulative federation endpoint latency in microseconds.
+    federation_endpoint_duration_us: AtomicU64,
+    /// Snapshot of dictionary_cache_hit_ratio * 1e6 (stored as integer for atomic ops).
+    dictionary_cache_hit_ratio_ppm: AtomicU64,
+    /// Merge worker delta rows pending (snapshot from extension monitoring table).
+    merge_worker_delta_rows_pending: AtomicU64,
+
+    // S13-03 (v0.86.0): CORS permissive-origin request counter.
+    /// Requests served under the CORS wildcard-origin (*) policy.
+    cors_permissive_requests_total: AtomicU64,
 }
 
 impl Default for Metrics {
@@ -112,6 +126,11 @@ impl Metrics {
             result_large: AtomicU64::new(0),
             dictionary_hot_cache_hits: AtomicU64::new(0),
             dictionary_hot_cache_misses: AtomicU64::new(0),
+            federation_endpoint_requests: AtomicU64::new(0),
+            federation_endpoint_duration_us: AtomicU64::new(0),
+            dictionary_cache_hit_ratio_ppm: AtomicU64::new(0),
+            merge_worker_delta_rows_pending: AtomicU64::new(0),
+            cors_permissive_requests_total: AtomicU64::new(0),
         }
     }
 
@@ -279,5 +298,59 @@ impl Metrics {
             .store(hits, Ordering::Relaxed);
         self.dictionary_hot_cache_misses
             .store(misses, Ordering::Relaxed);
+        // Update the hit-ratio snapshot (parts-per-million).
+        let total = hits + misses;
+        let ppm = if total > 0 {
+            hits * 1_000_000 / total
+        } else {
+            0
+        };
+        self.dictionary_cache_hit_ratio_ppm
+            .store(ppm, Ordering::Relaxed);
+    }
+
+    // O13-02 (v0.86.0): federation endpoint metrics.
+
+    /// Record a completed federation SERVICE call.
+    pub fn record_federation_request(&self, duration: std::time::Duration) {
+        self.federation_endpoint_requests
+            .fetch_add(1, Ordering::Relaxed);
+        self.federation_endpoint_duration_us
+            .fetch_add(duration.as_micros() as u64, Ordering::Relaxed);
+    }
+
+    pub fn federation_endpoint_requests(&self) -> u64 {
+        self.federation_endpoint_requests.load(Ordering::Relaxed)
+    }
+
+    pub fn federation_endpoint_duration_secs(&self) -> f64 {
+        self.federation_endpoint_duration_us.load(Ordering::Relaxed) as f64 / 1_000_000.0
+    }
+
+    /// Dictionary cache hit ratio (0.0–1.0) derived from the hot-cache counters.
+    pub fn dictionary_cache_hit_ratio(&self) -> f64 {
+        self.dictionary_cache_hit_ratio_ppm.load(Ordering::Relaxed) as f64 / 1_000_000.0
+    }
+
+    /// Update the merge worker delta rows pending snapshot.
+    pub fn update_merge_worker_delta_rows_pending(&self, rows: u64) {
+        self.merge_worker_delta_rows_pending
+            .store(rows, Ordering::Relaxed);
+    }
+
+    pub fn merge_worker_delta_rows_pending(&self) -> u64 {
+        self.merge_worker_delta_rows_pending.load(Ordering::Relaxed)
+    }
+
+    // S13-03 (v0.86.0): CORS permissive counter.
+
+    /// Increment the CORS permissive-origin request counter.
+    pub fn record_cors_permissive_request(&self) {
+        self.cors_permissive_requests_total
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn cors_permissive_requests_total(&self) -> u64 {
+        self.cors_permissive_requests_total.load(Ordering::Relaxed)
     }
 }

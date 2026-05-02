@@ -19,6 +19,13 @@ extension version is outside its known-compatible range.
 
 | pg_ripple_http version | pg_ripple extension range | Notes |
 |------------------------|---------------------------|-------|
+| 0.86.x | ≥ 0.85.0 | D13-01 (v0.86.0): SSE streaming, graceful shutdown, new Prometheus metrics (O13-02), Arrow 413 guard (S13-08), CORS counter (S13-03), structured JSON logs (O13-04) |
+| 0.85.x | ≥ 0.84.0 | COMPATIBLE_EXTENSION_MIN bumped to 0.84.0 (S13-05); strict compat mode (PG_RIPPLE_HTTP_STRICT_COMPAT); schema.rs/federation.rs splits; encode_batch GUC API |
+| 0.84.x | ≥ 0.83.0 | OpenAPI spec served at /openapi; per-query-type metrics (METRICS-LABELS-01); /health/ready deep check (HEALTH-DEEP-01); SPARQL Update in HTTP |
+| 0.83.x | ≥ 0.82.0 | CDC outbox bridge triggers, JSON-LD event serializer, vocabulary templates, pg-trickle detection |
+| 0.82.x | ≥ 0.80.0 | SBOM (cargo-cyclonedx), structured error bodies (HTTP-ERR-01), Arrow ticket nonce cache (FLIGHT-NONCE-01), per-IP governor |
+| 0.81.x | ≥ 0.80.0 | SHACL-SPARQL constraints, COPY rdf FROM, RAG hardening, CDC lifecycle events, OpenAPI spec |
+| 0.80.x | ≥ 0.79.0 | SQL-injection parameterization (SQL-INJ-01), /explorer auth gate (EXPLORER-AUTH-01) |
 | 0.76.x | ≥ 0.79.0 | COMPAT-MIN-01 (v0.80.0): requires `sparql_update_cursor()` (v0.76.0) and `feature_status()` wcoj/shacl_sparql entries (v0.79.0); `/explorer` now requires auth (EXPLORER-AUTH-01) |
 | 0.75.x | ≥ 0.78.0 | Bidirectional integration operations (v0.78.0), SPARQL subscription SSE (v0.73.0) |
 | 0.74.x | ≥ 0.77.0 | Bidirectional integration primitives (v0.77.0), SPARQL 1.2 tracking (v0.73.0) |

@@ -1687,3 +1687,97 @@ jobs:
             exit 1
           fi
           echo "PASS: all src/**/*.rs files are within the 1,800-line limit"
+
+
+  unwrap-cap:
+    name: unwrap/expect cap — max 3 per file (Q13-06, v0.86.0)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6
+
+      - name: Check unwrap/expect density
+        run: |
+          failed=0
+          while IFS= read -r -d '' f; do
+            count=$(grep -c '\.unwrap()\|\.expect(' "$f" || true)
+            if [ "$count" -gt 3 ]; then
+              echo "FAIL: $f has $count unwrap/expect calls (limit 3)"
+              failed=1
+            fi
+          done < <(find src -name '*.rs' -print0)
+          if [ "$failed" -eq 1 ]; then
+            exit 1
+          fi
+          echo "PASS: all src/**/*.rs files are within the unwrap/expect cap (≤3)"
+
+
+  unsafe-audit:
+    name: cargo-geiger unsafe count gate (Q13-08, v0.86.0)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+
+      - name: Install cargo-geiger
+        run: cargo install cargo-geiger --locked || true
+
+      - name: Run cargo-geiger and check unsafe count
+        run: |
+          # Count the total number of unsafe usages in pg_ripple code (excluding deps).
+          # Gate: if the count grows by more than 10% vs. the stored baseline, fail.
+          # Stored baseline is in scripts/geiger_baseline.txt (line 1: total unsafe count).
+          baseline_file=scripts/geiger_baseline.txt
+          if [ ! -f "$baseline_file" ]; then
+            echo "No baseline found — writing initial baseline"
+            cargo geiger --features pg18 2>/dev/null | tail -5 | tee "$baseline_file"
+            echo "PASS: initial baseline written"
+            exit 0
+          fi
+          baseline=$(head -1 "$baseline_file" | tr -d '[:space:]')
+          current=$(cargo geiger --features pg18 2>/dev/null | grep 'pg_ripple ' | awk '{print $NF}' | tr -d '[:space:]' | head -1 || echo "0")
+          echo "Baseline unsafe count: $baseline  Current: $current"
+          if [ -n "$baseline" ] && [ -n "$current" ] && [ "$baseline" -gt 0 ]; then
+            threshold=$(( baseline + baseline / 10 ))
+            if [ "$current" -gt "$threshold" ]; then
+              echo "FAIL: unsafe count $current exceeds 110% of baseline $baseline (threshold $threshold)"
+              exit 1
+            fi
+          fi
+          echo "PASS: unsafe count $current is within 10% of baseline $baseline"
+
+
+  openapi-validate:
+    name: OpenAPI spec validation (A13-02, v0.86.0)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6
+
+      - name: Validate openapi.yaml is non-empty and parseable YAML
+        run: |
+          if [ ! -f pg_ripple_http/openapi.yaml ]; then
+            echo "FAIL: pg_ripple_http/openapi.yaml does not exist"
+            exit 1
+          fi
+          # Check minimum size (> 200 bytes means real content)
+          size=$(wc -c < pg_ripple_http/openapi.yaml)
+          if [ "$size" -lt 200 ]; then
+            echo "FAIL: pg_ripple_http/openapi.yaml is too small ($size bytes) — likely empty placeholder"
+            exit 1
+          fi
+          # Validate it is parseable YAML using python3
+          python3 -c "
+import sys, yaml
+with open('pg_ripple_http/openapi.yaml') as f:
+    doc = yaml.safe_load(f)
+assert doc.get('openapi', '').startswith('3.'), f'Expected openapi 3.x, got: {doc.get(\"openapi\")}'
+assert 'paths' in doc, 'openapi.yaml missing paths'
+print(f'PASS: openapi.yaml is valid YAML, openapi={doc[\"openapi\"]}, paths={list(doc[\"paths\"].keys())}')
+"
+

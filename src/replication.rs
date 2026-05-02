@@ -75,7 +75,11 @@ pub fn replication_stats() -> TableIterator<
                     None,
                     &[],
                 )
-                .unwrap_or_else(|_| unreachable!("empty WHERE false must succeed"))
+                .unwrap_or_else(|e| {
+                    pgrx::error!(
+                        "internal: empty-result fallback query failed — please report: {e}"
+                    )
+                })
         });
 
         for row in tup_table {
@@ -142,6 +146,15 @@ pub extern "C-unwind" fn pg_ripple_logical_apply_worker_main(_arg: pg_sys::Datum
         "pg_ripple logical apply worker started (database={database}, strategy=last_writer_wins)"
     );
 
+    // CC13-03 (v0.86.0): batch LSN watermark updates.
+    // Only write to `_pg_ripple.cdc_lsn_watermark` every 100 events or every
+    // 500 ms (whichever comes first) to avoid excessive WAL traffic on busy
+    // CDC streams. The last-committed LSN is buffered in this local variable.
+    let mut events_since_watermark: u32 = 0;
+    let mut last_watermark_ts: std::time::Instant = std::time::Instant::now();
+    const WATERMARK_BATCH_EVENTS: u32 = 100;
+    const WATERMARK_BATCH_MS: u64 = 500;
+
     while BackgroundWorker::wait_latch(Some(Duration::from_secs(5))) {
         if BackgroundWorker::sighup_received() {
             // Re-read configuration.
@@ -159,13 +172,25 @@ pub extern "C-unwind" fn pg_ripple_logical_apply_worker_main(_arg: pg_sys::Datum
                  SET processed_at = now() \
                  WHERE processed_at IS NULL",
             );
-            // CDC-LSN-01 (v0.81.0): update the LSN watermark after each batch commit.
-            let lsn: Option<String> =
-                pgrx::Spi::get_one::<String>("SELECT pg_current_wal_lsn()::text").unwrap_or(None);
-            if let Some(lsn_str) = lsn {
-                crate::cdc::update_lsn_watermark("pg_ripple_logical_apply", &lsn_str);
-            }
         });
+
+        // CC13-03 (v0.86.0): flush watermark outside the transaction closure so
+        // mutable borrows satisfy BackgroundWorker::transaction's UnwindSafe bound.
+        events_since_watermark += 1;
+        let elapsed_ms = last_watermark_ts.elapsed().as_millis() as u64;
+        if events_since_watermark >= WATERMARK_BATCH_EVENTS || elapsed_ms >= WATERMARK_BATCH_MS {
+            BackgroundWorker::transaction(|| {
+                // CDC-LSN-01 (v0.81.0): update the LSN watermark.
+                let lsn: Option<String> =
+                    pgrx::Spi::get_one::<String>("SELECT pg_current_wal_lsn()::text")
+                        .unwrap_or(None);
+                if let Some(lsn_str) = lsn {
+                    crate::cdc::update_lsn_watermark("pg_ripple_logical_apply", &lsn_str);
+                }
+            });
+            events_since_watermark = 0;
+            last_watermark_ts = std::time::Instant::now();
+        }
     }
 
     pgrx::log!("pg_ripple logical apply worker shutting down");

@@ -24,6 +24,27 @@ unsafe extern "C-unwind" fn check_describe_strategy(
     };
     matches!(s, "cbd" | "scbd" | "simple")
 }
+
+/// SC13-04 (v0.86.0): check hook for describe_form GUC.
+/// Accepts 'cbd', 'scbd', and 'symmetric' (W3C-aligned alias for 'scbd').
+#[pg_guard]
+unsafe extern "C-unwind" fn check_describe_form(
+    newval: *mut *mut std::ffi::c_char,
+    _extra: *mut *mut std::ffi::c_void,
+    _source: pgrx::pg_sys::GucSource::Type,
+) -> bool {
+    if newval.is_null() {
+        return true;
+    }
+    // SAFETY: newval is a GUC check-hook argument; valid for the duration of this call.
+    let s = unsafe {
+        if (*newval).is_null() {
+            return true;
+        }
+        std::ffi::CStr::from_ptr(*newval).to_str().unwrap_or("")
+    };
+    matches!(s, "cbd" | "scbd" | "symmetric")
+}
 unsafe extern "C-unwind" fn check_sparql_overflow_action(
     newval: *mut *mut std::ffi::c_char,
     _extra: *mut *mut std::ffi::c_void,
@@ -133,6 +154,25 @@ pub fn register() {
         None,
         None,
     );
+    }
+
+    // SC13-04 (v0.86.0): describe_form — W3C-aligned alias with values cbd/scbd/symmetric.
+    // SAFETY: define_string_guc_with_hooks requires an unsafe block;
+    // the hook function pointers are valid extern "C" function pointers.
+    unsafe {
+        pgrx::GucRegistry::define_string_guc_with_hooks(
+            c"pg_ripple.describe_form",
+            c"DESCRIBE algorithm (W3C-aligned): 'cbd' (Concise Bounded Description), \
+              'scbd' (Symmetric CBD), or 'symmetric' (alias for scbd). \
+              Supersedes describe_strategy when set.",
+            c"",
+            &DESCRIBE_FORM,
+            GucContext::Userset,
+            GucFlags::default(),
+            Some(check_describe_form),
+            None,
+            None,
+        );
     }
 
     // ── v0.13.0 GUCs ─────────────────────────────────────────────────────────

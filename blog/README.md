@@ -111,6 +111,24 @@
 
 ---
 
+## Post Index by Version (D13-04, v0.86.0)
+
+Posts grouped by the pg_ripple version they document.
+
+| pg_ripple Version | Post |
+|---|---|
+| v0.1.0–v0.5.1 | [Why RDF Inside PostgreSQL?](why-rdf-in-postgresql.md), [Vertical Partitioning](vertical-partitioning-explained.md), [Everything Is an Integer](dictionary-encoding-integer-joins.md), [SPARQL→SQL Translation](sparql-to-sql-translation.md) |
+| v0.6.0–v0.10.0 | [HTAP for Triples](htap-reads-and-writes.md), [Property Paths](property-paths-recursive-ctes.md), [Datalog Inside PostgreSQL](datalog-inside-postgresql.md), [SHACL Data Quality](shacl-data-quality.md), [GeoSPARQL](geosparql-postgis-spatial.md), [owl:sameAs Entity Resolution](owl-sameas-entity-resolution.md) |
+| v0.11.0–v0.20.0 | [CDC for Knowledge Graphs](cdc-knowledge-graphs.md), [IVM with pg_trickle](ivm-pg-trickle-integration.md), [JSON-LD Framing](json-ld-framing-nested-json.md), [SPARQL Federation](sparql-federation-local-remote.md), [R2RML Relational to Graph](r2rml-relational-to-graph.md), [CONSTRUCT Views](construct-views-live-transformations.md) |
+| v0.21.0–v0.32.0 | [Leapfrog Triejoin](leapfrog-triejoin.md), [Magic Sets](magic-sets-goal-directed.md), [Well-Founded Semantics](well-founded-semantics.md), [Builtin Reasoning Rules](builtin-reasoning-rules-explained.md) |
+| v0.33.0–v0.46.0 | [EXPLAIN for SPARQL](explain-sparql-query-plans.md), [Probabilistic Datalog](probabilistic-datalog.md), [Ontology Mapping](ontology-mapping-alignment.md), [Neuro-Symbolic Entity Resolution](neuro-symbolic-entity-resolution.md) |
+| v0.47.0–v0.54.0 | [Multi-Tenant Knowledge Graphs](multi-tenant-knowledge-graphs.md), [GDPR Right-to-Erasure](gdpr-right-to-erasure.md), [Temporal Queries](temporal-time-travel-queries.md), [Provenance Tracking](provenance-tracking-prov-o.md) |
+| v0.55.0–v0.65.0 | [Natural Language to SPARQL](natural-language-to-sparql.md), [GraphRAG](graphrag-knowledge-export.md), [Vector + SPARQL Hybrid Search](vector-sparql-hybrid-search.md) |
+| v0.66.0–v0.79.0 | [Semantic Hub](semantic-hub-trickle-relay.md), [Citus Shard Pruning](citus-shard-pruning-sparql.md), [RDF-star](rdf-star-statements-about-statements.md) |
+
+---
+
 ## Contributing
 
 These posts are deliberately rough-edged — they're drafts exploring how the extension works, not polished marketing copy. If you spot a technical inaccuracy, open an issue or PR. If you want to write a post, open a discussion first to avoid duplication.
+

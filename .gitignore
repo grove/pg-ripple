@@ -7,3 +7,6 @@
 docs/book/
 /pg_regress_results/
 /w3c_report/
+
+# S13-07 (v0.86.0): local Docker secrets directory — never commit passwords.
+secrets/

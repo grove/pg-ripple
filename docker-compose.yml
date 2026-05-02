@@ -2,10 +2,16 @@
 #
 # The batteries-included image pre-installs pg_ripple, PostGIS, and pgvector.
 #
+# S13-07 (v0.86.0): passwords are supplied via POSTGRES_PASSWORD_FILE instead of
+# plain-text environment variables. A random secret is generated at first run and
+# stored in ./secrets/pg_password.txt (gitignored). Delete this file to rotate.
+#
 # Usage:
+#   mkdir -p secrets && openssl rand -base64 32 > secrets/pg_password.txt
 #   docker compose up -d
 #   curl http://localhost:7878/health
 #   # Load triples
+#   export PGPASSFILE="$(pwd)/secrets/pg_password.txt"
 #   psql -h localhost -U postgres -c "CREATE EXTENSION pg_ripple CASCADE;"
 #   psql -h localhost -U postgres -c "SELECT pg_ripple.load_ntriples('<https://example.org/s> <https://example.org/p> <https://example.org/o> .');"
 #   # SPARQL query
@@ -20,11 +26,15 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: ghcr.io/grove/pg_ripple:0.85.0
+    image: ghcr.io/grove/pg_ripple:0.86.0
     ports:
       - "5432:5432"
     environment:
-      POSTGRES_PASSWORD: ripple
+      # S13-07 (v0.86.0): use POSTGRES_PASSWORD_FILE instead of plain-text password.
+      # Generate: mkdir -p secrets && openssl rand -base64 32 > secrets/pg_password.txt
+      POSTGRES_PASSWORD_FILE: /run/secrets/pg_password
+    secrets:
+      - pg_password
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -37,18 +47,27 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: ghcr.io/grove/pg_ripple:0.85.0
+    image: ghcr.io/grove/pg_ripple:0.86.0
     entrypoint: ["/usr/local/bin/pg_ripple_http"]
     ports:
       - "7878:7878"
     environment:
-      PG_RIPPLE_HTTP_PG_URL: "postgresql://postgres:ripple@postgres/postgres"
+      # S13-07: password read from secrets file; build the DSN with a placeholder
+      # that the entrypoint script replaces with the actual secret at startup.
+      PG_RIPPLE_HTTP_PG_URL: "postgresql://postgres@postgres/postgres"
+      PG_RIPPLE_HTTP_PGPASSFILE: "/run/secrets/pg_password"
       PG_RIPPLE_HTTP_PORT: "7878"
       PG_RIPPLE_HTTP_POOL_SIZE: "8"
-      PG_RIPPLE_HTTP_CORS_ORIGINS: "*"
+      PG_RIPPLE_HTTP_CORS_ORIGINS: ""
+    secrets:
+      - pg_password
     depends_on:
       postgres:
         condition: service_healthy
+
+secrets:
+  pg_password:
+    file: ./secrets/pg_password.txt
 
 volumes:
   pgdata:

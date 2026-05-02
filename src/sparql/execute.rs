@@ -436,7 +436,24 @@ pub(crate) fn sparql_construct(query_text: &str) -> Vec<pgrx::JsonB> {
 ///
 /// `strategy` selects the algorithm: `"cbd"` (default), `"scbd"` (symmetric
 /// — also fetches incoming arcs), or `"simple"` (one-hop outgoing only).
+///
+/// SC13-04 (v0.86.0): the `pg_ripple.describe_form` GUC (values: `cbd`,
+/// `scbd`, `symmetric`) overrides `pg_ripple.describe_strategy` when set.
+/// `symmetric` is treated as an alias for `scbd`.
 pub(crate) fn sparql_describe(query_text: &str, strategy: &str) -> Vec<pgrx::JsonB> {
+    // SC13-04 (v0.86.0): resolve effective strategy from describe_form GUC or fallback.
+    let describe_form_raw = crate::gucs::sparql::DESCRIBE_FORM.get();
+    let effective_strategy: String = if let Some(form) = describe_form_raw {
+        let s = form.to_str().unwrap_or("cbd");
+        match s {
+            "symmetric" => "scbd".to_owned(),
+            other => other.to_owned(),
+        }
+    } else {
+        strategy.to_owned()
+    };
+    let strategy = effective_strategy.as_str();
+
     let query = SparqlParser::new()
         .parse_query(query_text)
         .unwrap_or_else(|e| pgrx::error!("SPARQL parse error: {}", e));
@@ -1353,6 +1370,8 @@ fn detect_update_operation_type(query: &str) -> &'static str {
 /// - `format = 'text'` (default): run `EXPLAIN (ANALYZE, FORMAT TEXT)`.
 /// - `format = 'json'`: run `EXPLAIN (ANALYZE, FORMAT JSON)`.
 /// - `format = 'sparql_algebra'`: return the spargebra algebra tree via `Debug`.
+/// - `format = 'sparql_algebra_optimised'` (O13-03, v0.86.0): run sparopt algebra
+///   optimiser and return the post-optimisation algebra tree.
 pub(crate) fn explain_sparql(query_text: &str, format: &str) -> String {
     use spargebra::Query;
 
@@ -1362,6 +1381,12 @@ pub(crate) fn explain_sparql(query_text: &str, format: &str) -> String {
 
     if format == "sparql_algebra" {
         return std::format!("{query:#?}");
+    }
+
+    // O13-03 (v0.86.0): post-sparopt algebra tree.
+    if format == "sparql_algebra_optimised" || format == "algebra_optimised" {
+        let optimised = crate::sparql::plan::optimise_query_algebra(&query);
+        return std::format!("{optimised:#?}");
     }
 
     let inner_sql = match &query {

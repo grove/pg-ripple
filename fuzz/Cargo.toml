@@ -124,3 +124,17 @@ name = "trig_load"
 path = "fuzz_targets/trig_load.rs"
 test = false
 doc = false
+
+# T13-03 (v0.86.0): CONSTRUCT writeback rule parser fuzz target.
+[[bin]]
+name = "construct_rule"
+path = "fuzz_targets/construct_rule.rs"
+test = false
+doc = false
+
+# T13-03 (v0.86.0): SHACL-SPARQL constraint parser fuzz target.
+[[bin]]
+name = "shacl_sparql"
+path = "fuzz_targets/shacl_sparql.rs"
+test = false
+doc = false

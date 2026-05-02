@@ -196,7 +196,9 @@ jobs:
             --notes-file /tmp/release_notes.md \
             --verify-tag
 
-      # v0.51.0 + v0.67.0 SBOM-01: Generate SBOM and verify version matches Cargo.toml.
+      # v0.51.0 + v0.67.0 SBOM-01 + DS13-03 (v0.86.0): Generate SBOM and verify version.
+      # DS13-03: SBOM regeneration is a required step on every tagged release; the
+      # version-check step fails the release job if SBOM version doesn't match Cargo.toml.
       - name: Install cargo-cyclonedx
         run: cargo install cargo-cyclonedx --locked
 
@@ -205,7 +207,7 @@ jobs:
           cargo cyclonedx --format json --override-filename sbom
           echo "Generated SBOM: $(wc -c < sbom.json) bytes"
 
-      - name: Verify SBOM version matches Cargo.toml (v0.67.0 SBOM-01)
+      - name: Verify SBOM version matches Cargo.toml (v0.67.0 SBOM-01 / DS13-03)
         run: |
           CARGO_VERSION=$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')
           SBOM_VERSION=$(jq -r '(.metadata.component.version // .version // "") | ltrimstr("v")' sbom.json)

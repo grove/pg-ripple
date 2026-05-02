@@ -167,9 +167,11 @@
 |---------|-------|--------|-------|-------------- |
 | [v0.84.0](roadmap/v0.84.0.md) | Assessment 13 critical/high & operational remediation: HTTP companion version sync, STRICT_COMPAT env var, docker-compose image tag currency, SECURITY DEFINER annotations, CI SQL-injection-check gate, migration-chain checkpoints for v0.80–v0.83, gucs/registration.rs split, nested OPTIONAL+EXISTS fix, /health/ready deep-check, plan cache double-parse elimination, justfile bump-version/regen-sbom/regen-openapi recipes | Released ✅ | Large | [Full details](roadmap/v0.84.0-full.md) |
 | [v0.85.0](roadmap/v0.85.0.md) | Assessment 13 correctness, performance & code quality: strict decode, mutation journal assertions, plan cache normalisation, IRI length bounds, encode batch API, merge-worker throttling, cycle pre-check, HOT-path metrics, schema.rs/federation.rs splits, per-file line-count CI gate, per-predicate merge fence | Released ✅ | Large | [Full details](roadmap/v0.85.0-full.md) |
-| [v0.86.0](roadmap/v0.86.0.md) | Assessment 13 tests, API polish, observability, supply chain & security: sparql_roundtrip proptest vs reference evaluator, CONSTRUCT/SHACL-SPARQL fuzz targets, conformance trend artifacts, benchmark regression gate, OpenAPI CI, error-code registry, structured JSON logs, axum graceful shutdown, dependency upgrades, CORS counter, Arrow 413 guard, line coverage badge + llvm-cov CI gate | Planned | Large | [Full details](roadmap/v0.86.0-full.md) |
+| [v0.86.0](roadmap/v0.86.0.md) | Assessment 13 tests, API polish, observability, supply chain & security: sparql_roundtrip proptest vs reference evaluator, CONSTRUCT/SHACL-SPARQL fuzz targets, conformance trend artifacts, benchmark regression gate, OpenAPI CI, error-code registry, structured JSON logs, axum graceful shutdown, dependency upgrades, CORS counter, Arrow 413 guard, line coverage badge + llvm-cov CI gate | Released ✅ | Large | [Full details](roadmap/v0.86.0-full.md) |
 
 ### Uncertain Knowledge & Soft Reasoning (v0.87.0)
+
+> **Probabilistic feature specification**: see [plans/probabilistic-features.md](plans/probabilistic-features.md) for the full architecture, algorithm details, and API design for the uncertain knowledge engine. (D13-05, v0.86.0)
 
 | Version | Theme | Status | Scope | Full details |
 |---------|-------|--------|-------|-------------- |

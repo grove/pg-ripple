@@ -116,3 +116,24 @@ the v1.0.0 release.
 - W3C SPARQL 1.2 Working Group: <https://www.w3.org/groups/wg/rdf-star>
 - `spargebra` crate: <https://crates.io/crates/spargebra>
 - RDF 1.2 (RDF-star formalisation): <https://www.w3.org/TR/rdf12-concepts/>
+
+---
+
+## Gap Analysis vs. W3C SPARQL 1.2 Draft (D13-03, v0.86.0)
+
+Last reviewed: 2026-05-02. Community draft source: <https://w3c.github.io/sparql-query/>
+
+| SPARQL 1.2 Feature | pg_ripple Status | Notes |
+|---|---|---|
+| `<< s p o >>` quoted triple syntax in BGPs | ✅ Implemented (v0.4.0) | Stored via `qt_s/qt_p/qt_o` dictionary columns |
+| `TRIPLE(s, p, o)` constructor | ⚠ Partial | Not yet translated to SQL; spargebra 0.4 does not expose the function call |
+| `SUBJECT()` / `PREDICATE()` / `OBJECT()` | ⚠ Partial | Dictionary join required; not yet plumbed through SQL generator |
+| `REIF` keyword (annotation syntax) | ❌ Not started | spargebra 0.4 does not support REIF; depends on spargebra update |
+| `LATERAL` in FROM clause | ❌ Not started | spargebra grammar update required |
+| New math functions (`op:numeric-integer-divide`, etc.) | ❌ Not started | Low priority; PostgreSQL CAST suffices |
+| Revised aggregate semantics (distinct in aggregate body) | ❌ Not started | Impact on Datalog aggregate push-down TBD |
+| `ADJUST()` / `TZ()` date functions | ❌ Not started | PostgreSQL `AT TIME ZONE` is equivalent |
+
+**Overall**: pg_ripple's RDF-star foundation (v0.4.0) covers the most impactful SPARQL 1.2 change.
+Remaining gaps depend on `spargebra` adopting SPARQL 1.2 grammar; tracked as post-v1.0.0 work.
+

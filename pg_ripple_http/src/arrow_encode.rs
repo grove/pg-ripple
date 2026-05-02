@@ -239,6 +239,47 @@ pub(crate) async fn flight_do_get(
         .unwrap_or(1000)
         .max(1);
 
+    // S13-08 (v0.86.0): enforce row export limit BEFORE materialising the full result.
+    // We run a lightweight COUNT(*) query first; if the count exceeds the limit,
+    // return HTTP 413 with a generic message (no row count in the response body)
+    // and log the actual count server-side only.
+    let max_export_rows: usize = std::env::var("ARROW_MAX_EXPORT_ROWS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(10_000_000)
+        .max(1);
+
+    let count_sql = format!("SELECT COUNT(*) FROM ({full_sql}) _arrow_count_");
+    // S13-08 (v0.86.0): pre-materialisation row count guard.
+    // Run COUNT(*) before fetching all rows; returns HTTP 413 if limit exceeded.
+    let row_count_check: Option<i64> = match client.query_one(&count_sql, &[]).await {
+        Ok(r) => r.try_get::<_, i64>(0).ok(),
+        Err(e) => {
+            tracing::error!("Arrow Flight row-count pre-check failed: {e}");
+            // COUNT failure is non-fatal; fall through to full query with
+            // post-materialisation secondary guard.
+            None
+        }
+    };
+    if let Some(count) = row_count_check {
+        if count as usize > max_export_rows {
+            tracing::warn!(
+                graph_id = %graph_id,
+                row_count = %count,
+                limit = %max_export_rows,
+                "Arrow Flight export denied: result exceeds max_export_rows"
+            );
+            return json_response_http(
+                StatusCode::PAYLOAD_TOO_LARGE,
+                serde_json::json!({
+                    "error": "PT413",
+                    "message": "Arrow Flight export result is too large; \
+                                use a more selective query or increase ARROW_MAX_EXPORT_ROWS"
+                }),
+            );
+        }
+    }
+
     let rows = match client.query(&full_sql, &[]).await {
         Ok(r) => r,
         Err(e) => {
@@ -250,22 +291,21 @@ pub(crate) async fn flight_do_get(
         }
     };
 
-    // ARROW-LIMIT-01 (v0.82.0): enforce row export limit before serializing.
-    // Configurable via ARROW_MAX_EXPORT_ROWS env var (default: 10,000,000).
-    let max_export_rows: usize = std::env::var("ARROW_MAX_EXPORT_ROWS")
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(10_000_000)
-        .max(1);
+    // Secondary row-count guard (post-materialisation, in case COUNT was skipped above).
     if rows.len() > max_export_rows {
+        // S13-08: log actual count server-side; return generic 413 to client.
+        tracing::warn!(
+            graph_id = %graph_id,
+            row_count = %rows.len(),
+            limit = %max_export_rows,
+            "Arrow Flight export denied post-materialisation: result exceeds max_export_rows"
+        );
         return json_response_http(
-            StatusCode::BAD_REQUEST,
+            StatusCode::PAYLOAD_TOO_LARGE,
             serde_json::json!({
-                "error": format!(
-                    "Arrow Flight export result ({} rows) exceeds ARROW_MAX_EXPORT_ROWS limit ({}); \
-                     use a more selective query or increase the limit",
-                    rows.len(), max_export_rows
-                )
+                "error": "PT413",
+                "message": "Arrow Flight export result is too large; \
+                            use a more selective query or increase ARROW_MAX_EXPORT_ROWS"
             }),
         );
     }

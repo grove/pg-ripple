@@ -299,7 +299,22 @@ pub(crate) async fn metrics_endpoint(State(state): State<Arc<AppState>>) -> Resp
          pg_ripple_dictionary_hot_cache_hits_total {}\n\
          # HELP pg_ripple_dictionary_hot_cache_misses_total Backend-local dictionary LRU cache misses (P13-08)\n\
          # TYPE pg_ripple_dictionary_hot_cache_misses_total counter\n\
-         pg_ripple_dictionary_hot_cache_misses_total {}\n",
+         pg_ripple_dictionary_hot_cache_misses_total {}\n\
+         # HELP pg_ripple_federation_endpoint_requests_total Total federation SERVICE endpoint requests (O13-02)\n\
+         # TYPE pg_ripple_federation_endpoint_requests_total counter\n\
+         pg_ripple_federation_endpoint_requests_total {}\n\
+         # HELP pg_ripple_federation_endpoint_duration_seconds Total federation SERVICE latency in seconds (O13-02)\n\
+         # TYPE pg_ripple_federation_endpoint_duration_seconds counter\n\
+         pg_ripple_federation_endpoint_duration_seconds {:.6}\n\
+         # HELP pg_ripple_dictionary_cache_hit_ratio Dictionary hot-cache hit ratio 0.0-1.0 (O13-02)\n\
+         # TYPE pg_ripple_dictionary_cache_hit_ratio gauge\n\
+         pg_ripple_dictionary_cache_hit_ratio {:.6}\n\
+         # HELP pg_ripple_merge_worker_delta_rows_pending Merge worker delta rows pending flush (O13-02)\n\
+         # TYPE pg_ripple_merge_worker_delta_rows_pending gauge\n\
+         pg_ripple_merge_worker_delta_rows_pending {}\n\
+         # HELP pg_ripple_http_cors_permissive_requests_total Requests served under CORS wildcard origin (S13-03)\n\
+         # TYPE pg_ripple_http_cors_permissive_requests_total counter\n\
+         pg_ripple_http_cors_permissive_requests_total {}\n",
         m.sparql_query_count(),
         m.datalog_query_count(),
         m.error_count(),
@@ -321,6 +336,11 @@ pub(crate) async fn metrics_endpoint(State(state): State<Arc<AppState>>) -> Resp
         m.result_large_count(),
         m.dictionary_hot_cache_hits(),
         m.dictionary_hot_cache_misses(),
+        m.federation_endpoint_requests(),
+        m.federation_endpoint_duration_secs(),
+        m.dictionary_cache_hit_ratio(),
+        m.merge_worker_delta_rows_pending(),
+        m.cors_permissive_requests_total(),
     );
 
     Response::builder()

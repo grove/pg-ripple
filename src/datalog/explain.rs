@@ -109,7 +109,11 @@ pub fn explain_datalog(rule_set_name: &str) -> pgrx::JsonB {
 
         let head = match rule.head.as_ref() {
             Some(h) => h,
-            None => unreachable!("already checked head.is_none() above"),
+            None => {
+                pgrx::error!(
+                    "internal: explain_datalog rule head is None after is_none() check — please report"
+                )
+            }
         };
         let head_pred_id = match &head.p {
             Term::Const(id) => *id,

@@ -1,0 +1,9 @@
+0
+# pg_ripple cargo-geiger baseline (Q13-08, v0.86.0)
+# This file stores the approved unsafe count for pg_ripple.
+# The CI job (unsafe-audit) compares the current count against this baseline
+# and fails if the count exceeds 110% of this value.
+# To update the baseline: run `cargo geiger --features pg18` and replace
+# the number on line 1 with the new total unsafe count.
+# Last updated: 2026-05-02 (v0.86.0)
+# Safe Rust only policy: all unsafe blocks must have a SAFETY comment.

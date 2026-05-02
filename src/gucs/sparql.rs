@@ -11,6 +11,15 @@ pub static MAX_PATH_DEPTH: pgrx::GucSetting<i32> = pgrx::GucSetting::<i32>::new(
 pub static DESCRIBE_STRATEGY: pgrx::GucSetting<Option<std::ffi::CString>> =
     pgrx::GucSetting::<Option<std::ffi::CString>>::new(None);
 
+/// GUC: SC13-04 (v0.86.0) — alias for `describe_strategy` using W3C-aligned
+/// value names: 'cbd' (Concise Bounded Description), 'scbd' (Symmetric CBD),
+/// or 'symmetric' (alias for 'scbd').
+///
+/// When set, this GUC takes precedence over `describe_strategy`.
+/// Supported values: `cbd`, `scbd`, `symmetric`.
+pub static DESCRIBE_FORM: pgrx::GucSetting<Option<std::ffi::CString>> =
+    pgrx::GucSetting::<Option<std::ffi::CString>>::new(None);
+
 // ─── v0.13.0 SPARQL GUCs ─────────────────────────────────────────────────────
 
 /// GUC: enable BGP join reordering based on pg_stats selectivity estimates.

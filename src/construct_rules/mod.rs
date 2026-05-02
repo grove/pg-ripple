@@ -236,7 +236,12 @@ pub(crate) fn explain_construct_rule(name: &str) -> Vec<(String, String)> {
     if row.is_none() {
         pgrx::error!("construct rule '{}' not found", name);
     }
-    let (_, generated, sources, order) = row.unwrap_or_else(|| unreachable!());
+    let (_, generated, sources, order) = row.unwrap_or_else(|| {
+        pgrx::error!(
+            "internal: construct rule '{}' not found after is_none() check -- please report",
+            name
+        )
+    });
 
     vec![
         (
