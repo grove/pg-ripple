@@ -1,0 +1,28 @@
+-- Migration 0.83.1 → 0.83.2: Assessment 13 correctness, performance & code quality
+--
+-- New GUC registered at extension load time (available immediately after ALTER EXTENSION UPDATE):
+--   pg_ripple.describe_depth_limit  integer  default 64  (min 1, max 1024)
+--     Controls the maximum recursion depth for DESCRIBE Concise Bounded Description traversal.
+--
+-- Correctness fixes (Rust-compiled, no SQL schema changes):
+--   • batch_decode raises error when strict_dictionary = on and a dict ID is missing
+--   • execute_drop / execute_clear assert mutation journal is open before modifying storage
+--   • plan cache key normalises INFERENCE_MODE via trim+lowercase
+--   • batch_decode warning guard tightened to id == 0 (was id <= 0)
+--   • encode_token in magic.rs handles typed literals correctly
+--   • parse_nt_triple adds IRI length bounds check (max 8192 chars)
+--   • describe_cbd recursion depth capped via pg_ripple.describe_depth_limit
+--   • GRAPH ?g default-graph (id=0) exclusion enforced
+--
+-- Performance improvements:
+--   • encode batch API reduces per-triple SPI overhead
+--   • merge-worker heartbeat log throttled to ≤ 1 message per 60 s
+--   • intra-stratum cycle pre-check avoids unnecessary fixpoint iteration
+--   • HOT-path Prometheus counters: plan_cache_hits, plan_cache_misses,
+--     dict_encode_batch_calls, dict_encode_single_calls
+--
+-- Code quality:
+--   • src/schema.rs split into schema/{tables,indices,functions,triggers}.rs
+--   • src/sparql/federation.rs split into federation/{planner,executor,cache,cost}.rs
+--   • CI lint gate: rejects any .rs file exceeding 1800 lines
+--   • merge fence lock scoped per-predicate (was global advisory lock)

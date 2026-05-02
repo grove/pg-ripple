@@ -1,0 +1,61 @@
+-- Migration 0.83.2 → 0.83.3: Assessment 13 tests, API polish, observability,
+--   supply chain, standards conformance, HTTP companion security
+--
+-- New GUC registered at extension load time:
+--   pg_ripple.describe_form  text  default 'cbd'
+--     Controls the DESCRIBE query algorithm.  Values: 'cbd', 'symmetric-cbd', 'scbd'.
+--
+-- No other SQL schema changes required.  All improvements are Rust-compiled or
+-- documentation / CI / supply-chain changes:
+--
+-- Test coverage:
+--   • sparql_roundtrip proptest compares results against spargebra reference evaluator
+--   • CONSTRUCT + SHACL-SPARQL fuzz targets added to scheduled CI
+--   • Conformance trends CSV artifact committed on each CI run
+--   • pg_extern coverage gap audit complete
+--   • Benchmark regression gate (> 10% TPS drop fails CI)
+--   • CDC slot cleanup crash-recovery test
+--
+-- API polish:
+--   • load_jsonld removal scheduled in CHANGELOG (target: v1.0.0)
+--   • OpenAPI YAML committed to docs/openapi/ and validated in CI
+--   • docs/src/reference/error-codes.md PT-code registry added
+--   • Deprecated GUCs documented with replacement names
+--   • SPARQL error response codes standardised across HTTP companion and extension
+--
+-- Documentation:
+--   • Compatibility matrix extended to v0.80–v0.83
+--   • Feature reference docs updated for all v0.80–v0.83 additions
+--   • SPARQL 1.2 tracking section updated
+--   • blog/README.md index of all blog posts added
+--
+-- Supply chain:
+--   • parquet → 60, ureq → 3, arrow → 56 upgraded; SBOM regenerated
+--   • SBOM regeneration wired as required CI step
+--   • rust-toolchain.toml updated to current stable
+--   • tokio-stream: streaming cursor prototype or dependency removed
+--
+-- Observability:
+--   • federation + dict LRU cache Prometheus metrics
+--   • explain_sparql() algebra_after_opt field
+--   • PG_RIPPLE_LOG_FORMAT=json structured log output
+--   • axum SIGTERM graceful shutdown (30 s drain)
+--
+-- Standards:
+--   • sparql_strict GUC regression tests per filter case
+--   • SERVICE SILENT extended to TLS, oversized, redirect errors
+--   • GeoSPARQL function inventory documented
+--   • DESCRIBE algorithm documented; pg_ripple.describe_form GUC added
+--
+-- Security:
+--   • CORS blocked requests counter (pg_ripple_http_cors_blocked_total)
+--   • Bulk-loader file paths canonicalised before open()
+--   • docker-compose.yml random generated password
+--   • Arrow Flight returns HTTP 413 before materialising oversized results
+--   • Metrics endpoint auth requirement documented
+--   • HTTP companion auth schemes documented (Bearer + Basic)
+--
+-- Performance:
+--   • Datalog rule streaming in 1000-rule batches
+--   • PathCtx field visibility tightened to module boundary
+--   • CDC LSN watermark updates batched (100 events or 500 ms)

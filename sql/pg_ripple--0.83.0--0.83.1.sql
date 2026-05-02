@@ -1,0 +1,15 @@
+-- Migration 0.83.0 → 0.83.1: Assessment 13 critical/high & operational remediation
+--
+-- New capabilities delivered (Rust-compiled, no SQL schema changes required):
+--   • pg_ripple_http bumped to 0.83.0; COMPATIBLE_EXTENSION_MIN raised to "0.83.0"
+--   • /health/ready performs real DB round-trip and extension version check
+--   • plan cache cache_key() avoids double-parse
+--   • gucs/registration.rs split into per-domain submodules
+--   • CI wires check_no_string_format_in_sql.sh as required lint step
+--   • migration-chain test extended with v0.80.0–v0.83.0 checkpoints
+--   • justfile gains bump-version, regen-sbom, regen-openapi recipes
+--
+-- Security notes:
+--   • SECURITY DEFINER sites annotated with inline SECURITY-JUSTIFY comments
+--   • audit.toml expiry dates added; serde_cbor advisory documented
+--   • PG_RIPPLE_HTTP_STRICT_COMPAT env var enables fail-closed compat check
