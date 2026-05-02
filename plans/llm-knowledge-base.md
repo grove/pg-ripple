@@ -1,205 +1,213 @@
-# pg_ripple + pg_trickle as a Compiled LLM Knowledge Base
+# pg_ripple + pg_trickle as a Living LLM Knowledge Base
 
 > **Date:** 2026-05-02
 > **Status:** Strategy report, not a committed roadmap item
 > **Source article:** [What Is Andrej Karpathy's LLM Knowledge Base Architecture? The Compiler Analogy Explained](https://www.mindstudio.ai/blog/karpathy-llm-knowledge-base-architecture-compiler-analogy)
 > **Related local plans:** [GraphRAG synergy](graphrag.md), [pg-trickle relay integration](pg_trickle_relay_integration.md), [future directions](future-directions.md), [ROADMAP](../ROADMAP.md)
 
-## 1. Executive summary
+## 1. The short version
 
-The article frames a useful architecture for LLM knowledge bases: treat raw
-documents as source code, run an LLM-powered compilation step before query time,
-store the compiled artifact as structured knowledge, and let the query-time LLM
-reason over that artifact instead of re-reading raw prose. The strongest idea is
-not the use of an LLM by itself. It is the shift of expensive semantic work from
-query time to ingest/update time.
+The article describes a useful idea: instead of asking an LLM to reread raw
+documents every time someone asks a question, first turn those documents into a
+cleaner, more structured knowledge base. The article calls this "compilation",
+borrowing a term from software development. Programmers do not run source code
+directly. They compile it into a form the machine can run quickly and reliably.
+The same pattern can work for knowledge: take messy human documents, compile
+them into structured facts, summaries, links, and questions, then query that
+compiled knowledge later.
 
-pg_ripple already has most of the runtime that this architecture wants: RDF
-storage, named graphs, SPARQL, Datalog, SHACL, provenance, GraphRAG export,
-hybrid vector retrieval, natural-language-to-SPARQL, and `rag_context()`.
-pg_trickle adds the missing production ingredient: live transport and
-incremental maintenance. Together they can build something stronger than a static
-LLM-generated wiki: a transactionally consistent, event-driven knowledge
-compiler whose compiled output is not a pile of text pages, but a governed RDF
-graph with validation, inference, provenance, uncertainty, CDC, and downstream
-delivery.
+pg_ripple and pg_trickle are unusually well suited to this idea.
 
-The recommended direction is to position the combined system as a **PostgreSQL
-native knowledge compiler**:
+pg_ripple already knows how to store and query structured knowledge. It has RDF
+storage, SPARQL queries, rules, validation, provenance, GraphRAG export, vector
+search, natural-language-to-SPARQL, and `rag_context()`. In plain English: it
+can hold facts, understand relationships, check quality, infer new facts, and
+prepare useful context for an LLM.
 
-1. **Source layer:** raw documents, event streams, API payloads, tickets,
-   transcripts, and existing RDF/JSON-LD sources land through pg_trickle inboxes
-   or direct pg_ripple loaders.
-2. **Compilation layer:** a new `pg_ripple.compile_document()` /
-   `pg_ripple_compile` workflow runs LLM extraction, summarization, entity
-   linking, contradiction checks, and artifact generation.
-3. **Compiled store:** pg_ripple stores atomic facts, summaries, QA pairs,
-   entity pages, dependency edges, confidence, and provenance as named RDF
-   graphs plus companion catalog rows.
-4. **Incremental build layer:** pg_trickle propagates changed source rows through
-   compilation queues, CONSTRUCT writeback views, Z-set deltas, outboxes, and
-   downstream notifications.
-5. **Runtime query layer:** users query compiled knowledge through SPARQL,
-   `sparql_from_nl()`, `rag_context()`, GraphRAG-style community summaries, and
-   exact graph traversal.
+pg_trickle adds the live-update part. It can bring in changes from event streams
+and APIs, keep derived views fresh, and publish changes back out. In plain
+English: it can keep the knowledge base moving as the world changes.
 
-This would make pg_ripple less like a vector database with graph features and
-more like a database-backed compiler/runtime for organizational knowledge.
+Together, they could build something more interesting than a static AI-written
+wiki. They could build a **living knowledge compiler** inside PostgreSQL:
 
-## 2. What the article argues
+1. Raw documents, tickets, transcripts, events, and API payloads arrive.
+2. An LLM-assisted compiler extracts facts, relationships, summaries, and likely
+   questions.
+3. pg_ripple stores the result as a governed knowledge graph.
+4. SHACL and Datalog check the result for quality, contradictions, and derived
+   knowledge.
+5. pg_trickle keeps everything fresh as sources change.
+6. Agents and applications query the compiled knowledge instead of searching raw
+   text chunks.
+7. Downstream systems receive semantic change events when the knowledge changes.
 
-The article's central analogy is:
+The big opportunity is not simply "RAG with RDF". It is **compiled operational
+knowledge**: a knowledge base with sources, tests, diffs, review workflows,
+confidence, provenance, and live change events.
 
-| Compiler world | LLM knowledge-base world |
+## 2. What the article is saying
+
+The article's main point is easy to summarize:
+
+> Raw documents are not a good runtime format for AI systems.
+
+Most documents are written for humans. They repeat themselves, hide important
+assumptions, mix topics, and rely on context that may live elsewhere. Standard
+RAG systems usually split those documents into chunks, embed the chunks, and
+retrieve a handful of similar chunks when a user asks a question. That works for
+some questions, but it has familiar problems:
+
+- A chunk can lose the context that made it meaningful.
+- Similar text is not the same as correct evidence.
+- The LLM must reinterpret raw prose on every query.
+- Multi-document reasoning is fragile.
+- Answers can vary when chunking, embeddings, or retrieval settings change.
+
+The article proposes a different pattern. Do more work before query time:
+
+1. Feed raw documents into an LLM workflow.
+2. Ask the workflow to extract facts, entities, relationships, summaries,
+   questions, answers, gaps, and contradictions.
+3. Store those extracted artifacts as the real knowledge base.
+4. At query time, retrieve and reason over the compiled artifacts instead of raw
+   prose.
+
+The compiler analogy looks like this:
+
+| Software compiler | LLM knowledge base |
 | --- | --- |
-| Source files | Raw documents, PDFs, web pages, transcripts, tickets |
-| Compiler | LLM pipeline that extracts and restructures meaning |
+| Source code | Raw documents, PDFs, web pages, transcripts, tickets |
+| Compiler | LLM workflow that extracts and reorganizes meaning |
 | Compiled binary | Structured knowledge base or wiki |
-| Runtime execution | Querying the compiled artifact |
-| Compiler errors | Gaps, contradictions, low-quality inputs, unresolved references |
+| Runtime | Querying the compiled knowledge |
+| Compiler errors | Missing facts, contradictions, weak evidence, unresolved references |
 
-Its practical claims are:
+The article also highlights the hard part: **incremental compilation**. When one
+document changes, a production system should not reprocess the whole corpus. It
+should update only the document, facts, summaries, links, and downstream entries
+that actually depend on the change.
 
-- Standard RAG keeps raw chunks as the main artifact and asks the LLM to
-  reinterpret them on every query.
-- A compiled knowledge base pays an upfront cost to extract facts,
-  relationships, summaries, and likely QA pairs.
-- Query-time reasoning becomes easier because the model reads dense structured
-  artifacts instead of arbitrary source prose.
-- Incremental compilation is the hard production problem: when one source
-  document changes, the system should update only affected artifacts and
-  downstream entries.
-- Compile-time prompt design matters at least as much as query-time prompt
-  design because it defines the structure and quality of the knowledge base.
+That is where pg_ripple and pg_trickle make the idea much stronger.
 
-That is a good architecture for a static or periodically refreshed knowledge
-base. pg_ripple plus pg_trickle can take it further: use database transactions,
-typed graph semantics, differential maintenance, and CDC to make the compiled
-knowledge base continuously updatable and operationally reliable.
+## 3. Why pg_ripple is a natural fit
 
-## 3. Where pg_ripple already matches the model
+pg_ripple already provides many of the pieces a compiled knowledge base needs.
+Some of the terms are technical, so this table explains them in practical terms.
 
-pg_ripple already implements several pieces that would otherwise have to be
-invented for this architecture.
-
-| Need | Existing pg_ripple capability |
+| Need | What pg_ripple already provides |
 | --- | --- |
-| Structured knowledge store | RDF triples in vertically partitioned VP tables |
-| Stable identifiers | Dictionary-encoded IRIs, blank nodes, literals, named graphs |
-| Query runtime | Native SPARQL 1.1 compiled to SQL |
-| Semantic validation | SHACL Core, SHACL-SPARQL, async validation |
-| Derived knowledge | Datalog, RDFS/OWL RL/EL/QL, CONSTRUCT writeback rules |
-| Source attribution | Named graphs, PROV-O, RDF-star annotations |
-| Entity resolution | `owl:sameAs` canonicalization and alignment helpers |
-| LLM query interface | `sparql_from_nl()`, `repair_sparql()`, LLM endpoint config |
-| RAG query packaging | `rag_context()` |
-| Hybrid retrieval | pgvector integration, graph-contextualized embeddings |
-| GraphRAG exchange | GraphRAG Parquet export and community detection |
-| Live change events | CDC subscriptions and JSON-LD event serializer |
+| Store structured facts | RDF triples in PostgreSQL |
+| Query relationships | SPARQL, a standard graph query language |
+| Ask in natural language | `sparql_from_nl()`, which turns English into SPARQL |
+| Give an LLM grounded context | `rag_context()`, which prepares graph facts for a prompt |
+| Keep source attribution | named graphs and PROV-O provenance |
+| Record facts about facts | RDF-star annotations for confidence, evidence, timestamps |
+| Validate quality | SHACL rules, which act like data quality checks |
+| Infer more knowledge | Datalog and OWL/RDFS rules |
+| Resolve duplicate entities | `owl:sameAs` canonicalization and alignment helpers |
+| Combine graph and vector retrieval | pgvector integration and graph-contextualized embeddings |
+| Export to GraphRAG tools | GraphRAG Parquet export and community detection |
+| Stream changes | CDC subscriptions and JSON-LD event output |
 
-The main missing piece is an explicit **source-to-compiled-knowledge pipeline**.
-Today pg_ripple can load RDF, JSON, JSON-LD, N-Triples, Turtle, and events, and
-it can answer questions over the graph. The article points at the feature that
-sits between those halves: use LLMs to compile raw human documents into graph
-artifacts before query time.
+In other words, pg_ripple already knows how to hold the compiled artifact. The
+missing product layer is the step that takes raw human-readable sources and
+turns them into that artifact in a repeatable, inspectable way.
 
-## 4. Where pg_trickle changes the design
+## 4. Why pg_trickle matters
 
-The article treats incremental compilation as a hard problem. pg_trickle gives
-us a strong answer because it is already designed around deltas, stream tables,
-outboxes, inboxes, and incremental view maintenance.
+The article talks about incremental compilation as a challenge. pg_trickle gives
+us a practical path to it.
 
-pg_trickle contributes four important properties:
+pg_trickle can:
 
-1. **Transport:** reverse relay can bring documents, events, and source payloads
-   from Kafka, NATS, HTTP, SQS, Redis Streams, and other sources into PostgreSQL
-   inbox tables.
-2. **Change propagation:** Z-set deltas and stream tables can maintain derived
-   views without full refresh, which fits the compiler analogy better than a
-   batch re-indexer.
-3. **Transactional coupling:** inbound event, source registry update, compiled
-   graph update, SHACL validation, and outbox publication can share PostgreSQL's
-   transaction semantics.
-4. **Outbound delivery:** forward relay can publish compiler diagnostics,
-   changed knowledge artifacts, refreshed entity pages, and answer-package
-   invalidations to downstream systems.
+- Bring new source material into PostgreSQL from Kafka, NATS, HTTP, SQS, Redis
+  Streams, and similar systems.
+- Keep derived tables and views fresh using deltas, instead of recomputing
+  everything from scratch.
+- Publish outbound events when the compiled knowledge changes.
+- Let inbound source events, graph updates, validation, and outbound messages
+  share PostgreSQL's transaction model.
 
-This is the main way to go beyond the article: do not only build a compiled
-wiki. Build a **live build system for knowledge**. The source files are
-documents and events. The compiled outputs are triples, summaries, entity
-profiles, QA pairs, embeddings, and graph indexes. The build graph is stored in
-PostgreSQL. pg_trickle moves changes through the build graph.
-
-## 5. Proposed product concept
-
-### 5.1 Working name: pg_ripple_compile
-
-`pg_ripple_compile` can be either a module inside `pg_ripple_http` or a sibling
-companion service. The database extension should own catalogs, functions,
-validation, and graph writes. The service should own long-running LLM calls,
-document fetching, retries, rate limiting, and connector-specific behavior.
-
-The product promise:
-
-> Point pg_ripple at a stream or corpus of human-readable knowledge. It compiles
-> the corpus into a governed, queryable, incrementally maintained RDF knowledge
-> graph that agents and applications can use at runtime.
-
-This is deliberately more database-like than workflow-builder-like. The value is
-not that pg_ripple calls an LLM. The value is that the compiled artifact becomes
-part of a strongly governed PostgreSQL knowledge system.
-
-### 5.2 Target users
-
-- **Enterprise documentation teams** that want support, sales, product, and
-  engineering knowledge unified without forcing every source into one wiki.
-- **Research teams** that ingest papers, notes, lab results, and experiment logs
-  and need provenance-preserving synthesis.
-- **Customer intelligence teams** that compile interviews, tickets, CRM notes,
-  telemetry, and call transcripts into product and account insight graphs.
-- **AI platform teams** that need auditable context layers for agents and want
-  less query-time LLM work.
-- **Integration teams** already using event streams, where knowledge changes
-  should be published as structured events.
-
-## 6. Reference architecture
+That changes the product shape. We do not have to think only in terms of a batch
+indexer that periodically rebuilds a knowledge base. We can think in terms of a
+live knowledge system:
 
 ```text
-                 SOURCE LAYER
-  Documents, PDFs, Markdown, tickets, calls, events, APIs
+source changes -> compile only what changed -> validate -> update graph -> publish semantic events
+```
+
+That is the part that can make pg_ripple + pg_trickle more novel than the
+architecture in the article. The article describes a compiled knowledge base.
+The combined pg_ripple/pg_trickle design can become a **build system for living
+knowledge**.
+
+## 5. The product idea: pg_ripple_compile
+
+A useful working name is `pg_ripple_compile`.
+
+It could be a new companion service, or a module inside `pg_ripple_http`. The
+important design principle is separation of responsibilities:
+
+- pg_ripple owns the database truth: catalogs, graph writes, validation,
+  provenance, rules, and query behavior.
+- pg_ripple_compile owns the long-running AI work: document fetching, chunking,
+  LLM calls, retries, rate limits, and structured output checks.
+- pg_trickle owns event transport: inbound feeds, outboxes, retries, delivery,
+  and downstream integration.
+
+The product promise could be:
+
+> Point pg_ripple at a stream or corpus of human-readable knowledge. It compiles
+> that material into a governed, queryable, incrementally maintained knowledge
+> graph that humans, agents, and applications can use at runtime.
+
+This is deliberately more database-like than a workflow builder. The goal is not
+to hide everything behind a visual pipeline. The goal is to make the compiled
+knowledge durable, queryable, auditable, and operationally safe.
+
+## 6. How the system would work
+
+Here is the idea in one flow.
+
+```text
+                 SOURCE MATERIAL
+  Docs, PDFs, Markdown, tickets, calls, events, APIs
         |              |                 |
         | direct load   | pg_trickle      | scheduled fetch
         |              | reverse relay   |
         v              v                 v
   +--------------------------------------------------+
-  | PostgreSQL source registry and inbox tables       |
-  | _pg_ripple.source_documents                       |
-  | _pg_ripple.source_fragments                       |
-  | pg_trickle inboxes                                |
+  | Source registry and inbox tables                  |
+  | - what source arrived                             |
+  | - where it came from                              |
+  | - whether it changed                              |
+  | - which compiler profile should process it        |
   +-------------------------+------------------------+
                             |
                             v
-                 COMPILATION LAYER
+                 COMPILATION
   +--------------------------------------------------+
-  | pg_ripple_compile worker                          |
-  | - chunk / normalize / classify source             |
-  | - LLM fact extraction                             |
-  | - summary and QA generation                       |
-  | - entity linking and sameAs suggestions           |
-  | - confidence and source-trust scoring             |
-  | - SHACL and Datalog diagnostics                   |
+  | pg_ripple_compile                                 |
+  | - breaks large documents into stable sections     |
+  | - asks an LLM to extract facts and relationships  |
+  | - generates summaries and question-answer pairs   |
+  | - links entities to known entities                |
+  | - attaches confidence and evidence                |
+  | - records warnings and contradictions             |
   +-------------------------+------------------------+
                             |
                             v
-                  COMPILED STORE
+                 COMPILED KNOWLEDGE
   +--------------------------------------------------+
-  | pg_ripple RDF graph                               |
+  | pg_ripple knowledge graph                         |
   | - atomic facts                                    |
   | - entity pages                                    |
-  | - summary artifacts                               |
+  | - summaries                                       |
+  | - generated questions and answers                 |
+  | - evidence and provenance                         |
   | - dependency graph                                |
-  | - contradiction records                           |
-  | - embeddings and graph communities                |
+  | - confidence and trust scores                     |
   +-------------------------+------------------------+
                             |
         +-------------------+-------------------+
@@ -208,779 +216,436 @@ part of a strongly governed PostgreSQL knowledge system.
   RUNTIME QUERY                            CHANGE OUTPUT
   SPARQL, rag_context(),                   pg_trickle outbox,
   GraphRAG summaries,                      subscriptions,
-  agent navigation graph                   downstream agents
+  agent navigation graph                   downstream systems
 ```
 
-## 7. Core data model
+The most important concept here is the **source registry**. The system needs to
+remember what it compiled, when it compiled it, which prompt/profile it used,
+what source hash it saw, what artifacts it generated, and what depends on what.
+Without that memory, it becomes a batch re-indexer. With that memory, it becomes
+an incremental compiler.
 
-The RDF graph should remain the canonical compiled artifact. Catalog tables are
-still useful for operational state, scheduling, and dependency tracking.
+## 7. What gets stored
 
-### 7.1 Source documents
+The compiled result should not be only Markdown pages or blobs of text. Those
+can be generated for display, but the core artifact should be graph data.
 
-```sql
-CREATE TABLE _pg_ripple.source_documents (
-    id                  BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    source_uri          TEXT NOT NULL UNIQUE,
-    source_kind         TEXT NOT NULL, -- document, web_page, ticket, event_stream, transcript
-    source_system       TEXT,
-    content_hash        TEXT NOT NULL,
-    etag                TEXT,
-    last_source_update  TIMESTAMPTZ,
-    last_seen_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
-    compiled_graph_iri  TEXT NOT NULL,
-    status              TEXT NOT NULL DEFAULT 'pending',
-    created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at          TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-```
+### 7.1 Source records
 
-The named graph is the source boundary. A document with URI
-`https://example.com/policies/travel` could compile into
-`urn:pg-ripple:source:https%3A%2F%2Fexample.com%2Fpolicies%2Ftravel` or a
-deployment-specific graph IRI.
+For every source document or event, store the basics:
+
+- source URI or external ID
+- source type, such as document, ticket, transcript, web page, event stream
+- source system, such as Confluence, GitHub, Zendesk, Salesforce, Kafka
+- content hash
+- last source update time
+- graph IRI where compiled assertions live
+- compile status
+- timestamps for first seen, last seen, and last compiled
+
+This makes the system answer simple operational questions:
+
+- What sources are compiled?
+- Which sources changed?
+- Which sources failed compilation?
+- Which graph came from which source?
+- Which sources are stale?
 
 ### 7.2 Source fragments
 
-Large documents should be broken into deterministic fragments. The fragment is
-the compilation unit, not always the whole document.
+Large documents should be split into stable sections. A section might be a
+Markdown heading, a Confluence block, a PDF page, a transcript time range, or a
+support-ticket message.
 
-```sql
-CREATE TABLE _pg_ripple.source_fragments (
-    id                  BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    document_id         BIGINT NOT NULL REFERENCES _pg_ripple.source_documents(id),
-    fragment_key        TEXT NOT NULL,
-    byte_start          BIGINT,
-    byte_end            BIGINT,
-    token_count         INTEGER,
-    content_hash        TEXT NOT NULL,
-    compiled_at         TIMESTAMPTZ,
-    status              TEXT NOT NULL DEFAULT 'pending',
-    UNIQUE (document_id, fragment_key)
-);
-```
-
-Fragment keys should be stable across edits when possible: headings, page
-numbers, section IDs, message IDs, transcript timestamp ranges, or structural
-anchors from HTML/Markdown parsers.
+Fragment-level tracking matters because a 50-page document should not be fully
+recompiled when one section changes. The compiler should reprocess the changed
+section, then update only the facts, summaries, and entity pages that depend on
+that section.
 
 ### 7.3 Compiler profiles
 
-Compilation should be configurable by domain. A legal corpus, medical corpus,
-product-feedback corpus, and source-code-design corpus should not share one
-prompt.
+Different domains need different compilation instructions. A product-feedback
+profile should extract customers, features, pain points, sentiment, urgency, and
+evidence. A policy profile should extract owners, dates, scope, approvals, and
+exceptions. A research profile should extract claims, methods, datasets,
+metrics, and limitations.
 
-```sql
-CREATE TABLE _pg_ripple.compiler_profiles (
-    name                TEXT PRIMARY KEY,
-    version             INTEGER NOT NULL DEFAULT 1,
-    output_schema       JSONB NOT NULL,
-    prompt_template     TEXT NOT NULL,
-    shacl_shapes_graph  TEXT,
-    datalog_ruleset     TEXT,
-    llm_model           TEXT,
-    embedding_model     TEXT,
-    max_fragment_tokens INTEGER NOT NULL DEFAULT 4000,
-    created_at          TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-```
+A compiler profile should include:
 
-Profiles should be versioned because changing the prompt changes the compiled
-artifact. A source compiled under `support_ticket_v3` is not necessarily
-equivalent to the same source compiled under `support_ticket_v4`.
+- profile name and version
+- prompt template
+- expected output shape
+- validation rules
+- optional Datalog rules to run after compilation
+- preferred LLM model
+- preferred embedding model
+- maximum source size per fragment
+
+Versioning matters. If we change the prompt, we changed the compiler. The system
+should know which sources were compiled with which profile version.
 
 ### 7.4 Compiler runs and diagnostics
 
-```sql
-CREATE TABLE _pg_ripple.compiler_runs (
-    id                  BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    profile_name        TEXT NOT NULL REFERENCES _pg_ripple.compiler_profiles(name),
-    source_document_id  BIGINT REFERENCES _pg_ripple.source_documents(id),
-    source_fragment_id  BIGINT REFERENCES _pg_ripple.source_fragments(id),
-    run_kind            TEXT NOT NULL, -- full, incremental, repair, revalidate
-    status              TEXT NOT NULL,
-    input_hash          TEXT NOT NULL,
-    output_hash         TEXT,
-    model               TEXT,
-    prompt_tokens       INTEGER,
-    completion_tokens   INTEGER,
-    started_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
-    finished_at         TIMESTAMPTZ
-);
+Every compile attempt should leave a trace:
 
-CREATE TABLE _pg_ripple.compiler_diagnostics (
-    id                  BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    run_id              BIGINT NOT NULL REFERENCES _pg_ripple.compiler_runs(id),
-    severity            TEXT NOT NULL, -- info, warning, violation, blocked
-    diagnostic_code     TEXT NOT NULL,
-    subject_iri         TEXT,
-    message             TEXT NOT NULL,
-    evidence            JSONB,
-    created_at          TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-```
+- what source or fragment was compiled
+- which profile and model were used
+- whether the run succeeded
+- how many tokens it used
+- what output hash it produced
+- what warnings or errors appeared
 
-Diagnostics are the compiler-error analogue. Examples:
+Diagnostics are the "compiler errors" from the article. Examples:
 
-- `unresolved_entity`: extracted entity has no label or cannot be linked.
-- `contradictory_fact`: two trusted sources assert mutually exclusive values.
-- `low_confidence_extraction`: LLM emitted a fact below the configured threshold.
-- `shape_violation`: compiled graph failed SHACL validation.
-- `stale_dependency`: an artifact depends on a source fragment that changed.
+- unresolved entity
+- weak evidence
+- low confidence extraction
+- source contradiction
+- missing required field
+- SHACL validation failure
+- stale dependency
+- LLM output did not match the expected schema
 
-### 7.5 Artifact dependencies
+This is important for trust. A useful knowledge system should not silently turn
+messy documents into questionable facts. It should show its work.
 
-The dependency graph is the key to incremental compilation.
+### 7.5 Compiled artifacts and dependencies
 
-```sql
-CREATE TABLE _pg_ripple.compiled_artifacts (
-    id                  BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    artifact_iri        TEXT NOT NULL UNIQUE,
-    artifact_kind       TEXT NOT NULL, -- fact, entity_page, summary, qa_pair, index_node, embedding
-    graph_iri           TEXT NOT NULL,
-    profile_name        TEXT NOT NULL,
-    content_hash        TEXT NOT NULL,
-    generated_by_run    BIGINT REFERENCES _pg_ripple.compiler_runs(id),
-    valid_from          TIMESTAMPTZ NOT NULL DEFAULT now(),
-    valid_until         TIMESTAMPTZ
-);
+A compiled artifact can be a fact, summary, entity page, generated question,
+generated answer, embedding, index entry, or diagnostic.
 
-CREATE TABLE _pg_ripple.artifact_dependencies (
-    artifact_id         BIGINT NOT NULL REFERENCES _pg_ripple.compiled_artifacts(id),
-    dependency_kind     TEXT NOT NULL, -- source_fragment, source_document, entity, artifact, rule
-    dependency_ref      TEXT NOT NULL,
-    dependency_hash     TEXT,
-    PRIMARY KEY (artifact_id, dependency_kind, dependency_ref)
-);
-```
+Each artifact should know what it depends on:
 
-This is the table that lets the system answer: "which entity pages, summaries,
-QA pairs, communities, embeddings, and outbox events need to change because this
-document fragment changed?"
+- source fragment
+- source document
+- entity
+- compiler profile
+- rule set
+- another artifact
 
-## 8. RDF vocabulary for compiled knowledge
+That dependency graph is what enables incremental compilation. If one support
+ticket changes, the system can ask: which extracted facts came from this ticket?
+Which customer profile used those facts? Which summary mentioned that customer?
+Which generated answer now needs a refresh?
 
-The report should not prescribe every vocabulary, but a small first-party
-namespace would make compiled artifacts predictable.
+## 8. What the compiled knowledge looks like
 
-Suggested namespace: `https://pg-ripple.dev/ns/compile#`, abbreviated `pgc:`.
+The compiled knowledge should include several layers. Each layer supports a
+different kind of question.
 
-Core classes:
+### 8.1 Atomic facts
 
-- `pgc:SourceDocument`
-- `pgc:SourceFragment`
-- `pgc:CompilerRun`
-- `pgc:CompiledArtifact`
-- `pgc:EntityPage`
-- `pgc:AtomicFact`
-- `pgc:GeneratedQuestion`
-- `pgc:GeneratedAnswer`
-- `pgc:CompilerDiagnostic`
-- `pgc:KnowledgeIndex`
-- `pgc:IndexEntry`
+Atomic facts are small, precise statements. For example:
 
-Core predicates:
+- Customer A requested SSO.
+- Policy B requires manager approval.
+- Paper C uses method D.
+- Incident E affected service F.
 
-- `pgc:compiledFrom`
-- `pgc:generatedByRun`
-- `pgc:dependsOn`
-- `pgc:hasConfidence`
-- `pgc:hasEvidenceText`
-- `pgc:hasSourceOffset`
-- `pgc:hasSummaryShort`
-- `pgc:hasSummaryMedium`
-- `pgc:hasSummaryLong`
-- `pgc:answersQuestion`
-- `pgc:relatedArtifact`
-- `pgc:invalidatedBy`
-- `pgc:diagnosticCode`
-- `pgc:repairSuggestion`
+These facts should carry evidence and confidence. A fact without evidence should
+not be treated the same as a fact with a clear source quote.
 
-PROV-O should be used wherever possible instead of inventing equivalents:
+In pg_ripple, these facts become RDF triples. Extra information about a fact,
+such as confidence or source quote, can be stored with RDF-star annotations.
 
-- `prov:wasDerivedFrom` for source linkage.
-- `prov:generatedAtTime` for compile timestamps.
-- `prov:wasGeneratedBy` for compiler runs.
-- `prov:wasAttributedTo` for source systems, users, or agents.
+### 8.2 Entity pages
 
-RDF-star annotations should capture statement-level provenance and confidence:
+The article talks about a compiled wiki. In pg_ripple, an entity page should be
+more than a text page. It should be an entity-centered graph bundle:
 
-```turtle
-<< ex:product-42 ex:hasPainPoint ex:slow-onboarding >>
-    prov:wasDerivedFrom <urn:source:support-ticket-987> ;
-    pgc:hasConfidence "0.83"^^xsd:double ;
-    pgc:hasEvidenceText "It took our new admins three days to get configured" .
-```
-
-This makes answers auditable at the fact level, not just document level.
-
-## 9. Proposed APIs
-
-### 9.1 Register a compiler profile
-
-```sql
-SELECT pg_ripple.register_compiler_profile(
-    name            => 'product_feedback',
-    output_schema   => '{
-      "entities": ["Customer", "Product", "Feature", "PainPoint"],
-      "relationships": ["requests", "blocks", "mentions", "duplicates"],
-      "summaries": ["short", "medium", "long"],
-      "qa_pairs": true
-    }'::jsonb,
-    prompt_template => $prompt$
-      Extract product feedback as RDF-ready JSON.
-      Use only facts supported by the source text.
-      Include evidence spans and confidence for each fact.
-    $prompt$,
-    shacl_shapes_graph => 'urn:pg-ripple:shapes:product-feedback',
-    datalog_ruleset    => 'product_feedback_alignment'
-);
-```
-
-### 9.2 Compile a document
-
-```sql
-SELECT pg_ripple.compile_document(
-    source_uri      => 'https://docs.example.com/product/onboarding',
-    content         => $doc$ ... $doc$,
-    profile         => 'product_feedback',
-    graph_iri       => 'urn:source:docs:product:onboarding',
-    mode            => 'incremental'
-);
-```
-
-The SQL function should enqueue work and return a run ID for non-trivial
-documents. Synchronous compilation is useful for tests and tiny documents, but
-production deployments should let the companion worker perform long-running LLM
-calls outside backend transactions.
-
-### 9.3 Compile from a pg_trickle inbox
-
-```sql
-SELECT pg_ripple.attach_compiler_to_inbox(
-    inbox_table       => 'support_ticket_inbox',
-    source_uri_expr   => 'payload->>''ticket_url''',
-    content_expr      => 'payload->>''body''',
-    profile           => 'support_ticket',
-    graph_iri_expr    => '''urn:source:support:'' || (payload->>''ticket_id'')'
-);
-```
-
-This is the event-native path. A ticket update, transcript arrival, or customer
-review enters through pg_trickle, becomes a source document/fragment row, and
-queues only the affected compilation work.
-
-### 9.4 Recompile changed sources
-
-```sql
-SELECT pg_ripple.recompile_changed_sources(
-    profile        => 'product_feedback',
-    max_documents  => 100,
-    reason         => 'source_hash_changed'
-);
-```
-
-### 9.5 Inspect compiler diagnostics
-
-```sql
-SELECT *
-FROM pg_ripple.compiler_diagnostics(
-    severity_at_least => 'warning',
-    graph_iri         => 'urn:source:docs:product:onboarding'
-);
-```
-
-### 9.6 Query the compiled knowledge base
-
-```sql
-SELECT pg_ripple.rag_context(
-    question       => 'Which onboarding pain points are mentioned by enterprise customers?',
-    max_triples    => 200,
-    include_types  => true,
-    include_labels => true
-);
-```
-
-### 9.7 Subscribe to compiled artifact changes
-
-```sql
-SELECT pg_ripple.create_subscription(
-    name             => 'compiled_product_feedback',
-    query            => $sparql$
-      CONSTRUCT {
-        ?feature ex:hasPainPoint ?pain .
-        ?pain pgc:hasConfidence ?confidence .
-      }
-      WHERE {
-        ?feature ex:hasPainPoint ?pain .
-        << ?feature ex:hasPainPoint ?pain >> pgc:hasConfidence ?confidence .
-        FILTER(?confidence >= 0.75)
-      }
-    $sparql$,
-    outbox_table     => 'compiled_feedback_outbox',
-    include_inferred => true
-);
-
-SELECT pgtrickle.set_relay_outbox(
-    'compiled-feedback-to-kafka',
-    outbox => 'compiled_feedback_outbox',
-    group  => 'feedback-publisher',
-    sink   => '{"type":"kafka","topic":"knowledge.compiled.feedback"}'
-);
-```
-
-## 10. Compilation outputs
-
-The article lists common compiled outputs. pg_ripple should represent all of
-them in graph-native form.
-
-### 10.1 Atomic facts
-
-Atomic facts are normal triples plus provenance annotations. They are the
-highest-value artifact because they support exact SPARQL, Datalog, SHACL, and
-CDC.
-
-Examples:
-
-- `ex:policy-17 ex:requiresApproval ex:manager-approval`
-- `ex:customer-42 ex:requests ex:feature-sso-scim`
-- `ex:paper-123 ex:usesMethod ex:contrastive-learning`
-
-### 10.2 Entity pages
-
-The article's "wiki page" maps naturally to an entity-centric subgraph, not
-only a Markdown blob. For each entity:
-
-- labels and aliases
-- type/class assignments
-- canonical URI and `owl:sameAs` links
-- short/medium/long summaries
-- key relationships
-- source coverage list
-- contradiction list
+- name and aliases
+- type or category
+- canonical ID
+- links to duplicate or equivalent entities
+- short, medium, and long summaries
+- important relationships
+- source coverage
+- known contradictions
 - confidence score
 - embedding vector
 - related entities and communities
 
-The entity page can be rendered as Markdown or JSON-LD, but the stored artifact
-should be graph data.
+Applications can render this as a wiki page, JSON-LD document, API response, or
+LLM context block. The stored form should stay graph-native.
 
-### 10.3 Multi-granularity summaries
+### 8.3 Summaries at different levels
 
-Summaries should be RDF literals attached to source fragments, source documents,
-entities, communities, and queryable topics.
-
-Suggested predicates:
-
-- `schema:description` for short summary.
-- `schema:abstract` for paragraph summary.
-- `pgc:hasSummaryLong` for detailed summary.
-
-Summaries should carry `prov:wasDerivedFrom` and a content hash so they can be
-invalidated when their dependencies change.
-
-### 10.4 Generated QA pairs
-
-Generated QA pairs are useful for retrieval and evaluation. Store them as first
-class artifacts:
-
-```turtle
-<urn:qa:source-42:q7> a pgc:GeneratedQuestion ;
-    schema:text "What approvals are required for international travel?" ;
-    pgc:answersQuestion <urn:qa:source-42:a7> ;
-    prov:wasDerivedFrom <urn:source:travel-policy> .
-
-<urn:qa:source-42:a7> a pgc:GeneratedAnswer ;
-    schema:text "International travel requires manager and finance approval." ;
-    pgc:dependsOn ex:manager-approval, ex:finance-approval .
-```
-
-These pairs can train domain examples for `sparql_from_nl()`, seed evaluation
-sets, and support fast retrieval for common questions.
-
-### 10.5 Knowledge index graph
-
-Karpathy's related "index file" idea can become a queryable graph instead of a
-single `index.md` document.
-
-The index graph should contain:
-
-- top-level topics
-- entity clusters
-- source coverage by topic
-- recommended traversal paths
-- representative questions
-- community reports
-- freshness and confidence metadata
-
-Example:
-
-```sparql
-SELECT ?topic ?label ?summary ?related
-WHERE {
-  GRAPH <urn:pg-ripple:index> {
-    ?topic a pgc:IndexEntry ;
-           rdfs:label ?label ;
-           schema:abstract ?summary ;
-           skos:related ?related .
-  }
-}
-```
-
-This gives agents a stable navigation map without depending only on vector
-similarity. Embeddings still help, but they become one access path over a richer
-index.
-
-## 11. Incremental compilation design
-
-Incremental compilation is where pg_ripple plus pg_trickle can be genuinely
-novel.
-
-### 11.1 Change detection
-
-For each source document or fragment, store:
-
-- source URI
-- stable fragment key
-- content hash
-- last source timestamp
-- compiler profile version
-- output hash
-- dependency hash set
-
-If the source content hash and compiler profile version are unchanged, skip the
-LLM call. If the prompt/profile changes, recompile only artifacts produced by
-that profile.
-
-### 11.2 Dependency invalidation
-
-When a fragment changes:
-
-1. Mark the fragment as dirty.
-2. Find artifacts where `artifact_dependencies` references that fragment.
-3. Mark dependent entity pages, summaries, QA pairs, embeddings, and index nodes
-   as stale.
-4. Recompile the changed fragment.
-5. Diff old and new compiled triples.
-6. Apply triple insertions/deletions through pg_ripple's normal mutation path.
-7. Let CONSTRUCT writeback, Datalog, SHACL, subscriptions, and pg_trickle
-   outboxes propagate downstream effects.
-
-### 11.3 Graph diff instead of text overwrite
-
-The compiler should not blindly delete a whole source graph and insert a new
-one unless the deployment chooses that mode. Better modes:
-
-- `append`: keep previous compiled facts; add newly extracted facts.
-- `replace_graph`: delete and reload the source graph.
-- `diff`: compute old vs new compiled triples and apply only delta.
-- `review`: store candidate facts in a staging graph until approved.
-
-The `diff` mode is the most interesting. It lets pg_trickle and pg_ripple work
-as a real incremental build system rather than a batch loader.
-
-### 11.4 pg_trickle stream table use
-
-Potential stream tables:
-
-- `source_document_changes`: new or changed source rows.
-- `compiler_work_queue`: work items derived from source deltas.
-- `compiled_triple_delta`: LLM output diff represented as Z-set triples.
-- `compiled_artifact_changes`: entity-page, summary, QA, and index updates.
-- `compiler_diagnostics_outbox`: warnings/errors for UI or human review.
-
-This gives operators observable queues and lets the relay publish progress to
-external systems.
-
-### 11.5 Delete and rederive for uncertain derived knowledge
-
-Some derived artifacts are not simple enough for Z-set maintenance. Examples:
-
-- community summaries
-- global corpus summaries
-- contradiction explanations
-- cluster labels
-- graph embeddings
-
-For those, use a DRed-like strategy: mark affected artifact as stale, rederive
-from surviving dependencies, then atomically swap the artifact version.
-
-### 11.6 Build graph visualization
-
-The dependency graph should be queryable:
-
-```sql
-SELECT *
-FROM pg_ripple.explain_compilation(
-    source_uri => 'https://docs.example.com/product/onboarding'
-);
-```
-
-Output should show:
+The compiler should generate summaries for:
 
 - source fragments
-- compiler profile
-- generated artifacts
-- downstream CONSTRUCT views
-- Datalog rules touched
-- subscriptions/outboxes affected
-- stale artifacts waiting for rebuild
+- whole source documents
+- entities
+- topics
+- communities of related entities
+- the corpus as a whole
 
-This is the knowledge-base equivalent of `cargo tree`, `make -n`, or an EXPLAIN
-plan.
+Short summaries help navigation. Medium summaries help answer common questions.
+Long summaries help users inspect a topic. All summaries should link back to the
+sources and artifacts they depend on.
 
-## 12. Query-time runtime design
+### 8.4 Generated questions and answers
 
-The query-time path should use the compiled graph first, raw source second.
+The compiler can generate likely questions that the source material answers.
+Those pairs are useful for:
 
-### 12.1 Exact retrieval path
+- testing whether the knowledge base still answers correctly after updates
+- improving `sparql_from_nl()` with examples
+- helping users discover what the knowledge base knows
+- speeding up common query paths
 
-For questions with structural answers, use `sparql_from_nl()` -> SPARQL ->
-`rag_context()`.
+For example, from a travel policy, it might generate:
 
-Examples:
+- Question: What approvals are required for international travel?
+- Answer: International travel requires manager and finance approval.
+- Evidence: policy section 4.2
+- Dependencies: approval facts extracted from that section
 
-- "Which policies apply to contractors in Germany?"
-- "Which accounts mention both SCIM and audit-log gaps?"
-- "Which product areas have more than five high-confidence pain points this
-  month?"
-- "Which documents contradict the current security policy?"
+### 8.5 A knowledge index graph
 
-These should compile to SPARQL and Datalog-backed graph traversal, not vector
-chunk search.
+Karpathy also discusses the idea of an index file that helps agents navigate a
+knowledge base. pg_ripple can make that index a graph instead of a single text
+file.
 
-### 12.2 Index navigation path
+The index graph could contain:
 
-For broad questions, query the index graph and community summaries first:
-
-- topic taxonomy
-- community reports
-- entity centrality
-- recent changes
+- top-level topics
+- related topics
+- key entities
 - source coverage
+- representative questions
+- community summaries
+- freshness and confidence metadata
 
-Then perform targeted local graph retrieval. This resembles GraphRAG global and
-local search, but keeps the graph live in PostgreSQL.
+This gives agents a map. They can start with the index graph, choose relevant
+topics, and then follow exact graph links to evidence.
 
-### 12.3 Hybrid fallback path
+## 9. How users would query it
 
-Use vector search over summaries, evidence spans, entity descriptions, and QA
-pairs when exact SPARQL cannot identify the target. Importantly, the retrieved
-vector hit should point back to graph artifacts and evidence spans. The LLM
-should receive:
+The query-time rule should be simple:
 
-- exact triples
+> Use compiled knowledge first. Use raw source text only when needed as evidence.
+
+There are three main query paths.
+
+### 9.1 Exact graph questions
+
+Some questions are really relationship questions:
+
+- Which customers asked for both SSO and audit logging?
+- Which policies apply to contractors in Germany?
+- Which features have more than five high-confidence pain points this month?
+- Which documents contradict the current security policy?
+
+These should be answered with SPARQL and Datalog over compiled facts, not by
+asking an LLM to read chunks and do set logic in its head.
+
+### 9.2 Broad sensemaking questions
+
+Some questions are broad:
+
+- What are the main themes in recent customer feedback?
+- What changed in the compliance corpus this week?
+- Which research areas are converging?
+- What are the biggest unresolved product risks?
+
+These should start with the index graph, communities, and summaries, then drill
+down into exact facts and evidence.
+
+### 9.3 Hybrid fallback
+
+Vector search is still useful, but it should search over cleaner artifacts:
+
 - summaries
-- confidence/provenance
-- source snippets when needed
-- diagnostics or contradictions
+- evidence spans
+- entity descriptions
+- generated questions
+- generated answers
 
-The raw document should be fallback evidence, not the primary runtime artifact.
+When vector search finds something relevant, it should point back to graph
+artifacts and source evidence. The final LLM prompt should include structured
+facts, provenance, confidence, and contradictions, not just raw text snippets.
 
-### 12.4 Answer packages
+## 10. The most novel ideas
 
-Return a structured answer package before natural-language generation:
+The article describes a compiled knowledge base. pg_ripple + pg_trickle can go
+further.
 
-```json
-{
-  "question": "Which onboarding pain points are mentioned by enterprise customers?",
-  "triples": [...],
-  "summaries": [...],
-  "evidence": [...],
-  "contradictions": [...],
-  "confidence": 0.86,
-  "sources": [...],
-  "staleness": "fresh"
-}
-```
+### 10.1 A live knowledge compiler
 
-The final LLM response should be a rendering of this package. Applications can
-also consume the package directly.
+The compiled output should not be a static wiki that gets refreshed overnight.
+It should be a live graph that updates when source material changes.
 
-## 13. Novel ideas beyond the article
+This means:
 
-### 13.1 Live knowledge compiler, not static wiki
+- a changed source fragment marks dependent artifacts stale
+- only affected artifacts rebuild
+- SHACL checks the new compiled output
+- Datalog derives follow-on facts
+- subscriptions publish semantic changes
+- downstream systems receive updates quickly
 
-The article's compiled artifact is wiki-like. pg_ripple can make the compiled
-artifact executable: SPARQL queries, Datalog rules, SHACL constraints, CONSTRUCT
-views, subscriptions, and CDC events all operate over it.
+### 10.2 Knowledge CI/CD
 
-The compiled output is not just readable. It is computable.
+Source changes can be treated like code changes.
 
-### 13.2 Knowledge CI/CD
+Before new compiled knowledge is published, the system can run checks:
 
-Treat source updates like commits:
+- Did the LLM output match the expected shape?
+- Did required fields exist?
+- Did SHACL validation pass?
+- Did the new facts introduce contradictions?
+- Did important generated questions still answer correctly?
+- Which answers changed?
 
-- compile changed documents
-- run SHACL tests
-- run Datalog contradiction tests
-- run generated QA regression tests
-- compare answer-package diffs
-- publish only if checks pass
+This creates a CI/CD pipeline for knowledge, not just software.
 
-`compiler_diagnostics` becomes the equivalent of build output. pg_trickle outbox
-events become CI notifications. Human reviewers can approve or reject staged
-graphs.
+### 10.3 Semantic pull requests
 
-### 13.3 Semantic pull requests
-
-A document update can produce a semantic diff:
+When a document changes, users usually review text diffs. A compiled knowledge
+system can show a more useful diff:
 
 - facts added
 - facts removed
-- entity links changed
-- contradictions introduced/resolved
+- relationships changed
+- entities merged or split
 - summaries invalidated
-- answers affected
+- contradictions introduced or resolved
+- generated answers affected
 
-Instead of reviewing a raw document diff, a domain owner reviews the knowledge
-diff. This is a stronger human-in-the-loop workflow than most RAG systems offer.
+Domain experts could review the knowledge change instead of reading every
+sentence of the source diff.
 
-### 13.4 Source-trust and probabilistic compilation
+### 10.4 Source trust and uncertain knowledge
 
-v0.87.0's uncertain knowledge work fits perfectly. The compiler can assign
-confidence to extracted facts, while source graphs carry trust scores. Datalog
-can propagate confidence through derived facts. SHACL can produce soft quality
-scores.
+Not all sources are equally trustworthy, and not all extracted facts are equally
+certain. This fits well with the planned uncertain-knowledge work in v0.87.0.
 
-This supports answers like:
+The compiler can attach confidence to facts. Source graphs can carry trust
+scores. Datalog can propagate confidence through derived facts. SHACL can produce
+soft quality scores.
+
+That lets the system say things like:
 
 > The strongest supported answer is A with confidence 0.82. Source B disagrees,
-> but it has lower trust and older provenance.
+> but it is older and has lower trust.
 
-That is more useful than hiding conflicts or pretending all extracted facts are
-equally true.
+That is much better than pretending every extracted fact is equally true.
 
-### 13.5 Agent memory bus
+### 10.5 An agent memory bus
 
-pg_trickle can turn compiled knowledge changes into events that agents subscribe
-to:
+pg_trickle can publish semantic events for agents:
 
 - `entity.updated`
+- `policy.changed`
 - `policy.contradiction.detected`
-- `source.needs_review`
 - `summary.invalidated`
+- `source.needs_review`
 - `answer_package.changed`
 
-Agents no longer need to poll a vector store. They can react to semantic change
-events with exactly-once or at-least-once delivery semantics depending on relay
-configuration.
+Agents would not need to poll a vector store. They could subscribe to meaningful
+knowledge changes.
 
-### 13.6 Bidirectional compiled knowledge
+### 10.6 Human correction loops
 
-The v0.77/v0.78 bidirectional primitives suggest a powerful extension: downstream
-systems can write corrections, labels, linkbacks, and human approvals back into
-the graph. pg_ripple then resolves conflicts and republishes the resolved
-projection.
+The bidirectional integration work from v0.77/v0.78 points to a powerful loop:
 
-Example loop:
+1. The compiler extracts a fact from a transcript.
+2. A product manager corrects it in a review UI.
+3. The UI sends the correction back through pg_trickle.
+4. pg_ripple stores the correction in a higher-priority human-review graph.
+5. Conflict rules prefer the human-reviewed fact over the lower-confidence LLM
+   extraction.
+6. The corrected knowledge is published downstream.
 
-1. LLM extracts `customer-42 ex:requests ex:sso` from a call transcript.
-2. Product manager corrects it to `ex:scim` in a UI.
-3. UI sends a correction event through pg_trickle inbox.
-4. pg_ripple records the correction in a higher-priority human-review graph.
-5. Conflict policy suppresses the lower-confidence extraction.
-6. Outbox publishes the resolved knowledge update.
+This keeps the LLM as an assistant, not the source of truth.
 
-This turns the compiled knowledge base into a learning system without treating
-the LLM as the source of truth.
+### 10.7 Knowledge packages
 
-### 13.7 Speculative precompilation
+Once a corpus is compiled, it could be packaged:
 
-The compiler can generate likely questions and precompute retrieval plans:
-
-- generated QA pairs become few-shot examples for `sparql_from_nl()`
-- common questions get cached SPARQL templates
-- entity pages precompute neighbor summaries
-- community reports precompute broad answer outlines
-
-This lowers query latency and creates stable, testable answer paths.
-
-### 13.8 Knowledge packages
-
-Compile a corpus into a portable package:
-
-- RDF named graphs
+- named RDF graphs
 - SHACL shapes
 - Datalog rules
 - compiler profile
-- GraphRAG community summaries
+- summaries and generated questions
 - embeddings metadata
-- QA evaluation set
 - provenance manifest
+- evaluation set
 
-This could become a distribution format for domain knowledge: install a package
-into pg_ripple, run validation, and immediately query it. Think "extension" for
-knowledge domains, not only code.
+That could become a distribution format for domain knowledge. Install a package
+into pg_ripple, validate it, and query it immediately.
 
-### 13.9 Federated compiled knowledge
+### 10.8 Federated compiled knowledge
 
-A company may not want to centralize all raw source content. pg_ripple's SPARQL
-federation plus compiled artifact exchange can support a federated design:
+Some organizations cannot centralize all raw documents. pg_ripple's federation
+support makes another design possible:
 
-- each department compiles its own documents locally
-- only compiled summaries/facts are shared
-- sensitive raw text never leaves the source domain
-- cross-domain queries use SERVICE or replicated safe summaries
+- each department compiles its own sources locally
+- only approved compiled facts or summaries are shared
+- sensitive raw text stays in the source domain
+- cross-domain queries use federation or replicated safe summaries
 
-This is a privacy-preserving variation of the architecture.
+This could be valuable for regulated or privacy-sensitive environments.
 
-## 14. Example end-to-end scenarios
+## 11. Example use cases
 
-### 14.1 Enterprise documentation compiler
+### 11.1 Enterprise documentation
 
-Inputs:
+Sources:
 
 - Confluence pages
 - GitHub Markdown docs
-- Slack/Teams decision logs
 - policy PDFs
-- support KB articles
+- support knowledge-base articles
+- decision logs
 
-Pipeline:
+What gets compiled:
 
-1. pg_trickle reverse relay ingests page-change events and webhook payloads.
-2. `pg_ripple_compile` fetches or receives source text.
-3. Compiler profile extracts policies, owners, products, procedures, exceptions,
-   and related systems.
-4. SHACL checks every policy has owner, effective date, and scope.
-5. Datalog derives policy applicability and detects conflicts.
-6. Index graph organizes knowledge by team, system, policy area, and freshness.
-7. `rag_context()` answers employee questions with provenance.
-8. pg_trickle publishes `policy.changed` and `policy.contradiction` events.
+- policies
+- owners
+- effective dates
+- product areas
+- required approvals
+- exceptions
+- related systems
+- contradictions between documents
 
-Why this beats raw RAG: policy questions often require exact applicability,
-dates, ownership, exceptions, and contradictions. Those are graph queries, not
-chunk similarity problems.
+Why it matters:
 
-### 14.2 Product intelligence compiler
+Policy questions often require exact scope, dates, exceptions, and ownership.
+Those are hard for raw chunk retrieval and much better as structured facts.
 
-Inputs:
+### 11.2 Product intelligence
+
+Sources:
 
 - support tickets
-- Gong/Zoom call transcripts
+- call transcripts
 - CRM notes
-- app telemetry events
-- product feedback forms
+- telemetry events
+- feedback forms
 
-Pipeline:
+What gets compiled:
 
-1. Each source enters through a source-specific graph.
-2. Compiler extracts customer, account, feature, pain point, sentiment, urgency,
-   and evidence spans.
-3. Entity resolution links CRM accounts, ticket users, and transcript speakers.
-4. Confidence combines source trust and extraction confidence.
-5. Datalog derives themes, duplicates, and account-level risk.
-6. Community summaries describe clusters of pain points.
-7. Outbox sends high-confidence product signals to roadmap tools.
+- customers
+- accounts
+- product areas
+- features
+- pain points
+- sentiment
+- urgency
+- evidence quotes
+- duplicate requests
 
-Novel output: not just "summaries of feedback", but an incrementally maintained
-semantic product graph with exact links from feature requests to accounts,
-source evidence, confidence, and trend changes.
+Why it matters:
 
-### 14.3 Research-library compiler
+The result is not just a pile of feedback summaries. It is a live product graph:
+which accounts asked for what, how confident we are, what evidence supports it,
+how the trend changed, and which downstream systems should be notified.
 
-Inputs:
+### 11.3 Research library
+
+Sources:
 
 - papers
 - lab notes
@@ -988,259 +653,242 @@ Inputs:
 - citations
 - experiment metadata
 
-Pipeline:
+What gets compiled:
 
-1. Compiler extracts claims, methods, datasets, metrics, baselines, and
-   limitations.
-2. Datalog normalizes metric comparisons and derives citation influence.
-3. SHACL validates claim structure and required evidence.
-4. Contradiction rules identify conflicting results under similar conditions.
-5. Index graph maps research areas, methods, and open questions.
+- claims
+- methods
+- datasets
+- metrics
+- baselines
+- limitations
+- conflicting results
+- open questions
 
-Novel output: a living research map where new papers invalidate or strengthen
-existing claims.
+Why it matters:
 
-### 14.4 Operational event compiler
+A new paper can strengthen, weaken, or contradict existing claims. The system
+can show what changed in the research map instead of only summarizing the new
+paper in isolation.
 
-Inputs:
+### 11.4 Operations memory
+
+Sources:
 
 - alerts
 - incident reports
-- deploy events
-- logs summarized by upstream services
+- deployment events
+- summarized logs
 - runbook changes
 
-Pipeline:
+What gets compiled:
 
-1. pg_trickle relays events into inbox tables.
-2. Compiler turns incidents and logs into typed operational facts.
-3. Datalog links symptoms to services, deploys, owners, and runbooks.
-4. SHACL ensures incidents have severity, affected service, and timeline.
-5. Outbox emits derived `probable_root_cause` or `runbook.updated` events.
+- symptoms
+- affected services
+- owners
+- deploys
+- probable causes
+- remediation steps
+- runbook links
 
-Novel output: an agent-ready operations memory that improves after every
-incident and can answer "what changed before this alert pattern?" with graph
-evidence.
+Why it matters:
 
-## 15. MVP scope
+The knowledge base can answer questions like "what changed before this alert
+pattern?" with evidence from previous incidents and deployments.
 
-The first version should be deliberately small. Avoid building a general
-workflow engine. Use PostgreSQL catalogs, pg_ripple graph writes, and one
-companion worker.
+## 12. Suggested first version
 
-### 15.1 MVP deliverables
+The first version should be intentionally small. It should prove the idea
+without trying to become a full workflow platform.
 
-1. `_pg_ripple.source_documents`, `_pg_ripple.source_fragments`,
-   `_pg_ripple.compiler_profiles`, `_pg_ripple.compiler_runs`,
-   `_pg_ripple.compiler_diagnostics`, `_pg_ripple.compiled_artifacts`, and
-   `_pg_ripple.artifact_dependencies`.
-2. `pg_ripple.register_compiler_profile(...)`.
-3. `pg_ripple.enqueue_compile_document(...)`.
-4. `pg_ripple.compiler_queue()` and `pg_ripple.compiler_diagnostics()` SRFs.
-5. `pg_ripple_compile` worker with OpenAI-compatible endpoint support, mock mode,
-   rate limits, retry/backoff, and structured JSON output validation.
-6. Basic compiled vocabulary: source, fragment, compiler run, atomic fact,
-   summary, QA pair, diagnostic.
-7. SHACL validation of compiler output before publish.
-8. Named graph write modes: `append`, `replace_graph`, `review`.
-9. Graph-level provenance and statement-level confidence annotations.
-10. A simple index graph generated from entities, summaries, and communities.
-11. pg_trickle inbox attachment for source events.
-12. pg_trickle outbox publication for compiler diagnostics and compiled artifact
-    changes.
+### 12.1 MVP features
 
-### 15.2 Explicit non-goals for MVP
+1. Source registry for documents and fragments.
+2. Compiler profiles with prompt, version, expected output, and validation
+   rules.
+3. Compile queue and run history.
+4. Diagnostics table for warnings and errors.
+5. `pg_ripple_compile` worker with OpenAI-compatible endpoint support.
+6. Mock compiler mode for deterministic tests.
+7. Basic compiled artifacts: facts, summaries, generated QA pairs, entity pages,
+   diagnostics.
+8. Statement-level provenance and confidence.
+9. SHACL validation before publishing compiled facts.
+10. Named graph write modes: append, replace, review, and later diff.
+11. Simple index graph for topics and entity navigation.
+12. pg_trickle inbox attachment for source events.
+13. pg_trickle outbox publication for diagnostics and artifact changes.
 
-- No custom UI.
-- No arbitrary workflow DAG editor.
-- No first-party document connectors beyond pg_trickle-compatible inboxes and
-  direct SQL/API calls.
-- No automatic deletion of raw source data.
-- No promise that LLM-extracted facts are trusted without SHACL/profile checks.
-- No global corpus re-summarization on every change.
+### 12.2 Things to avoid in the first version
 
-## 16. Later phases
+- No custom UI yet.
+- No general workflow DAG editor.
+- No large connector catalog.
+- No automatic trust in LLM-extracted facts.
+- No full-corpus re-summarization on every change.
+- No hidden destructive deletes during recompilation.
 
-### Phase 1: Document compiler foundation
+The demo should show one strong flow: a source changes, only the affected part is
+recompiled, the graph is updated, validation runs, and a meaningful change event
+is published.
 
-- Catalogs and SQL APIs.
-- Companion worker.
-- Structured LLM output validation.
-- Basic RDF/provenance vocabulary.
-- Mock mode for CI.
-- End-to-end tests on small Markdown and JSON fixtures.
+## 13. Later phases
+
+### Phase 1: Foundation
+
+- Add source/compiler catalogs.
+- Add SQL APIs for registering profiles and enqueueing compilation.
+- Build the companion worker.
+- Validate structured LLM output.
+- Add mock mode for CI.
+- Compile a small Markdown or ticket corpus end to end.
 
 ### Phase 2: Incremental compilation
 
-- Stable fragmenter.
-- Artifact dependency graph.
-- Diff mode for compiled triples.
-- Stale artifact tracking.
-- pg_trickle stream tables for work queues and outboxes.
-- `explain_compilation()`.
+- Add stable document fragmenting.
+- Track artifact dependencies.
+- Add stale-artifact handling.
+- Add diff mode for compiled triples.
+- Use pg_trickle stream tables for queues and outboxes.
+- Add `explain_compilation()` so users can see what depends on what.
 
 ### Phase 3: Graph-native compiled wiki
 
-- Entity pages.
-- Topic index graph.
-- Multi-granularity summaries.
-- Generated QA pairs.
-- Community summaries maintained from compiled graph.
-- `rag_context()` integration that prefers compiled artifacts.
+- Generate entity pages.
+- Generate topic index graphs.
+- Generate multi-level summaries.
+- Generate question-answer pairs.
+- Integrate compiled artifacts into `rag_context()`.
+- Maintain community summaries from the compiled graph.
 
-### Phase 4: Review, trust, and uncertainty
+### Phase 4: Review and trust
 
-- Human-review staging graphs.
-- Conflict policies for LLM vs human vs source-system assertions.
-- Source trust scores.
-- Confidence propagation using probabilistic Datalog.
-- Soft SHACL compilation-quality scores.
-- Semantic diffs for review.
+- Add review graphs for human approval.
+- Add conflict policies for source vs LLM vs human assertions.
+- Add source trust scores.
+- Use probabilistic Datalog for confidence propagation.
+- Add semantic diffs for reviewers.
 
-### Phase 5: Event-native agent ecosystem
+### Phase 5: Agent ecosystem
 
-- Agent subscriptions to compiled artifact changes.
-- Answer-package invalidation events.
-- Knowledge package export/import.
-- Federated compiled knowledge exchange.
-- Benchmarks versus vector RAG and static GraphRAG.
+- Publish semantic change events for agents.
+- Invalidate cached answer packages when knowledge changes.
+- Export and import knowledge packages.
+- Support federated compiled knowledge across teams.
+- Benchmark against vector RAG and static GraphRAG.
 
-## 17. Evaluation plan
+## 14. How to measure success
 
-We should evaluate this as a compiler, not only as a chatbot.
+This should be evaluated like a compiler and a knowledge system, not only like a
+chatbot.
 
-### 17.1 Compile-time metrics
+### Compile-time measures
 
-- source documents processed per hour
-- fragments skipped by content hash
-- LLM cost per source document
-- structured-output validation failure rate
-- SHACL violation rate
+- documents processed per hour
+- percentage of unchanged fragments skipped
+- LLM cost per document
+- structured-output failure rate
+- validation failure rate
 - unresolved entity rate
 - contradiction rate
-- average artifacts per fragment
-- percentage of artifacts with evidence spans
+- artifacts generated per document
+- facts with evidence attached
 
-### 17.2 Incremental metrics
+### Incremental-update measures
 
-- changed source -> compiled triple delta latency
-- changed source -> refreshed entity page latency
-- changed source -> outbox delivery latency
+- time from source change to updated graph
+- time from source change to refreshed summary
+- time from source change to outbound event
 - stale artifact count
 - unnecessary recompilation rate
-- full refresh avoided count
-- dependency fan-out distribution
+- number of full refreshes avoided
 
-### 17.3 Query-time metrics
+### Query-time measures
 
 - answer latency
-- triples retrieved per answer
-- raw source snippets needed per answer
-- hallucination/error rate on gold QA set
-- citation/evidence coverage
+- facts retrieved per answer
+- raw snippets needed per answer
+- evidence coverage
 - contradiction disclosure rate
 - SPARQL generation repair rate
+- accuracy on generated and human-written QA sets
 
-### 17.4 Comparative benchmarks
+### Comparison benchmarks
 
-Compare four systems on the same corpora:
+Compare four approaches on the same corpus:
 
 1. vector RAG over raw chunks
 2. static LLM-generated wiki
-3. Microsoft GraphRAG-style batch graph
+3. batch GraphRAG-style graph
 4. pg_ripple + pg_trickle live compiled graph
 
-Question classes:
+The combined pg_ripple/pg_trickle approach should do especially well on:
 
-- direct factual lookup
-- multi-hop entity traversal
-- aggregation over facts
+- multi-hop questions
+- aggregation questions
 - contradiction detection
-- "what changed?" questions
-- broad corpus sensemaking
-- time-bounded questions
+- questions about what changed
+- broad sensemaking questions that still need evidence
 
-The combined pg_ripple/pg_trickle system should shine on multi-hop,
-aggregation, contradiction, and change-aware questions.
+## 15. Risks and guardrails
 
-## 18. Security, governance, and correctness risks
+### 15.1 Prompt injection
 
-### 18.1 Prompt injection
+Raw documents may contain instructions aimed at the LLM. Compiler prompts must
+make it clear that source text is data, not instructions. The output must be
+validated before it becomes trusted knowledge.
 
-Raw documents can contain instructions aimed at the compiler. The compiler
-profile must instruct the LLM to treat source text as data, not instructions.
-Output must be schema-validated and SHACL-validated before publish.
+### 15.2 Hallucinated facts
 
-### 18.2 LLM hallucinated facts
+The compiler will sometimes extract weak or wrong facts. Every fact should carry
+evidence and confidence. Low-confidence facts should go to a review graph or
+diagnostic table, not directly into the trusted graph.
 
-Every extracted fact should carry confidence and evidence. Profiles can require
-that facts without evidence go to a review graph or diagnostic table rather than
-the trusted compiled graph.
+### 15.3 Destructive recompilation
 
-### 18.3 Destructive recompilation
+Deleting and rebuilding a whole source graph is simple but risky. Production
+mode should prefer staging, review, or diff-based updates.
 
-Replacing a whole graph on every source change is simple but dangerous. The
-default should be staging or diff mode for production. Deletions should be
-observable and reversible where feasible.
+### 15.4 Sensitive data leakage
 
-### 18.4 Sensitive source leakage
+Summaries can leak sensitive content. Compiler profiles should support
+redaction, graph-level access control, and output policies. pg_trickle outboxes
+should publish only what a subscription is allowed to expose.
 
-Summaries can leak raw source content. Compiler profiles should support field
-redaction, graph-level RLS, and output policies. pg_trickle relays should not
-publish sensitive summaries unless the subscription explicitly allows them.
+### 15.5 Non-determinism
 
-### 18.5 Non-determinism
+LLM output can vary. Store model name, prompt version, input hash, output hash,
+temperature, and run metadata. Important domains should use deterministic
+settings and human review.
 
-LLM outputs can vary. Store prompt version, model, temperature, input hash,
-output hash, and run metadata. Critical domains should use deterministic model
-settings and review workflows.
+### 15.6 Cost growth
 
-### 18.6 Cost explosion
+Without hashing, fragment tracking, and dependency tracking, this could become
+an expensive batch re-indexer. Incremental compilation is not an optional
+optimization. It is central to the product.
 
-Incremental hashing, fragment-level compilation, profile versioning, and
-dependency tracking are mandatory. Without them, the architecture becomes an
-expensive batch re-indexer.
+### 15.7 Trust confusion
 
-### 18.7 Trust boundary confusion
+An LLM-extracted assertion is not the same as a verified business fact. The
+system should keep source assertions, compiler assertions, human-reviewed
+assertions, and resolved projections clearly separated.
 
-Compiled facts are not automatically true. They are assertions from a compiler
-agent. The system should make the asserting graph explicit: source graph,
-compiler graph, human-review graph, or resolved projection.
+## 16. Recommended next steps
 
-## 19. Why this is strategically interesting
+1. Pick one demo corpus, preferably Markdown docs or support tickets.
+2. Define a small `pgc:` vocabulary for compiled knowledge artifacts.
+3. Draft the catalog schema for sources, fragments, profiles, runs,
+   diagnostics, artifacts, and dependencies.
+4. Prototype `pg_ripple_compile` as a companion worker that calls existing
+   pg_ripple SQL functions.
+5. Add a deterministic mock compiler profile for CI.
+6. Show one incremental update from start to finish: source change, partial
+   recompile, graph update, validation, and pg_trickle outbox event.
+7. Compare the result against raw vector RAG on questions that require exact
+   relationships, contradictions, or change awareness.
 
-The market already has vector databases, RAG frameworks, agent workflow tools,
-and graph databases. The differentiated product is not "RAG with RDF" or "an
-LLM that writes triples". The differentiated product is:
-
-- PostgreSQL-native source of truth.
-- Exact graph retrieval and reasoning at runtime.
-- Compile-time LLM extraction with validation and provenance.
-- Incremental recompilation through pg_trickle.
-- Change events for agents and downstream systems.
-- Built-in conflict, confidence, source trust, and human review paths.
-
-This creates a new category: **compiled operational knowledge**. It is not a
-static knowledge base and not an ephemeral agent memory. It is a maintained
-artifact with build metadata, tests, provenance, runtime query plans, and change
-events.
-
-## 20. Recommended next steps
-
-1. Build a small proof-of-concept around one corpus: Markdown docs or support
-   tickets are the best candidates.
-2. Add the source/compiler catalog schema in a draft migration plan.
-3. Prototype `pg_ripple_compile` as a separate worker that calls existing
-   pg_ripple SQL functions rather than embedding LLM calls in backend sessions.
-4. Define `pgc:` vocabulary and SHACL shapes for compiler output.
-5. Implement a mock compiler profile for CI so tests are deterministic.
-6. Demonstrate incremental update: edit one source fragment, recompile only that
-   fragment, diff compiled triples, refresh entity page, publish outbox event.
-7. Compare the demo against raw vector RAG and static GraphRAG on questions that
-   require multi-hop reasoning and change awareness.
-
-The first demo should show the thing that the article does not solve: a source
-update arrives as an event, only dependent knowledge artifacts rebuild, SHACL and
-Datalog check the result, and downstream agents receive a semantic change event.
-That is where pg_ripple and pg_trickle become more than an implementation of the
-compiler analogy. They become the build system and runtime for living knowledge.
+The strongest demo would show what the article only hints at: a knowledge base
+that behaves like a real build system. A source changes. Only the dependent
+knowledge rebuilds. The system validates the result, explains what changed, and
+publishes a semantic event. That is where pg_ripple and pg_trickle become more
+than an implementation of the compiler analogy. They become the runtime for
+living knowledge.
