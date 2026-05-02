@@ -41,7 +41,7 @@ collection (`pg_ripple.vacuum_confidence()`).**
 - **CONF-RLS-01**: Row-level security policies on `_pg_ripple.confidence` and `_pg_ripple.shacl_score_log`.
 - **CONF-DOCS-01**: `docs/src/features/uncertain-knowledge.md`; 9 new GUC entries in `docs/src/operations/configuration.md`.
 - **CONF-PERF-01**: `benchmarks/probabilistic_overhead.sql` and `benchmarks/confidence_join_scale.sql`.
-- **CONF-SBOM-01**: `postgresql-contrib` added to Dockerfile runtime layer; `audit.toml` pg_trgm note.
+- **CONF-SBOM-01**: `postgresql-contrib` added to Dockerfile runtime layer; `audit.toml` pg_trgm note; `sbom.json` regenerated for v0.87.0.
 - 5 new feature status rows (probabilistic_datalog, fuzzy_sparql, confidence_side_table, soft_shacl_scoring, prov_confidence).
 - `pg_ripple_http` version bumped to 0.87.0; `COMPATIBLE_EXTENSION_MIN` updated to 0.87.0.
 - `tests/pg_regress/sql/probabilistic.sql` regression test.

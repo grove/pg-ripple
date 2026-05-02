@@ -175,7 +175,7 @@
 
 | Version | Theme | Status | Scope | Full details |
 |---------|-------|--------|-------|-------------- |
-| [v0.87.0](roadmap/v0.87.0.md) | **Uncertain knowledge engine** — Probabilistic Datalog with `@weight(FLOAT)` rule annotations, multiplicative confidence propagation, and noisy-OR multi-path combination; `pg:confidence()` SPARQL function and `load_triples_with_confidence()` bulk-loader; fuzzy SPARQL filters (`pg:fuzzy_match()` trigram/token-set similarity, confidence-threshold edge filtering in property paths via `pg:confPath()`); soft SHACL scoring with numerical `sh:severityWeight` annotations and `pg_ripple.shacl_score()` composite data-quality function; provenance-weighted confidence derived automatically from PROV-O source trust metadata via Datalog rules | Planned | Very Large | [Full details](roadmap/v0.87.0-full.md) |
+| [v0.87.0](roadmap/v0.87.0.md) | **Uncertain knowledge engine** — Probabilistic Datalog with `@weight(FLOAT)` rule annotations, multiplicative confidence propagation, and noisy-OR multi-path combination; `pg:confidence()` SPARQL function and `load_triples_with_confidence()` bulk-loader; fuzzy SPARQL filters (`pg:fuzzy_match()` trigram/token-set similarity, confidence-threshold edge filtering in property paths via `pg:confPath()`); soft SHACL scoring with numerical `sh:severityWeight` annotations and `pg_ripple.shacl_score()` composite data-quality function; provenance-weighted confidence derived automatically from PROV-O source trust metadata via Datalog rules | Released ✅ | Very Large | [Full details](roadmap/v0.87.0-full.md) |
 
 ### Graph Analytics: PageRank (v0.88.0)
 
