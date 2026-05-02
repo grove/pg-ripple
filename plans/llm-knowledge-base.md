@@ -105,6 +105,10 @@ Some of the terms are technical, so this table explains them in practical terms.
 | Give an LLM grounded context | `rag_context()`, which prepares graph facts for a prompt |
 | Keep source attribution | named graphs and PROV-O provenance |
 | Record facts about facts | RDF-star annotations for confidence, evidence, timestamps |
+| Score extracted facts by confidence | `pg_ripple.load_triples_with_confidence()`, `pg:confidence()` SPARQL function, probabilistic Datalog with `@weight` noisy-OR combination (v0.87.0) |
+| Match entities by fuzzy similarity | `pg:fuzzy_match()`, `pg:token_set_ratio()`, GIN trigram index on compiled dictionary (v0.87.0) |
+| Score data quality numerically | `pg_ripple.shacl_score()`, `sh:severityWeight` annotations, `pg_ripple.shacl_report_scored()` (v0.87.0) |
+| Propagate source trust automatically | `pg:sourceTrust` predicate, PROV-O trust→confidence Datalog rules, noisy-OR multi-source attestation (v0.87.0) |
 | Validate quality | SHACL rules, which act like data quality checks |
 | Infer more knowledge | Datalog and OWL/RDFS rules |
 | Resolve duplicate entities | `owl:sameAs` canonicalization and alignment helpers |
@@ -278,8 +282,9 @@ A compiler profile should include:
 - profile name and version
 - prompt template
 - expected output shape
-- validation rules
-- optional Datalog rules to run after compilation
+- validation rules, including `sh:severityWeight` annotations (v0.87.0 SOFT-SHACL-01) so critical rules weigh more in the numeric quality score
+- optional Datalog rules to run after compilation, with `@weight(FLOAT)` annotations (v0.87.0 PROB-DATALOG-01) for probabilistic confidence propagation through derived facts
+- default extraction confidence assigned via `pg_ripple.load_triples_with_confidence()` at ingest time (v0.87.0 LOAD-CONF-01)
 - preferred LLM model
 - preferred embedding model
 - maximum source size per fragment
@@ -306,6 +311,7 @@ Diagnostics are the "compiler errors" from the article. Examples:
 - source contradiction
 - missing required field
 - SHACL validation failure
+- soft SHACL quality score below threshold (`pg_ripple.shacl_score()` ≤ threshold, v0.87.0 SOFT-SHACL-01)
 - stale dependency
 - LLM output did not match the expected schema
 
@@ -350,6 +356,18 @@ not be treated the same as a fact with a clear source quote.
 
 In pg_ripple, these facts become RDF triples. Extra information about a fact,
 such as confidence or source quote, can be stored with RDF-star annotations.
+v0.87.0's `pg_ripple.load_triples_with_confidence(data, confidence, format, graph_uri)`
+lets the compiler assign a score in [0, 1] to every extracted fact at ingest
+time; scores are stored in the shared `_pg_ripple.confidence` side table keyed
+on the statement ID. The `pg:confidence(?s, ?p, ?o)` SPARQL function retrieves
+the score inline, usable in `FILTER`, `BIND`, and `ORDER BY`. Datalog rules
+with `@weight(FLOAT)` annotations propagate confidence through derived facts:
+a rule chain with weights 0.9 × 0.8 × 0.7 produces a conclusion with confidence
+~0.5. When multiple independent sources support the same conclusion, noisy-OR
+combination (PROB-DATALOG-01) raises the joint confidence — three medium-trust
+sources (0.6, 0.7, 0.6) together reach ~0.94. CONSTRUCT writeback rules with
+`pg_ripple.cwb_confidence_propagation = 'inherit'` (CONF-CWB-01) automatically
+carry source confidence into materialized derived graphs.
 
 ### 8.2 Entity pages
 
@@ -490,6 +508,16 @@ When vector search finds something relevant, it should point back to graph
 artifacts and source evidence. The final LLM prompt should include structured
 facts, provenance, confidence, and contradictions, not just raw text snippets.
 
+v0.87.0 sharpens this retrieval path in two ways. First, `pg:fuzzy_match(a, b)`
+and `pg:token_set_ratio(a, b)` (FUZZY-SPARQL-01) enable fuzzy entity-name
+matching over the compiled dictionary backed by a GIN trigram index, so a query
+for "SSO" retrieves "Single Sign-On" and "sso login" without requiring exact
+string equality. Second, `pg:confPath(predicate, min_confidence)` (FUZZY-PATH-01)
+traverses the compiled graph along confidence-gated paths, so a context-retrieval
+query can follow relationship chains while excluding edges below a trust
+threshold — preventing low-confidence extractions from contaminating multi-hop
+reasoning paths fed to the LLM.
+
 ## 10. The most novel ideas
 
 The article describes a compiled knowledge base. pg_ripple + pg_trickle can go
@@ -543,11 +571,49 @@ sentence of the source diff.
 ### 10.4 Source trust and uncertain knowledge
 
 Not all sources are equally trustworthy, and not all extracted facts are equally
-certain. This fits well with the planned uncertain-knowledge work in v0.87.0.
+certain. v0.87.0 delivers a complete uncertain knowledge engine that makes
+this concrete rather than aspirational.
 
-The compiler can attach confidence to facts. Source graphs can carry trust
-scores. Datalog can propagate confidence through derived facts. SHACL can produce
-soft quality scores.
+**Attaching confidence at compile time.** `pg_ripple.load_triples_with_confidence()`
+assigns a uniform extraction confidence when ingesting compiled facts. Facts
+extracted by a high-accuracy model from a primary source get 0.95; facts
+extracted from a secondary source with a less reliable prompt get 0.6. The
+threshold for entering the trusted named graph vs. routing to the review graph
+can be a single GUC setting.
+
+**Source trust propagation.** Registering a `pg:sourceTrust` value on a source
+graph (e.g., 0.9 for an official policy document, 0.4 for a web scrape) is all
+that is needed. With `pg_ripple.prov_confidence = on` (PROV-CONF-01), Datalog
+rules read the PROV-O source metadata and automatically populate
+`_pg_ripple.confidence` for every triple originating from that source. When a
+fact is attested by multiple independent sources, noisy-OR combination raises
+the joint confidence automatically — no manual aggregation required.
+
+**Confidence propagation through inference.** Datalog rules annotated with
+`@weight(FLOAT)` (PROB-DATALOG-01) multiply body-atom confidences by the rule
+weight. A chain of inferences produces a conclusion whose confidence reflects
+the entire evidence chain. The compiled knowledge base therefore distinguishes
+between "we know this directly" (confidence 0.95) and "we derived this through
+three intermediate rules from a medium-trust source" (confidence 0.42).
+
+**Numeric quality gates.** `pg_ripple.shacl_score(graph_iri)` (SOFT-SHACL-01)
+returns a single floating-point quality score in [0, 1] for a compiled graph.
+Shapes can declare `sh:severityWeight` to make critical validation rules count
+more than minor ones. This turns the binary SHACL pass/fail into a graded
+quality signal: route graphs below 0.75 to the review queue; publish graphs
+above 0.9 immediately. `pg_ripple.shacl_report_scored()` gives a per-rule
+breakdown so the review UI can show exactly which shapes reduced the score.
+
+**Confidence-gated graph traversal.** `pg:confPath(predicate, min_confidence)`
+(FUZZY-PATH-01) restricts property-path traversal to edges meeting a minimum
+confidence. An agent following `pg:confPath(schema:relatedTo, 0.7)` never
+follows a weakly-supported relationship into a distant and dubious conclusion.
+
+**Exporting confidence for downstream consumers.** `export_turtle_with_confidence()`
+(CONF-EXPORT-01) emits every fact with its confidence as an RDF* annotation;
+`pg_ripple.export_confidence = on` adds `@annotation` blocks to JSON-LD output.
+Downstream systems receiving compiled knowledge can see not just the fact, but
+how much to trust it.
 
 That lets the system say things like:
 
@@ -624,6 +690,119 @@ endpoints into a temporary local graph, compute a single global importance
 ranking across all departments, then discard the raw remote triples. Each
 department keeps its source documents private while contributing to a shared
 knowledge ranking.
+
+### 10.9 Importance-ranked compiled knowledge (v0.88.0)
+
+One gap in the compiled-knowledge architecture is deciding which entities and
+facts matter most when an agent navigates the graph or when a sensemaking query
+needs to filter 50,000 compiled facts down to the 20 most relevant ones.
+v0.88.0 fills this gap with a suite of graph analytics features that work
+directly on the compiled VP storage.
+
+**Automatic index ordering.** `pg_ripple.pagerank_run()` computes an importance
+score for every entity based on how heavily it is referenced by other important
+entities. The knowledge index graph can expose the top-N entities per topic
+using `pg:topN()`, without manual curation or heuristics.
+
+**Freshness-aware ranking.** Temporal decay (PR-TEMPORAL-01) weights edges by
+the age of the compiled source. A policy extracted from a document updated last
+week pushes more importance than one extracted from a document last updated
+three years ago. The ranking naturally reflects recency without requiring
+explicit staleness rules.
+
+**Trust-propagating ranking.** Confidence-weighted edges (PR-CONF-01) mean the
+v0.87.0 uncertain-knowledge engine and the v0.88.0 ranking engine share the
+same confidence side-table. A high-trust source citation carries more rank mass
+than a low-confidence LLM extraction. Source trust propagates through the
+entire entity graph automatically.
+
+**Per-domain ranking.** Topic-sensitive scoring (PR-TOPIC-01) stores independent
+ranking runs per topic label — matching the compiler profile concept exactly.
+An agent working on a healthcare question receives a healthcare-ordered index;
+the same entity may rank differently for finance. One `pagerank_run()` per
+topic at compilation time; zero extra query cost at read time.
+
+**Bridge concept detection.** Betweenness centrality (PR-CENTRALITY-01)
+identifies entities that connect otherwise separate topic clusters. These are
+the concepts an index graph *must* include so agents can reason across domains.
+They would be invisible to a pure PageRank score but surface immediately as
+betweenness outliers.
+
+**Quality-gated ranking.** SHACL-aware ranking (PR-SHACL-01) lets SHACL shapes
+declare `sh:excludeFromRanking true` for node types that should not influence
+the importance graph — for example, diagnostic artifacts, stub entities, or
+nodes flagged as contradictory. Quality failures remove bad nodes from the
+ranking graph automatically, not just from query results.
+
+**Live incremental ranking.** The pg-trickle incremental refresh (PR-TRICKLE-01)
+propagates importance changes via bounded K-hop updates whenever a new compiled
+source is inserted or retracted. The index graph stays current without a nightly
+full recompute. The `stale`/`stale_since` columns on `pagerank_scores` let
+applications distinguish exact from approximate scores and decide whether to
+wait for the next scheduled full recompute.
+
+**Transparent rankings.** `pg_ripple.explain_pagerank(entity_iri)` returns the
+top-K contributor chain, showing exactly which other entities pushed the most
+importance to a given node. This supports the semantic pull-request review flow
+(section 10.3): reviewers can see not just what facts changed, but why the
+importance of related entities shifted.
+
+### 10.10 Graded confidence throughout the compiled knowledge base (v0.87.0)
+
+The compiled-knowledge architecture depends on the system knowing *how much to
+trust* every fact it holds. v0.87.0 delivers a complete uncertain knowledge
+engine that makes this concrete rather than aspirational, using a unified
+`_pg_ripple.confidence` side table and a set of composing APIs that work at
+every stage of the compilation pipeline.
+
+**At ingest.** `pg_ripple.load_triples_with_confidence(data, confidence, format,
+graph_uri)` lets the `pg_ripple_compile` worker assign a score in [0, 1] to
+every extracted fact at the moment it is loaded. The score can vary by compiler
+profile version, extraction model, source tier, or per-field confidence
+returned in structured LLM output. No schema change is needed on the VP tables.
+
+**During inference.** Datalog rules that derive new facts from compiled facts
+can carry `@weight(FLOAT)` annotations (PROB-DATALOG-01). The semi-naive
+evaluator multiplies body-atom confidences by the rule weight (conjunction) and
+applies noisy-OR across independent derivation paths. A fact supported by three
+independent rule paths with weights 0.8, 0.7, and 0.6 reaches a combined
+confidence of ~0.97. A long inference chain of medium-trust sources
+(0.9 × 0.8 × 0.7) produces a conclusion with confidence ~0.5, immediately
+visible to callers via `pg:confidence()`.
+
+**After compilation.** `pg_ripple.shacl_score(graph_iri)` (SOFT-SHACL-01)
+returns a single floating-point quality score for the entire compiled graph.
+The `pg_ripple_compile` worker uses this as a publish gate: score ≥ 0.9 →
+trusted graph; score < 0.75 → review queue with per-shape breakdown from
+`shacl_report_scored()`. SHACL shapes declare `sh:severityWeight` so critical
+rules count more than cosmetic ones.
+
+**At query time.** `pg:confidence(?s, ?p, ?o)` retrieves a fact's score inline
+in any SPARQL SELECT, FILTER, or ORDER BY. `FILTER(pg:confidence(?s, ?p, ?o) > 0.7)`
+restricts a context-retrieval query to well-supported facts. `pg:confPath(predicate,
+min_confidence)` (FUZZY-PATH-01) traverses the compiled graph along
+confidence-gated paths, preventing low-confidence extractions from contaminating
+multi-hop reasoning chains fed to the LLM.
+
+**For entity resolution.** `pg:fuzzy_match(a, b)` and `pg:token_set_ratio(a, b)`
+(FUZZY-SPARQL-01), backed by a GIN trigram index on the compiled dictionary,
+let the compiler find that "SSO", "Single Sign-On", and "sso login" should map
+to the same entity. Fuzzy similarity scores feed directly into confidence
+side-table rows for entity-alignment triples.
+
+**For source trust.** Registering `pg:sourceTrust 0.9` on a source named graph
+and enabling `pg_ripple.prov_confidence = on` (PROV-CONF-01) is enough for
+Datalog rules to automatically propagate source trust to all triples originating
+from that source. No per-triple annotation by the compiler is needed.
+
+**For export.** `export_turtle_with_confidence()` (CONF-EXPORT-01) emits every
+fact with its confidence as an RDF* annotation; `pg_ripple.export_confidence = on`
+adds `@annotation` blocks to JSON-LD output. Downstream consumers of compiled
+knowledge see not just the fact, but how much to trust it.
+
+**Security.** Row-level security on `_pg_ripple.confidence` (CONF-RLS-01)
+mirrors the VP-table named-graph RLS policies, so multi-tenant compilations
+cannot read each other's confidence scores.
 
 ## 11. Example use cases
 
@@ -758,8 +937,12 @@ without trying to become a full workflow platform.
 6. Mock compiler mode for deterministic tests.
 7. Basic compiled artifacts: facts, summaries, generated QA pairs, entity pages,
    diagnostics.
-8. Statement-level provenance and confidence.
-9. SHACL validation before publishing compiled facts.
+8. Statement-level provenance and confidence via
+   `pg_ripple.load_triples_with_confidence()` (v0.87.0 LOAD-CONF-01); the
+   compiler assigns a score in [0, 1] to every extracted fact at load time.
+9. SHACL validation before publishing compiled facts; `pg_ripple.shacl_score()`
+   (v0.87.0 SOFT-SHACL-01) used as the numeric quality gate — graphs below
+   threshold route to the diagnostic review queue instead of the trusted graph.
 10. Named graph write modes: append, replace, review, and later diff.
 11. Simple index graph for topics and entity navigation, with top-N entries
     ranked by PageRank (v0.88.0) using `pg:topN()` and temporal decay.
@@ -815,8 +998,15 @@ is published.
 
 - Add review graphs for human approval.
 - Add conflict policies for source vs LLM vs human assertions.
-- Add source trust scores.
-- Use probabilistic Datalog for confidence propagation.
+- Add source trust scores via `pg:sourceTrust` predicate and `pg_ripple.prov_confidence = on`
+  (v0.87.0 PROV-CONF-01); source trust propagates automatically to all triples
+  from that source via built-in Datalog rules.
+- Use probabilistic Datalog with `@weight` annotations (v0.87.0 PROB-DATALOG-01)
+  for confidence propagation through derived facts; noisy-OR combination raises
+  joint confidence when multiple sources agree.
+- Enable `pg_ripple.shacl_score()` (v0.87.0 SOFT-SHACL-01) as a numeric
+  publish gate per compiled graph; expose `shacl_report_scored()` in the
+  review UI to show which shapes reduced the quality score.
 - Add semantic diffs for reviewers.
 - Enable confidence-weighted PageRank (v0.88.0, PR-CONF-01) so entity importance
   reflects both graph structure and source trust simultaneously.
@@ -843,6 +1033,9 @@ chatbot.
 - LLM cost per document
 - structured-output failure rate
 - validation failure rate
+- mean `pg:confidence()` of extracted facts per compile run
+- low-confidence extraction rate (facts with score below threshold)
+- `pg_ripple.shacl_score()` per compiled graph (target > 0.9 for trusted graph)
 - unresolved entity rate
 - contradiction rate
 - artifacts generated per document
@@ -896,8 +1089,12 @@ validated before it becomes trusted knowledge.
 ### 15.2 Hallucinated facts
 
 The compiler will sometimes extract weak or wrong facts. Every fact should carry
-evidence and confidence. Low-confidence facts should go to a review graph or
-diagnostic table, not directly into the trusted graph.
+evidence and confidence. Use `pg_ripple.load_triples_with_confidence()` (v0.87.0)
+to assign an extraction confidence at load time. Set a threshold GUC: facts
+below the threshold go to a named review graph, not the trusted graph. The
+`pg:confidence()` SPARQL function lets the review UI surface all below-threshold
+facts for human inspection. Low-confidence facts that survive human review
+can be promoted with an updated confidence score without recompilation.
 
 ### 15.3 Destructive recompilation
 
@@ -926,7 +1123,15 @@ optimization. It is central to the product.
 
 An LLM-extracted assertion is not the same as a verified business fact. The
 system should keep source assertions, compiler assertions, human-reviewed
-assertions, and resolved projections clearly separated.
+assertions, and resolved projections clearly separated. v0.87.0's
+`_pg_ripple.confidence` side table (keyed on statement ID and model name)
+provides this separation at the storage level: different assertion sources
+register separate rows with their own model label (`'llm-extract'`,
+`'human-review'`, `'prov-trust'`). Row-level security (CONF-RLS-01) mirrors
+the named-graph VP-table policies, so tenant boundaries apply to confidence
+scores just as they do to the facts themselves. `pg:confidence(?s, ?p, ?o)`
+returns the highest-confidence row across all models; callers who need the
+per-model breakdown can query the side table directly.
 
 ## 16. Recommended next steps
 
@@ -939,11 +1144,17 @@ assertions, and resolved projections clearly separated.
 5. Add a deterministic mock compiler profile for CI.
 6. Show one incremental update from start to finish: source change, partial
    recompile, graph update, validation, and pg_trickle outbox event.
-7. Run `pg_ripple.pagerank_run()` with temporal decay over the compiled graph
+7. Test the v0.87.0 uncertain knowledge pipeline end to end: load a batch of
+   compiled facts via `load_triples_with_confidence()`, run a Datalog rule set
+   with `@weight` annotations, query derived confidence via `pg:confidence()`,
+   verify that `shacl_score()` gates publication, and confirm that
+   `pg:confPath(predicate, 0.7)` excludes low-confidence edges from a
+   multi-hop context-retrieval query.
+8. Run `pg_ripple.pagerank_run()` with temporal decay over the compiled graph
    and verify that the top-10 index entities match domain-expert expectations;
    enable PR-TRICKLE-01 incremental refresh and confirm scores update within
    seconds of a new source compile.
-8. Compare the result against raw vector RAG on questions that require exact
+9. Compare the result against raw vector RAG on questions that require exact
    relationships, contradictions, or change awareness.
 
 The strongest demo would show what the article only hints at: a knowledge base
