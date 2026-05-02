@@ -1160,6 +1160,25 @@ jobs:
       - name: Check for unsafe dynamic SQL patterns
         run: bash scripts/check_no_string_format_in_sql.sh
 
+  # BUILD-01 (v0.84.0): Verify docker-compose.yml image tag matches Cargo.toml version.
+  lint-docker-compose-version:
+    name: Lint — docker-compose image tag currency (v0.84.0 BUILD-01)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6
+      - name: Assert docker-compose image tag matches Cargo.toml version
+        run: |
+          CARGO_VER=$(grep '^version' Cargo.toml | head -1 | sed 's/.*"\(.*\)".*/\1/')
+          COMPOSE_TAG=$(grep 'image:.*pg_ripple:' docker-compose.yml | head -1 | sed 's/.*pg_ripple:\([^ ]*\).*/\1/')
+          echo "Cargo.toml version : ${CARGO_VER}"
+          echo "docker-compose tag : ${COMPOSE_TAG}"
+          if [[ "${CARGO_VER}" != "${COMPOSE_TAG}" ]]; then
+            echo "ERROR: docker-compose.yml image tag '${COMPOSE_TAG}' does not match Cargo.toml version '${CARGO_VER}'"
+            exit 1
+          fi
+          echo "OK: docker-compose image tag matches Cargo.toml version (${CARGO_VER})"
+
   lint-pt-codes:
     name: Lint — PT error code documentation (v0.55.0)
     runs-on: ubuntu-latest

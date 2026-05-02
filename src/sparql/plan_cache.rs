@@ -68,9 +68,34 @@ pub fn get(query_text: &str) -> Option<CacheEntry> {
     result
 }
 
-/// Store a translation in the cache.
+/// Retrieve a cached translation using an already-canonicalised query string.
+/// P13-01 (v0.84.0): avoids re-parsing in `cache_key` when the caller has
+/// already formatted the parsed query with `format!("{q}")` — eliminates the
+/// double-parse.  The canonical string is the `spargebra::Query` Display form.
+pub fn get_canonical(canonical: &str) -> Option<CacheEntry> {
+    let key = cache_key_inner(canonical);
+    let result = PLAN_CACHE.with(|c| c.borrow_mut().get(&key).cloned());
+    if result.is_some() {
+        HIT_COUNT.fetch_add(1, Ordering::Relaxed);
+    } else {
+        MISS_COUNT.fetch_add(1, Ordering::Relaxed);
+    }
+    result
+}
+
+/// Store a translation in the cache by raw query text.
+/// Falls back to re-parsing for canonicalization; prefer `put_canonical` when
+/// the caller already holds the canonical form.
+#[allow(dead_code)]
 pub fn put(query_text: &str, entry: CacheEntry) {
     let key = cache_key(query_text);
+    PLAN_CACHE.with(|c| c.borrow_mut().put(key, entry));
+}
+
+/// Store a translation using an already-canonicalised query string.
+/// P13-01 (v0.84.0): see `get_canonical`.
+pub fn put_canonical(canonical: &str, entry: CacheEntry) {
+    let key = cache_key_inner(canonical);
     PLAN_CACHE.with(|c| c.borrow_mut().put(key, entry));
 }
 
@@ -104,6 +129,14 @@ pub fn reset() {
 /// `inference_mode` GUC so that two roles with different RLS policies or
 /// inference settings never share a cached plan.
 fn cache_key(query_text: &str) -> String {
+    let canonical = match spargebra::SparqlParser::new().parse_query(query_text) {
+        Ok(q) => format!("{q}"),
+        Err(_) => query_text.to_owned(),
+    };
+    cache_key_inner(&canonical)
+}
+
+fn cache_key_inner(canonical: &str) -> String {
     let max_depth = crate::MAX_PATH_DEPTH.get();
     let bgp_reorder = crate::BGP_REORDER.get();
     // CACHE-RLS-01: include current role OID so cross-user plan leakage is
@@ -127,12 +160,7 @@ fn cache_key(query_text: &str) -> String {
         .unwrap_or_else(|| "error".to_string());
     let federation_timeout = crate::FEDERATION_TIMEOUT.get();
     let pgvector_enabled = crate::PGVECTOR_ENABLED.get();
-    // Normalise via spargebra Display → canonical SPARQL → hash.
-    let text_to_hash = match spargebra::SparqlParser::new().parse_query(query_text) {
-        Ok(q) => format!("{q}"),
-        Err(_) => query_text.to_owned(),
-    };
-    let digest = xxhash_rust::xxh3::xxh3_128(text_to_hash.as_bytes());
+    let digest = xxhash_rust::xxh3::xxh3_128(canonical.as_bytes());
     format!(
         "{digest:x}\x00max_depth={max_depth}\x00bgp_reorder={bgp_reorder}\x00role={role_oid}\
          \x00inference_mode={inference_mode}\x00normalize_iris={normalize_iris}\

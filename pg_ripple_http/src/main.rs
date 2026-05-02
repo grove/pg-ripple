@@ -29,16 +29,22 @@ use common::{AppState, env_or};
 
 /// The minimum pg_ripple extension version required by this build of pg_ripple_http.
 ///
-/// COMPAT-MIN-01 (v0.80.0): bumped to 0.79.0 — requires:
-///   - `sparql_update_cursor()` (added v0.76.0)
-///   - `feature_status()` returning wcoj/shacl_sparql entries (v0.79.0)
+/// S13-05 (v0.84.0): bumped to 0.84.0 — requires:
+///   - `/health/ready` deep-check endpoint (v0.84.0)
+///   - `PG_RIPPLE_HTTP_STRICT_COMPAT` env var support (v0.84.0)
+///   - All v0.80–v0.83 correctness, security and performance fixes
 ///
 /// Connections to older extension versions log a prominent warning.  The extension
 /// is still served (degraded mode) so that rolling upgrades do not hard-fail.
-const COMPATIBLE_EXTENSION_MIN: &str = "0.79.0";
+/// Set `PG_RIPPLE_HTTP_STRICT_COMPAT=1` to convert the warning to a fatal startup error.
+const COMPATIBLE_EXTENSION_MIN: &str = "0.84.0";
 
 /// Check that the installed pg_ripple extension version is within the known-compatible
-/// range for this pg_ripple_http build.  Logs a warning if it is not; does NOT exit.
+/// range for this pg_ripple_http build.  Logs a warning if it is not.
+///
+/// S13-05 (v0.84.0): When `PG_RIPPLE_HTTP_STRICT_COMPAT=1` is set, a version
+/// mismatch causes an immediate `process::exit(1)` instead of a warning.
+/// Default is off (backward-compatible degraded-mode behaviour).
 async fn check_extension_compatibility(client: &deadpool_postgres::Object) {
     if std::env::var("PG_RIPPLE_HTTP_SKIP_COMPAT_CHECK")
         .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
@@ -49,6 +55,10 @@ async fn check_extension_compatibility(client: &deadpool_postgres::Object) {
         );
         return;
     }
+
+    let strict = std::env::var("PG_RIPPLE_HTTP_STRICT_COMPAT")
+        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+        .unwrap_or(false);
 
     let ext_version = match client
         .query_opt(
@@ -78,13 +88,22 @@ async fn check_extension_compatibility(client: &deadpool_postgres::Object) {
     );
 
     if semver_lt(&ext_version, COMPATIBLE_EXTENSION_MIN) {
+        if strict {
+            tracing::error!(
+                ext_version = %ext_version,
+                min_supported = %COMPATIBLE_EXTENSION_MIN,
+                "PG_RIPPLE_HTTP_STRICT_COMPAT=1: extension version is below minimum — aborting"
+            );
+            std::process::exit(1);
+        }
         tracing::warn!(
             ext_version = %ext_version,
             min_supported = %COMPATIBLE_EXTENSION_MIN,
             "pg_ripple extension version is below the minimum supported by this pg_ripple_http \
              build — some features may not work correctly. \
              Upgrade the extension with: ALTER EXTENSION pg_ripple UPDATE; \
-             or set PG_RIPPLE_HTTP_SKIP_COMPAT_CHECK=1 to suppress this warning."
+             or set PG_RIPPLE_HTTP_SKIP_COMPAT_CHECK=1 to suppress this warning. \
+             Set PG_RIPPLE_HTTP_STRICT_COMPAT=1 to make this a fatal startup error."
         );
     }
 }
