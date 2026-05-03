@@ -644,13 +644,13 @@ pub fn explain_pagerank(node_iri: &str, top_k: i32) -> Vec<ExplainPageRankRow> {
            d.value AS contributor_iri, \
            ps_src.score * COALESCE( \
              (SELECT weight FROM ( \
-               SELECT SUM(1.0) AS weight, source_id \
+               SELECT SUM(1.0) AS weight, s AS source_id \
                FROM _pg_ripple.vp_rare \
-               WHERE target_id = $1 \
-               GROUP BY source_id \
+               WHERE o = $1 \
+               GROUP BY s \
              ) t WHERE source_id = ps_src.node), 1.0 \
            ) AS contribution, \
-           d.value || ' → ' || $2::TEXT AS path \
+           d.value || ' -> ' || $2::TEXT AS path \
          FROM _pg_ripple.pagerank_scores ps_src \
          JOIN _pg_ripple.dictionary d ON d.id = ps_src.node \
          WHERE EXISTS ( \
