@@ -13,6 +13,62 @@ Versions correspond to the milestones in [ROADMAP.md](ROADMAP.md).
 
 ---
 
+## [0.88.0] — 2026-05-XX — Datalog-Native PageRank & Graph Analytics
+
+**Implements v0.88.0 roadmap: iterative PageRank engine via Datalog^agg + subsumptive tabling,
+topic-sensitive and personalized PageRank, IVM dirty-edge queue (K-hop incremental refresh),
+confidence-weighted edges, four centrality measures (betweenness, closeness, degree, Katz),
+score-explanation trees, standard-format export (CSV/Turtle/N-Triples/JSON-LD), probabilistic
+score bounds, SHACL-aware ranking, federation blend mode, centrality-guided entity deduplication,
+HTTP companion PageRank/centrality REST API, pg_regress test suite, and benchmarks.**
+
+### Added
+
+- **PR-DATALOG-01**: `src/pagerank.rs` — Datalog-native iterative PageRank via `WITH RECURSIVE` SQL; subsumptive tabling for convergence-aware early termination; `_pg_ripple.pagerank_scores` persistence table.
+- **PR-ITER-01**: Power-iteration loop; L1-norm convergence test; per-iteration delta tracking.
+- **PR-DAMPING-01**: Configurable damping factor (`pg_ripple.pagerank_damping`, default 0.85); teleportation redistributes to dangling nodes.
+- **PR-BLANK-01**: `pg_ripple.pagerank_include_blank_nodes` GUC; blank nodes excluded by default.
+- **PR-PERSONAL-01**: Personalization vector via `seed_iris` + `bias` parameters; uniform bias when no seeds.
+- **PR-SPARQL-FN-01**: `pg:pagerank()` and `pg:pagerank(?node, ?topic)` SPARQL extension functions.
+- **PR-TOPN-01**: `pg:topN_approx()` sketch-based approximate top-N; `top_k` parameter on `pagerank_run()`.
+- **PR-SQL-FN-01**: `pg_ripple.pagerank_run(damping, max_iterations, convergence_delta, direction, topic, ...)` SQL set-returning function.
+- **PR-VIEW-01**: `_pg_ripple.pagerank_scores (node, topic, score, score_lower, score_upper, computed_at, iterations, converged, stale, stale_since)` table; BRIN index on `computed_at`.
+- **PR-MAGIC-01**: Magic-sets transformation for goal-directed partial-graph evaluation (bound node shortcut).
+- **PR-TRICKLE-01**: `_pg_ripple.pagerank_dirty_edges` IVM queue; K-hop incremental refresh; `pg_ripple.pagerank_incremental` GUC; `pg_ripple.vacuum_pagerank_dirty()`.
+- **PR-TRICKLE-CONF-01**: Confidence-attenuated K-hop propagation; `pg_ripple.pagerank_trickle_confidence_attenuation` GUC.
+- **PR-CONF-01**: Confidence-weighted edges via `_pg_ripple.confidence` join; `pg_ripple.pagerank_confidence_weighted` GUC.
+- **PR-PROB-DATALOG-01**: Probabilistic PageRank score bounds via `@weight` Datalog rules; `score_lower`/`score_upper` columns; `pg_ripple.pagerank_probabilistic` GUC.
+- **PR-TOPIC-01**: Topic-sensitive multi-run via `topic` parameter and `pg_ripple.pagerank_run_topics(topics text[])`.
+- **PR-WEIGHT-01**: Edge-weight predicate (`edge_weight_predicate` param); `pg_ripple.pagerank_confidence_default` GUC.
+- **PR-REVERSE-01**: `direction` parameter: `'forward'` / `'reverse'` / `'undirected'`.
+- **PR-EXPLAIN-SCORE-01**: `pg_ripple.explain_pagerank(node_iri, top_k)` returns depth/contributor/contribution/path tree.
+- **PR-STALE-BOUNDS-01**: `stale` / `stale_since` columns; `pg_ripple.is_stale()` helper; `pg_ripple.pagerank_lower()` / `pg_ripple.pagerank_upper()`.
+- **PR-IVM-METRICS-01**: `pg_ripple.pagerank_queue_stats()` returning `(queued_edges, max_delta, oldest_enqueue, estimated_drain_seconds)`.
+- **PR-SKETCH-01**: `pg_ripple.pagerank_selective_threshold` GUC for selective per-node recomputation gating.
+- **PR-PARTITION-01**: `pg_ripple.pagerank_partition` GUC; per-named-graph parallel evaluation.
+- **PR-SELECTIVE-01**: Selective recomputation of high-centrality nodes only.
+- **PR-TEMPORAL-01**: `decay_rate` + `temporal_predicate` parameters for temporal authority decay.
+- **PR-SHACL-01**: `pg_ripple.pagerank_shacl_threshold` GUC; `shacl_score()` threshold gate; `sh:importance` / `sh:excludeFromRanking` awareness.
+- **PR-EXPORT-01**: `pg_ripple.export_pagerank(format, top_k, topic)` — CSV, Turtle, N-Triples, JSON-LD.
+- **PR-FED-01**: `pg_ripple.pagerank_federation_blend` GUC; federation blend mode.
+- **PR-FED-CONF-01**: Confidence-gated federation edges.
+- **PR-CENTRALITY-01**: `pg_ripple.centrality_run(metric)` for betweenness, closeness, degree, Katz; `_pg_ripple.centrality_scores` table.
+- **PR-TRUST-EIGEN-01**: Source-trust-weighted eigenvector centrality.
+- **PR-ENTITY-RESOLUTION-01**: `pg_ripple.pagerank_find_duplicates(metric, centrality_threshold, fuzzy_threshold)` — centrality-guided entity deduplication.
+- **PR-KATZ-TEMPORAL-01**: Temporal authority via Katz centrality; `pg_ripple.katz_alpha` GUC.
+- **PR-HTTP-01**: 10 new HTTP endpoints in `pg_ripple_http` (`/pagerank/*`, `/centrality/*`); `pagerank_handlers.rs`.
+- **PR-CI-01**: `tests/pg_regress/sql/pagerank.sql` pg_regress test suite (30 tests).
+- **PR-BENCH-01**: `benchmarks/pagerank.sql` — 10 pgbench scenarios for scale-free graph.
+- **PR-DOCS-01**: `docs/src/features/pagerank.md`.
+- **PR-EXPLAIN-01**: `explain_pagerank()` score-explanation tree (tree traversal via `WITH RECURSIVE`).
+- **PR-ERR-01**: Error constants PT0401–PT0410, PT0411–PT0419, PT0420–PT0423 for PageRank error catalog (ranges: PT040x, PT041x, PT042x).
+- **PR-MIGRATE-01**: `sql/pg_ripple--0.87.0--0.88.0.sql` migration script; 3 new tables + BRIN index + RLS policies.
+- 22 new GUC parameters in `src/gucs/pagerank.rs`.
+- 8 new `feature_status` rows (`pagerank_datalog`, `pagerank_incremental`, `pagerank_confidence_weighted`, `pagerank_centrality`, `pagerank_explain`, `pagerank_export`, `pagerank_entity_resolution`, `pagerank_http_api`).
+- `pg_ripple_http` version bumped to 0.88.0.
+
+---
+
 ## [0.87.0] — 2026-05-XX — Uncertain Knowledge Engine
 
 **Implements v0.87.0 roadmap: probabilistic Datalog with `@weight` annotations, confidence

@@ -75,6 +75,9 @@ mod bidi;
 // v0.87.0 modules — Uncertain Knowledge Engine
 mod shacl_scoring;
 mod uncertain_knowledge_api;
+// v0.88.0 modules — Datalog-native PageRank & Graph Analytics
+mod pagerank;
+mod pagerank_api;
 
 // Re-export all GUC statics at the crate root so that `crate::SOME_GUC` paths
 // in existing code continue to work after the split.

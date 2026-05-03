@@ -300,11 +300,10 @@ impl Metrics {
             .store(misses, Ordering::Relaxed);
         // Update the hit-ratio snapshot (parts-per-million).
         let total = hits + misses;
-        let ppm = if total > 0 {
-            hits * 1_000_000 / total
-        } else {
-            0
-        };
+        let ppm = total
+            .checked_div(1)
+            .map(|_| hits * 1_000_000 / total)
+            .unwrap_or(0);
         self.dictionary_cache_hit_ratio_ppm
             .store(ppm, Ordering::Relaxed);
     }

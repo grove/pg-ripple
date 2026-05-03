@@ -675,6 +675,87 @@ mod pg_ripple {
                 Some("docs/src/features/uncertain-knowledge.md".to_string()),
                 Some("src/gucs/datalog.rs".to_string()),
             ),
+            // ── v0.88.0 PageRank & Graph Analytics ─────────────────────────────
+            (
+                "pagerank_datalog".to_string(),
+                "implemented".to_string(),
+                None,
+                Some("PR-DATALOG-01 (v0.88.0): Datalog-native iterative PageRank via \
+                     Datalog^agg + subsumptive tabling; pg_ripple.pagerank_run().".to_string()),
+                Some("ci/regress: pagerank.sql".to_string()),
+                Some("docs/src/features/pagerank.md".to_string()),
+                Some("src/pagerank.rs".to_string()),
+            ),
+            (
+                "pagerank_incremental".to_string(),
+                "implemented".to_string(),
+                None,
+                Some("PR-TRICKLE-01 (v0.88.0): pg-trickle incremental K-hop refresh \
+                     via _pg_ripple.pagerank_dirty_edges queue.".to_string()),
+                Some("ci/regress: pagerank.sql".to_string()),
+                Some("docs/src/features/pagerank.md".to_string()),
+                Some("src/pagerank.rs".to_string()),
+            ),
+            (
+                "pagerank_confidence_weighted".to_string(),
+                "implemented".to_string(),
+                None,
+                Some("PR-CONF-01 (v0.88.0): confidence-weighted PageRank edges \
+                     from _pg_ripple.confidence (v0.87 integration).".to_string()),
+                Some("ci/regress: pagerank.sql".to_string()),
+                Some("docs/src/features/pagerank.md".to_string()),
+                Some("src/pagerank.rs".to_string()),
+            ),
+            (
+                "pagerank_centrality".to_string(),
+                "implemented".to_string(),
+                None,
+                Some("PR-CENTRALITY-01 (v0.88.0): betweenness, closeness, eigenvector, \
+                     and Katz centrality via pg_ripple.centrality_run().".to_string()),
+                Some("ci/regress: pagerank.sql".to_string()),
+                Some("docs/src/features/pagerank.md".to_string()),
+                Some("src/pagerank.rs".to_string()),
+            ),
+            (
+                "pagerank_explain".to_string(),
+                "implemented".to_string(),
+                None,
+                Some("PR-EXPLAIN-SCORE-01 (v0.88.0): pg_ripple.explain_pagerank() \
+                     score explanation tree with top-K contributor chain.".to_string()),
+                Some("ci/regress: pagerank.sql".to_string()),
+                Some("docs/src/features/pagerank.md".to_string()),
+                Some("src/pagerank.rs".to_string()),
+            ),
+            (
+                "pagerank_export".to_string(),
+                "implemented".to_string(),
+                None,
+                Some("PR-EXPORT-01 (v0.88.0): export PageRank scores as Turtle, \
+                     JSON-LD, CSV, or N-Triples.".to_string()),
+                Some("ci/regress: pagerank.sql".to_string()),
+                Some("docs/src/features/pagerank.md".to_string()),
+                Some("src/pagerank.rs".to_string()),
+            ),
+            (
+                "pagerank_entity_resolution".to_string(),
+                "implemented".to_string(),
+                None,
+                Some("PR-ENTITY-RESOLUTION-01 (v0.88.0): pg_ripple.pagerank_find_duplicates() \
+                     combining centrality + fuzzy matching for entity deduplication.".to_string()),
+                Some("ci/regress: pagerank.sql".to_string()),
+                Some("docs/src/features/pagerank.md".to_string()),
+                Some("src/pagerank.rs".to_string()),
+            ),
+            (
+                "pagerank_http_api".to_string(),
+                "implemented".to_string(),
+                None,
+                Some("PR-HTTP-01 (v0.88.0): REST API for PageRank at /pagerank/* \
+                     and /centrality/* in pg_ripple_http.".to_string()),
+                Some("ci/regress: pagerank.sql".to_string()),
+                Some("docs/src/features/pagerank.md".to_string()),
+                Some("src/pagerank_api.rs".to_string()),
+            ),
         ];
 
         TableIterator::new(rows)
