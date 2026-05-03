@@ -754,7 +754,7 @@ mod pg_ripple {
                      and /centrality/* in pg_ripple_http.".to_string()),
                 Some("ci/regress: pagerank.sql".to_string()),
                 Some("docs/src/features/pagerank.md".to_string()),
-                Some("pg_ripple_http/src/routing/pagerank_handlers.rs".to_string()),
+                Some("src/pagerank_api.rs".to_string()),
             ),
         ];
 

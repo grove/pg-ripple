@@ -299,7 +299,7 @@ SELECT length(pg_ripple.export_pagerank('csv', 1, NULL)) > 0 AS topk_ok;
 -- ── Test 30: feature_status includes pagerank_datalog ────────────────────────
 SELECT COUNT(*) >= 1 AS fs_pagerank_ok
 FROM pg_ripple.feature_status()
-WHERE feature = 'pagerank_datalog' AND status = 'implemented';
+WHERE feature_name = 'pagerank_datalog' AND status = 'implemented';
  fs_pagerank_ok 
 ----------------
  t

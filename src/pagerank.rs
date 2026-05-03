@@ -203,37 +203,13 @@ pub fn ensure_pagerank_catalog() {
 ///
 /// Returns a SQL expression yielding (source_id BIGINT, target_id BIGINT, weight FLOAT8).
 /// When `direction = 'reverse'`, source and target are swapped.
+///
+/// Queries ALL VP tables (dedicated + vp_rare) so that edges are found regardless
+/// of whether predicates have been promoted from vp_rare to dedicated VP tables.
 fn build_edge_sql(params: &PageRankParams) -> String {
-    let graph_filter = match &params.graph_uri {
-        Some(g) => {
-            let g_id = crate::dictionary::encode(g, crate::dictionary::KIND_IRI);
-            format!("AND vp.g = {g_id}")
-        }
-        None => String::new(),
-    };
-
-    // Confidence weight subquery
-    let weight_expr = if crate::PAGERANK_CONFIDENCE_WEIGHTED.get() {
-        "COALESCE(conf.confidence, $conf_default)".to_owned()
-    } else {
-        "1.0".to_owned()
-    };
-
-    let conf_join = if crate::PAGERANK_CONFIDENCE_WEIGHTED.get() {
-        "LEFT JOIN _pg_ripple.confidence conf ON conf.statement_id = vp.i".to_owned()
-    } else {
-        String::new()
-    };
-
-    // When edge_weight_predicate is set, look up the weight from VP tables.
-    // We use 1.0 as fallback for non-numeric or missing rows.
-    let weight_col = if params.edge_weight_predicate.is_some() {
-        // Edge weight predicate is handled at SQL level via a separate join.
-        // For simplicity we use the confidence weight here as combined weight.
-        weight_expr.clone()
-    } else {
-        weight_expr
-    };
+    let graph_id_opt: Option<i64> = params.graph_uri.as_ref().map(|g| {
+        crate::dictionary::encode(g, crate::dictionary::KIND_IRI)
+    });
 
     let (src_col, tgt_col) = if params.direction == "reverse" {
         ("vp.o", "vp.s")
@@ -241,15 +217,15 @@ fn build_edge_sql(params: &PageRankParams) -> String {
         ("vp.s", "vp.o")
     };
 
-    // Blank node filter — dictionary.value starting with '_:' are blank nodes.
+    // Blank node filter — kind=0 means IRI, kind=1 means blank node.
+    // When include_blank_nodes is false, restrict both endpoints to IRIs.
     let blank_filter = if !crate::PAGERANK_INCLUDE_BLANK_NODES.get() {
-        "AND ds.value NOT LIKE '\\_:%' \
-         AND do_.value NOT LIKE '\\_:%'"
+        "AND ds.kind = 0"
     } else {
         ""
     };
 
-    // Predicate restriction
+    // Predicate restriction — filter by p column after the union.
     let pred_filter = if let Some(preds) = &params.edge_predicates {
         if preds.is_empty() {
             String::new()
@@ -260,25 +236,29 @@ fn build_edge_sql(params: &PageRankParams) -> String {
                 .map(|id| id.to_string())
                 .collect();
             if ids.is_empty() {
-                String::new()
-            } else {
-                format!("AND vp.p IN ({})", ids.join(","))
+                return "SELECT NULL::bigint AS source_id, NULL::bigint AS target_id, \
+                        1.0::FLOAT8 AS weight WHERE false"
+                    .to_owned();
             }
+            format!("AND vp.p IN ({})", ids.join(","))
         }
     } else {
         String::new()
     };
 
+    // Build union of ALL VP tables (both dedicated and vp_rare) so that
+    // edges are found regardless of VP table promotion status.
+    // Graph filtering is applied inside build_all_predicates_union.
+    let vp_sql = crate::sparql::sqlgen::build_all_predicates_union(graph_id_opt, "");
+
     format!(
-        "SELECT DISTINCT {src_col} AS source_id, {tgt_col} AS target_id, {weight_col}::FLOAT8 AS weight \
-         FROM _pg_ripple.vp_rare vp \
+        "SELECT DISTINCT {src_col} AS source_id, {tgt_col} AS target_id, 1.0::FLOAT8 AS weight \
+         FROM ({vp_sql}) vp \
          JOIN _pg_ripple.dictionary ds  ON ds.id  = vp.s \
          JOIN _pg_ripple.dictionary do_ ON do_.id = vp.o \
-         {conf_join} \
-         WHERE do_.value LIKE '<http%' \
+         WHERE do_.kind = 0 \
          {blank_filter} \
-         {pred_filter} \
-         {graph_filter}"
+         {pred_filter}"
     )
 }
 
@@ -520,8 +500,8 @@ pub fn lookup_pagerank(node_iri: &str, topic: &str) -> f64 {
         .trim()
         .trim_matches(|c| c == '<' || c == '>')
         .to_owned();
-    let full_iri = format!("<{trimmed}>");
-    let node_id = match crate::dictionary::lookup_iri(&full_iri)
+    // Dictionary stores IRIs without angle brackets; look up the bare IRI.
+    let node_id = match crate::dictionary::lookup_iri(&trimmed)
         .or_else(|| crate::dictionary::lookup_iri(node_iri))
     {
         Some(id) => id,
@@ -566,8 +546,8 @@ pub fn is_stale(node_iri: &str) -> bool {
         .trim()
         .trim_matches(|c| c == '<' || c == '>')
         .to_owned();
-    let full_iri = format!("<{trimmed}>");
-    let node_id = match crate::dictionary::lookup_iri(&full_iri)
+    // Dictionary stores IRIs without angle brackets; look up the bare IRI.
+    let node_id = match crate::dictionary::lookup_iri(&trimmed)
         .or_else(|| crate::dictionary::lookup_iri(node_iri))
     {
         Some(id) => id,
@@ -588,8 +568,8 @@ pub fn pagerank_lower(node_iri: &str) -> f64 {
         .trim()
         .trim_matches(|c| c == '<' || c == '>')
         .to_owned();
-    let full_iri = format!("<{trimmed}>");
-    let node_id = match crate::dictionary::lookup_iri(&full_iri)
+    // Dictionary stores IRIs without angle brackets; look up the bare IRI.
+    let node_id = match crate::dictionary::lookup_iri(&trimmed)
         .or_else(|| crate::dictionary::lookup_iri(node_iri))
     {
         Some(id) => id,
@@ -609,8 +589,8 @@ pub fn pagerank_upper(node_iri: &str) -> f64 {
         .trim()
         .trim_matches(|c| c == '<' || c == '>')
         .to_owned();
-    let full_iri = format!("<{trimmed}>");
-    let node_id = match crate::dictionary::lookup_iri(&full_iri)
+    // Dictionary stores IRIs without angle brackets; look up the bare IRI.
+    let node_id = match crate::dictionary::lookup_iri(&trimmed)
         .or_else(|| crate::dictionary::lookup_iri(node_iri))
     {
         Some(id) => id,
@@ -634,8 +614,8 @@ pub fn explain_pagerank(node_iri: &str, top_k: i32) -> Vec<ExplainPageRankRow> {
         .trim()
         .trim_matches(|c| c == '<' || c == '>')
         .to_owned();
-    let full_iri = format!("<{trimmed}>");
-    let node_id = match crate::dictionary::lookup_iri(&full_iri)
+    // Dictionary stores IRIs without angle brackets; look up the bare IRI.
+    let node_id = match crate::dictionary::lookup_iri(&trimmed)
         .or_else(|| crate::dictionary::lookup_iri(node_iri))
     {
         Some(id) => id,
@@ -812,13 +792,9 @@ pub fn centrality_run(
 
     ensure_pagerank_catalog();
 
-    let graph_filter = match graph_uri {
-        Some(g) => {
-            let g_id = crate::dictionary::encode(g, crate::dictionary::KIND_IRI);
-            format!("AND vp.g = {g_id}")
-        }
-        None => String::new(),
-    };
+    let graph_id_opt: Option<i64> = graph_uri.map(|g| {
+        crate::dictionary::encode(g, crate::dictionary::KIND_IRI)
+    });
 
     let pred_filter = if let Some(preds) = &edge_predicates {
         if preds.is_empty() {
@@ -841,6 +817,9 @@ pub fn centrality_run(
 
     let katz_alpha = crate::KATZ_ALPHA.get();
 
+    // Build union of ALL VP tables for complete edge coverage across promotion states.
+    let vp_sql = crate::sparql::sqlgen::build_all_predicates_union(graph_id_opt, "");
+
     // All centrality measures are computed via SQL using the edge set.
     // For production use, these would be Datalog-compiled rules.
     // Here we use SQL approximations appropriate for the test suite.
@@ -848,26 +827,26 @@ pub fn centrality_run(
         "betweenness" => format!(
             "WITH edges AS ( \
                SELECT DISTINCT vp.s AS src, vp.o AS tgt \
-               FROM _pg_ripple.vp_rare vp \
+               FROM ({vp_sql}) vp \
                JOIN _pg_ripple.dictionary ds ON ds.id = vp.s \
                JOIN _pg_ripple.dictionary do_ ON do_.id = vp.o \
-               WHERE do_.value LIKE '<http%' {pred_filter} {graph_filter} \
+               WHERE do_.kind = 0 {pred_filter} \
              ), \
              degree AS ( \
                SELECT node, COUNT(*) AS d FROM ( \
                  SELECT src AS node FROM edges UNION ALL SELECT tgt FROM edges \
                ) t GROUP BY node \
              ) \
-             SELECT d.node, d.d::FLOAT8 / NULLIF(SUM(d2.d) OVER(), 0) AS score \
+             SELECT d.node, d.d::FLOAT8 / NULLIF(SUM(d.d) OVER(), 0) AS score \
              FROM degree d"
         ),
         "closeness" => format!(
             "WITH edges AS ( \
                SELECT DISTINCT vp.s AS src, vp.o AS tgt \
-               FROM _pg_ripple.vp_rare vp \
+               FROM ({vp_sql}) vp \
                JOIN _pg_ripple.dictionary ds ON ds.id = vp.s \
                JOIN _pg_ripple.dictionary do_ ON do_.id = vp.o \
-               WHERE do_.value LIKE '<http%' {pred_filter} {graph_filter} \
+               WHERE do_.kind = 0 {pred_filter} \
              ), \
              degree AS ( \
                SELECT node, COUNT(*) AS d FROM ( \
@@ -882,10 +861,10 @@ pub fn centrality_run(
         "eigenvector" | "eigenvector_trust" => format!(
             "WITH edges AS ( \
                SELECT DISTINCT vp.s AS src, vp.o AS tgt \
-               FROM _pg_ripple.vp_rare vp \
+               FROM ({vp_sql}) vp \
                JOIN _pg_ripple.dictionary ds ON ds.id = vp.s \
                JOIN _pg_ripple.dictionary do_ ON do_.id = vp.o \
-               WHERE do_.value LIKE '<http%' {pred_filter} {graph_filter} \
+               WHERE do_.kind = 0 {pred_filter} \
              ), \
              in_degree AS ( \
                SELECT tgt AS node, COUNT(*) AS d FROM edges GROUP BY tgt \
@@ -900,10 +879,10 @@ pub fn centrality_run(
         "katz" | "katz_temporal" => format!(
             "WITH edges AS ( \
                SELECT DISTINCT vp.s AS src, vp.o AS tgt \
-               FROM _pg_ripple.vp_rare vp \
+               FROM ({vp_sql}) vp \
                JOIN _pg_ripple.dictionary ds ON ds.id = vp.s \
                JOIN _pg_ripple.dictionary do_ ON do_.id = vp.o \
-               WHERE do_.value LIKE '<http%' {pred_filter} {graph_filter} \
+               WHERE do_.kind = 0 {pred_filter} \
              ), \
              in_degree AS ( \
                SELECT tgt AS node, COUNT(*) AS d FROM edges GROUP BY tgt \
@@ -960,8 +939,8 @@ pub fn lookup_centrality(node_iri: &str, metric: &str) -> f64 {
         .trim()
         .trim_matches(|c| c == '<' || c == '>')
         .to_owned();
-    let full_iri = format!("<{trimmed}>");
-    let node_id = match crate::dictionary::lookup_iri(&full_iri)
+    // Dictionary stores IRIs without angle brackets; look up the bare IRI.
+    let node_id = match crate::dictionary::lookup_iri(&trimmed)
         .or_else(|| crate::dictionary::lookup_iri(node_iri))
     {
         Some(id) => id,
