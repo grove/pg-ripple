@@ -207,9 +207,10 @@ pub fn ensure_pagerank_catalog() {
 /// Queries ALL VP tables (dedicated + vp_rare) so that edges are found regardless
 /// of whether predicates have been promoted from vp_rare to dedicated VP tables.
 fn build_edge_sql(params: &PageRankParams) -> String {
-    let graph_id_opt: Option<i64> = params.graph_uri.as_ref().map(|g| {
-        crate::dictionary::encode(g, crate::dictionary::KIND_IRI)
-    });
+    let graph_id_opt: Option<i64> = params
+        .graph_uri
+        .as_ref()
+        .map(|g| crate::dictionary::encode(g, crate::dictionary::KIND_IRI));
 
     let (src_col, tgt_col) = if params.direction == "reverse" {
         ("vp.o", "vp.s")
@@ -792,9 +793,8 @@ pub fn centrality_run(
 
     ensure_pagerank_catalog();
 
-    let graph_id_opt: Option<i64> = graph_uri.map(|g| {
-        crate::dictionary::encode(g, crate::dictionary::KIND_IRI)
-    });
+    let graph_id_opt: Option<i64> =
+        graph_uri.map(|g| crate::dictionary::encode(g, crate::dictionary::KIND_IRI));
 
     let pred_filter = if let Some(preds) = &edge_predicates {
         if preds.is_empty() {
