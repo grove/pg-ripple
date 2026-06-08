@@ -41,7 +41,7 @@ jobs:
     name: Check local Markdown links
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6
 
       - name: Check docs links
         run: python3 scripts/check_docs_links.py
@@ -50,7 +50,7 @@ jobs:
     name: Check SUMMARY.md coverage
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6
 
       - name: Check SUMMARY.md coverage
         run: python3 scripts/check_docs_summary.py
@@ -59,7 +59,7 @@ jobs:
     name: Build mdBook (with admonish)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6
 
       - name: Install mdBook
         run: |
@@ -99,7 +99,7 @@ jobs:
     name: GUC drift check (report-only)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6
 
       - name: Check GUC drift
         # Report-only: does not fail the build yet.
@@ -110,7 +110,7 @@ jobs:
     name: HTTP route drift check (report-only)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6
 
       - name: Check HTTP route drift
         # Report-only: does not fail the build yet.
@@ -121,7 +121,7 @@ jobs:
     name: SQL function coverage (report-only)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6
 
       - name: Check SQL function coverage
         # Report-only: does not fail the build yet.
@@ -132,7 +132,7 @@ jobs:
     name: PT error code coverage
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6
 
       - name: Check PT error code documentation
         run: bash scripts/check_pt_codes.sh
@@ -141,7 +141,7 @@ jobs:
     name: Code block label coverage (informational)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6
 
       - name: Report unlabeled SQL/SPARQL code blocks
         # Informational only — does not block the build.
