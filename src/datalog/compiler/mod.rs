@@ -544,7 +544,7 @@ pub(super) fn is_recursive_rule(rule: &Rule, head_pred: i64) -> bool {
 fn compile_nonrecursive_rule(
     rule: &Rule,
     _head_pred: i64,
-    head_g_expr: &str,
+    _head_g_expr: &str,
     target: &str,
 ) -> Result<String, String> {
     let head = rule
@@ -956,6 +956,7 @@ fn compile_nonrecursive_rule(
         Term::Wildcard => return Err("wildcard in head not allowed".to_owned()),
         Term::DefaultGraph => "0".to_owned(),
     };
+    let select_g = helpers::head_g_select_expr(head, &var_map)?;
 
     let from_str = from_clauses.join("\n");
     let where_str = if where_clauses.is_empty() {
@@ -966,7 +967,7 @@ fn compile_nonrecursive_rule(
 
     Ok(format!(
         "INSERT INTO {target} (s, o, g)\n\
-         SELECT {select_s}, {select_o}, {head_g_expr}\n\
+         SELECT {select_s}, {select_o}, {select_g}\n\
          FROM {from_str}\n\
          {where_str}\n\
          ON CONFLICT DO NOTHING"
@@ -979,5 +980,6 @@ fn compile_nonrecursive_rule(
 // v0.122.0 H17-02: helpers extracted to helpers.rs
 pub(super) mod helpers;
 pub(crate) use helpers::{
-    arith_op_sql, build_join_cond, build_not_exists_conds, compare_op_sql, render_comparison_term,
+    arith_op_sql, build_join_cond, build_not_exists_conds, compare_op_sql, head_g_select_expr,
+    render_comparison_term,
 };

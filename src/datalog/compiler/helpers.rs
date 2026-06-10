@@ -92,3 +92,15 @@ pub(crate) fn arith_op_sql(op: &ArithOp) -> &'static str {
         ArithOp::Div => "/",
     }
 }
+
+/// SQL expression for the head graph column (constant, default graph, or bound ?g).
+pub(crate) fn head_g_select_expr(head: &Atom, var_map: &VarMap) -> Result<String, String> {
+    Ok(match &head.g {
+        Term::Var(v) => var_map
+            .col_ref(v)
+            .ok_or_else(|| format!("unbound variable ?{v} in head graph"))?,
+        Term::Const(id) => const_sql(*id),
+        Term::DefaultGraph => "0".to_owned(),
+        Term::Wildcard => "0".to_owned(),
+    })
+}
