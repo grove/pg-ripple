@@ -1,0 +1,21 @@
+{
+  "name": "pg_ripple",
+  "image": "mcr.microsoft.com/devcontainers/rust:1-bookworm",
+  "postCreateCommand": [
+    "apt-get update",
+    "apt-get install -y clang llvm pkg-config build-essential libssl-dev libreadline-dev zlib1g-dev bison flex",
+    "cargo install just cargo-pgrx",
+    "cargo pgrx init --pg18 download"
+  ],
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "rust-lang.rust-analyzer",
+        "vadimcn.vscode-lldb"
+      ],
+      "settings": {
+        "rust-analyzer.checkOnSave.command": "clippy"
+      }
+    }
+  }
+}
