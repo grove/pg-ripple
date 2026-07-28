@@ -599,6 +599,15 @@ unsafe extern "C-unwind" fn sub_xact_callback_c(
         // so that stale id→string mappings from the aborted subtransaction
         // cannot be returned by subsequent decode() calls.
         crate::dictionary::invalidate_decode_cache();
+        // DICT-SUBXACT-02: e desfazer no cache de memória compartilhada os
+        // termos internados por esta subtransação. O cache é do cluster, não do
+        // processo: deixar o mapeamento vivo aqui fazia a próxima escrita de
+        // qualquer processo gravar tripla apontando para linha inexistente.
+        crate::dictionary::subxact_abort(_mySubid);
+    } else if event == pgrx::pg_sys::SubXactEvent::SUBXACT_EVENT_COMMIT_SUB {
+        // Subtransação boa: quem responde pelos termos dela passa a ser o pai,
+        // que ainda pode abortar.
+        crate::dictionary::subxact_commit(_mySubid, _parentSubid);
     }
 }
 

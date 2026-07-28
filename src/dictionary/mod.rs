@@ -88,7 +88,15 @@ thread_local! {
     /// are evicted from shmem so that stale hash→id mappings cannot poison
     /// subsequent transactions (the dictionary rows are rolled back but the
     /// shmem entries would otherwise persist indefinitely).
-    static TX_SHMEM_INSERTS: RefCell<Vec<u128>> = const { RefCell::new(Vec::new()) };
+    ///
+    /// DICT-SUBXACT-02: cada entrada guarda também o `SubTransactionId` em que
+    /// foi criada. Sem isso, o rollback de uma subtransação (`SAVEPOINT`, ou o
+    /// bloco `EXCEPTION` de qualquer função PL/pgSQL) desfazia a linha do
+    /// dicionário e deixava o mapeamento hash→id vivo na memória compartilhada,
+    /// visível para todos os processos. A próxima escrita do mesmo termo pegava
+    /// o id fantasma do cache e gravava uma tripla apontando para uma linha que
+    /// não existe — dado indecifrável, sem erro nenhum.
+    static TX_SHMEM_INSERTS: RefCell<Vec<(u32, u128)>> = const { RefCell::new(Vec::new()) };
     /// Decode cache: sequence id → term value.
     static DECODE_CACHE: RefCell<LruCache<i64, String>> = RefCell::new(
         // SAFETY: CACHE_CAPACITY is a compile-time non-zero literal (4096).
@@ -190,7 +198,7 @@ fn encode_inner(term: &str, kind: i16) -> i64 {
 
     // Populate both caches.
     crate::shmem::encode_cache_insert(hash128, id);
-    TX_SHMEM_INSERTS.with(|v| v.borrow_mut().push(hash128));
+    track_shmem_insert(hash128);
     ENCODE_CACHE.with(|c| c.borrow_mut().put(hash128, id));
     DECODE_CACHE.with(|c| c.borrow_mut().put(id, term.to_owned()));
 
@@ -265,7 +273,7 @@ pub fn encode_typed_literal(value: &str, datatype: &str) -> i64 {
     .unwrap_or_else(|| pgrx::error!("dictionary encode_typed_literal: no id returned"));
 
     crate::shmem::encode_cache_insert(hash128, id);
-    TX_SHMEM_INSERTS.with(|v| v.borrow_mut().push(hash128));
+    track_shmem_insert(hash128);
     ENCODE_CACHE.with(|c| c.borrow_mut().put(hash128, id));
     DECODE_CACHE.with(|c| c.borrow_mut().put(id, canonical));
 
@@ -313,7 +321,7 @@ pub fn encode_lang_literal(value: &str, lang: &str) -> i64 {
     .unwrap_or_else(|| pgrx::error!("dictionary encode_lang_literal: no id returned"));
 
     crate::shmem::encode_cache_insert(hash128, id);
-    TX_SHMEM_INSERTS.with(|v| v.borrow_mut().push(hash128));
+    track_shmem_insert(hash128);
     ENCODE_CACHE.with(|c| c.borrow_mut().put(hash128, id));
     DECODE_CACHE.with(|c| c.borrow_mut().put(id, canonical));
 
@@ -449,7 +457,7 @@ pub fn encode_batch(terms_and_kinds: &[(&str, i16)]) -> Vec<i64> {
             )
         });
         crate::shmem::encode_cache_insert(hash, id);
-        TX_SHMEM_INSERTS.with(|v| v.borrow_mut().push(hash));
+        track_shmem_insert(hash);
         ENCODE_CACHE.with(|c| c.borrow_mut().put(hash, id));
         let term = terms_and_kinds[i].0;
         DECODE_CACHE.with(|c| c.borrow_mut().put(id, term.to_owned()));
@@ -562,7 +570,7 @@ pub fn encode_quoted_triple(s_id: i64, p_id: i64, o_id: i64) -> i64 {
     .unwrap_or_else(|| pgrx::error!("dictionary encode_quoted_triple: no id returned"));
 
     crate::shmem::encode_cache_insert(hash128, id);
-    TX_SHMEM_INSERTS.with(|v| v.borrow_mut().push(hash128));
+    track_shmem_insert(hash128);
     ENCODE_CACHE.with(|c| c.borrow_mut().put(hash128, id));
     DECODE_CACHE.with(|c| c.borrow_mut().put(id, canonical));
     id
@@ -869,7 +877,7 @@ pub fn decode(id: i64) -> Option<String> {
 pub(crate) fn clear_caches() {
     // Evict shmem entries that were inserted in this (now-aborting) transaction.
     TX_SHMEM_INSERTS.with(|v| {
-        for &hash128 in v.borrow().iter() {
+        for &(_subid, hash128) in v.borrow().iter() {
             crate::shmem::encode_cache_evict(hash128);
         }
         v.borrow_mut().clear();
@@ -879,6 +887,49 @@ pub(crate) fn clear_caches() {
     });
     DECODE_CACHE.with(|c| {
         c.borrow_mut().clear();
+    });
+}
+
+/// Anota que este termo acabou de entrar no cache de memória compartilhada,
+/// junto com a subtransação corrente, para poder ser desfeito no rollback certo.
+fn track_shmem_insert(hash128: u128) {
+    // SAFETY: encode só é chamado dentro de uma transação, onde
+    // GetCurrentSubTransactionId() é válido; a função não aloca nem faz SPI.
+    let subid = unsafe { pgrx::pg_sys::GetCurrentSubTransactionId() };
+    TX_SHMEM_INSERTS.with(|v| v.borrow_mut().push((subid, hash128)));
+}
+
+/// Desfaz no cache compartilhado o que a subtransação `my_subid` internou.
+///
+/// DICT-SUBXACT-02: chamado em `SUBXACT_EVENT_ABORT_SUB`. O corte é
+/// `subid >= my_subid` porque `SubTransactionId` cresce dentro da transação:
+/// qualquer subtransação aberta depois desta já morreu junto com ela.
+pub(crate) fn subxact_abort(my_subid: u32) {
+    TX_SHMEM_INSERTS.with(|v| {
+        let mut lista = v.borrow_mut();
+        lista.retain(|&(subid, hash128)| {
+            if subid >= my_subid {
+                crate::shmem::encode_cache_evict(hash128);
+                false
+            } else {
+                true
+            }
+        });
+    });
+}
+
+/// Passa para a subtransação pai o que a subtransação `my_subid` internou.
+///
+/// Sem isso, um `SAVEPOINT` bem-sucedido dentro de uma transação que depois
+/// aborta deixaria os termos daquele savepoint sem ninguém para desfazê-los —
+/// o mesmo fantasma, um nível acima.
+pub(crate) fn subxact_commit(my_subid: u32, parent_subid: u32) {
+    TX_SHMEM_INSERTS.with(|v| {
+        for entrada in v.borrow_mut().iter_mut() {
+            if entrada.0 >= my_subid {
+                entrada.0 = parent_subid;
+            }
+        }
     });
 }
 
