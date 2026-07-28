@@ -36,6 +36,6 @@ pub struct ConstraintArgs<'a> {
 pub use super::Violation;
 pub(crate) use super::node_conforms_to_shape;
 pub(crate) use super::{
-    compare_dictionary_values, encode_shacl_in_value, get_language_tag, get_value_ids,
+    compare_dictionary_values, get_language_tag, get_value_ids, shacl_value_matches,
     value_has_datatype, value_has_node_kind, value_has_rdf_type,
 };

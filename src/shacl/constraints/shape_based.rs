@@ -1,35 +1,41 @@
 //! sh:in, sh:hasValue, sh:lessThan, sh:greaterThan, sh:closed constraint checkers.
 
 use super::{
-    ConstraintArgs, Violation, compare_dictionary_values, encode_shacl_in_value, get_value_ids,
+    ConstraintArgs, Violation, compare_dictionary_values, get_value_ids, shacl_value_matches,
 };
 
 /// Check `sh:in [values]` — every value node must be one of the allowed values.
+///
+/// A comparação é por forma canônica do termo, não por id do dicionário. Casar
+/// só por id fazia todo `sh:in` de literal falhar: a forma declarada na shape
+/// (`"tool"`) e o literal internado podem ter ids diferentes quando um traz tipo
+/// explícito e o outro não.
 pub(crate) fn check_in(
     allowed_values: &[String],
     args: &ConstraintArgs,
     violations: &mut Vec<Violation>,
 ) {
-    let allowed_ids: Vec<i64> = allowed_values
-        .iter()
-        .filter_map(|val| encode_shacl_in_value(val))
-        .collect();
     let value_ids = get_value_ids(args.focus, args.path_id, args.graph_id);
     for v_id in value_ids {
-        if !allowed_ids.contains(&v_id) {
-            let focus_iri = crate::dictionary::decode(args.focus)
-                .unwrap_or_else(|| format!("_id_{}", args.focus));
-            violations.push(Violation {
-                focus_node: focus_iri,
-                shape_iri: args.shape_iri.to_owned(),
-                path: Some(args.path_iri.to_owned()),
-                constraint: "sh:in".to_owned(),
-                message: format!("value node id {v_id} is not in the allowed value set"),
-                severity: "Violation".to_owned(),
-                sh_value: None,
-                sh_source_constraint_component: None,
-            });
+        if allowed_values
+            .iter()
+            .any(|declared| shacl_value_matches(v_id, declared))
+        {
+            continue;
         }
+        let focus_iri =
+            crate::dictionary::decode(args.focus).unwrap_or_else(|| format!("_id_{}", args.focus));
+        let stored = crate::dictionary::decode(v_id).unwrap_or_else(|| format!("_id_{v_id}"));
+        violations.push(Violation {
+            focus_node: focus_iri,
+            shape_iri: args.shape_iri.to_owned(),
+            path: Some(args.path_iri.to_owned()),
+            constraint: "sh:in".to_owned(),
+            message: format!("value {stored} (id {v_id}) is not in the allowed value set"),
+            severity: "Violation".to_owned(),
+            sh_value: None,
+            sh_source_constraint_component: None,
+        });
     }
 }
 
@@ -39,25 +45,25 @@ pub(crate) fn check_has_value(
     args: &ConstraintArgs,
     violations: &mut Vec<Violation>,
 ) {
-    let expected_id = match encode_shacl_in_value(expected_val) {
-        Some(id) => id,
-        None => return, // Expected value not in dictionary — cannot match.
-    };
     let value_ids = get_value_ids(args.focus, args.path_id, args.graph_id);
-    if !value_ids.contains(&expected_id) {
-        let focus_iri =
-            crate::dictionary::decode(args.focus).unwrap_or_else(|| format!("_id_{}", args.focus));
-        violations.push(Violation {
-            focus_node: focus_iri,
-            shape_iri: args.shape_iri.to_owned(),
-            path: Some(args.path_iri.to_owned()),
-            constraint: "sh:hasValue".to_owned(),
-            message: format!("expected value '{expected_val}' not found"),
-            severity: "Violation".to_owned(),
-            sh_value: None,
-            sh_source_constraint_component: None,
-        });
+    if value_ids
+        .iter()
+        .any(|&v_id| shacl_value_matches(v_id, expected_val))
+    {
+        return;
     }
+    let focus_iri =
+        crate::dictionary::decode(args.focus).unwrap_or_else(|| format!("_id_{}", args.focus));
+    violations.push(Violation {
+        focus_node: focus_iri,
+        shape_iri: args.shape_iri.to_owned(),
+        path: Some(args.path_iri.to_owned()),
+        constraint: "sh:hasValue".to_owned(),
+        message: format!("expected value '{expected_val}' not found"),
+        severity: "Violation".to_owned(),
+        sh_value: None,
+        sh_source_constraint_component: None,
+    });
 }
 
 /// Check `sh:lessThan other_path` — every value must be less than the corresponding
