@@ -363,11 +363,11 @@ pub(crate) fn build_router(state: Arc<AppState>, max_body_bytes: usize, cors: Co
         .route("/temporal/facts", get(temporal_handlers::temporal_facts))
         // v0.125.0 FEAT-02: Temporal graph snapshot and diff endpoints.
         .route(
-            "/temporal/graphs/:iri/snapshot",
+            "/temporal/graphs/{iri}/snapshot",
             get(temporal_handlers::graph_snapshot),
         )
         .route(
-            "/temporal/graphs/:iri/diff",
+            "/temporal/graphs/{iri}/diff",
             get(temporal_handlers::graph_diff),
         )
         // v0.115.0 M16-02: PPRL REST API.
@@ -381,7 +381,7 @@ pub(crate) fn build_router(state: Arc<AppState>, max_body_bytes: usize, cors: Co
         .route("/dp/noisy_histogram", post(dp_handlers::dp_noisy_histogram))
         // v0.118.0 Feature 2: Privacy budget status endpoint.
         .route(
-            "/dp/budget/:dataset/:principal",
+            "/dp/budget/{dataset}/{principal}",
             get(dp_handlers::dp_budget_get),
         )
         // v0.115.0 M16-02: Entity-resolution REST API.
