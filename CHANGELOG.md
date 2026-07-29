@@ -11,6 +11,16 @@ Versions correspond to the milestones in [ROADMAP.md](ROADMAP.md).
 
 ### Fixed
 
+- **`drain_dead_letter_queue()` deleted one row, not the queue.** It used
+  `Spi::get_one` on `DELETE … RETURNING 1`; `get_one` asks SPI for a single row and
+  SPI stops executing the command once the limit is reached, so exactly one row was
+  deleted while the function returned 1 as if it had emptied the queue. Observed in
+  production on 2026-07-28: the queue held 18 450 rows, the call returned 1, and the
+  next count still said 18 450. Every other DML in the module already used the
+  correct `WITH d AS (DELETE … RETURNING 1) SELECT count(*) FROM d` shape; this was
+  the only call outside the pattern. Pinned by
+  `tests/pg_regress/dead_letter_drain`.
+
 - **SHACL `sh:in` never matched a literal value set** — The single-triple write
   guard resolved each declared value with `lookup_iri()`, which returns `NULL`
   for a quoted literal. The allowed-value list was therefore empty for every
@@ -64,6 +74,9 @@ Versions correspond to the milestones in [ROADMAP.md](ROADMAP.md).
   value is rejected under `maxCount 1`, a conforming write validated after the
   fact produces no dead letter, and a real violation records shape, constraint
   and path.
+
+- **`tests/pg_regress/pgturbohybrid_bm25_bulk_delete`** — (in the pgturbohybrid repo)
+  see that project's changelog.
 
 - **`tests/pg_regress/dict_subxact_phantom`** — pins the dictionary invariant
   across `EXCEPTION` blocks, `ROLLBACK TO SAVEPOINT`, and a released savepoint
