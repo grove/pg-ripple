@@ -539,6 +539,16 @@ jobs:
           echo "digest=$DIGEST" >> "$GITHUB_OUTPUT"
           echo "Image digest: $DIGEST"
 
+      # v0.128.1 (container-auth-negative-test): the production image must
+      # never accept passwordless remote PostgreSQL connections by default —
+      # docker/00-pg_hba.sh used to add unconditional trust rules to every
+      # built image. Verify against the digest just pushed, not a local
+      # rebuild.
+      - name: Verify production image rejects passwordless auth by default
+        run: |
+          IMAGE_REF="ghcr.io/trickle-labs/pg-ripple@${{ steps.digest.outputs.digest }}" \
+            bash tests/container/test_pg_hba.sh
+
       # v0.60.0 N7-4 / v0.64.0 TRUTH-04: Docker CVE scan — fail release if
       # HIGH/CRITICAL CVEs found. Scan the immutable digest, not the mutable tag.
       - name: Run Trivy vulnerability scan

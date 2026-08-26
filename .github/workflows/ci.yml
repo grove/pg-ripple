@@ -93,6 +93,14 @@ jobs:
       - name: Check pg_ripple_http compiles
         run: cargo check -p pg_ripple_http
 
+      # v0.128.1 (http-router-construction): compiling is not enough — Axum 0.8
+      # panics at router-construction time on obsolete `:capture` routes, which
+      # only surfaces once the binary actually runs. This builds the full
+      # router and dispatches a request to every registered route, with no
+      # live PostgreSQL connection required.
+      - name: pg_ripple_http router construction & startup gate
+        run: cargo test -p pg_ripple_http --test router_construction
+
       # v0.62.0 N7-5: cargo deny — licence, duplicate and advisory checks.
       - name: Install cargo-deny
         run: |
@@ -227,6 +235,19 @@ jobs:
 
       - name: Install extension into live instance
         run: cargo pgrx install --pg-config ~/.pgrx/18.*/pgrx-install/bin/pg_config --release 2>/dev/null || cargo pgrx install --pg-config $(find ~/.pgrx -name pg_config | head -1) 2>/dev/null || echo "Install skipped — pg_config path not found"
+
+      # v0.128.1 (http-process-smoke): start the real pg_ripple_http binary
+      # against the live pgrx instance, poll /health and /ready, and verify a
+      # clean exit on SIGTERM. Catches startup crashes that a compile-only or
+      # in-process router check cannot (e.g. failing to bind, or an unclean
+      # shutdown path).
+      - name: pg_ripple_http process smoke test
+        run: |
+          psql "host=localhost port=28818 dbname=postgres user=${USER}" \
+            -c "CREATE EXTENSION IF NOT EXISTS pg_ripple;"
+          cargo build -p pg_ripple_http
+          PG_RIPPLE_HTTP_PG_URL="postgresql://${USER}@localhost:28818/postgres" \
+            bash pg_ripple_http/tests/process_smoke.sh
 
       - name: Validate examples (live, L15-03)
         run: |

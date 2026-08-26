@@ -9,15 +9,74 @@ Versions correspond to the milestones in [ROADMAP.md](ROADMAP.md).
 
 ## [Unreleased]
 
+---
+
+## [0.128.1] — 2026-08-26 — Emergency Containment and Safe Patch
+
+**Out-of-band safety patch for v0.128.0. Fixes three critical issues found
+after that release: the HTTP companion could crash on startup instead of serving traffic, the
+production Docker image accepted passwordless remote database connections,
+and async JSON writeback could report itself as enabled without a working
+event path. Nothing new is added — this release only removes unsafe
+behavior; see
+[plans/pg-ripple-production-readiness-plan.md](plans/pg-ripple-production-readiness-plan.md#v01281--emergency-containment-and-safe-patch)
+for the full remediation plan.**
+
+### Security
+
+- **Production Docker image accepted passwordless remote PostgreSQL
+  connections** — `docker/00-pg_hba.sh` unconditionally added `trust` rules
+  for all external TCP connections to every built image, including
+  production pulls; any client that could reach the port got an
+  unauthenticated superuser connection. The script is now inert unless the
+  operator explicitly sets `PG_RIPPLE_DEV_TRUST_AUTH=1` (development only —
+  never set this on a reachable deployment). `docker-compose.yml` now binds
+  PostgreSQL to `127.0.0.1` by default. Added
+  `tests/container/test_pg_hba.sh`, which confirms passwordless TCP auth
+  fails, SCRAM auth with the configured password succeeds, and local
+  Unix-socket access is unaffected.
+
 ### Fixed
 
-- **CI: CloudNativePG extension image publishing** — Added `docker-cnpg` job to
-  release workflow to build and publish the extension volume image with the
+- **HTTP companion could panic during startup instead of serving traffic** —
+  three routes (`/temporal/graphs/:iri/snapshot`, `/temporal/graphs/:iri/diff`,
+  `/dp/budget/:dataset/:principal`) still used the Axum 0.7 `:capture` path
+  syntax, which Axum 0.8 rejects with a panic at router-construction time —
+  the process would exit before ever binding a port or answering `/health`.
+  All routes now use the `{capture}` syntax Axum 0.8 requires. Added
+  `pg_ripple_http/tests/router_construction.rs`, which builds the full
+  router and dispatches a request to every registered route without a live
+  PostgreSQL connection, and `pg_ripple_http/tests/process_smoke.sh`, which
+  starts the real binary against a real database, polls `/health` and
+  `/ready`, and verifies a clean exit on `SIGTERM`.
+- **`enable_json_writeback()` could report success while leaving predicates
+  uncovered** — it always set `writeback_enabled = true` even when a
+  predicate's dictionary entry or VP delta table did not exist yet, or a
+  trigger failed to install, silently under-covering the async writeback
+  event path (RDF changes for uncovered predicates were never enqueued for
+  relational writeback). It now fails with a descriptive error and leaves
+  `writeback_enabled = false` unless every mapped predicate got a working
+  enqueue trigger. Direct writeback via `writeback_json_row()` and
+  `writeback_json_row_delete()` is unaffected. `pg_ripple.feature_status()`
+  now reports `json_mapping_writeback` as `broken` pending the full
+  trigger-architecture repair in v0.129.0. Added regression coverage in
+  `tests/pg_regress/sql/v0128_json_writeback.sql` (JWB-22).
+- **CI (`release.yml`): CloudNativePG extension image publishing** — Added a
+  `docker-cnpg` job to build and publish the extension volume image with the
   `-cnpg` suffix on each tagged release. The `docker/Dockerfile.cnpg` existed
   but was never built by CI, causing `docker pull
   ghcr.io/trickle-labs/pg-ripple:<version>-cnpg` to fail with "not found". Now
   the extension image is published automatically alongside the main extension
   and HTTP companion images.
+
+### Technical Details
+
+- `pg_ripple_http` gained a library target (`src/lib.rs`) re-exporting
+  `routing`, `common`, and `metrics` so integration tests can build the
+  router in-process; `main.rs` is now a thin binary over that library.
+  `routing::build_router()` is `pub` instead of `pub(crate)`.
+- `src/feature_status.rs` documents a new `broken` status value in its
+  taxonomy: "known correctness defect; do not rely on this in production."
 
 ---
 

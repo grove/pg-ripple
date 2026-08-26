@@ -16,9 +16,12 @@
 #     ghcr.io/trickle-labs/pg-ripple:latest
 #
 # Authentication:
-#   The container is configured for development/testing with trust authentication
-#   enabled for external TCP connections. See docker/00-pg_hba.sh for details.
-#   For production deployments, use password-based authentication instead.
+#   v0.128.1: SCRAM authentication (the postgres:18 base image default) applies
+#   to all TCP connections out of the box — the image no longer weakens this.
+#   For local development ONLY, set PG_RIPPLE_DEV_TRUST_AUTH=1 to make
+#   docker/00-pg_hba.sh add passwordless trust rules for external TCP
+#   connections. Never set this in a production or otherwise reachable
+#   deployment. See docker/00-pg_hba.sh for details.
 
 # ── Build stage ───────────────────────────────────────────────────────────────
 # Build a fresh gosu binary from source using Go 1.26 (fixes all gosu stdlib

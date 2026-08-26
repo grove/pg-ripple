@@ -990,6 +990,13 @@ pub fn enable_json_writeback_impl(mapping: &str) {
     // For each predicate IRI, find the VP delta table and install trigger.
     let safe_mapping = mapping.replace(|c: char| !c.is_alphanumeric(), "_");
 
+    // v0.128.1 C18-01 containment: track exactly which predicates got a
+    // working enqueue trigger installed. Until v0.129.0 rebuilds this on a
+    // storage-level event path, `writeback_enabled` must never claim more
+    // coverage than what was actually installed just now.
+    let mut installed = 0usize;
+    let mut uncovered: Vec<String> = Vec::new();
+
     for pred_iri in &pred_iris {
         // Look up predicate_id in dictionary.
         let pred_id_opt: Option<i64> = pgrx::Spi::get_one_with_args::<i64>(
@@ -1000,7 +1007,10 @@ pub fn enable_json_writeback_impl(mapping: &str) {
 
         let pred_id = match pred_id_opt {
             Some(id) => id,
-            None => continue, // predicate not yet stored
+            None => {
+                uncovered.push(format!("{pred_iri} (no dictionary entry yet)"));
+                continue;
+            }
         };
 
         // Check whether the delta table exists.
@@ -1015,6 +1025,7 @@ pub fn enable_json_writeback_impl(mapping: &str) {
         .unwrap_or(false);
 
         if !delta_exists {
+            uncovered.push(format!("{pred_iri} (no {delta_table} table yet)"));
             continue;
         }
 
@@ -1029,15 +1040,29 @@ pub fn enable_json_writeback_impl(mapping: &str) {
              FOR EACH ROW EXECUTE FUNCTION _pg_ripple.json_writeback_enqueue_fn('{q_mapping}')"
         );
 
-        pgrx::Spi::run_with_args(&create_trigger_sql, &[]).unwrap_or_else(|e| {
-            pgrx::warning!(
-                "enable_json_writeback: could not install trigger on {}: {e}",
-                delta_table
-            )
-        });
+        match pgrx::Spi::run_with_args(&create_trigger_sql, &[]) {
+            Ok(_) => installed += 1,
+            Err(e) => uncovered.push(format!("{pred_iri} (trigger install failed: {e})")),
+        }
     }
 
-    // Set writeback_enabled = true.
+    // v0.128.1 C18-01 containment: fail closed rather than silently reporting
+    // "enabled" when the enqueue path is incomplete or entirely missing.
+    if installed == 0 || !uncovered.is_empty() {
+        pgrx::error!(
+            "enable_json_writeback: cannot enable — incomplete enqueue coverage \
+             ({installed} of {} predicate(s) covered); async writeback is unavailable \
+             for this mapping until every mapped predicate has been ingested at least \
+             once. Uncovered: [{}]. writeback_enabled was left false; use \
+             writeback_json_row()/writeback_json_row_delete() for direct writeback \
+             in the meantime.",
+            pred_iris.len(),
+            uncovered.join(", ")
+        );
+    }
+
+    // Set writeback_enabled = true — only reached once every mapped predicate
+    // has a validated enqueue trigger installed.
     pgrx::Spi::run_with_args(
         "UPDATE _pg_ripple.json_mappings SET writeback_enabled = true WHERE name = $1",
         &[pgrx::datum::DatumWithOid::from(mapping)],

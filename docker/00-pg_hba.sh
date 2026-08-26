@@ -1,6 +1,6 @@
 #!/bin/bash
-# 00-pg_hba.sh  
-# Modifies PostgreSQL authentication configuration to allow TCP connections.
+# 00-pg_hba.sh
+# Opt-in: adds passwordless (trust) rules for external TCP connections.
 #
 # Background:
 # The official postgres:18 Docker image generates pg_hba.conf during initdb with
@@ -8,10 +8,19 @@
 # When pg_ripple's Docker image is used with port forwarding, the connection source
 # IP may not match the localhost-only trust rules, causing authentication to fail.
 #
-# This script adds trust rules for external TCP connections so the container is
-# easily accessible from the host during development/testing.
+# v0.128.1 (emergency containment): this script used to apply unconditionally,
+# so every pg_ripple image — including production pulls — accepted passwordless
+# remote PostgreSQL connections. It is now inert unless the operator explicitly
+# opts in with PG_RIPPLE_DEV_TRUST_AUTH=1. NEVER set this in a production or
+# otherwise network-reachable deployment — anyone who can reach the port gets
+# an unauthenticated superuser connection.
 
 set -e
+
+if [ "$PG_RIPPLE_DEV_TRUST_AUTH" != "1" ]; then
+  echo "INFO: PG_RIPPLE_DEV_TRUST_AUTH not set to 1, skipping pg_hba.conf trust rules (SCRAM auth stays in effect)"
+  exit 0
+fi
 
 # PGDATA is set by the official postgres entrypoint
 if [ -z "$PGDATA" ]; then

@@ -26,13 +26,17 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: ghcr.io/trickle-labs/pg_ripple:0.128.0
+    image: ghcr.io/trickle-labs/pg_ripple:0.128.1
     environment:
       # S13-07 (v0.86.0): use POSTGRES_PASSWORD_FILE instead of plain-text password.
       # Generate: mkdir -p secrets && openssl rand -base64 32 > secrets/pg_password.txt
       POSTGRES_PASSWORD_FILE: /run/secrets/pg_password
     secrets:
       - pg_password
+    ports:
+      # v0.128.1: bind to loopback only by default — change to "5432:5432" to
+      # expose PostgreSQL beyond this host, e.g. for a real remote deployment.
+      - "127.0.0.1:5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -45,7 +49,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: ghcr.io/trickle-labs/pg_ripple:0.128.0
+    image: ghcr.io/trickle-labs/pg_ripple:0.128.1
     entrypoint: ["/usr/local/bin/pg_ripple_http"]
     ports:
       - "7878:7878"

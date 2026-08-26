@@ -2092,7 +2092,7 @@ dependencies = [
 
 [[package]]
 name = "pg_ripple"
-version = "0.128.0"
+version = "0.128.1"
 dependencies = [
  "chrono",
  "crossbeam-channel",
@@ -2123,7 +2123,7 @@ dependencies = [
 
 [[package]]
 name = "pg_ripple_http"
-version = "0.128.0"
+version = "0.128.1"
 dependencies = [
  "arrow",
  "axum",
@@ -2141,6 +2141,7 @@ dependencies = [
  "tokio",
  "tokio-postgres",
  "tokio-stream",
+ "tower",
  "tower-http",
  "tower_governor",
  "tracing",

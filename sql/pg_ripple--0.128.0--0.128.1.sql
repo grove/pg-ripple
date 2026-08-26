@@ -1,0 +1,11 @@
+-- Migration 0.128.0 → 0.128.1: Emergency containment and safe patch
+--
+-- Changes in this release:
+--   - enable_json_writeback() now fails with an error instead of setting
+--     writeback_enabled = true when enqueue-trigger coverage is incomplete
+--     (C18-01 containment). No schema change — behavior change in Rust only.
+--   - pg_ripple.feature_status() reports json_mapping_writeback as 'broken'
+--     instead of 'implemented' pending the v0.129.0 trigger-architecture repair.
+--   - pg_ripple_http and Docker image fixes only; no extension schema changes.
+--
+-- No SQL statements required for this migration.

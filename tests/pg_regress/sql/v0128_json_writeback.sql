@@ -365,6 +365,49 @@ SELECT COUNT(*) AS jwb21_feature_status_entry
 FROM pg_ripple.feature_status()
 WHERE feature_name = 'json_mapping_writeback';
 
+-- ─── JWB-22: enable_json_writeback() fails closed on incomplete enqueue
+-- coverage (v0.128.1 C18-01 emergency containment) ───────────────────────────
+
+CREATE TABLE IF NOT EXISTS public.uncovered_test (
+    item_id   TEXT PRIMARY KEY,
+    item_name TEXT
+);
+
+-- Mapped predicates below have never been ingested, so no dictionary entry
+-- or VP delta table exists for them — enqueue coverage cannot be complete.
+SELECT pg_ripple.register_json_mapping(
+    'uncovered_writeback',
+    '{"item_id":   "http://example.org/v0128-1/uncovered-id",
+      "item_name": "http://example.org/v0128-1/uncovered-name"}'::jsonb,
+    NULL, NULL, NULL, NULL, NULL, NULL
+);
+
+UPDATE _pg_ripple.json_mappings
+SET writeback_table        = 'uncovered_test',
+    writeback_schema       = 'public',
+    writeback_key_columns  = ARRAY['item_id'],
+    writeback_conflict_policy = 'replace'
+WHERE name = 'uncovered_writeback';
+
+DO $$
+BEGIN
+    BEGIN
+        PERFORM pg_ripple.enable_json_writeback('uncovered_writeback');
+        RAISE NOTICE 'JWB-22 FAIL: enable_json_writeback() should have raised for incomplete coverage';
+    EXCEPTION WHEN OTHERS THEN
+        RAISE NOTICE 'JWB-22 PASS: enable_json_writeback() failed closed: %', SQLERRM;
+    END;
+END;
+$$;
+
+-- writeback_enabled must remain false — no false-positive "enabled" claim.
+SELECT writeback_enabled AS jwb22_writeback_enabled_stays_false
+FROM _pg_ripple.json_mappings
+WHERE name = 'uncovered_writeback';
+
+DELETE FROM _pg_ripple.json_mappings WHERE name = 'uncovered_writeback';
+DROP TABLE IF EXISTS public.uncovered_test;
+
 -- ─── Cleanup ─────────────────────────────────────────────────────────────────
 
 DELETE FROM _pg_ripple.json_mappings WHERE name = 'contacts_writeback';

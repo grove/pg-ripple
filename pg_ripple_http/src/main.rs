@@ -15,15 +15,8 @@ use tower_governor::GovernorLayer;
 use tower_governor::governor::GovernorConfigBuilder;
 use tower_http::cors::{AllowOrigin, CorsLayer};
 
-pub mod arrow_encode;
-pub mod common;
-pub mod datalog;
-pub mod metrics;
-pub mod routing;
-pub mod spi_bridge;
-pub mod stream;
-
-use common::{AppState, env_or};
+use pg_ripple_http::common::{AppState, env_or};
+use pg_ripple_http::{metrics, routing};
 
 // ─── Compatibility constants (COMPAT-01, v0.71.0) ────────────────────────────
 

@@ -303,7 +303,7 @@
 
 | Version | Theme | Status | Release type | Primary gate |
 |---------|-------|--------|--------------|--------------|
-| [v0.128.1](plans/pg-ripple-production-readiness-plan.md#v01281--emergency-containment-and-safe-patch) | Emergency containment and safe patch | Planned | Out-of-band patch | No startup panic, no passwordless production image, no false-enabled async writeback |
+| [v0.128.1](plans/pg-ripple-production-readiness-plan.md#v01281--emergency-containment-and-safe-patch) | Emergency containment and safe patch | ✅ Released | Out-of-band patch | No startup panic, no passwordless production image, no false-enabled async writeback |
 | [v0.129.0](plans/pg-ripple-production-readiness-plan.md#v01290--json-writeback-and-mutation-integrity) | JSON writeback and mutation integrity | Planned | Correctness release | Full insert/update/delete/retry/restart writeback matrix passes |
 | [v0.130.0](plans/pg-ripple-production-readiness-plan.md#v01300--installation-and-migration-integrity) | Installation and migration integrity | Planned | Upgrade release | Fresh install and every supported upgrade path are schema- and behavior-equivalent |
 | [v0.131.0](plans/pg-ripple-production-readiness-plan.md#v01310--secure-by-default-runtime-and-packaging) | Secure-by-default runtime and packaging | Planned | Security release | Production deployments fail closed and least privilege is verified |

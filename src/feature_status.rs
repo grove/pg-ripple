@@ -11,6 +11,7 @@
 //! - `manual_refresh`— feature is correct only when a manual refresh is invoked
 //! - `stub`          — API exists but production behavior is not implemented
 //! - `degraded`      — dependency or configuration is missing; fallback is active
+//! - `broken`        — known correctness defect; do not rely on this in production
 //! - `planned`       — roadmap item exists, no user-facing implementation
 
 #[pgrx::pg_schema]
@@ -463,16 +464,24 @@ mod pg_ripple {
                 Some("docs/src/features/loading-data.md".to_string()),
                 Some("src/json_mapping.rs".to_string()),
             ),
-            // ── JSON mapping relational writeback (v0.128.0 JSON-WRITEBACK-01) ─
+            // ── JSON mapping relational writeback (v0.128.0 JSON-WRITEBACK-01;
+            // async path marked broken by v0.128.1 C18-01 emergency containment) ─
             (
                 "json_mapping_writeback".to_string(),
-                "implemented".to_string(),
+                "broken".to_string(),
                 None,
                 Some(
                     "JSON-WRITEBACK-01 (v0.128.0): writeback_json_row() / \
                      writeback_json_row_delete() propagate RDF graph changes back to \
-                     the source relational table. enable_json_writeback() installs VP \
-                     delta triggers for automatic async queueing. \
+                     the source relational table and remain safe to call directly. \
+                     v0.128.1 C18-01: enable_json_writeback() previously installed VP \
+                     delta triggers per predicate but set writeback_enabled = true even \
+                     when some or all triggers failed to install (e.g. a predicate not \
+                     yet ingested), silently under-covering the async event path. It now \
+                     fails closed with an error and leaves writeback_enabled = false \
+                     unless every mapped predicate got a working trigger. Full repair of \
+                     the underlying trigger-based design lands in v0.129.0 \
+                     (plans/pg-ripple-production-readiness-plan.md#v01290--json-writeback-and-mutation-integrity). \
                      Conflict policies: replace (upsert), skip, error. \
                      GUC: pg_ripple.json_writeback_batch_size (default 100)."
                         .to_string(),
