@@ -263,37 +263,37 @@ release VERSION:
 [group: "release"]
 bump-version NEW_VERSION COMPAT_MIN="":
     @OLD_VERSION=$(grep '^version = ' Cargo.toml | head -1 | sed 's/.*"\([^"]*\)".*/\1/'); \
-     echo "Bumping $$OLD_VERSION → {{NEW_VERSION}}"; \
-     sed -i '' "s/^version = \"$$OLD_VERSION\"/version = \"{{NEW_VERSION}}\"/" Cargo.toml; \
-     sed -i '' "s/^version = \"$$OLD_VERSION\"/version = \"{{NEW_VERSION}}\"/" pg_ripple_http/Cargo.toml; \
-     sed -i '' "s/^default_version = '$$OLD_VERSION'/default_version = '{{NEW_VERSION}}'/" pg_ripple.control; \
+     echo "Bumping $OLD_VERSION → {{NEW_VERSION}}"; \
+     sed -i '' "s/^version = \"$OLD_VERSION\"/version = \"{{NEW_VERSION}}\"/" Cargo.toml; \
+     sed -i '' "s/^version = \"$OLD_VERSION\"/version = \"{{NEW_VERSION}}\"/" pg_ripple_http/Cargo.toml; \
+     sed -i '' "s/^default_version = '$OLD_VERSION'/default_version = '{{NEW_VERSION}}'/" pg_ripple.control; \
      sed -i '' "s/^comment = '.*'/comment = 'High-performance RDF triple store with SPARQL 1.1, SHACL, Datalog, HTAP, federation, and Datalog-native PageRank (v{{NEW_VERSION}})'/" pg_ripple.control; \
      if [ -n "{{COMPAT_MIN}}" ]; then \
        OLD_COMPAT=$(grep 'COMPATIBLE_EXTENSION_MIN' pg_ripple_http/src/main.rs | grep -oE '"[0-9]+\.[0-9]+\.[0-9]+"' | tr -d '"' | head -1); \
-       sed -i '' "s/COMPATIBLE_EXTENSION_MIN: \&str = \"$$OLD_COMPAT\"/COMPATIBLE_EXTENSION_MIN: \&str = \"{{COMPAT_MIN}}\"/" pg_ripple_http/src/main.rs; \
-       echo "Updated COMPATIBLE_EXTENSION_MIN: $$OLD_COMPAT → {{COMPAT_MIN}}"; \
+       sed -i '' "s/COMPATIBLE_EXTENSION_MIN: \&str = \"$OLD_COMPAT\"/COMPATIBLE_EXTENSION_MIN: \&str = \"{{COMPAT_MIN}}\"/" pg_ripple_http/src/main.rs; \
+       echo "Updated COMPATIBLE_EXTENSION_MIN: $OLD_COMPAT → {{COMPAT_MIN}}"; \
      fi; \
-     sed -i '' "s|ghcr.io/trickle-labs/pg-ripple:$$OLD_VERSION|ghcr.io/trickle-labs/pg-ripple:{{NEW_VERSION}}|g" docker-compose.yml; \
-     MIGRATION_FILE="sql/pg_ripple--$$OLD_VERSION--{{NEW_VERSION}}.sql"; \
-     if [ ! -f "$$MIGRATION_FILE" ]; then \
-       printf -- "-- Migration $$OLD_VERSION → {{NEW_VERSION}}\n-- Schema changes: TODO\n" > "$$MIGRATION_FILE"; \
-       echo "Created $$MIGRATION_FILE"; \
+     sed -i '' "s|ghcr.io/trickle-labs/pg_ripple:$OLD_VERSION|ghcr.io/trickle-labs/pg_ripple:{{NEW_VERSION}}|g" docker-compose.yml; \
+     MIGRATION_FILE="sql/pg_ripple--$OLD_VERSION--{{NEW_VERSION}}.sql"; \
+     if [ ! -f "$MIGRATION_FILE" ]; then \
+       printf -- "-- Migration $OLD_VERSION → {{NEW_VERSION}}\n-- Schema changes: TODO\n" > "$MIGRATION_FILE"; \
+       echo "Created $MIGRATION_FILE"; \
      else \
-       echo "$$MIGRATION_FILE already exists"; \
+       echo "$MIGRATION_FILE already exists"; \
      fi; \
-     CHANGELOG_SECTION="## v{{NEW_VERSION}} — $(date +%Y-%m-%d)\n\n### Added\n- TODO\n\n### Changed\n- TODO\n\n### Fixed\n- TODO\n\n"; \
-     if grep -q "## v{{NEW_VERSION}}" CHANGELOG.md 2>/dev/null; then \
-       echo "CHANGELOG.md already contains ## v{{NEW_VERSION}} section"; \
+     CHANGELOG_SECTION="## [{{NEW_VERSION}}] — $(date +%Y-%m-%d)\n\n### Added\n- TODO\n\n### Changed\n- TODO\n\n### Fixed\n- TODO\n\n"; \
+     if grep -q "## \[{{NEW_VERSION}}\]" CHANGELOG.md 2>/dev/null; then \
+       echo "CHANGELOG.md already contains ## [{{NEW_VERSION}}] section"; \
      else \
        TMP=$(mktemp); \
-       awk -v section="$$CHANGELOG_SECTION" '/^## v[0-9]/{if(!done){printf section; done=1}} {print}' CHANGELOG.md > "$$TMP" && mv "$$TMP" CHANGELOG.md; \
+       awk -v section="$CHANGELOG_SECTION" '/^## \[[0-9]/{if(!done){printf section; done=1}} {print}' CHANGELOG.md > "$TMP" && mv "$TMP" CHANGELOG.md; \
        echo "Added CHANGELOG.md section for v{{NEW_VERSION}}"; \
      fi; \
      echo ""; \
      echo "=== Version bump complete ==="; \
      echo "Files updated: Cargo.toml, pg_ripple_http/Cargo.toml, pg_ripple.control,"; \
      echo "  docker-compose.yml, CHANGELOG.md"; \
-     echo "Next: fill in CHANGELOG.md and $$MIGRATION_FILE"
+     echo "Next: fill in CHANGELOG.md and $MIGRATION_FILE"
 
 # Dry-run for bump-version: prints proposed changes without writing any files.
 # ROAD-02 (v0.89.0)
@@ -301,23 +301,23 @@ bump-version NEW_VERSION COMPAT_MIN="":
 [group: "release"]
 bump-version-dry NEW_VERSION:
     @OLD_VERSION=$(grep '^version = ' Cargo.toml | head -1 | sed 's/.*"\([^"]*\)".*/\1/'); \
-     echo "=== bump-version dry-run: $$OLD_VERSION → {{NEW_VERSION}} ==="; \
+     echo "=== bump-version dry-run: $OLD_VERSION → {{NEW_VERSION}} ==="; \
      echo ""; \
      echo "[Cargo.toml]          version = \"{{NEW_VERSION}}\""; \
      echo "[pg_ripple_http/Cargo.toml] version = \"{{NEW_VERSION}}\""; \
      echo "[pg_ripple.control]   default_version = '{{NEW_VERSION}}'"; \
      echo "[pg_ripple_http/src/main.rs] COMPATIBLE_EXTENSION_MIN = \"{{NEW_VERSION}}\""; \
-     echo "[docker-compose.yml]  ghcr.io/trickle-labs/pg-ripple:{{NEW_VERSION}}"; \
-     MIGRATION_FILE="sql/pg_ripple--$$OLD_VERSION--{{NEW_VERSION}}.sql"; \
-     if [ -f "$$MIGRATION_FILE" ]; then \
-       echo "[migration]           $$MIGRATION_FILE (already exists)"; \
+     echo "[docker-compose.yml]  ghcr.io/trickle-labs/pg_ripple:{{NEW_VERSION}}"; \
+     MIGRATION_FILE="sql/pg_ripple--$OLD_VERSION--{{NEW_VERSION}}.sql"; \
+     if [ -f "$MIGRATION_FILE" ]; then \
+       echo "[migration]           $MIGRATION_FILE (already exists)"; \
      else \
-       echo "[migration]           $$MIGRATION_FILE (will be created)"; \
+       echo "[migration]           $MIGRATION_FILE (will be created)"; \
      fi; \
-     if grep -q "## v{{NEW_VERSION}}" CHANGELOG.md 2>/dev/null; then \
-       echo "[CHANGELOG.md]        ## v{{NEW_VERSION}} section already exists"; \
+     if grep -q "## \[{{NEW_VERSION}}\]" CHANGELOG.md 2>/dev/null; then \
+       echo "[CHANGELOG.md]        ## [{{NEW_VERSION}}] section already exists"; \
      else \
-       echo "[CHANGELOG.md]        ## v{{NEW_VERSION}} stub section will be added"; \
+       echo "[CHANGELOG.md]        ## [{{NEW_VERSION}}] stub section will be added"; \
      fi; \
      echo ""; \
      echo "Run 'just bump-version {{NEW_VERSION}}' to apply."
@@ -336,32 +336,32 @@ regen-sbom:
 # COMPATIBLE_EXTENSION_MIN in pg_ripple_http/src/main.rs, docker-compose.yml.
 [group: "release"]
 check-version-sync:
-    @CARGO_VER=$(grep '^version = ' Cargo.toml | head -1 | grep -oP '"\K[^"]+'); \
-     HTTP_VER=$(grep '^version = ' pg_ripple_http/Cargo.toml | head -1 | grep -oP '"\K[^"]+'); \
-     CTRL_VER=$(grep '^default_version' pg_ripple.control | grep -oP "'\K[^']+"); \
-     COMPAT_VER=$(grep 'COMPATIBLE_EXTENSION_MIN' pg_ripple_http/src/main.rs | grep -oP '"\K[0-9]+\.[0-9]+\.[0-9]+' | head -1); \
-     DC_VER=$(grep 'ghcr.io/trickle-labs/pg-ripple:' docker-compose.yml | grep -oP ':\K[0-9.]+' | head -1); \
+    @CARGO_VER=$(grep '^version = ' Cargo.toml | head -1 | sed 's/.*"\([^"]*\)".*/\1/'); \
+     HTTP_VER=$(grep '^version = ' pg_ripple_http/Cargo.toml | head -1 | sed 's/.*"\([^"]*\)".*/\1/'); \
+     CTRL_VER=$(grep '^default_version' pg_ripple.control | sed "s/.*'\([^']*\)'.*/\1/"); \
+     COMPAT_VER=$(grep 'COMPATIBLE_EXTENSION_MIN' pg_ripple_http/src/main.rs | head -1 | sed 's/.*"\([0-9]*\.[0-9]*\.[0-9]*\)".*/\1/'); \
+     DC_VER=$(grep 'ghcr.io/trickle-labs/pg_ripple:' docker-compose.yml | head -1 | sed 's/.*pg_ripple:\([0-9.]*\).*/\1/'); \
      FAIL=0; \
-     echo "Cargo.toml:              $$CARGO_VER"; \
-     echo "pg_ripple_http:          $$HTTP_VER"; \
-     echo "pg_ripple.control:       $$CTRL_VER"; \
-     echo "COMPATIBLE_EXTENSION_MIN: $$COMPAT_VER"; \
-     echo "docker-compose.yml:      $$DC_VER"; \
-     [ "$$CARGO_VER" = "$$HTTP_VER" ]   || { echo "FAIL: pg_ripple_http version mismatch"; FAIL=1; }; \
-     [ "$$CARGO_VER" = "$$CTRL_VER" ]   || { echo "FAIL: pg_ripple.control version mismatch"; FAIL=1; }; \
-     [ "$$CARGO_VER" = "$$DC_VER" ]     || { echo "FAIL: docker-compose.yml image tag mismatch"; FAIL=1; }; \
-     LOWEST=$(printf '%s\n%s' "$$COMPAT_VER" "$$CARGO_VER" | sort -V | head -1); \
-     [ "$$LOWEST" = "$$COMPAT_VER" ] || { echo "FAIL: COMPATIBLE_EXTENSION_MIN ($$COMPAT_VER) > extension version ($$CARGO_VER)"; FAIL=1; }; \
-     if [ $$FAIL -eq 0 ]; then echo "OK: all versions consistent at $$CARGO_VER (COMPAT_MIN=$$COMPAT_VER)"; fi; \
-     exit $$FAIL
+     echo "Cargo.toml:              $CARGO_VER"; \
+     echo "pg_ripple_http:          $HTTP_VER"; \
+     echo "pg_ripple.control:       $CTRL_VER"; \
+     echo "COMPATIBLE_EXTENSION_MIN: $COMPAT_VER"; \
+     echo "docker-compose.yml:      $DC_VER"; \
+     [ "$CARGO_VER" = "$HTTP_VER" ]   || { echo "FAIL: pg_ripple_http version mismatch"; FAIL=1; }; \
+     [ "$CARGO_VER" = "$CTRL_VER" ]   || { echo "FAIL: pg_ripple.control version mismatch"; FAIL=1; }; \
+     [ "$CARGO_VER" = "$DC_VER" ]     || { echo "FAIL: docker-compose.yml image tag mismatch"; FAIL=1; }; \
+     LOWEST=$(printf '%s\n%s' "$COMPAT_VER" "$CARGO_VER" | sort -V | head -1); \
+     [ "$LOWEST" = "$COMPAT_VER" ] || { echo "FAIL: COMPATIBLE_EXTENSION_MIN ($COMPAT_VER) > extension version ($CARGO_VER)"; FAIL=1; }; \
+     if [ $FAIL -eq 0 ]; then echo "OK: all versions consistent at $CARGO_VER (COMPAT_MIN=$COMPAT_VER)"; fi; \
+     exit $FAIL
 
 # BUILD-02 (v0.84.0): Regenerate the OpenAPI spec from the running HTTP service.
 # Requires pg_ripple_http to be running on $PG_RIPPLE_HTTP_URL (default: http://localhost:3000).
 [group: "release"]
 regen-openapi:
-    @URL=$${PG_RIPPLE_HTTP_URL:-http://localhost:3000}; \
-     echo "Fetching OpenAPI spec from $$URL/openapi.json"; \
-     curl -fsSL "$$URL/openapi.json" -o pg_ripple_http/openapi.json && \
+    @URL=${PG_RIPPLE_HTTP_URL:-http://localhost:3000}; \
+     echo "Fetching OpenAPI spec from $URL/openapi.json"; \
+     curl -fsSL "$URL/openapi.json" -o pg_ripple_http/openapi.json && \
      echo "Saved to pg_ripple_http/openapi.json"; \
      if command -v yq >/dev/null 2>&1; then \
        yq -P pg_ripple_http/openapi.json > pg_ripple_http/openapi.yaml && \
@@ -385,36 +385,36 @@ generate-helm-values TENANT="":
        echo "Usage: just generate-helm-values TENANT=<name>"; \
        exit 1; \
      fi; \
-     URL=$${PG_RIPPLE_HTTP_URL:-http://localhost:7878}; \
+     URL=${PG_RIPPLE_HTTP_URL:-http://localhost:7878}; \
      OUTFILE="values-{{TENANT}}.yaml"; \
-     echo "Fetching tenant '{{TENANT}}' from $$URL/tenants/{{TENANT}} ..."; \
-     RESPONSE=$$(curl -fsSL "$$URL/tenants/{{TENANT}}" 2>&1); \
-     if [ $$? -ne 0 ]; then \
-       echo "ERROR: could not fetch tenant from $$URL/tenants/{{TENANT}}"; \
-       echo "Response: $$RESPONSE"; \
+     echo "Fetching tenant '{{TENANT}}' from $URL/tenants/{{TENANT}} ..."; \
+     RESPONSE=$(curl -fsSL "$URL/tenants/{{TENANT}}" 2>&1); \
+     if [ $? -ne 0 ]; then \
+       echo "ERROR: could not fetch tenant from $URL/tenants/{{TENANT}}"; \
+       echo "Response: $RESPONSE"; \
        exit 1; \
      fi; \
-     GRAPH_IRI=$$(echo "$$RESPONSE" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('graph_iri',''))"); \
-     QUOTA=$$(echo "$$RESPONSE" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('quota_triples', 0))"); \
-     echo "# pg_ripple per-tenant Helm values for tenant: {{TENANT}}" > $$OUTFILE; \
-     echo "# Generated by: just generate-helm-values TENANT={{TENANT}}" >> $$OUTFILE; \
-     echo "tenant:" >> $$OUTFILE; \
-     echo "  name: \"{{TENANT}}\"" >> $$OUTFILE; \
-     echo "  graphIri: \"$$GRAPH_IRI\"" >> $$OUTFILE; \
-     echo "  quotaTriples: $$QUOTA" >> $$OUTFILE; \
-     echo "Wrote $$OUTFILE"; \
-     cat $$OUTFILE
+     GRAPH_IRI=$(echo "$RESPONSE" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('graph_iri',''))"); \
+     QUOTA=$(echo "$RESPONSE" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('quota_triples', 0))"); \
+     echo "# pg_ripple per-tenant Helm values for tenant: {{TENANT}}" > $OUTFILE; \
+     echo "# Generated by: just generate-helm-values TENANT={{TENANT}}" >> $OUTFILE; \
+     echo "tenant:" >> $OUTFILE; \
+     echo "  name: \"{{TENANT}}\"" >> $OUTFILE; \
+     echo "  graphIri: \"$GRAPH_IRI\"" >> $OUTFILE; \
+     echo "  quotaTriples: $QUOTA" >> $OUTFILE; \
+     echo "Wrote $OUTFILE"; \
+     cat $OUTFILE
 
 # SBOM-03: Verify that sbom.json version matches Cargo.toml version.
 # Fails with exit 1 if they differ (prevents stale SBOM in releases).
 [group: "release"]
 check-sbom-version:
-    @CARGO_VER=$(grep '^version = ' Cargo.toml | head -1 | grep -oP '"\\K[^"]+'); \
-     SBOM_VER=$(python3 -c "import json; print(json.load(open('sbom.json'))['version'])"); \
-     if [ "$$CARGO_VER" = "$$SBOM_VER" ]; then \
-       echo "OK: sbom.json version matches Cargo.toml ($$CARGO_VER)"; \
+    @CARGO_VER=$(grep '^version = ' Cargo.toml | head -1 | sed 's/.*"\([^"]*\)".*/\1/'); \
+     SBOM_VER=$(python3 -c "import json; print(json.load(open('sbom.json')).get('metadata',{}).get('component',{}).get('version','MISSING'))"); \
+     if [ "$CARGO_VER" = "$SBOM_VER" ]; then \
+       echo "OK: sbom.json version matches Cargo.toml ($CARGO_VER)"; \
      else \
-       echo "FAIL: sbom.json version ($$SBOM_VER) != Cargo.toml version ($$CARGO_VER)"; \
+       echo "FAIL: sbom.json version ($SBOM_VER) != Cargo.toml version ($CARGO_VER)"; \
        echo "Regenerate sbom.json with: cargo cyclonedx --format json"; \
        exit 1; \
      fi
@@ -449,12 +449,12 @@ assess-release VERSION="":
     bash scripts/check_readme_version.sh
     @echo ""
     @echo "--- Version sync check ---"
-    @CARGO_VER=$(grep '^version = ' Cargo.toml | head -1 | grep -oP '"\\K[^"]+'); \
-     CTRL_VER=$(grep '^default_version' pg_ripple.control | grep -oP "'\\K[^']+"); \
-     if [ "$$CARGO_VER" = "$$CTRL_VER" ]; then \
-       echo "OK: Cargo.toml and pg_ripple.control both at v$$CARGO_VER"; \
+    @CARGO_VER=$(grep '^version = ' Cargo.toml | head -1 | sed 's/.*"\([^"]*\)".*/\1/'); \
+     CTRL_VER=$(grep '^default_version' pg_ripple.control | sed "s/.*'\([^']*\)'.*/\1/"); \
+     if [ "$CARGO_VER" = "$CTRL_VER" ]; then \
+       echo "OK: Cargo.toml and pg_ripple.control both at v$CARGO_VER"; \
      else \
-       echo "FAIL: version mismatch — Cargo.toml=$$CARGO_VER control=$$CTRL_VER"; exit 1; \
+       echo "FAIL: version mismatch — Cargo.toml=$CARGO_VER control=$CTRL_VER"; exit 1; \
      fi
     @if [ -n "{{VERSION}}" ]; then \
        echo ""; \
