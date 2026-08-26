@@ -19,6 +19,14 @@ ignore = [
     { id = "RUSTSEC-2024-0436", reason = "pre-existing unmaintained transitive dependency; tracked for replacement" },
     # RUSTSEC-2021-0127: pre-existing advisory
     { id = "RUSTSEC-2021-0127", reason = "pre-existing transitive dependency advisory; tracked for upstream fix" },
+    # RUSTSEC-2026-0194 / RUSTSEC-2026-0195: quick-xml DoS advisories (2026-08-26 audit).
+    # quick-xml 0.36.2 is pinned by rio_xml (direct dep, RDF/XML parsing) and 0.37.5 by
+    # oxrdfxml/sparesults via oxigraph (dev-dependency only). rio_xml is unmaintained
+    # (upstream recommends oxrdfxml) and neither pinning has released a fix. Both
+    # advisories are DoS-only (CPU/memory exhaustion on a crafted document), not memory
+    # corruption. Tracked for replacement via migration to oxrdfxml/oxttl.
+    { id = "RUSTSEC-2026-0194", reason = "quick-xml pinned by unmaintained rio_xml (direct dep) and oxigraph dev-dep chain; no fixed release available; DoS-only" },
+    { id = "RUSTSEC-2026-0195", reason = "quick-xml pinned by unmaintained rio_xml (direct dep) and oxigraph dev-dep chain; no fixed release available; DoS-only" },
 ]
 
 [licenses]

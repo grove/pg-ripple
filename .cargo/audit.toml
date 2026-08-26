@@ -13,4 +13,10 @@ ignore = [
     "RUSTSEC-2024-0436",
     # paste: proc-macro crate unsoundness.  Only used at compile time.
     "RUSTSEC-2026-0104",
+    # quick-xml: DoS-only advisories (quadratic attribute scan; unbounded namespace
+    # allocation). Pinned by unmaintained rio_xml (direct dep) and by oxrdfxml/
+    # sparesults via oxigraph (dev-dependency only); no fixed release available yet.
+    # See audit.toml at the repo root for the full triage note.
+    "RUSTSEC-2026-0194",
+    "RUSTSEC-2026-0195",
 ]

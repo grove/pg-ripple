@@ -49,6 +49,20 @@ ignore = [
     # No upstream fixed version available as of 2026-05-19 review.
     # Expiry: 2027-01-01 — re-audit when paste releases a fixed version.
     { id = "RUSTSEC-2026-0104", reason = "paste is a compile-time proc-macro only; unsoundness is in macro internals with no runtime impact on generated code — verified 2026-05-19 (SEC-M-02)", expires = "2027-01-01" },
+    # quick-xml: two DoS advisories (quadratic attribute scan; unbounded namespace
+    # allocation), fixed upstream in quick-xml >=0.41.0.
+    # quick-xml 0.36.2 is pinned by rio_xml (direct dependency, used to parse RDF/XML
+    # documents supplied via pg_ripple's bulk-load functions) and 0.37.5 is pinned by
+    # oxrdfxml/sparesults, reached only through oxigraph as a dev-dependency (test-only,
+    # not shipped in the extension binary). rio_xml is unmaintained (upstream points to
+    # oxrdfxml) and has not released a version depending on a fixed quick-xml.
+    # Triage 2026-08-26: both advisories are availability (CPU/memory exhaustion) only,
+    # not memory corruption. RDF/XML loading requires a database role already trusted to
+    # execute SQL against pg_ripple, the same trust boundary as other bulk-load paths.
+    # No upstream fix exists yet; tracked for replacement by migrating off rio_xml to
+    # oxrdfxml/oxttl (the maintained oxigraph parser family).
+    { id = "RUSTSEC-2026-0194", reason = "quick-xml pinned by unmaintained rio_xml (direct dep, RDF/XML bulk load) and oxigraph dev-dep chain; no fixed release available; DoS-only, requires a trusted DB role", expires = "2027-02-26" },
+    { id = "RUSTSEC-2026-0195", reason = "quick-xml pinned by unmaintained rio_xml (direct dep, RDF/XML bulk load) and oxigraph dev-dep chain; no fixed release available; DoS-only, requires a trusted DB role", expires = "2027-02-26" },
 ]
 
 # pg_trgm: PostgreSQL contrib module used for fuzzy SPARQL (v0.87.0 CONF-SBOM-01)

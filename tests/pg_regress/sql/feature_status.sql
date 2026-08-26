@@ -20,6 +20,7 @@ WHERE status NOT IN (
     'manual_refresh',
     'stub',
     'degraded',
+    'broken',
     'planned'
 );
 
