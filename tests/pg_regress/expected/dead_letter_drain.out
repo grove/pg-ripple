@@ -1,0 +1,52 @@
+-- pg_regress test: `drain_dead_letter_queue()` esvazia a fila, não uma linha.
+--
+-- `Spi::get_one` sobre `DELETE ... RETURNING` apaga **uma** linha: o `get_one` pede
+-- uma linha ao SPI, e o SPI para de executar o comando quando o limite é atingido. A
+-- função devolvia 1 como se tivesse esvaziado a fila.
+--
+-- Observado em produção em 28/07/2026: a fila tinha 18.450 linhas,
+-- `drain_dead_letter_queue()` devolveu 1, e a contagem seguinte ainda dizia 18.450.
+-- O resto do módulo já usava a forma certa (`WITH d AS (DELETE ... RETURNING 1)
+-- SELECT count(*) FROM d`); esta era a única chamada fora do padrão.
+SET client_min_messages = error;
+SELECT pg_ripple.triple_count() >= 0 AS biblioteca_carregada;
+ biblioteca_carregada 
+----------------------
+ t
+(1 row)
+
+RESET client_min_messages;
+SELECT pg_ripple.drain_dead_letter_queue() >= 0 AS fila_limpa_para_o_teste;
+ fila_limpa_para_o_teste 
+-------------------------
+ t
+(1 row)
+
+INSERT INTO _pg_ripple.dead_letter_queue (s_id, p_id, o_id, g_id, stmt_id, violation)
+SELECT i, i, i, 0, i, '{"message":"teste"}'::jsonb
+FROM generate_series(1, 25) i;
+SELECT pg_ripple.dead_letter_count() AS antes;
+ antes 
+-------
+    25
+(1 row)
+
+SELECT pg_ripple.drain_dead_letter_queue() AS drenadas;
+ drenadas 
+----------
+       25
+(1 row)
+
+SELECT pg_ripple.dead_letter_count() AS depois;
+ depois 
+--------
+      0
+(1 row)
+
+-- E numa fila vazia devolve zero, não erro.
+SELECT pg_ripple.drain_dead_letter_queue() AS drenadas_de_fila_vazia;
+ drenadas_de_fila_vazia 
+------------------------
+                      0
+(1 row)
+

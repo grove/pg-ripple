@@ -249,7 +249,34 @@ pub extern "C-unwind" fn pg_ripple_merge_worker_main(arg: pg_sys::Datum) {
         .unwrap_or(Instant::now());
     // MERGE-PRED-01 (v0.82.0): predicate ID cache.
     let mut pred_cache = PredicateCache::new();
+    // MERGE-SPIN-01: piso de tempo entre ciclos.
+    //
+    // O laço abaixo espera no latch com teto de `merge_interval_secs`, mas o latch
+    // acionado devolve na hora. Medido em produção (28/07, PostgreSQL 18, 10
+    // predicados promovidos): o ciclo recomeçava 9.467 vezes por segundo,
+    // 13,4 milhões de `count(*)` sobre as tabelas de delta em 20 minutos, 41% de um
+    // núcleo em média e 100% no pico — com a fila de merge vazia. O desenho de
+    // reagir rápido a escrita nova está certo; reagir dez mil vezes por segundo à
+    // mesma escrita não é reagir, é girar.
+    //
+    // O piso não atrasa merge: com 250 ms de default, escrita nova continua sendo
+    // atendida no mesmo instante em qualquer escala humana, e o consumo em vazio cai
+    // para quatro ciclos por segundo no pior caso — na prática, um a cada
+    // `merge_interval_secs`, porque sem latch acionado a espera é a cheia.
+    let piso_entre_ciclos = Duration::from_millis(250);
+    let mut ultimo_ciclo = Instant::now()
+        .checked_sub(piso_entre_ciclos)
+        .unwrap_or(Instant::now());
     while BackgroundWorker::wait_latch(Some(Duration::from_secs(interval_secs))) {
+        {
+            let decorrido = ultimo_ciclo.elapsed();
+            if decorrido < piso_entre_ciclos
+                && !BackgroundWorker::wait_latch(Some(piso_entre_ciclos - decorrido))
+            {
+                break; // SIGTERM durante a espera do piso.
+            }
+        }
+        ultimo_ciclo = Instant::now();
         let sighup = BackgroundWorker::sighup_received();
         if sighup {
             // SIGHUP: reload configuration.  The GUC system handles this.
@@ -585,8 +612,17 @@ fn run_merge_cycle_for_worker_inner(worker_idx: u32, n_workers: u32, pred_ids_al
 
     // Process this worker's assigned predicates.
     for p_id in pred_ids {
+        // MERGE-SPIN-01: contagem limitada ao que a decisão precisa.
+        //
+        // A pergunta é "passou do limite?", e `count(*)` responde muito mais que
+        // isso: varre o delta inteiro. Com `LIMIT threshold` o plano para no
+        // primeiro momento em que a resposta já está decidida — e o nome da tabela
+        // continua interpolado, então o texto muda por predicado e cada chamada paga
+        // planejamento; quanto menos ela ler, melhor.
         let delta_rows: i64 = Spi::get_one_with_args::<i64>(
-            &format!("SELECT count(*)::bigint FROM _pg_ripple.vp_{p_id}_delta"),
+            &format!(
+                "SELECT count(*)::bigint FROM (SELECT 1 FROM _pg_ripple.vp_{p_id}_delta LIMIT {threshold}) s"
+            ),
             &[],
         )
         .unwrap_or(None)
@@ -630,8 +666,11 @@ fn run_merge_cycle_for_worker_inner(worker_idx: u32, n_workers: u32, pred_ids_al
     // Work-stealing: check foreign predicates above threshold with no owner.
     if n_workers > 1 {
         for p_id in all_pred_ids {
+            // MERGE-SPIN-01: mesma contagem limitada do laço acima.
             let delta_rows: i64 = Spi::get_one_with_args::<i64>(
-                &format!("SELECT count(*)::bigint FROM _pg_ripple.vp_{p_id}_delta"),
+                &format!(
+                    "SELECT count(*)::bigint FROM (SELECT 1 FROM _pg_ripple.vp_{p_id}_delta LIMIT {threshold}) s"
+                ),
                 &[],
             )
             .unwrap_or(None)

@@ -22,6 +22,6 @@ pub use severity::Violation;
 
 // pub(crate) helpers used by shacl/constraints/*.rs via `super::validator::{...}`
 pub(crate) use property::{
-    compare_dictionary_values, encode_shacl_in_value, get_language_tag, get_value_ids,
-    get_vp_table_name, value_has_datatype, value_has_node_kind, value_has_rdf_type,
+    compare_dictionary_values, get_language_tag, get_value_ids, get_vp_table_name,
+    shacl_value_matches, value_has_datatype, value_has_node_kind, value_has_rdf_type,
 };

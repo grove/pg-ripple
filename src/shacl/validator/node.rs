@@ -253,7 +253,12 @@ pub fn run_validate(graph: Option<&str>) -> pgrx::JsonB {
 }
 
 /// Synchronous validation of a single triple.
-pub fn validate_sync(s_id: i64, p_id: i64, o_id: i64, g_id: i64) -> Result<(), String> {
+pub fn validate_sync(
+    s_id: i64,
+    p_id: i64,
+    o_id: i64,
+    g_id: i64,
+) -> Result<(), crate::shacl::validator::severity::SyncViolation> {
     let shapes = crate::shacl::spi::load_shapes();
     validate_sync_with_shapes(s_id, p_id, o_id, g_id, &shapes)
 }
@@ -322,10 +327,12 @@ pub fn process_validation_batch(batch_size: i64) -> i64 {
     for row in &rows {
         match validate_sync_with_shapes(row.s_id, row.p_id, row.o_id, row.g_id, &shapes) {
             Ok(()) => {}
-            Err(msg) => {
+            Err(falha) => {
                 let violation = serde_json::json!({
-                    "shapeIRI":   "unknown",
-                    "message":    msg,
+                    "shapeIRI":   falha.shape_iri,
+                    "path":       falha.path,
+                    "constraint": falha.constraint,
+                    "message":    falha.message,
                     "detectedAt": "async"
                 });
                 let _ = Spi::run_with_args(

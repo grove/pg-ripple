@@ -1,0 +1,79 @@
+-- pg_regress test: rollback de subtransação não pode deixar id fantasma no
+-- cache de memória compartilhada do dicionário (DICT-SUBXACT-02).
+--
+-- O cache de codificação vive em memória compartilhada, então é do cluster
+-- inteiro, não do processo. O rollback da transação já evictava as entradas
+-- daquela transação; o rollback de *subtransação* não. Como todo bloco
+-- `EXCEPTION` de PL/pgSQL e todo `SAVEPOINT` abre uma subtransação, bastava uma
+-- função com tratamento de erro internar um termo e falhar para o mapeamento
+-- hash→id sobreviver à linha do dicionário. A escrita seguinte do mesmo termo
+-- pegava o id do cache, pulava o INSERT, e gravava uma tripla apontando para
+-- uma linha que não existe — sem erro, sem aviso, dado indecifrável.
+--
+-- Atenção ao ler um verde daqui: o cache compartilhado só existe quando
+-- pg_ripple está em `shared_preload_libraries`. Sem preload o teste passa por
+-- ausência do cache, não por correção do rollback. A validação que vale é com
+-- preload ligado.
+
+-- Carrega a biblioteca antes de qualquer asserção, sem o aviso de preload que
+-- varia entre ambientes.
+SET client_min_messages = error;
+SELECT pg_ripple.triple_count() >= 0 AS biblioteca_carregada;
+RESET client_min_messages;
+
+SET search_path TO pg_ripple, public;
+
+-- ── caminho 1: bloco EXCEPTION de PL/pgSQL ──────────────────────────────────
+DO $$
+BEGIN
+    PERFORM pg_ripple.insert_triple(
+        '<http://sub.test/a>', '<http://sub.test/p>', '"internado-e-desfeito"');
+    RAISE EXCEPTION 'desfaz';
+EXCEPTION WHEN OTHERS THEN
+    RAISE NOTICE 'subtransacao_desfeita';
+END $$;
+
+SELECT count(*) AS linha_no_dicionario
+FROM _pg_ripple.dictionary WHERE value = 'internado-e-desfeito';
+
+-- O mesmo termo, agora numa escrita que vai ficar. Tem que internar de novo.
+SELECT pg_ripple.insert_triple(
+    '<http://sub.test/b>', '<http://sub.test/p>', '"internado-e-desfeito"') > 0 AS gravado;
+
+-- ── caminho 2: SAVEPOINT explícito ──────────────────────────────────────────
+BEGIN;
+SAVEPOINT s1;
+SELECT pg_ripple.insert_triple(
+    '<http://sub.test/c>', '<http://sub.test/p>', '"savepoint-desfeito"') > 0 AS gravado_no_savepoint;
+ROLLBACK TO SAVEPOINT s1;
+SELECT pg_ripple.insert_triple(
+    '<http://sub.test/d>', '<http://sub.test/p>', '"savepoint-desfeito"') > 0 AS gravado_depois;
+COMMIT;
+
+-- ── caminho 3: savepoint que dá certo dentro de transação que aborta ─────────
+-- Quem responde pelos termos do savepoint passa a ser a transação pai.
+BEGIN;
+SAVEPOINT s2;
+SELECT pg_ripple.insert_triple(
+    '<http://sub.test/e>', '<http://sub.test/p>', '"pai-aborta"') > 0 AS gravado_no_savepoint_bom;
+RELEASE SAVEPOINT s2;
+ROLLBACK;
+
+SELECT pg_ripple.insert_triple(
+    '<http://sub.test/f>', '<http://sub.test/p>', '"pai-aborta"') > 0 AS gravado_depois_do_abort;
+
+-- ── a invariante ────────────────────────────────────────────────────────────
+-- Nenhuma tripla deste teste aponta para linha de dicionário que não existe.
+SELECT count(*) AS objetos_sem_linha_no_dicionario
+FROM _pg_ripple.vp_rare v
+WHERE v.p = (SELECT id FROM _pg_ripple.dictionary WHERE value = 'http://sub.test/p')
+  AND v.o > 0
+  AND NOT EXISTS (SELECT 1 FROM _pg_ripple.dictionary d WHERE d.id = v.o);
+
+-- E os três termos voltam decifráveis, não `_id_N`.
+SELECT d.value, count(*) AS triplas
+FROM _pg_ripple.vp_rare v
+JOIN _pg_ripple.dictionary d ON d.id = v.o
+WHERE v.p = (SELECT id FROM _pg_ripple.dictionary WHERE value = 'http://sub.test/p')
+GROUP BY d.value
+ORDER BY d.value;

@@ -5,7 +5,7 @@ use crate::datalog::{AggFunc, AggregateLiteral, Atom, BodyLiteral, Rule, StringB
 
 use super::{
     VarMap, arith_op_sql, build_join_cond, build_not_exists_conds, compare_op_sql, const_sql,
-    is_recursive_rule, render_comparison_term, vp_read_expr, vp_table,
+    head_g_select_expr, is_recursive_rule, render_comparison_term, vp_read_expr, vp_table,
 };
 
 pub(super) fn compile_recursive_rule(
@@ -474,7 +474,7 @@ pub fn compile_rule_delta_variants_to(
 fn compile_rule_with_one_delta_atom(
     rule: &Rule,
     _head_pred: i64,
-    head_g_expr: &str,
+    _head_g_expr: &str,
     target: &str,
     delta_atom_pos: usize,
     delta_table_name: &dyn Fn(i64) -> String,
@@ -670,6 +670,7 @@ fn compile_rule_with_one_delta_atom(
         Term::Const(id) => const_sql(*id),
         _ => return Err("wildcard/invalid in head not allowed".to_owned()),
     };
+    let select_g = head_g_select_expr(head, &var_map)?;
 
     let from_str = from_clauses.join("\n");
     let where_str = if where_clauses.is_empty() {
@@ -680,7 +681,7 @@ fn compile_rule_with_one_delta_atom(
 
     Ok(format!(
         "INSERT INTO {target} (s, o, g)\n\
-         SELECT {select_s}, {select_o}, {head_g_expr}\n\
+         SELECT {select_s}, {select_o}, {select_g}\n\
          FROM {from_str}\n\
          {where_str}\n\
          ON CONFLICT DO NOTHING"

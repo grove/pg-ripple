@@ -112,6 +112,6 @@ pub use validator::{
 
 // pub(crate) re-exports consumed by constraints/* and other internal callers
 pub(crate) use validator::{
-    compare_dictionary_values, encode_shacl_in_value, get_language_tag, get_value_ids,
-    node_conforms_to_shape, value_has_datatype, value_has_node_kind, value_has_rdf_type,
+    compare_dictionary_values, get_language_tag, get_value_ids, node_conforms_to_shape,
+    shacl_value_matches, value_has_datatype, value_has_node_kind, value_has_rdf_type,
 };

@@ -198,9 +198,14 @@ pub(crate) fn collect_focus_nodes(target: &ShapeTarget, graph_id: i64) -> Vec<i6
 
 // ─── Low-level query helpers ──────────────────────────────────────────────────
 
+/// Quantos *nós de valor distintos* o foco tem no caminho, dentro do grafo.
+///
+/// `sh:maxCount` conta nós de valor, que formam um conjunto: o mesmo objeto
+/// repetido é um valor, não dois. Contar linhas (`COUNT(*)`) fazia a mesma
+/// afirmação gravada duas vezes estourar `maxCount 1`.
 pub(crate) fn count_values_in_graph(focus: i64, path_id: i64, graph_id: i64) -> i64 {
     let table = get_vp_table_name(path_id);
-    let sql = format!("SELECT COUNT(*) FROM {table} WHERE s = $1 AND g = $2");
+    let sql = format!("SELECT COUNT(DISTINCT o) FROM {table} WHERE s = $1 AND g = $2");
     Spi::get_one_with_args::<i64>(
         &sql,
         &[DatumWithOid::from(focus), DatumWithOid::from(graph_id)],
@@ -211,10 +216,43 @@ pub(crate) fn count_values_in_graph(focus: i64, path_id: i64, graph_id: i64) -> 
 
 pub(crate) fn count_values_all_graphs(focus: i64, path_id: i64) -> i64 {
     let table = get_vp_table_name(path_id);
-    let sql = format!("SELECT COUNT(*) FROM {table} WHERE s = $1");
+    let sql = format!("SELECT COUNT(DISTINCT o) FROM {table} WHERE s = $1");
     Spi::get_one_with_args::<i64>(&sql, &[DatumWithOid::from(focus)])
         .unwrap_or(None)
         .unwrap_or(0)
+}
+
+/// A afirmação já está gravada neste grafo?
+///
+/// Serve para o validador saber se está olhando o estado *antes* ou *depois* da
+/// escrita. O modo `sync` valida antes de inserir (a afirmação não está lá); o
+/// modo `async` valida depois (está). Sem essa distinção, o mesmo código somava
+/// mais um a uma contagem que já incluía a linha nova e acusava violação de
+/// `maxCount 1` em todo predicado de valor único.
+pub(crate) fn triple_exists_in_graph(
+    focus: i64,
+    path_id: i64,
+    value_id: i64,
+    graph_id: i64,
+) -> bool {
+    let table = get_vp_table_name(path_id);
+    let sql = if graph_id < 0 {
+        format!("SELECT EXISTS(SELECT 1 FROM {table} WHERE s = $1 AND o = $2)")
+    } else {
+        format!("SELECT EXISTS(SELECT 1 FROM {table} WHERE s = $1 AND o = $2 AND g = $3)")
+    };
+    let args: Vec<DatumWithOid> = if graph_id < 0 {
+        vec![DatumWithOid::from(focus), DatumWithOid::from(value_id)]
+    } else {
+        vec![
+            DatumWithOid::from(focus),
+            DatumWithOid::from(value_id),
+            DatumWithOid::from(graph_id),
+        ]
+    };
+    Spi::get_one_with_args::<bool>(&sql, &args)
+        .unwrap_or(None)
+        .unwrap_or(false)
 }
 
 pub(crate) fn get_value_ids(focus: i64, path_id: i64, graph_id: i64) -> Vec<i64> {
@@ -348,6 +386,51 @@ pub(crate) fn encode_shacl_in_value(val: &str) -> Option<i64> {
         }
     } else {
         crate::dictionary::lookup_iri(val)
+    }
+}
+
+/// Chave canônica de um termo RDF para comparação de conjunto (`sh:in`,
+/// `sh:hasValue`).
+///
+/// Literal simples e literal `^^xsd:string` são o mesmo valor em RDF 1.1, e a
+/// etiqueta de idioma não diferencia maiúscula. Sem normalizar, um `sh:in` com
+/// `"tool"` nunca casava com um objeto gravado como `"tool"^^xsd:string`.
+pub(crate) fn shacl_value_key(raw: &str) -> String {
+    let Some(inner) = raw.strip_prefix('"') else {
+        return raw.to_owned();
+    };
+    let Some(close) = inner.rfind('"') else {
+        return raw.to_owned();
+    };
+    let lexical = &inner[..close];
+    let rest = inner[close + 1..].trim();
+    if let Some(dt) = rest.strip_prefix("^^") {
+        let dt = dt.trim().trim_start_matches('<').trim_end_matches('>');
+        if dt == "http://www.w3.org/2001/XMLSchema#string" {
+            return format!("\"{lexical}\"");
+        }
+        return format!("\"{lexical}\"^^<{dt}>");
+    }
+    if let Some(lang) = rest.strip_prefix('@') {
+        let lang = lang.split_whitespace().next().unwrap_or(lang);
+        return format!("\"{lexical}\"@{}", lang.to_lowercase());
+    }
+    format!("\"{lexical}\"")
+}
+
+/// O valor gravado (`value_id`) é o valor declarado na forma (`declared`)?
+///
+/// Primeiro tenta a igualdade de id — o caminho barato, que resolve IRI e
+/// literal já internado do mesmo jeito. Só cai na comparação por forma canônica
+/// quando o id não bate, que é o caso de literal internado com tipo explícito
+/// contra forma declarada sem tipo (e vice-versa).
+pub(crate) fn shacl_value_matches(value_id: i64, declared: &str) -> bool {
+    if encode_shacl_in_value(declared) == Some(value_id) {
+        return true;
+    }
+    match crate::dictionary::decode(value_id) {
+        Some(stored) => shacl_value_key(&stored) == shacl_value_key(declared),
+        None => false,
     }
 }
 

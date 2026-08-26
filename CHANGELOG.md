@@ -11,6 +11,54 @@ Versions correspond to the milestones in [ROADMAP.md](ROADMAP.md).
 
 ### Fixed
 
+- **`drain_dead_letter_queue()` deleted one row, not the queue.** It used
+  `Spi::get_one` on `DELETE … RETURNING 1`; `get_one` asks SPI for a single row and
+  SPI stops executing the command once the limit is reached, so exactly one row was
+  deleted while the function returned 1 as if it had emptied the queue. Observed in
+  production on 2026-07-28: the queue held 18 450 rows, the call returned 1, and the
+  next count still said 18 450. Every other DML in the module already used the
+  correct `WITH d AS (DELETE … RETURNING 1) SELECT count(*) FROM d` shape; this was
+  the only call outside the pattern. Pinned by
+  `tests/pg_regress/dead_letter_drain`.
+
+- **SHACL `sh:in` never matched a literal value set** — The single-triple write
+  guard resolved each declared value with `lookup_iri()`, which returns `NULL`
+  for a quoted literal. The allowed-value list was therefore empty for every
+  literal enumeration and every value was rejected. Comparison now uses the
+  canonical term form, so a plain literal and the same literal typed
+  `^^xsd:string` match (RDF 1.1), and a language tag compares case-insensitively.
+  The same fix applies to `sh:in` and `sh:hasValue` in the full-graph validator.
+  Observed in production: a seven-value `entityType` enumeration rejected all
+  seven of its own values.
+
+- **SHACL `sh:maxCount` counted the triple being validated twice in async mode** —
+  The guard added 1 to a value count taken *after* the write, so every
+  single-valued predicate reported `found 1 existing value(s), limit is 1`. It
+  also treated re-asserting an existing value as adding a second one. The guard
+  now checks whether the triple is already stored and only counts what the write
+  would actually add; `sh:qualifiedMaxCount` gets the same treatment. Value
+  counts are now `COUNT(DISTINCT o)`, matching SHACL's set semantics.
+  Together these two defects produced 18k dead letters in two days in a
+  production database, none of them a real data problem.
+
+- **Dead letter rows did not say which shape or constraint failed** — Async
+  validation wrote `"shapeIRI": "unknown"` with no path and no constraint name,
+  leaving `idx_dead_letter_shape` and `violation_summary` nothing to group by.
+  The write guard now returns a structured violation (shape IRI, path,
+  constraint) and the queue records all three.
+
+- **DICT-SUBXACT-02: subtransaction rollback left a phantom id in the
+  shared-memory dictionary cache** — Transaction abort evicted the entries
+  interned by that transaction; subtransaction abort did not. Because every
+  PL/pgSQL `EXCEPTION` block and every `SAVEPOINT` runs in a subtransaction, a
+  function that interned a term and then failed left the hash→id mapping live in
+  shared memory — cluster-wide, visible to every backend — while the dictionary
+  row was rolled back. The next write of that term took the cached id, skipped
+  the `INSERT`, and stored a triple pointing at a row that does not exist: no
+  error, no warning, undecodable data. Cache entries are now tagged with the
+  `SubTransactionId` that created them, evicted on `SUBXACT_EVENT_ABORT_SUB`,
+  and reassigned to the parent on `SUBXACT_EVENT_COMMIT_SUB`.
+
 - **CI: CloudNativePG extension image publishing** — Added `docker-cnpg` job to
   release workflow to build and publish the extension volume image with the
   `-cnpg` suffix on each tagged release. The `docker/Dockerfile.cnpg` existed
@@ -18,6 +66,24 @@ Versions correspond to the milestones in [ROADMAP.md](ROADMAP.md).
   ghcr.io/trickle-labs/pg-ripple:<version>-cnpg` to fail with "not found". Now
   the extension image is published automatically alongside the main extension
   and HTTP companion images.
+
+### Added
+
+- **`tests/pg_regress/shacl_write_guard`** — pins the write guard: a value inside
+  the `sh:in` set is accepted, re-asserting it is a no-op, a second distinct
+  value is rejected under `maxCount 1`, a conforming write validated after the
+  fact produces no dead letter, and a real violation records shape, constraint
+  and path.
+
+- **`tests/pg_regress/pgturbohybrid_bm25_bulk_delete`** — (in the pgturbohybrid repo)
+  see that project's changelog.
+
+- **`tests/pg_regress/dict_subxact_phantom`** — pins the dictionary invariant
+  across `EXCEPTION` blocks, `ROLLBACK TO SAVEPOINT`, and a released savepoint
+  inside an aborting transaction: no stored triple may point at a missing
+  dictionary row. Note that the shared-memory cache only exists when pg_ripple
+  is in `shared_preload_libraries`; without preload the test passes for the wrong
+  reason.
 
 ---
 

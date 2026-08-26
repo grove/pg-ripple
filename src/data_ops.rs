@@ -247,9 +247,24 @@ mod pg_ripple {
     /// Returns the number of rows deleted.
     #[pg_extern]
     fn drain_dead_letter_queue() -> i64 {
-        pgrx::Spi::get_one::<i64>("DELETE FROM _pg_ripple.dead_letter_queue RETURNING 1")
-            .unwrap_or(None)
-            .unwrap_or(0)
+        // `Spi::get_one` sobre `DELETE ... RETURNING` apaga **uma** linha.
+        //
+        // O `get_one` pede uma linha ao SPI, e o SPI para de executar o comando
+        // quando o limite é atingido — num `DELETE ... RETURNING 1` isso significa
+        // uma linha apagada, com a função devolvendo 1 como se tivesse esvaziado a
+        // fila. Observado em produção em 28/07/2026: a fila tinha 18.450 linhas,
+        // `drain_dead_letter_queue()` devolveu 1, e a contagem seguinte ainda dizia
+        // 18.450.
+        //
+        // O resto do módulo já usa a forma certa — `WITH d AS (DELETE ... RETURNING
+        // 1) SELECT count(*) FROM d`, que executa o comando inteiro e conta depois.
+        // Esta era a única chamada fora do padrão.
+        pgrx::Spi::get_one::<i64>(
+            "WITH d AS (DELETE FROM _pg_ripple.dead_letter_queue RETURNING 1) \
+             SELECT count(*)::bigint FROM d",
+        )
+        .unwrap_or(None)
+        .unwrap_or(0)
     }
 
     // ── Deduplication functions (v0.7.0) ──────────────────────────────────────

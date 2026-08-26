@@ -1,0 +1,138 @@
+-- pg_regress test: single-triple write guard (sync + async modes).
+--
+-- Three defects this pins down, all found in production with 18k dead letters
+-- in two days:
+--
+--   1. sh:in compared dictionary ids resolved with lookup_iri(), which returns
+--      NULL for a quoted literal. Every literal value set was therefore empty
+--      and every literal value was rejected.
+--   2. sh:maxCount added 1 to a count taken *after* the write in async mode, so
+--      every single-valued predicate reported "found 1, limit is 1".
+--   3. The dead letter row said shapeIRI = "unknown", so neither the shape
+--      index nor the violation summary could group anything.
+
+-- Carrega a biblioteca antes de qualquer asserção, sem o aviso de preload que
+-- varia entre ambientes.
+SET client_min_messages = error;
+SELECT pg_ripple.triple_count() >= 0 AS biblioteca_carregada;
+RESET client_min_messages;
+
+SET search_path TO pg_ripple, public;
+
+SELECT pg_ripple.load_shacl($$
+  @prefix sh: <http://www.w3.org/ns/shacl#> .
+  @prefix ex: <http://guard.test/> .
+  @prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+
+  ex:ThingShape a sh:NodeShape ;
+    sh:targetClass ex:Thing ;
+    sh:property [
+      sh:path ex:label ;
+      sh:datatype xsd:string ;
+      sh:maxCount 1 ;
+    ] ;
+    sh:property [
+      sh:path ex:kind ;
+      sh:in ( "tool" "service" ) ;
+      sh:maxCount 1 ;
+    ] .
+$$) >= 0 AS shacl_loaded;
+
+SELECT pg_ripple.insert_triple(
+    '<http://guard.test/a>',
+    '<http://www.w3.org/1999/02/22-rdf-syntax-ns#type>',
+    '<http://guard.test/Thing>'
+) > 0 AS typed;
+
+-- ── sync mode: the guard runs before the write ──────────────────────────────
+SET pg_ripple.shacl_mode = 'sync';
+
+-- A value inside the sh:in set is accepted. Before the fix this raised
+-- "object id N is not in the allowed value set".
+SELECT pg_ripple.insert_triple(
+    '<http://guard.test/a>',
+    '<http://guard.test/kind>',
+    '"tool"'
+) > 0 AS kind_allowed;
+
+-- Re-asserting the same value is a no-op on the value set, not a second value.
+SELECT pg_ripple.insert_triple(
+    '<http://guard.test/a>',
+    '<http://guard.test/kind>',
+    '"tool"'
+) >= 0 AS kind_reasserted;
+
+-- A different value would make the count 2 against maxCount 1: rejected.
+DO $$
+BEGIN
+    PERFORM pg_ripple.insert_triple(
+        '<http://guard.test/a>',
+        '<http://guard.test/kind>',
+        '"service"'
+    );
+    RAISE NOTICE 'second_kind_accepted';
+EXCEPTION WHEN OTHERS THEN
+    RAISE NOTICE 'second_kind_rejected';
+END $$;
+
+-- A value outside the sh:in set is rejected.
+DO $$
+BEGIN
+    PERFORM pg_ripple.insert_triple(
+        '<http://guard.test/a>',
+        '<http://guard.test/kind>',
+        '"person"'
+    );
+    RAISE NOTICE 'bad_kind_accepted';
+EXCEPTION WHEN OTHERS THEN
+    RAISE NOTICE 'bad_kind_rejected';
+END $$;
+
+SELECT count(*) AS kind_values
+FROM pg_ripple.sparql(
+    'SELECT ?o WHERE { <http://guard.test/a> <http://guard.test/kind> ?o }'
+);
+
+-- ── async mode: the guard runs after the write ──────────────────────────────
+SET pg_ripple.shacl_mode = 'async';
+SELECT pg_ripple.drain_dead_letter_queue() >= 0 AS drained;
+
+SELECT pg_ripple.insert_triple(
+    '<http://guard.test/b>',
+    '<http://www.w3.org/1999/02/22-rdf-syntax-ns#type>',
+    '<http://guard.test/Thing>'
+) > 0 AS typed_b;
+
+SELECT pg_ripple.insert_triple(
+    '<http://guard.test/b>',
+    '<http://guard.test/label>',
+    '"only one"'
+) > 0 AS label_b;
+
+SELECT pg_ripple.insert_triple(
+    '<http://guard.test/b>',
+    '<http://guard.test/kind>',
+    '"service"'
+) > 0 AS kind_b;
+
+SELECT pg_ripple.process_validation_queue(1000) >= 0 AS processed;
+
+-- A conforming triple validated after the write must not be dead-lettered.
+SELECT pg_ripple.dead_letter_count() AS dead_letters_after_valid_writes;
+
+-- A real violation still lands, and it says which shape and which constraint.
+SELECT pg_ripple.insert_triple(
+    '<http://guard.test/b>',
+    '<http://guard.test/label>',
+    '"a second label"'
+) > 0 AS second_label_b;
+
+SELECT pg_ripple.process_validation_queue(1000) >= 0 AS processed_again;
+
+SELECT violation->>'shapeIRI' AS shape,
+       violation->>'constraint' AS constraint_kind,
+       violation->>'path' AS path
+FROM _pg_ripple.dead_letter_queue
+ORDER BY id;
+
+SET pg_ripple.shacl_mode = 'off';
