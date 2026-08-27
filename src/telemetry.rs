@@ -73,6 +73,7 @@ pub fn start_span(name: &'static str) -> SpanGuard {
 }
 
 /// Emit a completed span to the configured exporter.
+#[cfg_attr(not(test), allow(dead_code))]
 fn emit_span(name: &str, elapsed_us: u128) {
     let exporter = crate::TRACING_EXPORTER
         .get()
@@ -116,6 +117,7 @@ fn emit_span(name: &str, elapsed_us: u128) {
 }
 
 /// Write a span record to the PostgreSQL log as a JSON line.
+#[cfg_attr(not(test), allow(dead_code))]
 fn emit_stdout(name: &str, elapsed_us: u128) {
     // Avoid pulling in pgrx error-handling macros for a logging path.
     // Use the DEBUG5 level so the output is invisible by default and only

@@ -1,4 +1,5 @@
 //! Foundation schema tables, sequences, and indexes (v0.1.0 -- v0.28.0).
+// @allow-large-file: versioned foundation DDL remains grouped in one schema module
 //!
 //! Split from `schema.rs` in v0.85.0 (Q13-02).
 

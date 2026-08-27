@@ -614,16 +614,15 @@ fn execute_add_by_ids(src_g_id: i64, dst_g_id: i64) -> Result<i64, String> {
 /// of these operations, or `None` if spargebra should handle it.
 fn try_execute_add_copy_move(query: &str) -> Option<i64> {
     let upper = query.to_uppercase();
-    let op: &str;
-    if upper.starts_with("ADD") {
-        op = "ADD";
+    let op = if upper.starts_with("ADD") {
+        "ADD"
     } else if upper.starts_with("COPY") {
-        op = "COPY";
+        "COPY"
     } else if upper.starts_with("MOVE") {
-        op = "MOVE";
+        "MOVE"
     } else {
         return None;
-    }
+    };
 
     let rest = query[op.len()..].trim_start();
     let (silent, rest) = if rest.to_uppercase().starts_with("SILENT") {

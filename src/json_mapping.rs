@@ -35,7 +35,7 @@ use pgrx::prelude::*;
 
 mod writeback;
 pub use writeback::{
-    drain_json_writeback_queue, disable_json_writeback_impl, enable_json_writeback_impl,
+    disable_json_writeback_impl, drain_json_writeback_queue, enable_json_writeback_impl,
     install_writeback_triggers_after_promotion, json_writeback_status_impl,
     writeback_json_row_delete_impl, writeback_json_row_impl,
 };
@@ -531,7 +531,6 @@ fn require_mapping_exists(mapping: &str) {
         );
     }
 }
-
 
 #[cfg(any(test, feature = "pg_test"))]
 #[pgrx::pg_schema]

@@ -1,5 +1,3 @@
-use pgrx::prelude::*;
-
 fn fetch_writeback_config(mapping: &str) -> (String, String, Vec<String>, String) {
     let row: Option<(Option<String>, String, Option<String>, String)> =
         pgrx::Spi::connect(|client| {
