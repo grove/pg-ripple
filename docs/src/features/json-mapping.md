@@ -53,15 +53,22 @@ relational table — completing the full round-trip.
 
 ### Configuration
 
-Add writeback configuration to the mapping:
+Configure the relational target through the validated public API. This checks
+the relation, key columns, conflict policy, privileges, and target PostgreSQL
+types, then caches the casts atomically. Direct updates to `_pg_ripple` are not
+part of the public API.
 
 ```sql
-UPDATE _pg_ripple.json_mappings
-SET writeback_table        = 'contacts',
-    writeback_schema       = 'public',
-    writeback_key_columns  = ARRAY['contact_id'],
-    writeback_conflict_policy = 'replace'
-WHERE name = 'contacts';
+SELECT pg_ripple.configure_json_writeback(
+    'contacts', 'public', 'contacts', ARRAY['contact_id'], 'replace'
+);
+```
+
+Inspect the resolved target, cached column types, enabled state, and queue
+health:
+
+```sql
+SELECT * FROM pg_ripple.writeback_inspect('contacts');
 ```
 
 ### Conflict Policies
@@ -135,6 +142,13 @@ The status response mirrors `json_writeback_status()` for the selected mapping:
     "last_error": null,
     "last_processed_at": null
 }
+```
+
+Validated writeback configuration and queue health are also available at:
+
+```bash
+curl http://localhost:7878/json-mapping/contacts/writeback/config \
+    -H "Authorization: Bearer $TOKEN"
 ```
 
 Disable triggers:

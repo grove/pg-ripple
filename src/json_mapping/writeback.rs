@@ -123,29 +123,7 @@ fn fetch_or_compute_column_casts(
             .collect();
     }
 
-    let casts: std::collections::HashMap<String, String> = pgrx::Spi::connect(|client| {
-        client
-            .select(
-                "SELECT a.attname::text, a.atttypid::regtype::text \
-                 FROM pg_catalog.pg_attribute a \
-                 JOIN pg_catalog.pg_class c ON c.oid = a.attrelid \
-                 JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace \
-                 WHERE n.nspname = $1 AND c.relname = $2 \
-                   AND a.attnum > 0 AND NOT a.attisdropped",
-                None,
-                &[
-                    pgrx::datum::DatumWithOid::from(schema),
-                    pgrx::datum::DatumWithOid::from(table),
-                ],
-            )
-            .unwrap_or_else(|e| pgrx::error!("writeback column list SPI error: {e}"))
-            .filter_map(|row| {
-                let name: String = row.get(1).ok().flatten()?;
-                let ty: String = row.get(2).ok().flatten()?;
-                Some((name, ty))
-            })
-            .collect()
-    });
+    let casts = compute_column_casts(schema, table);
 
     if !casts.is_empty() {
         let casts_json = serde_json::Value::Object(
@@ -165,6 +143,235 @@ fn fetch_or_compute_column_casts(
     }
 
     casts
+}
+
+fn compute_column_casts(schema: &str, table: &str) -> std::collections::HashMap<String, String> {
+    pgrx::Spi::connect(|client| {
+        client
+            .select(
+                "SELECT a.attname::text, a.atttypid::regtype::text \
+                 FROM pg_catalog.pg_attribute a \
+                 JOIN pg_catalog.pg_class c ON c.oid = a.attrelid \
+                 JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace \
+                 WHERE n.nspname = $1 AND c.relname = $2 \
+                   AND a.attnum > 0 AND NOT a.attisdropped \
+                   AND a.attgenerated = '' AND a.attidentity = ''",
+                None,
+                &[
+                    pgrx::datum::DatumWithOid::from(schema),
+                    pgrx::datum::DatumWithOid::from(table),
+                ],
+            )
+            .unwrap_or_else(|e| pgrx::error!("writeback column list SPI error: {e}"))
+            .filter_map(|row| {
+                let name: String = row.get(1).ok().flatten()?;
+                let ty: String = row.get(2).ok().flatten()?;
+                Some((name, ty))
+            })
+            .collect()
+    })
+}
+
+/// Validate and atomically store the public writeback configuration.
+pub fn configure_json_writeback_impl(
+    mapping: &str,
+    schema: &str,
+    table: &str,
+    key_columns: &[String],
+    conflict_policy: &str,
+) {
+    super::require_mapping_exists(mapping);
+    if schema.trim().is_empty() || table.trim().is_empty() {
+        pgrx::error!("configure_json_writeback: target schema and table are required");
+    }
+    if !matches!(conflict_policy, "replace" | "skip" | "error") {
+        pgrx::error!(
+            "configure_json_writeback: conflict_policy must be 'replace', 'skip', or 'error'"
+        );
+    }
+    if key_columns.is_empty() {
+        pgrx::error!("configure_json_writeback: key_columns must not be empty");
+    }
+    let mut seen = std::collections::HashSet::new();
+    if key_columns
+        .iter()
+        .any(|column| column.trim().is_empty() || !seen.insert(column))
+    {
+        pgrx::error!("configure_json_writeback: key_columns must contain unique, non-empty names");
+    }
+
+    let relation: Option<(i64, String, bool, bool)> = pgrx::Spi::connect(|client| {
+        let rows = client
+            .select(
+                "SELECT c.oid::bigint, c.relkind::text, \
+                        has_table_privilege(session_user, c.oid, 'INSERT'), \
+                        has_table_privilege(session_user, c.oid, 'UPDATE') \
+                 FROM pg_catalog.pg_class c \
+                 JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace \
+                 WHERE n.nspname = $1 AND c.relname = $2",
+                Some(1),
+                &[
+                    pgrx::datum::DatumWithOid::from(schema),
+                    pgrx::datum::DatumWithOid::from(table),
+                ],
+            )
+            .unwrap_or_else(|e| {
+                pgrx::error!("configure_json_writeback: relation lookup failed: {e}")
+            });
+        if rows.is_empty() {
+            return None;
+        }
+        let row = rows.first();
+        Some((
+            row.get::<i64>(1).ok().flatten()?,
+            row.get::<String>(2).ok().flatten()?,
+            row.get::<bool>(3).ok().flatten()?,
+            row.get::<bool>(4).ok().flatten()?,
+        ))
+    });
+    let (target_oid, relkind, can_insert, can_update) = relation.unwrap_or_else(|| {
+        pgrx::error!(
+            "configure_json_writeback: target relation {}.{} does not exist",
+            schema,
+            table
+        )
+    });
+    if !matches!(relkind.as_str(), "r" | "p") {
+        pgrx::error!(
+            "configure_json_writeback: target {}.{} must be a table or partitioned table",
+            schema,
+            table
+        );
+    }
+    if !can_insert || (conflict_policy == "replace" && !can_update) {
+        pgrx::error!(
+            "configure_json_writeback: current role lacks required privileges on {}.{}",
+            schema,
+            table
+        );
+    }
+
+    let columns: Vec<(String, String, String, String)> = pgrx::Spi::connect(|client| {
+        client
+            .select(
+                "SELECT a.attname::text, a.atttypid::regtype::text, \
+                        a.attgenerated::text, a.attidentity::text \
+                 FROM pg_catalog.pg_attribute a \
+                 WHERE a.attrelid = $1 AND a.attnum > 0 AND NOT a.attisdropped",
+                None,
+                &[pgrx::datum::DatumWithOid::from(target_oid)],
+            )
+            .unwrap_or_else(|e| pgrx::error!("configure_json_writeback: column lookup failed: {e}"))
+            .filter_map(|row| {
+                Some((
+                    row.get(1).ok().flatten()?,
+                    row.get(2).ok().flatten()?,
+                    row.get(3).ok().flatten()?,
+                    row.get(4).ok().flatten()?,
+                ))
+            })
+            .collect()
+    });
+    for key in key_columns {
+        let Some((_, _, generated, identity)) = columns.iter().find(|column| column.0 == *key)
+        else {
+            pgrx::error!(
+                "configure_json_writeback: key column {:?} does not exist on {}.{}",
+                key,
+                schema,
+                table
+            );
+        };
+        if !generated.is_empty() || !identity.is_empty() {
+            pgrx::error!(
+                "configure_json_writeback: key column {:?} is generated or identity and is not insertable",
+                key
+            );
+        }
+    }
+
+    let casts = compute_column_casts(schema, table);
+    let casts_json = serde_json::Value::Object(
+        casts
+            .into_iter()
+            .map(|(name, ty)| (name, serde_json::Value::String(ty)))
+            .collect(),
+    );
+    pgrx::Spi::run_with_args(
+        "UPDATE _pg_ripple.json_mappings \
+         SET writeback_schema = $2, writeback_table = $3, writeback_key_columns = $4, \
+             writeback_conflict_policy = $5, writeback_column_casts = $6, writeback_enabled = false \
+         WHERE name = $1",
+        &[
+            pgrx::datum::DatumWithOid::from(mapping),
+            pgrx::datum::DatumWithOid::from(schema),
+            pgrx::datum::DatumWithOid::from(table),
+            pgrx::datum::DatumWithOid::from(
+                key_columns.iter().map(String::as_str).collect::<Vec<_>>(),
+            ),
+            pgrx::datum::DatumWithOid::from(conflict_policy),
+            pgrx::datum::DatumWithOid::from(pgrx::JsonB(casts_json)),
+        ],
+    )
+    .unwrap_or_else(|e| pgrx::error!("configure_json_writeback: catalog update failed: {e}"));
+}
+
+pub type WritebackInspectRow = (
+    pgrx::name!(target_schema, String),
+    pgrx::name!(target_table, String),
+    pgrx::name!(key_columns, Vec<String>),
+    pgrx::name!(conflict_policy, String),
+    pgrx::name!(writeback_enabled, bool),
+    pgrx::name!(trigger_count, i32),
+    pgrx::name!(queue_depth, i64),
+);
+
+pub fn writeback_inspect_impl(
+    mapping: &str,
+) -> pgrx::iter::TableIterator<'static, WritebackInspectRow> {
+    type Row = (String, String, Vec<String>, String, bool, i32, i64);
+    let rows: Vec<Row> = pgrx::Spi::connect(|client| {
+        client
+            .select(
+                "SELECT COALESCE(m.writeback_schema, 'public'), \
+                        COALESCE(m.writeback_table, ''), \
+                        COALESCE(m.writeback_key_columns, '{}'::text[]), \
+                        COALESCE(m.writeback_conflict_policy, 'error'), \
+                        m.writeback_enabled, \
+                        (SELECT COUNT(*)::int \
+                         FROM pg_catalog.pg_trigger t \
+                         WHERE NOT t.tgisinternal \
+                           AND pg_catalog.starts_with( \
+                               t.tgname, \
+                               'pg_ripple_jwb_' || \
+                               pg_catalog.regexp_replace(m.name, '[^[:alnum:]]', '_', 'g') || '_')), \
+                        COUNT(q.id) FILTER (WHERE q.processed_at IS NULL)::bigint \
+                 FROM _pg_ripple.json_mappings m \
+                 LEFT JOIN _pg_ripple.json_writeback_queue q ON q.mapping_name = m.name \
+                 WHERE m.name = $1 \
+                 GROUP BY m.name, m.writeback_schema, m.writeback_table, m.writeback_key_columns, \
+                          m.writeback_conflict_policy, m.writeback_enabled",
+                None,
+                &[pgrx::datum::DatumWithOid::from(mapping)],
+            )
+            .unwrap_or_else(|e| pgrx::error!("writeback_inspect: SPI error: {e}"))
+            .filter_map(|row| {
+                Some((
+                    row.get(1).ok().flatten()?,
+                    row.get(2).ok().flatten()?,
+                    row.get(3).ok().flatten().unwrap_or_default(),
+                    row.get(4).ok().flatten().unwrap_or_default(),
+                    row.get(5).ok().flatten().unwrap_or(false),
+                    row.get(6).ok().flatten().unwrap_or(0),
+                    row.get(7).ok().flatten().unwrap_or(0),
+                ))
+            })
+            .collect()
+    });
+    if rows.is_empty() {
+        super::require_mapping_exists(mapping);
+    }
+    pgrx::iter::TableIterator::new(rows)
 }
 
 pub fn writeback_json_row_impl(mapping: &str, subject_iri: &str) -> i64 {

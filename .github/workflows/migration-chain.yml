@@ -15,12 +15,24 @@ on:
       - 'sql/**.sql'
       - 'pg_ripple.control'
       - 'tests/test_migration_chain.sh'
+      - 'tests/schema_fingerprint.sh'
+      - 'tests/upgrade_recovery.sh'
+      - 'tests/package_upgrade_matrix.sh'
+      - 'scripts/migration_graph.py'
+      - 'scripts/schema_fingerprint.sql'
+      - 'scripts/compare_schema_fingerprints.py'
   pull_request:
     branches: [main]
     paths:
       - 'sql/**.sql'
       - 'pg_ripple.control'
       - 'tests/test_migration_chain.sh'
+      - 'tests/schema_fingerprint.sh'
+      - 'tests/upgrade_recovery.sh'
+      - 'tests/package_upgrade_matrix.sh'
+      - 'scripts/migration_graph.py'
+      - 'scripts/schema_fingerprint.sql'
+      - 'scripts/compare_schema_fingerprints.py'
   workflow_dispatch:
 
 env:
@@ -80,11 +92,20 @@ jobs:
       - name: Initialise pgrx (PostgreSQL 18)
         run: cargo pgrx init --pg18 /usr/lib/postgresql/18/bin/pg_config
 
+      - name: Install pg_ripple candidate
+        run: cargo pgrx install --pg-config /usr/lib/postgresql/18/bin/pg_config
+
       - name: Start pgrx PostgreSQL 18
         run: cargo pgrx start pg18 --postgresql-conf "allow_system_table_mods=on"
 
       - name: Run migration chain test
         run: bash tests/test_migration_chain.sh
+
+      - name: Compare fresh and upgraded schema fingerprints
+        run: bash tests/schema_fingerprint.sh
+
+      - name: Run upgrade recovery test
+        run: bash tests/upgrade_recovery.sh
 
       - name: Stop pgrx PostgreSQL 18
         if: always()

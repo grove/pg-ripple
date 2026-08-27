@@ -1,205 +1,16 @@
-//! Datalog rule parser: Turtle-flavoured Datalog syntax.
-//!
-//! # Syntax
-//!
-//! ```text
-//! RuleSet       ::= (Rule | Comment)*
-//! Rule          ::= Head ':-' Body '.' | ':-' Body '.'
-//! Head          ::= [GraphPattern] TriplePattern
-//! Body          ::= Literal (',' Literal)*
-//! Literal       ::= 'NOT'? [GraphPattern] TriplePattern
-//!                 | CompareExpr
-//!                 | AssignExpr
-//!                 | StringBuiltin
-//! GraphPattern  ::= 'GRAPH' GraphTerm '{'  '}'
-//! GraphTerm     ::= Variable | PrefixedIRI | FullIRI
-//! TriplePattern ::= Term Term Term
-//! Term          ::= Variable | PrefixedIRI | FullIRI | RDFLiteral
-//! Variable      ::= '?' [a-zA-Z_][a-zA-Z0-9_]*
-//! ```
-
+use super::lexer::{self, split_body};
 use crate::datalog::{
-    AggFunc, AggregateLiteral, ArithOp, Atom, BodyLiteral, CompareOp, Rule, RuleSet, StringBuiltin,
+    AggFunc, AggregateLiteral, ArithOp, Atom, BodyLiteral, CompareOp, StringBuiltin,
     TemporalFilter, Term,
 };
-
-// ─── Public API ──────────────────────────────────────────────────────────────
-
-/// Parse a Datalog rule text into a `RuleSet` IR.
-///
-/// `rule_set_name` is used for error messages and catalog storage.
-pub fn parse_rules(text: &str, rule_set_name: &str) -> Result<RuleSet, String> {
-    let mut rules = Vec::new();
-    let mut errors = Vec::new();
-
-    // Pre-register standard prefixes so rules can use them without declaring.
-    // Additional prefixes are resolved via the _pg_ripple.prefixes table.
-    let lines = tokenize_rules(text);
-
-    for (line_num, line) in lines.iter().enumerate() {
-        let line = line.trim();
-        if line.is_empty() || line.starts_with('#') {
-            continue;
-        }
-        match parse_rule(line) {
-            Ok(rule) => rules.push(rule),
-            Err(e) => errors.push(format!("line {}: {e}", line_num + 1)),
-        }
-    }
-
-    if !errors.is_empty() {
-        return Err(errors.join("; "));
-    }
-
-    Ok(RuleSet {
-        name: rule_set_name.to_owned(),
-        rules,
-    })
-}
-
-// ─── Tokenizer: split on rule-ending '.' ─────────────────────────────────────
-
-fn tokenize_rules(text: &str) -> Vec<String> {
-    let mut rules = Vec::new();
-    let mut current = String::new();
-    let mut in_literal = false;
-    let mut in_iri = false;
-
-    let chars: Vec<char> = text.chars().collect();
-    let mut i = 0;
-    while i < chars.len() {
-        let c = chars[i];
-        match c {
-            '"' if !in_iri => {
-                in_literal = !in_literal;
-                current.push(c);
-            }
-            '<' if !in_literal => {
-                in_iri = true;
-                current.push(c);
-            }
-            '>' if !in_literal && in_iri => {
-                in_iri = false;
-                current.push(c);
-            }
-            '.' if !in_literal && !in_iri => {
-                let trimmed = current.trim().to_owned();
-                if !trimmed.is_empty() {
-                    rules.push(trimmed);
-                }
-                current.clear();
-            }
-            '#' if !in_literal && !in_iri => {
-                // Line comment — skip until end of line.
-                while i < chars.len() && chars[i] != '\n' {
-                    i += 1;
-                }
-                continue;
-            }
-            _ => current.push(c),
-        }
-        i += 1;
-    }
-    let trimmed = current.trim().to_owned();
-    if !trimmed.is_empty() {
-        rules.push(trimmed);
-    }
-    rules
-}
-
-// ─── Rule parser ─────────────────────────────────────────────────────────────
-
-/// Parse a single rule (without the trailing `.`).
-fn parse_rule(text: &str) -> Result<Rule, String> {
-    // v0.87.0: extract @weight(FLOAT) annotation before parsing rule body.
-    let (rule_body, weight) = extract_weight_annotation(text);
-    let rule_text = rule_body.trim().to_owned() + " .";
-
-    // Constraint rule: starts with ':-'
-    if rule_body.trim_start().starts_with(":-") {
-        let body_text = rule_body.trim_start()[2..].trim().to_owned();
-        let body = parse_body(&body_text)?;
-        return Ok(Rule {
-            head: None,
-            body,
-            rule_text,
-            weight,
-        });
-    }
-
-    // Normal rule: head :- body
-    let sep = find_neck(rule_body)?;
-    let head_text = rule_body[..sep].trim();
-    let body_text = rule_body[sep + 2..].trim();
-
-    let head = parse_head(head_text)?;
-    let body = parse_body(body_text)?;
-
-    Ok(Rule {
-        head: Some(head),
-        body,
-        rule_text,
-        weight,
-    })
-}
-
-/// Extract `@weight(FLOAT)` annotation from a rule text, returning (body_text, weight).
-///
-/// v0.87.0: Supports `@weight(0.85)` anywhere after the rule body.
-/// The value must be in [0.0, 1.0]; values outside this range trigger PT0301.
-fn extract_weight_annotation(text: &str) -> (&str, Option<f64>) {
-    if let Some(pos) = text.rfind("@weight(") {
-        let annotation = &text[pos..];
-        if let Some(end) = annotation.find(')') {
-            let inner = &annotation[8..end]; // "8" = len("@weight(")
-            match inner.trim().parse::<f64>() {
-                Ok(w) if (0.0..=1.0).contains(&w) => {
-                    return (&text[..pos], Some(w));
-                }
-                Ok(w) => {
-                    pgrx::error!("rule weight must be in [0.0, 1.0]; got {} (PT0301)", w);
-                }
-                Err(_) => {
-                    pgrx::error!(
-                        "invalid @weight annotation: expected a float literal, got '{}' (PT0301)",
-                        inner.trim()
-                    );
-                }
-            }
-        }
-    }
-    (text, None)
-}
-
-/// Find the position of `:-` that is not inside a literal or IRI.
-fn find_neck(text: &str) -> Result<usize, String> {
-    let chars: Vec<char> = text.chars().collect();
-    let mut in_literal = false;
-    let mut in_iri = false;
-    let mut i = 0;
-    while i < chars.len() {
-        match chars[i] {
-            '"' => in_literal = !in_literal,
-            '<' if !in_literal => in_iri = true,
-            '>' if !in_literal => in_iri = false,
-            '-' if !in_literal && !in_iri && i > 0 && chars[i - 1] == ':' => {
-                return Ok(i - 1);
-            }
-            _ => {}
-        }
-        i += 1;
-    }
-    Err(format!("missing ':-' in rule: {text}"))
-}
-
 /// Parse the head of a rule (single atom, optionally with GRAPH clause).
-fn parse_head(text: &str) -> Result<Atom, String> {
+pub(super) fn parse_head(text: &str) -> Result<Atom, String> {
     parse_atom(text.trim())
 }
 
 /// Parse the body: a comma-separated list of literals.
-fn parse_body(text: &str) -> Result<Vec<BodyLiteral>, String> {
-    let literals = split_body(text);
+pub(super) fn parse_body(text: &str) -> Result<Vec<BodyLiteral>, String> {
+    let literals = lexer::split_body(text);
     let mut body = Vec::new();
     for lit in literals {
         let lit = lit.trim();
@@ -209,49 +20,6 @@ fn parse_body(text: &str) -> Result<Vec<BodyLiteral>, String> {
         body.push(parse_body_literal(lit)?);
     }
     Ok(body)
-}
-
-/// Split body on commas, respecting nested brackets, literals, and IRIs.
-fn split_body(text: &str) -> Vec<String> {
-    let mut parts = Vec::new();
-    let mut current = String::new();
-    let mut depth = 0i32;
-    let mut in_literal = false;
-    let mut in_iri = false;
-
-    for c in text.chars() {
-        match c {
-            '"' => {
-                in_literal = !in_literal;
-                current.push(c);
-            }
-            '<' if !in_literal => {
-                in_iri = true;
-                current.push(c);
-            }
-            '>' if !in_literal && in_iri => {
-                in_iri = false;
-                current.push(c);
-            }
-            '{' | '(' if !in_literal && !in_iri => {
-                depth += 1;
-                current.push(c);
-            }
-            '}' | ')' if !in_literal && !in_iri => {
-                depth -= 1;
-                current.push(c);
-            }
-            ',' if !in_literal && !in_iri && depth == 0 => {
-                parts.push(current.trim().to_owned());
-                current.clear();
-            }
-            _ => current.push(c),
-        }
-    }
-    if !current.trim().is_empty() {
-        parts.push(current.trim().to_owned());
-    }
-    parts
 }
 
 /// Parse a single body literal.
@@ -331,7 +99,7 @@ fn try_parse_temporal_filter(text: &str) -> Option<TemporalFilter> {
 
     if upper.starts_with("DURING(") && text.ends_with(')') {
         let inner = &text[7..text.len() - 1];
-        let parts = split_csv(inner);
+        let parts = lexer::split_csv(inner);
         if parts.len() == 2 {
             let from_ts = trim_cast(&parts[0]);
             let to_ts = trim_cast(&parts[1]);
@@ -343,7 +111,7 @@ fn try_parse_temporal_filter(text: &str) -> Option<TemporalFilter> {
     // The duration is the last argument; it can be an ISO 8601 interval string.
     if upper.starts_with("WITHIN(") && text.ends_with(')') {
         let inner = &text[7..text.len() - 1];
-        let parts = split_csv(inner);
+        let parts = lexer::split_csv(inner);
         if parts.len() == 4 {
             // The duration is the last component.
             let duration = trim_cast(&parts[3]);
@@ -354,7 +122,7 @@ fn try_parse_temporal_filter(text: &str) -> Option<TemporalFilter> {
     // v0.107.0: SEQUENCE(s1_var, pred1, o1_var, s2_var, pred2, o2_var, window)
     if upper.starts_with("SEQUENCE(") && text.ends_with(')') {
         let inner = &text[9..text.len() - 1];
-        let parts = split_csv(inner);
+        let parts = lexer::split_csv(inner);
         if parts.len() == 7 {
             let s1 = parts[0].trim().to_owned();
             let p1 = parts[1].trim().to_owned();
@@ -370,7 +138,7 @@ fn try_parse_temporal_filter(text: &str) -> Option<TemporalFilter> {
     // v0.107.0: CONSECUTIVE(n, predicate, window)
     if upper.starts_with("CONSECUTIVE(") && text.ends_with(')') {
         let inner = &text[12..text.len() - 1];
-        let parts = split_csv(inner);
+        let parts = lexer::split_csv(inner);
         if parts.len() == 3 {
             let n_str = parts[0].trim();
             let pred = parts[1].trim().to_owned();
@@ -394,7 +162,7 @@ fn try_parse_temporal_filter(text: &str) -> Option<TemporalFilter> {
     ] {
         if upper.starts_with(prefix) && text.ends_with(')') {
             let inner = &text[*len..text.len() - 1];
-            let parts = split_csv(inner);
+            let parts = lexer::split_csv(inner);
             if parts.len() == 4 {
                 let a_start = trim_cast(&parts[0]);
                 let a_end = trim_cast(&parts[1]);
@@ -424,42 +192,6 @@ fn try_parse_temporal_filter(text: &str) -> Option<TemporalFilter> {
 
 /// Split a CSV string respecting quoted strings and nested parentheses.
 /// Returns a `Vec<String>` of the comma-separated parts (un-trimmed).
-fn split_csv(s: &str) -> Vec<String> {
-    let mut parts = Vec::new();
-    let mut current = String::new();
-    let mut depth = 0i32;
-    let mut in_str = false;
-    for c in s.chars() {
-        match c {
-            '\'' => {
-                in_str = !in_str;
-                current.push(c);
-            }
-            '(' if !in_str => {
-                depth += 1;
-                current.push(c);
-            }
-            ')' if !in_str => {
-                depth -= 1;
-                current.push(c);
-            }
-            ',' if !in_str && depth == 0 => {
-                parts.push(current.clone());
-                current.clear();
-            }
-            _ => current.push(c),
-        }
-    }
-    if !current.is_empty() || !parts.is_empty() {
-        parts.push(current);
-    }
-    parts
-}
-
-/// Try parsing an aggregate body literal.
-///
-/// Syntax: `COUNT(?aggVar WHERE subject pred object) = ?resultVar`
-/// Also supports SUM, MIN, MAX, AVG.
 fn try_parse_aggregate(text: &str) -> Option<AggregateLiteral> {
     let upper = text.to_uppercase();
     let func = if upper.starts_with("COUNT(") {
@@ -555,7 +287,7 @@ fn try_parse_assign(text: &str) -> Option<BodyLiteral> {
 }
 
 /// Try parsing a comparison: `?a OP ?b` or `?a OP <literal>`.
-fn try_parse_comparison(text: &str) -> Option<BodyLiteral> {
+pub(super) fn try_parse_comparison(text: &str) -> Option<BodyLiteral> {
     let tokens: Vec<&str> = text.split_whitespace().collect();
     if tokens.len() < 3 {
         return None;
@@ -764,7 +496,7 @@ fn parse_atom(text: &str) -> Result<Atom, String> {
 
 /// Parse three whitespace-separated terms for a triple pattern.
 fn parse_triple_terms(text: &str) -> Result<(Term, Term, Term), String> {
-    let tokens = tokenize_terms(text);
+    let tokens = lexer::tokenize_terms(text);
     if tokens.len() < 3 {
         return Err(format!(
             "expected 3 terms in triple pattern, got {}: {text}",
@@ -784,67 +516,6 @@ fn parse_triple_terms(text: &str) -> Result<(Term, Term, Term), String> {
 }
 
 /// Tokenize a term list, respecting IRIs and literals.
-fn tokenize_terms(text: &str) -> Vec<String> {
-    let mut tokens = Vec::new();
-    let mut current = String::new();
-    let mut in_literal = false;
-    let mut in_iri = false;
-    let mut in_quoted = false; // << >> quoted triple
-
-    let chars: Vec<char> = text.chars().collect();
-    let mut i = 0;
-
-    while i < chars.len() {
-        let c = chars[i];
-        match c {
-            '"' => {
-                in_literal = !in_literal;
-                current.push(c);
-            }
-            '<' if !in_literal => {
-                // Check for <<
-                if i + 1 < chars.len() && chars[i + 1] == '<' {
-                    in_quoted = true;
-                    current.push(c);
-                    current.push(chars[i + 1]);
-                    i += 2;
-                    continue;
-                }
-                in_iri = true;
-                current.push(c);
-            }
-            '>' if !in_literal && in_quoted => {
-                // Check for >>
-                if i + 1 < chars.len() && chars[i + 1] == '>' {
-                    in_quoted = false;
-                    current.push(c);
-                    current.push(chars[i + 1]);
-                    i += 2;
-                    continue;
-                }
-                current.push(c);
-            }
-            '>' if !in_literal && in_iri => {
-                in_iri = false;
-                current.push(c);
-            }
-            ' ' | '\t' | '\n' if !in_literal && !in_iri && !in_quoted => {
-                if !current.is_empty() {
-                    tokens.push(current.trim().to_owned());
-                    current.clear();
-                }
-            }
-            _ => current.push(c),
-        }
-        i += 1;
-    }
-    if !current.trim().is_empty() {
-        tokens.push(current.trim().to_owned());
-    }
-    tokens
-}
-
-/// Parse a single term (simple form without GRAPH context).
 fn parse_term_simple(text: &str) -> Result<Term, String> {
     parse_term(text)
 }
@@ -975,10 +646,3 @@ fn term_to_const(term: &Term) -> Result<i64, String> {
         Term::DefaultGraph => Err("default graph not allowed in quoted triple".to_owned()),
     }
 }
-
-// ─── Tests ───────────────────────────────────────────────────────────────────
-
-#[cfg(test)]
-#[allow(clippy::unwrap_used, clippy::expect_used)]
-#[path = "parser_tests.rs"]
-mod tests;

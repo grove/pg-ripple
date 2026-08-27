@@ -193,15 +193,19 @@ jobs:
         include:
           - os: ubuntu-latest
             artifact_suffix: linux-amd64
+            platform: linux
             archive_ext: tar.gz
           - os: ubuntu-24.04-arm
             artifact_suffix: linux-arm64
+            platform: linux
             archive_ext: tar.gz
           - os: macos-15
             artifact_suffix: macos-arm64
+            platform: macos
             archive_ext: tar.gz
           - os: windows-2022
             artifact_suffix: windows-amd64
+            platform: windows
             archive_ext: zip
 
     steps:
@@ -227,6 +231,21 @@ jobs:
             FEATURES="pg18,cshim"
           fi
           cargo pgrx package --pg-config "${PG_CONFIG_PATH}" --features "${FEATURES}"
+
+      - name: Download six recent release archives for upgrade qualification
+        if: matrix.artifact_suffix == 'linux-amd64'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p dist/recent
+          for version in 0.124.0 0.125.0 0.126.0 0.127.0 0.128.0 0.129.0; do
+            mkdir -p "dist/recent/${version}"
+            gh release download "v${version}" \
+              --repo "${GITHUB_REPOSITORY}" \
+              --pattern "pg_ripple-${version}-pg18-linux-amd64.tar.gz" \
+              --dir "dist/recent/${version}"
+          done
 
       - name: Create archive (tar.gz)
         if: matrix.archive_ext == 'tar.gz'
@@ -254,9 +273,19 @@ jobs:
 
           cp README.md LICENSE "dist/${ARCHIVE_NAME}/" 2>/dev/null || true
 
+          python3 scripts/migration_graph.py --output target/migration-graph.json
+          python3 scripts/check_package_artifact.py "dist/${ARCHIVE_NAME}" \
+            --platform "${{ matrix.platform }}"
+
           cd dist
           tar czf "${ARCHIVE_NAME}.tar.gz" "${ARCHIVE_NAME}"
           echo "Archive: ${ARCHIVE_NAME}.tar.gz ($(du -h "${ARCHIVE_NAME}.tar.gz" | cut -f1))"
+          cd ..
+          bash tests/package_install_smoke.sh "dist/${ARCHIVE_NAME}.tar.gz" \
+            --platform "${{ matrix.platform }}"
+          if [[ "${{ matrix.artifact_suffix }}" == "linux-amd64" ]]; then
+            bash tests/package_upgrade_matrix.sh "dist/${ARCHIVE_NAME}.tar.gz" dist/recent
+          fi
 
       - name: Create archive (zip)
         if: matrix.archive_ext == 'zip'
@@ -284,8 +313,11 @@ jobs:
             ForEach-Object { Copy-Item $_.FullName "dist\${archiveName}\extension\" }
 
           Copy-Item README.md, LICENSE "dist\${archiveName}\" -ErrorAction SilentlyContinue
+          python scripts/migration_graph.py --output target/migration-graph.json
+          python scripts/check_package_artifact.py "dist\${archiveName}" --platform windows
           Compress-Archive -Path "dist\${archiveName}" -DestinationPath "dist\${archiveName}.zip"
           Write-Host "Archive: ${archiveName}.zip"
+          bash tests/package_install_smoke.sh "dist/${archiveName}.zip" --platform windows
 
       - name: Upload release artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
@@ -762,4 +794,3 @@ jobs:
           fi
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-

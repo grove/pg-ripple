@@ -25,9 +25,9 @@ No separate graph database. No data pipelines. No extra infrastructure.
 
 ---
 
-## What works today (v0.129.0)
+## What works today (v0.130.0)
 
-pg_ripple passes **100% of the W3C SPARQL 1.1, SHACL Core, and OWL 2 RL conformance test suites** — the industry benchmarks for correctness in knowledge graph systems. After 129 releases it covers the full feature set described below.
+pg_ripple passes **100% of the W3C SPARQL 1.1, SHACL Core, and OWL 2 RL conformance test suites** — the industry benchmarks for correctness in knowledge graph systems. After 130 releases it covers the full feature set described below.
 
 | What you can do | How it works |
 |---|---|
@@ -186,9 +186,10 @@ report itself enabled without full coverage. v0.129.0 repairs that async
 writeback path for real: a wrong dictionary column name had made it silently
 non-functional, and enqueue coverage now extends to not-yet-promoted
 predicates and main-resident deletes (see "JSON↔RDF mapping registry" above).
-See
+v0.130.0 adds independent migration-graph, schema-fingerprint, and upgrade
+recovery checks plus validated writeback configuration. See
 [ROADMAP.md](ROADMAP.md#production-readiness--ga-qualification-v01281--v01370)
-for the full v0.130.0–v0.137.0 production-readiness sequence still ahead of
+for the remaining v0.131.0–v0.137.0 production-readiness sequence ahead of
 v1.0.0.
 
 The v0.91.0–v0.111.0 development cycle adds deep reasoning capabilities: proof trees and justification infrastructure (v0.100.0), natural-language explanation of derived facts via LLM or deterministic fallback (v0.101.0), what-if hypothetical inference (v0.102.0), Datalog conflict detection (v0.103.0), versioned domain rule libraries (v0.104.0), guided rule authoring with LLM-backed NL-to-Datalog translation (v0.105.0), first-class temporal fact store with AFTER/BEFORE/DURING operators and CDC integration (v0.106.0–v0.107.0), Bayesian confidence updates with evidence log and derivation-DAG propagation (v0.108.0), neuro-symbolic record linkage with six string-similarity built-ins and a five-stage `resolve_entities()` pipeline (v0.109.0), NS-RL evaluation harness with live ER monitoring stream tables and rule explainability (v0.110.0), and Privacy-Preserving Record Linkage via CLK Bloom-filter encoding and differential-privacy aggregates (v0.111.0). Every row in `pg_ripple.feature_status()` shows `implemented`.

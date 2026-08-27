@@ -66,8 +66,9 @@ It was introduced in v0.114.0 as part of the module-decomposition effort (A16).
 
 ## Module Size Policy
 
-Each `.rs` file is bounded at **1,500 LOC** (CI hard failure) with a **1,200 LOC** advisory warning.
-The gate runs via `scripts/check_module_sizes.sh` on every PR.
+Each `.rs` file is reported at **800 LOC** and bounded at **1,200 LOC** (CI hard failure).
+The gate runs via `scripts/check_module_size.sh` on every PR. Files over 800
+lines are reported for review; files over 1,200 lines fail CI.
 
 When a module grows beyond the limit, decompose it into a `src/<module>/` directory:
 

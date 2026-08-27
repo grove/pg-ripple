@@ -11,6 +11,48 @@ Versions correspond to the milestones in [ROADMAP.md](ROADMAP.md).
 
 ---
 
+## [0.130.0] — 2026-08-27 — Installation and Migration Integrity
+
+Fresh installs and upgrades now have an independently checked migration graph,
+schema fingerprint tooling, and a validated JSON writeback configuration API.
+
+### What you can do
+
+- Configure JSON writeback with `pg_ripple.configure_json_writeback()` after
+  validating the target table, key columns, privileges, and conflict policy.
+- Inspect writeback configuration and queue health with
+  `pg_ripple.writeback_inspect()` or `GET /json-mapping/{name}/writeback/config`.
+- Verify an installed database against a normalized schema fingerprint.
+- Run the complete migration-chain and recovery checks with
+  `just test-migration-full` and `tests/upgrade_recovery.sh`.
+
+### What happens behind the scenes
+
+- The migration graph is parsed from filenames and the control file separately,
+  so missing, duplicate, ambiguous, cyclic, or unreachable paths fail early.
+- The upgrade test discovers the current endpoint dynamically and checks
+  representative data, permissions, and JSON writeback objects.
+- Maintenance, Datalog, and JSON mapping code are split into smaller modules
+  without changing their SQL-facing APIs.
+
+### Technical Details
+
+<details>
+<summary>Implementation details</summary>
+
+- `scripts/migration_graph.py` writes `target/migration-graph.json`.
+- `scripts/schema_fingerprint.sql` and
+  `scripts/compare_schema_fingerprints.py` compare normalized catalog state,
+  functions, policies, extension membership, and pg_ripple GUC defaults.
+- `scripts/check_module_size.sh` reports Rust files over 800 lines and fails
+  files over 1,200 lines.
+- `configure_json_writeback()` caches target-column casts and resets async
+  writeback to disabled when configuration changes.
+
+</details>
+
+---
+
 ## [0.129.0] — 2026-08-27 — JSON Writeback and Mutation Integrity
 
 **Repairs async JSON-mapping writeback (introduced in v0.128.0, contained in

@@ -1,0 +1,58 @@
+-- v0.130.0 JSON writeback public configuration API.
+SET client_min_messages = warning;
+CREATE EXTENSION IF NOT EXISTS pg_ripple;
+SET client_min_messages = DEFAULT;
+SET search_path TO pg_ripple, public;
+LOAD '$libdir/pg_ripple';
+CREATE TABLE public.jwb_api_test (
+    id INTEGER PRIMARY KEY,
+    label TEXT,
+    uuid_key UUID,
+    payload JSONB
+);
+TRUNCATE public.jwb_api_test;
+ jwb29_security_definer | jwb29_safe_search_path 
+------------------------+------------------------
+ t                      | t
+(1 row)
+
+SELECT pg_ripple.register_json_mapping(
+    'jwb_api',
+    '{"id": "http://example.org/jwb/id", "label": "http://example.org/jwb/label", "uuid_key": "http://example.org/jwb/uuid_key", "payload": "http://example.org/jwb/payload"}'::jsonb
+);
+ register_json_mapping 
+-----------------------
+ 
+(1 row)
+
+ jwb30_configured 
+------------------
+ 
+(1 row)
+
+ target_schema | target_table | key_columns | conflict_policy | writeback_enabled | trigger_count | queue_depth 
+---------------+--------------+-------------+------------------+------------------+---------------+-------------
+ public        | jwb_api_test | {id}        | replace          | f                |             0 |           0
+(1 row)
+
+ integer_type | uuid_type | jsonb_type 
+--------------+-----------+------------
+ integer      | uuid      | jsonb
+(1 row)
+
+NOTICE:  JWB-32 PASS: missing target rejected
+NOTICE:  JWB-33 PASS: missing key rejected
+NOTICE:  JWB-34 PASS: duplicate key rejected
+NOTICE:  JWB-35 PASS: invalid policy rejected
+ jwb36_reconfigured 
+--------------------
+ 
+(1 row)
+
+ key_columns | conflict_policy | writeback_enabled 
+-------------+------------------+-------------------
+ {uuid_key}  | skip             | f
+(1 row)
+
+DELETE 1
+DROP TABLE

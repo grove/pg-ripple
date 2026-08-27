@@ -434,6 +434,10 @@ pub fn build_router(state: Arc<AppState>, max_body_bytes: usize, cors: CorsLayer
             "/json-mapping/{name}/writeback/status",
             get(json_mapping_handlers::json_mapping_writeback_status_get),
         )
+        .route(
+            "/json-mapping/{name}/writeback/config",
+            get(json_mapping_handlers::json_mapping_writeback_config_get),
+        )
         .layer(RequestBodyLimitLayer::new(max_body_bytes))
         .layer(cors)
         .with_state(state)

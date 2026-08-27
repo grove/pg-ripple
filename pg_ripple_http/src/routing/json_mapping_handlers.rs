@@ -7,6 +7,9 @@
 //!
 //! `GET /json-mapping/{name}/writeback/status`
 //!    returns queue depth, error count, and `last_error` JSON; requires read-auth.
+//!
+//! `GET /json-mapping/{name}/writeback/config`
+//!    returns validated target configuration and queue health; requires read-auth.
 
 use std::sync::Arc;
 
@@ -153,5 +156,63 @@ pub(crate) async fn json_mapping_writeback_status_get(
             &e.to_string(),
             StatusCode::INTERNAL_SERVER_ERROR,
         ),
+    }
+}
+
+/// `GET /json-mapping/{name}/writeback/config`
+pub(crate) async fn json_mapping_writeback_config_get(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Path(name): Path<String>,
+) -> Response {
+    if let Err(r) = check_auth(&state, &headers) {
+        return r;
+    }
+
+    let client = match state.pool.get().await {
+        Ok(c) => c,
+        Err(e) => {
+            return redacted_error(
+                "db_pool_error",
+                &e.to_string(),
+                StatusCode::SERVICE_UNAVAILABLE,
+            );
+        }
+    };
+    match client
+        .query_opt(
+            "SELECT row_to_json(config)::jsonb \
+             FROM pg_ripple.writeback_inspect($1) AS config",
+            &[&name],
+        )
+        .await
+    {
+        Ok(Some(row)) => match row.try_get::<_, serde_json::Value>(0) {
+            Ok(config) => json_response(StatusCode::OK, config),
+            Err(e) => redacted_error(
+                "config_query_error",
+                &e.to_string(),
+                StatusCode::INTERNAL_SERVER_ERROR,
+            ),
+        },
+        Ok(None) => json_response(
+            StatusCode::NOT_FOUND,
+            serde_json::json!({"error": "json_mapping_not_found"}),
+        ),
+        Err(e) => {
+            let msg = e.to_string();
+            if msg.contains("json mapping") && msg.contains("not found") {
+                json_response(
+                    StatusCode::NOT_FOUND,
+                    serde_json::json!({"error": "json_mapping_not_found"}),
+                )
+            } else {
+                redacted_error(
+                    "config_query_error",
+                    &msg,
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                )
+            }
+        }
     }
 }

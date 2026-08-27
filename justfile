@@ -64,6 +64,11 @@ test-regress:
 test-migration:
     bash tests/test_migration_chain.sh
 
+# Full migration-chain integrity test (pgrx pg18 must be running).
+[group: "test"]
+test-migration-full:
+    timeout 1800 bash tests/test_migration_chain.sh
+
 # Run all tests (unit + pgrx + regress + migration chain)
 [group: "test"]
 test-all: test test-regress test-migration

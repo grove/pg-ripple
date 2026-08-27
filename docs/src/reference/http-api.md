@@ -145,6 +145,7 @@ the endpoint is intentionally unauthenticated.
 | `GET` | `/federation/{endpoint}/auth-status` | Write | Per-endpoint federation credential status |
 | `POST` | `/json-mapping/{name}/writeback` | Write | Synchronous JSON mapping relational writeback |
 | `GET` | `/json-mapping/{name}/writeback/status` | Read | JSON mapping writeback queue status |
+| `GET` | `/json-mapping/{name}/writeback/config` | Read | Validated JSON mapping writeback configuration |
 
 ---
 
@@ -338,6 +339,26 @@ requires read auth when authentication is enabled.
   "errors": 0,
   "last_error": null,
   "last_processed_at": null
+}
+```
+
+### `GET /json-mapping/{name}/writeback/config`
+
+Return the validated relational target and writeback health for one mapping.
+The response mirrors `pg_ripple.writeback_inspect()` and requires read auth
+when authentication is enabled.
+
+**Response (200 OK):**
+
+```json
+{
+  "target_schema": "public",
+  "target_table": "contacts",
+  "key_columns": ["contact_id"],
+  "conflict_policy": "replace",
+  "writeback_enabled": false,
+  "trigger_count": 0,
+  "queue_depth": 0
 }
 ```
 

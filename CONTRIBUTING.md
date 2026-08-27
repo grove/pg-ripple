@@ -217,7 +217,7 @@ the current release is not tagged.
 
 ## Module size policy
 
-To prevent monolithic growth, each `.rs` file in `src/` is limited to **1,500 LOC** (hard CI failure) with a **1,200 LOC** advisory warning.  The limit is enforced by `scripts/check_module_sizes.sh`, which runs on every PR.
+To prevent monolithic growth, each `.rs` file in `src/` is reported at **800 LOC** and limited to **1,200 LOC** (hard CI failure). The limit is enforced by `scripts/check_module_size.sh`, which runs on every PR.
 
 When a file approaches the limit:
 1. Create a sub-module directory `src/<module>/` next to the flat file.
@@ -228,8 +228,8 @@ When a file approaches the limit:
 Run the check locally:
 
 ```bash
-bash scripts/check_module_sizes.sh          # defaults to src/
-bash scripts/check_module_sizes.sh src/     # explicit path
+bash scripts/check_module_size.sh           # defaults to src/
+bash scripts/check_module_size.sh src/      # explicit path
 ```
 
 ---

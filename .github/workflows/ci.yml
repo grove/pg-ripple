@@ -87,6 +87,9 @@ jobs:
       - name: Check formatting
         run: cargo fmt --all -- --check
 
+      - name: Production Rust module size gate
+        run: bash scripts/check_module_size.sh
+
       - name: Clippy
         run: cargo clippy --features pg18 -- -D warnings
 
@@ -326,11 +329,20 @@ jobs:
       - name: Initialise pgrx (PostgreSQL 18)
         run: cargo pgrx init --pg18 /usr/lib/postgresql/18/bin/pg_config
 
+      - name: Install pg_ripple candidate
+        run: cargo pgrx install --pg-config /usr/lib/postgresql/18/bin/pg_config
+
       - name: Start pgrx PostgreSQL 18
         run: cargo pgrx start pg18 --postgresql-conf "allow_system_table_mods=on"
 
       - name: Run migration chain test
         run: bash tests/test_migration_chain.sh
+
+      - name: Compare fresh and upgraded schema fingerprints
+        run: bash tests/schema_fingerprint.sh
+
+      - name: Run upgrade recovery test
+        run: bash tests/upgrade_recovery.sh
 
       - name: Stop pgrx PostgreSQL 18
         if: always()
@@ -1946,4 +1958,3 @@ jobs:
           assert 'paths' in doc, 'openapi.yaml missing paths'
           print(f'PASS: openapi.yaml is valid YAML, openapi={doc[\"openapi\"]}, paths={list(doc[\"paths\"].keys())}')
           "
-

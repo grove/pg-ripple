@@ -19,6 +19,9 @@ extension version is outside its known-compatible range.
 
 | pg_ripple_http version | pg_ripple extension range | Notes |
 |------------------------|---------------------------|-------|
+| 0.130.x | ≥ 0.129.0 | Installation/migration integrity: independent migration graph, schema fingerprints, and validated JSON writeback configuration API |
+| 0.129.x | ≥ 0.128.0 | JSON writeback and mutation integrity; async queue coverage and typed direct writeback |
+| 0.128.x | ≥ 0.127.0 | JSON mapping relational writeback API and queue-based asynchronous propagation |
 | 0.127.x | ≥ 0.126.0 | pg_tide relay bridge migration: CDC bridge publishes named outbox events via `tide.outbox_publish`; current pg_tide pins use 0.33.0 and the stable `relay_set_*_v2` APIs |
 | 0.123.x | ≥ 0.122.0 | A17 observability & docs: replica pool Prometheus gauges (OBS-M-01), rule-library stream latency/error counters (OBS-M-02), `bench_workload_result()` SQL wrapper (ERG-L-01) |
 | 0.122.x | ≥ 0.121.0 | A17 god-module decomposition & test coverage closure (H17-02); WatDiv correctness gating; pg_regress coverage for v0.119.0–v0.120.0 features |
@@ -101,6 +104,14 @@ companion. This means:
 
 See also: [Arrow Flight Reference](../reference/arrow-flight.md), [HTTP API](../reference/http-api.md).
 
+## Pre-GA upgrade support policy
+
+Until v1.0.0, CI runs the complete historical sequential migration chain. Release qualification
+also tests direct upgrades from the six most recent published pre-GA release artifacts. After
+v1.0.0, each minor release supports direct upgrades from the two
+previous minor releases and sequential upgrades from older versions that remain in the migration
+graph.
+
 ## pg_tide / pg_trickle Extension Compatibility
 
 pg_ripple integrates with two companion PostgreSQL extensions:
@@ -144,4 +155,3 @@ CREATE EXTENSION pg_ripple;    -- RDF triple store (≥ 0.127.0)
 
 Call `pg_ripple.pg_tide_available()` to verify pg_tide is installed at runtime.
 Call `pg_ripple.pg_trickle_available()` to verify pg_trickle is installed at runtime.
-

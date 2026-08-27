@@ -1,0 +1,2 @@
+-- Migration 0.129.0 → 0.130.0: installation and migration integrity.
+-- No schema changes. The release adds migration-chain verification only.

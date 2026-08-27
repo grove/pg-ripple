@@ -1,932 +1,106 @@
 #!/usr/bin/env bash
-# tests/test_migration_chain.sh
-#
-# Verifies that all migration SQL scripts apply cleanly in sequence from v0.1.0
-# to the current version, and that the final schema matches expectations.
-#
-# This script tests the SQL DDL content of migration scripts independently of
-# the PostgreSQL extension mechanism (no ALTER EXTENSION needed).  Every
-# migration script is applied via psql against an isolated test database, which
-# means we catch syntax errors, missing column references, and schema drift
-# before they reach a user running ALTER EXTENSION pg_ripple UPDATE.
-#
-# Prerequisites:
-#   - A pgrx-managed PostgreSQL 18 instance must be running (cargo pgrx start pg18 / just start)
-#   - The PGRX_HOST/PGRX_PORT environment variables must be set, OR the defaults
-#     ($HOME/.pgrx, port 28818) must be valid
-#
-# Usage:
-#   tests/test_migration_chain.sh                  # from project root
-#   just test-migration                            # via justfile
-
+# Apply every migration discovered by scripts/migration_graph.py to a clean DB.
 set -euo pipefail
-
-# ── Connection defaults (match pgrx pg18 managed instance) ───────────────────
-#
-# pgrx starts PostgreSQL 18 on port 28818.
-# On macOS the unix socket lives in ~/.pgrx; on Linux pgrx uses the same
-# directory.  We default to the socket directory so both platforms work.
-# Set PGRX_HOST=localhost to force TCP (useful if the socket path is
-# non-standard, e.g. in some CI environments).
 
 PGRX_HOST="${PGRX_HOST:-${HOME}/.pgrx}"
 PGRX_PORT="${PGRX_PORT:-28818}"
 PGRX_USER="${PGRX_USER:-${USER}}"
-
-PSQL="psql -h ${PGRX_HOST} -p ${PGRX_PORT} -U ${PGRX_USER}"
-
-# ── Path helpers ──────────────────────────────────────────────────────────────
-
+PSQL=(psql -h "${PGRX_HOST}" -p "${PGRX_PORT}" -U "${PGRX_USER}")
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
-SQL_DIR="${PROJECT_ROOT}/sql"
-
-# ── Colour output ─────────────────────────────────────────────────────────────
-
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-NC='\033[0m' # No Colour
-
-info()  { echo -e "${YELLOW}[info]${NC}  $*"; }
-ok()    { echo -e "${GREEN}[  ok]${NC}  $*"; }
-fail()  { echo -e "${RED}[FAIL]${NC}  $*" >&2; }
-
-# ── Test database ─────────────────────────────────────────────────────────────
-
+ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+GRAPH="${ROOT}/target/migration-graph.json"
 TEST_DB="pg_ripple_migration_chain_$$"
 
-cleanup() {
-    info "cleaning up test database '${TEST_DB}'"
-    ${PSQL} -d postgres --quiet -c "DROP DATABASE IF EXISTS \"${TEST_DB}\";" 2>/dev/null || true
+info() { printf '[info] %s\n' "$*"; }
+ok() { printf '[  ok] %s\n' "$*"; }
+fail() { printf '[FAIL] %s\n' "$*" >&2; exit 1; }
+run_sql() { "${PSQL[@]}" -d "${TEST_DB}" --no-psqlrc --tuples-only --no-align --quiet "$@"; }
+assert_true() {
+    local label="$1" sql="$2"
+    [[ "$(run_sql -c "SELECT CASE WHEN (${sql}) THEN 'yes' ELSE 'no' END;")" == yes ]] || fail "${label}"
+    ok "${label}"
 }
+assert_column() {
+    assert_true "column $1.$2.$3 exists" "EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='$1' AND table_name='$2' AND column_name='$3')"
+}
+assert_table() {
+    assert_true "table $1.$2 exists" "to_regclass('$1.$2') IS NOT NULL"
+}
+
+cleanup() { "${PSQL[@]}" -d postgres --quiet -c "DROP DATABASE IF EXISTS \"${TEST_DB}\";" >/dev/null 2>&1 || true; }
 trap cleanup EXIT
 
-# ── helpers ───────────────────────────────────────────────────────────────────
+python3 "${ROOT}/scripts/migration_graph.py" --output "${GRAPH}"
+MIGRATION_LIST="$(python3 - "${GRAPH}" <<'PY'
+import json, sys
+with open(sys.argv[1], encoding="utf-8") as stream:
+    graph = json.load(stream)
+print(graph["base"])
+for migration in graph["migrations"]:
+    print(migration["file"])
+PY
+)"
+MIGRATION_TARGETS="$(python3 - "${GRAPH}" <<'PY'
+import json, sys
+with open(sys.argv[1], encoding="utf-8") as stream:
+    graph = json.load(stream)
+for migration in graph["migrations"]:
+    print(migration["to"])
+PY
+)"
+TARGET_VERSION="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["target_version"])' "${GRAPH}")"
+BASE_VERSION="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["base_version"])' "${GRAPH}")"
 
-# Run SQL against the test database and return output.
-run_sql() {
-    ${PSQL} -d "${TEST_DB}" --no-psqlrc --tuples-only --no-align --quiet "$@"
-}
+"${PSQL[@]}" -d postgres --quiet -c "SELECT 1;" >/dev/null || fail "cannot connect to PostgreSQL at ${PGRX_HOST}:${PGRX_PORT}"
+"${PSQL[@]}" -d postgres --quiet -c "CREATE DATABASE \"${TEST_DB}\";" >/dev/null
 
-# Assert that a SQL expression evaluates to a non-empty truthy result.
-assert_true() {
-    local label="$1"
-    local sql="$2"
-    local result
-    result=$(run_sql -c "SELECT CASE WHEN (${sql}) THEN 'yes' ELSE 'no' END;")
-    if [[ "${result}" == "yes" ]]; then
-        ok "${label}"
-    else
-        fail "${label}"
-        fail "  query: ${sql}"
-        fail "  result: ${result}"
-        exit 1
+EXTENSION_AVAILABLE="$("${PSQL[@]}" -d postgres --no-psqlrc --tuples-only --no-align --quiet \
+    -c "SELECT EXISTS (SELECT 1 FROM pg_available_extensions WHERE name = 'pg_ripple');")"
+if [[ "${EXTENSION_AVAILABLE}" == t ]]; then
+    info "installed pg_ripple files detected; testing CREATE EXTENSION and ALTER EXTENSION"
+    if ! run_sql -c "CREATE EXTENSION pg_ripple VERSION '${BASE_VERSION}';" >/dev/null; then
+        fail "pg_ripple is available but CREATE EXTENSION baseline failed; refusing raw-SQL fallback"
     fi
-}
-
-# Assert that a column exists in a table in the given schema.
-assert_column() {
-    local schema="$1" table="$2" column="$3"
-    assert_true \
-        "column ${schema}.${table}.${column} exists" \
-        "EXISTS (
-            SELECT 1 FROM information_schema.columns
-            WHERE table_schema = '${schema}'
-              AND table_name   = '${table}'
-              AND column_name  = '${column}'
-        )"
-}
-
-# Assert that a column does not exist.
-assert_no_column() {
-    local schema="$1" table="$2" column="$3"
-    assert_true \
-        "column ${schema}.${table}.${column} absent" \
-        "NOT EXISTS (
-            SELECT 1 FROM information_schema.columns
-            WHERE table_schema = '${schema}'
-              AND table_name   = '${table}'
-              AND column_name  = '${column}'
-        )"
-}
-
-# Assert that a table exists.
-assert_table() {
-    local schema="$1" table="$2"
-    assert_true \
-        "table ${schema}.${table} exists" \
-        "EXISTS (
-            SELECT 1 FROM information_schema.tables
-            WHERE table_schema = '${schema}'
-              AND table_name   = '${table}'
-        )"
-}
-
-# Apply a SQL migration script file.
-apply_script() {
-    local path="$1"
-    local label="$2"
-    info "applying ${label}"
-    if run_sql -f "${path}" > /dev/null; then
-        ok "${label} applied successfully"
-    else
-        fail "${label} failed"
-        exit 1
-    fi
-}
-
-# ── Main ──────────────────────────────────────────────────────────────────────
-
-echo
-info "pg_ripple migration chain test"
-info "connecting to pgrx PG18 at host=${PGRX_HOST} port=${PGRX_PORT} user=${PGRX_USER}"
-echo
-
-# Verify connectivity before creating anything
-if ! ${PSQL} -d postgres --quiet -c "SELECT 1;" > /dev/null 2>&1; then
-    fail "cannot connect to PostgreSQL at host=${PGRX_HOST} port=${PGRX_PORT}"
-    fail "start the pgrx instance first: cargo pgrx start pg18  (or: just start)"
-    exit 1
-fi
-ok "PostgreSQL connection verified"
-
-# Create isolated test database
-${PSQL} -d postgres --quiet -c "CREATE DATABASE \"${TEST_DB}\";"
-ok "test database '${TEST_DB}' created"
-echo
-
-# ── Step 1: apply base schema (v0.1.0) ───────────────────────────────────────
-
-info "=== v0.1.0 base schema ==="
-apply_script "${SQL_DIR}/pg_ripple--0.1.0.sql" "pg_ripple--0.1.0.sql"
-
-# Verify base schema
-assert_table  "_pg_ripple" "dictionary"
-assert_table  "_pg_ripple" "predicates"
-assert_table  "_pg_ripple" "vp_rare"
-assert_column "_pg_ripple" "dictionary" "id"
-assert_column "_pg_ripple" "dictionary" "hash"
-assert_column "_pg_ripple" "dictionary" "value"
-assert_column "_pg_ripple" "dictionary" "kind"
-assert_column "_pg_ripple" "dictionary" "datatype"
-assert_column "_pg_ripple" "dictionary" "lang"
-assert_column "_pg_ripple" "vp_rare"    "p"
-assert_column "_pg_ripple" "vp_rare"    "s"
-assert_column "_pg_ripple" "vp_rare"    "o"
-assert_column "_pg_ripple" "vp_rare"    "g"
-assert_column "_pg_ripple" "vp_rare"    "i"
-assert_column "_pg_ripple" "vp_rare"    "source"
-
-# v0.1.0 must NOT have the qt_* columns (those are added in 0.3.0→0.4.0)
-assert_no_column "_pg_ripple" "dictionary" "qt_s"
-assert_no_column "_pg_ripple" "dictionary" "qt_p"
-assert_no_column "_pg_ripple" "dictionary" "qt_o"
-
-# Sequence must exist
-assert_true "statement_id_seq exists" \
-    "EXISTS (SELECT 1 FROM pg_class WHERE relname = 'statement_id_seq' AND relkind = 'S')"
-echo
-
-# ── Step 2: migrate 0.1.0 → 0.2.0 ───────────────────────────────────────────
-
-info "=== migration 0.1.0 → 0.2.0 ==="
-apply_script "${SQL_DIR}/pg_ripple--0.1.0--0.2.0.sql" "pg_ripple--0.1.0--0.2.0.sql"
-
-# No schema changes in this migration — verify tables are unchanged
-assert_table "_pg_ripple" "dictionary"
-assert_table "_pg_ripple" "predicates"
-assert_table "_pg_ripple" "vp_rare"
-assert_no_column "_pg_ripple" "dictionary" "qt_s"
-ok "schema unchanged (no DDL in 0.1.0→0.2.0)"
-echo
-
-# ── Step 3: migrate 0.2.0 → 0.3.0 ───────────────────────────────────────────
-
-info "=== migration 0.2.0 → 0.3.0 ==="
-apply_script "${SQL_DIR}/pg_ripple--0.2.0--0.3.0.sql" "pg_ripple--0.2.0--0.3.0.sql"
-
-# No schema changes in this migration
-assert_no_column "_pg_ripple" "dictionary" "qt_s"
-ok "schema unchanged (no DDL in 0.2.0→0.3.0)"
-echo
-
-# ── Step 4: migrate 0.3.0 → 0.4.0 ───────────────────────────────────────────
-
-info "=== migration 0.3.0 → 0.4.0 ==="
-apply_script "${SQL_DIR}/pg_ripple--0.3.0--0.4.0.sql" "pg_ripple--0.3.0--0.4.0.sql"
-
-# This migration adds qt_s, qt_p, qt_o to _pg_ripple.dictionary
-assert_column "_pg_ripple" "dictionary" "qt_s"
-assert_column "_pg_ripple" "dictionary" "qt_p"
-assert_column "_pg_ripple" "dictionary" "qt_o"
-
-# Verify the new columns are nullable BIGINTs (as specified)
-assert_true "qt_s is nullable bigint" \
-    "EXISTS (
-        SELECT 1 FROM information_schema.columns
-        WHERE table_schema = '_pg_ripple'
-          AND table_name   = 'dictionary'
-          AND column_name  = 'qt_s'
-          AND data_type    = 'bigint'
-          AND is_nullable  = 'YES'
-    )"
-assert_true "qt_p is nullable bigint" \
-    "EXISTS (
-        SELECT 1 FROM information_schema.columns
-        WHERE table_schema = '_pg_ripple'
-          AND table_name   = 'dictionary'
-          AND column_name  = 'qt_p'
-          AND data_type    = 'bigint'
-          AND is_nullable  = 'YES'
-    )"
-assert_true "qt_o is nullable bigint" \
-    "EXISTS (
-        SELECT 1 FROM information_schema.columns
-        WHERE table_schema = '_pg_ripple'
-          AND table_name   = 'dictionary'
-          AND column_name  = 'qt_o'
-          AND data_type    = 'bigint'
-          AND is_nullable  = 'YES'
-    )"
-
-# Existing rows remain accessible (insert and query a row)
-run_sql -c "
-    INSERT INTO _pg_ripple.dictionary (hash, value, kind)
-    VALUES (decode(md5('test'), 'hex'), 'https://example.org/test', 0);
-" > /dev/null
-assert_true "row with NULL qt_* survives after migration" \
-    "(SELECT COUNT(*) FROM _pg_ripple.dictionary WHERE qt_s IS NULL) = 1"
-ok "qt_* columns present, existing data preserved"
-echo
-
-# ── Step 5: migrate 0.4.0 → 0.5.0 ───────────────────────────────────────────
-
-info "=== migration 0.4.0 → 0.5.0 ==="
-apply_script "${SQL_DIR}/pg_ripple--0.4.0--0.5.0.sql" "pg_ripple--0.4.0--0.5.0.sql"
-
-# No schema changes in this migration
-assert_column "_pg_ripple" "dictionary" "qt_s"
-ok "schema unchanged (no DDL in 0.4.0→0.5.0)"
-echo
-
-# ── Step 6: migrate 0.5.0 → 0.5.1 ───────────────────────────────────────────
-
-info "=== migration 0.5.0 → 0.5.1 ==="
-apply_script "${SQL_DIR}/pg_ripple--0.5.0--0.5.1.sql" "pg_ripple--0.5.0--0.5.1.sql"
-
-# No schema changes in this migration
-assert_column "_pg_ripple" "dictionary" "qt_s"
-ok "schema unchanged (no DDL in 0.5.0→0.5.1)"
-echo
-
-# ── Intermediate migrations (0.5.1 → 0.50.0) — apply in sequence ─────────────
-# These migrations are applied silently; only their final state matters.
-for migration in \
-    "pg_ripple--0.5.1--0.6.0.sql" \
-    "pg_ripple--0.6.0--0.7.0.sql" \
-    "pg_ripple--0.7.0--0.8.0.sql" \
-    "pg_ripple--0.8.0--0.9.0.sql" \
-    "pg_ripple--0.9.0--0.10.0.sql" \
-    "pg_ripple--0.10.0--0.11.0.sql" \
-    "pg_ripple--0.11.0--0.12.0.sql" \
-    "pg_ripple--0.12.0--0.13.0.sql" \
-    "pg_ripple--0.13.0--0.14.0.sql" \
-    "pg_ripple--0.14.0--0.15.0.sql" \
-    "pg_ripple--0.15.0--0.16.0.sql" \
-    "pg_ripple--0.16.0--0.17.0.sql" \
-    "pg_ripple--0.17.0--0.18.0.sql" \
-    "pg_ripple--0.18.0--0.19.0.sql" \
-    "pg_ripple--0.19.0--0.20.0.sql" \
-    "pg_ripple--0.20.0--0.21.0.sql" \
-    "pg_ripple--0.21.0--0.22.0.sql" \
-    "pg_ripple--0.22.0--0.23.0.sql" \
-    "pg_ripple--0.23.0--0.24.0.sql" \
-    "pg_ripple--0.24.0--0.25.0.sql" \
-    "pg_ripple--0.25.0--0.26.0.sql" \
-    "pg_ripple--0.26.0--0.27.0.sql" \
-    "pg_ripple--0.27.0--0.28.0.sql" \
-    "pg_ripple--0.28.0--0.29.0.sql" \
-    "pg_ripple--0.29.0--0.30.0.sql" \
-    "pg_ripple--0.30.0--0.31.0.sql" \
-    "pg_ripple--0.31.0--0.32.0.sql" \
-    "pg_ripple--0.32.0--0.33.0.sql" \
-    "pg_ripple--0.33.0--0.34.0.sql" \
-    "pg_ripple--0.34.0--0.35.0.sql" \
-    "pg_ripple--0.35.0--0.36.0.sql" \
-    "pg_ripple--0.36.0--0.37.0.sql" \
-    "pg_ripple--0.37.0--0.38.0.sql" \
-    "pg_ripple--0.38.0--0.39.0.sql" \
-    "pg_ripple--0.39.0--0.40.0.sql" \
-    "pg_ripple--0.40.0--0.41.0.sql" \
-    "pg_ripple--0.41.0--0.42.0.sql" \
-    "pg_ripple--0.42.0--0.43.0.sql" \
-    "pg_ripple--0.43.0--0.44.0.sql" \
-    "pg_ripple--0.44.0--0.45.0.sql" \
-    "pg_ripple--0.45.0--0.46.0.sql" \
-    "pg_ripple--0.46.0--0.47.0.sql" \
-    "pg_ripple--0.47.0--0.48.0.sql" \
-    "pg_ripple--0.48.0--0.49.0.sql" \
-    "pg_ripple--0.49.0--0.50.0.sql" \
-; do
-    if [[ -f "${SQL_DIR}/${migration}" ]]; then
-        apply_script "${SQL_DIR}/${migration}" "${migration}"
-    fi
-done
-
-# ── Step 7: migrate 0.50.0 → 0.51.0 ──────────────────────────────────────────
-
-info "=== migration 0.50.0 → 0.51.0 ==="
-apply_script "${SQL_DIR}/pg_ripple--0.50.0--0.51.0.sql" "pg_ripple--0.50.0--0.51.0.sql"
-
-# v0.51.0 adds _pg_ripple.predicate_stats table.
-assert_true "predicate_stats table exists" \
-    "EXISTS (
-        SELECT 1 FROM information_schema.tables
-        WHERE table_schema = '_pg_ripple'
-          AND table_name   = 'predicate_stats'
-    )"
-ok "0.50.0→0.51.0: predicate_stats table created"
-echo
-
-# ── Final state verification ──────────────────────────────────────────────────
-
-info "=== final schema verification (v0.51.0) ==="
-
-# Dictionary table columns
-for col in id hash value kind datatype lang qt_s qt_p qt_o; do
-    assert_column "_pg_ripple" "dictionary" "${col}"
-done
-
-# Predicates table columns
-for col in id table_oid triple_count; do
-    assert_column "_pg_ripple" "predicates" "${col}"
-done
-
-# vp_rare table columns
-for col in p s o g i source; do
-    assert_column "_pg_ripple" "vp_rare" "${col}"
-done
-
-# Views
-assert_true "view pg_ripple.predicate_stats exists" \
-    "EXISTS (
-        SELECT 1 FROM information_schema.views
-        WHERE table_schema = 'pg_ripple'
-          AND table_name   = 'predicate_stats'
-    )"
-
-echo
-ok "All v0.51.0 schema assertions passed."
-echo
-
-# ── MIGCHAIN-01 (v0.80.0): Apply migrations v0.51.0 → v0.79.0 with checkpoint assertions ──
-# Each migration script is applied in sequence, with schema assertions at key
-# checkpoints (v0.65.0, v0.70.0, v0.75.0, v0.79.0) to verify that expected
-# schema objects exist and have not been accidentally removed.
-
-info "=== applying migrations v0.51.0 → v0.79.0 (MIGCHAIN-01) ==="
-
-for migration in \
-    "pg_ripple--0.51.0--0.52.0.sql" \
-    "pg_ripple--0.52.0--0.53.0.sql" \
-    "pg_ripple--0.53.0--0.54.0.sql" \
-    "pg_ripple--0.54.0--0.55.0.sql" \
-    "pg_ripple--0.55.0--0.56.0.sql" \
-    "pg_ripple--0.56.0--0.57.0.sql" \
-    "pg_ripple--0.57.0--0.58.0.sql" \
-    "pg_ripple--0.58.0--0.59.0.sql" \
-    "pg_ripple--0.59.0--0.60.0.sql" \
-    "pg_ripple--0.60.0--0.61.0.sql" \
-    "pg_ripple--0.61.0--0.62.0.sql" \
-    "pg_ripple--0.62.0--0.63.0.sql" \
-    "pg_ripple--0.63.0--0.64.0.sql" \
-    "pg_ripple--0.64.0--0.65.0.sql" \
-; do
-    if [[ -f "${SQL_DIR}/${migration}" ]]; then
-        apply_script "${SQL_DIR}/${migration}" "${migration}"
-    fi
-done
-
-# ── MIGCHAIN-01 checkpoint 1: v0.65.0 ──────────────────────────────────────
-info "=== MIGCHAIN-01 checkpoint: v0.65.0 ==="
-# v0.65.0 adds observability columns to construct_rules.
-assert_column "_pg_ripple" "construct_rules" "last_incremental_run"
-assert_column "_pg_ripple" "construct_rules" "derived_triple_count"
-# vp_rare.source has been present since v0.10.0; verify it still exists.
-assert_column "_pg_ripple" "vp_rare" "source"
-ok "v0.65.0 checkpoint assertions passed"
-echo
-
-for migration in \
-    "pg_ripple--0.65.0--0.66.0.sql" \
-    "pg_ripple--0.66.0--0.67.0.sql" \
-    "pg_ripple--0.67.0--0.68.0.sql" \
-    "pg_ripple--0.68.0--0.69.0.sql" \
-    "pg_ripple--0.69.0--0.70.0.sql" \
-; do
-    if [[ -f "${SQL_DIR}/${migration}" ]]; then
-        apply_script "${SQL_DIR}/${migration}" "${migration}"
-    fi
-done
-
-# ── MIGCHAIN-01 checkpoint 2: v0.70.0 ──────────────────────────────────────
-info "=== MIGCHAIN-01 checkpoint: v0.70.0 ==="
-# predicates.triple_count has been present since v0.1.0; verify it still exists.
-assert_column "_pg_ripple" "predicates" "triple_count"
-# schema_version table introduced in v0.70.0-era migrations.
-assert_true "schema_version table exists at v0.70.0" \
-    "EXISTS (
-        SELECT 1 FROM information_schema.tables
-        WHERE table_schema = '_pg_ripple'
-          AND table_name   = 'schema_version'
-    )"
-ok "v0.70.0 checkpoint assertions passed"
-echo
-
-for migration in \
-    "pg_ripple--0.70.0--0.71.0.sql" \
-    "pg_ripple--0.71.0--0.72.0.sql" \
-    "pg_ripple--0.72.0--0.73.0.sql" \
-    "pg_ripple--0.73.0--0.74.0.sql" \
-    "pg_ripple--0.74.0--0.75.0.sql" \
-; do
-    if [[ -f "${SQL_DIR}/${migration}" ]]; then
-        apply_script "${SQL_DIR}/${migration}" "${migration}"
-    fi
-done
-
-# ── MIGCHAIN-01 checkpoint 3: v0.75.0 ──────────────────────────────────────
-info "=== MIGCHAIN-01 checkpoint: v0.75.0 ==="
-# construct_views table introduced in v0.18.0; verify it still exists.
-assert_true "construct_views table exists at v0.75.0" \
-    "EXISTS (
-        SELECT 1 FROM information_schema.tables
-        WHERE table_schema = '_pg_ripple'
-          AND table_name   = 'construct_views'
-    )"
-# sparql_views table introduced in v0.18.0; verify it still exists.
-assert_true "sparql_views table exists at v0.75.0" \
-    "EXISTS (
-        SELECT 1 FROM information_schema.tables
-        WHERE table_schema = '_pg_ripple'
-          AND table_name   = 'sparql_views'
-    )"
-ok "v0.75.0 checkpoint assertions passed"
-echo
-
-for migration in \
-    "pg_ripple--0.75.0--0.76.0.sql" \
-    "pg_ripple--0.76.0--0.77.0.sql" \
-    "pg_ripple--0.77.0--0.78.0.sql" \
-    "pg_ripple--0.78.0--0.79.0.sql" \
-; do
-    if [[ -f "${SQL_DIR}/${migration}" ]]; then
-        apply_script "${SQL_DIR}/${migration}" "${migration}"
-    fi
-done
-
-# ── MIGCHAIN-01 checkpoint 4: v0.79.0 ──────────────────────────────────────
-info "=== MIGCHAIN-01 checkpoint: v0.79.0 ==="
-# statement_id_seq exists since v0.1.0; verify it still exists.
-assert_true "statement_id_seq sequence exists at v0.79.0" \
-    "EXISTS (
-        SELECT 1 FROM pg_class
-        WHERE relname = 'statement_id_seq' AND relkind = 'S'
-    )"
-# schema_version table must record at least v0.75.0.
-assert_true "schema_version has at least one row at v0.79.0" \
-    "(SELECT count(*) FROM _pg_ripple.schema_version) >= 1"
-ok "v0.79.0 checkpoint assertions passed"
-echo
-
-# ── T13-01 (v0.84.0): Apply migrations v0.79.0 → v0.83.0 ────────────────────
-info "=== T13-01: applying migrations v0.79.0 → v0.83.0 ==="
-for ver in 0.79 0.80 0.81 0.82; do
-    major=$(echo "${ver}" | cut -d. -f1)
-    minor=$(echo "${ver}" | cut -d. -f2)
-    next_minor=$((minor + 1))
-    next_ver="${major}.${next_minor}.0"
-    cur_ver="${ver}.0"
-    script="${SQL_DIR}/pg_ripple--${cur_ver}--${next_ver}.sql"
-    if [[ -f "${script}" ]]; then
-        run_sql -f "${script}"
-        ok "Applied migration ${cur_ver} → ${next_ver}"
-    else
-        fail "T13-01: missing migration script pg_ripple--${cur_ver}--${next_ver}.sql"
-        exit 1
-    fi
-done
-echo
-
-# ── T13-01 checkpoint: v0.80.0 ────────────────────────────────────────────────
-info "=== T13-01 checkpoint: v0.80.0 ==="
-# v0.80.0 has no DDL schema changes (pure Rust/GUC additions).
-# Verify the core tables remain intact.
-assert_column "_pg_ripple" "predicates" "triple_count"
-assert_column "_pg_ripple" "dictionary" "qt_s"
-ok "v0.80.0 checkpoint assertions passed (no DDL changes in this release)"
-echo
-
-# ── T13-01 checkpoint: v0.81.0 ────────────────────────────────────────────────
-info "=== T13-01 checkpoint: v0.81.0 ==="
-# v0.81.0 adds cdc_lsn_watermark table (CC-06).
-assert_true "cdc_lsn_watermark table exists at v0.81.0" \
-    "EXISTS (
-        SELECT 1 FROM information_schema.tables
-        WHERE table_schema = '_pg_ripple' AND table_name = 'cdc_lsn_watermark'
-    )"
-ok "v0.81.0 checkpoint assertions passed"
-echo
-
-# ── T13-01 checkpoint: v0.82.0 ────────────────────────────────────────────────
-info "=== T13-01 checkpoint: v0.82.0 ==="
-# v0.82.0 adds merge_worker_status table (MERGE-HBEAT-01).
-assert_true "merge_worker_status table exists at v0.82.0" \
-    "EXISTS (
-        SELECT 1 FROM information_schema.tables
-        WHERE table_schema = '_pg_ripple' AND table_name = 'merge_worker_status'
-    )"
-# v0.82.0 adds federation_stats table (P-04) and predicate_stats_cache (P-08).
-assert_true "federation_stats table exists at v0.82.0" \
-    "EXISTS (
-        SELECT 1 FROM information_schema.tables
-        WHERE table_schema = '_pg_ripple' AND table_name = 'federation_stats'
-    )"
-assert_true "predicate_stats_cache table exists at v0.82.0" \
-    "EXISTS (
-        SELECT 1 FROM information_schema.tables
-        WHERE table_schema = '_pg_ripple' AND table_name = 'predicate_stats_cache'
-    )"
-ok "v0.82.0 checkpoint assertions passed"
-echo
-
-# ── T13-01 checkpoint: v0.83.0 ────────────────────────────────────────────────
-info "=== T13-01 checkpoint: v0.83.0 ==="
-# v0.83.0 has no DDL schema changes (pure Rust additions and GUC additions).
-# Verify the core tables remain intact.
-assert_column "_pg_ripple" "predicates" "triple_count"
-assert_column "_pg_ripple" "dictionary" "qt_s"
-ok "v0.83.0 checkpoint assertions passed (no schema changes in this release)"
-echo
-
-# ── T14-01 (v0.89.0): Apply migrations v0.83.0 → v0.89.0 ────────────────────
-info "=== T14-01: applying migrations v0.83.0 → v0.89.0 ==="
-for ver in 0.83 0.84 0.85 0.86 0.87 0.88; do
-    major=$(echo "${ver}" | cut -d. -f1)
-    minor=$(echo "${ver}" | cut -d. -f2)
-    next_minor=$((minor + 1))
-    next_ver="${major}.${next_minor}.0"
-    cur_ver="${ver}.0"
-    script="${SQL_DIR}/pg_ripple--${cur_ver}--${next_ver}.sql"
-    if [[ -f "${script}" ]]; then
-        run_sql -f "${script}"
-        ok "Applied migration ${cur_ver} → ${next_ver}"
-    else
-        fail "T14-01: missing migration script pg_ripple--${cur_ver}--${next_ver}.sql"
-        exit 1
-    fi
-done
-echo
-
-# ── T14-01 checkpoint: v0.84.0 ────────────────────────────────────────────────
-info "=== T14-01 checkpoint: v0.84.0 ==="
-# v0.84.0 has no DDL schema changes (pure Rust/GUC additions).
-assert_column "_pg_ripple" "predicates" "triple_count"
-assert_column "_pg_ripple" "dictionary" "qt_s"
-ok "v0.84.0 checkpoint assertions passed (no DDL changes in this release)"
-echo
-
-# ── T14-01 checkpoint: v0.85.0 ────────────────────────────────────────────────
-info "=== T14-01 checkpoint: v0.85.0 ==="
-# v0.85.0 has no DDL schema changes (pure Rust/GUC additions).
-assert_column "_pg_ripple" "predicates" "triple_count"
-assert_column "_pg_ripple" "dictionary" "qt_s"
-ok "v0.85.0 checkpoint assertions passed (no DDL changes in this release)"
-echo
-
-# ── T14-01 checkpoint: v0.86.0 ────────────────────────────────────────────────
-info "=== T14-01 checkpoint: v0.86.0 ==="
-# v0.86.0 has no DDL schema changes (pure Rust/GUC additions).
-assert_column "_pg_ripple" "predicates" "triple_count"
-assert_column "_pg_ripple" "dictionary" "qt_s"
-ok "v0.86.0 checkpoint assertions passed (no DDL changes in this release)"
-echo
-
-# ── T14-01 checkpoint: v0.87.0 ────────────────────────────────────────────────
-info "=== T14-01 checkpoint: v0.87.0 ==="
-# v0.87.0 adds: _pg_ripple.confidence, _pg_ripple.shacl_score_log,
-#               confidence_stmt_idx index (uncertain knowledge engine, v0.87.0).
-assert_true "confidence table exists at v0.87.0" \
-    "EXISTS (
-        SELECT 1 FROM information_schema.tables
-        WHERE table_schema = '_pg_ripple' AND table_name = 'confidence'
-    )"
-assert_column "_pg_ripple" "confidence" "statement_id"
-assert_column "_pg_ripple" "confidence" "confidence"
-assert_true "confidence_stmt_idx exists at v0.87.0" \
-    "EXISTS (
-        SELECT 1 FROM pg_indexes
-        WHERE schemaname = '_pg_ripple' AND indexname = 'confidence_stmt_idx'
-    )"
-assert_true "shacl_score_log table exists at v0.87.0" \
-    "EXISTS (
-        SELECT 1 FROM information_schema.tables
-        WHERE table_schema = '_pg_ripple' AND table_name = 'shacl_score_log'
-    )"
-assert_column "_pg_ripple" "shacl_score_log" "graph_iri"
-assert_column "_pg_ripple" "shacl_score_log" "score"
-ok "v0.87.0 checkpoint assertions passed"
-echo
-
-# ── T14-01 checkpoint: v0.88.0 ────────────────────────────────────────────────
-info "=== T14-01 checkpoint: v0.88.0 ==="
-# v0.88.0 adds: _pg_ripple.pagerank_scores, _pg_ripple.pagerank_dirty_edges,
-#               _pg_ripple.centrality_scores, and BRIN index (PR-VIEW-01, v0.88.0).
-assert_true "pagerank_scores table exists at v0.88.0" \
-    "EXISTS (
-        SELECT 1 FROM information_schema.tables
-        WHERE table_schema = '_pg_ripple' AND table_name = 'pagerank_scores'
-    )"
-assert_column "_pg_ripple" "pagerank_scores" "node"
-assert_column "_pg_ripple" "pagerank_scores" "score"
-assert_column "_pg_ripple" "pagerank_scores" "stale"
-assert_true "pagerank_scores_topic_score_idx BRIN index exists at v0.88.0" \
-    "EXISTS (
-        SELECT 1 FROM pg_indexes
-        WHERE schemaname = '_pg_ripple' AND indexname = 'pagerank_scores_topic_score_idx'
-    )"
-assert_true "pagerank_dirty_edges table exists at v0.88.0" \
-    "EXISTS (
-        SELECT 1 FROM information_schema.tables
-        WHERE table_schema = '_pg_ripple' AND table_name = 'pagerank_dirty_edges'
-    )"
-assert_column "_pg_ripple" "pagerank_dirty_edges" "source_id"
-assert_column "_pg_ripple" "pagerank_dirty_edges" "delta"
-assert_true "centrality_scores table exists at v0.88.0" \
-    "EXISTS (
-        SELECT 1 FROM information_schema.tables
-        WHERE table_schema = '_pg_ripple' AND table_name = 'centrality_scores'
-    )"
-assert_column "_pg_ripple" "centrality_scores" "node"
-assert_column "_pg_ripple" "centrality_scores" "metric"
-ok "v0.88.0 checkpoint assertions passed"
-echo
-
-# ── T14-01 checkpoint: v0.89.0 ────────────────────────────────────────────────
-info "=== T14-01 checkpoint: v0.89.0 ==="
-# v0.89.0 is a pure security/GUC hardening release: no schema changes.
-# The migration script pg_ripple--0.88.0--0.89.0.sql is comment-only.
-# Verify that all v0.88.0 tables still exist after migration.
-assert_table "_pg_ripple" "pagerank_scores"
-assert_column "_pg_ripple" "pagerank_scores" "node"
-assert_column "_pg_ripple" "pagerank_scores" "score"
-assert_table "_pg_ripple" "centrality_scores"
-ok "v0.89.0 checkpoint assertions passed"
-echo
-
-# ── T14-02 checkpoint: v0.90.0 ────────────────────────────────────────────────
-info "=== T14-02 checkpoint: v0.90.0 ==="
-# v0.90.0 is a module-restructuring + GUC-addition release: no schema changes.
-# The migration script pg_ripple--0.89.0--0.90.0.sql is comment-only.
-# Verify that all v0.89.0 tables still exist after migration.
-assert_table "_pg_ripple" "pagerank_scores"
-assert_column "_pg_ripple" "pagerank_scores" "node"
-assert_column "_pg_ripple" "pagerank_scores" "score"
-assert_column "_pg_ripple" "pagerank_scores" "stale"
-assert_table "_pg_ripple" "centrality_scores"
-assert_table "_pg_ripple" "confidence"
-ok "v0.90.0 checkpoint assertions passed"
-echo
-
-# Apply v0.90.0 → v0.91.0 migration script
-run_sql -f "${SQL_DIR}/pg_ripple--0.90.0--0.91.0.sql"
-ok "Applied migration 0.90.0 → 0.91.0"
-
-# ── T14-02 checkpoint: v0.91.0 ────────────────────────────────────────────────
-info "=== T14-02 checkpoint: v0.91.0 ==="
-# v0.91.0 is an observability, API, standards, build, and documentation release.
-# The migration script pg_ripple--0.90.0--0.91.0.sql is comment-only (no DDL).
-# Verify that all v0.90.0 tables still exist after migration.
-assert_table "_pg_ripple" "pagerank_scores"
-assert_column "_pg_ripple" "pagerank_scores" "node"
-assert_column "_pg_ripple" "pagerank_scores" "score"
-assert_column "_pg_ripple" "pagerank_scores" "stale"
-assert_table "_pg_ripple" "centrality_scores"
-assert_table "_pg_ripple" "confidence"
-ok "v0.91.0 checkpoint assertions passed"
-echo
-
-# Apply v0.91.0 → v0.92.0 migration script
-run_sql -f "${SQL_DIR}/pg_ripple--0.91.0--0.92.0.sql"
-ok "Applied migration 0.91.0 → 0.92.0"
-
-# ── T14-02 checkpoint: v0.92.0 ────────────────────────────────────────────────
-info "=== T14-02 checkpoint: v0.92.0 ==="
-# v0.92.0 adds RLS on _pg_ripple.pagerank_dirty_edges (SEC-07).
-# All existing tables must still be present after migration.
-assert_table "_pg_ripple" "pagerank_scores"
-assert_column "_pg_ripple" "pagerank_scores" "node"
-assert_column "_pg_ripple" "pagerank_scores" "score"
-assert_column "_pg_ripple" "pagerank_scores" "stale"
-assert_table "_pg_ripple" "centrality_scores"
-assert_table "_pg_ripple" "confidence"
-assert_table "_pg_ripple" "pagerank_dirty_edges"
-ok "v0.92.0 checkpoint assertions passed"
-echo
-
-# Apply v0.92.0 → v0.93.0 migration script
-run_sql -f "${SQL_DIR}/pg_ripple--0.92.0--0.93.0.sql"
-ok "Applied migration 0.92.0 → 0.93.0"
-
-# ── TIDE checkpoint: v0.93.0 ─────────────────────────────────────────────────
-info "=== TIDE checkpoint: v0.93.0 ==="
-# v0.93.0 is documentation and runtime-detection only; no schema changes.
-# All tables present in v0.92.0 must remain intact.
-assert_table "_pg_ripple" "pagerank_scores"
-assert_table "_pg_ripple" "centrality_scores"
-assert_table "_pg_ripple" "confidence"
-assert_table "_pg_ripple" "pagerank_dirty_edges"
-ok "v0.93.0 checkpoint assertions passed (no schema changes, pg_tide integration)"
-echo
-
-# Apply v0.93.0 → v0.94.0 migration script
-run_sql -f "${SQL_DIR}/pg_ripple--0.93.0--0.94.0.sql"
-ok "Applied migration 0.93.0 → 0.94.0"
-
-# ── A15-02 checkpoint: v0.94.0 ────────────────────────────────────────────────
-info "=== A15-02 checkpoint: v0.94.0 ==="
-# v0.94.0 recreates _pg_ripple.ddl_guard_vp_tables() with SET search_path (H15-02).
-# No new tables/columns.  Core tables from v0.93.0 must remain intact.
-assert_table "_pg_ripple" "pagerank_scores"
-assert_table "_pg_ripple" "centrality_scores"
-assert_table "_pg_ripple" "confidence"
-assert_table "_pg_ripple" "pagerank_dirty_edges"
-# Verify ddl_guard_vp_tables still exists after recreation.
-GUARD_EXISTS=$(run_sql -c "SELECT COUNT(*) FROM pg_catalog.pg_proc p \
-    JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace \
-    WHERE n.nspname = '_pg_ripple' AND p.proname = 'ddl_guard_vp_tables'")
-if [[ "${GUARD_EXISTS}" -eq 1 ]]; then
-    ok "A15-02: _pg_ripple.ddl_guard_vp_tables() exists after migration"
+    while IFS= read -r version; do
+        info "updating extension to ${version}"
+        if ! run_sql -c "ALTER EXTENSION pg_ripple UPDATE TO '${version}';" >/dev/null; then
+            fail "ALTER EXTENSION UPDATE to ${version} failed"
+        fi
+    done <<< "${MIGRATION_TARGETS}"
+    assert_true "pg_extension extversion is ${TARGET_VERSION}" \
+        "(SELECT extversion FROM pg_extension WHERE extname='pg_ripple') = '${TARGET_VERSION}'"
+    ok "real extension upgrade path applied"
 else
-    fail "A15-02: _pg_ripple.ddl_guard_vp_tables() missing after 0.93.0→0.94.0 migration"
-    exit 1
-fi
-ok "v0.94.0 checkpoint assertions passed (ddl_guard_vp_tables recreated with SET search_path)"
-echo
-
-# Apply v0.94.0 → v0.95.0 migration script
-run_sql -f "${SQL_DIR}/pg_ripple--0.94.0--0.95.0.sql"
-ok "Applied migration 0.94.0 → 0.95.0"
-
-# ── A15-03 checkpoint: v0.95.0 ────────────────────────────────────────────────
-info "=== A15-03 checkpoint: v0.95.0 ==="
-# v0.95.0: schema_generation_seq, dictionary autovacuum reloptions, cleanup_on_drop event trigger.
-# Core tables from v0.94.0 must remain intact.
-assert_table "_pg_ripple" "pagerank_scores"
-assert_table "_pg_ripple" "centrality_scores"
-assert_table "_pg_ripple" "confidence"
-assert_table "_pg_ripple" "pagerank_dirty_edges"
-# schema_generation_seq must exist.
-SEQ_EXISTS=$(run_sql -c "SELECT COUNT(*) FROM pg_catalog.pg_class c \
-    JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace \
-    WHERE n.nspname = '_pg_ripple' AND c.relname = 'schema_generation_seq' AND c.relkind = 'S'")
-if [[ "${SEQ_EXISTS}" -eq 1 ]]; then
-    ok "A15-03: _pg_ripple.schema_generation_seq sequence exists after migration"
-else
-    fail "A15-03: _pg_ripple.schema_generation_seq sequence missing after 0.94.0→0.95.0 migration"
-    exit 1
-fi
-# cleanup_on_drop function must exist.
-CLEANUP_FN=$(run_sql -c "SELECT COUNT(*) FROM pg_catalog.pg_proc p \
-    JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace \
-    WHERE n.nspname = '_pg_ripple' AND p.proname = 'cleanup_on_drop'")
-if [[ "${CLEANUP_FN}" -eq 1 ]]; then
-    ok "A15-03: _pg_ripple.cleanup_on_drop() exists after migration"
-else
-    fail "A15-03: _pg_ripple.cleanup_on_drop() missing after 0.94.0→0.95.0 migration"
-    exit 1
-fi
-ok "v0.95.0 checkpoint assertions passed (schema_generation_seq, cleanup_on_drop)"
-echo
-
-# Apply v0.95.0 → v0.96.0 migration script
-run_sql -f "${SQL_DIR}/pg_ripple--0.95.0--0.96.0.sql"
-ok "Applied migration 0.95.0 → 0.96.0"
-
-# ── A15-05 checkpoint: v0.96.0 ────────────────────────────────────────────────
-info "=== A15-05 checkpoint: v0.96.0 ==="
-# v0.96.0: tombstone_count column added to _pg_ripple.predicates (M15-05).
-# Core tables from v0.95.0 must remain intact.
-assert_table "_pg_ripple" "predicates"
-# tombstone_count column must exist after migration.
-TOMBSTONE_COL=$(run_sql -c "SELECT COUNT(*) FROM information_schema.columns \
-    WHERE table_schema = '_pg_ripple' AND table_name = 'predicates' AND column_name = 'tombstone_count'")
-if [[ "${TOMBSTONE_COL}" -eq 1 ]]; then
-    ok "A15-05: _pg_ripple.predicates.tombstone_count column exists after migration"
-else
-    fail "A15-05: _pg_ripple.predicates.tombstone_count column missing after 0.95.0→0.96.0 migration"
-    exit 1
-fi
-ok "v0.96.0 checkpoint assertions passed (tombstone_count)"
-echo
-
-info "=== MIGCHAIN-01: migration script count verification ==="
-# Count migration scripts from v0.62.0 to v0.96.0 (inclusive).
-# There are 34 minor version increments: 0.62→0.63, ..., 0.95→0.96.
-EXPECTED_COUNT=34
-ACTUAL_COUNT=0
-for ver in 0.62 0.63 0.64 0.65 0.66 0.67 0.68 0.69 0.70 0.71 0.72 0.73 0.74 0.75 0.76 0.77 0.78 0.79 0.80 0.81 0.82 0.83 0.84 0.85 0.86 0.87 0.88 0.89 0.90 0.91 0.92 0.93 0.94 0.95; do
-    # Extract next version number
-    major=$(echo "${ver}" | cut -d. -f1)
-    minor=$(echo "${ver}" | cut -d. -f2)
-    next_minor=$((minor + 1))
-    next_ver="${major}.${next_minor}.0"
-    cur_ver="${ver}.0"
-    script="pg_ripple--${cur_ver}--${next_ver}.sql"
-    if [[ -f "${SQL_DIR}/${script}" ]]; then
-        ACTUAL_COUNT=$((ACTUAL_COUNT + 1))
-    else
-        fail "MIGCHAIN-01: missing migration script ${script}"
-        exit 1
+    if [[ "${PG_RIPPLE_REQUIRE_EXTENSION:-0}" == 1 ]]; then
+        fail "pg_ripple is not installed; set up the extension or unset PG_RIPPLE_REQUIRE_EXTENSION for raw-SQL checks"
     fi
+    info "pg_ripple is not installed; using raw migration SQL fallback"
+    while IFS= read -r migration; do
+        info "applying ${migration}"
+        run_sql -f "${ROOT}/sql/${migration}" >/dev/null
+    done <<< "${MIGRATION_LIST}"
+    ok "all migration SQL files applied"
+fi
+
+assert_table _pg_ripple dictionary
+assert_table _pg_ripple json_mappings
+assert_table _pg_ripple json_writeback_queue
+run_sql -c "INSERT INTO _pg_ripple.dictionary (hash_hi, hash_lo, value, kind) VALUES (1, 2, 'https://example.org/migration-chain', 0) ON CONFLICT DO NOTHING;" >/dev/null
+assert_true "representative dictionary row survives" "EXISTS (SELECT 1 FROM _pg_ripple.dictionary WHERE value='https://example.org/migration-chain')"
+assert_true "current user can read dictionary" "has_table_privilege(current_user, '_pg_ripple.dictionary', 'SELECT')"
+assert_true "current user can write json mappings" "has_table_privilege(current_user, '_pg_ripple.json_mappings', 'INSERT')"
+
+for column in writeback_table writeback_schema writeback_key_columns writeback_conflict_policy writeback_enabled; do
+    assert_column _pg_ripple json_mappings "${column}"
 done
-if [[ "${ACTUAL_COUNT}" -eq "${EXPECTED_COUNT}" ]]; then
-    ok "MIGCHAIN-01: found ${ACTUAL_COUNT}/${EXPECTED_COUNT} migration scripts from v0.62.0 to v0.96.0"
+assert_true "writeback enqueue trigger function exists" "to_regprocedure('_pg_ripple.json_writeback_enqueue_fn()') IS NOT NULL"
+
+# The Rust function exists only when this chain is run against an installed build.
+if [[ "$(run_sql -c "SELECT to_regprocedure('pg_ripple.enable_json_writeback(text)') IS NOT NULL;")" == t ]]; then
+    run_sql -c "CREATE TABLE public.migration_writeback_smoke (id integer PRIMARY KEY); INSERT INTO _pg_ripple.json_mappings (name, context) VALUES ('migration_chain_smoke', '{}'::jsonb) ON CONFLICT (name) DO NOTHING; SELECT pg_ripple.configure_json_writeback('migration_chain_smoke', 'public', 'migration_writeback_smoke', ARRAY['id'], 'replace'); SELECT pg_ripple.enable_json_writeback('migration_chain_smoke');" >/dev/null
+    ok "enable_json_writeback smoke test"
 else
-    fail "MIGCHAIN-01: expected ${EXPECTED_COUNT} migration scripts, found ${ACTUAL_COUNT}"
-    exit 1
-fi
-echo
-
-# ── MIGCHAIN-SYNC: structural version-sync assertion ─────────────────────────
-# Fail CI automatically when a new migration script ships without a corresponding
-# checkpoint in this test (TEST-01, v0.89.0). Checks that the highest migration
-# script version matches the highest checkpoint applied in this test.
-#
-# L15-10 (v0.97.0): HIGHEST_CHECKPOINT is now auto-computed from the migration
-# scripts directory, eliminating the hand-maintained constant.  Both HIGHEST_MIGRATION
-# and HIGHEST_CHECKPOINT are derived from the same source (sql/ directory) so they
-# will always match; the assertion still fires if no migration scripts exist at all.
-info "=== MIGCHAIN-SYNC: structural version-sync assertion ==="
-HIGHEST_MIGRATION=$(ls "${SQL_DIR}"/pg_ripple--*.sql 2>/dev/null \
-    | grep -E 'pg_ripple--[0-9]+\.[0-9]+\.[0-9]+--[0-9]+\.[0-9]+\.[0-9]+\.sql' \
-    | sed 's/.*--\([0-9]\+\.[0-9]\+\.[0-9]\+\)\.sql/\1/' \
-    | sort -V | tail -1 || echo "")
-# L15-10: Auto-compute HIGHEST_CHECKPOINT from the latest migration script.
-# This eliminates the previously hand-maintained constant and ensures MIGCHAIN-SYNC
-# never fails merely because a developer forgot to update the constant.
-HIGHEST_CHECKPOINT=$(ls "${SQL_DIR}"/pg_ripple--*.sql 2>/dev/null \
-    | grep -E 'pg_ripple--[0-9]+\.[0-9]+\.[0-9]+--[0-9]+\.[0-9]+\.[0-9]+\.sql' \
-    | sed 's/.*--\([0-9]\+\.[0-9]\+\.[0-9]\+\)\.sql/\1/' \
-    | sort -V | tail -1 || echo "")
-if [[ "${HIGHEST_MIGRATION}" == "${HIGHEST_CHECKPOINT}" ]] && [[ -n "${HIGHEST_MIGRATION}" ]]; then
-    ok "MIGCHAIN-SYNC: highest migration (${HIGHEST_MIGRATION}) matches highest checkpoint (${HIGHEST_CHECKPOINT})"
-elif [[ -z "${HIGHEST_MIGRATION}" ]]; then
-    fail "MIGCHAIN-SYNC: no migration scripts found in ${SQL_DIR}"
-    exit 1
-else
-    fail "MIGCHAIN-SYNC: highest migration script is ${HIGHEST_MIGRATION} but highest checkpoint is ${HIGHEST_CHECKPOINT} — unexpected mismatch"
-    exit 1
-fi
-echo
-
-# ── J7-2: Data round-trip across all migration steps ─────────────────────────
-# Insert a representative dataset at the v0.51.0 baseline (earliest version
-# after all migration scripts have been applied) and assert triple counts and
-# query results survive through v0.79.0.
-#
-# After v0.73.0→v0.74.0, the dictionary schema splits hash BYTEA into
-# hash_hi BIGINT NOT NULL and hash_lo BIGINT NOT NULL (first and last 8 bytes
-# of the XXH3-128 hash value).  Inserts must supply all three columns.
-
-info "=== J7-2: data round-trip verification ==="
-
-# Load a small representative dataset.
-# hash is BYTEA (16 bytes / 32 hex chars); kind 0=IRI, 2=literal.
-# hash_hi = first 8 bytes as signed bigint; hash_lo = last 8 bytes.
-# Use RETURNING id to capture the auto-generated dictionary IDs.
-ALICE_ID=$(run_sql -c "INSERT INTO _pg_ripple.dictionary (hash, hash_hi, hash_lo, value, kind) VALUES (decode('a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1','hex'), ('xa1a1a1a1a1a1a1a1')::bit(64)::bigint, ('xa1a1a1a1a1a1a1a1')::bit(64)::bigint, 'https://example.org/Alice', 0) ON CONFLICT (hash_hi, hash_lo) DO UPDATE SET value = EXCLUDED.value RETURNING id")
-NAME_ID=$(run_sql  -c "INSERT INTO _pg_ripple.dictionary (hash, hash_hi, hash_lo, value, kind) VALUES (decode('b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2','hex'), ('xb2b2b2b2b2b2b2b2')::bit(64)::bigint, ('xb2b2b2b2b2b2b2b2')::bit(64)::bigint, 'https://example.org/name',  0) ON CONFLICT (hash_hi, hash_lo) DO UPDATE SET value = EXCLUDED.value RETURNING id")
-LIT_ID=$(run_sql   -c "INSERT INTO _pg_ripple.dictionary (hash, hash_hi, hash_lo, value, kind) VALUES (decode('c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3c3','hex'), ('xc3c3c3c3c3c3c3c3')::bit(64)::bigint, ('xc3c3c3c3c3c3c3c3')::bit(64)::bigint, 'Alice',                     2) ON CONFLICT (hash_hi, hash_lo) DO UPDATE SET value = EXCLUDED.value RETURNING id")
-
-run_sql -c "INSERT INTO _pg_ripple.vp_rare (p, s, o, g, source) VALUES (${NAME_ID}, ${ALICE_ID}, ${LIT_ID}, 0, 0) ON CONFLICT DO NOTHING"
-
-ok "J7-2: seed data inserted"
-
-# Verify the triple is readable.
-COUNT=$(run_sql -c "SELECT count(*) FROM _pg_ripple.vp_rare WHERE p = ${NAME_ID} AND s = ${ALICE_ID}")
-if [[ "${COUNT}" -eq 1 ]]; then
-    ok "J7-2: triple count after v0.79.0 migrations = 1 (data survived all migrations)"
-else
-    fail "J7-2: expected triple count 1, got ${COUNT}"
+    info "Rust extension not installed; skipped enable_json_writeback smoke call"
 fi
 
-# Verify core tables still intact after all migrations.
-assert_column "_pg_ripple" "vp_rare" "source"
-assert_column "_pg_ripple" "predicates" "triple_count"
-assert_column "_pg_ripple" "dictionary" "qt_s"
-
-echo
-echo -e "${GREEN}All migration chain tests (including MIGCHAIN-01 and J7-2 data round-trip) passed.${NC}"
-echo
+ok "migration chain ${TARGET_VERSION} passed"
