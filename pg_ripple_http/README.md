@@ -1,6 +1,6 @@
 # pg_ripple_http
 
-Standalone HTTP service that exposes a [W3C SPARQL 1.1 Protocol](https://www.w3.org/TR/sparql11-protocol/) endpoint for [pg_ripple](../README.md). Any standard SPARQL client — YASGUI, SPARQLWrapper, Jena, or plain `curl` — can query pg_ripple without a PostgreSQL driver.
+Standalone HTTP service that exposes a [W3C SPARQL 1.1 Protocol](https://www.w3.org/TR/sparql11-protocol/) endpoint for [pg_ripple](../README.md). See the [canonical HTTP API reference](../docs/src/reference/http-api.md) for the complete endpoint documentation. Any standard SPARQL client — YASGUI, SPARQLWrapper, Jena, or plain `curl` — can query pg_ripple without a PostgreSQL driver.
 
 ## Build
 
@@ -34,11 +34,11 @@ All configuration is via environment variables:
 | `PG_RIPPLE_HTTP_PG_URL` | `postgresql://localhost/postgres` | PostgreSQL connection URL |
 | `PG_RIPPLE_HTTP_PORT` | `7878` | HTTP listening port |
 | `PG_RIPPLE_HTTP_POOL_SIZE` | `16` | Database connection pool size |
-| `PG_RIPPLE_HTTP_AUTH_TOKEN` | (unset) | If set, requests must include `Authorization: Bearer <token>` |
+| `PG_RIPPLE_HTTP_AUTH_TOKEN` | (required) | Requests must include `Authorization: Bearer <token>` |
 | `PG_RIPPLE_HTTP_AUTH_REALM` | `pg_ripple` | Value used in the `Bearer realm=` field of `WWW-Authenticate` response headers (L16-06, v0.117.0) |
 | `PG_RIPPLE_HTTP_METRICS_TOKEN` | (unset) | If set, `GET /metrics` requires `Authorization: Bearer <token>` (M16-22) |
-| `PG_RIPPLE_HTTP_RATE_LIMIT` | `0` | Max requests/sec per client IP (0 = disabled) |
-| `PG_RIPPLE_HTTP_CORS_ORIGINS` | `*` | Comma-separated allowed origins, or `*` for all |
+| `PG_RIPPLE_HTTP_RATE_LIMIT` | `100` | Max requests/sec per client IP (0 = disabled) |
+| `PG_RIPPLE_HTTP_CORS_ORIGINS` | (empty) | Comma-separated allowed origins; empty disables cross-origin access |
 
 Example:
 

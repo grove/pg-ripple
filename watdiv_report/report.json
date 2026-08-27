@@ -1,4 +1,5 @@
 {
+  "note": "historical artifact from version 0.43.0",
   "jena": {
     "failed": 3,
     "passed": 668,

@@ -21,8 +21,11 @@ extension version is outside its known-compatible range.
 |------------------------|---------------------------|-------|
 | 0.130.x | ≥ 0.129.0 | Installation/migration integrity: independent migration graph, schema fingerprints, and validated JSON writeback configuration API |
 | 0.129.x | ≥ 0.128.0 | JSON writeback and mutation integrity; async queue coverage and typed direct writeback |
-| 0.128.x | ≥ 0.127.0 | JSON mapping relational writeback API and queue-based asynchronous propagation |
-| 0.127.x | ≥ 0.126.0 | pg_tide relay bridge migration: CDC bridge publishes named outbox events via `tide.outbox_publish`; current pg_tide pins use 0.33.0 and the stable `relay_set_*_v2` APIs |
+| 0.128.x | ≥ 0.127.0 | JSON mapping relational writeback API; breaking change: requires the v0.128 JSON writeback catalog and queue schema |
+| 0.127.x | ≥ 0.126.0 | pg_tide relay bridge migration; breaking change: uses named outbox events via `tide.outbox_publish` and `relay_set_*_v2` APIs |
+| 0.126.x | ≥ 0.125.0 | Federation credential-status and temporal snapshot APIs; breaking change: requires the v0.126 HTTP route and credential catalog additions |
+| 0.125.x | ≥ 0.124.0 | Temporal graph snapshot and diff APIs; breaking change: requires the v0.125 snapshot catalog and metrics |
+| 0.124.x | ≥ 0.123.0 | Rule-library observability and benchmark history APIs; breaking change: requires the v0.124 rule-library and benchmark catalog additions |
 | 0.123.x | ≥ 0.122.0 | A17 observability & docs: replica pool Prometheus gauges (OBS-M-01), rule-library stream latency/error counters (OBS-M-02), `bench_workload_result()` SQL wrapper (ERG-L-01) |
 | 0.122.x | ≥ 0.121.0 | A17 god-module decomposition & test coverage closure (H17-02); WatDiv correctness gating; pg_regress coverage for v0.119.0–v0.120.0 features |
 | 0.121.x | ≥ 0.120.0 | A17 security hardening (H17-01 SSRF, SEC-M-03 CGNAT/multicast, BUG-M-01 silent degradation, OBS-L-01 mutation journal); mutation journal for rule-library ops |
