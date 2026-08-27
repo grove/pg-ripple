@@ -70,6 +70,20 @@ spec:
               value: "postgresql://postgres:$(POSTGRES_PASSWORD)@localhost/{{ .Values.postgres.database }}"
             - name: PG_RIPPLE_HTTP_PORT
               value: "7878"
+            - name: PG_RIPPLE_HTTP_RATE_LIMIT
+              value: {{ .Values.http.rateLimit | quote }}
+            - name: PG_RIPPLE_HTTP_CORS_ORIGINS
+              value: {{ .Values.http.corsOrigins | quote }}
+            {{- if .Values.http.allowUnauthenticated }}
+            - name: PG_RIPPLE_HTTP_ALLOW_UNAUTHENTICATED
+              value: "1"
+            {{- else }}
+            - name: PG_RIPPLE_HTTP_AUTH_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ required "http.authTokenSecret.name is required unless http.allowUnauthenticated is true" .Values.http.authTokenSecret.name }}
+                  key: {{ .Values.http.authTokenSecret.key | quote }}
+            {{- end }}
             - name: POSTGRES_PASSWORD
               valueFrom:
                 secretKeyRef:

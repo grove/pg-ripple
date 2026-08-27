@@ -7,21 +7,24 @@
 #   docker build -f Dockerfile.http -t pg-ripple-http:local .
 #   docker run --rm -p 7878:7878 \
 #     -e PG_RIPPLE_HTTP_PG_URL="postgresql://user:pass@postgres:5432/mydb" \
-#     -e PG_RIPPLE_HTTP_AUTH_TOKEN="secret" \
+#     -e PG_RIPPLE_HTTP_AUTH_TOKEN="${AUTH_TOKEN:?set AUTH_TOKEN}" \
 #     pg-ripple-http:local
 #
 # The resulting image is published to ghcr.io as part of each release:
 #   docker run --rm -p 7878:7878 \
 #     -e PG_RIPPLE_HTTP_PG_URL="postgresql://user:pass@postgres:5432/mydb" \
+#     -e PG_RIPPLE_HTTP_AUTH_TOKEN="${AUTH_TOKEN:?set AUTH_TOKEN}" \
 #     ghcr.io/trickle-labs/pg-ripple-http:latest
 #
 # Environment variables:
 #   PG_RIPPLE_HTTP_PG_URL              PostgreSQL connection URL (required)
 #   PG_RIPPLE_HTTP_PORT                HTTP listen port (default: 7878)
-#   PG_RIPPLE_HTTP_AUTH_TOKEN          Bearer token for endpoint auth (optional)
+#   PG_RIPPLE_HTTP_AUTH_TOKEN          Bearer token for endpoint auth (required)
 #   PG_RIPPLE_HTTP_DATALOG_WRITE_TOKEN Separate write token for Datalog endpoints (optional)
 #   PG_RIPPLE_HTTP_POOL_SIZE           DB connection pool size (default: 16)
 #   PG_RIPPLE_HTTP_RATE_LIMIT          Requests per second per IP (default: 100)
+#   PG_RIPPLE_HTTP_CORS_ORIGINS        Comma-separated allowed origins (default: empty)
+#   PG_RIPPLE_HTTP_ALLOW_UNAUTHENTICATED Set to "1" for local development only
 #   RUST_LOG                           Log level (default: pg_ripple_http=info)
 #   RUST_LOG_FORMAT                    Set to "json" for structured JSON log output
 #   PG_RIPPLE_HTTP_SKIP_COMPAT_CHECK   Set to "1" to skip extension version check

@@ -9,6 +9,7 @@
 # Usage:
 #   mkdir -p secrets && openssl rand -base64 32 > secrets/pg_password.txt
 #   docker compose up -d
+#   # Development only: this example explicitly disables HTTP authentication.
 #   curl http://localhost:7878/health
 #   # Load triples
 #   export PGPASSFILE="$(pwd)/secrets/pg_password.txt"
@@ -26,7 +27,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: ghcr.io/trickle-labs/pg_ripple:0.130.0
+    image: ghcr.io/trickle-labs/pg_ripple:0.131.0
     environment:
       # S13-07 (v0.86.0): use POSTGRES_PASSWORD_FILE instead of plain-text password.
       # Generate: mkdir -p secrets && openssl rand -base64 32 > secrets/pg_password.txt
@@ -49,7 +50,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: ghcr.io/trickle-labs/pg_ripple:0.130.0
+    image: ghcr.io/trickle-labs/pg_ripple:0.131.0
     entrypoint: ["/usr/local/bin/pg_ripple_http"]
     ports:
       - "7878:7878"
@@ -60,7 +61,9 @@ services:
       PG_RIPPLE_HTTP_PGPASSFILE: "/run/secrets/pg_password"
       PG_RIPPLE_HTTP_PORT: "7878"
       PG_RIPPLE_HTTP_POOL_SIZE: "8"
+      PG_RIPPLE_HTTP_RATE_LIMIT: "100"
       PG_RIPPLE_HTTP_CORS_ORIGINS: ""
+      PG_RIPPLE_HTTP_ALLOW_UNAUTHENTICATED: "1"
     secrets:
       - pg_password
     depends_on:

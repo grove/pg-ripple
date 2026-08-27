@@ -10,7 +10,17 @@ This Helm chart deploys a PostgreSQL 18 instance with the `pg_ripple` extension 
 ## Installation
 
 ```bash
-helm install my-ripple ./charts/pg_ripple
+kubectl create secret generic my-ripple-http \
+  --from-literal=auth-token="$AUTH_TOKEN"
+helm install my-ripple ./charts/pg_ripple \
+  --set http.authTokenSecret.name=my-ripple-http
+```
+
+For local development only, allow unauthenticated HTTP explicitly:
+
+```bash
+helm install my-ripple ./charts/pg_ripple \
+  --set http.allowUnauthenticated=true
 ```
 
 With custom values:
@@ -28,10 +38,14 @@ See `values.yaml` for all available configuration options.
 | Parameter | Description | Default |
 |-----------|-------------|---------|
 | `replicaCount` | Number of PostgreSQL pods | `1` |
-| `image.tag` | pg_ripple image tag | `"0.73.0"` |
+| `image.tag` | pg_ripple image tag | `"0.131.0"` |
 | `postgres.password` | PostgreSQL superuser password | `"ripple"` |
 | `podDisruptionBudget.enabled` | Enable PodDisruptionBudget | `true` |
 | `podDisruptionBudget.minAvailable` | Minimum available pods during disruptions | `1` |
+| `http.authTokenSecret.name` | Existing Secret containing the HTTP bearer token | `""` |
+| `http.allowUnauthenticated` | Allow unauthenticated HTTP for local development | `false` |
+| `http.rateLimit` | Requests per second per client IP | `100` |
+| `http.corsOrigins` | Comma-separated CORS allowlist | `""` |
 
 ## PodDisruptionBudget (v0.120.0)
 
