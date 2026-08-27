@@ -22,7 +22,7 @@ FROM pg_catalog.pg_proc p
 JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace
 WHERE n.nspname = 'pg_ripple'
   AND p.proname = 'configure_json_writeback'
-  AND pg_catalog.pg_get_function_identity_arguments(p.oid) = 'text, text, text, text[], text';
+  AND pg_catalog.oidvectortypes(p.proargtypes) = 'text, text, text, text[], text';
 
 -- JWB-30: valid configuration stores typed casts and disables stale triggers.
 SELECT pg_ripple.register_json_mapping(

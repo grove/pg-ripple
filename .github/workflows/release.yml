@@ -270,6 +270,7 @@ jobs:
           find "${PKG_DIR}" \( -name '*.control' -o -name '*.sql' \) | while read -r f; do
             cp "$f" "dist/${ARCHIVE_NAME}/extension/"
           done
+          cp sql/pg_ripple--0.1.0.sql "dist/${ARCHIVE_NAME}/extension/"
 
           cp README.md LICENSE "dist/${ARCHIVE_NAME}/" 2>/dev/null || true
 
@@ -311,6 +312,7 @@ jobs:
           # Copy control + SQL files
           Get-ChildItem -Path $pkgDir.FullName -Recurse -Include "*.control","*.sql" |
             ForEach-Object { Copy-Item $_.FullName "dist\${archiveName}\extension\" }
+          Copy-Item sql\pg_ripple--0.1.0.sql "dist\${archiveName}\extension\"
 
           Copy-Item README.md, LICENSE "dist\${archiveName}\" -ErrorAction SilentlyContinue
           python scripts/migration_graph.py --output target/migration-graph.json

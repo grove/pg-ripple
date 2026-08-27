@@ -57,6 +57,7 @@ SELECT pg_ripple.json_to_ntriples_and_load(
 ) >= 0 AS alert_loaded;
 
 -- Install bridge trigger (requires pg_tide; skip the publish path when unavailable).
+SET client_min_messages = error;
 DO $$
 DECLARE
     tide_available BOOLEAN := false;
@@ -124,6 +125,7 @@ BEGIN
     END IF;
 END;
 $$;
+SET client_min_messages = DEFAULT;
 
 -- ── Part 4: statement_dedup_key ───────────────────────────────────────────────
 

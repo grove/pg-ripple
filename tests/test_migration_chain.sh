@@ -56,7 +56,9 @@ BASE_VERSION="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))[
 
 EXTENSION_AVAILABLE="$("${PSQL[@]}" -d postgres --no-psqlrc --tuples-only --no-align --quiet \
     -c "SELECT EXISTS (SELECT 1 FROM pg_available_extensions WHERE name = 'pg_ripple');")"
-if [[ "${EXTENSION_AVAILABLE}" == t ]]; then
+PG_SHARE="$(pg_config --sharedir 2>/dev/null || true)"
+BASE_INSTALL="${PG_SHARE}/extension/pg_ripple--${BASE_VERSION}.sql"
+if [[ "${EXTENSION_AVAILABLE}" == t && -f "${BASE_INSTALL}" ]]; then
     info "installed pg_ripple files detected; testing CREATE EXTENSION and ALTER EXTENSION"
     if ! run_sql -c "CREATE EXTENSION pg_ripple VERSION '${BASE_VERSION}';" >/dev/null; then
         fail "pg_ripple is available but CREATE EXTENSION baseline failed; refusing raw-SQL fallback"
@@ -71,10 +73,14 @@ if [[ "${EXTENSION_AVAILABLE}" == t ]]; then
         "(SELECT extversion FROM pg_extension WHERE extname='pg_ripple') = '${TARGET_VERSION}'"
     ok "real extension upgrade path applied"
 else
+    if [[ "${EXTENSION_AVAILABLE}" == t ]]; then
+        info "installed pg_ripple has no ${BASE_VERSION} installation script; using raw migration SQL"
+    else
+        info "pg_ripple is not installed; using raw migration SQL fallback"
+    fi
     if [[ "${PG_RIPPLE_REQUIRE_EXTENSION:-0}" == 1 ]]; then
         fail "pg_ripple is not installed; set up the extension or unset PG_RIPPLE_REQUIRE_EXTENSION for raw-SQL checks"
     fi
-    info "pg_ripple is not installed; using raw migration SQL fallback"
     while IFS= read -r migration; do
         info "applying ${migration}"
         run_sql -f "${ROOT}/sql/${migration}" >/dev/null

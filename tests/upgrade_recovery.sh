@@ -24,6 +24,12 @@ python3 "${ROOT}/scripts/migration_graph.py" --output "${GRAPH}" >/dev/null
 BASE_VERSION="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["base_version"])' "${GRAPH}")"
 TARGET_VERSION="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["target_version"])' "${GRAPH}")"
 
+PG_SHARE="$(pg_config --sharedir 2>/dev/null || true)"
+if [[ ! -f "$PG_SHARE/extension/pg_ripple--${BASE_VERSION}.sql" ]]; then
+    echo "SKIP: pg_ripple ${BASE_VERSION} installation script is not installed"
+    exit 0
+fi
+
 "${PSQL[@]}" -d postgres -c "CREATE DATABASE \"${DB}\";" >/dev/null
 "${PSQL[@]}" -d "$DB" <<SQL
 CREATE EXTENSION pg_ripple VERSION '${BASE_VERSION}';
