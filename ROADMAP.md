@@ -304,7 +304,7 @@
 | Version | Theme | Status | Release type | Primary gate |
 |---------|-------|--------|--------------|--------------|
 | [v0.128.1](plans/pg-ripple-production-readiness-plan.md#v01281--emergency-containment-and-safe-patch) | Emergency containment and safe patch | ✅ Released | Out-of-band patch | No startup panic, no passwordless production image, no false-enabled async writeback |
-| [v0.129.0](plans/pg-ripple-production-readiness-plan.md#v01290--json-writeback-and-mutation-integrity) | JSON writeback and mutation integrity | Planned | Correctness release | Full insert/update/delete/retry/restart writeback matrix passes |
+| [v0.129.0](plans/pg-ripple-production-readiness-plan.md#v01290--json-writeback-and-mutation-integrity) | JSON writeback and mutation integrity | ✅ Released | Correctness release | Full insert/update/delete/retry/restart writeback matrix passes |
 | [v0.130.0](plans/pg-ripple-production-readiness-plan.md#v01300--installation-and-migration-integrity) | Installation and migration integrity | Planned | Upgrade release | Fresh install and every supported upgrade path are schema- and behavior-equivalent |
 | [v0.131.0](plans/pg-ripple-production-readiness-plan.md#v01310--secure-by-default-runtime-and-packaging) | Secure-by-default runtime and packaging | Planned | Security release | Production deployments fail closed and least privilege is verified |
 | [v0.132.0](plans/pg-ripple-production-readiness-plan.md#v01320--conformance-feature-truth-and-release-evidence) | Conformance, feature truth, and release evidence | Planned | Assurance release | Required suites cannot skip; claims are artifact-backed |
@@ -970,4 +970,3 @@ OWL 2 EL profile reasoning with full normative rule tables targeting biomedical 
 (FEAT-05), Parquet columnar cold-tier storage via DuckDB FDW for 5–20× analytical SPARQL
 speedup on billion-triple graphs (FEAT-06), and Graph Neural Network integration
 bridging PyG/DGL models into in-database GNN training and link prediction (FEAT-08).
-
