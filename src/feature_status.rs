@@ -462,7 +462,7 @@ mod pg_ripple {
                 ),
                 Some("ci/regress: json_mapping.sql".to_string()),
                 Some("docs/src/features/loading-data.md".to_string()),
-                Some("src/json_mapping.rs".to_string()),
+                Some("src/json_mapping/mod.rs".to_string()),
             ),
             // ── JSON mapping relational writeback (v0.128.0 JSON-WRITEBACK-01;
             // repaired by v0.129.0 A18 remediation) ──────────────────────────
@@ -490,7 +490,7 @@ mod pg_ripple {
                 ),
                 Some("ci/regress: v0128_json_writeback.sql".to_string()),
                 Some("docs/src/features/json-mapping.md".to_string()),
-                Some("src/json_mapping.rs".to_string()),
+                Some("src/json_mapping/mod.rs".to_string()),
             ),
             // ── VP promotion recovery monitoring (v0.74.0 PROMO-RECOVER-01) ──
             (
