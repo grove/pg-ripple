@@ -124,7 +124,6 @@ fn test_state() -> Arc<AppState> {
         pool,
         auth_token: Some("test-auth-token".to_owned()),
         datalog_write_token: None,
-        trust_proxy: None,
         metrics: Metrics::new(),
         ever_connected: AtomicBool::new(false),
         arrow_flight_secret: None,
