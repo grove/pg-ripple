@@ -14,7 +14,7 @@ use axum::response::Response;
 use serde::Deserialize;
 
 use super::sparql_handlers::json_response_http;
-use crate::common::{AppState, check_auth, check_auth_write, redacted_error};
+use crate::common::{AppState, check_auth, check_auth_write, format_nquads_term, redacted_error};
 
 fn json_response(status: StatusCode, body: serde_json::Value) -> Response {
     json_response_http(status, body)
@@ -411,19 +411,12 @@ pub(crate) async fn graph_snapshot(
         let s: String = row.get(0);
         let p: String = row.get(1);
         let o: String = row.get(2);
-        // Determine if subject/object are IRIs or literals.
-        let s_term = if s.starts_with("http") || s.starts_with("urn") || s.starts_with("_:") {
-            format!("<{s}>")
-        } else {
-            format!("\"{s}\"")
-        };
-        let p_term = format!("<{p}>");
-        let o_term = if o.starts_with("http") || o.starts_with("urn") || o.starts_with("_:") {
-            format!("<{o}>")
-        } else {
-            format!("\"{o}\"")
-        };
-        turtle.push_str(&format!("{s_term} {p_term} {o_term} .\n"));
+        turtle.push_str(&format!(
+            "{} {} {} .\n",
+            format_nquads_term(&s),
+            format_nquads_term(&p),
+            format_nquads_term(&o)
+        ));
     }
 
     // Update the snapshot gauge.
@@ -510,7 +503,7 @@ pub(crate) async fn graph_diff(
         }
     };
 
-    let graph_term = format!("<{iri}>");
+    let graph_term = format_nquads_term(&iri);
     let mut nquads = format!(
         "# Graph: {iri}\n# From: {}\n# To: {}\n\n",
         params.from, params.to
@@ -521,19 +514,11 @@ pub(crate) async fn graph_diff(
         let o: String = row.get(2);
         let change: String = row.get(3);
 
-        let s_term = if s.starts_with("http") || s.starts_with("urn") || s.starts_with("_:") {
-            format!("<{s}>")
-        } else {
-            format!("\"{s}\"")
-        };
-        let p_term = format!("<{p}>");
-        let o_term = if o.starts_with("http") || o.starts_with("urn") || o.starts_with("_:") {
-            format!("<{o}>")
-        } else {
-            format!("\"{o}\"")
-        };
         nquads.push_str(&format!(
-            "# {change}\n{s_term} {p_term} {o_term} {graph_term} .\n"
+            "# {change}\n{} {} {} {graph_term} .\n",
+            format_nquads_term(&s),
+            format_nquads_term(&p),
+            format_nquads_term(&o)
         ));
     }
 

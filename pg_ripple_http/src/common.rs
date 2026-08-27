@@ -54,9 +54,6 @@ pub struct AppState {
     /// (`POST /datalog/rules/*`, `PUT`, `DELETE`). When `None`, the main
     /// `auth_token` governs all requests.
     pub datalog_write_token: Option<String>,
-    /// Comma-separated list of upstream IP/CIDR values that are trusted to set
-    /// `X-Forwarded-For`. `None` means X-Forwarded-For is not trusted.
-    pub trust_proxy: Option<String>,
     pub metrics: Metrics,
     /// v0.60.0 H7-5: Set to `true` after the first successful PostgreSQL
     /// connection.  Used by the `/ready` Kubernetes readiness probe — the
@@ -146,32 +143,203 @@ pub fn check_auth_write(state: &AppState, headers: &HeaderMap) -> Result<(), Res
 // A16-CQ: result_large_err expected — error type is inherently large due to pgrx Response payload.
 #[allow(clippy::result_large_err)]
 fn check_token(expected: Option<&str>, headers: &HeaderMap, realm: &str) -> Result<(), Response> {
-    if let Some(expected) = expected {
-        let provided = headers
-            .get("authorization")
-            .and_then(|v| v.to_str().ok())
-            .unwrap_or("");
-        // Support "Bearer <token>" and "Basic <token>".
-        let token = provided
-            .strip_prefix("Bearer ")
-            .or_else(|| provided.strip_prefix("Basic "))
-            .unwrap_or(provided);
-        // Constant-time comparison prevents timing side-channels (v0.22.0 S-4).
-        if !constant_time_eq(token.as_bytes(), expected.as_bytes()) {
-            // HTTP-401-WWW-AUTH-01 (v0.83.0): RFC 7235 §4.1 requires WWW-Authenticate
-            // on every 401.  Absence breaks OAuth client auto-retry and browser dialogs.
-            // AUTH-RESP-FMT-01 (v0.83.0): body is structured JSON for client consistency.
-            // L16-06 (v0.117.0): realm is configurable via PG_RIPPLE_HTTP_AUTH_REALM.
-            let body = serde_json::json!({"error": "PT401", "message": "unauthorized"}).to_string();
-            let www_auth = format!("Bearer realm=\"{realm}\"");
-            // SAFETY: status code and header values are compile-time constants; builder never fails.
-            return Err(Response::builder()
-                .status(StatusCode::UNAUTHORIZED)
-                .header("www-authenticate", www_auth)
-                .header("content-type", "application/json")
-                .body(Body::from(body))
-                .expect("infallible: hardcoded valid HTTP headers"));
+    check_token_with_policy(expected, headers, realm, unauthenticated_allowed())
+}
+
+fn unauthenticated_allowed() -> bool {
+    std::env::var("PG_RIPPLE_HTTP_ALLOW_UNAUTHENTICATED")
+        .map(|v| v == "1")
+        .unwrap_or(false)
+}
+
+fn check_token_with_policy(
+    expected: Option<&str>,
+    headers: &HeaderMap,
+    realm: &str,
+    allow_unauthenticated: bool,
+) -> Result<(), Response> {
+    let Some(expected) = expected else {
+        if allow_unauthenticated {
+            return Ok(());
         }
+        return unauthorized_response(realm);
+    };
+
+    let provided = headers
+        .get("authorization")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    // Support "Bearer <token>" and "Basic <token>".
+    let token = provided
+        .strip_prefix("Bearer ")
+        .or_else(|| provided.strip_prefix("Basic "))
+        .unwrap_or(provided);
+    // Constant-time comparison prevents timing side-channels (v0.22.0 S-4).
+    if !constant_time_eq(token.as_bytes(), expected.as_bytes()) {
+        return unauthorized_response(realm);
     }
     Ok(())
+}
+
+fn unauthorized_response(realm: &str) -> Result<(), Response> {
+    // HTTP-401-WWW-AUTH-01 (v0.83.0): RFC 7235 §4.1 requires WWW-Authenticate
+    // on every 401. AUTH-RESP-FMT-01 (v0.83.0): structured JSON response.
+    let body = serde_json::json!({"error": "PT401", "message": "unauthorized"}).to_string();
+    let www_auth = format!("Bearer realm=\"{realm}\"");
+    // SAFETY: status code and header values are compile-time constants; builder never fails.
+    Err(Response::builder()
+        .status(StatusCode::UNAUTHORIZED)
+        .header("www-authenticate", www_auth)
+        .header("content-type", "application/json")
+        .body(Body::from(body))
+        .expect("infallible: hardcoded valid HTTP headers"))
+}
+
+/// Format a decoded RDF term as an N-Quads term.
+pub fn format_nquads_term(term: &str) -> String {
+    if term.starts_with("_:") {
+        return term.to_owned();
+    }
+    if term.starts_with('<') && term.ends_with('>') {
+        return format!("<{}>", escape_iri(&term[1..term.len() - 1]));
+    }
+    if term.starts_with('"') {
+        if let Some(end) = literal_end(term) {
+            let value = unescape_literal(&term[1..end]);
+            let suffix = &term[end + 1..];
+            if suffix.is_empty() || suffix.starts_with('@') || suffix.starts_with("^^<") {
+                let suffix = suffix
+                    .strip_prefix("^^<")
+                    .and_then(|dt| dt.strip_suffix('>'))
+                    .map(|dt| format!("^^<{}>", escape_iri(dt)))
+                    .unwrap_or_else(|| suffix.to_owned());
+                return format!("\"{}\"{suffix}", escape_literal(&value));
+            }
+        }
+    }
+    if is_iri(term) {
+        return format!("<{}>", escape_iri(term));
+    }
+    format!("\"{}\"", escape_literal(term))
+}
+
+fn is_iri(term: &str) -> bool {
+    term.split_once(':').is_some_and(|(scheme, _)| {
+        !scheme.is_empty()
+            && scheme.chars().enumerate().all(|(i, c)| {
+                c.is_ascii_alphabetic() && i == 0
+                    || i > 0 && (c.is_ascii_alphanumeric() || "+-.".contains(c))
+            })
+    })
+}
+
+fn literal_end(term: &str) -> Option<usize> {
+    let bytes = term.as_bytes();
+    (1..bytes.len()).find(|&i| bytes[i] == b'"' && !is_escaped(bytes, i))
+}
+
+fn is_escaped(bytes: &[u8], index: usize) -> bool {
+    let mut slashes = 0;
+    let mut i = index;
+    while i > 0 && bytes[i - 1] == b'\\' {
+        slashes += 1;
+        i -= 1;
+    }
+    slashes % 2 == 1
+}
+
+fn unescape_literal(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut chars = s.chars();
+    while let Some(c) = chars.next() {
+        if c != '\\' {
+            out.push(c);
+            continue;
+        }
+        match chars.next() {
+            Some('t') => out.push('\t'),
+            Some('b') => out.push('\u{0008}'),
+            Some('n') => out.push('\n'),
+            Some('r') => out.push('\r'),
+            Some('f') => out.push('\u{000c}'),
+            Some('"') => out.push('"'),
+            Some('\\') => out.push('\\'),
+            Some('u') => out.push_str(&decode_hex_escape(&mut chars, 4)),
+            Some('U') => out.push_str(&decode_hex_escape(&mut chars, 8)),
+            Some(other) => {
+                out.push('\\');
+                out.push(other);
+            }
+            None => out.push('\\'),
+        }
+    }
+    out
+}
+
+fn decode_hex_escape(chars: &mut impl Iterator<Item = char>, width: usize) -> String {
+    let digits: String = chars.take(width).collect();
+    u32::from_str_radix(&digits, 16)
+        .ok()
+        .and_then(char::from_u32)
+        .unwrap_or('\u{fffd}')
+        .to_string()
+}
+
+fn escape_literal(s: &str) -> String {
+    s.chars()
+        .flat_map(|c| match c {
+            '\\' => "\\\\".chars().collect::<Vec<_>>(),
+            '"' => "\\\"".chars().collect(),
+            '\t' => "\\t".chars().collect(),
+            '\u{0008}' => "\\b".chars().collect(),
+            '\n' => "\\n".chars().collect(),
+            '\r' => "\\r".chars().collect(),
+            '\u{000c}' => "\\f".chars().collect(),
+            c if c.is_control() => format!("\\u{:04X}", c as u32).chars().collect(),
+            c => vec![c],
+        })
+        .collect()
+}
+
+fn escape_iri(s: &str) -> String {
+    s.chars()
+        .flat_map(|c| match c {
+            '<' | '>' | '"' | '{' | '}' | '|' | '^' | '`' | '\\' => {
+                format!("\\u{:04X}", c as u32).chars().collect()
+            }
+            c if c.is_control() => format!("\\u{:04X}", c as u32).chars().collect(),
+            c => vec![c],
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::http::HeaderMap;
+
+    #[test]
+    fn no_token_fails_closed_but_explicit_dev_mode_allows() {
+        let headers = HeaderMap::new();
+        assert_eq!(
+            check_token_with_policy(None, &headers, "pg_ripple", false)
+                .unwrap_err()
+                .status(),
+            StatusCode::UNAUTHORIZED
+        );
+        assert!(check_token_with_policy(None, &headers, "pg_ripple", true).is_ok());
+    }
+
+    #[test]
+    fn nquads_formatter_handles_terms_and_escaping() {
+        assert_eq!(format_nquads_term("http://example/s"), "<http://example/s>");
+        assert_eq!(format_nquads_term("http://example/a>b"), "<http://example/a\\u003Eb>");
+        assert_eq!(format_nquads_term("_:b1"), "_:b1");
+        assert_eq!(format_nquads_term("a\"\\\nb"), "\"a\\\"\\\\\\nb\"");
+        assert_eq!(format_nquads_term("\"a\\n b\"@en"), "\"a\\n b\"@en");
+        assert_eq!(
+            format_nquads_term("\"42\"^^<http://www.w3.org/2001/XMLSchema#integer>"),
+            "\"42\"^^<http://www.w3.org/2001/XMLSchema#integer>"
+        );
+    }
 }

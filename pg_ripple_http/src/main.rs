@@ -17,6 +17,7 @@ use tower_http::cors::{AllowOrigin, CorsLayer};
 
 use pg_ripple_http::common::{AppState, env_or};
 use pg_ripple_http::{metrics, routing};
+use pg_ripple_http::routing::middleware::{self, TrustedProxyLayer};
 
 // ─── Compatibility constants (COMPAT-01, v0.71.0) ────────────────────────────
 
@@ -211,6 +212,17 @@ async fn main() {
         }
     };
     let auth_token = std::env::var("PG_RIPPLE_HTTP_AUTH_TOKEN").ok();
+    if auth_token.is_none() {
+        if std::env::var("PG_RIPPLE_HTTP_ALLOW_UNAUTHENTICATED").as_deref() == Ok("1") {
+            tracing::warn!(
+                "unauthenticated HTTP mode is enabled by PG_RIPPLE_HTTP_ALLOW_UNAUTHENTICATED=1"
+            );
+        } else {
+            tracing::warn!(
+                "PG_RIPPLE_HTTP_AUTH_TOKEN is not configured; protected requests will be rejected"
+            );
+        }
+    }
     let datalog_write_token = std::env::var("PG_RIPPLE_HTTP_DATALOG_WRITE_TOKEN").ok();
     let rate_limit: u32 = match env_or("PG_RIPPLE_HTTP_RATE_LIMIT", "100").parse() {
         Ok(r) => r,
@@ -229,8 +241,16 @@ async fn main() {
             std::process::exit(1);
         }
     };
-    // Trust proxy: comma-separated list of upstream IP/CIDR values trusted for X-Forwarded-For.
-    let trust_proxy = std::env::var("PG_RIPPLE_HTTP_TRUST_PROXY").ok();
+    // L18-01 (v0.131.0): parse trusted proxy networks before startup continues.
+    let trusted_proxy = match middleware::parse_trusted_proxy(
+        std::env::var("PG_RIPPLE_HTTP_TRUST_PROXY").ok().as_deref(),
+    ) {
+        Ok(networks) => networks,
+        Err(error) => {
+            tracing::error!("{error}");
+            std::process::exit(1);
+        }
+    };
 
     // ── v0.46.0: CA-bundle for outbound TLS (PG_RIPPLE_HTTP_CA_BUNDLE) ───────
     // If set, load the PEM file at the given path as the trust anchor for all
@@ -372,7 +392,6 @@ async fn main() {
         pool,
         auth_token,
         datalog_write_token,
-        trust_proxy,
         metrics: metrics::Metrics::new(),
         ever_connected: std::sync::atomic::AtomicBool::new(false),
         arrow_flight_secret: std::env::var("ARROW_FLIGHT_SECRET").ok(),
@@ -434,6 +453,9 @@ async fn main() {
         };
         app = app.layer(GovernorLayer::new(Arc::new(governor_conf)));
     }
+
+    // This must be outermost so ConnectInfo is rewritten before governor extracts its key.
+    app = app.layer(TrustedProxyLayer::new(trusted_proxy));
 
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
     tracing::info!("pg_ripple_http listening on http://{addr}");
