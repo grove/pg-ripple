@@ -11,6 +11,99 @@ Versions correspond to the milestones in [ROADMAP.md](ROADMAP.md).
 
 ---
 
+## [0.129.0] — 2026-08-27 — JSON Writeback and Mutation Integrity
+
+**Repairs async JSON-mapping writeback (introduced in v0.128.0, contained in
+v0.128.1): a wrong dictionary column name meant it never actually worked,
+even though `enable_json_writeback()` could appear to succeed. Direct
+writeback also gets fixed for non-text columns and real affected-row
+counts. See
+[plans/pg-ripple-production-readiness-plan.md](plans/pg-ripple-production-readiness-plan.md#v01290--json-writeback-and-mutation-integrity)
+for the full remediation plan.**
+
+### Fixed
+
+- **Async JSON writeback never actually ran** — `enable_json_writeback()`
+  and the background drain worker queried a `_pg_ripple.dictionary.iri`
+  column that has never existed (the real column is `value`); every lookup
+  silently failed, and since v0.128.1's containment fix made
+  `enable_json_writeback()` fail closed on any incomplete coverage, it could
+  never succeed at all. Both now query the real column, so `writeback_enabled
+  = true` finally means the event path works. Predicate lookup failures are
+  now fatal (surfaced to the caller) instead of being swallowed and reported
+  as generic "not yet covered" gaps.
+- **`enable_json_writeback()` required a predicate to already be promoted to
+  its own VP table** — before promotion, all of a predicate's data lives in
+  the shared `vp_rare` table, which had no writeback trigger at all, so a
+  freshly-ingested (still-rare) predicate could never be covered.
+  `enable_json_writeback()` now also installs a predicate-filtered trigger
+  on `vp_rare`, and `promote_predicate()` installs the dedicated-table
+  (and tombstone-table, for main-resident deletes) triggers automatically
+  the moment a covered predicate is promoted, so coverage survives the
+  transition.
+- **Databases upgraded via `ALTER EXTENSION` never got the writeback trigger
+  function** — the v0.128.0 migration script only added the queue table and
+  new columns; the trigger function itself was only created for fresh
+  installs. `enable_json_writeback()` failed with "function does not exist"
+  on any database that upgraded incrementally rather than installing fresh.
+  Backfilled into the v0.127.0 → v0.128.0 migration script.
+- **`writeback_json_row()` / `writeback_json_row_delete()` returned a
+  hard-coded row count** — a conflict-policy `'skip'` that hit an existing
+  row, or a delete that matched nothing, still reported 1 row affected.
+  Both now report the real affected-row count.
+- **Direct writeback failed for any non-text column** — every value was
+  cast to `::text` before insertion, which Postgres rejects for columns
+  like `integer` or `uuid` ("column is of type integer but expression is of
+  type text"). Values are now cast to the target column's real type,
+  derived from `pg_attribute` once per mapping and cached.
+- **A missing `writeback_key_columns` value could build a broken SQL
+  statement** — under the `'error'` conflict policy, filtering out an
+  absent key column while numbering placeholders from the original column
+  list could produce a placeholder with no bound parameter. Missing key
+  values are now validated up front with a descriptive error instead.
+- **`drain_json_writeback_queue()` could silently drop a queue row** — if
+  its own status-update `UPDATE` failed, the row was neither marked
+  processed nor retried. It now logs a warning, increments the new
+  `pg_ripple_json_writeback_drain_errors_total` metric, and leaves the row
+  pending with an incremented `retry_count` instead.
+- **`disable_json_writeback()` could leave triggers permanently installed**
+  — its trigger-discovery query (`information_schema.triggers` via a
+  multi-row SPI call) was found to return zero rows for triggers created
+  moments earlier by another SPI call in the same session, so `DROP
+  TRIGGER` never ran and no error was raised either. A mapping's triggers
+  would then outlive the mapping itself; on a shared table like `vp_rare`
+  this broke every later write to that predicate with a foreign-key
+  violation once the mapping row was deleted. Trigger discovery now queries
+  `pg_catalog.pg_trigger` directly through a single-row aggregate fetch,
+  which does not exhibit the problem.
+
+### Technical Details
+
+- `_pg_ripple.dictionary` lookups in `enable_json_writeback_impl()` and
+  `drain_json_writeback_queue()` now use `WHERE value = $1 AND kind =
+  KIND_IRI` / `SELECT value ... WHERE id = $1 AND kind = KIND_IRI` instead
+  of the nonexistent `iri` column (C18-01).
+  `json_writeback_enqueue_fn()` gained an optional second trigger argument
+  (a predicate id filter, used on the shared `vp_rare` table) and treats an
+  `INSERT` on a `*_tombstones` table as a `delete` event.
+- `writeback_json_row_impl()` / `writeback_json_row_delete_impl()` build
+  their `INSERT ... RETURNING 1` / `DELETE ... RETURNING 1` statements
+  wrapped in a CTE (`WITH ins AS (...) SELECT count(*) FROM ins`) to report
+  the real row count, and cast each value with `CAST($n AS <pg_type>)`
+  using a column-type map cached in the new
+  `_pg_ripple.json_mappings.writeback_column_casts` column.
+- New `_pg_ripple.json_writeback_queue.retry_count SMALLINT` column.
+- `pg_ripple.feature_status()`: `json_mapping_writeback` moves from
+  `broken` back to `implemented`.
+- Six new `tests/pg_regress/sql/v0128_json_writeback.sql` regression cases
+  cover an integer primary key, a UUID key column, a zero-row delete, a
+  missing-key-column error, the `'error'` conflict policy, and
+  `enable_json_writeback()` succeeding for a still-rare predicate.
+- New blog post:
+  [`blog/json-writeback-correctness.md`](blog/json-writeback-correctness.md).
+- `pg_ripple_http`: `COMPATIBLE_EXTENSION_MIN` bumped from `"0.127.0"` to
+  `"0.128.0"`.
+
 ## [0.128.1] — 2026-08-26 — Emergency Containment and Safe Patch
 
 **Out-of-band safety patch for v0.128.0. Fixes three critical issues found

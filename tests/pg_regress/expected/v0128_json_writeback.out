@@ -22,6 +22,14 @@
 --   JWB-19: disable_json_writeback() is idempotent
 --   JWB-20: json_writeback_status() returns correct pending count
 --   JWB-21: feature_status() includes 'json_mapping_writeback' entry
+--   JWB-22: enable_json_writeback() fails closed on incomplete enqueue coverage
+--   JWB-23: writeback round-trip with an integer primary key column (H18-02)
+--   JWB-24: writeback round-trip with a UUID key column (H18-02)
+--   JWB-25: writeback_json_row_delete() returns 0 for a zero-row delete (H18-02)
+--   JWB-26: missing writeback_key_columns value raises a descriptive error (H18-02)
+--   JWB-27: conflict policy 'error' raises PT0551 when the row already exists (H18-02)
+--   JWB-28: enable_json_writeback() succeeds for a still-rare predicate via the
+--           vp_rare enqueue trigger (v0.129.0 C18-01 ENQUEUE-COVERAGE fix)
 SET client_min_messages = warning;
 CREATE EXTENSION IF NOT EXISTS pg_ripple;
 SET client_min_messages = DEFAULT;
@@ -54,7 +62,8 @@ ORDER BY ordinal_position;
  queued_at    | timestamp with time zone
  processed_at | timestamp with time zone
  error        | text
-(7 rows)
+ retry_count  | smallint
+(8 rows)
 
 -- ─── JWB-03: json_writeback_queue_pending_idx exists ────────────────────────
 SELECT EXISTS(
@@ -347,14 +356,15 @@ SELECT pg_ripple.ingest_json(
             3
 (1 row)
 
--- Writeback with 'skip' policy — should return 0 (no update).
+-- Writeback with 'skip' policy — should return 0 (no update). H18-02
+-- ROW-COUNTS: previously hard-coded to 1 regardless of ON CONFLICT outcome.
 SELECT pg_ripple.writeback_json_row(
     'contacts_writeback',
     'https://example.com/contacts/c003'
 ) AS jwb16_rows_affected;
  jwb16_rows_affected 
 ---------------------
-                   1
+                   0
 (1 row)
 
 -- Row should still have original name.
@@ -499,6 +509,333 @@ WHERE name = 'uncovered_writeback';
 
 DELETE FROM _pg_ripple.json_mappings WHERE name = 'uncovered_writeback';
 DROP TABLE IF EXISTS public.uncovered_test;
+-- ─── JWB-23: writeback round-trip with an integer primary key (H18-02) ──────
+-- TYPED-PARAMS: writeback previously cast every column to ::text, which
+-- fails for a non-text column such as an integer primary key.
+CREATE TABLE IF NOT EXISTS public.jwb_int_pk_test (
+    id    INTEGER PRIMARY KEY,
+    label TEXT
+);
+TRUNCATE public.jwb_int_pk_test;
+SELECT pg_ripple.register_json_mapping(
+    'jwb_int_pk',
+    '{"id": "http://example.org/v0129/int-id",
+      "label": "http://example.org/v0129/int-label"}'::jsonb,
+    NULL, NULL, NULL, NULL, NULL, NULL
+);
+ register_json_mapping 
+-----------------------
+ 
+(1 row)
+
+UPDATE _pg_ripple.json_mappings
+SET writeback_table        = 'jwb_int_pk_test',
+    writeback_schema       = 'public',
+    writeback_key_columns  = ARRAY['id'],
+    writeback_conflict_policy = 'replace'
+WHERE name = 'jwb_int_pk';
+SELECT pg_ripple.ingest_json(
+    '{"id": 42, "label": "forty-two"}'::jsonb,
+    'https://example.com/v0129/int/42',
+    'jwb_int_pk'
+) AS jwb23_ingest;
+ jwb23_ingest 
+--------------
+            2
+(1 row)
+
+SELECT pg_ripple.writeback_json_row('jwb_int_pk', 'https://example.com/v0129/int/42')
+    AS jwb23_rows_affected;
+ jwb23_rows_affected 
+---------------------
+                   1
+(1 row)
+
+SELECT id, label FROM public.jwb_int_pk_test WHERE id = 42;
+ id |   label   
+----+-----------
+ 42 | forty-two
+(1 row)
+
+DELETE FROM _pg_ripple.json_mappings WHERE name = 'jwb_int_pk';
+DROP TABLE IF EXISTS public.jwb_int_pk_test;
+-- ─── JWB-24: writeback round-trip with a UUID key column (H18-02) ───────────
+CREATE TABLE IF NOT EXISTS public.jwb_uuid_pk_test (
+    ext_id UUID PRIMARY KEY,
+    label  TEXT
+);
+TRUNCATE public.jwb_uuid_pk_test;
+SELECT pg_ripple.register_json_mapping(
+    'jwb_uuid_pk',
+    '{"ext_id": "http://example.org/v0129/uuid-id",
+      "label":  "http://example.org/v0129/uuid-label"}'::jsonb,
+    NULL, NULL, NULL, NULL, NULL, NULL
+);
+ register_json_mapping 
+-----------------------
+ 
+(1 row)
+
+UPDATE _pg_ripple.json_mappings
+SET writeback_table        = 'jwb_uuid_pk_test',
+    writeback_schema       = 'public',
+    writeback_key_columns  = ARRAY['ext_id'],
+    writeback_conflict_policy = 'replace'
+WHERE name = 'jwb_uuid_pk';
+SELECT pg_ripple.ingest_json(
+    '{"ext_id": "5b1e5f0a-1111-4a2b-9c3d-000000000001", "label": "widget"}'::jsonb,
+    'https://example.com/v0129/uuid/1',
+    'jwb_uuid_pk'
+) AS jwb24_ingest;
+ jwb24_ingest 
+--------------
+            2
+(1 row)
+
+SELECT pg_ripple.writeback_json_row('jwb_uuid_pk', 'https://example.com/v0129/uuid/1')
+    AS jwb24_rows_affected;
+ jwb24_rows_affected 
+---------------------
+                   1
+(1 row)
+
+SELECT ext_id, label FROM public.jwb_uuid_pk_test
+WHERE ext_id = '5b1e5f0a-1111-4a2b-9c3d-000000000001';
+                ext_id                | label  
+--------------------------------------+--------
+ 5b1e5f0a-1111-4a2b-9c3d-000000000001 | widget
+(1 row)
+
+DELETE FROM _pg_ripple.json_mappings WHERE name = 'jwb_uuid_pk';
+DROP TABLE IF EXISTS public.jwb_uuid_pk_test;
+-- ─── JWB-25: writeback_json_row_delete() returns 0 for a zero-row delete
+-- (H18-02 / ROW-COUNTS) ───────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS public.jwb_delete_zero_test (
+    contact_id TEXT PRIMARY KEY
+);
+SELECT pg_ripple.register_json_mapping(
+    'jwb_delete_zero',
+    '{"contact_id": "http://schema.org/identifier"}'::jsonb,
+    NULL, NULL, NULL, NULL, NULL, NULL
+);
+ register_json_mapping 
+-----------------------
+ 
+(1 row)
+
+UPDATE _pg_ripple.json_mappings
+SET writeback_table        = 'jwb_delete_zero_test',
+    writeback_schema       = 'public',
+    writeback_key_columns  = ARRAY['contact_id'],
+    writeback_conflict_policy = 'replace'
+WHERE name = 'jwb_delete_zero';
+SELECT pg_ripple.ingest_json(
+    '{"contact_id": "ghost"}'::jsonb,
+    'https://example.com/v0129/ghost',
+    'jwb_delete_zero'
+) AS jwb25_ingest;
+ jwb25_ingest 
+--------------
+            1
+(1 row)
+
+-- No row was ever inserted into jwb_delete_zero_test for 'ghost'.
+SELECT pg_ripple.writeback_json_row_delete('jwb_delete_zero', 'https://example.com/v0129/ghost')
+    AS jwb25_rows_deleted;
+ jwb25_rows_deleted 
+--------------------
+                  0
+(1 row)
+
+DELETE FROM _pg_ripple.json_mappings WHERE name = 'jwb_delete_zero';
+DROP TABLE IF EXISTS public.jwb_delete_zero_test;
+-- ─── JWB-26: missing writeback_key_columns value raises a descriptive error
+-- (H18-02 / KEY-VALIDATION) — this is also the exact code path that used to
+-- build a mis-numbered SQL placeholder when the 'error' conflict policy
+-- pre-check filtered out an absent key column. ──────────────────────────────
+CREATE TABLE IF NOT EXISTS public.jwb_partial_key_test (
+    tenant_id TEXT,
+    item_id   TEXT,
+    label     TEXT,
+    PRIMARY KEY (tenant_id, item_id)
+);
+SELECT pg_ripple.register_json_mapping(
+    'jwb_partial_key',
+    '{"tenant_id": "http://example.org/v0129/tenant-id",
+      "item_id":   "http://example.org/v0129/item-id",
+      "label":     "http://example.org/v0129/label"}'::jsonb,
+    NULL, NULL, NULL, NULL, NULL, NULL
+);
+ register_json_mapping 
+-----------------------
+ 
+(1 row)
+
+UPDATE _pg_ripple.json_mappings
+SET writeback_table        = 'jwb_partial_key_test',
+    writeback_schema       = 'public',
+    writeback_key_columns  = ARRAY['tenant_id', 'item_id'],
+    writeback_conflict_policy = 'error'
+WHERE name = 'jwb_partial_key';
+-- Only item_id and label are asserted — tenant_id is missing.
+SELECT pg_ripple.ingest_json(
+    '{"item_id": "sku-1", "label": "Widget"}'::jsonb,
+    'https://example.com/v0129/partial/1',
+    'jwb_partial_key'
+) AS jwb26_ingest;
+ jwb26_ingest 
+--------------
+            2
+(1 row)
+
+DO $$
+BEGIN
+    BEGIN
+        PERFORM pg_ripple.writeback_json_row('jwb_partial_key', 'https://example.com/v0129/partial/1');
+        RAISE EXCEPTION 'JWB-26 FAIL: expected a missing-key-column error';
+    EXCEPTION WHEN OTHERS THEN
+        IF SQLERRM LIKE '%PT0552%' AND SQLERRM LIKE '%tenant_id%' THEN
+            RAISE NOTICE 'JWB-26 PASS: missing key column rejected: %', SQLERRM;
+        ELSE
+            RAISE EXCEPTION 'JWB-26 FAIL: unexpected error: %', SQLERRM;
+        END IF;
+    END;
+END;
+$$;
+DELETE FROM _pg_ripple.json_mappings WHERE name = 'jwb_partial_key';
+DROP TABLE IF EXISTS public.jwb_partial_key_test;
+-- ─── JWB-27: conflict policy 'error' raises PT0551 when the row already
+-- exists (H18-02) ────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS public.jwb_error_policy_test (
+    contact_id TEXT PRIMARY KEY,
+    full_name  TEXT
+);
+SELECT pg_ripple.register_json_mapping(
+    'jwb_error_policy',
+    '{"contact_id": "http://schema.org/identifier",
+      "full_name":  "http://schema.org/name"}'::jsonb,
+    NULL, NULL, NULL, NULL, NULL, NULL
+);
+ register_json_mapping 
+-----------------------
+ 
+(1 row)
+
+UPDATE _pg_ripple.json_mappings
+SET writeback_table        = 'jwb_error_policy_test',
+    writeback_schema       = 'public',
+    writeback_key_columns  = ARRAY['contact_id'],
+    writeback_conflict_policy = 'error'
+WHERE name = 'jwb_error_policy';
+INSERT INTO public.jwb_error_policy_test (contact_id, full_name) VALUES ('e001', 'Existing Row');
+SELECT pg_ripple.ingest_json(
+    '{"contact_id": "e001", "full_name": "New Value"}'::jsonb,
+    'https://example.com/v0129/error/e001',
+    'jwb_error_policy'
+) AS jwb27_ingest;
+ jwb27_ingest 
+--------------
+            2
+(1 row)
+
+DO $$
+BEGIN
+    BEGIN
+        PERFORM pg_ripple.writeback_json_row('jwb_error_policy', 'https://example.com/v0129/error/e001');
+        RAISE EXCEPTION 'JWB-27 FAIL: expected PT0551 conflict error';
+    EXCEPTION WHEN OTHERS THEN
+        IF SQLERRM LIKE '%PT0551%' THEN
+            RAISE NOTICE 'JWB-27 PASS: error policy raised PT0551: %', SQLERRM;
+        ELSE
+            RAISE EXCEPTION 'JWB-27 FAIL: unexpected error: %', SQLERRM;
+        END IF;
+    END;
+END;
+$$;
+DELETE FROM _pg_ripple.json_mappings WHERE name = 'jwb_error_policy';
+DROP TABLE IF EXISTS public.jwb_error_policy_test;
+-- ─── JWB-28: enable_json_writeback() succeeds for a still-rare (unpromoted)
+-- predicate via vp_rare enqueue coverage (v0.129.0 C18-01 ENQUEUE-COVERAGE) ──
+CREATE TABLE IF NOT EXISTS public.jwb_rare_coverage_test (
+    item_id TEXT PRIMARY KEY,
+    label   TEXT
+);
+SELECT pg_ripple.register_json_mapping(
+    'jwb_rare_coverage',
+    '{"item_id": "http://example.org/v0129/rare-id",
+      "label":   "http://example.org/v0129/rare-label"}'::jsonb,
+    NULL, NULL, NULL, NULL, NULL, NULL
+);
+ register_json_mapping 
+-----------------------
+ 
+(1 row)
+
+UPDATE _pg_ripple.json_mappings
+SET writeback_table        = 'jwb_rare_coverage_test',
+    writeback_schema       = 'public',
+    writeback_key_columns  = ARRAY['item_id'],
+    writeback_conflict_policy = 'replace'
+WHERE name = 'jwb_rare_coverage';
+-- One ingest gives both predicates a dictionary entry; they stay in
+-- vp_rare, well below vp_promotion_threshold.
+SELECT pg_ripple.ingest_json(
+    '{"item_id": "r001", "label": "Still rare"}'::jsonb,
+    'https://example.com/v0129/rare/r001',
+    'jwb_rare_coverage'
+) AS jwb28_ingest;
+ jwb28_ingest 
+--------------
+            2
+(1 row)
+
+DO $$
+BEGIN
+    PERFORM pg_ripple.enable_json_writeback('jwb_rare_coverage');
+    RAISE NOTICE 'JWB-28 PASS: enable_json_writeback() succeeded for a still-rare predicate';
+END;
+$$;
+SELECT writeback_enabled AS jwb28_writeback_enabled
+FROM _pg_ripple.json_mappings
+WHERE name = 'jwb_rare_coverage';
+ jwb28_writeback_enabled 
+-------------------------
+ t
+(1 row)
+
+-- A further insert to the still-rare predicate should now auto-enqueue a
+-- writeback event via the vp_rare trigger.
+SELECT pg_ripple.ingest_json(
+    '{"item_id": "r002", "label": "Also rare"}'::jsonb,
+    'https://example.com/v0129/rare/r002',
+    'jwb_rare_coverage'
+) AS jwb28_ingest2;
+ jwb28_ingest2 
+---------------
+             2
+(1 row)
+
+SELECT EXISTS(
+    SELECT 1 FROM _pg_ripple.json_writeback_queue
+    WHERE mapping_name = 'jwb_rare_coverage'
+) AS jwb28_auto_enqueued;
+ jwb28_auto_enqueued 
+---------------------
+ t
+(1 row)
+
+-- Must disable before dropping the mapping row: the vp_rare trigger this
+-- test installed lives on a table shared by every predicate in the
+-- database, so an orphaned trigger here (unlike one on a predicate's own
+-- delta table) would break unrelated tests for the rest of the suite.
+SELECT pg_ripple.disable_json_writeback('jwb_rare_coverage');
+ disable_json_writeback 
+------------------------
+ 
+(1 row)
+
+DELETE FROM _pg_ripple.json_mappings WHERE name = 'jwb_rare_coverage';
+DROP TABLE IF EXISTS public.jwb_rare_coverage_test;
 -- ─── Cleanup ─────────────────────────────────────────────────────────────────
 DELETE FROM _pg_ripple.json_mappings WHERE name = 'contacts_writeback';
 DROP TABLE IF EXISTS public.contacts_test;

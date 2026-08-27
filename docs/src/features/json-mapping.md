@@ -151,10 +151,12 @@ Both `enable_json_writeback()` and `disable_json_writeback()` are idempotent.
 |---|---|
 | `PT0550` | `json mapping writeback target not configured` — `writeback_table` is NULL or `writeback_key_columns` is empty |
 | `PT0551` | `json mapping writeback conflict` — conflict detected with policy `'error'` |
+| `PT0552` | `json mapping writeback key column(s) have no asserted value` — a configured `writeback_key_columns` predicate was never asserted for this subject |
 
 ## See Also
 
 - [JSON-LD Reverse Mapping blog post](https://github.com/trickle-labs/pg-ripple/blob/main/blog/json-ld-reverse-mapping.md)
+- [JSON Writeback, and What It Took to Make It Actually Work](https://github.com/trickle-labs/pg-ripple/blob/main/blog/json-writeback-correctness.md)
 - [GUC reference: json_writeback_batch_size](../reference/guc-reference.md#pg_ripplejson_writeback_batch_size)
 - [HTTP API Reference](../reference/http-api.md#json-mapping-writeback)
 - [R2RML for complex ETL](r2rml.md)

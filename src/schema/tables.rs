@@ -931,3 +931,87 @@ COMMENT ON FUNCTION _pg_ripple.json_writeback_enqueue_fn() IS
     name = "v0128_json_writeback_schema",
     requires = ["v0126_federation_credentials", "v073_schema_additions"]
 );
+
+// v0.129.0: A18 critical & high correctness remediation for JSON mapping
+// relational writeback (C18-01 / H18-02). Schema changes:
+//   - _pg_ripple.json_writeback_queue.retry_count: tracks drain-loop
+//     retries when the status UPDATE itself fails (L18-02)
+//   - _pg_ripple.json_mappings.writeback_column_casts: caches derived
+//     column-type casts so writeback_json_row() need not re-derive them
+//     from pg_attribute on every call (H18-02 / TYPED-PARAMS)
+//   - json_writeback_enqueue_fn() gains an optional predicate-id filter
+//     argument (for tables shared by multiple predicates, e.g. vp_rare)
+//     and treats an INSERT on a *_tombstones table as a delete event for
+//     main-resident rows (C18-01 / ENQUEUE-COVERAGE)
+pgrx::extension_sql!(
+    r#"
+-- v0.129.0 L18-02: track drain retry attempts when the status UPDATE itself fails.
+ALTER TABLE _pg_ripple.json_writeback_queue
+    ADD COLUMN IF NOT EXISTS retry_count SMALLINT NOT NULL DEFAULT 0;
+
+COMMENT ON COLUMN _pg_ripple.json_writeback_queue.retry_count IS
+    'Incremented by drain_json_writeback_queue() when its own status-update fails, '
+    'so the row stays pending instead of being silently dropped (v0.129.0 L18-02). '
+    'Exposed via the pg_ripple_json_writeback_drain_errors_total metric.';
+
+-- v0.129.0 H18-02 / TYPED-PARAMS: cache derived column-cast expressions.
+ALTER TABLE _pg_ripple.json_mappings
+    ADD COLUMN IF NOT EXISTS writeback_column_casts JSONB;
+
+-- v0.129.0 C18-01: the enqueue trigger function now accepts an optional
+-- second argument (predicate id) so it can be installed on tables shared by
+-- multiple predicates (vp_rare), and treats an INSERT on a *_tombstones
+-- table as a delete event for main-resident rows.
+CREATE OR REPLACE FUNCTION _pg_ripple.json_writeback_enqueue_fn()
+RETURNS trigger
+LANGUAGE plpgsql AS $$
+DECLARE
+    v_mapping_name TEXT    := TG_ARGV[0];
+    v_pred_filter  BIGINT  := NULLIF(TG_ARGV[1], '')::BIGINT;
+    v_subject_id   BIGINT;
+    v_operation    TEXT;
+    v_row_pred     BIGINT;
+    v_is_tombstone BOOLEAN := TG_TABLE_NAME LIKE '%\_tombstones' ESCAPE '\';
+BEGIN
+    IF TG_TABLE_NAME = 'vp_rare' THEN
+        IF TG_OP = 'INSERT' THEN
+            v_row_pred := NEW.p;
+        ELSIF TG_OP = 'DELETE' THEN
+            v_row_pred := OLD.p;
+        END IF;
+        IF v_pred_filter IS NOT NULL AND v_row_pred IS DISTINCT FROM v_pred_filter THEN
+            RETURN NULL;
+        END IF;
+    END IF;
+
+    IF v_is_tombstone THEN
+        IF TG_OP <> 'INSERT' THEN
+            RETURN NULL;
+        END IF;
+        v_subject_id := NEW.s;
+        v_operation  := 'delete';
+    ELSIF TG_OP = 'INSERT' THEN
+        v_subject_id := NEW.s;
+        v_operation  := 'upsert';
+    ELSIF TG_OP = 'DELETE' THEN
+        v_subject_id := OLD.s;
+        v_operation  := 'delete';
+    ELSE
+        RETURN NULL;
+    END IF;
+
+    INSERT INTO _pg_ripple.json_writeback_queue
+        (mapping_name, subject_id, operation)
+    VALUES (v_mapping_name, v_subject_id, v_operation);
+    RETURN NULL;
+END;
+$$;
+
+COMMENT ON FUNCTION _pg_ripple.json_writeback_enqueue_fn() IS
+    'Trigger function that enqueues VP delta/vp_rare/tombstone changes into '
+    'json_writeback_queue (v0.128.0 JSON-WRITEBACK-01; v0.129.0 C18-01 adds '
+    'vp_rare predicate filtering and tombstone-table support)';
+"#,
+    name = "v0129_json_writeback_fixes",
+    requires = ["v0128_json_writeback_schema"]
+);

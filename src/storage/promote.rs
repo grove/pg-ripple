@@ -71,6 +71,12 @@ fn promote_predicate_impl(p_id: i64) {
     crate::security_api::apply_rls_to_vp_table(&delta);
     crate::security_api::apply_rls_to_vp_table(&main_table);
 
+    // C18-01 / ENQUEUE-COVERAGE (v0.129.0): any JSON-mapping writeback
+    // already enabled for this predicate was covering it via a
+    // predicate-filtered vp_rare trigger; now that dedicated tables exist,
+    // install delta + tombstone triggers so coverage survives promotion.
+    crate::json_mapping::install_writeback_triggers_after_promotion(p_id);
+
     // PROMO-01 Phase 2: Atomically move all rows for this predicate from
     // vp_rare to the dedicated delta table in a single CTE — eliminates the
     // window between SELECT and DELETE where concurrent inserts could be orphaned.

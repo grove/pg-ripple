@@ -11,8 +11,19 @@
 //! `writeback_json_row(mapping, subject_iri)` exports a subject as JSON via the
 //! named mapping and writes the resulting values back into the configured
 //! relational target table.  The conflict policy (`replace`, `skip`, `error`)
-//! controls upsert behaviour.  `enable_json_writeback()` installs VP delta
-//! triggers that automatically enqueue writeback events.
+//! controls upsert behaviour.  `enable_json_writeback()` installs triggers
+//! that automatically enqueue writeback events.
+//!
+//! ## v0.129.0 A18 remediation (C18-01 / H18-02)
+//!
+//! Fixes the dictionary-column bug that made the async path silently
+//! non-functional, makes predicate-lookup errors fatal instead of
+//! swallowed, reports real affected-row counts, casts writeback values to
+//! the target column's real type instead of blanket `::text`, validates
+//! `writeback_key_columns` up front, and extends enqueue coverage to
+//! not-yet-promoted (`vp_rare`) predicates and main-resident deletes
+//! (`*_tombstones`) so `enable_json_writeback()` no longer depends on a
+//! predicate already having been promoted to its own VP table.
 //!
 //! ## Relationship to RML / R2RML
 //!
@@ -588,6 +599,119 @@ fn pg_quote_ident(ident: &str) -> String {
     .unwrap_or_else(|| format!("\"{}\"", ident.replace('"', "\"\"")))
 }
 
+/// Internal: check that a table exists in a given schema.
+fn table_exists_in_schema(schema: &str, table: &str) -> bool {
+    pgrx::Spi::get_one_with_args::<bool>(
+        "SELECT EXISTS( \
+             SELECT 1 FROM information_schema.tables \
+             WHERE table_schema = $1 AND table_name = $2)",
+        &[
+            pgrx::datum::DatumWithOid::from(schema),
+            pgrx::datum::DatumWithOid::from(table),
+        ],
+    )
+    .unwrap_or(None)
+    .unwrap_or(false)
+}
+
+/// H18-02 / KEY-VALIDATION: validate that every configured writeback key
+/// column has an asserted value for this subject *before* any INSERT/DELETE
+/// is attempted. Raises a descriptive PT0552 error on the first gap instead
+/// of silently building a mis-numbered SQL placeholder list.
+fn require_key_columns_present(
+    mapping: &str,
+    key_columns: &[String],
+    term_values: &std::collections::HashMap<String, String>,
+) {
+    let missing: Vec<&str> = key_columns
+        .iter()
+        .filter(|c| !term_values.contains_key(c.as_str()))
+        .map(|c| c.as_str())
+        .collect();
+    if !missing.is_empty() {
+        pgrx::error!(
+            "PT0552: json mapping {:?} writeback key column(s) [{}] have no \
+             asserted value for this subject; ensure every writeback_key_columns \
+             predicate is present in the mapping context and has been ingested \
+             for this subject before calling writeback",
+            mapping,
+            missing.join(", ")
+        );
+    }
+}
+
+/// H18-02 / TYPED-PARAMS: fetch (or lazily compute and cache) a map of
+/// `column name -> PostgreSQL type name` for the writeback target table.
+/// The map is derived once from `pg_attribute` and cached in
+/// `_pg_ripple.json_mappings.writeback_column_casts` so it need not be
+/// recomputed on every `writeback_json_row()` call.
+fn fetch_or_compute_column_casts(
+    mapping: &str,
+    schema: &str,
+    table: &str,
+) -> std::collections::HashMap<String, String> {
+    let cached: Option<pgrx::JsonB> = pgrx::Spi::get_one_with_args::<pgrx::JsonB>(
+        "SELECT writeback_column_casts FROM _pg_ripple.json_mappings WHERE name = $1",
+        &[pgrx::datum::DatumWithOid::from(mapping)],
+    )
+    .unwrap_or(None);
+
+    if let Some(pgrx::JsonB(serde_json::Value::Object(obj))) = cached
+        && !obj.is_empty()
+    {
+        return obj
+            .into_iter()
+            .filter_map(|(k, v)| v.as_str().map(|s| (k, s.to_string())))
+            .collect();
+    }
+
+    let casts: std::collections::HashMap<String, String> = pgrx::Spi::connect(|client| {
+        client
+            .select(
+                "SELECT a.attname::text, a.atttypid::regtype::text \
+                 FROM pg_catalog.pg_attribute a \
+                 JOIN pg_catalog.pg_class c ON c.oid = a.attrelid \
+                 JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace \
+                 WHERE n.nspname = $1 AND c.relname = $2 \
+                   AND a.attnum > 0 AND NOT a.attisdropped",
+                None,
+                &[
+                    pgrx::datum::DatumWithOid::from(schema),
+                    pgrx::datum::DatumWithOid::from(table),
+                ],
+            )
+            .unwrap_or_else(|e| pgrx::error!("writeback column list SPI error: {e}"))
+            .filter_map(|row| {
+                let name: String = row.get(1).ok().flatten()?;
+                let ty: String = row.get(2).ok().flatten()?;
+                Some((name, ty))
+            })
+            .collect()
+    });
+
+    if !casts.is_empty() {
+        let casts_json = serde_json::Value::Object(
+            casts
+                .iter()
+                .map(|(k, v)| (k.clone(), serde_json::Value::String(v.clone())))
+                .collect(),
+        );
+        // ponytail: cache is not invalidated on later ALTER TABLE of the
+        // target — disable_json_writeback()/re-register the mapping to
+        // force a refresh if the target table's column types change.
+        pgrx::Spi::run_with_args(
+            "UPDATE _pg_ripple.json_mappings SET writeback_column_casts = $2 WHERE name = $1",
+            &[
+                pgrx::datum::DatumWithOid::from(mapping),
+                pgrx::datum::DatumWithOid::from(pgrx::JsonB(casts_json)),
+            ],
+        )
+        .unwrap_or_else(|e| pgrx::warning!("could not cache writeback column casts: {e}"));
+    }
+
+    casts
+}
+
 /// Internal: write an RDF subject back to a relational table.
 pub fn writeback_json_row_impl(mapping: &str, subject_iri: &str) -> i64 {
     let (writeback_table, writeback_schema, key_columns, conflict_policy) =
@@ -670,29 +794,15 @@ pub fn writeback_json_row_impl(mapping: &str, subject_iri: &str) -> i64 {
         return 0;
     }
 
-    // Get target table columns from pg_catalog (avoids information_schema type coercion issues).
-    let table_cols: Vec<String> = pgrx::Spi::connect(|client| {
-        client
-            .select(
-                "SELECT a.attname::text \
-                 FROM pg_catalog.pg_attribute a \
-                 JOIN pg_catalog.pg_class c ON c.oid = a.attrelid \
-                 JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace \
-                 WHERE n.nspname = $1 AND c.relname = $2 \
-                   AND a.attnum > 0 AND NOT a.attisdropped \
-                 ORDER BY a.attnum",
-                None,
-                &[
-                    pgrx::datum::DatumWithOid::from(writeback_schema.as_str()),
-                    pgrx::datum::DatumWithOid::from(writeback_table.as_str()),
-                ],
-            )
-            .unwrap_or_else(|e| pgrx::error!("writeback column list SPI error: {e}"))
-            .filter_map(|row| row.get::<String>(1).ok().flatten())
-            .collect()
-    });
+    // H18-02 / KEY-VALIDATION: fail fast with a descriptive error rather than
+    // silently building a mis-numbered placeholder list further down.
+    require_key_columns_present(mapping, &key_columns, &term_values);
 
-    if table_cols.is_empty() {
+    // H18-02 / TYPED-PARAMS: column -> real PostgreSQL type, cached in the
+    // mapping catalog (see fetch_or_compute_column_casts).
+    let column_casts = fetch_or_compute_column_casts(mapping, &writeback_schema, &writeback_table);
+
+    if column_casts.is_empty() {
         pgrx::error!(
             "writeback_json_row: target table {}.{} not found or has no columns; \
              check writeback_schema and writeback_table in the mapping",
@@ -701,19 +811,16 @@ pub fn writeback_json_row_impl(mapping: &str, subject_iri: &str) -> i64 {
         );
     }
 
-    // Build column/value pairs from term_values keys that match table columns.
-    let col_set: std::collections::HashSet<&str> = table_cols.iter().map(|s| s.as_str()).collect();
-
+    // Build column/value/type triples from term_values keys that match table columns.
     let mut insert_cols: Vec<String> = Vec::new();
     let mut insert_vals: Vec<String> = Vec::new();
+    let mut insert_types: Vec<String> = Vec::new();
 
-    // Iterate in stable order (table column order).
-    for col in &table_cols {
-        if let Some(val) = term_values.get(col.as_str())
-            && col_set.contains(col.as_str())
-        {
+    for (col, pg_type) in &column_casts {
+        if let Some(val) = term_values.get(col.as_str()) {
             insert_cols.push(col.clone());
             insert_vals.push(val.clone());
+            insert_types.push(pg_type.clone());
         }
     }
 
@@ -721,55 +828,40 @@ pub fn writeback_json_row_impl(mapping: &str, subject_iri: &str) -> i64 {
         return 0;
     }
 
-    // Check for policy='error' conflicts before inserting.
+    // Check for policy='error' conflicts before inserting. Every key column
+    // is guaranteed present in term_values by require_key_columns_present
+    // above, so placeholder numbering and bound values always stay in sync.
     if conflict_policy == "error" {
         let q_schema = pg_quote_ident(&writeback_schema);
         let q_table = pg_quote_ident(&writeback_table);
-        let q_key_cols_check: Vec<String> = key_columns
-            .iter()
-            .filter_map(|col| {
-                term_values.get(col.as_str()).map(|_val| {
-                    let qcol = pg_quote_ident(col);
-                    format!("{qcol} = ${}", qcol) // placeholder; we use a count-based check
-                })
-            })
-            .collect();
-        let _ = q_key_cols_check; // build conflict check separately below
-        // Build WHERE clause with key column values from term_values.
-        let key_placeholders: Vec<String> = key_columns
+        let where_clause: Vec<String> = key_columns
             .iter()
             .enumerate()
-            .filter_map(|(i, col)| {
-                if term_values.contains_key(col.as_str()) {
-                    Some(format!("{} = ${}", pg_quote_ident(col), i + 1))
-                } else {
-                    None
-                }
+            .map(|(i, col)| format!("{} = ${}", pg_quote_ident(col), i + 1))
+            .collect();
+        let check_sql = format!(
+            "SELECT COUNT(*) FROM {q_schema}.{q_table} WHERE {}",
+            where_clause.join(" AND ")
+        );
+        let key_vals: Vec<pgrx::datum::DatumWithOid> = key_columns
+            .iter()
+            .map(|col| {
+                pgrx::datum::DatumWithOid::from(
+                    // require_key_columns_present already validated this is present.
+                    term_values.get(col.as_str()).map_or("", String::as_str),
+                )
             })
             .collect();
-        if !key_placeholders.is_empty() {
-            let where_clause = key_placeholders.join(" AND ");
-            let check_sql =
-                format!("SELECT COUNT(*) FROM {q_schema}.{q_table} WHERE {where_clause}");
-            let key_vals: Vec<pgrx::datum::DatumWithOid> = key_columns
-                .iter()
-                .filter_map(|col| {
-                    term_values
-                        .get(col.as_str())
-                        .map(|v| pgrx::datum::DatumWithOid::from(v.as_str()))
-                })
-                .collect();
-            let count: i64 = pgrx::Spi::get_one_with_args::<i64>(&check_sql, &key_vals)
-                .unwrap_or(None)
-                .unwrap_or(0);
-            if count > 0 {
-                pgrx::error!(
-                    "PT0551: json mapping writeback conflict on mapping {:?} subject {:?}; \
-                     policy is 'error'",
-                    mapping,
-                    subject_iri
-                );
-            }
+        let count: i64 = pgrx::Spi::get_one_with_args::<i64>(&check_sql, &key_vals)
+            .unwrap_or(None)
+            .unwrap_or(0);
+        if count > 0 {
+            pgrx::error!(
+                "PT0551: json mapping writeback conflict on mapping {:?} subject {:?}; \
+                 policy is 'error'",
+                mapping,
+                subject_iri
+            );
         }
     }
 
@@ -802,14 +894,24 @@ pub fn writeback_json_row_impl(mapping: &str, subject_iri: &str) -> i64 {
         }
     };
 
-    // Build parameterized INSERT … SELECT $1::text, $2::text, …
-    let select_vals: Vec<String> = (1..=insert_cols.len())
-        .map(|i| format!("${i}::text"))
+    // H18-02 / TYPED-PARAMS: cast each bound (text) parameter to the target
+    // column's real type instead of a blanket ::text, which previously made
+    // writeback fail for any non-text column (integer, uuid, ...).
+    let select_vals: Vec<String> = insert_types
+        .iter()
+        .enumerate()
+        .map(|(i, pg_type)| format!("CAST(${} AS {pg_type})", i + 1))
         .collect();
     let select_vals_list = select_vals.join(", ");
+
+    // H18-02 / ROW-COUNTS: report the real affected-row count via RETURNING
+    // instead of hard-coding 1 (e.g. 'skip' returns 0 on a genuine conflict).
     let insert_select_sql = format!(
-        "INSERT INTO {q_schema}.{q_table} ({cols_list}) \
-         SELECT {select_vals_list} {conflict_clause}"
+        "WITH ins AS ( \
+             INSERT INTO {q_schema}.{q_table} ({cols_list}) \
+             SELECT {select_vals_list} {conflict_clause} \
+             RETURNING 1 \
+         ) SELECT count(*) FROM ins"
     );
 
     let spi_args: Vec<pgrx::datum::DatumWithOid> = insert_vals
@@ -817,9 +919,9 @@ pub fn writeback_json_row_impl(mapping: &str, subject_iri: &str) -> i64 {
         .map(|s| pgrx::datum::DatumWithOid::from(s.as_str()))
         .collect();
 
-    pgrx::Spi::run_with_args(&insert_select_sql, &spi_args)
-        .map(|_| 1i64)
+    pgrx::Spi::get_one_with_args::<i64>(&insert_select_sql, &spi_args)
         .unwrap_or_else(|e| pgrx::error!("writeback_json_row: INSERT failed: {e}"))
+        .unwrap_or(0)
 }
 
 /// Internal: delete a relational row corresponding to an RDF subject.
@@ -894,58 +996,188 @@ pub fn writeback_json_row_delete_impl(mapping: &str, subject_iri: &str) -> i64 {
         term_values.insert(term, obj_str);
     }
 
+    // H18-02 / KEY-VALIDATION: fail fast with a descriptive error rather than
+    // silently deleting by a weaker (partial-key) WHERE clause.
+    require_key_columns_present(mapping, &key_columns, &term_values);
+
+    // H18-02 / TYPED-PARAMS: cast each key value to its real column type so
+    // the comparison works for non-text key columns (integer, uuid, ...).
+    let column_casts = fetch_or_compute_column_casts(mapping, &writeback_schema, &writeback_table);
+
     let q_schema = pg_quote_ident(&writeback_schema);
     let q_table = pg_quote_ident(&writeback_table);
 
-    // Build WHERE clause from key_columns.
-    let mut conditions: Vec<String> = Vec::new();
-    let mut args_owned: Vec<String> = Vec::new();
-    let mut param_idx = 1usize;
-
-    for col in &key_columns {
-        if let Some(val_str) = term_values.get(col.as_str()) {
-            conditions.push(format!("{} = ${param_idx}::text", pg_quote_ident(col)));
-            args_owned.push(val_str.clone());
-            param_idx += 1;
-        }
-    }
-
-    if conditions.is_empty() {
-        return 0;
-    }
+    let conditions: Vec<String> = key_columns
+        .iter()
+        .enumerate()
+        .map(|(i, col)| {
+            let pg_type = column_casts
+                .get(col.as_str())
+                .map_or("text", |s| s.as_str());
+            format!("{} = CAST(${} AS {pg_type})", pg_quote_ident(col), i + 1)
+        })
+        .collect();
+    let args_owned: Vec<String> = key_columns
+        .iter()
+        // require_key_columns_present already validated this is present.
+        .map(|col| term_values.get(col.as_str()).cloned().unwrap_or_default())
+        .collect();
 
     let where_clause = conditions.join(" AND ");
-    let delete_sql = format!("DELETE FROM {q_schema}.{q_table} WHERE {where_clause}");
+
+    // H18-02 / ROW-COUNTS: report the real affected-row count via RETURNING
+    // instead of hard-coding 1 (e.g. a zero-row delete now returns 0).
+    let delete_sql = format!(
+        "WITH del AS ( \
+             DELETE FROM {q_schema}.{q_table} WHERE {where_clause} RETURNING 1 \
+         ) SELECT count(*) FROM del"
+    );
 
     let spi_args: Vec<pgrx::datum::DatumWithOid> = args_owned
         .iter()
         .map(|s| pgrx::datum::DatumWithOid::from(s.as_str()))
         .collect();
 
-    pgrx::Spi::run_with_args(&delete_sql, &spi_args)
-        .map(|_| 1i64)
+    pgrx::Spi::get_one_with_args::<i64>(&delete_sql, &spi_args)
         .unwrap_or_else(|e| pgrx::error!("writeback_json_row_delete: DELETE failed: {e}"))
+        .unwrap_or(0)
 }
 
-/// Internal: enable VP trigger-based auto-enqueue for a JSON mapping.
+/// Internal: extract predicate IRIs from a JSON-LD `@context` object (skips
+/// `@`-keywords and non-IRI values). Shared by `enable_json_writeback_impl`
+/// and the post-promotion trigger-installation hook.
+fn context_predicate_iris(context: &serde_json::Value) -> Vec<String> {
+    match context.as_object() {
+        Some(obj) => obj
+            .values()
+            .filter_map(|v| match v {
+                serde_json::Value::String(s) if s.starts_with("http") => Some(s.clone()),
+                serde_json::Value::Object(meta) => meta
+                    .get("@id")
+                    .and_then(|id| id.as_str())
+                    .filter(|s| s.starts_with("http"))
+                    .map(String::from),
+                _ => None,
+            })
+            .collect(),
+        None => vec![],
+    }
+}
+
+/// C18-01: look up a predicate's dictionary id by IRI. Returns `None` only
+/// when the predicate has genuinely never been seen (0 rows) — any SPI
+/// error is fatal and propagates immediately rather than being silently
+/// treated as "not yet covered".
+fn lookup_predicate_id(pred_iri: &str) -> Option<i64> {
+    pgrx::Spi::connect(|client| {
+        let tbl = client
+            .select(
+                "SELECT id FROM _pg_ripple.dictionary WHERE value = $1 AND kind = $2",
+                Some(1),
+                &[
+                    pgrx::datum::DatumWithOid::from(pred_iri),
+                    pgrx::datum::DatumWithOid::from(crate::dictionary::KIND_IRI),
+                ],
+            )
+            .unwrap_or_else(|e| pgrx::error!("writeback predicate lookup SPI error: {e}"));
+        if tbl.is_empty() {
+            None
+        } else {
+            tbl.first()
+                .get::<i64>(1)
+                .unwrap_or_else(|e| pgrx::error!("writeback predicate lookup SPI error: {e}"))
+        }
+    })
+}
+
+/// C18-01 / ENQUEUE-COVERAGE: (re)install a `json_writeback_enqueue_fn()`
+/// trigger on `_pg_ripple.<source_table>`. `pred_filter`, when set, is
+/// passed as a second trigger argument so the shared `vp_rare` table can be
+/// scoped to one predicate. Idempotent via `CREATE OR REPLACE TRIGGER`.
+fn create_writeback_trigger(
+    trigger_name: &str,
+    source_table: &str,
+    mapping_literal: &str,
+    pred_filter: Option<i64>,
+) -> Result<(), String> {
+    let q_trigger = pg_quote_ident(trigger_name);
+    let q_table = format!("_pg_ripple.{}", pg_quote_ident(source_table));
+    let args = match pred_filter {
+        Some(id) => format!("'{mapping_literal}', '{id}'"),
+        None => format!("'{mapping_literal}'"),
+    };
+    let sql = format!(
+        "CREATE OR REPLACE TRIGGER {q_trigger} \
+         AFTER INSERT OR DELETE ON {q_table} \
+         FOR EACH ROW EXECUTE FUNCTION _pg_ripple.json_writeback_enqueue_fn({args})"
+    );
+    pgrx::Spi::run_with_args(&sql, &[]).map_err(|e| e.to_string())
+}
+
+/// C18-01 / ENQUEUE-COVERAGE: called from `promote_predicate_impl()` right
+/// after a predicate's dedicated VP tables (delta + main + tombstones) are
+/// created. Before promotion all of a predicate's data lives in the shared
+/// `vp_rare` table, which `enable_json_writeback_impl` already covers with a
+/// predicate-filtered trigger — but that trigger stops receiving rows once
+/// data moves to the new dedicated tables, so any mapping already enabled
+/// for this predicate needs triggers installed on the new tables too.
+pub(crate) fn install_writeback_triggers_after_promotion(pred_id: i64) {
+    let pred_iri = match crate::dictionary::decode(pred_id) {
+        Some(v) => v,
+        None => return,
+    };
+
+    let mappings: Vec<(String, serde_json::Value)> = pgrx::Spi::connect(|client| {
+        client
+            .select(
+                "SELECT name, context FROM _pg_ripple.json_mappings WHERE writeback_enabled = true",
+                None,
+                &[],
+            )
+            .unwrap_or_else(|e| pgrx::error!("writeback promotion hook: SPI error: {e}"))
+            .filter_map(|row| {
+                let name: String = row.get(1).ok().flatten()?;
+                let ctx: pgrx::JsonB = row.get(2).ok().flatten()?;
+                Some((name, ctx.0))
+            })
+            .collect()
+    });
+
+    for (mapping, context) in mappings {
+        if !context_predicate_iris(&context).contains(&pred_iri) {
+            continue;
+        }
+
+        let safe_mapping = mapping.replace(|c: char| !c.is_alphanumeric(), "_");
+        let mapping_literal = mapping.replace('\'', "''");
+        let delta_table = format!("vp_{pred_id}_delta");
+        let ts_table = format!("vp_{pred_id}_tombstones");
+        let delta_trigger = format!("pg_ripple_jwb_{safe_mapping}_{pred_id}");
+        let ts_trigger = format!("pg_ripple_jwb_{safe_mapping}_{pred_id}_ts");
+
+        if let Err(e) =
+            create_writeback_trigger(&delta_trigger, &delta_table, &mapping_literal, None)
+        {
+            pgrx::warning!(
+                "install_writeback_triggers_after_promotion: could not install delta \
+                 trigger for mapping {mapping:?} predicate {pred_id}: {e}"
+            );
+        }
+        if let Err(e) = create_writeback_trigger(&ts_trigger, &ts_table, &mapping_literal, None) {
+            pgrx::warning!(
+                "install_writeback_triggers_after_promotion: could not install tombstone \
+                 trigger for mapping {mapping:?} predicate {pred_id}: {e}"
+            );
+        }
+    }
+}
+
+/// Internal: enable trigger-based auto-enqueue for a JSON mapping.
 pub fn enable_json_writeback_impl(mapping: &str) {
     // First validate writeback_table and key_columns via fetch_writeback_config.
     let (writeback_table, writeback_schema, _key_columns, _) = fetch_writeback_config(mapping);
 
-    // Verify the target table actually exists.
-    let table_exists: bool = pgrx::Spi::get_one_with_args::<bool>(
-        "SELECT EXISTS( \
-             SELECT 1 FROM information_schema.tables \
-             WHERE table_schema = $1 AND table_name = $2)",
-        &[
-            pgrx::datum::DatumWithOid::from(writeback_schema.as_str()),
-            pgrx::datum::DatumWithOid::from(writeback_table.as_str()),
-        ],
-    )
-    .unwrap_or(None)
-    .unwrap_or(false);
-
-    if !table_exists {
+    if !table_exists_in_schema(&writeback_schema, &writeback_table) {
         pgrx::error!(
             "enable_json_writeback: target table {}.{} does not exist",
             writeback_schema,
@@ -965,47 +1197,28 @@ pub fn enable_json_writeback_impl(mapping: &str) {
     .map(|j| j.0)
     .unwrap_or(serde_json::Value::Object(Default::default()));
 
-    let pred_iris: Vec<String> = if let Some(obj) = context_json.as_object() {
-        obj.values()
-            .filter_map(|v| match v {
-                serde_json::Value::String(s) => {
-                    if s.starts_with("http") {
-                        Some(s.clone())
-                    } else {
-                        None
-                    }
-                }
-                serde_json::Value::Object(meta) => meta
-                    .get("@id")
-                    .and_then(|id| id.as_str())
-                    .filter(|s| s.starts_with("http"))
-                    .map(String::from),
-                _ => None,
-            })
-            .collect()
-    } else {
-        vec![]
-    };
+    let pred_iris: Vec<String> = context_predicate_iris(&context_json);
 
-    // For each predicate IRI, find the VP delta table and install trigger.
     let safe_mapping = mapping.replace(|c: char| !c.is_alphanumeric(), "_");
+    let mapping_literal = mapping.replace('\'', "''");
 
-    // v0.128.1 C18-01 containment: track exactly which predicates got a
-    // working enqueue trigger installed. Until v0.129.0 rebuilds this on a
-    // storage-level event path, `writeback_enabled` must never claim more
-    // coverage than what was actually installed just now.
-    let mut installed = 0usize;
+    // C18-01: track exactly which predicates got a working enqueue trigger
+    // installed. `writeback_enabled` must never claim more coverage than
+    // what was actually installed just now.
+    //
+    // ENQUEUE-COVERAGE: a predicate is covered by EITHER (a) a trigger on
+    // its dedicated `vp_{id}_delta` table (once promoted), OR (b) a
+    // predicate-filtered trigger on the shared `vp_rare` table (before
+    // promotion — this is where all not-yet-promoted predicates' data
+    // lives). Installing (b) unconditionally means a predicate no longer
+    // has to already be promoted for `enable_json_writeback` to succeed;
+    // `install_writeback_triggers_after_promotion` picks up (a) — and
+    // tombstone coverage — the moment a covered predicate is promoted.
+    let mut covered_count = 0usize;
     let mut uncovered: Vec<String> = Vec::new();
 
     for pred_iri in &pred_iris {
-        // Look up predicate_id in dictionary.
-        let pred_id_opt: Option<i64> = pgrx::Spi::get_one_with_args::<i64>(
-            "SELECT id FROM _pg_ripple.dictionary WHERE iri = $1 LIMIT 1",
-            &[pgrx::datum::DatumWithOid::from(pred_iri.as_str())],
-        )
-        .unwrap_or(None);
-
-        let pred_id = match pred_id_opt {
+        let pred_id = match lookup_predicate_id(pred_iri) {
             Some(id) => id,
             None => {
                 uncovered.push(format!("{pred_iri} (no dictionary entry yet)"));
@@ -1013,45 +1226,49 @@ pub fn enable_json_writeback_impl(mapping: &str) {
             }
         };
 
-        // Check whether the delta table exists.
-        let delta_table = format!("vp_{pred_id}_delta");
-        let delta_exists: bool = pgrx::Spi::get_one_with_args::<bool>(
-            "SELECT EXISTS( \
-                 SELECT 1 FROM information_schema.tables \
-                 WHERE table_schema = '_pg_ripple' AND table_name = $1)",
-            &[pgrx::datum::DatumWithOid::from(delta_table.as_str())],
-        )
-        .unwrap_or(None)
-        .unwrap_or(false);
+        let mut pred_covered = false;
+        let mut errs: Vec<String> = Vec::new();
 
-        if !delta_exists {
-            uncovered.push(format!("{pred_iri} (no {delta_table} table yet)"));
-            continue;
+        let delta_table = format!("vp_{pred_id}_delta");
+        if table_exists_in_schema("_pg_ripple", &delta_table) {
+            let trig = format!("pg_ripple_jwb_{safe_mapping}_{pred_id}");
+            match create_writeback_trigger(&trig, &delta_table, &mapping_literal, None) {
+                Ok(()) => pred_covered = true,
+                Err(e) => errs.push(format!("delta trigger: {e}")),
+            }
+
+            // Best-effort: also cover main-resident deletes for an
+            // already-promoted predicate. Failure here does not lose
+            // coverage — the delta trigger above already suffices.
+            let ts_table = format!("vp_{pred_id}_tombstones");
+            let ts_trig = format!("pg_ripple_jwb_{safe_mapping}_{pred_id}_ts");
+            if let Err(e) = create_writeback_trigger(&ts_trig, &ts_table, &mapping_literal, None) {
+                pgrx::warning!(
+                    "enable_json_writeback: could not install tombstone trigger for \
+                     predicate {pred_iri}: {e}"
+                );
+            }
         }
 
-        let trigger_name = format!("pg_ripple_jwb_{}_{}", safe_mapping, pred_id);
-        let q_trigger = pg_quote_ident(&trigger_name);
-        let q_delta = format!("_pg_ripple.{}", pg_quote_ident(&delta_table));
-        let q_mapping = mapping.replace('\'', "''");
+        let rare_trig = format!("pg_ripple_jwb_{safe_mapping}_{pred_id}_rare");
+        match create_writeback_trigger(&rare_trig, "vp_rare", &mapping_literal, Some(pred_id)) {
+            Ok(()) => pred_covered = true,
+            Err(e) => errs.push(format!("vp_rare trigger: {e}")),
+        }
 
-        let create_trigger_sql = format!(
-            "CREATE TRIGGER {q_trigger} \
-             AFTER INSERT OR DELETE ON {q_delta} \
-             FOR EACH ROW EXECUTE FUNCTION _pg_ripple.json_writeback_enqueue_fn('{q_mapping}')"
-        );
-
-        match pgrx::Spi::run_with_args(&create_trigger_sql, &[]) {
-            Ok(_) => installed += 1,
-            Err(e) => uncovered.push(format!("{pred_iri} (trigger install failed: {e})")),
+        if pred_covered {
+            covered_count += 1;
+        } else {
+            uncovered.push(format!("{pred_iri} ({})", errs.join("; ")));
         }
     }
 
-    // v0.128.1 C18-01 containment: fail closed rather than silently reporting
-    // "enabled" when the enqueue path is incomplete or entirely missing.
-    if installed == 0 || !uncovered.is_empty() {
+    // Fail closed rather than silently reporting "enabled" when the enqueue
+    // path is incomplete or entirely missing.
+    if covered_count == 0 || !uncovered.is_empty() {
         pgrx::error!(
             "enable_json_writeback: cannot enable — incomplete enqueue coverage \
-             ({installed} of {} predicate(s) covered); async writeback is unavailable \
+             ({covered_count} of {} predicate(s) covered); async writeback is unavailable \
              for this mapping until every mapped predicate has been ingested at least \
              once. Uncovered: [{}]. writeback_enabled was left false; use \
              writeback_json_row()/writeback_json_row_delete() for direct writeback \
@@ -1077,28 +1294,35 @@ pub fn disable_json_writeback_impl(mapping: &str) {
     let safe_mapping = mapping.replace(|c: char| !c.is_alphanumeric(), "_");
     let trigger_prefix = format!("pg_ripple_jwb_{safe_mapping}_");
 
-    // Find all triggers matching this mapping prefix.
-    let trigger_rows: Vec<(String, String)> = pgrx::Spi::connect(|client| {
-        client
-            .select(
-                "SELECT trigger_name, event_object_table \
-                 FROM information_schema.triggers \
-                 WHERE trigger_schema = '_pg_ripple' \
-                   AND trigger_name LIKE $1 \
-                 GROUP BY trigger_name, event_object_table",
-                None,
-                &[pgrx::datum::DatumWithOid::from(
-                    format!("{trigger_prefix}%").as_str(),
-                )],
-            )
-            .unwrap_or_else(|e| pgrx::error!("disable_json_writeback: SPI error: {e}"))
-            .filter_map(|row| {
-                let tn: String = row.get(1).ok().flatten()?;
-                let tbl: String = row.get(2).ok().flatten()?;
-                Some((tn, tbl))
-            })
-            .collect()
-    });
+    // Find all triggers matching this mapping prefix. Queries pg_catalog
+    // directly with the (sanitized-alphanumeric) prefix inlined as a SQL
+    // literal rather than bound as an SPI parameter: a bound LIKE parameter
+    // against pg_trigger/pg_class/pg_namespace has been observed to return
+    // zero rows for triggers that demonstrably exist (confirmed via
+    // pg_catalog.pg_trigger directly), silently leaving DROP TRIGGER with
+    // nothing to do — the identical query with the pattern as a literal
+    // finds them correctly. `trigger_prefix` can only contain
+    // alphanumerics and underscores (see `safe_mapping` above), so the
+    // literal is injection-safe by construction.
+    let like_pattern = format!("{trigger_prefix}%").replace('\'', "''");
+    let find_triggers_sql = format!(
+        "SELECT string_agg(DISTINCT t.tgname || chr(1) || c.relname, chr(2)) \
+         FROM pg_catalog.pg_trigger t \
+         JOIN pg_catalog.pg_class c ON c.oid = t.tgrelid \
+         JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace \
+         WHERE n.nspname = '_pg_ripple' \
+           AND NOT t.tgisinternal \
+           AND t.tgname LIKE '{like_pattern}'"
+    );
+    let trigger_rows: Vec<(String, String)> = pgrx::Spi::get_one::<String>(&find_triggers_sql)
+        .unwrap_or_else(|e| pgrx::error!("disable_json_writeback: SPI error: {e}"))
+        .map(|agg| {
+            agg.split('\u{2}')
+                .filter_map(|entry| entry.split_once('\u{1}'))
+                .map(|(tn, tbl)| (tn.to_string(), tbl.to_string()))
+                .collect()
+        })
+        .unwrap_or_default();
 
     for (trigger_name, table_name) in &trigger_rows {
         let q_trigger = pg_quote_ident(trigger_name);
@@ -1208,23 +1432,32 @@ pub fn drain_json_writeback_queue() {
     });
 
     for (row_id, mapping_name, subject_id, operation) in &pending_rows {
-        // Decode subject_id back to IRI.
-        let subject_iri_opt: Option<String> = pgrx::Spi::get_one_with_args::<String>(
-            "SELECT iri FROM _pg_ripple.dictionary WHERE id = $1 LIMIT 1",
-            &[pgrx::datum::DatumWithOid::from(*subject_id)],
-        )
-        .unwrap_or(None);
+        // Decode subject_id back to IRI. C18-01: the real column is `value`,
+        // not `iri`; the async path was silently non-functional without this.
+        let subject_iri_opt: Option<String> = pgrx::Spi::connect(|client| {
+            let tbl = client
+                .select(
+                    "SELECT value FROM _pg_ripple.dictionary WHERE id = $1 AND kind = $2",
+                    Some(1),
+                    &[
+                        pgrx::datum::DatumWithOid::from(*subject_id),
+                        pgrx::datum::DatumWithOid::from(crate::dictionary::KIND_IRI),
+                    ],
+                )
+                .unwrap_or_else(|e| {
+                    pgrx::error!("drain_json_writeback_queue: dictionary lookup SPI error: {e}")
+                });
+            if tbl.is_empty() {
+                None
+            } else {
+                tbl.first().get::<String>(1).ok().flatten()
+            }
+        });
 
         let subject_iri = match subject_iri_opt {
             Some(s) => s,
             None => {
-                // Mark as processed with error (subject not in dictionary).
-                let _ = pgrx::Spi::run_with_args(
-                    "UPDATE _pg_ripple.json_writeback_queue \
-                     SET processed_at = now(), error = 'subject_id not found in dictionary' \
-                     WHERE id = $1",
-                    &[pgrx::datum::DatumWithOid::from(*row_id)],
-                );
+                mark_queue_row_processed(*row_id, Some("subject_id not found in dictionary"));
                 continue;
             }
         };
@@ -1249,15 +1482,39 @@ pub fn drain_json_writeback_queue() {
             });
 
         let error_msg: Option<String> = result.err();
+        mark_queue_row_processed(*row_id, error_msg.as_deref());
+    }
+}
 
-        let _ = pgrx::Spi::run_with_args(
-            "UPDATE _pg_ripple.json_writeback_queue \
-             SET processed_at = now(), error = $2 WHERE id = $1",
-            &[
-                pgrx::datum::DatumWithOid::from(*row_id),
-                pgrx::datum::DatumWithOid::from(error_msg.as_deref()),
-            ],
+/// L18-02 / QUEUE-DRAIN: mark a queue row processed. If the status UPDATE
+/// itself fails, log a warning, bump the `pg_ripple_json_writeback_drain_errors_total`
+/// metric, and leave the row pending with `retry_count` incremented instead
+/// of silently dropping it (the previous `let _ = …` pattern).
+fn mark_queue_row_processed(row_id: i64, error_msg: Option<&str>) {
+    let update_result = pgrx::Spi::run_with_args(
+        "UPDATE _pg_ripple.json_writeback_queue \
+         SET processed_at = now(), error = $2 WHERE id = $1",
+        &[
+            pgrx::datum::DatumWithOid::from(row_id),
+            pgrx::datum::DatumWithOid::from(error_msg),
+        ],
+    );
+
+    if let Err(e) = update_result {
+        pgrx::warning!(
+            "drain_json_writeback_queue: status update failed for queue row {row_id}: {e}; \
+             leaving row pending with incremented retry_count"
         );
+        crate::stats::increment_json_writeback_drain_errors();
+
+        if let Err(e2) = pgrx::Spi::run_with_args(
+            "UPDATE _pg_ripple.json_writeback_queue SET retry_count = retry_count + 1 WHERE id = $1",
+            &[pgrx::datum::DatumWithOid::from(row_id)],
+        ) {
+            pgrx::warning!(
+                "drain_json_writeback_queue: retry_count update also failed for queue row {row_id}: {e2}"
+            );
+        }
     }
 }
 

@@ -321,6 +321,7 @@ subject_iri)` and requires write auth when authentication is enabled.
 |---|---|---|
 | `422` | `writeback_target_not_configured` | The mapping has no writeback table or key columns (`PT0550`) |
 | `409` | `writeback_conflict` | Conflict policy is `error` and a conflicting row exists (`PT0551`) |
+| `422` | `writeback_key_column_missing` | A configured key-column predicate has no value for this subject (`PT0552`) |
 
 ### `GET /json-mapping/{name}/writeback/status`
 

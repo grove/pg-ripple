@@ -25,9 +25,9 @@ No separate graph database. No data pipelines. No extra infrastructure.
 
 ---
 
-## What works today (v0.128.1)
+## What works today (v0.129.0)
 
-pg_ripple passes **100% of the W3C SPARQL 1.1, SHACL Core, and OWL 2 RL conformance test suites** — the industry benchmarks for correctness in knowledge graph systems. After 128 releases it covers the full feature set described below.
+pg_ripple passes **100% of the W3C SPARQL 1.1, SHACL Core, and OWL 2 RL conformance test suites** — the industry benchmarks for correctness in knowledge graph systems. After 129 releases it covers the full feature set described below.
 
 | What you can do | How it works |
 |---|---|
@@ -52,7 +52,7 @@ pg_ripple passes **100% of the W3C SPARQL 1.1, SHACL Core, and OWL 2 RL conforma
 | **Multi-tenant graph isolation** | `create_tenant()` registers a named graph with a triple-count quota. Triggers enforce the quota on insert; `tenant_stats()` reports usage per tenant. |
 | **SPARQL-DL OWL axiom queries** | `sparql_dl_subclasses(IRI)` and `sparql_dl_superclasses(IRI)` route OWL vocabulary BGPs (`owl:subClassOf`, `owl:equivalentClass`, `owl:disjointWith`) directly to VP table T-Box data — no separate index required. |
 | **SHACL-SPARQL rules** | SHACL Advanced Features: `sh:SPARQLRule` and `sh:SPARQLConstraint` are evaluated as native SPARQL queries against the VP store, enabling complex cross-shape validation that cannot be expressed with pure property-path SHACL. |
-| **JSON↔RDF mapping registry** | Register named bidirectional JSON↔RDF mappings with `register_json_mapping(name, context_jsonb, shape_iri)`. `ingest_json(mapping, document)` converts a JSON document to RDF triples using the stored context; `export_json_node(mapping, iri)` converts a graph node back to JSON. Mapping inconsistencies with the optional SHACL shape are recorded in `_pg_ripple.json_mapping_warnings`. |
+| **JSON↔RDF mapping registry** | Register named bidirectional JSON↔RDF mappings with `register_json_mapping(name, context_jsonb, shape_iri)`. `ingest_json(mapping, document)` converts a JSON document to RDF triples using the stored context; `export_json_node(mapping, iri)` converts a graph node back to JSON. Mapping inconsistencies with the optional SHACL shape are recorded in `_pg_ripple.json_mapping_warnings`. `writeback_json_row()` / `writeback_json_row_delete()` push RDF graph changes back into the source relational table (conflict policies `replace`/`skip`/`error`); `enable_json_writeback()` installs triggers — covering both not-yet-promoted and already-promoted predicates — so changes are queued and applied automatically. |
 | **R2RML direct mapping** | `pg_ripple.r2rml_load(mapping_ttl)` applies an R2RML mapping document to convert relational tables in the same database into RDF triples, inserted directly into the VP store. |
 | **Graph analytics (PageRank)** | Datalog-native iterative PageRank via `pg_ripple.pagerank_run()`. Supports topic-sensitive, personalized, confidence-weighted, and temporal-decay variants. Incremental refresh via IVM dirty-edge queue. Four centrality measures (betweenness, closeness, degree, Katz). `pg:pagerank()` SPARQL function. Score-explanation trees via `explain_pagerank()`. Sketch-based approximate top-N. SHACL-aware ranking. Standard-format export (CSV, Turtle, N-Triples, JSON-LD). |
 | **Probabilistic reasoning** | `@weight(FLOAT)` annotations on Datalog rules for probabilistic inference with noisy-OR confidence propagation. `pg:confidence()`, `pg:fuzzy_match()`, `pg:token_set_ratio()` SPARQL functions. Soft SHACL scoring (`shacl_score()`). Confidence-weighted bulk load. PROV-O source-trust propagation. Cyclic probabilistic programs with well-founded convergence guarantees. |
@@ -179,12 +179,16 @@ Token budgets matter. `sparql_construct_jsonld()` takes a SPARQL CONSTRUCT query
 
 ## Where we're headed
 
-v0.128.1 is an out-of-band safety patch — a router-construction crash in the
+v0.128.1 was an out-of-band safety patch — a router-construction crash in the
 `pg_ripple_http` companion, a Docker image default that accepted passwordless
 remote database connections, and an async JSON-writeback path that could
-report itself enabled without full coverage. See
+report itself enabled without full coverage. v0.129.0 repairs that async
+writeback path for real: a wrong dictionary column name had made it silently
+non-functional, and enqueue coverage now extends to not-yet-promoted
+predicates and main-resident deletes (see "JSON↔RDF mapping registry" above).
+See
 [ROADMAP.md](ROADMAP.md#production-readiness--ga-qualification-v01281--v01370)
-for the full v0.129.0–v0.137.0 production-readiness sequence still ahead of
+for the full v0.130.0–v0.137.0 production-readiness sequence still ahead of
 v1.0.0.
 
 The v0.91.0–v0.111.0 development cycle adds deep reasoning capabilities: proof trees and justification infrastructure (v0.100.0), natural-language explanation of derived facts via LLM or deterministic fallback (v0.101.0), what-if hypothetical inference (v0.102.0), Datalog conflict detection (v0.103.0), versioned domain rule libraries (v0.104.0), guided rule authoring with LLM-backed NL-to-Datalog translation (v0.105.0), first-class temporal fact store with AFTER/BEFORE/DURING operators and CDC integration (v0.106.0–v0.107.0), Bayesian confidence updates with evidence log and derivation-DAG propagation (v0.108.0), neuro-symbolic record linkage with six string-similarity built-ins and a five-stage `resolve_entities()` pipeline (v0.109.0), NS-RL evaluation harness with live ER monitoring stream tables and rule explainability (v0.110.0), and Privacy-Preserving Record Linkage via CLK Bloom-filter encoding and differential-privacy aggregates (v0.111.0). Every row in `pg_ripple.feature_status()` shows `implemented`.

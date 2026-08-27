@@ -357,6 +357,9 @@ pub(crate) async fn metrics_endpoint(
          # HELP pg_ripple_bidi_relay_dropped_total Total bidi relay dispatch calls dropped due to inflight overflow (H15-03)\n\
          # TYPE pg_ripple_bidi_relay_dropped_total counter\n\
          pg_ripple_bidi_relay_dropped_total {}\n\
+         # HELP pg_ripple_json_writeback_drain_errors_total Total drain_json_writeback_queue() status-update failures (L18-02)\n\
+         # TYPE pg_ripple_json_writeback_drain_errors_total counter\n\
+         pg_ripple_json_writeback_drain_errors_total {}\n\
          # HELP pg_ripple_merge_cycle_duration_seconds Cumulative merge cycle wall-clock time in seconds (M15-19)\n\
          # TYPE pg_ripple_merge_cycle_duration_seconds counter\n\
          pg_ripple_merge_cycle_duration_seconds {}\n\
@@ -448,6 +451,7 @@ pub(crate) async fn metrics_endpoint(
         m.pagerank_queue_max_delta(),
         m.pagerank_queue_oldest_enqueue_seconds(),
         m.bidi_relay_dropped_total(),
+        m.json_writeback_drain_errors_total(),
         m.merge_cycle_duration_secs(),
         m.datalog_stratum_duration_secs(),
         m.shacl_validation_queue_depth(),

@@ -48,6 +48,7 @@
 |------|---------|
 | [Querying the World from Inside PostgreSQL](sparql-federation-local-remote.md) | SPARQL `SERVICE` clauses that reach out to Wikidata, DBpedia, or your company's other SPARQL endpoints — federated from inside a single query. Cost-based planning, connection pooling, result caching, and the SSRF allowlist that keeps it safe. |
 | [From Flat Triples to Nested JSON](json-ld-framing-nested-json.md) | A CONSTRUCT query returns triples. JSON-LD framing turns those triples into the nested JSON your API consumers actually want. Frame-driven shaping, `@embed`, `@reverse`, and why you don't need a separate API layer for graph-to-tree conversion. |
+| [JSON Writeback, and What It Took to Make It Actually Work](json-writeback-correctness.md) | The round-trip architecture behind `writeback_json_row()`, the dictionary-column bug that made async writeback silently non-functional, and the vp_rare/tombstone enqueue-coverage model that finally closes the loop. |
 
 ### AI & Semantic Search
 

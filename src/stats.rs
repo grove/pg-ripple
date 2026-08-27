@@ -37,6 +37,17 @@ pub(crate) static BIDI_RELAY_INFLIGHT: AtomicI64 = AtomicI64::new(0);
 /// Exposed via `streaming_metrics()` and the `/metrics` Prometheus endpoint.
 pub(crate) static BIDI_RELAY_DROPPED_TOTAL: AtomicI64 = AtomicI64::new(0);
 
+// ─── v0.129.0 JSON writeback drain-queue counters (L18-02) ────────────────────
+
+/// Total status-update failures inside `drain_json_writeback_queue()`.
+/// Exposed via `streaming_metrics()` and the `/metrics` Prometheus endpoint.
+static JSON_WRITEBACK_DRAIN_ERRORS_TOTAL: AtomicI64 = AtomicI64::new(0);
+
+/// Increment the writeback drain-queue status-update error counter (L18-02).
+pub fn increment_json_writeback_drain_errors() {
+    JSON_WRITEBACK_DRAIN_ERRORS_TOTAL.fetch_add(1, Ordering::Relaxed);
+}
+
 // -- Increment helpers --------------------------------------------------------
 
 pub fn increment_cursor_pages_opened() {
@@ -108,6 +119,7 @@ mod pg_ripple {
     /// - `arrow_batches_sent`             -- Arrow IPC batches sent (HTTP service)
     /// - `arrow_ticket_rejections`        -- invalid/expired ticket rejections
     /// - `citus_brin_summarise_completed` -- BRIN summarise ops after merge
+    /// - `json_writeback_drain_errors_total` -- drain_json_writeback_queue() status-update failures (L18-02)
     ///
     /// ```sql
     /// SELECT pg_ripple.streaming_metrics();
@@ -123,7 +135,8 @@ mod pg_ripple {
             "arrow_ticket_rejections":        ARROW_TICKET_REJECTIONS.load(Ordering::Relaxed),
             "citus_brin_summarise_completed": CITUS_BRIN_SUMMARISE_COMPLETED.load(Ordering::Relaxed),
             "bidi_relay_inflight":            super::BIDI_RELAY_INFLIGHT.load(Ordering::Relaxed),
-            "bidi_relay_dropped_total":       super::BIDI_RELAY_DROPPED_TOTAL.load(Ordering::Relaxed)
+            "bidi_relay_dropped_total":       super::BIDI_RELAY_DROPPED_TOTAL.load(Ordering::Relaxed),
+            "json_writeback_drain_errors_total": super::JSON_WRITEBACK_DRAIN_ERRORS_TOTAL.load(Ordering::Relaxed)
         }))
     }
 }

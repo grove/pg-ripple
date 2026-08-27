@@ -105,6 +105,10 @@ pub struct Metrics {
     /// Total bidi relay dispatch calls dropped due to inflight overflow.
     bidi_relay_dropped_total: AtomicU64,
 
+    // L18-02 (v0.129.0): JSON writeback drain-queue status-update failures.
+    /// Total drain_json_writeback_queue() status-update failures.
+    json_writeback_drain_errors_total: AtomicU64,
+
     // M15-19 (v0.96.0): four missing Prometheus metrics.
     /// Cumulative merge cycle wall-clock time in microseconds.
     merge_cycle_duration_us: AtomicU64,
@@ -196,6 +200,7 @@ impl Metrics {
             pagerank_queue_max_delta_bits: AtomicU64::new(0),
             pagerank_queue_oldest_enqueue_seconds: AtomicU64::new(0),
             bidi_relay_dropped_total: AtomicU64::new(0),
+            json_writeback_drain_errors_total: AtomicU64::new(0),
             merge_cycle_duration_us: AtomicU64::new(0),
             datalog_stratum_duration_us: AtomicU64::new(0),
             shacl_validation_queue_depth: AtomicU64::new(0),
@@ -491,6 +496,20 @@ impl Metrics {
     /// Return the total number of bidi relay calls dropped due to inflight overflow.
     pub fn bidi_relay_dropped_total(&self) -> u64 {
         self.bidi_relay_dropped_total.load(Ordering::Relaxed)
+    }
+
+    // L18-02 (v0.129.0): JSON writeback drain-queue status-update failures.
+
+    /// Refresh the JSON writeback drain-error counter from the extension's streaming_metrics().
+    pub fn update_json_writeback_drain_errors_total(&self, errors: u64) {
+        self.json_writeback_drain_errors_total
+            .store(errors, Ordering::Relaxed);
+    }
+
+    /// Return the total number of drain_json_writeback_queue() status-update failures.
+    pub fn json_writeback_drain_errors_total(&self) -> u64 {
+        self.json_writeback_drain_errors_total
+            .load(Ordering::Relaxed)
     }
 
     // M15-19 (v0.96.0): four new Prometheus metrics.
