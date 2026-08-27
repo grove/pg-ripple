@@ -1,5 +1,11 @@
 # pg_ripple GUC Reference
 
+For the complete reference, see [the reference GUC documentation](src/reference/guc-reference.md).
+
+`pg_ripple.llm_api_key_env` accepts only environment-variable names matching
+`^[A-Z_][A-Z0-9_]*$`. Raw values are rejected. During a pre-0.131 migration,
+a superuser may temporarily set `pg_ripple.llm_api_key_env_allow_raw = on`.
+
 > **Version**: v0.116.0  
 > All parameters are prefixed with `pg_ripple.` and configurable via `SET`, `postgresql.conf`, or `ALTER DATABASE/ROLE SET`.
 

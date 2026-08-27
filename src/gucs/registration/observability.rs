@@ -9,34 +9,30 @@ use pgrx::guc::{GucContext, GucFlags};
 #[allow(unused_imports)]
 use pgrx::prelude::*;
 
-unsafe extern "C-unwind" fn assign_llm_api_key_env(
-    newval: *const std::ffi::c_char,
-    _extra: *mut std::ffi::c_void,
-) {
-    if newval.is_null() {
-        return;
+#[pg_guard]
+unsafe extern "C-unwind" fn check_llm_api_key_env(
+    newval: *mut *mut std::ffi::c_char,
+    _extra: *mut *mut std::ffi::c_void,
+    _source: pgrx::pg_sys::GucSource::Type,
+) -> bool {
+    if newval.is_null() || unsafe { (*newval).is_null() } || LLM_API_KEY_ENV_ALLOW_RAW.get() {
+        return true;
     }
-    // SAFETY: newval is a GUC assign-hook argument; pointer is valid for
-    // the duration of this call and the string has at least a NUL terminator.
-    let s = unsafe { std::ffi::CStr::from_ptr(newval).to_str().unwrap_or("") };
-    if s.is_empty() {
-        return;
-    }
-    // Heuristic: env var names only contain A-Z, 0-9, and underscores.
-    // If the value contains lowercase letters, hyphens, slashes, or looks
-    // like a base64/JWT token (long string with mixed chars), warn the user.
-    let looks_like_raw_key = s.len() > 20
-        || s.contains(['-', '.', '/', '=', '+'])
-        || s.chars().any(|c| c.is_ascii_lowercase());
-    if looks_like_raw_key {
-        pgrx::warning!(
-            "pg_ripple.llm_api_key_env looks like a raw API key, not an \
-             environment variable name. Set it to the NAME of an env var \
-             (e.g. MY_LLM_KEY) rather than the key value itself. \
-             Storing API keys in GUCs is insecure: they appear in \
-             pg_settings and server logs."
+    // SAFETY: newval is a GUC check-hook argument; pointer is valid for the
+    // duration of this call and the string has at least a NUL terminator.
+    let s = unsafe { std::ffi::CStr::from_ptr(*newval).to_str().unwrap_or("") };
+    let valid = s
+        .as_bytes()
+        .first()
+        .is_some_and(|c| c.is_ascii_uppercase() || *c == b'_')
+        && s.bytes()
+            .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == b'_');
+    if !valid {
+        pgrx::error!(
+            "llm_api_key_env must be an environment-variable name (e.g. MY_KEY_ENV), not a raw key value"
         );
     }
+    true
 }
 
 /// Register all pg_ripple GUC parameters.
@@ -71,17 +67,26 @@ pub fn register() {
     unsafe {
         pgrx::GucRegistry::define_string_guc_with_hooks(
             c"pg_ripple.llm_api_key_env",
-            c"Name of the environment variable holding the LLM API key \
-          (default: PG_RIPPLE_LLM_API_KEY). Never stored inline. (v0.49.0)",
-            c"",
+            c"Name of the environment variable holding the LLM API key; must match ^[A-Z_][A-Z0-9_]*$ \
+          (default: PG_RIPPLE_LLM_API_KEY). Raw values require pg_ripple.llm_api_key_env_allow_raw = on. (v0.131.0)",
+            c"PG_RIPPLE_LLM_API_KEY",
             &LLM_API_KEY_ENV,
             GucContext::Userset,
             GucFlags::default(),
+            Some(check_llm_api_key_env),
             None,
-            Some(assign_llm_api_key_env),
             None,
         );
     }
+
+    pgrx::GucRegistry::define_bool_guc(
+        c"pg_ripple.llm_api_key_env_allow_raw",
+        c"Allow raw API-key values in pg_ripple.llm_api_key_env during pre-0.131 migration (default: off).",
+        c"",
+        &LLM_API_KEY_ENV_ALLOW_RAW,
+        GucContext::Suset,
+        GucFlags::default(),
+    );
 
     pgrx::GucRegistry::define_bool_guc(
         c"pg_ripple.llm_include_shapes",

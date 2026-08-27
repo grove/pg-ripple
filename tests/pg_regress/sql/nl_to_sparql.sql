@@ -24,6 +24,25 @@ SELECT current_setting('pg_ripple.llm_model', true) IS DISTINCT FROM 'disabled' 
 -- 1c. llm_api_key_env GUC exists.
 SELECT current_setting('pg_ripple.llm_api_key_env', true) IS DISTINCT FROM 'disabled' AS llm_api_key_env_guc_exists;
 
+-- 1c. Raw values are rejected; valid names and the migration escape hatch work.
+SET pg_ripple.llm_api_key_env = 'OPENAI_API_KEY';
+DO $$
+BEGIN
+    SET pg_ripple.llm_api_key_env = 'sk-raw-secret';
+    RAISE EXCEPTION 'raw API key was accepted';
+EXCEPTION
+    WHEN OTHERS THEN
+        IF SQLERRM NOT LIKE '%llm_api_key_env must be an environment-variable name%' THEN
+            RAISE;
+        END IF;
+END;
+$$;
+SET pg_ripple.llm_api_key_env_allow_raw = on;
+SET pg_ripple.llm_api_key_env = 'sk-raw-secret';
+SET pg_ripple.llm_api_key_env = 'OPENAI_API_KEY';
+SET pg_ripple.llm_api_key_env_allow_raw = off;
+RESET pg_ripple.llm_api_key_env;
+
 -- 1d. llm_include_shapes defaults to on.
 SELECT current_setting('pg_ripple.llm_include_shapes') = 'on' AS llm_include_shapes_default_on;
 

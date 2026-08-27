@@ -549,7 +549,17 @@ LLM model identifier passed in the `model` field of the chat completion request 
 | Default | `PG_RIPPLE_LLM_API_KEY` |
 | Context | `userset` |
 
-Name of the environment variable from which `sparql_from_nl()` reads the Bearer API key at call time. The key is never stored in the database or visible in `pg_settings`.
+Name of the environment variable from which `sparql_from_nl()` reads the Bearer API key at call time. Values must match `^[A-Z_][A-Z0-9_]*$`; raw values are rejected. For pre-0.131 migrations only, a superuser can set `pg_ripple.llm_api_key_env_allow_raw = on`. The key is never stored in the database or visible in `pg_settings`.
+
+### `pg_ripple.llm_api_key_env_allow_raw`
+
+| | |
+|---|---|
+| Type | Boolean |
+| Default | `off` |
+| Context | `suset` |
+
+Temporary superuser-only escape hatch for migrating raw API-key values from pre-0.131 installations. Keep it `off` after migration.
 
 ---
 

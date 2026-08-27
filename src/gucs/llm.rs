@@ -57,6 +57,9 @@ pub static LLM_MODEL: pgrx::GucSetting<Option<std::ffi::CString>> =
 pub static LLM_API_KEY_ENV: pgrx::GucSetting<Option<std::ffi::CString>> =
     pgrx::GucSetting::<Option<std::ffi::CString>>::new(None);
 
+/// GUC: temporarily allow raw API keys during pre-0.131 migration.
+pub static LLM_API_KEY_ENV_ALLOW_RAW: pgrx::GucSetting<bool> = pgrx::GucSetting::<bool>::new(false);
+
 /// GUC: when `on` (default), include active SHACL shapes as semantic context
 /// in the prompt sent to the LLM endpoint (v0.49.0).
 pub static LLM_INCLUDE_SHAPES: pgrx::GucSetting<bool> = pgrx::GucSetting::<bool>::new(true);
