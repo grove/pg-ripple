@@ -23,8 +23,8 @@ schema fingerprint tooling, and a validated JSON writeback configuration API.
 - Inspect writeback configuration and queue health with
   `pg_ripple.writeback_inspect()` or `GET /json-mapping/{name}/writeback/config`.
 - Verify an installed database against a normalized schema fingerprint.
-- Run the complete migration-chain and recovery checks with
-  `just test-migration-full` and `tests/upgrade_recovery.sh`.
+- Run the complete migration-chain and recovery checks (`pg_ripple.feature_status()`)
+  with `just test-migration-full` and `tests/upgrade_recovery.sh`.
 
 ### What happens behind the scenes
 
