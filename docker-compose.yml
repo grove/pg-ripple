@@ -58,7 +58,9 @@ services:
       # S13-07: password read from secrets file; build the DSN with a placeholder
       # that the entrypoint script replaces with the actual secret at startup.
       PG_RIPPLE_HTTP_PG_URL: "postgresql://postgres@postgres/postgres"
-      PG_RIPPLE_HTTP_PGPASSFILE: "/run/secrets/pg_password"
+      PG_RIPPLE_HTTP_BIND: "0.0.0.0:7878"
+      PG_RIPPLE_HTTP_MODE: "development"
+      PG_RIPPLE_HTTP_PG_PASSWORD_FILE: "/run/secrets/pg_password"
       PG_RIPPLE_HTTP_PORT: "7878"
       PG_RIPPLE_HTTP_POOL_SIZE: "8"
       PG_RIPPLE_HTTP_RATE_LIMIT: "100"

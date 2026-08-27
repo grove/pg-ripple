@@ -17,6 +17,9 @@ spec:
       annotations:
         {{- toYaml .Values.podAnnotations | nindent 8 }}
     spec:
+      {{- if and .Values.http.allowUnauthenticated (ne .Values.http.mode "development") }}
+      {{- fail "http.allowUnauthenticated requires http.mode=development" }}
+      {{- end }}
       serviceAccountName: {{ include "pg-ripple.serviceAccountName" . }}
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
@@ -58,6 +61,8 @@ spec:
               mountPath: /etc/postgresql/conf.d
         {{- if .Values.http.enabled }}
         - name: sparql-http
+          securityContext:
+            {{- toYaml .Values.http.securityContext | nindent 12 }}
           image: "{{ .Values.http.image.repository | default .Values.image.repository }}:{{ .Values.http.image.tag | default .Values.image.tag }}"
           imagePullPolicy: {{ .Values.http.image.pullPolicy | default .Values.image.pullPolicy }}
           command: ["/usr/local/bin/pg_ripple_http"]
@@ -66,8 +71,38 @@ spec:
               containerPort: 7878
               protocol: TCP
           env:
+            - name: PG_RIPPLE_HTTP_MODE
+              value: {{ .Values.http.mode | quote }}
+            - name: PG_RIPPLE_HTTP_BIND
+              value: "0.0.0.0:7878"
             - name: PG_RIPPLE_HTTP_PG_URL
-              value: "postgresql://postgres:$(POSTGRES_PASSWORD)@localhost/{{ .Values.postgres.database }}"
+              value: "postgresql://postgres@localhost/{{ .Values.postgres.database }}"
+            - name: PG_RIPPLE_HTTP_PG_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "pg-ripple.fullname" . }}-secret
+                  key: postgres-password
+            {{- if .Values.http.writeTokenSecret.name }}
+            - name: PG_RIPPLE_HTTP_WRITE_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.http.writeTokenSecret.name }}
+                  key: {{ .Values.http.writeTokenSecret.key | quote }}
+            {{- end }}
+            {{- if .Values.http.adminTokenSecret.name }}
+            - name: PG_RIPPLE_HTTP_ADMIN_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.http.adminTokenSecret.name }}
+                  key: {{ .Values.http.adminTokenSecret.key | quote }}
+            {{- end }}
+            {{- if .Values.http.metricsTokenSecret.name }}
+            - name: PG_RIPPLE_HTTP_METRICS_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.http.metricsTokenSecret.name }}
+                  key: {{ .Values.http.metricsTokenSecret.key | quote }}
+            {{- end }}
             - name: PG_RIPPLE_HTTP_PORT
               value: "7878"
             - name: PG_RIPPLE_HTTP_RATE_LIMIT
@@ -84,11 +119,6 @@ spec:
                   name: {{ required "http.authTokenSecret.name is required unless http.allowUnauthenticated is true" .Values.http.authTokenSecret.name }}
                   key: {{ .Values.http.authTokenSecret.key | quote }}
             {{- end }}
-            - name: POSTGRES_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "pg-ripple.fullname" . }}-secret
-                  key: postgres-password
             {{- range $k, $v := .Values.http.env }}
             - name: {{ $k }}
               value: {{ $v | quote }}

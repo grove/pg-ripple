@@ -7,7 +7,7 @@ use axum::extract::{Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 
-use crate::common::{AppState, check_auth, json_error, redacted_error};
+use crate::common::{AppState, check_auth, check_auth_write, json_error, redacted_error};
 use crate::spi_bridge::{execute_sparql_with_traceparent, execute_sparql_with_traceparent_routed};
 // Re-use types and constants declared in parent routing module.
 use super::{
@@ -67,7 +67,7 @@ pub(crate) async fn sparql_post(
     Query(params): Query<SparqlParams>,
     body: Body,
 ) -> Response {
-    if let Err(r) = check_auth(&state, &headers) {
+    if let Err(r) = check_auth_write(&state, &headers) {
         return r;
     }
 

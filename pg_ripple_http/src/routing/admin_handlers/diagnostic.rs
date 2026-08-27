@@ -6,7 +6,7 @@ use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::Response;
 
-use crate::common::{AppState, redacted_error};
+use crate::common::{AppState, check_auth_admin, redacted_error};
 use crate::routing::json_response_http;
 
 // ─── Feature 8 (v0.120.0): Diagnostic snapshot ───────────────────────────────
@@ -21,7 +21,7 @@ pub(crate) async fn diagnostic_snapshot(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
 ) -> Response {
-    if let Err(r) = crate::common::check_auth_write(&state, &headers) {
+    if let Err(r) = check_auth_admin(&state, &headers) {
         return r;
     }
 

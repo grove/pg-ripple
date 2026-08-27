@@ -134,8 +134,7 @@ fetch_jena() {
     tar -xzf "${archive}" \
         --strip-components=3 \
         -C "${JENA_TEST_DIR}" \
-        "${JENA_SPARQL_PATH}" \
-        2>/dev/null || true   # Some paths may not exist in all Jena versions.
+        "${JENA_SPARQL_PATH}"
 
     # Create sub-suite directories expected by the test harness.
     for suite in sparql-query sparql-update sparql-syntax algebra; do
@@ -152,9 +151,7 @@ fetch_jena() {
     if find "${JENA_TEST_DIR}" -name "manifest.ttl" 2>/dev/null | grep -q .; then
         ok "Jena test data extracted to ${JENA_TEST_DIR}"
     else
-        info "WARNING: No manifest.ttl files found after extraction."
-        info "Jena may have changed its repository layout."
-        info "Set JENA_TEST_DIR to a directory containing SPARQL test manifests."
+        fail "No manifest.ttl files found after extracting Jena test data."
     fi
 }
 

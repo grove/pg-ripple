@@ -125,6 +125,7 @@
 - [Troubleshooting](operations/troubleshooting.md)
 - [Security](operations/security.md)
 - [Compatibility Matrix](operations/compatibility.md)
+- [HTTP Companion Operations](operations/http-companion.md)
 
 ---
 

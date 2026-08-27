@@ -15,24 +15,28 @@ unsafe extern "C-unwind" fn check_llm_api_key_env(
     _extra: *mut *mut std::ffi::c_void,
     _source: pgrx::pg_sys::GucSource::Type,
 ) -> bool {
-    if newval.is_null() || unsafe { (*newval).is_null() } || LLM_API_KEY_ENV_ALLOW_RAW.get() {
+    if newval.is_null() || LLM_API_KEY_ENV_ALLOW_RAW.get() {
+        return true;
+    }
+    // SAFETY: PostgreSQL supplies a valid pointer to the candidate GUC value
+    // when the outer pointer is non-null.
+    let value = unsafe { *newval };
+    if value.is_null() {
         return true;
     }
     // SAFETY: newval is a GUC check-hook argument; pointer is valid for the
     // duration of this call and the string has at least a NUL terminator.
-    let s = unsafe { std::ffi::CStr::from_ptr(*newval).to_str().unwrap_or("") };
+    let s = unsafe { std::ffi::CStr::from_ptr(value).to_str().unwrap_or("") };
     let valid = s
         .as_bytes()
         .first()
         .is_some_and(|c| c.is_ascii_uppercase() || *c == b'_')
         && s.bytes()
             .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == b'_');
-    if !valid {
-        pgrx::error!(
-            "llm_api_key_env must be an environment-variable name (e.g. MY_KEY_ENV), not a raw key value"
-        );
-    }
-    true
+    // PostgreSQL turns a false check-hook result into a configuration error;
+    // returning false also works for SET/ALTER SYSTEM and does not leak the
+    // rejected value into the server log.
+    valid
 }
 
 /// Register all pg_ripple GUC parameters.

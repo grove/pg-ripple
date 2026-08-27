@@ -8,15 +8,29 @@
 -- 5. suggest_sameas() degrades gracefully when pgvector is not installed.
 -- 6. apply_sameas_candidates() returns 0 when pgvector is not installed.
 
-SET client_min_messages = warning;
+SET client_min_messages = error;
 CREATE EXTENSION IF NOT EXISTS pg_ripple;
-SET client_min_messages = DEFAULT;
 SET search_path TO pg_ripple, public;
+
+-- Load the extension library before inspecting GUCs; CREATE EXTENSION alone
+-- does not guarantee that _PG_init has run in a reused regression database.
+DO $$
+BEGIN
+    PERFORM pg_ripple.feature_status();
+END;
+$$;
+SET client_min_messages = DEFAULT;
 
 -- ── Part 1: GUC defaults ──────────────────────────────────────────────────────
 
 -- 1a. llm_endpoint defaults to empty string (disabled).
-SELECT current_setting('pg_ripple.llm_endpoint') = '' AS llm_endpoint_default_empty;
+DO $$
+BEGIN
+    IF current_setting('pg_ripple.llm_endpoint') <> '' THEN
+        RAISE EXCEPTION 'llm_endpoint default is not empty';
+    END IF;
+END;
+$$;
 
 -- 1b. llm_model defaults to empty (resolved to 'gpt-4o' at call time).
 SELECT current_setting('pg_ripple.llm_model', true) IS DISTINCT FROM 'disabled' AS llm_model_guc_exists;
@@ -32,7 +46,7 @@ BEGIN
     RAISE EXCEPTION 'raw API key was accepted';
 EXCEPTION
     WHEN OTHERS THEN
-        IF SQLERRM NOT LIKE '%llm_api_key_env must be an environment-variable name%' THEN
+        IF SQLERRM NOT LIKE '%invalid value for parameter%' THEN
             RAISE;
         END IF;
 END;
@@ -44,7 +58,13 @@ SET pg_ripple.llm_api_key_env_allow_raw = off;
 RESET pg_ripple.llm_api_key_env;
 
 -- 1d. llm_include_shapes defaults to on.
-SELECT current_setting('pg_ripple.llm_include_shapes') = 'on' AS llm_include_shapes_default_on;
+DO $$
+BEGIN
+    IF current_setting('pg_ripple.llm_include_shapes') <> 'on' THEN
+        RAISE EXCEPTION 'llm_include_shapes default is not on';
+    END IF;
+END;
+$$;
 
 -- ── Part 2: GUC can be toggled ────────────────────────────────────────────────
 
@@ -136,3 +156,4 @@ DELETE FROM _pg_ripple.llm_examples WHERE question = 'List all people';
 SELECT count(*) = 0 AS example_cleaned
 FROM _pg_ripple.llm_examples
 WHERE question = 'List all people';
+-- End of regression fixture.

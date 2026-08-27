@@ -25,9 +25,9 @@ No separate graph database. No data pipelines. No extra infrastructure.
 
 ---
 
-## What works today (v0.130.0)
+## What works today (v0.131.0)
 
-pg_ripple passes **100% of the W3C SPARQL 1.1, SHACL Core, and OWL 2 RL conformance test suites** — the industry benchmarks for correctness in knowledge graph systems. After 130 releases it covers the full feature set described below.
+pg_ripple passes **100% of the W3C SPARQL 1.1, SHACL Core, and OWL 2 RL conformance test suites** — the industry benchmarks for correctness in knowledge graph systems. After 131 releases it covers the full feature set described below.
 
 | What you can do | How it works |
 |---|---|
@@ -186,7 +186,9 @@ report itself enabled without full coverage. v0.129.0 repairs that async
 writeback path for real: a wrong dictionary column name had made it silently
 non-functional, and enqueue coverage now extends to not-yet-promoted
 predicates and main-resident deletes (see "JSON↔RDF mapping registry" above).
-v0.130.0 adds independent migration-graph, schema-fingerprint, and upgrade
+v0.131.0 adds secure-by-default HTTP startup, typed secret/TLS configuration,
+central route authorization, outbound request policy, and versioned conformance
+evidence. The release also keeps the independent migration-graph, schema-fingerprint, and upgrade
 recovery checks plus validated writeback configuration. See
 [ROADMAP.md](ROADMAP.md#production-readiness--ga-qualification-v01281--v01370)
 for the remaining v0.131.0–v0.137.0 production-readiness sequence ahead of

@@ -1,0 +1,3 @@
+-- Migration 0.130.0 → 0.131.0: security hardening and conformance evidence.
+-- Schema changes: None. The release changes Rust validation, HTTP middleware,
+-- serialization, CI, and operational documentation only.

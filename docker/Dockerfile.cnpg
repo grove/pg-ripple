@@ -1,4 +1,4 @@
-# pg_ripple CloudNativePG Extension Image (v0.128.0)
+# pg_ripple CloudNativePG Extension Image (v0.131.0)
 #
 # This is a minimal "extension volume" image for use with the CloudNativePG
 # operator (CNP ≥ 1.24).  It contains only the compiled .so and SQL files
@@ -10,17 +10,18 @@
 #   spec:
 #     postgresql:
 #       extensionImages:
-#         - ghcr.io/trickle-labs/pg-ripple:0.128.0-cnpg
+#         - ghcr.io/trickle-labs/pg-ripple:0.131.0-cnpg
 #
 # See docs/src/operations/cloudnativepg.md for the full walkthrough.
 #
-# Published as: ghcr.io/trickle-labs/pg-ripple:0.128.0-cnpg
+# Published as: ghcr.io/trickle-labs/pg-ripple:0.131.0-cnpg
 
 # ── Build stage ───────────────────────────────────────────────────────────────
-FROM rust:1-bookworm AS builder
+FROM rust:1-bookworm@sha256:4e4a7e7939c17991ab35f2b8c2e67593980f771d28f6b1254b1850f860fd0c7f AS builder
 
 ARG PGRX_VERSION=0.18.0
 ARG PGVECTOR_VERSION=0.8.2
+ARG PGVECTOR_COMMIT=cab9da72c04353f143bb06b42ab70a403daac64a
 
 RUN apt-get update -qq \
     && apt-get install -y --no-install-recommends gnupg curl ca-certificates \
@@ -60,9 +61,11 @@ RUN cargo pgrx package \
       --features pg18
 
 # Build pgvector
-RUN git clone --depth 1 --branch "v${PGVECTOR_VERSION}" \
-      https://github.com/pgvector/pgvector.git /tmp/pgvector \
+RUN git init /tmp/pgvector \
     && cd /tmp/pgvector \
+    && git remote add origin https://github.com/pgvector/pgvector.git \
+    && git fetch --depth 1 origin "${PGVECTOR_COMMIT}" \
+    && git checkout --detach "${PGVECTOR_COMMIT}" \
     && make PG_CONFIG=/usr/lib/postgresql/18/bin/pg_config \
     && make PG_CONFIG=/usr/lib/postgresql/18/bin/pg_config install
 
@@ -73,7 +76,7 @@ RUN git clone --depth 1 --branch "v${PGVECTOR_VERSION}" \
 #   /var/lib/postgresql/extension-files/ext/   → copied to $sharedir/extension/
 #
 # See: https://cloudnative-pg.io/documentation/current/extension_volumes/
-FROM debian:bookworm-slim
+FROM debian:bookworm-slim@sha256:5ae3c39ebd15e229dcedd5cee596b2497182493d41ff162e824ba13fc1b2b867
 
 ARG PG_VERSION=18
 
@@ -104,7 +107,7 @@ COPY --from=builder \
 LABEL org.opencontainers.image.source="https://github.com/trickle-labs/pg-ripple"
 LABEL org.opencontainers.image.description="CloudNativePG extension volume: pg_ripple + pgvector for PostgreSQL 18"
 LABEL org.opencontainers.image.licenses="Apache-2.0"
-LABEL org.opencontainers.image.version="0.98.0-cnpg"
+LABEL org.opencontainers.image.version="0.131.0-cnpg"
 
 # The image is used purely as an init-container volume source; no entrypoint needed.
 CMD ["/bin/true"]

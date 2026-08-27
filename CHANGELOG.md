@@ -11,6 +11,45 @@ Versions correspond to the milestones in [ROADMAP.md](ROADMAP.md).
 
 ---
 
+## [0.131.0] — 2026-08-27 — Security Hardening and Conformance Evidence
+
+Production HTTP deployments now fail closed by default, temporal RDF output is
+escaped as valid N-Quads terms, and conformance results carry verifiable release
+metadata.
+
+### What you can do
+
+- Run `pg_ripple_http` with an authentication token supplied by an environment
+  variable or secret file; unauthenticated mode is an explicit development opt-in.
+- Safely expose the service behind a configured trusted proxy without allowing
+  untrusted clients to spoof their source address.
+- Use the temporal snapshot and diff endpoints with IRIs, literals, blank nodes,
+  language tags, and typed literals containing special characters.
+- Publish versioned conformance reports under `results/conformance/<version>`.
+
+### What happens behind the scenes
+
+- Missing HTTP credentials return `401 Unauthorized` unless
+  `PG_RIPPLE_HTTP_ALLOW_UNAUTHENTICATED=1` is explicitly set.
+- The LLM key setting rejects raw secret values and accepts only environment
+  variable names, with a superuser-only migration escape hatch.
+- Required conformance data downloads fail CI instead of silently skipping tests;
+  informational failures leave a `conformance-skip.txt` artifact.
+- The 0.130.0 → 0.131.0 migration path is present and has no catalog changes.
+
+### Technical Details
+
+<details>
+<summary>Implementation details</summary>
+
+- `TrustedProxyLayer` rewrites forwarded client addresses only for configured
+  trusted CIDRs and rejects invalid CIDR configuration at startup.
+- Temporal endpoint serialization uses one shared N-Quads term formatter.
+- Conformance JSON reports include `version` and UTC `generated_at` fields;
+  stale checked-in reports are labelled as historical v0.43.0 evidence.
+
+</details>
+
 ## [0.130.0] — 2026-08-27 — Installation and Migration Integrity
 
 Fresh installs and upgrades now have an independently checked migration graph,

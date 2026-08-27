@@ -6,6 +6,7 @@ pub mod arrow_encode;
 pub mod common;
 pub mod datalog;
 pub mod metrics;
+pub mod outbound_policy;
 pub mod routing;
 pub mod spi_bridge;
 pub mod stream;

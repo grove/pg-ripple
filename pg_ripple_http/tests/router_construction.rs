@@ -9,7 +9,7 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
 use axum::body::Body;
-use axum::http::{Request, StatusCode};
+use axum::http::{Method, Request, StatusCode};
 use dashmap::DashMap;
 use deadpool_postgres::{Config, Runtime};
 use tokio_postgres::NoTls;
@@ -18,7 +18,7 @@ use tower_http::cors::CorsLayer;
 
 use pg_ripple_http::common::AppState;
 use pg_ripple_http::metrics::Metrics;
-use pg_ripple_http::routing::build_router;
+use pg_ripple_http::routing::{build_router, classify_route};
 
 /// Every path registered in `routing::build_router`, with `{param}`
 /// segments replaced by a literal `x`. Kept in sync with that route table.
@@ -106,6 +106,7 @@ const ROUTES: &[&str] = &[
     "/federation/x/auth-status",
     "/json-mapping/x/writeback",
     "/json-mapping/x/writeback/status",
+    "/json-mapping/x/writeback/config",
 ];
 
 /// Builds an `AppState` backed by a lazy pool pointed at a closed local port.
@@ -114,6 +115,14 @@ const ROUTES: &[&str] = &[
 /// timing out, so every handler that touches `state.pool` still returns
 /// quickly without a real PostgreSQL instance.
 fn test_state() -> Arc<AppState> {
+    test_state_with_tokens(None, None, None)
+}
+
+fn test_state_with_tokens(
+    datalog_write_token: Option<&str>,
+    admin_token: Option<&str>,
+    metrics_token: Option<&str>,
+) -> Arc<AppState> {
     let mut cfg = Config::new();
     cfg.url = Some("postgresql://127.0.0.1:1/pg_ripple_router_test".to_owned());
     let pool = cfg
@@ -123,7 +132,8 @@ fn test_state() -> Arc<AppState> {
     Arc::new(AppState {
         pool,
         auth_token: Some("test-auth-token".to_owned()),
-        datalog_write_token: None,
+        datalog_write_token: datalog_write_token.map(str::to_owned),
+        admin_token: admin_token.map(str::to_owned),
         metrics: Metrics::new(),
         ever_connected: AtomicBool::new(false),
         arrow_flight_secret: None,
@@ -131,7 +141,7 @@ fn test_state() -> Arc<AppState> {
         arrow_nonce_cache: DashMap::new(),
         arrow_nonce_cache_max: 10_000,
         cors_is_permissive: false,
-        metrics_token: None,
+        metrics_token: metrics_token.map(str::to_owned),
         auth_realm: "pg_ripple".to_owned(),
         replica_pool: None,
     })
@@ -149,6 +159,10 @@ async fn router_builds_without_panicking_and_every_route_resolves() {
     .expect("router construction panicked — check for obsolete `:capture` route syntax");
 
     for path in ROUTES {
+        assert!(
+            classify_route(&Method::GET, path).is_some(),
+            "route {path} has no authorization class"
+        );
         let request = Request::builder()
             .method("GET")
             .uri(*path)
@@ -167,4 +181,57 @@ async fn router_builds_without_panicking_and_every_route_resolves() {
             "route {path} returned 404 — stale or mistyped path pattern"
         );
     }
+}
+
+#[tokio::test]
+async fn separate_tokens_cannot_cross_authorization_classes() {
+    let state = test_state_with_tokens(
+        Some("write-token"),
+        Some("admin-token"),
+        Some("metrics-token"),
+    );
+    let router = build_router(state, 1_048_576, CorsLayer::new());
+
+    let read_on_write = Request::builder()
+        .method("POST")
+        .uri("/datalog/rules/demo")
+        .header("authorization", "Bearer test-auth-token")
+        .body(Body::empty())
+        .unwrap();
+    assert_eq!(
+        router
+            .clone()
+            .oneshot(read_on_write)
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::UNAUTHORIZED
+    );
+
+    let write_on_admin = Request::builder()
+        .method("GET")
+        .uri("/admin/bench-history")
+        .header("authorization", "Bearer write-token")
+        .body(Body::empty())
+        .unwrap();
+    assert_eq!(
+        router
+            .clone()
+            .oneshot(write_on_admin)
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::UNAUTHORIZED
+    );
+
+    let read_on_metrics = Request::builder()
+        .method("GET")
+        .uri("/metrics")
+        .header("authorization", "Bearer test-auth-token")
+        .body(Body::empty())
+        .unwrap();
+    assert_eq!(
+        router.oneshot(read_on_metrics).await.unwrap().status(),
+        StatusCode::UNAUTHORIZED
+    );
 }

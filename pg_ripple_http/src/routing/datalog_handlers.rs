@@ -30,6 +30,7 @@ use crate::common::{AppState, check_auth, check_auth_write, redacted_error};
 // ─── Shared helpers ───────────────────────────────────────────────────────────
 
 /// Read up to 10 MiB from a request body.
+#[allow(clippy::result_large_err)]
 pub(crate) async fn read_body(body: Body) -> Result<String, Response> {
     let bytes = match axum::body::to_bytes(body, 10 * 1024 * 1024).await {
         Ok(b) => b,

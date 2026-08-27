@@ -6,25 +6,34 @@
 # Usage:
 #   docker build -f Dockerfile.http -t pg-ripple-http:local .
 #   docker run --rm -p 7878:7878 \
+#     -e PG_RIPPLE_HTTP_BIND="0.0.0.0:7878" \
 #     -e PG_RIPPLE_HTTP_PG_URL="postgresql://user:pass@postgres:5432/mydb" \
 #     -e PG_RIPPLE_HTTP_AUTH_TOKEN="${AUTH_TOKEN:?set AUTH_TOKEN}" \
 #     pg-ripple-http:local
 #
 # The resulting image is published to ghcr.io as part of each release:
 #   docker run --rm -p 7878:7878 \
+#     -e PG_RIPPLE_HTTP_BIND="0.0.0.0:7878" \
 #     -e PG_RIPPLE_HTTP_PG_URL="postgresql://user:pass@postgres:5432/mydb" \
 #     -e PG_RIPPLE_HTTP_AUTH_TOKEN="${AUTH_TOKEN:?set AUTH_TOKEN}" \
-#     ghcr.io/trickle-labs/pg-ripple-http:latest
+#     ghcr.io/trickle-labs/pg-ripple-http:0.131.0
 #
 # Environment variables:
 #   PG_RIPPLE_HTTP_PG_URL              PostgreSQL connection URL (required)
+#   PG_RIPPLE_HTTP_MODE                development or production (default: production)
+#   PG_RIPPLE_HTTP_BIND                Listen address (default: 127.0.0.1:7878)
 #   PG_RIPPLE_HTTP_PORT                HTTP listen port (default: 7878)
 #   PG_RIPPLE_HTTP_AUTH_TOKEN          Bearer token for endpoint auth (required)
+#   PG_RIPPLE_HTTP_AUTH_TOKEN_FILE     File containing the bearer token
+#   PG_RIPPLE_HTTP_PG_PASSWORD[_FILE]  PostgreSQL password or Docker/Kubernetes secret file
 #   PG_RIPPLE_HTTP_DATALOG_WRITE_TOKEN Separate write token for Datalog endpoints (optional)
 #   PG_RIPPLE_HTTP_POOL_SIZE           DB connection pool size (default: 16)
 #   PG_RIPPLE_HTTP_RATE_LIMIT          Requests per second per IP (default: 100)
 #   PG_RIPPLE_HTTP_CORS_ORIGINS        Comma-separated allowed origins (default: empty)
 #   PG_RIPPLE_HTTP_ALLOW_UNAUTHENTICATED Set to "1" for local development only
+#   PG_RIPPLE_HTTP_PG_SSLMODE           disable, require, verify-ca, or verify-full
+#   PG_RIPPLE_HTTP_PG_CA_FILE           CA bundle for PostgreSQL TLS verification
+#   PG_RIPPLE_HTTP_OUTBOUND_ALLOWLIST   Comma-separated exact outbound URLs/origins
 #   RUST_LOG                           Log level (default: pg_ripple_http=info)
 #   RUST_LOG_FORMAT                    Set to "json" for structured JSON log output
 #   PG_RIPPLE_HTTP_SKIP_COMPAT_CHECK   Set to "1" to skip extension version check
@@ -33,7 +42,7 @@
 # ── Build stage ───────────────────────────────────────────────────────────────
 # pgrx 0.18 requires Rust stable. Use rust:1-bookworm which tracks the latest
 # stable 1.x release.
-FROM rust:1-bookworm AS builder
+FROM rust:1-bookworm@sha256:4e4a7e7939c17991ab35f2b8c2e67593980f771d28f6b1254b1850f860fd0c7f AS builder
 
 # Minimal build dependencies — pg_ripple_http uses only pure-Rust TLS (rustls)
 # and does not require libclang, PostgreSQL headers, or OpenSSL dev headers.
@@ -75,7 +84,7 @@ RUN cargo build --release -p pg_ripple_http
 # distroless/cc-debian12 provides glibc, libgcc, and a current CA bundle with
 # no shell, package manager, or other attack-surface enlargers.  The :nonroot
 # variant sets uid/gid 65532 ("nonroot") as the default user.
-FROM gcr.io/distroless/cc-debian12:nonroot
+FROM gcr.io/distroless/cc-debian12:nonroot@sha256:777e96cf322c46bc32aca926c263624c4dc8d7cf37e2fa65ba2c7e697318ebbb
 
 LABEL org.opencontainers.image.source="https://github.com/trickle-labs/pg-ripple"
 LABEL org.opencontainers.image.description="SPARQL 1.1 Protocol HTTP endpoint for pg_ripple — connects PostgreSQL 18 RDF triple store to the web"

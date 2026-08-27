@@ -274,38 +274,12 @@ pub async fn subscribe_rule_library(
     }
 
     // Fetch the rules from the remote endpoint.
-    let remote_body = match reqwest::get(&req.source_uri).await {
-        Ok(resp) if resp.status().is_success() => match resp.text().await {
-            Ok(t) => t,
-            Err(e) => {
-                // OBS-M-02 (v0.123.0): count subscribe errors.
-                state.metrics.record_rule_library_subscribe_error();
-                return redacted_error(
-                    "remote_read_error",
-                    &e.to_string(),
-                    StatusCode::BAD_GATEWAY,
-                );
-            }
-        },
-        Ok(resp) => {
+    let remote_body = match crate::outbound_policy::fetch_text(&req.source_uri).await {
+        Ok(body) => body,
+        Err(error) => {
             // OBS-M-02 (v0.123.0): count subscribe errors.
             state.metrics.record_rule_library_subscribe_error();
-            return json_response(
-                StatusCode::BAD_GATEWAY,
-                serde_json::json!({
-                    "error": "remote_error",
-                    "detail": format!("remote returned HTTP {}", resp.status())
-                }),
-            );
-        }
-        Err(e) => {
-            // OBS-M-02 (v0.123.0): count subscribe errors.
-            state.metrics.record_rule_library_subscribe_error();
-            return redacted_error(
-                "remote_fetch_error",
-                &e.to_string(),
-                StatusCode::BAD_GATEWAY,
-            );
+            return redacted_error("remote_fetch_error", &error, StatusCode::BAD_GATEWAY);
         }
     };
 

@@ -13,10 +13,9 @@ use axum::body::Body;
 use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
-use constant_time_eq::constant_time_eq;
 
 use super::sparql_handlers::json_response_http;
-use crate::common::{AppState, redacted_error};
+use crate::common::{AppState, check_auth_admin, check_auth_metrics, redacted_error};
 
 // Re-import routing types for ApiDoc
 use super::ApiDoc;
@@ -269,23 +268,8 @@ pub(crate) async fn metrics_endpoint(
     headers: HeaderMap,
 ) -> Response {
     // M16-22 (v0.115.0): optional bearer-token auth for the metrics endpoint.
-    if let Some(expected) = &state.metrics_token {
-        let provided = headers
-            .get("authorization")
-            .and_then(|v| v.to_str().ok())
-            .unwrap_or("");
-        let token = provided.strip_prefix("Bearer ").unwrap_or(provided);
-        if !constant_time_eq(token.as_bytes(), expected.as_bytes()) {
-            // SAFETY: status code and header values are compile-time constants.
-            return axum::response::Response::builder()
-                .status(StatusCode::UNAUTHORIZED)
-                .header("www-authenticate", "Bearer realm=\"pg_ripple\"")
-                .header("content-type", "application/json")
-                .body(axum::body::Body::from(
-                    r#"{"error":"PT401","message":"metrics token required"}"#,
-                ))
-                .expect("infallible: hardcoded valid HTTP headers");
-        }
+    if let Err(response) = check_auth_metrics(&state, &headers) {
+        return response;
     }
     let m = &state.metrics;
     let body = format!(
@@ -735,8 +719,7 @@ pub(crate) async fn bench_history(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
 ) -> Response {
-    use crate::common::check_auth_write;
-    if let Err(r) = check_auth_write(&state, &headers) {
+    if let Err(r) = check_auth_admin(&state, &headers) {
         return r;
     }
     let client = match state.pool.get().await {

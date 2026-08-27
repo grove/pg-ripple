@@ -21,8 +21,8 @@ The binary is placed at `target/release/pg_ripple_http`.
 On startup, the service connects to PostgreSQL, verifies that pg_ripple is available, and logs the connection details:
 
 ```
-INFO pg_ripple_http: connected to postgresql://localhost/postgres (port 7878), triple store contains 12345 triples
-INFO pg_ripple_http: pg_ripple_http listening on http://0.0.0.0:7878
+INFO pg_ripple_http: connected to postgresql://***@localhost/postgres (port 7878), triple store contains 12345 triples
+INFO pg_ripple_http: pg_ripple_http listening on http://127.0.0.1:7878
 ```
 
 ## Configuration
@@ -32,11 +32,19 @@ All configuration is via environment variables:
 | Variable | Default | Description |
 |---|---|---|
 | `PG_RIPPLE_HTTP_PG_URL` | `postgresql://localhost/postgres` | PostgreSQL connection URL |
+| `PG_RIPPLE_HTTP_PG_PASSWORD[_FILE]` | (unset) | PostgreSQL password or mounted secret file |
+| `PG_RIPPLE_HTTP_MODE` | `production` | `development` or `production` |
+| `PG_RIPPLE_HTTP_BIND` | `127.0.0.1:7878` | HTTP listen address |
 | `PG_RIPPLE_HTTP_PORT` | `7878` | HTTP listening port |
 | `PG_RIPPLE_HTTP_POOL_SIZE` | `16` | Database connection pool size |
 | `PG_RIPPLE_HTTP_AUTH_TOKEN` | (required) | Requests must include `Authorization: Bearer <token>` |
+| `PG_RIPPLE_HTTP_AUTH_TOKEN_FILE` | (unset) | Mounted file containing the read token |
+| `PG_RIPPLE_HTTP_WRITE_TOKEN[_FILE]` | (unset) | Token for mutating endpoints |
+| `PG_RIPPLE_HTTP_ADMIN_TOKEN[_FILE]` | (unset) | Token for administrative endpoints |
 | `PG_RIPPLE_HTTP_AUTH_REALM` | `pg_ripple` | Value used in the `Bearer realm=` field of `WWW-Authenticate` response headers (L16-06, v0.117.0) |
 | `PG_RIPPLE_HTTP_METRICS_TOKEN` | (unset) | If set, `GET /metrics` requires `Authorization: Bearer <token>` (M16-22) |
+| `PG_RIPPLE_HTTP_PG_SSLMODE` | `disable` | `disable`, `require`, `verify-ca`, or `verify-full` |
+| `PG_RIPPLE_HTTP_PG_CA_FILE` | (unset) | CA bundle for PostgreSQL certificate verification |
 | `PG_RIPPLE_HTTP_RATE_LIMIT` | `100` | Max requests/sec per client IP (0 = disabled) |
 | `PG_RIPPLE_HTTP_CORS_ORIGINS` | (empty) | Comma-separated allowed origins; empty disables cross-origin access |
 
@@ -46,6 +54,7 @@ Example:
 export PG_RIPPLE_HTTP_PG_URL="postgresql://user:password@db-host:5432/mydb"
 export PG_RIPPLE_HTTP_PORT=8080
 export PG_RIPPLE_HTTP_AUTH_TOKEN="my-secret-token"
+export PG_RIPPLE_HTTP_PG_SSLMODE="verify-full"
 ./target/release/pg_ripple_http
 ```
 

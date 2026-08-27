@@ -43,3 +43,4 @@ SELECT
     value IN ('off', 'sync', 'async') AS valid_shacl_mode
 FROM pg_ripple.diagnostic_report()
 WHERE key = 'guc_shacl_mode';
+-- End of regression fixture.

@@ -21,6 +21,7 @@ fn json_response(status: StatusCode, body: serde_json::Value) -> Response {
     json_response_http(status, body)
 }
 
+#[allow(clippy::result_large_err)]
 async fn read_body(body: Body) -> Result<String, Response> {
     let bytes = match axum::body::to_bytes(body, 64 * 1024 * 1024).await {
         Ok(b) => b,

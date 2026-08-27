@@ -31,8 +31,9 @@ securityContext:
 
 # ── PostgreSQL configuration ──────────────────────────────────────────────────
 postgres:
-  # -- PostgreSQL superuser password (stored as a Secret; override in production).
-  password: "ripple"
+  # -- PostgreSQL superuser password (stored as a Secret). Leave empty to
+  #    generate one on install; an existing generated Secret is preserved on upgrade.
+  password: ""
   # -- Database to create on first start.
   database: "postgres"
   # -- Extra postgresql.conf options.
@@ -56,6 +57,8 @@ service:
 
 http:
   enabled: true
+  # -- Runtime mode. Production rejects the unauthenticated development override.
+  mode: production
   image:
     # -- pg_ripple_http sidecar image.  Defaults to the same batteries-included
     #    image as the PostgreSQL container (tag must match the extension version).
@@ -73,6 +76,15 @@ http:
   authTokenSecret:
     name: ""
     key: "auth-token"
+  writeTokenSecret:
+    name: ""
+    key: "write-token"
+  adminTokenSecret:
+    name: ""
+    key: "admin-token"
+  metricsTokenSecret:
+    name: ""
+    key: "metrics-token"
   # -- Set to true only for local development. Production requires authTokenSecret.
   allowUnauthenticated: false
   # -- Requests per second per client IP.
@@ -81,6 +93,20 @@ http:
   corsOrigins: ""
   # -- Extra environment variables for the pg_ripple_http sidecar.
   env: {}
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 65532
+    readOnlyRootFilesystem: true
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop: [ALL]
+
+# -- Optional pod ingress/egress policy. Keep egress denied by default and add
+# explicit destinations when federation or LLM calls are enabled.
+networkPolicy:
+  enabled: false
+  ingress: []
+  egress: []
 
 # ── pg_ripple GUC configuration ───────────────────────────────────────────────
 ripple:

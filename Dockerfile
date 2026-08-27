@@ -13,7 +13,7 @@
 #
 # The resulting image is published to ghcr.io as part of each release:
 #   docker run --rm -p 5432:5432 -e POSTGRES_PASSWORD=ripple \
-#     ghcr.io/trickle-labs/pg-ripple:latest
+#     ghcr.io/trickle-labs/pg-ripple:0.131.0
 #
 # Authentication:
 #   v0.128.1: SCRAM authentication (the postgres:18 base image default) applies
@@ -28,18 +28,31 @@
 # CVEs: CVE-2025-68121 CRITICAL + CVE-2026-32280/32281/32283 HIGH which are
 # only fixed in Go ≥1.25.9/1.26.2). CGO_ENABLED=0 produces a static binary
 # that is fully portable on any glibc/musl system.
-FROM golang:1.26-bookworm AS gosu-builder
-RUN CGO_ENABLED=0 go install github.com/tianon/gosu@latest
+FROM golang:1.26-bookworm@sha256:659cc38c1a394eeb4dd7e31fff6df128bd33444dcc7afd70e3bed5225749dbc0 AS gosu-builder
+ARG GOSU_VERSION=1.17
+ARG GOSU_COMMIT=0d1847490b448a17eb347e5e357f2c0478df87ad
+RUN apt-get update -qq \
+    && apt-get install -y --no-install-recommends git \
+    && rm -rf /var/lib/apt/lists/* \
+    && git init /tmp/gosu \
+    && cd /tmp/gosu \
+    && git remote add origin https://github.com/tianon/gosu.git \
+    && git fetch --depth 1 origin "${GOSU_COMMIT}" \
+    && git checkout --detach "${GOSU_COMMIT}" \
+    && CGO_ENABLED=0 go build -trimpath -o /go/bin/gosu .
 
 # pgrx 0.18 requires Rust stable. Use rust:1-bookworm which tracks the latest
 # stable 1.x release.
-FROM rust:1-bookworm AS builder
+FROM rust:1-bookworm@sha256:4e4a7e7939c17991ab35f2b8c2e67593980f771d28f6b1254b1850f860fd0c7f AS builder
 
 ARG PGRX_VERSION=0.18.0
 ARG POSTGIS_VERSION=3.5.6
 ARG PGVECTOR_VERSION=0.8.2
 ARG PG_TRICKLE_VERSION=0.68.0
 ARG PG_TIDE_VERSION=0.33.0
+ARG PG_TRICKLE_COMMIT=98b1651c33e46f9ffbfb17a1333cd802cf647282
+ARG PGVECTOR_COMMIT=cab9da72c04353f143bb06b42ab70a403daac64a
+ARG PG_TIDE_COMMIT=10f2881b211d904c741a96535fd7986f51716cff
 
 # Add the PostgreSQL Global Development Group APT repository so we get the
 # exact PostgreSQL 18 server development headers that match postgres:18-bookworm.
@@ -100,32 +113,42 @@ RUN cargo pgrx package \
 RUN cargo build --release -p pg_ripple_http
 
 # ── Build pg_trickle ──────────────────────────────────────────────────────────
-RUN git clone --depth 1 --branch "v${PG_TRICKLE_VERSION}" \
-      https://github.com/trickle-labs/pg-trickle.git /tmp/pg_trickle \
+RUN git init /tmp/pg_trickle \
     && cd /tmp/pg_trickle \
+    && git remote add origin https://github.com/trickle-labs/pg-trickle.git \
+    && git fetch --depth 1 origin "${PG_TRICKLE_COMMIT}" \
+    && git checkout --detach "${PG_TRICKLE_COMMIT}" \
     && cargo pgrx package \
          --pg-config /usr/lib/postgresql/18/bin/pg_config \
          --features pg18
 
 # ── Build pgvector ────────────────────────────────────────────────────────────
-RUN git clone --depth 1 --branch "v${PGVECTOR_VERSION}" \
-      https://github.com/pgvector/pgvector.git /tmp/pgvector \
+RUN git init /tmp/pgvector \
     && cd /tmp/pgvector \
+    && git remote add origin https://github.com/pgvector/pgvector.git \
+    && git fetch --depth 1 origin "${PGVECTOR_COMMIT}" \
+    && git checkout --detach "${PGVECTOR_COMMIT}" \
     && make PG_CONFIG=/usr/lib/postgresql/18/bin/pg_config \
     && make PG_CONFIG=/usr/lib/postgresql/18/bin/pg_config install
 
 # ── Build pg_tide ────────────────────────────────────────────────────────────
-RUN git clone --depth 1 --branch "v${PG_TIDE_VERSION}" \
-      https://github.com/trickle-labs/pg-tide.git /tmp/pg_tide \
+RUN git init /tmp/pg_tide \
     && cd /tmp/pg_tide \
+    && git remote add origin https://github.com/trickle-labs/pg-tide.git \
+    && git fetch --depth 1 origin "${PG_TIDE_COMMIT}" \
+    && git checkout --detach "${PG_TIDE_COMMIT}" \
     && cargo pgrx package \
          --pg-config /usr/lib/postgresql/18/bin/pg_config \
          --features pg18
 
 # ── Build PostGIS ─────────────────────────────────────────────────────────────
+ARG POSTGIS_SHA256=4f3e51f14c19ba5408c87ef2339eac8f3fa1cc297573dae574d9908d6d597766
 RUN curl -fsSL \
       "https://download.osgeo.org/postgis/source/postgis-${POSTGIS_VERSION}.tar.gz" \
-    | tar xz -C /tmp \
+      -o /tmp/postgis.tar.gz \
+    && echo "${POSTGIS_SHA256}  /tmp/postgis.tar.gz" | sha256sum -c - \
+    && tar xzf /tmp/postgis.tar.gz -C /tmp \
+    && rm /tmp/postgis.tar.gz \
     && cd /tmp/postgis-${POSTGIS_VERSION} \
     && ./configure \
          --with-pgconfig=/usr/lib/postgresql/18/bin/pg_config \
@@ -135,7 +158,7 @@ RUN curl -fsSL \
     && make install
 
 # ── Runtime stage ─────────────────────────────────────────────────────────────
-FROM postgres:18-bookworm
+FROM postgres:18-bookworm@sha256:a10c981235b4f635e65df0cfb66a5598064628128505dbc6a3ed4ca303717521
 
 LABEL org.opencontainers.image.source="https://github.com/trickle-labs/pg-ripple"
 LABEL org.opencontainers.image.description="PostgreSQL 18 with pg_ripple, pg_trickle, pg_tide, PostGIS, pgvector"

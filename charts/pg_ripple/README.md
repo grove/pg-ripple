@@ -39,7 +39,7 @@ See `values.yaml` for all available configuration options.
 |-----------|-------------|---------|
 | `replicaCount` | Number of PostgreSQL pods | `1` |
 | `image.tag` | pg_ripple image tag | `"0.131.0"` |
-| `postgres.password` | PostgreSQL superuser password | `"ripple"` |
+| `postgres.password` | PostgreSQL superuser password; empty generates and persists one | `""` |
 | `podDisruptionBudget.enabled` | Enable PodDisruptionBudget | `true` |
 | `podDisruptionBudget.minAvailable` | Minimum available pods during disruptions | `1` |
 | `http.authTokenSecret.name` | Existing Secret containing the HTTP bearer token | `""` |
