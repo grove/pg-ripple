@@ -76,7 +76,6 @@ JENA_TEST_DIR="${JENA_TEST_DIR:-${PROJECT_ROOT}/tests/jena/data}"
 
 # Pin the fixture snapshot consumed by the harness.
 JENA_URL="https://raw.githubusercontent.com/apache/jena/790b3dc08fccb6be1ea2868b97bfcbae8f113062/jena-arq/testing/ARQ/testing-2026-05.zip"
-JENA_ZIP_PATH="testing/ARQ/*"
 
 # SHA-256 checksum of the Jena archive.
 # Set JENA_SKIP_CHECKSUM=1 to skip verification when testing a new snapshot.
@@ -96,7 +95,8 @@ fetch_jena() {
     info "This will extract the SPARQL test resources (~4 MB)."
 
     local archive="/tmp/jena-tests-$$.zip"
-    trap "rm -f '${archive}'" EXIT
+    local extract_dir="/tmp/jena-tests-extract-$$"
+    trap "rm -rf '${extract_dir}' '${archive}'" EXIT
 
     if command -v curl >/dev/null 2>&1; then
         curl -fsSL --retry 3 --retry-delay 5 "${JENA_URL}" -o "${archive}" \
@@ -133,8 +133,10 @@ fetch_jena() {
     fi
 
     info "Extracting SPARQL test resources..."
-    mkdir -p "${JENA_TEST_DIR}"
-    unzip -q "${archive}" "${JENA_ZIP_PATH}" -d "${JENA_TEST_DIR}"
+    mkdir -p "${JENA_TEST_DIR}" "${extract_dir}"
+    unzip -q "${archive}" -d "${extract_dir}"
+    mkdir -p "${JENA_TEST_DIR}/ARQ"
+    cp -R "${extract_dir}/testing/ARQ/." "${JENA_TEST_DIR}/ARQ/"
 
     # Create sub-suite directories expected by the test harness.
     for suite in sparql-query sparql-update sparql-syntax algebra; do
