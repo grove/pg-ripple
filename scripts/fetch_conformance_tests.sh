@@ -74,10 +74,10 @@ fetch_w3c() {
 
 JENA_TEST_DIR="${JENA_TEST_DIR:-${PROJECT_ROOT}/tests/jena/data}"
 
-# Apache Jena test suite is hosted on the Apache GitHub mirror.
-# The SPARQL test resources are under jena-arq/testing/ARQ (not src/test/resources).
-JENA_URL="https://github.com/apache/jena/archive/refs/heads/main.tar.gz"
-JENA_SPARQL_PATH="jena-main/jena-arq/testing/ARQ"
+# Pin the release containing the manifest tree consumed by the harness.
+# Jena main now packages these fixtures in testing-2026-05.zip instead.
+JENA_URL="https://github.com/apache/jena/archive/refs/tags/jena-5.6.0.tar.gz"
+JENA_SPARQL_PATH="jena-jena-5.6.0/jena-arq/testing/ARQ"
 
 # SHA-256 checksum of the Jena archive.
 # NOTE: This changes with each Jena HEAD commit; set JENA_SKIP_CHECKSUM=1 to skip.
