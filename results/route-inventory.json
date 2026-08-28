@@ -1,0 +1,563 @@
+{
+  "source": "pg_ripple_http/src/routing/mod.rs",
+  "routes": [
+    {
+      "method": "GET",
+      "path": "/admin/bench-history",
+      "access": "Admin",
+      "source_line": 439
+    },
+    {
+      "method": "GET",
+      "path": "/admin/diagnostic-snapshot",
+      "access": "Admin",
+      "source_line": 441
+    },
+    {
+      "method": "GET",
+      "path": "/centrality/results",
+      "access": "Read",
+      "source_line": 496
+    },
+    {
+      "method": "POST",
+      "path": "/centrality/run",
+      "access": "Write",
+      "source_line": 495
+    },
+    {
+      "method": "POST",
+      "path": "/confidence/bulk-update",
+      "access": "Write",
+      "source_line": 471
+    },
+    {
+      "method": "POST",
+      "path": "/confidence/load",
+      "access": "Write",
+      "source_line": 450
+    },
+    {
+      "method": "GET",
+      "path": "/confidence/shacl-report",
+      "access": "Read",
+      "source_line": 458
+    },
+    {
+      "method": "GET",
+      "path": "/confidence/shacl-score",
+      "access": "Read",
+      "source_line": 454
+    },
+    {
+      "method": "POST",
+      "path": "/confidence/update",
+      "access": "Write",
+      "source_line": 467
+    },
+    {
+      "method": "POST",
+      "path": "/confidence/vacuum",
+      "access": "Write",
+      "source_line": 462
+    },
+    {
+      "method": "GET",
+      "path": "/datalog/constraints",
+      "access": "Read",
+      "source_line": 419
+    },
+    {
+      "method": "GET",
+      "path": "/datalog/constraints/{}",
+      "access": "Read",
+      "source_line": 420
+    },
+    {
+      "method": "POST",
+      "path": "/datalog/infer/{}",
+      "access": "Write",
+      "source_line": 402
+    },
+    {
+      "method": "POST",
+      "path": "/datalog/infer/{}/agg",
+      "access": "Write",
+      "source_line": 407
+    },
+    {
+      "method": "POST",
+      "path": "/datalog/infer/{}/demand",
+      "access": "Write",
+      "source_line": 409
+    },
+    {
+      "method": "POST",
+      "path": "/datalog/infer/{}/lattice",
+      "access": "Write",
+      "source_line": 413
+    },
+    {
+      "method": "POST",
+      "path": "/datalog/infer/{}/stats",
+      "access": "Write",
+      "source_line": 403
+    },
+    {
+      "method": "POST",
+      "path": "/datalog/infer/{}/wfs",
+      "access": "Write",
+      "source_line": 408
+    },
+    {
+      "method": "GET",
+      "path": "/datalog/lattices",
+      "access": "Read",
+      "source_line": 427
+    },
+    {
+      "method": "POST",
+      "path": "/datalog/lattices",
+      "access": "Admin",
+      "source_line": 427
+    },
+    {
+      "method": "POST",
+      "path": "/datalog/query/{}",
+      "access": "Read",
+      "source_line": 418
+    },
+    {
+      "method": "GET",
+      "path": "/datalog/rules",
+      "access": "Read",
+      "source_line": 379
+    },
+    {
+      "method": "DELETE",
+      "path": "/datalog/rules/{}",
+      "access": "Write",
+      "source_line": 380
+    },
+    {
+      "method": "POST",
+      "path": "/datalog/rules/{}",
+      "access": "Write",
+      "source_line": 380
+    },
+    {
+      "method": "POST",
+      "path": "/datalog/rules/{}/add",
+      "access": "Write",
+      "source_line": 388
+    },
+    {
+      "method": "POST",
+      "path": "/datalog/rules/{}/builtin",
+      "access": "Write",
+      "source_line": 384
+    },
+    {
+      "method": "PUT",
+      "path": "/datalog/rules/{}/disable",
+      "access": "Write",
+      "source_line": 397
+    },
+    {
+      "method": "PUT",
+      "path": "/datalog/rules/{}/enable",
+      "access": "Write",
+      "source_line": 393
+    },
+    {
+      "method": "DELETE",
+      "path": "/datalog/rules/{}/{}",
+      "access": "Write",
+      "source_line": 389
+    },
+    {
+      "method": "GET",
+      "path": "/datalog/stats/cache",
+      "access": "Admin",
+      "source_line": 425
+    },
+    {
+      "method": "GET",
+      "path": "/datalog/stats/tabling",
+      "access": "Admin",
+      "source_line": 426
+    },
+    {
+      "method": "GET",
+      "path": "/datalog/views",
+      "access": "Read",
+      "source_line": 431
+    },
+    {
+      "method": "POST",
+      "path": "/datalog/views",
+      "access": "Admin",
+      "source_line": 431
+    },
+    {
+      "method": "DELETE",
+      "path": "/datalog/views/{}",
+      "access": "Admin",
+      "source_line": 435
+    },
+    {
+      "method": "GET",
+      "path": "/dp/budget/{}/{}",
+      "access": "Read",
+      "source_line": 577
+    },
+    {
+      "method": "POST",
+      "path": "/dp/noisy_count",
+      "access": "Write",
+      "source_line": 574
+    },
+    {
+      "method": "POST",
+      "path": "/dp/noisy_histogram",
+      "access": "Write",
+      "source_line": 575
+    },
+    {
+      "method": "POST",
+      "path": "/entity-resolution/evaluate",
+      "access": "Write",
+      "source_line": 586
+    },
+    {
+      "method": "POST",
+      "path": "/entity-resolution/monitoring/disable",
+      "access": "Write",
+      "source_line": 594
+    },
+    {
+      "method": "POST",
+      "path": "/entity-resolution/monitoring/enable",
+      "access": "Write",
+      "source_line": 590
+    },
+    {
+      "method": "POST",
+      "path": "/entity-resolution/resolve",
+      "access": "Write",
+      "source_line": 582
+    },
+    {
+      "method": "GET",
+      "path": "/explain",
+      "access": "Read",
+      "source_line": 505
+    },
+    {
+      "method": "POST",
+      "path": "/explain",
+      "access": "Read",
+      "source_line": 505
+    },
+    {
+      "method": "GET",
+      "path": "/explorer",
+      "access": "Admin",
+      "source_line": 437
+    },
+    {
+      "method": "GET",
+      "path": "/federation/{}/auth-status",
+      "access": "Write",
+      "source_line": 618
+    },
+    {
+      "method": "POST",
+      "path": "/flight/do_get",
+      "access": "Read",
+      "source_line": 446
+    },
+    {
+      "method": "GET",
+      "path": "/health",
+      "access": "PublicHealth",
+      "source_line": 354
+    },
+    {
+      "method": "GET",
+      "path": "/health/ready",
+      "access": "PublicHealth",
+      "source_line": 358
+    },
+    {
+      "method": "POST",
+      "path": "/hypothetical",
+      "access": "Read",
+      "source_line": 510
+    },
+    {
+      "method": "POST",
+      "path": "/json-mapping/{}/writeback",
+      "access": "Write",
+      "source_line": 623
+    },
+    {
+      "method": "GET",
+      "path": "/json-mapping/{}/writeback/config",
+      "access": "Read",
+      "source_line": 631
+    },
+    {
+      "method": "GET",
+      "path": "/json-mapping/{}/writeback/status",
+      "access": "Read",
+      "source_line": 627
+    },
+    {
+      "method": "GET",
+      "path": "/metrics",
+      "access": "Metrics",
+      "source_line": 359
+    },
+    {
+      "method": "GET",
+      "path": "/metrics/extension",
+      "access": "Metrics",
+      "source_line": 368
+    },
+    {
+      "method": "GET",
+      "path": "/openapi.yaml",
+      "access": "Read",
+      "source_line": 377
+    },
+    {
+      "method": "GET",
+      "path": "/pagerank/explain/{}",
+      "access": "Read",
+      "source_line": 487
+    },
+    {
+      "method": "GET",
+      "path": "/pagerank/export",
+      "access": "Read",
+      "source_line": 486
+    },
+    {
+      "method": "POST",
+      "path": "/pagerank/find-duplicates",
+      "access": "Write",
+      "source_line": 500
+    },
+    {
+      "method": "GET",
+      "path": "/pagerank/queue-stats",
+      "access": "Read",
+      "source_line": 491
+    },
+    {
+      "method": "GET",
+      "path": "/pagerank/results",
+      "access": "Read",
+      "source_line": 477
+    },
+    {
+      "method": "POST",
+      "path": "/pagerank/run",
+      "access": "Write",
+      "source_line": 476
+    },
+    {
+      "method": "GET",
+      "path": "/pagerank/status",
+      "access": "Read",
+      "source_line": 481
+    },
+    {
+      "method": "POST",
+      "path": "/pagerank/vacuum-dirty",
+      "access": "Write",
+      "source_line": 482
+    },
+    {
+      "method": "POST",
+      "path": "/pprl/bloom_encode",
+      "access": "Write",
+      "source_line": 568
+    },
+    {
+      "method": "POST",
+      "path": "/pprl/dice_similarity",
+      "access": "Write",
+      "source_line": 569
+    },
+    {
+      "method": "GET",
+      "path": "/proof-tree/{}/{}/{}",
+      "access": "Read",
+      "source_line": 599
+    },
+    {
+      "method": "POST",
+      "path": "/rag",
+      "access": "Read",
+      "source_line": 353
+    },
+    {
+      "method": "GET",
+      "path": "/ready",
+      "access": "PublicHealth",
+      "source_line": 356
+    },
+    {
+      "method": "GET",
+      "path": "/rule-conflicts/{}",
+      "access": "Read",
+      "source_line": 515
+    },
+    {
+      "method": "GET",
+      "path": "/rule-libraries",
+      "access": "Read",
+      "source_line": 520
+    },
+    {
+      "method": "GET",
+      "path": "/rule-libraries/{}/stream",
+      "access": "Read",
+      "source_line": 525
+    },
+    {
+      "method": "POST",
+      "path": "/rule-libraries/{}/subscribe",
+      "access": "Write",
+      "source_line": 529
+    },
+    {
+      "method": "POST",
+      "path": "/rules/draft",
+      "access": "Read",
+      "source_line": 534
+    },
+    {
+      "method": "POST",
+      "path": "/rules/validate",
+      "access": "Read",
+      "source_line": 538
+    },
+    {
+      "method": "GET",
+      "path": "/rules/{}/explain",
+      "access": "Read",
+      "source_line": 543
+    },
+    {
+      "method": "GET",
+      "path": "/service",
+      "access": "Read",
+      "source_line": 375
+    },
+    {
+      "method": "GET",
+      "path": "/sparql",
+      "access": "Read",
+      "source_line": 348
+    },
+    {
+      "method": "POST",
+      "path": "/sparql",
+      "access": "Write",
+      "source_line": 348
+    },
+    {
+      "method": "POST",
+      "path": "/sparql/stream",
+      "access": "Read",
+      "source_line": 352
+    },
+    {
+      "method": "GET",
+      "path": "/subscribe/{}",
+      "access": "Read",
+      "source_line": 448
+    },
+    {
+      "method": "GET",
+      "path": "/temporal/facts",
+      "access": "Read",
+      "source_line": 557
+    },
+    {
+      "method": "GET",
+      "path": "/temporal/graphs/{}/diff",
+      "access": "Read",
+      "source_line": 563
+    },
+    {
+      "method": "GET",
+      "path": "/temporal/graphs/{}/snapshot",
+      "access": "Read",
+      "source_line": 559
+    },
+    {
+      "method": "GET",
+      "path": "/temporal/mark",
+      "access": "Read",
+      "source_line": 548
+    },
+    {
+      "method": "POST",
+      "path": "/temporal/mark",
+      "access": "Write",
+      "source_line": 548
+    },
+    {
+      "method": "POST",
+      "path": "/temporal/point_in_time",
+      "access": "Write",
+      "source_line": 553
+    },
+    {
+      "method": "GET",
+      "path": "/tenants",
+      "access": "Read",
+      "source_line": 604
+    },
+    {
+      "method": "POST",
+      "path": "/tenants",
+      "access": "Write",
+      "source_line": 604
+    },
+    {
+      "method": "DELETE",
+      "path": "/tenants/{}",
+      "access": "Write",
+      "source_line": 608
+    },
+    {
+      "method": "GET",
+      "path": "/tenants/{}",
+      "access": "Read",
+      "source_line": 608
+    },
+    {
+      "method": "GET",
+      "path": "/tenants/{}/quota",
+      "access": "Read",
+      "source_line": 613
+    },
+    {
+      "method": "POST",
+      "path": "/tenants/{}/quota",
+      "access": "Write",
+      "source_line": 613
+    },
+    {
+      "method": "GET",
+      "path": "/void",
+      "access": "Read",
+      "source_line": 373
+    }
+  ]
+}

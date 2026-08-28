@@ -20,7 +20,7 @@ docker run --rm -p 7878:7878 \
   -e PG_RIPPLE_HTTP_PG_CA_FILE="/run/secrets/pg-ca.pem" \
   -e PG_RIPPLE_HTTP_RATE_LIMIT="100" \
   -e PG_RIPPLE_HTTP_CORS_ORIGINS="https://app.example.com" \
-  ghcr.io/trickle-labs/pg-ripple-http:0.131.0
+  ghcr.io/trickle-labs/pg-ripple-http:0.132.0
 ```
 
 Send the token in the `Authorization` header:
@@ -50,7 +50,7 @@ docker run --rm -p 7878:7878 \
   -e PG_RIPPLE_HTTP_PG_URL="postgresql://user:password@postgres:5432/mydb" \
   -e PG_RIPPLE_HTTP_MODE=development \
   -e PG_RIPPLE_HTTP_ALLOW_UNAUTHENTICATED=1 \
-  ghcr.io/trickle-labs/pg-ripple-http:0.131.0
+  ghcr.io/trickle-labs/pg-ripple-http:0.132.0
 ```
 
 ## Helm

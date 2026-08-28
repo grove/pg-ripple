@@ -93,6 +93,7 @@ pub struct RunReport {
     pub timeout: usize,
     pub xfail: usize,
     pub xpass: usize,
+    pub duration_seconds: f64,
     pub results: Vec<TestResult>,
 }
 
@@ -139,15 +140,39 @@ impl RunReport {
 
     /// Serialise to a JSON value for the unified conformance report.
     pub fn to_json(&self) -> serde_json::Value {
+        let unexpected_failures: Vec<_> = self
+            .results
+            .iter()
+            .filter(|result| result.outcome.is_unexpected_failure())
+            .map(|result| {
+                let detail = match &result.outcome {
+                    TestOutcome::Fail(message) => message.clone(),
+                    TestOutcome::Timeout => "timeout".to_owned(),
+                    TestOutcome::XPass => "unexpected pass".to_owned(),
+                    _ => String::new(),
+                };
+                serde_json::json!({"key": result.key, "name": result.name, "detail": detail})
+            })
+            .collect();
         serde_json::json!({
-            "suite":   self.suite,
-            "total":   self.total,
-            "passed":  self.passed,
-            "failed":  self.failed,
+            "pg_ripple_version": std::env::var("CONFORMANCE_VERSION").unwrap_or_else(|_| env!("CARGO_PKG_VERSION").to_owned()),
+            "git_sha": std::env::var("GITHUB_SHA").unwrap_or_else(|_| "unknown".to_owned()),
+            "artifact_digest": std::env::var("CONFORMANCE_ARTIFACT_DIGEST").unwrap_or_else(|_| "uncomputed".to_owned()),
+            "postgres_version": std::env::var("POSTGRES_VERSION").unwrap_or_else(|_| "unknown".to_owned()),
+            "suite": self.suite,
+            "suite_commit": std::env::var("CONFORMANCE_SUITE_COMMIT").unwrap_or_else(|_| "unknown".to_owned()),
+            "started_at": std::env::var("CONFORMANCE_STARTED_AT").unwrap_or_else(|_| "unknown".to_owned()),
+            "duration_seconds": self.duration_seconds,
+            "expected_total": self.total,
+            "executed_total": self.total,
+            "total": self.total,
+            "passed": self.passed,
+            "failed": self.failed,
             "skipped": self.skipped,
             "timeout": self.timeout,
-            "xfail":   self.xfail,
-            "xpass":   self.xpass,
+            "xfail": self.xfail,
+            "xpass": self.xpass,
+            "unexpected_failures": unexpected_failures,
         })
     }
 }
@@ -172,6 +197,7 @@ pub struct TestEntry {
 /// Each worker calls its test function directly (no DB connection management
 /// at this level — that is the responsibility of the test closure).
 pub fn run_entries(entries: Vec<TestEntry>, config: &RunConfig) -> RunReport {
+    let started = std::time::Instant::now();
     let known = Arc::new(config.known_failures.clone());
     let timeout = std::time::Duration::from_secs(config.timeout_secs);
 
@@ -258,6 +284,7 @@ pub fn run_entries(entries: Vec<TestEntry>, config: &RunConfig) -> RunReport {
     while let Ok(r) = res_rx.recv() {
         report.add(r);
     }
+    report.duration_seconds = started.elapsed().as_secs_f64();
     report
 }
 

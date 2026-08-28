@@ -22,13 +22,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 OUTPUT_DIR="${W3C_TEST_DIR:-${PROJECT_ROOT}/tests/w3c/data}"
 
-# Official W3C SPARQL 1.1 test suite — now maintained on GitHub.
-# The old W3C URL (https://www.w3.org/2009/sparql/docs/tests/data-sparql11/...)
-# returns 404 as of 2026.  The canonical source is now:
-#   https://github.com/w3c/rdf-tests/tree/main/sparql/sparql11
-#
-# We download the full rdf-tests repo archive and extract just sparql/sparql11.
-W3C_TEST_URL="${W3C_TEST_URL:-https://github.com/w3c/rdf-tests/archive/refs/heads/main.tar.gz}"
+# Official W3C SPARQL 1.1 test suite, pinned by tests/conformance/sources.lock.
+# The full rdf-tests archive is downloaded and only sparql/sparql11 is used.
+W3C_TEST_URL="${W3C_TEST_URL:-https://api.github.com/repos/w3c/rdf-tests/tarball/369a90d1a60c021b746df2e411da0ff36258a758}"
 
 ARCHIVE="/tmp/sparql11-tests-$$.tar.gz"
 FORCE="${1:-}"
@@ -38,11 +34,15 @@ info()  { echo -e "${YELLOW}[info]${NC}  $*"; }
 ok()    { echo -e "${GREEN}[  ok]${NC}  $*"; }
 fail()  { echo -e "${RED}[FAIL]${NC}  $*" >&2; exit 1; }
 
+validate_source() {
+    python3 "${SCRIPT_DIR}/validate_conformance_sources.py" \
+        --suite w3c_sparql11 "$@"
+}
+
 # ── Already downloaded? ───────────────────────────────────────────────────────
 
 if [[ -d "${OUTPUT_DIR}" && "${FORCE}" != "--force" ]]; then
-    # Check that at least one manifest file exists.
-    if ls "${OUTPUT_DIR}"/*/manifest.ttl 2>/dev/null | grep -q .; then
+    if validate_source --directory "${OUTPUT_DIR}"; then
         ok "W3C test data already present at ${OUTPUT_DIR}"
         ok "Use --force to re-download."
         exit 0
@@ -65,6 +65,7 @@ else
 fi
 
 ok "Download complete: ${ARCHIVE}"
+validate_source --archive "${ARCHIVE}"
 
 # ── Extract ───────────────────────────────────────────────────────────────────
 
@@ -79,7 +80,8 @@ if tar -tzf "${ARCHIVE}" >/dev/null 2>&1; then
         info "Detected GitHub rdf-tests archive — extracting sparql/sparql11 subtree..."
         TMPDIR_EXTRACT="/tmp/sparql11-extract-$$"
         mkdir -p "${TMPDIR_EXTRACT}"
-        tar -xzf "${ARCHIVE}" -C "${TMPDIR_EXTRACT}" 2>/dev/null || true
+        tar -xzf "${ARCHIVE}" -C "${TMPDIR_EXTRACT}" 2>/dev/null \
+            || fail "Could not extract the W3C archive"
         SPARQL11_DIR=$(find "${TMPDIR_EXTRACT}" -type d -name "sparql11" | head -1)
         if [[ -n "${SPARQL11_DIR}" ]]; then
             cp -r "${SPARQL11_DIR}/"* "${OUTPUT_DIR}/"
@@ -88,13 +90,15 @@ if tar -tzf "${ARCHIVE}" >/dev/null 2>&1; then
         fi
         rm -rf "${TMPDIR_EXTRACT}"
     else
-        tar -xzf "${ARCHIVE}" -C "${OUTPUT_DIR}" --strip-components=1 2>/dev/null \
-            || tar -xzf "${ARCHIVE}" -C "${OUTPUT_DIR}" 2>/dev/null \
-            || true
+        if ! tar -xzf "${ARCHIVE}" -C "${OUTPUT_DIR}" --strip-components=1 2>/dev/null; then
+            tar -xzf "${ARCHIVE}" -C "${OUTPUT_DIR}" 2>/dev/null \
+                || fail "Could not extract the W3C archive"
+        fi
     fi
 elif unzip -t "${ARCHIVE}" >/dev/null 2>&1; then
     # zip archive
-    unzip -q "${ARCHIVE}" -d "${OUTPUT_DIR}" 2>/dev/null || true
+    unzip -q "${ARCHIVE}" -d "${OUTPUT_DIR}" 2>/dev/null \
+        || fail "Could not extract the W3C archive"
 else
     fail "Unrecognised archive format: ${ARCHIVE}"
 fi
@@ -112,15 +116,15 @@ if [[ "${MANIFEST_COUNT}" -eq 0 ]]; then
     SUBDIR=$(ls -d "${OUTPUT_DIR}"/*/ 2>/dev/null | head -1)
     if [[ -n "${SUBDIR}" ]]; then
         info "Moving content from subdirectory ${SUBDIR}..."
-        mv "${SUBDIR}"* "${OUTPUT_DIR}/" 2>/dev/null || true
-        rmdir "${SUBDIR}" 2>/dev/null || true
+        mv "${SUBDIR}"* "${OUTPUT_DIR}/" 2>/dev/null \
+            || fail "Could not flatten extracted W3C content"
+        rmdir "${SUBDIR}" 2>/dev/null \
+            || fail "Could not remove extracted W3C directory"
         MANIFEST_COUNT=$(find "${OUTPUT_DIR}" -name "manifest.ttl" 2>/dev/null | wc -l | tr -d ' ')
     fi
 fi
 
-if [[ "${MANIFEST_COUNT}" -eq 0 ]]; then
-    fail "No manifest.ttl files found in ${OUTPUT_DIR}. Extraction may have failed."
-fi
+validate_source --directory "${OUTPUT_DIR}"
 
 ok "Found ${MANIFEST_COUNT} manifest file(s) in ${OUTPUT_DIR}"
 

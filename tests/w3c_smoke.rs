@@ -17,8 +17,8 @@
 //! W3C_TEST_DIR=/tmp/sparql11 cargo test --test w3c_smoke
 //! ```
 //!
-//! Tests skip gracefully when neither the test data nor a pg_ripple database
-//! is reachable.
+//! Local runs may skip when fixtures or PostgreSQL are unavailable. CI sets
+//! `REQUIRE_CONFORMANCE=1` so the required gate cannot pass by skipping.
 
 #[path = "w3c/mod.rs"]
 mod w3c;
@@ -36,6 +36,9 @@ fn w3c_smoke() {
             println!(
                 "      Run scripts/fetch_w3c_tests.sh or set W3C_TEST_DIR to enable this test."
             );
+            if std::env::var("REQUIRE_CONFORMANCE").is_ok() {
+                panic!("required W3C corpus is missing");
+            }
             return;
         }
     };
@@ -61,6 +64,9 @@ fn w3c_smoke() {
 
     if report.total == 0 {
         println!("SKIP: no test cases found in categories: optional, aggregates, grouping");
+        if std::env::var("REQUIRE_CONFORMANCE").is_ok() {
+            panic!("required W3C smoke suite executed zero tests");
+        }
         return;
     }
 
@@ -111,6 +117,8 @@ fn w3c_smoke() {
         }
     }
 
+    write_smoke_report(&report, report.duration_seconds);
+
     // ── Assert no unexpected failures ───────────────────────────────────────
     assert!(
         report.is_clean(),
@@ -118,4 +126,53 @@ fn w3c_smoke() {
         failures.len(),
         report.summary(),
     );
+}
+
+fn write_smoke_report(report: &w3c::RunReport, duration_seconds: f64) {
+    let unexpected_failures: Vec<_> = report
+        .results
+        .iter()
+        .filter(|result| result.outcome.is_unexpected_failure())
+        .map(|result| {
+            serde_json::json!({
+                "key": result.test_case.iri,
+                "name": result.test_case.name,
+                "detail": format!("{:?}", result.outcome),
+            })
+        })
+        .collect();
+    let document = serde_json::json!({
+        "pg_ripple_version": std::env::var("CONFORMANCE_VERSION").unwrap_or_else(|_| env!("CARGO_PKG_VERSION").to_owned()),
+        "git_sha": std::env::var("GITHUB_SHA").unwrap_or_else(|_| "unknown".to_owned()),
+        "artifact_digest": std::env::var("CONFORMANCE_ARTIFACT_DIGEST").unwrap_or_else(|_| "uncomputed".to_owned()),
+        "postgres_version": std::env::var("POSTGRES_VERSION").unwrap_or_else(|_| "unknown".to_owned()),
+        "suite": "w3c_sparql11",
+        "suite_commit": std::env::var("CONFORMANCE_SUITE_COMMIT").unwrap_or_else(|_| "unknown".to_owned()),
+        "started_at": std::env::var("CONFORMANCE_STARTED_AT").unwrap_or_else(|_| "unknown".to_owned()),
+        "duration_seconds": duration_seconds,
+        "expected_total": report.total,
+        "executed_total": report.total,
+        "total": report.total,
+        "passed": report.passed,
+        "failed": report.failed,
+        "skipped": report.skipped,
+        "timeout": report.timeout,
+        "xfail": report.xfail,
+        "xpass": report.xpass,
+        "unexpected_failures": unexpected_failures,
+    });
+    let directory = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("results/conformance")
+        .join(
+            std::env::var("CONFORMANCE_VERSION")
+                .unwrap_or_else(|_| env!("CARGO_PKG_VERSION").to_owned()),
+        );
+    if let Err(error) = std::fs::create_dir_all(&directory).and_then(|_| {
+        std::fs::write(
+            directory.join("w3c_sparql11.json"),
+            serde_json::to_string_pretty(&document).map_err(std::io::Error::other)?,
+        )
+    }) {
+        panic!("failed to write W3C smoke conformance report: {error}");
+    }
 }

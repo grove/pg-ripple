@@ -85,6 +85,9 @@ pub static PLAN_CACHE_CAPACITY: pgrx::GucSetting<i32> = pgrx::GucSetting::<i32>:
 /// limit, `build_all_nodes_sql()` uses only the top-N predicates by triple count.
 pub static ALL_NODES_PREDICATE_LIMIT: pgrx::GucSetting<i32> = pgrx::GucSetting::<i32>::new(500);
 
+/// Maximum number of predicate branches emitted for a variable-predicate scan.
+pub static MAX_PREDICATE_UNION_BRANCHES: pgrx::GucSetting<i32> = pgrx::GucSetting::<i32>::new(500);
+
 // ─── v0.81.0 SPARQL GUCs ─────────────────────────────────────────────────────
 
 /// GUC: when `on`, an unknown built-in function name in a FILTER expression raises

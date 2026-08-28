@@ -105,11 +105,11 @@ the endpoint is intentionally unauthenticated.
 | `POST` | `/datalog/query/{rule_set}` | Read | Goal-directed Datalog query |
 | `GET` | `/datalog/constraints` | Read | Check all constraint rules |
 | `GET` | `/datalog/constraints/{rule_set}` | Read | Check constraints for one rule set |
-| `GET` | `/datalog/stats/cache` | Read | Rule plan cache statistics |
-| `GET` | `/datalog/stats/tabling` | Read | Tabling cache statistics |
-| `GET/POST` | `/datalog/lattices` | Read/Write | List or create lattice structures |
-| `GET/POST` | `/datalog/views` | Read/Write | List or create Datalog-backed views |
-| `DELETE` | `/datalog/views/{name}` | Write | Drop a Datalog-backed view |
+| `GET` | `/datalog/stats/cache` | Admin | Rule plan cache statistics |
+| `GET` | `/datalog/stats/tabling` | Admin | Tabling cache statistics |
+| `GET/POST` | `/datalog/lattices` | Read/Admin | List or create lattice structures |
+| `GET/POST` | `/datalog/views` | Read/Admin | List or create Datalog-backed views |
+| `DELETE` | `/datalog/views/{name}` | Admin | Drop a Datalog-backed view |
 | `POST` | `/pagerank/run` | Write | Start PageRank computation |
 | `GET` | `/pagerank/status` | Read | PageRank computation status |
 | `GET` | `/pagerank/results` | Read | Retrieve PageRank scores |

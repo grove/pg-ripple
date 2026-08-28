@@ -37,7 +37,7 @@ use self::datalog_handlers as datalog;
 #[openapi(
     info(
         title = "pg_ripple_http",
-        version = "0.131.0",
+        version = "0.132.0",
         description = "SPARQL 1.1 Protocol HTTP endpoint and Datalog REST API for pg_ripple",
         license(name = "Apache-2.0")
     ),

@@ -118,6 +118,12 @@ pub fn ensure_htap_tables(pred_id: i64) -> String {
     )
     .unwrap_or_else(|e| pgrx::error!("delta index(o,s) error: {e}"));
 
+    Spi::run_with_args(
+        &format!("CREATE INDEX IF NOT EXISTS idx_vp_{pred_id}_delta_i ON {delta} (i)"),
+        &[],
+    )
+    .unwrap_or_else(|e| pgrx::error!("delta index(i) error: {e}"));
+
     // Main table — read-optimised.
     Spi::run_with_args(
         &format!(
@@ -140,6 +146,12 @@ pub fn ensure_htap_tables(pred_id: i64) -> String {
         &[],
     )
     .unwrap_or_else(|e| pgrx::error!("main BRIN index error: {e}"));
+
+    Spi::run_with_args(
+        &format!("CREATE INDEX IF NOT EXISTS idx_vp_{pred_id}_main_i ON {main} (i)"),
+        &[],
+    )
+    .unwrap_or_else(|e| pgrx::error!("main index(i) error: {e}"));
 
     // Tombstones table — pending deletes from main.
     // Column `i` records the SID at insert time; used by merge_predicate to
@@ -374,6 +386,11 @@ pub fn merge_predicate(pred_id: i64) -> i64 {
         &[],
     )
     .unwrap_or_else(|e| pgrx::error!("merge: BRIN index on main_new error: {e}"));
+    Spi::run_with_args(
+        &format!("CREATE INDEX idx_vp_{pred_id}_main_new_i ON {main_new} (i)"),
+        &[],
+    )
+    .unwrap_or_else(|e| pgrx::error!("merge: B-tree index on main_new error: {e}"));
 
     // Count rows before rename (for return value).
     let row_count: i64 =
@@ -461,6 +478,14 @@ pub fn merge_predicate(pred_id: i64) -> i64 {
         &[],
     )
     .unwrap_or_else(|e| pgrx::warning!("merge: rename BRIN index error (non-fatal): {e}"));
+    Spi::run_with_args(
+        &format!(
+            "ALTER INDEX IF EXISTS _pg_ripple.idx_vp_{pred_id}_main_new_i \
+             RENAME TO idx_vp_{pred_id}_main_i"
+        ),
+        &[],
+    )
+    .unwrap_or_else(|e| pgrx::warning!("merge: rename B-tree index error (non-fatal): {e}"));
 
     // Re-summarize BRIN index so page-range summaries are valid immediately
     // without waiting for the autovacuum BRIN worker.
@@ -875,6 +900,12 @@ pub fn migrate_flat_to_htap(pred_id: i64) {
     )
     .unwrap_or_else(|e| pgrx::error!("htap_migrate: delta index(o,s) error: {e}"));
 
+    Spi::run_with_args(
+        &format!("CREATE INDEX idx_vp_{pred_id}_delta_i ON {delta} (i)"),
+        &[],
+    )
+    .unwrap_or_else(|e| pgrx::error!("htap_migrate: delta index(i) error: {e}"));
+
     // Create empty main table.
     Spi::run_with_args(
         &format!(
@@ -895,6 +926,12 @@ pub fn migrate_flat_to_htap(pred_id: i64) {
         &[],
     )
     .unwrap_or_else(|e| pgrx::error!("htap_migrate: main BRIN index error: {e}"));
+
+    Spi::run_with_args(
+        &format!("CREATE INDEX idx_vp_{pred_id}_main_i ON {main} (i)"),
+        &[],
+    )
+    .unwrap_or_else(|e| pgrx::error!("htap_migrate: main index(i) error: {e}"));
 
     // Create empty tombstones table.
     Spi::run_with_args(

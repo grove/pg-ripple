@@ -140,6 +140,17 @@ pub fn register() {
         GucFlags::default(),
     );
 
+    pgrx::GucRegistry::define_int_guc(
+        c"pg_ripple.max_predicate_union_branches",
+        c"Maximum VP-table branches for variable-predicate queries (default: 500)",
+        c"",
+        &MAX_PREDICATE_UNION_BRANCHES,
+        10,
+        10_000,
+        GucContext::Userset,
+        GucFlags::default(),
+    );
+
     // v0.37.0: validated describe_strategy
     // SAFETY: define_string_guc_with_hooks requires an unsafe block;
     // the hook function pointers are valid extern "C" function pointers.

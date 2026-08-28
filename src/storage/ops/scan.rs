@@ -211,19 +211,26 @@ pub fn for_each_encoded_triple_batch(
 
     for p_id in pred_ids {
         let table = format!("_pg_ripple.vp_{p_id}");
-        let g_filter = match graph {
-            Some(gid) => format!(" WHERE g = {gid}"),
-            None => String::new(),
-        };
-        // Use OFFSET-based pagination inside a single SPI::connect to avoid
-        // repeated connection overhead.  Each page fetches `batch_size` rows
-        // ordered by the monotonically-increasing SID column `i`.
-        let mut offset = 0usize;
+        // Keyset pagination keeps each page indexable even when a graph has
+        // millions of triples; OFFSET would rescan and discard every prior page.
+        let mut last_i = None;
         loop {
+            let mut filters = Vec::new();
+            if let Some(gid) = graph {
+                filters.push(format!("g = {gid}"));
+            }
+            if let Some(i) = last_i {
+                filters.push(format!("i > {i}"));
+            }
+            let where_clause = if filters.is_empty() {
+                String::new()
+            } else {
+                format!(" WHERE {}", filters.join(" AND "))
+            };
             let sql = format!(
-                "SELECT s, o, g FROM {table}{g_filter} ORDER BY i LIMIT {batch_size} OFFSET {offset}"
+                "SELECT s, o, g, i FROM {table}{where_clause} ORDER BY i LIMIT {batch_size}"
             );
-            let page: Vec<(i64, i64, i64, i64)> = Spi::connect(|c| {
+            let page: Vec<(i64, i64, i64, i64, i64)> = Spi::connect(|c| {
                 c.select(&sql, None, &[])
                     .unwrap_or_else(|e| {
                         pgrx::error!("for_each_encoded_triple_batch VP scan SPI error: {e}")
@@ -232,8 +239,9 @@ pub fn for_each_encoded_triple_batch(
                         let s: Option<i64> = row.get(1).ok().flatten();
                         let o: Option<i64> = row.get(2).ok().flatten();
                         let g: Option<i64> = row.get(3).ok().flatten();
-                        match (s, o, g) {
-                            (Some(s), Some(o), Some(g)) => Some((s, p_id, o, g)),
+                        let i: Option<i64> = row.get(4).ok().flatten();
+                        match (s, o, g, i) {
+                            (Some(s), Some(o), Some(g), Some(i)) => Some((s, p_id, o, g, i)),
                             _ => None,
                         }
                     })
@@ -241,26 +249,35 @@ pub fn for_each_encoded_triple_batch(
             });
             let page_len = page.len();
             if !page.is_empty() {
-                callback(&page);
+                let triples: Vec<_> = page.iter().map(|&(s, p, o, g, _)| (s, p, o, g)).collect();
+                callback(&triples);
+                last_i = page.last().map(|row| row.4);
             }
             if page_len < batch_size {
                 break;
             }
-            offset += batch_size;
         }
     }
 
     // ── vp_rare ───────────────────────────────────────────────────────────────
-    let g_filter = match graph {
-        Some(gid) => format!(" WHERE g = {gid}"),
-        None => String::new(),
-    };
-    let mut offset = 0usize;
+    let mut last_i = None;
     loop {
+        let mut filters = Vec::new();
+        if let Some(gid) = graph {
+            filters.push(format!("g = {gid}"));
+        }
+        if let Some(i) = last_i {
+            filters.push(format!("i > {i}"));
+        }
+        let where_clause = if filters.is_empty() {
+            String::new()
+        } else {
+            format!(" WHERE {}", filters.join(" AND "))
+        };
         let sql = format!(
-            "SELECT p, s, o, g FROM _pg_ripple.vp_rare{g_filter} ORDER BY i LIMIT {batch_size} OFFSET {offset}"
+            "SELECT p, s, o, g, i FROM _pg_ripple.vp_rare{where_clause} ORDER BY i LIMIT {batch_size}"
         );
-        let page: Vec<(i64, i64, i64, i64)> = Spi::connect(|c| {
+        let page: Vec<(i64, i64, i64, i64, i64)> = Spi::connect(|c| {
             c.select(&sql, None, &[])
                 .unwrap_or_else(|e| {
                     pgrx::error!("for_each_encoded_triple_batch vp_rare scan SPI error: {e}")
@@ -270,8 +287,9 @@ pub fn for_each_encoded_triple_batch(
                     let s: Option<i64> = row.get(2).ok().flatten();
                     let o: Option<i64> = row.get(3).ok().flatten();
                     let g: Option<i64> = row.get(4).ok().flatten();
-                    match (p, s, o, g) {
-                        (Some(p), Some(s), Some(o), Some(g)) => Some((s, p, o, g)),
+                    let i: Option<i64> = row.get(5).ok().flatten();
+                    match (p, s, o, g, i) {
+                        (Some(p), Some(s), Some(o), Some(g), Some(i)) => Some((s, p, o, g, i)),
                         _ => None,
                     }
                 })
@@ -279,12 +297,13 @@ pub fn for_each_encoded_triple_batch(
         });
         let page_len = page.len();
         if !page.is_empty() {
-            callback(&page);
+            let triples: Vec<_> = page.iter().map(|&(s, p, o, g, _)| (s, p, o, g)).collect();
+            callback(&triples);
+            last_i = page.last().map(|row| row.4);
         }
         if page_len < batch_size {
             break;
         }
-        offset += batch_size;
     }
 }
 

@@ -25,7 +25,7 @@ env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
   PGRX_VERSION: "0.18.0"
-  CONFORMANCE_VERSION: "0.131.0"
+  CONFORMANCE_VERSION: "0.132.0"
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
@@ -430,6 +430,7 @@ jobs:
           PGPORT: "28818"
           PGDATABASE: postgres
           PGUSER: runner
+          REQUIRE_CONFORMANCE: "1"
         run: cargo test --test w3c_smoke -- --nocapture
 
       - name: Stop pgrx PostgreSQL 18
@@ -519,13 +520,14 @@ jobs:
           PGDATABASE: postgres
           PGUSER: runner
           W3C_THREADS: "8"
+          REQUIRE_CONFORMANCE: "1"
         run: cargo test --test w3c_suite -- --nocapture
 
       - name: Stamp W3C conformance report
         if: always()
         run: |
           if [ -f tests/w3c/report.json ]; then
-            python3 -c 'import json, os; p="tests/w3c/report.json"; d=json.load(open(p)); d["version"]=os.environ.get("CONFORMANCE_VERSION", "0.131.0"); d["generated_at"]=__import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat().replace("+00:00", "Z"); open(p, "w").write(json.dumps(d, indent=2)+"\n")'
+            python3 -c 'import json, os; p="tests/w3c/report.json"; d=json.load(open(p)); d["version"]=os.environ.get("CONFORMANCE_VERSION", "0.132.0"); d["generated_at"]=__import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat().replace("+00:00", "Z"); open(p, "w").write(json.dumps(d, indent=2)+"\n")'
           fi
 
       - name: Upload W3C test report
@@ -629,7 +631,7 @@ jobs:
         if: always()
         run: |
           if [ -f tests/conformance/report.json ]; then
-            python3 -c 'import json, os; p="tests/conformance/report.json"; d=json.load(open(p)); d["version"]=os.environ.get("CONFORMANCE_VERSION", "0.131.0"); d["generated_at"]=__import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat().replace("+00:00", "Z"); open(p, "w").write(json.dumps(d, indent=2)+"\n")'
+            python3 -c 'import json, os; p="tests/conformance/report.json"; d=json.load(open(p)); d["version"]=os.environ.get("CONFORMANCE_VERSION", "0.132.0"); d["generated_at"]=__import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat().replace("+00:00", "Z"); open(p, "w").write(json.dumps(d, indent=2)+"\n")'
           fi
 
       - name: Upload Jena conformance report
@@ -730,7 +732,7 @@ jobs:
         if: always()
         run: |
           if [ -f tests/conformance/report.json ]; then
-            python3 -c 'import json, os; p="tests/conformance/report.json"; d=json.load(open(p)); d["version"]=os.environ.get("CONFORMANCE_VERSION", "0.131.0"); d["generated_at"]=__import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat().replace("+00:00", "Z"); open(p, "w").write(json.dumps(d, indent=2)+"\n")'
+            python3 -c 'import json, os; p="tests/conformance/report.json"; d=json.load(open(p)); d["version"]=os.environ.get("CONFORMANCE_VERSION", "0.132.0"); d["generated_at"]=__import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat().replace("+00:00", "Z"); open(p, "w").write(json.dumps(d, indent=2)+"\n")'
           fi
 
       - name: Upload WatDiv benchmark report
@@ -993,7 +995,7 @@ jobs:
         if: always()
         run: |
           if [ -f tests/conformance/report.json ]; then
-            python3 -c 'import json, os; p="tests/conformance/report.json"; d=json.load(open(p)); d["version"]=os.environ.get("CONFORMANCE_VERSION", "0.131.0"); d["generated_at"]=__import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat().replace("+00:00", "Z"); open(p, "w").write(json.dumps(d, indent=2)+"\n")'
+            python3 -c 'import json, os; p="tests/conformance/report.json"; d=json.load(open(p)); d["version"]=os.environ.get("CONFORMANCE_VERSION", "0.132.0"); d["generated_at"]=__import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat().replace("+00:00", "Z"); open(p, "w").write(json.dumps(d, indent=2)+"\n")'
           fi
 
       - name: Upload OWL 2 RL conformance report
@@ -2012,3 +2014,21 @@ jobs:
           assert 'paths' in doc, 'openapi.yaml missing paths'
           print(f'PASS: openapi.yaml is valid YAML, openapi={doc[\"openapi\"]}, paths={list(doc[\"paths\"].keys())}')
           "
+  # v0.132.0: immutable corpus, feature, route, and known-failure contracts.
+  v0132-truth:
+    name: v0.132.0 truth contracts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6
+      - name: Validate conformance source lock
+        run: python3 scripts/validate_conformance_sources.py
+      - name: Validate known-failure metadata
+        run: python3 scripts/validate_known_failures.py
+      - name: Generate and validate feature evidence
+        run: |
+          python3 scripts/generate_feature_evidence.py "${CONFORMANCE_VERSION}"
+          python3 scripts/validate_feature_evidence.py \
+            "results/features/${CONFORMANCE_VERSION}/feature-evidence.json" \
+            --version "${CONFORMANCE_VERSION}"
+      - name: Validate HTTP route truth
+        run: python3 scripts/check_http_routes.py --strict

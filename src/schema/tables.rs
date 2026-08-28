@@ -74,6 +74,7 @@ CREATE INDEX IF NOT EXISTS idx_vp_rare_s_p     ON _pg_ripple.vp_rare (s, p);
 CREATE INDEX IF NOT EXISTS idx_vp_rare_g_p_s_o ON _pg_ripple.vp_rare (g, p, s, o);
 -- v0.37.0: (o, s) index eliminates seq-scans on object-leading patterns
 CREATE INDEX IF NOT EXISTS vp_rare_os_idx      ON _pg_ripple.vp_rare (o, s);
+CREATE INDEX IF NOT EXISTS idx_vp_rare_i       ON _pg_ripple.vp_rare (i);
 
 -- Statements range-mapping catalog (v0.2.0)
 CREATE TABLE IF NOT EXISTS _pg_ripple.statements (

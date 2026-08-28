@@ -159,6 +159,16 @@ pub(crate) fn table_expr(src: &VpSource, graph_filter: Option<i64>, svc_excl: &s
 /// When `graph_filter` is `Some(gid)`, injects `WHERE g = {gid}` into every
 /// branch so the filter is baked in before any outer `LEFT JOIN` wrapper.
 pub(crate) fn build_all_predicates_union(graph_filter: Option<i64>, svc_excl: &str) -> String {
+    let predicate_count =
+        Spi::get_one_with_args::<i64>("SELECT count(*)::bigint FROM _pg_ripple.predicates", &[])
+            .unwrap_or_else(|e| pgrx::error!("variable-predicate catalog scan error: {e}"))
+            .unwrap_or(0);
+    let max_branches = crate::MAX_PREDICATE_UNION_BRANCHES.get().max(10) as i64;
+    if predicate_count > max_branches {
+        pgrx::error!(
+            "PT0601: variable-predicate query would require {predicate_count} UNION branches (max {max_branches}); use a named predicate or increase pg_ripple.max_predicate_union_branches"
+        );
+    }
     let mut branches: Vec<String> = Vec::new();
 
     // Collect dedicated VP table predicate IDs.

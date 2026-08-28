@@ -27,6 +27,17 @@ pub fn write_report(reports: &[&RunReport], output_path: &Path) -> std::io::Resu
 
     let json = serde_json::to_string_pretty(&serde_json::Value::Object(root))
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
-    std::fs::write(output_path, json)?;
+    std::fs::write(output_path, &json)?;
+
+    if let Ok(version) = std::env::var("CONFORMANCE_VERSION") {
+        let directory = Path::new("results").join("conformance").join(version);
+        std::fs::create_dir_all(&directory)?;
+        for report in reports {
+            let path = directory.join(format!("{}.json", report.suite));
+            let content = serde_json::to_string_pretty(&report.to_json())
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+            std::fs::write(path, content)?;
+        }
+    }
     Ok(())
 }

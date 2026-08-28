@@ -324,6 +324,19 @@ Always use `scram-sha-256` authentication (the default in PostgreSQL 18). Avoid 
 
 ---
 
+## Planned v1.0.0 External Audit
+
+After v0.132.0, the project plans an independent security audit covering the
+Rust extension, HTTP companion, SQL migrations, Docker images, and Helm chart.
+The requested review scope includes OWASP ASVS level 2, PostgreSQL extension
+attack surfaces, SSRF, injection, authentication bypass, and privilege
+escalation. The engagement brief and deliverables checklist are tracked in
+[`audit/engagement-brief.md`](../../../audit/engagement-brief.md).
+
+The audit is planned to start within four weeks of the v0.132.0 tag. Its report
+and remediation confirmation are release evidence for v1.0.0; this section is
+not a claim that the audit has completed.
+
 ## Audit Logging
 
 Enable PostgreSQL's logging to maintain an audit trail:
@@ -417,4 +430,3 @@ cross-origin request increments the `pg_ripple_http_cors_permissive_requests_tot
 counter. Monitor this counter to detect unexpected cross-origin traffic. Use a specific origin
 allowlist in production (e.g., `PG_RIPPLE_HTTP_CORS_ORIGINS=https://app.example.com`).
 ```
-

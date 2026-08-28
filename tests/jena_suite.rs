@@ -17,8 +17,7 @@
 //! bash scripts/fetch_conformance_tests.sh --jena
 //! ```
 //!
-//! Tests skip gracefully when neither the test data nor a pg_ripple database
-//! is reachable.
+//! Informational runs may skip when fixtures or PostgreSQL are unavailable.
 //!
 //! # CI job
 //!

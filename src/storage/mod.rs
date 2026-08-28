@@ -202,6 +202,12 @@ pub fn initialize_schema() {
     )
     .unwrap_or_else(|e| pgrx::error!("vp_rare (g,p,s,o) index creation error: {e}"));
 
+    Spi::run_with_args(
+        "CREATE INDEX IF NOT EXISTS idx_vp_rare_i ON _pg_ripple.vp_rare (i)",
+        &[],
+    )
+    .unwrap_or_else(|e| pgrx::error!("vp_rare (i) index creation error: {e}"));
+
     // Create the statements range-mapping catalog (v0.2.0, used by RDF-star in v0.4.0).
     Spi::run_with_args(
         "CREATE TABLE IF NOT EXISTS _pg_ripple.statements ( \

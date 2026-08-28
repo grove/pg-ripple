@@ -105,6 +105,8 @@ fn lubm_suite() {
     let mut passed = 0usize;
     let mut failed = 0usize;
     let mut xfail = 0usize;
+    let mut xpass = 0usize;
+    let mut unexpected_failures = Vec::new();
     let suite_start = Instant::now();
 
     for query in &queries {
@@ -125,8 +127,8 @@ fn lubm_suite() {
                         elapsed_ms, key, query.expected, actual
                     )
                     .ok();
-                    // XPASS is an unexpected pass; counted as a soft notice (not a hard failure).
-                    xfail += 1;
+                    // XPASS is an unexpected pass and therefore a release-gate failure.
+                    xpass += 1;
                 } else {
                     writeln!(out, "  PASS  [{}ms]  {} — {} rows", elapsed_ms, key, actual).ok();
                     passed += 1;
@@ -149,6 +151,11 @@ fn lubm_suite() {
                     )
                     .ok();
                     failed += 1;
+                    unexpected_failures.push(serde_json::json!({
+                        "key": key,
+                        "name": key,
+                        "detail": format!("expected {} rows, got {}", query.expected, actual),
+                    }));
                 }
             }
             Err(e) => {
@@ -168,6 +175,11 @@ fn lubm_suite() {
                     )
                     .ok();
                     failed += 1;
+                    unexpected_failures.push(serde_json::json!({
+                        "key": key,
+                        "name": key,
+                        "detail": e.to_string(),
+                    }));
                 }
             }
         }
@@ -186,18 +198,28 @@ fn lubm_suite() {
     )
     .ok();
 
+    write_lubm_report(
+        passed,
+        failed,
+        xfail,
+        xpass,
+        suite_elapsed.as_secs_f64(),
+        unexpected_failures,
+    )
+    .expect("failed to write LUBM conformance report");
+
     // ── Datalog validation sub-suite ────────────────────────────────────────
     writeln!(out, "\n[lubm] Datalog validation sub-suite").ok();
     run_datalog_validation(&mut client, &mut out);
 
     // ── Final assertion ─────────────────────────────────────────────────────
-    // No unexpected failures (failed == 0).  XFAIL/XPASS are informational.
-    if failed > 0 {
+    // No unexpected failures (failed == 0 and xpass == 0).
+    if failed > 0 || xpass > 0 {
         panic!(
-            "[lubm] {} unexpected failure(s) in LUBM suite.  \
+            "[lubm] {} unexpected failure(s) and {} XPASS result(s) in LUBM suite.  \
              Add entries to tests/conformance/known_failures.txt with prefix 'lubm:' \
              for any confirmed bugs.",
-            failed
+            failed, xpass
         );
     }
 
@@ -210,6 +232,58 @@ fn lubm_suite() {
         )
         .ok();
     }
+}
+
+fn write_lubm_report(
+    passed: usize,
+    failed: usize,
+    xfail: usize,
+    xpass: usize,
+    duration_seconds: f64,
+    unexpected_failures: Vec<serde_json::Value>,
+) -> std::io::Result<()> {
+    let document = serde_json::json!({
+        "pg_ripple_version": std::env::var("CONFORMANCE_VERSION").unwrap_or_else(|_| env!("CARGO_PKG_VERSION").to_owned()),
+        "git_sha": std::env::var("GITHUB_SHA").unwrap_or_else(|_| "unknown".to_owned()),
+        "artifact_digest": std::env::var("CONFORMANCE_ARTIFACT_DIGEST").unwrap_or_else(|_| "uncomputed".to_owned()),
+        "postgres_version": std::env::var("POSTGRES_VERSION").unwrap_or_else(|_| "unknown".to_owned()),
+        "suite": "lubm",
+        "suite_commit": std::env::var("CONFORMANCE_SUITE_COMMIT").unwrap_or_else(|_| "vendored".to_owned()),
+        "started_at": std::env::var("CONFORMANCE_STARTED_AT").unwrap_or_else(|_| "unknown".to_owned()),
+        "duration_seconds": duration_seconds,
+        "expected_total": 14,
+        "executed_total": 14,
+        "total": 14,
+        "passed": passed,
+        "failed": failed,
+        "skipped": 0,
+        "timeout": 0,
+        "xfail": xfail,
+        "xpass": xpass,
+        "unexpected_failures": unexpected_failures,
+    });
+    let project_root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let report_path = project_root.join("tests/conformance/report.json");
+    let mut unified: serde_json::Map<String, serde_json::Value> = if report_path.exists() {
+        serde_json::from_str(&std::fs::read_to_string(&report_path)?).unwrap_or_default()
+    } else {
+        serde_json::Map::new()
+    };
+    unified.insert("lubm".to_owned(), document.clone());
+    std::fs::write(
+        report_path,
+        serde_json::to_string_pretty(&serde_json::Value::Object(unified))
+            .map_err(std::io::Error::other)?,
+    )?;
+    if let Ok(version) = std::env::var("CONFORMANCE_VERSION") {
+        let directory = project_root.join("results/conformance").join(version);
+        std::fs::create_dir_all(&directory)?;
+        std::fs::write(
+            directory.join("lubm.json"),
+            serde_json::to_string_pretty(&document).map_err(std::io::Error::other)?,
+        )?;
+    }
+    Ok(())
 }
 
 // ── Datalog validation sub-suite ─────────────────────────────────────────────

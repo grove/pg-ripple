@@ -80,6 +80,7 @@ pub struct RunReport {
     pub timeout: usize,
     pub xfail: usize,
     pub xpass: usize,
+    pub duration_seconds: f64,
     pub results: Vec<TestResult>,
 }
 
@@ -124,6 +125,7 @@ impl RunReport {
 ///
 /// Returns a [`RunReport`] with per-test results.
 pub fn run_test_suite(db_connect_string: &str, data_dir: &Path, config: &RunConfig) -> RunReport {
+    let started = Instant::now();
     let known_failures = config
         .known_failures_path
         .as_deref()
@@ -165,14 +167,17 @@ pub fn run_test_suite(db_connect_string: &str, data_dir: &Path, config: &RunConf
     }
 
     if all_tests.is_empty() {
-        return RunReport::default();
+        return RunReport {
+            duration_seconds: started.elapsed().as_secs_f64(),
+            ..RunReport::default()
+        };
     }
 
     // Distribute tests across worker threads.
     let threads = config.threads.max(1);
     let timeout = Duration::from_secs(config.timeout_secs);
 
-    if threads == 1 {
+    let mut report = if threads == 1 {
         run_sequential(db_connect_string, all_tests, &known_failures, timeout)
     } else {
         run_parallel(
@@ -182,7 +187,9 @@ pub fn run_test_suite(db_connect_string: &str, data_dir: &Path, config: &RunConf
             timeout,
             threads,
         )
-    }
+    };
+    report.duration_seconds = started.elapsed().as_secs_f64();
+    report
 }
 
 // ── Sequential runner (single connection) ─────────────────────────────────────

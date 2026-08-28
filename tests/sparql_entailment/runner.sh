@@ -24,6 +24,8 @@ PGUSER="${PGUSER:-postgres}"
 PASS=0
 FAIL=0
 SKIP=0
+FAIL_IDS=""
+START_SECONDS=$(date +%s)
 
 echo "SPARQL Entailment Regime Suite"
 echo "================================"
@@ -47,13 +49,16 @@ for i in $(seq 0 $((test_count - 1))); do
 
     query_text=$(cat "$SCRIPT_DIR/$query_file")
 
-    result=$(psql \
+    if ! result=$(psql \
         -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$PGDATABASE" \
-        -t -c "SELECT count(*) FROM pg_ripple.sparql(\$\$${query_text}\$\$)" 2>&1) || true
-
-    if echo "$result" | grep -q "ERROR"; then
+        -t -c "SELECT count(*) FROM pg_ripple.sparql(\$\$${query_text}\$\$)" 2>&1); then
         echo "FAIL"
         FAIL=$((FAIL + 1))
+        FAIL_IDS="${FAIL_IDS},${id}"
+    elif echo "$result" | grep -q "ERROR"; then
+        echo "FAIL"
+        FAIL=$((FAIL + 1))
+        FAIL_IDS="${FAIL_IDS},${id}"
     else
         echo "PASS"
         PASS=$((PASS + 1))
@@ -62,6 +67,52 @@ done
 
 echo ""
 echo "Results: PASS=$PASS FAIL=$FAIL SKIP=$SKIP total=$test_count"
+
+if [[ -n "${CONFORMANCE_VERSION:-}" ]]; then
+    PASS_COUNT="$PASS" FAIL_COUNT="$FAIL" SKIP_COUNT="$SKIP" \
+    FAIL_IDS="$FAIL_IDS" CONFORMANCE_VERSION="$CONFORMANCE_VERSION" \
+    DURATION_SECONDS="$(( $(date +%s) - START_SECONDS ))" \
+    CONFORMANCE_STARTED_AT="${CONFORMANCE_STARTED_AT:-unknown}" \
+    python3 - "$SCRIPT_DIR" <<'PY'
+import json
+import os
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+directory = Path(sys.argv[1]).parents[1] / "results" / "conformance" / os.environ["CONFORMANCE_VERSION"]
+directory.mkdir(parents=True, exist_ok=True)
+passed = int(os.environ["PASS_COUNT"])
+failed = int(os.environ["FAIL_COUNT"])
+skipped = int(os.environ["SKIP_COUNT"])
+failures = [
+    {"key": key, "name": key, "detail": "query failed"}
+    for key in os.environ["FAIL_IDS"].split(",")
+    if key
+]
+document = {
+    "pg_ripple_version": os.environ["CONFORMANCE_VERSION"],
+    "git_sha": os.environ.get("GITHUB_SHA", "unknown"),
+    "artifact_digest": "vendored-in-repository",
+    "postgres_version": os.environ.get("POSTGRES_VERSION", "unknown"),
+    "suite": "entailment_regimes",
+    "suite_commit": "vendored",
+    "started_at": os.environ["CONFORMANCE_STARTED_AT"],
+    "duration_seconds": int(os.environ["DURATION_SECONDS"]),
+    "expected_total": passed + failed + skipped,
+    "executed_total": passed + failed + skipped,
+    "total": passed + failed + skipped,
+    "passed": passed,
+    "failed": failed,
+    "skipped": skipped,
+    "timeout": 0,
+    "xfail": 0,
+    "xpass": 0,
+    "unexpected_failures": failures,
+}
+(directory / "entailment_regimes.json").write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
+PY
+fi
 
 if [ "$FAIL" -gt 0 ]; then
     echo "SUITE FAILED: $FAIL test(s) failed."

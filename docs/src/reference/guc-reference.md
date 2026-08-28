@@ -85,6 +85,20 @@ SET pg_ripple.arrow_batch_size = 5000;
 
 ---
 
+### `pg_ripple.max_predicate_union_branches`
+
+| | |
+|---|---|
+| Type | Integer |
+| Default | `500` |
+| Range | 10–10 000 |
+
+Maximum number of VP-table branches allowed when a variable-predicate SPARQL
+pattern expands to a `UNION ALL`. Queries exceeding this bound fail with
+`PT0601`; use a named predicate or raise the limit deliberately.
+
+---
+
 ### `pg_ripple.vp_promotion_batch_size`
 
 | | |

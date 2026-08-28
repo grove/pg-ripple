@@ -14,9 +14,9 @@
     ],
     "component": {
       "type": "application",
-      "bom-ref": "path+file:///Users/geir.gronmo/projects/pg-ripple1/pg_ripple_http#0.131.0",
+      "bom-ref": "path+file:///Users/geir.gronmo/projects/pg-ripple1/pg_ripple_http#0.132.0",
       "name": "pg_ripple_http",
-      "version": "0.131.0",
+      "version": "0.132.0",
       "description": "SPARQL 1.1 Protocol HTTP endpoint for pg_ripple — connects PostgreSQL 18 RDF triple store to the web",
       "scope": "required",
       "licenses": [
@@ -24,7 +24,7 @@
           "expression": "Apache-2.0"
         }
       ],
-      "purl": "pkg:cargo/pg_ripple_http@0.131.0?download_url=file://.",
+      "purl": "pkg:cargo/pg_ripple_http@0.132.0?download_url=file://.",
       "externalReferences": [
         {
           "type": "vcs",
@@ -34,17 +34,17 @@
       "components": [
         {
           "type": "library",
-          "bom-ref": "path+file:///Users/geir.gronmo/projects/pg-ripple1/pg_ripple_http#0.131.0 bin-target-0",
+          "bom-ref": "path+file:///Users/geir.gronmo/projects/pg-ripple1/pg_ripple_http#0.132.0 bin-target-0",
           "name": "pg_ripple_http",
-          "version": "0.131.0",
-          "purl": "pkg:cargo/pg_ripple_http@0.131.0?download_url=file://.#src/lib.rs"
+          "version": "0.132.0",
+          "purl": "pkg:cargo/pg_ripple_http@0.132.0?download_url=file://.#src/lib.rs"
         },
         {
           "type": "application",
-          "bom-ref": "path+file:///Users/geir.gronmo/projects/pg-ripple1/pg_ripple_http#0.131.0 bin-target-1",
+          "bom-ref": "path+file:///Users/geir.gronmo/projects/pg-ripple1/pg_ripple_http#0.132.0 bin-target-1",
           "name": "pg_ripple_http",
-          "version": "0.131.0",
-          "purl": "pkg:cargo/pg_ripple_http@0.131.0?download_url=file://.#src/main.rs"
+          "version": "0.132.0",
+          "purl": "pkg:cargo/pg_ripple_http@0.132.0?download_url=file://.#src/main.rs"
         }
       ]
     },
@@ -7612,7 +7612,7 @@
   ],
   "dependencies": [
     {
-      "ref": "path+file:///Users/geir.gronmo/projects/pg-ripple1/pg_ripple_http#0.131.0",
+      "ref": "path+file:///Users/geir.gronmo/projects/pg-ripple1/pg_ripple_http#0.132.0",
       "dependsOn": [
         "registry+https://github.com/rust-lang/crates.io-index#arrow@58.3.0",
         "registry+https://github.com/rust-lang/crates.io-index#axum@0.8.9",

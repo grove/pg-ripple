@@ -33,7 +33,7 @@ use pg_ripple_http::{metrics, routing};
 /// Connections to older extension versions log a prominent warning. The extension
 /// is still served (degraded mode) so that rolling upgrades do not hard-fail.
 /// Set `PG_RIPPLE_HTTP_STRICT_COMPAT=1` to convert the warning to a fatal startup error.
-const COMPATIBLE_EXTENSION_MIN: &str = "0.130.0";
+const COMPATIBLE_EXTENSION_MIN: &str = "0.131.0";
 
 /// Check that the installed pg_ripple extension version is within the known-compatible
 /// range for this pg_ripple_http build.  Logs a warning if it is not.

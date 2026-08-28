@@ -17,10 +17,6 @@ use axum::response::{IntoResponse, Response};
 use super::sparql_handlers::json_response_http;
 use crate::common::{AppState, check_auth_admin, check_auth_metrics, redacted_error};
 
-// Re-import routing types for ApiDoc
-use super::ApiDoc;
-use utoipa::OpenApi as _;
-
 /// Build timestamp recorded at compile time (RFC 3339).
 /// BUILD-TIME-FIELD-01 (v0.83.0): populated by build.rs with an RFC-3339
 /// timestamp, or falls back to the Cargo package version string prefixed with
@@ -684,9 +680,7 @@ pub(crate) async fn service_description() -> Response {
     )
 )]
 pub(crate) async fn openapi_spec() -> Response {
-    let yaml = ApiDoc::openapi()
-        .to_yaml()
-        .unwrap_or_else(|e| format!("# openapi generation error: {e}\n"));
+    let yaml = include_str!("../../../openapi.yaml");
 
     Response::builder()
         .status(StatusCode::OK)

@@ -33,6 +33,13 @@ info()  { echo -e "${YELLOW}[info]${NC}  $*"; }
 ok()    { echo -e "${GREEN}[  ok]${NC}  $*"; }
 fail()  { echo -e "${RED}[FAIL]${NC}  $*" >&2; exit 1; }
 
+validate_source() {
+    local suite="$1"
+    shift
+    python3 "${SCRIPT_DIR}/validate_conformance_sources.py" \
+        --suite "$suite" "$@"
+}
+
 # ── Argument parsing ──────────────────────────────────────────────────────────
 
 FORCE=""
@@ -79,11 +86,11 @@ JENA_URL="https://raw.githubusercontent.com/apache/jena/790b3dc08fccb6be1ea2868b
 
 # SHA-256 checksum of the Jena archive.
 # Set JENA_SKIP_CHECKSUM=1 to skip verification when testing a new snapshot.
-JENA_SHA256="${JENA_SHA256:-cfe989a8429ca57e6a737ccc094c761ec57737ef06ed7a749257a3ad7d0f7f3e}"
+JENA_SHA256="cfe989a8429ca57e6a737ccc094c761ec57737ef06ed7a749257a3ad7d0f7f3e"
 
 fetch_jena() {
     if [[ -d "${JENA_TEST_DIR}" && "${FORCE}" != "--force" ]]; then
-        if find "${JENA_TEST_DIR}" -name "manifest.ttl" 2>/dev/null | grep -q .; then
+        if validate_source jena --directory "${JENA_TEST_DIR}"; then
             ok "Jena test data already present at ${JENA_TEST_DIR}"
             ok "Use --force to re-download."
             return 0
@@ -108,25 +115,7 @@ fetch_jena() {
         fail "Neither curl nor wget is available. Please install one."
     fi
 
-    # Verify checksum if provided.
-    if [[ -n "${JENA_SHA256}" ]]; then
-        info "Verifying SHA-256 checksum..."
-        local actual
-        if command -v sha256sum >/dev/null 2>&1; then
-            actual=$(sha256sum "${archive}" | awk '{print $1}')
-        elif command -v shasum >/dev/null 2>&1; then
-            actual=$(shasum -a 256 "${archive}" | awk '{print $1}')
-        else
-            info "WARNING: no sha256sum or shasum found; skipping checksum verification."
-            actual="${JENA_SHA256}"
-        fi
-        if [[ "${actual}" != "${JENA_SHA256}" ]]; then
-            fail "SHA-256 mismatch: expected ${JENA_SHA256}, got ${actual}"
-        fi
-        ok "Checksum verified."
-    elif [[ "${JENA_SKIP_CHECKSUM:-}" != "1" ]]; then
-        info "Set JENA_SHA256 or JENA_SKIP_CHECKSUM=1 to skip verification."
-    fi
+    validate_source jena --archive "${archive}"
 
     if ! command -v unzip >/dev/null 2>&1; then
         fail "unzip is not available."
@@ -145,16 +134,13 @@ fetch_jena() {
             # Try alternative layout (Jena uses various directory structures).
             local alt="${JENA_TEST_DIR}/SPARQL/${suite}"
             if [[ -d "${alt}" ]]; then
-                ln -sfn "${alt}" "${src_dir}" 2>/dev/null || true
+                ln -sfn "${alt}" "${src_dir}"
             fi
         fi
     done
 
-    if find "${JENA_TEST_DIR}" -name "manifest.ttl" 2>/dev/null | grep -q .; then
-        ok "Jena test data extracted to ${JENA_TEST_DIR}"
-    else
-        fail "No manifest.ttl files found after extracting Jena test data."
-    fi
+    validate_source jena --directory "${JENA_TEST_DIR}"
+    ok "Jena test data extracted to ${JENA_TEST_DIR}"
 }
 
 # ── WatDiv ────────────────────────────────────────────────────────────────────
@@ -163,10 +149,10 @@ WATDIV_DATA_DIR="${WATDIV_DATA_DIR:-${PROJECT_ROOT}/tests/watdiv/data}"
 WATDIV_TMPL_DIR="${WATDIV_TMPL_DIR:-${PROJECT_ROOT}/tests/watdiv/templates}"
 
 # WatDiv query templates are in a GitHub repository.
-WATDIV_TMPL_URL="https://github.com/daveritchie/watdiv/archive/refs/heads/master.tar.gz"
+WATDIV_TMPL_URL="https://api.github.com/repos/dsg-uwaterloo/watdiv/tarball/482524d0e35423ae1ab7ad1bcfda5bd3c8f76308"
 
 # SHA-256 of the WatDiv template archive.
-WATDIV_TMPL_SHA256="${WATDIV_TMPL_SHA256:-}"
+WATDIV_TMPL_SHA256="ce1707e2ceec57ae8f2d18e0d1e0b8905db31a2c11c6e2768b1eb16ec023f031"
 
 # WatDiv data generation: requires the watdiv binary or Docker image.
 # If WATDIV_BINARY is set, use it; otherwise try Docker.
@@ -175,7 +161,7 @@ WATDIV_SCALE="${WATDIV_SCALE:-10000000}"   # 10M triples (default for CI)
 
 fetch_watdiv_templates() {
     if [[ -d "${WATDIV_TMPL_DIR}" && "${FORCE}" != "--force" ]]; then
-        if find "${WATDIV_TMPL_DIR}" -name "*.sparql" -o -name "*.rq" 2>/dev/null | grep -q .; then
+        if validate_source watdiv --directory "${WATDIV_TMPL_DIR}"; then
             ok "WatDiv templates already present at ${WATDIV_TMPL_DIR}"
             ok "Use --force to re-download."
             return 0
@@ -198,29 +184,21 @@ fetch_watdiv_templates() {
         fail "Neither curl nor wget is available."
     fi
 
-    if [[ -n "${WATDIV_TMPL_SHA256}" ]]; then
-        info "Verifying SHA-256 checksum..."
-        local actual
-        if command -v sha256sum >/dev/null 2>&1; then
-            actual=$(sha256sum "${archive}" | awk '{print $1}')
-        elif command -v shasum >/dev/null 2>&1; then
-            actual=$(shasum -a 256 "${archive}" | awk '{print $1}')
-        else
-            actual="${WATDIV_TMPL_SHA256}"
-        fi
-        if [[ "${actual}" != "${WATDIV_TMPL_SHA256}" ]]; then
-            fail "SHA-256 mismatch: expected ${WATDIV_TMPL_SHA256}, got ${actual}"
-        fi
-        ok "Checksum verified."
-    fi
+    validate_source watdiv --archive "${archive}"
 
     info "Extracting WatDiv templates..."
-    mkdir -p "${WATDIV_TMPL_DIR}"
-    tar -xzf "${archive}" \
-        --strip-components=2 \
-        -C "${WATDIV_TMPL_DIR}" \
-        "watdiv-master/watdiv/data-model/queries" \
-        2>/dev/null || true
+    local extract_dir="/tmp/watdiv-tmpl-extract-$$"
+    mkdir -p "${WATDIV_TMPL_DIR}" "${extract_dir}"
+    tar -xzf "${archive}" -C "${extract_dir}" 2>/dev/null \
+        || fail "Could not extract the WatDiv archive"
+    local query_dir
+    query_dir=$(find "${extract_dir}" -type d -path '*/data-model/queries' -print -quit)
+    if [[ -z "${query_dir}" ]]; then
+        fail "Could not locate WatDiv query templates in the extracted archive"
+    fi
+    find "${query_dir}" -type f \( -name '*.sparql' -o -name '*.rq' \) \
+        -exec cp {} "${WATDIV_TMPL_DIR}/" \;
+    rm -rf "${extract_dir}"
 
     # Organise into sub-directories if not already.
     for class in star chain snowflake complex; do
@@ -231,20 +209,16 @@ fetch_watdiv_templates() {
     for f in "${WATDIV_TMPL_DIR}"/*.sparql "${WATDIV_TMPL_DIR}"/*.rq; do
         base="$(basename "$f")"
         case "${base}" in
-            S*.*)  mv -n "$f" "${WATDIV_TMPL_DIR}/star/"  2>/dev/null || true ;;
-            C*.*)  mv -n "$f" "${WATDIV_TMPL_DIR}/chain/" 2>/dev/null || true ;;
-            F*.*)  mv -n "$f" "${WATDIV_TMPL_DIR}/snowflake/" 2>/dev/null || true ;;
-            B*.*|L*.*)  mv -n "$f" "${WATDIV_TMPL_DIR}/complex/" 2>/dev/null || true ;;
+            S*.*)  mv -n "$f" "${WATDIV_TMPL_DIR}/star/" ;;
+            C*.*)  mv -n "$f" "${WATDIV_TMPL_DIR}/chain/" ;;
+            F*.*)  mv -n "$f" "${WATDIV_TMPL_DIR}/snowflake/" ;;
+            B*.*|L*.*)  mv -n "$f" "${WATDIV_TMPL_DIR}/complex/" ;;
         esac
     done
     shopt -u nullglob
 
-    if find "${WATDIV_TMPL_DIR}" -name "*.sparql" -o -name "*.rq" 2>/dev/null | grep -q .; then
-        ok "WatDiv templates extracted to ${WATDIV_TMPL_DIR}"
-    else
-        info "WARNING: No .sparql/.rq files found after extraction."
-        info "The WatDiv repository layout may have changed."
-    fi
+    validate_source watdiv --directory "${WATDIV_TMPL_DIR}"
+    ok "WatDiv templates extracted to ${WATDIV_TMPL_DIR}"
 }
 
 generate_watdiv_data() {
@@ -295,33 +269,13 @@ fetch_owl2rl() {
     info "Fetching W3C OWL 2 RL test manifests..."
 
     if [[ -d "${OWL2RL_DIR}" && "${FORCE}" != "--force" ]]; then
-        if find "${OWL2RL_DIR}" -name "manifest.ttl" 2>/dev/null | grep -q .; then
+        if python3 "${SCRIPT_DIR}/validate_conformance_sources.py" \
+            --suite owl2_rl --directory "${OWL2RL_DIR}"; then
             ok "OWL 2 RL test data already present at ${OWL2RL_DIR}"
             return 0
         fi
     fi
-
-    mkdir -p "${OWL2RL_DIR}"
-
-    local OWL2RL_URL="https://github.com/w3c/owl2-profiles-tests/archive/refs/heads/master.tar.gz"
-    local OWL2RL_ARCHIVE="${OWL2RL_DIR}/owl2rl-tests.tar.gz"
-
-    if command -v curl >/dev/null 2>&1; then
-        curl -fsSL "${OWL2RL_URL}" -o "${OWL2RL_ARCHIVE}" \
-            || { info "WARNING: OWL 2 RL download failed — tests will skip gracefully."; return 0; }
-    elif command -v wget >/dev/null 2>&1; then
-        wget -q "${OWL2RL_URL}" -O "${OWL2RL_ARCHIVE}" \
-            || { info "WARNING: OWL 2 RL download failed — tests will skip gracefully."; return 0; }
-    else
-        info "WARNING: Neither curl nor wget available — OWL 2 RL tests will skip."
-        return 0
-    fi
-
-    tar -xzf "${OWL2RL_ARCHIVE}" -C "${OWL2RL_DIR}" --strip-components=1 \
-        || { info "WARNING: OWL 2 RL archive extraction failed."; return 0; }
-
-    rm -f "${OWL2RL_ARCHIVE}"
-    ok "OWL 2 RL test data extracted to ${OWL2RL_DIR}"
+    fail "OWL 2 RL corpus is missing; provide the pinned corpus under ${OWL2RL_DIR}"
 }
 
 # ── BSBM data (v0.46.0) ───────────────────────────────────────────────────────

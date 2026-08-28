@@ -11,6 +11,35 @@ Versions correspond to the milestones in [ROADMAP.md](ROADMAP.md).
 
 ---
 
+## [0.132.0] — 2026-08-28 — Conformance, feature truth, and release evidence
+
+Required conformance gates now fail closed, feature claims are versioned in a
+machine-validated evidence manifest, and HTTP route, documentation, OpenAPI,
+and authorization inventories are checked against the central router.
+
+### What you can do
+
+- Fetch immutable W3C, Jena, and WatDiv corpus snapshots with checksum and
+  shape validation from `tests/conformance/sources.lock`.
+- Inspect release-scoped conformance reports under `results/conformance/<version>/`
+  and feature evidence under
+  `results/features/<version>/` (`results/features/<version>/feature-evidence.json`).
+- Build the complete release evidence bundle with `scripts/build_release_evidence.py`
+  (`target/release-evidence/<version>/`).
+- Use bounded variable-predicate expansion with
+  `pg_ripple.max_predicate_union_branches` and keyset-paginated graph exports.
+
+### Technical details
+
+- Required W3C smoke and LUBM runs reject missing corpora, zero tests, skips,
+  failures, and XPASS results; informational suites remain explicitly marked
+  informational.
+- VP rare, delta, and main partitions have statement-id indexes for keyset
+  pagination; the 0.131.0 → 0.132.0 migration adds the rare-table index.
+- The release bundle (`scripts/build_release_evidence.py`) contains provenance, schema and migration evidence,
+  conformance reports, feature evidence, security checks, test counts, SBOM,
+  and checksums.
+
 ## [0.131.0] — 2026-08-27 — Security Hardening and Conformance Evidence
 
 Production HTTP deployments now fail closed by default, temporal RDF output is

@@ -1,15 +1,15 @@
 # Unified conformance known-failures list
 #
-# Format: <suite>:<test-key>  <optional reason>
+# Format: <suite>:<test-key> issue=<URL> owner=<team/person>
+#         rationale=<text> expires=<YYYY-MM-DD>
 #
 # Suite prefixes:
 #   w3c:     W3C SPARQL 1.1 test suite (test IRI)
 #   jena:    Apache Jena test suite (test IRI)
 #   watdiv:  WatDiv benchmark template (template ID, e.g. S1, B7)
 #
-# A test listed here is reported as XFAIL (expected failure).
-# An XFAIL that unexpectedly passes is reported as XPASS — a CI notice
-# to remove the stale entry.
+# A test listed here is reported as XFAIL. CI rejects missing fields and expired
+# entries; an XFAIL that unexpectedly passes is an XPASS and fails required jobs.
 #
 # Guidelines:
 #   - Only add entries for confirmed bugs, not framework issues.
@@ -30,7 +30,7 @@
 #   requires the parser to reject "<?a&&?b>" as a syntax error, but spargebra
 #   accepts it. This is a parser library limitation; no local workaround exists.
 # Issue: https://github.com/oxigraph/spargebra/issues/123
-jena:syn-bad-28.rq
+jena:syn-bad-28.rq issue=https://github.com/oxigraph/spargebra/issues/123 owner=pg-ripple rationale=spargebra does not enforce the SPARQL longest-token rule expires=2026-12-31
 
 # ─────────────────────────────────────────────────────────────────────────────
 # WatDiv entries (v0.43.0+): none expected for correctness failures

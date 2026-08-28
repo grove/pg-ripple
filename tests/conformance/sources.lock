@@ -1,0 +1,71 @@
+{
+  "format": 1,
+  "suites": {
+    "w3c_sparql11": {
+      "kind": "w3c",
+      "policy": "required",
+      "repository": "https://github.com/w3c/rdf-tests",
+      "commit": "369a90d1a60c021b746df2e411da0ff36258a758",
+      "archive_url": "https://api.github.com/repos/w3c/rdf-tests/tarball/369a90d1a60c021b746df2e411da0ff36258a758",
+      "archive_sha256": "151a7086fafbdc0003b7b7c6f8eba99ad153105bfbcc769e0a1714581ca859d5",
+      "expected_manifest_count": {"min": 1, "max": 100},
+      "expected_test_count": {"min": 1, "max": 10000},
+      "license": "W3C-3-Clause"
+    },
+    "jena": {
+      "kind": "jena",
+      "policy": "informational",
+      "repository": "https://github.com/apache/jena",
+      "commit": "790b3dc08fccb6be1ea2868b97bfcbae8f113062",
+      "archive_url": "https://raw.githubusercontent.com/apache/jena/790b3dc08fccb6be1ea2868b97bfcbae8f113062/jena-arq/testing/ARQ/testing-2026-05.zip",
+      "archive_sha256": "cfe989a8429ca57e6a737ccc094c761ec57737ef06ed7a749257a3ad7d0f7f3e",
+      "expected_manifest_count": {"min": 1, "max": 200},
+      "expected_test_count": {"min": 1, "max": 5000},
+      "license": "Apache-2.0"
+    },
+    "watdiv": {
+      "kind": "watdiv",
+      "policy": "informational",
+      "repository": "https://github.com/dsg-uwaterloo/watdiv",
+      "commit": "482524d0e35423ae1ab7ad1bcfda5bd3c8f76308",
+      "archive_url": "https://api.github.com/repos/dsg-uwaterloo/watdiv/tarball/482524d0e35423ae1ab7ad1bcfda5bd3c8f76308",
+      "archive_sha256": "ce1707e2ceec57ae8f2d18e0d1e0b8905db31a2c11c6e2768b1eb16ec023f031",
+      "expected_manifest_count": {"min": 0, "max": 1},
+      "expected_test_count": {"min": 1, "max": 100},
+      "license": "WatDiv-Research-Use"
+    },
+    "lubm": {
+      "kind": "vendored",
+      "policy": "required",
+      "repository": "https://github.com/trickle-labs/pg-ripple",
+      "commit": "aa893c00e9f27a8cf09d68ad1a6382866ab92ef6",
+      "archive_url": "local://tests/lubm",
+      "archive_sha256": "vendored-in-repository",
+      "expected_manifest_count": {"min": 0, "max": 0},
+      "expected_test_count": {"min": 14, "max": 14},
+      "license": "Apache-2.0"
+    },
+    "owl2_rl": {
+      "kind": "owl2rl",
+      "policy": "informational",
+      "repository": "https://www.w3.org/2009/owl-test-cases",
+      "commit": "w3c-archive-2009-11-18",
+      "archive_url": "https://www.w3.org/2009/11/owl-test/all.rdf",
+      "archive_sha256": "5383f1ddf4cf2f03703a2f886f41d4e5bc375633a1cfa94a03254fd89330f8bb",
+      "expected_manifest_count": {"min": 1, "max": 100},
+      "expected_test_count": {"min": 1, "max": 1000},
+      "license": "W3C-3-Clause"
+    },
+    "entailment_regimes": {
+      "kind": "vendored",
+      "policy": "informational",
+      "repository": "https://github.com/trickle-labs/pg-ripple",
+      "commit": "aa893c00e9f27a8cf09d68ad1a6382866ab92ef6",
+      "archive_url": "local://tests/sparql_entailment",
+      "archive_sha256": "vendored-in-repository",
+      "expected_manifest_count": {"min": 1, "max": 1},
+      "expected_test_count": {"min": 4, "max": 4},
+      "license": "Apache-2.0"
+    }
+  }
+}
