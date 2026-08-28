@@ -65,6 +65,7 @@ pub fn insert_triple(s: &str, p: &str, o: &str, g: i64) -> i64 {
 
     // Fast path: dedicated VP table (HTAP split) already exists — insert to delta.
     if let Some(_view) = get_dedicated_vp_table(p_id) {
+        crate::error::fault_injection::hit("vp_delta_write");
         let delta = format!("_pg_ripple.vp_{p_id}_delta");
         // Use ON CONFLICT DO UPDATE to get the existing row's ID if it already exists.
         // This handles UNIQUE (s, o, g) constraint (v0.22.0 H-6).
@@ -245,6 +246,7 @@ pub(crate) fn copy_into_vp(delta: &str, rows: &[(i64, i64, i64)]) {
          SELECT s, o, g FROM UNNEST($1::bigint[], $2::bigint[], $3::bigint[]) AS t(s, o, g) \
          ON CONFLICT (s, o, g) DO NOTHING"
     );
+    crate::error::fault_injection::hit("vp_delta_write");
     Spi::run_with_args(
         &sql,
         &[
@@ -269,6 +271,7 @@ pub(crate) fn batch_insert_encoded(p_id: i64, rows: &[(i64, i64, i64)]) -> i64 {
     let table_opt = get_dedicated_vp_table(p_id);
 
     if let Some(_view) = table_opt {
+        crate::error::fault_injection::hit("vp_delta_write");
         // Route batch insert to delta table.
         let delta = format!("_pg_ripple.vp_{p_id}_delta");
 
@@ -484,6 +487,7 @@ pub fn delete_triple(s: &str, p: &str, o: &str, g: i64) -> i64 {
             deleted += d;
         } else {
             // 2. Not in delta — add a tombstone to suppress it from main.
+            crate::error::fault_injection::hit("tombstone_application");
             // v0.37.0: Acquire the per-predicate advisory lock in shared mode before
             // inserting a tombstone. The merge worker acquires the exclusive form
             // (pg_advisory_xact_lock) so a merge and a concurrent delete never race.

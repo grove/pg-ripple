@@ -253,6 +253,28 @@ CREATE OR REPLACE VIEW pg_ripple.graph_access_decoded AS
            CASE permission_id WHEN 1 THEN 'read' WHEN 2 THEN 'write' WHEN 3 THEN 'admin' END
                AS permission_name
     FROM _pg_ripple.graph_access;
+
+-- v0.133.0: make mutable extension-owned catalogs part of normal pg_dump
+-- archives. Dynamic VP tables remain ordinary user tables and are dumped
+-- automatically. Bootstrap catalogs are recreated by CREATE EXTENSION and
+-- must not be copied back over their seed rows.
+DO $$
+DECLARE
+    relation_name REGCLASS;
+BEGIN
+    FOR relation_name IN
+        SELECT c.oid::regclass
+        FROM pg_catalog.pg_class AS c
+        JOIN pg_catalog.pg_namespace AS n ON n.oid = c.relnamespace
+        WHERE n.nspname IN ('_pg_ripple', 'pg_ripple')
+          AND c.relkind IN ('r', 'p')
+          AND NOT (n.nspname = '_pg_ripple'
+                  AND c.relname IN ('lattice_types', 'schema_version'))
+    LOOP
+        PERFORM pg_catalog.pg_extension_config_dump(relation_name, '');
+    END LOOP;
+END;
+$$;
 "#,
     name = "predicate_stats_view",
     requires = ["schema_setup"],

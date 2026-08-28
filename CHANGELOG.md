@@ -11,6 +11,27 @@ Versions correspond to the milestones in [ROADMAP.md](ROADMAP.md).
 
 ---
 
+## [0.133.0] — 2026-08-28 — Crash recovery, backup, failover, and operations
+
+pg_ripple now has a release-scoped resilience qualification surface for the
+failures expected of PostgreSQL production deployments.
+
+### Added
+
+- Deterministic, test-only fault injection for storage, mutation journal,
+  merge, promotion, writeback, Datalog, and worker boundaries.
+- `pg_ripple.health()` with schema/migration, worker, merge, cache,
+  dead-letter, and replication diagnostics.
+- Crash/restart, logical backup, physical backup, PITR, standby promotion, and
+  resource-pressure qualification harnesses under `tests/resilience/`.
+- Executable recovery runbooks under `docs/src/operations/`.
+
+### Changed
+
+- Merge-worker heartbeat state is persisted in
+  `_pg_ripple.merge_worker_status`, including restart count and last error.
+- The 0.132.0 → 0.133.0 migration creates the durable worker diagnostics table.
+
 ## [0.132.0] — 2026-08-28 — Conformance, feature truth, and release evidence
 
 Required conformance gates now fail closed, feature claims are versioned in a

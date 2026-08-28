@@ -16,6 +16,7 @@ use pgrx::prelude::*;
 ///
 /// Returns the number of derived triples permanently retracted.
 pub fn run_dred_on_delete(pred_id: i64, s_val: i64, o_val: i64, _g_val: i64) -> i64 {
+    crate::error::fault_injection::hit("datalog_dred_retraction_start");
     if !crate::DRED_ENABLED.get() {
         return 0;
     }
@@ -100,6 +101,7 @@ pub fn run_dred_on_delete(pred_id: i64, s_val: i64, o_val: i64, _g_val: i64) -> 
         // ── Phase 1: Over-delete ─────────────────────────────────────────────
         // Create a temporary table to hold the candidates for over-deletion.
         let temp_over = format!("_dred_over_{d}");
+        crate::error::fault_injection::hit("datalog_dred_retraction_cleanup");
         let _ = Spi::run_with_args(&format!("DROP TABLE IF EXISTS {temp_over}"), &[]);
 
         if has_dedicated {

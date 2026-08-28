@@ -98,6 +98,7 @@ pub fn clear() {
 ///
 /// Note: calling `flush()` when the journal is empty is a no-op (fast path).
 pub fn flush() {
+    crate::error::fault_injection::hit("mutation_journal_flush");
     JOURNAL.with(|j| {
         let mut entries = j.borrow_mut();
         if entries.is_empty() {

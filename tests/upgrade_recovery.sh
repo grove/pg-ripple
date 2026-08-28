@@ -61,6 +61,33 @@ if ! command -v pg_ctl >/dev/null 2>&1; then
     echo "FAIL: pg_ctl is required for restart recovery verification" >&2
     exit 1
 fi
+
+if [[ "${PG_RIPPLE_RESILIENCE_REQUIRE_SIGKILL:-0}" == "1" ]]; then
+    postmaster_pid_file="$data_dir/postmaster.pid"
+    [[ -r "$postmaster_pid_file" ]] || {
+        echo "FAIL: postmaster.pid is not readable for SIGKILL recovery verification" >&2
+        exit 1
+    }
+    postmaster_pid="$(head -n 1 "$postmaster_pid_file")"
+    [[ "$postmaster_pid" =~ ^[0-9]+$ && "$postmaster_pid" -gt 1 ]] || {
+        echo "FAIL: invalid postmaster PID in $postmaster_pid_file" >&2
+        exit 1
+    }
+    kill -KILL "$postmaster_pid"
+    for attempt in $(seq 1 30); do
+        if ! pg_ctl status -D "$data_dir" >/dev/null 2>&1; then
+            break
+        fi
+        [[ "$attempt" -lt 30 ]] || {
+            echo "FAIL: postmaster remained alive after SIGKILL" >&2
+            exit 1
+        }
+        sleep 1
+    done
+    pg_ctl start -D "$data_dir" -w -t 60 >/dev/null
+    echo "SIGKILL restart completed"
+fi
+
 pg_ctl -D "$data_dir" restart -m fast -w >/dev/null
 
 after_restart="$(${PSQL[@]} -d "$DB" -tAc "SELECT pg_ripple.triple_count();" | tr -d ' ')"

@@ -25,7 +25,7 @@ env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
   PGRX_VERSION: "0.18.0"
-  CONFORMANCE_VERSION: "0.132.0"
+  CONFORMANCE_VERSION: "0.133.0"
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
@@ -527,7 +527,7 @@ jobs:
         if: always()
         run: |
           if [ -f tests/w3c/report.json ]; then
-            python3 -c 'import json, os; p="tests/w3c/report.json"; d=json.load(open(p)); d["version"]=os.environ.get("CONFORMANCE_VERSION", "0.132.0"); d["generated_at"]=__import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat().replace("+00:00", "Z"); open(p, "w").write(json.dumps(d, indent=2)+"\n")'
+            python3 -c 'import json, os; p="tests/w3c/report.json"; d=json.load(open(p)); d["version"]=os.environ.get("CONFORMANCE_VERSION", "0.133.0"); d["generated_at"]=__import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat().replace("+00:00", "Z"); open(p, "w").write(json.dumps(d, indent=2)+"\n")'
           fi
 
       - name: Upload W3C test report
@@ -631,7 +631,7 @@ jobs:
         if: always()
         run: |
           if [ -f tests/conformance/report.json ]; then
-            python3 -c 'import json, os; p="tests/conformance/report.json"; d=json.load(open(p)); d["version"]=os.environ.get("CONFORMANCE_VERSION", "0.132.0"); d["generated_at"]=__import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat().replace("+00:00", "Z"); open(p, "w").write(json.dumps(d, indent=2)+"\n")'
+            python3 -c 'import json, os; p="tests/conformance/report.json"; d=json.load(open(p)); d["version"]=os.environ.get("CONFORMANCE_VERSION", "0.133.0"); d["generated_at"]=__import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat().replace("+00:00", "Z"); open(p, "w").write(json.dumps(d, indent=2)+"\n")'
           fi
 
       - name: Upload Jena conformance report
@@ -732,7 +732,7 @@ jobs:
         if: always()
         run: |
           if [ -f tests/conformance/report.json ]; then
-            python3 -c 'import json, os; p="tests/conformance/report.json"; d=json.load(open(p)); d["version"]=os.environ.get("CONFORMANCE_VERSION", "0.132.0"); d["generated_at"]=__import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat().replace("+00:00", "Z"); open(p, "w").write(json.dumps(d, indent=2)+"\n")'
+            python3 -c 'import json, os; p="tests/conformance/report.json"; d=json.load(open(p)); d["version"]=os.environ.get("CONFORMANCE_VERSION", "0.133.0"); d["generated_at"]=__import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat().replace("+00:00", "Z"); open(p, "w").write(json.dumps(d, indent=2)+"\n")'
           fi
 
       - name: Upload WatDiv benchmark report
@@ -995,7 +995,7 @@ jobs:
         if: always()
         run: |
           if [ -f tests/conformance/report.json ]; then
-            python3 -c 'import json, os; p="tests/conformance/report.json"; d=json.load(open(p)); d["version"]=os.environ.get("CONFORMANCE_VERSION", "0.132.0"); d["generated_at"]=__import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat().replace("+00:00", "Z"); open(p, "w").write(json.dumps(d, indent=2)+"\n")'
+            python3 -c 'import json, os; p="tests/conformance/report.json"; d=json.load(open(p)); d["version"]=os.environ.get("CONFORMANCE_VERSION", "0.133.0"); d["generated_at"]=__import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat().replace("+00:00", "Z"); open(p, "w").write(json.dumps(d, indent=2)+"\n")'
           fi
 
       - name: Upload OWL 2 RL conformance report
@@ -2045,3 +2045,13 @@ jobs:
             --version "${CONFORMANCE_VERSION}"
       - name: Validate HTTP route truth
         run: python3 scripts/check_http_routes.py --strict
+
+  v0133-resilience-static:
+    name: v0.133.0 resilience static qualification
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6
+      - name: Validate resilience matrix, scripts, and runbooks
+        run: |
+          bash tests/resilience/run_v0133_matrix.sh --validate
+          bash scripts/check_v0133_resilience.sh

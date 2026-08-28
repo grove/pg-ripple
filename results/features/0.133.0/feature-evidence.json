@@ -1,0 +1,1885 @@
+{
+  "version": "0.133.0",
+  "features": [
+    {
+      "feature_name": "sparql_select",
+      "status": "implemented",
+      "stable_api_entry_points": [
+        "pg_ripple.sparql_select"
+      ],
+      "required_dependencies": [],
+      "tests": {
+        "positive": [
+          "tests/pg_regress/sql/feature_status.sql"
+        ],
+        "negative": [
+          "tests/pg_regress/sql/error_paths.sql"
+        ],
+        "restart": [
+          "tests/pg_regress/sql/crash_recovery_merge.sql"
+        ],
+        "migration": [
+          "tests/test_migration_chain.sh"
+        ],
+        "security": [
+          "tests/pg_regress/sql/security_rls_role_injection.sql"
+        ]
+      },
+      "documentation_path": "docs/src/reference/sparql.md",
+      "last_verified_version": "0.133.0",
+      "known_limitations": "",
+      "evidence_artifact_digest": "sha256:3da3242a7e12a29a24abbd3dfc570abe826369b5cef44ce8cdccd6d5d0112908"
+    },
+    {
+      "feature_name": "sparql_update",
+      "status": "implemented",
+      "stable_api_entry_points": [
+        "pg_ripple.sparql_update"
+      ],
+      "required_dependencies": [],
+      "tests": {
+        "positive": [
+          "tests/pg_regress/sql/feature_status.sql"
+        ],
+        "negative": [
+          "tests/pg_regress/sql/error_paths.sql"
+        ],
+        "restart": [
+          "tests/pg_regress/sql/crash_recovery_merge.sql"
+        ],
+        "migration": [
+          "tests/test_migration_chain.sh"
+        ],
+        "security": [
+          "tests/pg_regress/sql/security_rls_role_injection.sql"
+        ]
+      },
+      "documentation_path": "docs/src/reference/sparql.md",
+      "last_verified_version": "0.133.0",
+      "known_limitations": "",
+      "evidence_artifact_digest": "sha256:a3813aef56e785b38615d2da258b2b659daa4c30e56a63b4aba67a27709e0ed2"
+    },
+    {
+      "feature_name": "sparql_construct",
+      "status": "implemented",
+      "stable_api_entry_points": [
+        "pg_ripple.sparql_construct"
+      ],
+      "required_dependencies": [],
+      "tests": {
+        "positive": [
+          "tests/pg_regress/sql/feature_status.sql"
+        ],
+        "negative": [
+          "tests/pg_regress/sql/error_paths.sql"
+        ],
+        "restart": [
+          "tests/pg_regress/sql/crash_recovery_merge.sql"
+        ],
+        "migration": [
+          "tests/test_migration_chain.sh"
+        ],
+        "security": [
+          "tests/pg_regress/sql/security_rls_role_injection.sql"
+        ]
+      },
+      "documentation_path": "docs/src/reference/sparql.md",
+      "last_verified_version": "0.133.0",
+      "known_limitations": "",
+      "evidence_artifact_digest": "sha256:51c0e0cd043682dbd2dc59c890589f230855acc6b6f9eafd8009bcfeb111399b"
+    },
+    {
+      "feature_name": "sparql_property_paths",
+      "status": "implemented",
+      "stable_api_entry_points": [
+        "pg_ripple.sparql_property_paths"
+      ],
+      "required_dependencies": [],
+      "tests": {
+        "positive": [
+          "tests/pg_regress/sql/feature_status.sql"
+        ],
+        "negative": [
+          "tests/pg_regress/sql/error_paths.sql"
+        ],
+        "restart": [
+          "tests/pg_regress/sql/crash_recovery_merge.sql"
+        ],
+        "migration": [
+          "tests/test_migration_chain.sh"
+        ],
+        "security": [
+          "tests/pg_regress/sql/security_rls_role_injection.sql"
+        ]
+      },
+      "documentation_path": "docs/src/reference/sparql.md",
+      "last_verified_version": "0.133.0",
+      "known_limitations": "",
+      "evidence_artifact_digest": "sha256:5fec829b0c793a0a537a520835d82fcbf6ef45968ec5c8fb96aa51987bf2ecf9"
+    },
+    {
+      "feature_name": "sparql_federation",
+      "status": "implemented",
+      "stable_api_entry_points": [
+        "pg_ripple.sparql_federation"
+      ],
+      "required_dependencies": [],
+      "tests": {
+        "positive": [
+          "tests/pg_regress/sql/feature_status.sql"
+        ],
+        "negative": [
+          "tests/pg_regress/sql/error_paths.sql"
+        ],
+        "restart": [
+          "tests/pg_regress/sql/crash_recovery_merge.sql"
+        ],
+        "migration": [
+          "tests/test_migration_chain.sh"
+        ],
+        "security": [
+          "tests/pg_regress/sql/security_rls_role_injection.sql"
+        ]
+      },
+      "documentation_path": "docs/src/reference/federation.md",
+      "last_verified_version": "0.133.0",
+      "known_limitations": "",
+      "evidence_artifact_digest": "sha256:e53adc2e5740f7e719f1fb0a3541aa1749424b5c6bbc66857ce34f14fb15d83d"
+    },
+    {
+      "feature_name": "sparql_cursor_streaming",
+      "status": "experimental",
+      "stable_api_entry_points": [
+        "pg_ripple.sparql_cursor_streaming"
+      ],
+      "required_dependencies": [],
+      "tests": {
+        "positive": [
+          "tests/pg_regress/sql/feature_status.sql"
+        ],
+        "negative": [
+          "tests/pg_regress/sql/error_paths.sql"
+        ],
+        "restart": [
+          "tests/pg_regress/sql/crash_recovery_merge.sql"
+        ],
+        "migration": [
+          "tests/test_migration_chain.sh"
+        ],
+        "security": [
+          "tests/pg_regress/sql/security_rls_role_injection.sql"
+        ]
+      },
+      "documentation_path": "docs/src/reference/sparql.md",
+      "last_verified_version": "0.133.0",
+      "known_limitations": "src/sparql/cursor.rs: ConstructCursorIter",
+      "evidence_artifact_digest": "sha256:12d23624f3bae58ba9b14dd87ce87392c72174b49de2fc48a44d9bf9cc2b7004"
+    },
+    {
+      "feature_name": "construct_writeback",
+      "status": "implemented",
+      "stable_api_entry_points": [
+        "pg_ripple.construct_writeback"
+      ],
+      "required_dependencies": [],
+      "tests": {
+        "positive": [
+          "tests/pg_regress/sql/feature_status.sql"
+        ],
+        "negative": [
+          "tests/pg_regress/sql/error_paths.sql"
+        ],
+        "restart": [
+          "tests/pg_regress/sql/crash_recovery_merge.sql"
+        ],
+        "migration": [
+          "tests/test_migration_chain.sh"
+        ],
+        "security": [
+          "tests/pg_regress/sql/security_rls_role_injection.sql"
+        ]
+      },
+      "documentation_path": "docs/src/reference/construct-rules.md",
+      "last_verified_version": "0.133.0",
+      "known_limitations": "",
+      "evidence_artifact_digest": "sha256:f1a488db67346098b3e2680ffe5df74a6a39357f2113a3ed9b64eb90ece3219a"
+    },
+    {
+      "feature_name": "shacl_sparql_constraint",
+      "status": "implemented",
+      "stable_api_entry_points": [
+        "pg_ripple.shacl_sparql_constraint"
+      ],
+      "required_dependencies": [],
+      "tests": {
+        "positive": [
+          "tests/pg_regress/sql/feature_status.sql"
+        ],
+        "negative": [
+          "tests/pg_regress/sql/error_paths.sql"
+        ],
+        "restart": [
+          "tests/pg_regress/sql/crash_recovery_merge.sql"
+        ],
+        "migration": [
+          "tests/test_migration_chain.sh"
+        ],
+        "security": [
+          "tests/pg_regress/sql/security_rls_role_injection.sql"
+        ]
+      },
+      "documentation_path": "docs/src/reference/shacl.md",
+      "last_verified_version": "0.133.0",
+      "known_limitations": "",
+      "evidence_artifact_digest": "sha256:6d7b2c7e524a9862a3899de805062d7ab8eceebe4c724a88bf7d0b383af95913"
+    },
+    {
+      "feature_name": "shacl_sparql_rule",
+      "status": "implemented",
+      "stable_api_entry_points": [
+        "pg_ripple.shacl_sparql_rule"
+      ],
+      "required_dependencies": [],
+      "tests": {
+        "positive": [
+          "tests/pg_regress/sql/feature_status.sql"
+        ],
+        "negative": [
+          "tests/pg_regress/sql/error_paths.sql"
+        ],
+        "restart": [
+          "tests/pg_regress/sql/crash_recovery_merge.sql"
+        ],
+        "migration": [
+          "tests/test_migration_chain.sh"
+        ],
+        "security": [
+          "tests/pg_regress/sql/security_rls_role_injection.sql"
+        ]
+      },
+      "documentation_path": "docs/src/reference/shacl.md",
+      "last_verified_version": "0.133.0",
+      "known_limitations": "",
+      "evidence_artifact_digest": "sha256:7fb35cb36f128bc6196c4cfc62882008eb11004116a24c1dfca2d59bbdf063ac"
+    },
+    {
+      "feature_name": "datalog_inference",
+      "status": "implemented",
+      "stable_api_entry_points": [
+        "pg_ripple.datalog_inference"
+      ],
+      "required_dependencies": [],
+      "tests": {
+        "positive": [
+          "tests/pg_regress/sql/feature_status.sql"
+        ],
+        "negative": [
+          "tests/pg_regress/sql/error_paths.sql"
+        ],
+        "restart": [
+          "tests/pg_regress/sql/crash_recovery_merge.sql"
+        ],
+        "migration": [
+          "tests/test_migration_chain.sh"
+        ],
+        "security": [
+          "tests/pg_regress/sql/security_rls_role_injection.sql"
+        ]
+      },
+      "documentation_path": "docs/src/reference/datalog.md",
+      "last_verified_version": "0.133.0",
+      "known_limitations": "",
+      "evidence_artifact_digest": "sha256:d0c2273070fc088c40ca97d4ce8bb79c2546dda5ef8c7be2d5926ee07947699a"
+    },
+    {
+      "feature_name": "datalog_owl_rl",
+      "status": "implemented",
+      "stable_api_entry_points": [
+        "pg_ripple.datalog_owl_rl"
+      ],
+      "required_dependencies": [],
+      "tests": {
+        "positive": [
+          "tests/pg_regress/sql/feature_status.sql"
+        ],
+        "negative": [
+          "tests/pg_regress/sql/error_paths.sql"
+        ],
+        "restart": [
+          "tests/pg_regress/sql/crash_recovery_merge.sql"
+        ],
+        "migration": [
+          "tests/test_migration_chain.sh"
+        ],
+        "security": [
+          "tests/pg_regress/sql/security_rls_role_injection.sql"
+        ]
+      },
+      "documentation_path": "docs/src/reference/datalog.md",
+      "last_verified_version": "0.133.0",
+      "known_limitations": "",
+      "evidence_artifact_digest": "sha256:75cc89c924ac66c193c544e82b43ef77d3e992e3c0196eb591f5ab759049962c"
+    },
+    {
+      "feature_name": "htap_delta_main",
+      "status": "implemented",
+      "stable_api_entry_points": [
+        "pg_ripple.htap_delta_main"
+      ],
+      "required_dependencies": [],
+      "tests": {
+        "positive": [
+          "tests/pg_regress/sql/feature_status.sql"
+        ],
+        "negative": [
+          "tests/pg_regress/sql/error_paths.sql"
+        ],
+        "restart": [
+          "tests/pg_regress/sql/crash_recovery_merge.sql"
+        ],
+        "migration": [
+          "tests/test_migration_chain.sh"
+        ],
+        "security": [
+          "tests/pg_regress/sql/security_rls_role_injection.sql"
+        ]
+      },
+      "documentation_path": "docs/src/reference/storage.md",
+      "last_verified_version": "0.133.0",
+      "known_limitations": "",
+      "evidence_artifact_digest": "sha256:4c33d395f640c7a180d2d20347501f78e7d9b33ac82398dcd07b7c34cce75191"
+    },
+    {
+      "feature_name": "citus_service_pruning",
+      "status": "experimental",
+      "stable_api_entry_points": [
+        "pg_ripple.citus_service_pruning"
+      ],
+      "required_dependencies": [
+        "citus"
+      ],
+      "tests": {
+        "positive": [
+          "tests/pg_regress/sql/feature_status.sql"
+        ],
+        "negative": [
+          "tests/pg_regress/sql/error_paths.sql"
+        ],
+        "restart": [
+          "tests/pg_regress/sql/crash_recovery_merge.sql"
+        ],
+        "migration": [
+          "tests/test_migration_chain.sh"
+        ],
+        "security": [
+          "tests/pg_regress/sql/security_rls_role_injection.sql"
+        ]
+      },
+      "documentation_path": "docs/src/reference/scalability.md",
+      "last_verified_version": "0.133.0",
+      "known_limitations": "src/citus/mod.rs: citus_service_shard_annotation()",
+      "evidence_artifact_digest": "sha256:80f89f4630f193fd8401fea8b3f3800fd895003d3e89f8f945a60ceeec49eb31"
+    },
+    {
+      "feature_name": "citus_hll_distinct",
+      "status": "experimental",
+      "stable_api_entry_points": [
+        "pg_ripple.citus_hll_distinct"
+      ],
+      "required_dependencies": [
+        "citus, hll"
+      ],
+      "tests": {
+        "positive": [
+          "tests/pg_regress/sql/feature_status.sql"
+        ],
+        "negative": [
+          "tests/pg_regress/sql/error_paths.sql"
+        ],
+        "restart": [
+          "tests/pg_regress/sql/crash_recovery_merge.sql"
+        ],
+        "migration": [
+          "tests/test_migration_chain.sh"
+        ],
+        "security": [
+          "tests/pg_regress/sql/security_rls_role_injection.sql"
+        ]
+      },
+      "documentation_path": "docs/src/reference/scalability.md",
+      "last_verified_version": "0.133.0",
+      "known_limitations": "src/sparql/translate/group.rs: citus_hll_available",
+      "evidence_artifact_digest": "sha256:7fe5c7a253be9454556500ac21df5fb288836a92bee01388ffdcbcc0035581e1"
+    },
+    {
+      "feature_name": "citus_nonblocking_promotion",
+      "status": "experimental",
+      "stable_api_entry_points": [
+        "pg_ripple.citus_nonblocking_promotion"
+      ],
+      "required_dependencies": [
+        "citus"
+      ],
+      "tests": {
+        "positive": [
+          "tests/pg_regress/sql/feature_status.sql"
+        ],
+        "negative": [
+          "tests/pg_regress/sql/error_paths.sql"
+        ],
+        "restart": [
+          "tests/pg_regress/sql/crash_recovery_merge.sql"
+        ],
+        "migration": [
+          "tests/test_migration_chain.sh"
+        ],
+        "security": [
+          "tests/pg_regress/sql/security_rls_role_injection.sql"
+        ]
+      },
+      "documentation_path": "docs/src/reference/scalability.md",
+      "last_verified_version": "0.133.0",
+      "known_limitations": "src/storage/mod.rs: promote_predicate, recover_interrupted_promotions",
+      "evidence_artifact_digest": "sha256:86c5869922eb4bfeb4264cd0aeac89e8e3e38c18003f9d2ba0ac5b721528906a"
+    },
+    {
+      "feature_name": "citus_brin_summarise",
+      "status": "implemented",
+      "stable_api_entry_points": [
+        "pg_ripple.citus_brin_summarise"
+      ],
+      "required_dependencies": [
+        "citus"
+      ],
+      "tests": {
+        "positive": [
+          "tests/pg_regress/sql/feature_status.sql"
+        ],
+        "negative": [
+          "tests/pg_regress/sql/error_paths.sql"
+        ],
+        "restart": [
+          "tests/pg_regress/sql/crash_recovery_merge.sql"
+        ],
+        "migration": [
+          "tests/test_migration_chain.sh"
+        ],
+        "security": [
+          "tests/pg_regress/sql/security_rls_role_injection.sql"
+        ]
+      },
+      "documentation_path": "docs/src/reference/scalability.md",
+      "last_verified_version": "0.133.0",
+      "known_limitations": "",
+      "evidence_artifact_digest": "sha256:139263212823932092ab41635f41f034f02b1908d01d151fe0d048767dd68e0d"
+    },
+    {
+      "feature_name": "citus_rls_propagation",
+      "status": "experimental",
+      "stable_api_entry_points": [
+        "pg_ripple.citus_rls_propagation"
+      ],
+      "required_dependencies": [
+        "citus"
+      ],
+      "tests": {
+        "positive": [
+          "tests/pg_regress/sql/feature_status.sql"
+        ],
+        "negative": [
+          "tests/pg_regress/sql/error_paths.sql"
+        ],
+        "restart": [
+          "tests/pg_regress/sql/crash_recovery_merge.sql"
+        ],
+        "migration": [
+          "tests/test_migration_chain.sh"
+        ],
+        "security": [
+          "tests/pg_regress/sql/security_rls_role_injection.sql"
+        ]
+      },
+      "documentation_path": "docs/src/reference/scalability.md",
+      "last_verified_version": "0.133.0",
+      "known_limitations": "",
+      "evidence_artifact_digest": "sha256:9ae421e73b82ba58f66697f2fe4da637ace9feb37583cb2fc56cde4004ce67cd"
+    },
+    {
+      "feature_name": "citus_multihop_pruning",
+      "status": "experimental",
+      "stable_api_entry_points": [
+        "pg_ripple.citus_multihop_pruning"
+      ],
+      "required_dependencies": [
+        "citus"
+      ],
+      "tests": {
+        "positive": [
+          "tests/pg_regress/sql/feature_status.sql"
+        ],
+        "negative": [
+          "tests/pg_regress/sql/error_paths.sql"
+        ],
+        "restart": [
+          "tests/pg_regress/sql/crash_recovery_merge.sql"
+        ],
+        "migration": [
+          "tests/test_migration_chain.sh"
+        ],
+        "security": [
+          "tests/pg_regress/sql/security_rls_role_injection.sql"
+        ]
+      },
+      "documentation_path": "docs/src/reference/scalability.md",
+      "last_verified_version": "0.133.0",
+      "known_limitations": "src/citus/mod.rs: is_citus_worker_endpoint, citus_service_shard_annotation",
+      "evidence_artifact_digest": "sha256:f572528d07b530aa9047fa8fac9a635b28c9508451477ab099137c8c38dbf3d4"
+    },
+    {
+      "feature_name": "arrow_flight",
+      "status": "experimental",
+      "stable_api_entry_points": [
+        "pg_ripple.arrow_flight"
+      ],
+      "required_dependencies": [],
+      "tests": {
+        "positive": [
+          "tests/pg_regress/sql/feature_status.sql"
+        ],
+        "negative": [
+          "tests/pg_regress/sql/error_paths.sql"
+        ],
+        "restart": [
+          "tests/pg_regress/sql/crash_recovery_merge.sql"
+        ],
+        "migration": [
+          "tests/test_migration_chain.sh"
+        ],
+        "security": [
+          "tests/pg_regress/sql/security_rls_role_injection.sql"
+        ]
+      },
+      "documentation_path": "docs/src/reference/arrow-flight.md",
+      "last_verified_version": "0.133.0",
+      "known_limitations": "",
+      "evidence_artifact_digest": "sha256:17ddab231626c9922cb55592866a8c66f02cd0dc5e0970a64b089a9c00ef0adb"
+    },
+    {
+      "feature_name": "wcoj",
+      "status": "implemented",
+      "stable_api_entry_points": [
+        "pg_ripple.wcoj"
+      ],
+      "required_dependencies": [],
+      "tests": {
+        "positive": [
+          "tests/pg_regress/sql/feature_status.sql"
+        ],
+        "negative": [
+          "tests/pg_regress/sql/error_paths.sql"
+        ],
+        "restart": [
+          "tests/pg_regress/sql/crash_recovery_merge.sql"
+        ],
+        "migration": [
+          "tests/test_migration_chain.sh"
+        ],
+        "security": [
+          "tests/pg_regress/sql/security_rls_role_injection.sql"
+        ]
+      },
+      "documentation_path": "docs/src/reference/query-optimization.md",
+      "last_verified_version": "0.133.0",
+      "known_limitations": "",
+      "evidence_artifact_digest": "sha256:5538f28a14d16bf5373d2d441a0f205cbecb6f3b17637f3d9c02ddf8e36f5195"
+    },
+    {
+      "feature_name": "streaming_observability",
+      "status": "implemented",
+      "stable_api_entry_points": [
+        "pg_ripple.streaming_observability"
+      ],
+      "required_dependencies": [],
+      "tests": {
+        "positive": [
+          "tests/pg_regress/sql/feature_status.sql"
+        ],
+        "negative": [
+          "tests/pg_regress/sql/error_paths.sql"
+        ],
+        "restart": [
+          "tests/pg_regress/sql/crash_recovery_merge.sql"
+        ],
+        "migration": [
+          "tests/test_migration_chain.sh"
+        ],
+        "security": [
+          "tests/pg_regress/sql/security_rls_role_injection.sql"
+        ]
+      },
+      "documentation_path": "docs/src/reference/observability.md",
+      "last_verified_version": "0.133.0",
+      "known_limitations": "",
+      "evidence_artifact_digest": "sha256:e6e903e2814eaa53ec5d50027c463e3f51ba62b59b95d791c177b7ca15a75713"
+    },
+    {
+      "feature_name": "vector_hybrid_search",
+      "status": "experimental",
+      "stable_api_entry_points": [
+        "pg_ripple.vector_hybrid_search"
+      ],
+      "required_dependencies": [
+        "pgvector"
+      ],
+      "tests": {
+        "positive": [
+          "tests/pg_regress/sql/feature_status.sql"
+        ],
+        "negative": [
+          "tests/pg_regress/sql/error_paths.sql"
+        ],
+        "restart": [
+          "tests/pg_regress/sql/crash_recovery_merge.sql"
+        ],
+        "migration": [
+          "tests/test_migration_chain.sh"
+        ],
+        "security": [
+          "tests/pg_regress/sql/security_rls_role_injection.sql"
+        ]
+      },
+      "documentation_path": "docs/src/reference/vector-search.md",
+      "last_verified_version": "0.133.0",
+      "known_limitations": "",
+      "evidence_artifact_digest": "sha256:f040c8641cd343079d50d26d897b257032983b7d94b8984222c4f199162bb36b"
+    },
+    {
+      "feature_name": "sparql_service_federation",
+      "status": "implemented",
+      "stable_api_entry_points": [
+        "pg_ripple.sparql_service_federation"
+      ],
+      "required_dependencies": [],
+      "tests": {
+        "positive": [
+          "tests/pg_regress/sql/feature_status.sql"
+        ],
+        "negative": [
+          "tests/pg_regress/sql/error_paths.sql"
+        ],
+        "restart": [
+          "tests/pg_regress/sql/crash_recovery_merge.sql"
+        ],
+        "migration": [
+          "tests/test_migration_chain.sh"
+        ],
+        "security": [
+          "tests/pg_regress/sql/security_rls_role_injection.sql"
+        ]
+      },
+      "documentation_path": "docs/src/reference/federation.md",
+      "last_verified_version": "0.133.0",
+      "known_limitations": "",
+      "evidence_artifact_digest": "sha256:a2e3ecc65bed2fbf8aa8816ba3c8d007f47d8e58076888266a95b9a3e109319a"
+    },
+    {
+      "feature_name": "graphrag_export",
+      "status": "implemented",
+      "stable_api_entry_points": [
+        "pg_ripple.graphrag_export"
+      ],
+      "required_dependencies": [],
+      "tests": {
+        "positive": [
+          "tests/pg_regress/sql/feature_status.sql"
+        ],
+        "negative": [
+          "tests/pg_regress/sql/error_paths.sql"
+        ],
+        "restart": [
+          "tests/pg_regress/sql/crash_recovery_merge.sql"
+        ],
+        "migration": [
+          "tests/test_migration_chain.sh"
+        ],
+        "security": [
+          "tests/pg_regress/sql/security_rls_role_injection.sql"
+        ]
+      },
+      "documentation_path": "docs/src/reference/graphrag.md",
+      "last_verified_version": "0.133.0",
+      "known_limitations": "",
+      "evidence_artifact_digest": "sha256:dcaba092f93540c5d549aff4b4d2587a12c40c0760b7037b9fc8e33ed5850320"
+    },
+    {
+      "feature_name": "cdc_subscriptions",
+      "status": "experimental",
+      "stable_api_entry_points": [
+        "pg_ripple.cdc_subscriptions"
+      ],
+      "required_dependencies": [
+        "pg_trickle"
+      ],
+      "tests": {
+        "positive": [
+          "tests/pg_regress/sql/feature_status.sql"
+        ],
+        "negative": [
+          "tests/pg_regress/sql/error_paths.sql"
+        ],
+        "restart": [
+          "tests/pg_regress/sql/crash_recovery_merge.sql"
+        ],
+        "migration": [
+          "tests/test_migration_chain.sh"
+        ],
+        "security": [
+          "tests/pg_regress/sql/security_rls_role_injection.sql"
+        ]
+      },
+      "documentation_path": "docs/src/reference/cdc.md",
+      "last_verified_version": "0.133.0",
+      "known_limitations": "",
+      "evidence_artifact_digest": "sha256:c7941f27b894326bfa58928db119ec9c7bda03e8d256c9c8fb4c9cbe94097f90"
+    },
+    {
+      "feature_name": "continuous_fuzzing",
+      "status": "experimental",
+      "stable_api_entry_points": [
+        "pg_ripple.continuous_fuzzing"
+      ],
+      "required_dependencies": [],
+      "tests": {
+        "positive": [
+          "tests/pg_regress/sql/feature_status.sql"
+        ],
+        "negative": [
+          "tests/pg_regress/sql/error_paths.sql"
+        ],
+        "restart": [
+          "tests/pg_regress/sql/crash_recovery_merge.sql"
+        ],
+        "migration": [
+          "tests/test_migration_chain.sh"
+        ],
+        "security": [
+          "tests/pg_regress/sql/security_rls_role_injection.sql"
+        ]
+      },
+      "documentation_path": "docs/src/reference/development.md",
+      "last_verified_version": "0.133.0",
+      "known_limitations": "",
+      "evidence_artifact_digest": "sha256:5b19a216d87967ca11e7b52573a4c458d17f197723fe070c30fe316c590e1567"
+    },
+    {
+      "feature_name": "llm_sparql_repair",
+      "status": "experimental",
+      "stable_api_entry_points": [
+        "pg_ripple.llm_sparql_repair"
+      ],
+      "required_dependencies": [
+        "external LLM endpoint"
+      ],
+      "tests": {
+        "positive": [
+          "tests/pg_regress/sql/feature_status.sql"
+        ],
+        "negative": [
+          "tests/pg_regress/sql/error_paths.sql"
+        ],
+        "restart": [
+          "tests/pg_regress/sql/crash_recovery_merge.sql"
+        ],
+        "migration": [
+          "tests/test_migration_chain.sh"
+        ],
+        "security": [
+          "tests/pg_regress/sql/security_rls_role_injection.sql"
+        ]
+      },
+      "documentation_path": "docs/src/features/nl-to-sparql.md",
+      "last_verified_version": "0.133.0",
+      "known_limitations": "src/llm/mod.rs",
+      "evidence_artifact_digest": "sha256:4017f4913b938a7e5ad1df2831883a300b97889b181ced35487b1239a4943219"
+    },
+    {
+      "feature_name": "kge_embeddings",
+      "status": "experimental",
+      "stable_api_entry_points": [
+        "pg_ripple.kge_embeddings"
+      ],
+      "required_dependencies": [
+        "pgvector"
+      ],
+      "tests": {
+        "positive": [
+          "tests/pg_regress/sql/feature_status.sql"
+        ],
+        "negative": [
+          "tests/pg_regress/sql/error_paths.sql"
+        ],
+        "restart": [
+          "tests/pg_regress/sql/crash_recovery_merge.sql"
+        ],
+        "migration": [
+          "tests/test_migration_chain.sh"
+        ],
+        "security": [
+          "tests/pg_regress/sql/security_rls_role_injection.sql"
+        ]
+      },
+      "documentation_path": "docs/src/features/knowledge-graph-embeddings.md",
+      "last_verified_version": "0.133.0",
+      "known_limitations": "src/kge.rs",
+      "evidence_artifact_digest": "sha256:de6eae5f67abfe4afc2cf50d123470e42c1998f4419f79340c3a230fd04ed3c0"
+    },
+    {
+      "feature_name": "sparql_nl_to_sparql",
+      "status": "experimental",
+      "stable_api_entry_points": [
+        "pg_ripple.sparql_nl_to_sparql"
+      ],
+      "required_dependencies": [
+        "external LLM endpoint"
+      ],
+      "tests": {
+        "positive": [
+          "tests/pg_regress/sql/feature_status.sql"
+        ],
+        "negative": [
+          "tests/pg_regress/sql/error_paths.sql"
+        ],
+        "restart": [
+          "tests/pg_regress/sql/crash_recovery_merge.sql"
+        ],
+        "migration": [
+          "tests/test_migration_chain.sh"
+        ],
+        "security": [
+          "tests/pg_regress/sql/security_rls_role_injection.sql"
+        ]
+      },
+      "documentation_path": "docs/src/features/nl-to-sparql.md",
+      "last_verified_version": "0.133.0",
+      "known_limitations": "src/llm/mod.rs: sparql_from_nl",
+      "evidence_artifact_digest": "sha256:9794e7f1f66616bb44cb55686f821777c454729637aae5a646c64211dbe9c5fa"
+    },
+    {
+      "feature_name": "sparql_12",
+      "status": "planned",
+      "stable_api_entry_points": [
+        "pg_ripple.sparql_12"
+      ],
+      "required_dependencies": [
+        "spargebra SPARQL 1.2 grammar"
+      ],
+      "tests": {
+        "positive": [
+          "tests/pg_regress/sql/feature_status.sql"
+        ],
+        "negative": [
+          "tests/pg_regress/sql/error_paths.sql"
+        ],
+        "restart": [
+          "tests/pg_regress/sql/crash_recovery_merge.sql"
+        ],
+        "migration": [
+          "tests/test_migration_chain.sh"
+        ],
+        "security": [
+          "tests/pg_regress/sql/security_rls_role_injection.sql"
+        ]
+      },
+      "documentation_path": "docs/src/reference/sparql.md",
+      "last_verified_version": "0.133.0",
+      "known_limitations": "",
+      "evidence_artifact_digest": "sha256:f93613385188df9a8cf1b8586f05c7a9fca8dbf116bdad7228b579ef522d8b2f"
+    },
+    {
+      "feature_name": "sparql_subscription",
+      "status": "experimental",
+      "stable_api_entry_points": [
+        "pg_ripple.sparql_subscription"
+      ],
+      "required_dependencies": [],
+      "tests": {
+        "positive": [
+          "tests/pg_regress/sql/feature_status.sql"
+        ],
+        "negative": [
+          "tests/pg_regress/sql/error_paths.sql"
+        ],
+        "restart": [
+          "tests/pg_regress/sql/crash_recovery_merge.sql"
+        ],
+        "migration": [
+          "tests/test_migration_chain.sh"
+        ],
+        "security": [
+          "tests/pg_regress/sql/security_rls_role_injection.sql"
+        ]
+      },
+      "documentation_path": "docs/src/features/live-subscriptions.md",
+      "last_verified_version": "0.133.0",
+      "known_limitations": "src/subscriptions.rs",
+      "evidence_artifact_digest": "sha256:01c775beac33ba1bc880ed1c742af196da3a575a3255abd62fd776697193e371"
+    },
+    {
+      "feature_name": "json_ld_multi_ingest",
+      "status": "implemented",
+      "stable_api_entry_points": [
+        "pg_ripple.json_ld_multi_ingest"
+      ],
+      "required_dependencies": [],
+      "tests": {
+        "positive": [
+          "tests/pg_regress/sql/feature_status.sql"
+        ],
+        "negative": [
+          "tests/pg_regress/sql/error_paths.sql"
+        ],
+        "restart": [
+          "tests/pg_regress/sql/crash_recovery_merge.sql"
+        ],
+        "migration": [
+          "tests/test_migration_chain.sh"
+        ],
+        "security": [
+          "tests/pg_regress/sql/security_rls_role_injection.sql"
+        ]
+      },
+      "documentation_path": "docs/src/features/loading-data.md",
+      "last_verified_version": "0.133.0",
+      "known_limitations": "src/bulk_load/mod.rs: json_ld_load",
+      "evidence_artifact_digest": "sha256:540bc73b91d57c282c4678f3d7852fd61190ca2feed93b7c367e92df936eedb0"
+    },
+    {
+      "feature_name": "json_mapping",
+      "status": "experimental",
+      "stable_api_entry_points": [
+        "pg_ripple.json_mapping"
+      ],
+      "required_dependencies": [],
+      "tests": {
+        "positive": [
+          "tests/pg_regress/sql/feature_status.sql"
+        ],
+        "negative": [
+          "tests/pg_regress/sql/error_paths.sql"
+        ],
+        "restart": [
+          "tests/pg_regress/sql/crash_recovery_merge.sql"
+        ],
+        "migration": [
+          "tests/test_migration_chain.sh"
+        ],
+        "security": [
+          "tests/pg_regress/sql/security_rls_role_injection.sql"
+        ]
+      },
+      "documentation_path": "docs/src/features/loading-data.md",
+      "last_verified_version": "0.133.0",
+      "known_limitations": "src/json_mapping/mod.rs",
+      "evidence_artifact_digest": "sha256:90aa38c5b9c33a86e5fa865ade24ee168626f5afc20dbf51a96e3dbcaa6338cf"
+    },
+    {
+      "feature_name": "json_mapping_writeback",
+      "status": "implemented",
+      "stable_api_entry_points": [
+        "pg_ripple.json_mapping_writeback"
+      ],
+      "required_dependencies": [],
+      "tests": {
+        "positive": [
+          "tests/pg_regress/sql/feature_status.sql"
+        ],
+        "negative": [
+          "tests/pg_regress/sql/error_paths.sql"
+        ],
+        "restart": [
+          "tests/pg_regress/sql/crash_recovery_merge.sql"
+        ],
+        "migration": [
+          "tests/test_migration_chain.sh"
+        ],
+        "security": [
+          "tests/pg_regress/sql/security_rls_role_injection.sql"
+        ]
+      },
+      "documentation_path": "docs/src/features/json-mapping.md",
+      "last_verified_version": "0.133.0",
+      "known_limitations": "src/json_mapping/mod.rs",
+      "evidence_artifact_digest": "sha256:5a659631dd8622cd28084bf8b4194811767894fe874b4a579a1f69fd977e9e75"
+    },
+    {
+      "feature_name": "vp_promotion_recovery",
+      "status": "implemented",
+      "stable_api_entry_points": [
+        "pg_ripple.vp_promotion_recovery"
+      ],
+      "required_dependencies": [],
+      "tests": {
+        "positive": [
+          "tests/pg_regress/sql/feature_status.sql"
+        ],
+        "negative": [
+          "tests/pg_regress/sql/error_paths.sql"
+        ],
+        "restart": [
+          "tests/pg_regress/sql/crash_recovery_merge.sql"
+        ],
+        "migration": [
+          "tests/test_migration_chain.sh"
+        ],
+        "security": [
+          "tests/pg_regress/sql/security_rls_role_injection.sql"
+        ]
+      },
+      "documentation_path": "docs/src/reference/storage.md",
+      "last_verified_version": "0.133.0",
+      "known_limitations": "src/storage/promote.rs: recover_interrupted_promotions",
+      "evidence_artifact_digest": "sha256:05e15f39c865f11b9a68c7e685be465d9e93fb4d46faa048b494d37ad673224d"
+    },
+    {
+      "feature_name": "mutation_journal",
+      "status": "implemented",
+      "stable_api_entry_points": [
+        "pg_ripple.mutation_journal"
+      ],
+      "required_dependencies": [],
+      "tests": {
+        "positive": [
+          "tests/pg_regress/sql/feature_status.sql"
+        ],
+        "negative": [
+          "tests/pg_regress/sql/error_paths.sql"
+        ],
+        "restart": [
+          "tests/pg_regress/sql/crash_recovery_merge.sql"
+        ],
+        "migration": [
+          "tests/test_migration_chain.sh"
+        ],
+        "security": [
+          "tests/pg_regress/sql/security_rls_role_injection.sql"
+        ]
+      },
+      "documentation_path": "docs/src/reference/storage.md",
+      "last_verified_version": "0.133.0",
+      "known_limitations": "src/storage/mutation_journal.rs",
+      "evidence_artifact_digest": "sha256:e788d1fac6d79e4a0b2ee97d325433be19f6578853714a525924661c11d58e10"
+    },
+    {
+      "feature_name": "bidi_integration",
+      "status": "implemented",
+      "stable_api_entry_points": [
+        "pg_ripple.bidi_integration"
+      ],
+      "required_dependencies": [],
+      "tests": {
+        "positive": [
+          "tests/pg_regress/sql/feature_status.sql"
+        ],
+        "negative": [
+          "tests/pg_regress/sql/error_paths.sql"
+        ],
+        "restart": [
+          "tests/pg_regress/sql/crash_recovery_merge.sql"
+        ],
+        "migration": [
+          "tests/test_migration_chain.sh"
+        ],
+        "security": [
+          "tests/pg_regress/sql/security_rls_role_injection.sql"
+        ]
+      },
+      "documentation_path": "docs/src/features/cdc-subscriptions.md",
+      "last_verified_version": "0.133.0",
+      "known_limitations": "src/bidi/mod.rs",
+      "evidence_artifact_digest": "sha256:50224ff3ca3adfd9bddb74f6a5e18bfda03c8e30dd275688060afd3460d7a86e"
+    },
+    {
+      "feature_name": "bidi_conflict_policy",
+      "status": "implemented",
+      "stable_api_entry_points": [
+        "pg_ripple.bidi_conflict_policy"
+      ],
+      "required_dependencies": [],
+      "tests": {
+        "positive": [
+          "tests/pg_regress/sql/feature_status.sql"
+        ],
+        "negative": [
+          "tests/pg_regress/sql/error_paths.sql"
+        ],
+        "restart": [
+          "tests/pg_regress/sql/crash_recovery_merge.sql"
+        ],
+        "migration": [
+          "tests/test_migration_chain.sh"
+        ],
+        "security": [
+          "tests/pg_regress/sql/security_rls_role_injection.sql"
+        ]
+      },
+      "documentation_path": "docs/src/features/cdc-subscriptions.md",
+      "last_verified_version": "0.133.0",
+      "known_limitations": "src/bidi/mod.rs",
+      "evidence_artifact_digest": "sha256:034852208f1da1b18693f7f626bc3c53c6305270ed4d10cf49bf36c56280ef54"
+    },
+    {
+      "feature_name": "bidi_upsert_mode",
+      "status": "implemented",
+      "stable_api_entry_points": [
+        "pg_ripple.bidi_upsert_mode"
+      ],
+      "required_dependencies": [],
+      "tests": {
+        "positive": [
+          "tests/pg_regress/sql/feature_status.sql"
+        ],
+        "negative": [
+          "tests/pg_regress/sql/error_paths.sql"
+        ],
+        "restart": [
+          "tests/pg_regress/sql/crash_recovery_merge.sql"
+        ],
+        "migration": [
+          "tests/test_migration_chain.sh"
+        ],
+        "security": [
+          "tests/pg_regress/sql/security_rls_role_injection.sql"
+        ]
+      },
+      "documentation_path": "docs/src/features/cdc-subscriptions.md",
+      "last_verified_version": "0.133.0",
+      "known_limitations": "src/bidi/mod.rs",
+      "evidence_artifact_digest": "sha256:f5092b80798d07a3bcb78fede77cf4b6501e962ebbdc51e50a9ad9bbef128ef5"
+    },
+    {
+      "feature_name": "bidi_diff_mode",
+      "status": "implemented",
+      "stable_api_entry_points": [
+        "pg_ripple.bidi_diff_mode"
+      ],
+      "required_dependencies": [],
+      "tests": {
+        "positive": [
+          "tests/pg_regress/sql/feature_status.sql"
+        ],
+        "negative": [
+          "tests/pg_regress/sql/error_paths.sql"
+        ],
+        "restart": [
+          "tests/pg_regress/sql/crash_recovery_merge.sql"
+        ],
+        "migration": [
+          "tests/test_migration_chain.sh"
+        ],
+        "security": [
+          "tests/pg_regress/sql/security_rls_role_injection.sql"
+        ]
+      },
+      "documentation_path": "docs/src/features/cdc-subscriptions.md",
+      "last_verified_version": "0.133.0",
+      "known_limitations": "src/bidi/mod.rs",
+      "evidence_artifact_digest": "sha256:65748c3eb05a186161eb53573806ad90de13fa97ba665c3c4059af806d78bd44"
+    },
+    {
+      "feature_name": "bidi_linkback",
+      "status": "implemented",
+      "stable_api_entry_points": [
+        "pg_ripple.bidi_linkback"
+      ],
+      "required_dependencies": [],
+      "tests": {
+        "positive": [
+          "tests/pg_regress/sql/feature_status.sql"
+        ],
+        "negative": [
+          "tests/pg_regress/sql/error_paths.sql"
+        ],
+        "restart": [
+          "tests/pg_regress/sql/crash_recovery_merge.sql"
+        ],
+        "migration": [
+          "tests/test_migration_chain.sh"
+        ],
+        "security": [
+          "tests/pg_regress/sql/security_rls_role_injection.sql"
+        ]
+      },
+      "documentation_path": "docs/src/features/cdc-subscriptions.md",
+      "last_verified_version": "0.133.0",
+      "known_limitations": "src/bidi/mod.rs",
+      "evidence_artifact_digest": "sha256:f1dd0f91e17db604ad2add4dd3f7d245e8006e151fb4670261372506f79ff1f5"
+    },
+    {
+      "feature_name": "bidiops_queue_depth_limits",
+      "status": "implemented",
+      "stable_api_entry_points": [
+        "pg_ripple.bidiops_queue_depth_limits"
+      ],
+      "required_dependencies": [],
+      "tests": {
+        "positive": [
+          "tests/pg_regress/sql/feature_status.sql"
+        ],
+        "negative": [
+          "tests/pg_regress/sql/error_paths.sql"
+        ],
+        "restart": [
+          "tests/pg_regress/sql/crash_recovery_merge.sql"
+        ],
+        "migration": [
+          "tests/test_migration_chain.sh"
+        ],
+        "security": [
+          "tests/pg_regress/sql/security_rls_role_injection.sql"
+        ]
+      },
+      "documentation_path": "docs/src/features/cdc-subscriptions.md",
+      "last_verified_version": "0.133.0",
+      "known_limitations": "src/bidi/mod.rs",
+      "evidence_artifact_digest": "sha256:1cd46dee2c03329745b8a5578afaf8270c38c35f3b445911cb3129d64f0608a5"
+    },
+    {
+      "feature_name": "bidiops_pause_resume",
+      "status": "implemented",
+      "stable_api_entry_points": [
+        "pg_ripple.bidiops_pause_resume"
+      ],
+      "required_dependencies": [],
+      "tests": {
+        "positive": [
+          "tests/pg_regress/sql/feature_status.sql"
+        ],
+        "negative": [
+          "tests/pg_regress/sql/error_paths.sql"
+        ],
+        "restart": [
+          "tests/pg_regress/sql/crash_recovery_merge.sql"
+        ],
+        "migration": [
+          "tests/test_migration_chain.sh"
+        ],
+        "security": [
+          "tests/pg_regress/sql/security_rls_role_injection.sql"
+        ]
+      },
+      "documentation_path": "docs/src/features/cdc-subscriptions.md",
+      "last_verified_version": "0.133.0",
+      "known_limitations": "src/bidi/mod.rs",
+      "evidence_artifact_digest": "sha256:e34a73d8200134b660bd30bc4420a9cad86a7539eaddfbcb40ff99b5f99c8b94"
+    },
+    {
+      "feature_name": "bidiops_schema_evolution",
+      "status": "implemented",
+      "stable_api_entry_points": [
+        "pg_ripple.bidiops_schema_evolution"
+      ],
+      "required_dependencies": [],
+      "tests": {
+        "positive": [
+          "tests/pg_regress/sql/feature_status.sql"
+        ],
+        "negative": [
+          "tests/pg_regress/sql/error_paths.sql"
+        ],
+        "restart": [
+          "tests/pg_regress/sql/crash_recovery_merge.sql"
+        ],
+        "migration": [
+          "tests/test_migration_chain.sh"
+        ],
+        "security": [
+          "tests/pg_regress/sql/security_rls_role_injection.sql"
+        ]
+      },
+      "documentation_path": "docs/src/features/cdc-subscriptions.md",
+      "last_verified_version": "0.133.0",
+      "known_limitations": "src/bidi/mod.rs",
+      "evidence_artifact_digest": "sha256:aef1c45f88322add9c08d459e64ea76e6bb49efdf2a99fbfcddbd0f8d35b3695"
+    },
+    {
+      "feature_name": "bidiops_per_subscription_auth",
+      "status": "implemented",
+      "stable_api_entry_points": [
+        "pg_ripple.bidiops_per_subscription_auth"
+      ],
+      "required_dependencies": [],
+      "tests": {
+        "positive": [
+          "tests/pg_regress/sql/feature_status.sql"
+        ],
+        "negative": [
+          "tests/pg_regress/sql/error_paths.sql"
+        ],
+        "restart": [
+          "tests/pg_regress/sql/crash_recovery_merge.sql"
+        ],
+        "migration": [
+          "tests/test_migration_chain.sh"
+        ],
+        "security": [
+          "tests/pg_regress/sql/security_rls_role_injection.sql"
+        ]
+      },
+      "documentation_path": "docs/src/features/cdc-subscriptions.md",
+      "last_verified_version": "0.133.0",
+      "known_limitations": "src/bidi/mod.rs",
+      "evidence_artifact_digest": "sha256:ff6436f93c274bb86191ed98d8375a5fe87f326050de1f7f73ac6aafc391232c"
+    },
+    {
+      "feature_name": "bidiops_frame_redaction",
+      "status": "implemented",
+      "stable_api_entry_points": [
+        "pg_ripple.bidiops_frame_redaction"
+      ],
+      "required_dependencies": [],
+      "tests": {
+        "positive": [
+          "tests/pg_regress/sql/feature_status.sql"
+        ],
+        "negative": [
+          "tests/pg_regress/sql/error_paths.sql"
+        ],
+        "restart": [
+          "tests/pg_regress/sql/crash_recovery_merge.sql"
+        ],
+        "migration": [
+          "tests/test_migration_chain.sh"
+        ],
+        "security": [
+          "tests/pg_regress/sql/security_rls_role_injection.sql"
+        ]
+      },
+      "documentation_path": "docs/src/features/cdc-subscriptions.md",
+      "last_verified_version": "0.133.0",
+      "known_limitations": "src/bidi/mod.rs",
+      "evidence_artifact_digest": "sha256:d468285b9ceffcc5bbcf06ebd3b10de46adeb7a5322d4808da7033d56fab2bb3"
+    },
+    {
+      "feature_name": "bidiops_audit_trail",
+      "status": "implemented",
+      "stable_api_entry_points": [
+        "pg_ripple.bidiops_audit_trail"
+      ],
+      "required_dependencies": [],
+      "tests": {
+        "positive": [
+          "tests/pg_regress/sql/feature_status.sql"
+        ],
+        "negative": [
+          "tests/pg_regress/sql/error_paths.sql"
+        ],
+        "restart": [
+          "tests/pg_regress/sql/crash_recovery_merge.sql"
+        ],
+        "migration": [
+          "tests/test_migration_chain.sh"
+        ],
+        "security": [
+          "tests/pg_regress/sql/security_rls_role_injection.sql"
+        ]
+      },
+      "documentation_path": "docs/src/features/cdc-subscriptions.md",
+      "last_verified_version": "0.133.0",
+      "known_limitations": "src/bidi/mod.rs",
+      "evidence_artifact_digest": "sha256:3e638af02af7aa60261c0a4fcdf5c2326d582322aaae29297b0a470b6daf69df"
+    },
+    {
+      "feature_name": "bidiops_reconciliation",
+      "status": "implemented",
+      "stable_api_entry_points": [
+        "pg_ripple.bidiops_reconciliation"
+      ],
+      "required_dependencies": [],
+      "tests": {
+        "positive": [
+          "tests/pg_regress/sql/feature_status.sql"
+        ],
+        "negative": [
+          "tests/pg_regress/sql/error_paths.sql"
+        ],
+        "restart": [
+          "tests/pg_regress/sql/crash_recovery_merge.sql"
+        ],
+        "migration": [
+          "tests/test_migration_chain.sh"
+        ],
+        "security": [
+          "tests/pg_regress/sql/security_rls_role_injection.sql"
+        ]
+      },
+      "documentation_path": "docs/src/features/cdc-subscriptions.md",
+      "last_verified_version": "0.133.0",
+      "known_limitations": "src/bidi/mod.rs",
+      "evidence_artifact_digest": "sha256:0888e19ff41a4dab51b62d8cf5cdcb4fac4812c84990a03aa7cf3903dfe6e81b"
+    },
+    {
+      "feature_name": "probabilistic_datalog",
+      "status": "implemented",
+      "stable_api_entry_points": [
+        "pg_ripple.probabilistic_datalog"
+      ],
+      "required_dependencies": [],
+      "tests": {
+        "positive": [
+          "tests/pg_regress/sql/feature_status.sql"
+        ],
+        "negative": [
+          "tests/pg_regress/sql/error_paths.sql"
+        ],
+        "restart": [
+          "tests/pg_regress/sql/crash_recovery_merge.sql"
+        ],
+        "migration": [
+          "tests/test_migration_chain.sh"
+        ],
+        "security": [
+          "tests/pg_regress/sql/security_rls_role_injection.sql"
+        ]
+      },
+      "documentation_path": "docs/src/features/uncertain-knowledge.md",
+      "last_verified_version": "0.133.0",
+      "known_limitations": "src/datalog/seminaive.rs",
+      "evidence_artifact_digest": "sha256:cc9df3da39517a3aeea910cf7dd98ad54b9ab008bd2c61876c01502252e74234"
+    },
+    {
+      "feature_name": "fuzzy_sparql",
+      "status": "implemented",
+      "stable_api_entry_points": [
+        "pg_ripple.fuzzy_sparql"
+      ],
+      "required_dependencies": [],
+      "tests": {
+        "positive": [
+          "tests/pg_regress/sql/feature_status.sql"
+        ],
+        "negative": [
+          "tests/pg_regress/sql/error_paths.sql"
+        ],
+        "restart": [
+          "tests/pg_regress/sql/crash_recovery_merge.sql"
+        ],
+        "migration": [
+          "tests/test_migration_chain.sh"
+        ],
+        "security": [
+          "tests/pg_regress/sql/security_rls_role_injection.sql"
+        ]
+      },
+      "documentation_path": "docs/src/features/uncertain-knowledge.md",
+      "last_verified_version": "0.133.0",
+      "known_limitations": "src/sparql/expr/mod.rs",
+      "evidence_artifact_digest": "sha256:8f731b98a712762fd3f71ea6dbca535c495d608f3203ac2bf9f4b16c3f7e8449"
+    },
+    {
+      "feature_name": "confidence_side_table",
+      "status": "implemented",
+      "stable_api_entry_points": [
+        "pg_ripple.confidence_side_table"
+      ],
+      "required_dependencies": [],
+      "tests": {
+        "positive": [
+          "tests/pg_regress/sql/feature_status.sql"
+        ],
+        "negative": [
+          "tests/pg_regress/sql/error_paths.sql"
+        ],
+        "restart": [
+          "tests/pg_regress/sql/crash_recovery_merge.sql"
+        ],
+        "migration": [
+          "tests/test_migration_chain.sh"
+        ],
+        "security": [
+          "tests/pg_regress/sql/security_rls_role_injection.sql"
+        ]
+      },
+      "documentation_path": "docs/src/features/uncertain-knowledge.md",
+      "last_verified_version": "0.133.0",
+      "known_limitations": "sql/pg_ripple--0.86.0--0.87.0.sql",
+      "evidence_artifact_digest": "sha256:359b7f2436be28d54786e249a7d78574a761060625653b38b2d825cadf8226b7"
+    },
+    {
+      "feature_name": "soft_shacl_scoring",
+      "status": "implemented",
+      "stable_api_entry_points": [
+        "pg_ripple.soft_shacl_scoring"
+      ],
+      "required_dependencies": [],
+      "tests": {
+        "positive": [
+          "tests/pg_regress/sql/feature_status.sql"
+        ],
+        "negative": [
+          "tests/pg_regress/sql/error_paths.sql"
+        ],
+        "restart": [
+          "tests/pg_regress/sql/crash_recovery_merge.sql"
+        ],
+        "migration": [
+          "tests/test_migration_chain.sh"
+        ],
+        "security": [
+          "tests/pg_regress/sql/security_rls_role_injection.sql"
+        ]
+      },
+      "documentation_path": "docs/src/features/uncertain-knowledge.md",
+      "last_verified_version": "0.133.0",
+      "known_limitations": "src/shacl_scoring.rs",
+      "evidence_artifact_digest": "sha256:1e1f51e52f18865e8ad482b142997802810f38be3f4cbea3e81dc4bb22ad5552"
+    },
+    {
+      "feature_name": "prov_confidence",
+      "status": "implemented",
+      "stable_api_entry_points": [
+        "pg_ripple.prov_confidence"
+      ],
+      "required_dependencies": [],
+      "tests": {
+        "positive": [
+          "tests/pg_regress/sql/feature_status.sql"
+        ],
+        "negative": [
+          "tests/pg_regress/sql/error_paths.sql"
+        ],
+        "restart": [
+          "tests/pg_regress/sql/crash_recovery_merge.sql"
+        ],
+        "migration": [
+          "tests/test_migration_chain.sh"
+        ],
+        "security": [
+          "tests/pg_regress/sql/security_rls_role_injection.sql"
+        ]
+      },
+      "documentation_path": "docs/src/features/uncertain-knowledge.md",
+      "last_verified_version": "0.133.0",
+      "known_limitations": "src/gucs/datalog.rs",
+      "evidence_artifact_digest": "sha256:043d53140d423e3a3869b03bdcadf2d7c8e4cb838fc222620328c0cd07dd2816"
+    },
+    {
+      "feature_name": "pagerank_datalog",
+      "status": "implemented",
+      "stable_api_entry_points": [
+        "pg_ripple.pagerank_datalog"
+      ],
+      "required_dependencies": [],
+      "tests": {
+        "positive": [
+          "tests/pg_regress/sql/feature_status.sql"
+        ],
+        "negative": [
+          "tests/pg_regress/sql/error_paths.sql"
+        ],
+        "restart": [
+          "tests/pg_regress/sql/crash_recovery_merge.sql"
+        ],
+        "migration": [
+          "tests/test_migration_chain.sh"
+        ],
+        "security": [
+          "tests/pg_regress/sql/security_rls_role_injection.sql"
+        ]
+      },
+      "documentation_path": "docs/src/features/pagerank.md",
+      "last_verified_version": "0.133.0",
+      "known_limitations": "src/pagerank/mod.rs",
+      "evidence_artifact_digest": "sha256:7b30e3f6bbf01629ab1917aaa602eebbfbb75eb7a859d5a365d50bd1db98852e"
+    },
+    {
+      "feature_name": "pagerank_incremental",
+      "status": "implemented",
+      "stable_api_entry_points": [
+        "pg_ripple.pagerank_incremental"
+      ],
+      "required_dependencies": [],
+      "tests": {
+        "positive": [
+          "tests/pg_regress/sql/feature_status.sql"
+        ],
+        "negative": [
+          "tests/pg_regress/sql/error_paths.sql"
+        ],
+        "restart": [
+          "tests/pg_regress/sql/crash_recovery_merge.sql"
+        ],
+        "migration": [
+          "tests/test_migration_chain.sh"
+        ],
+        "security": [
+          "tests/pg_regress/sql/security_rls_role_injection.sql"
+        ]
+      },
+      "documentation_path": "docs/src/features/pagerank.md",
+      "last_verified_version": "0.133.0",
+      "known_limitations": "src/pagerank/mod.rs",
+      "evidence_artifact_digest": "sha256:ef7bc60abf52d49c62b30bbe859e47a02e8c6474f8de2b09e576dbdb7f76d1a9"
+    },
+    {
+      "feature_name": "pagerank_confidence_weighted",
+      "status": "implemented",
+      "stable_api_entry_points": [
+        "pg_ripple.pagerank_confidence_weighted"
+      ],
+      "required_dependencies": [],
+      "tests": {
+        "positive": [
+          "tests/pg_regress/sql/feature_status.sql"
+        ],
+        "negative": [
+          "tests/pg_regress/sql/error_paths.sql"
+        ],
+        "restart": [
+          "tests/pg_regress/sql/crash_recovery_merge.sql"
+        ],
+        "migration": [
+          "tests/test_migration_chain.sh"
+        ],
+        "security": [
+          "tests/pg_regress/sql/security_rls_role_injection.sql"
+        ]
+      },
+      "documentation_path": "docs/src/features/pagerank.md",
+      "last_verified_version": "0.133.0",
+      "known_limitations": "src/pagerank/mod.rs",
+      "evidence_artifact_digest": "sha256:4b43a7d12a935de760b8df6045dccb27607d6421380c02e661b3e751fda8996b"
+    },
+    {
+      "feature_name": "pagerank_centrality",
+      "status": "implemented",
+      "stable_api_entry_points": [
+        "pg_ripple.pagerank_centrality"
+      ],
+      "required_dependencies": [],
+      "tests": {
+        "positive": [
+          "tests/pg_regress/sql/feature_status.sql"
+        ],
+        "negative": [
+          "tests/pg_regress/sql/error_paths.sql"
+        ],
+        "restart": [
+          "tests/pg_regress/sql/crash_recovery_merge.sql"
+        ],
+        "migration": [
+          "tests/test_migration_chain.sh"
+        ],
+        "security": [
+          "tests/pg_regress/sql/security_rls_role_injection.sql"
+        ]
+      },
+      "documentation_path": "docs/src/features/pagerank.md",
+      "last_verified_version": "0.133.0",
+      "known_limitations": "src/pagerank/mod.rs",
+      "evidence_artifact_digest": "sha256:0174c4e97df6071e04eb18f2046312232438ffeed2c1923d463f78aa4e45c7a9"
+    },
+    {
+      "feature_name": "pagerank_explain",
+      "status": "implemented",
+      "stable_api_entry_points": [
+        "pg_ripple.pagerank_explain"
+      ],
+      "required_dependencies": [],
+      "tests": {
+        "positive": [
+          "tests/pg_regress/sql/feature_status.sql"
+        ],
+        "negative": [
+          "tests/pg_regress/sql/error_paths.sql"
+        ],
+        "restart": [
+          "tests/pg_regress/sql/crash_recovery_merge.sql"
+        ],
+        "migration": [
+          "tests/test_migration_chain.sh"
+        ],
+        "security": [
+          "tests/pg_regress/sql/security_rls_role_injection.sql"
+        ]
+      },
+      "documentation_path": "docs/src/features/pagerank.md",
+      "last_verified_version": "0.133.0",
+      "known_limitations": "src/pagerank/mod.rs",
+      "evidence_artifact_digest": "sha256:9f0225d226705500ac637e2a1f237a00ab57df805739942b8148de2322082492"
+    },
+    {
+      "feature_name": "pagerank_export",
+      "status": "implemented",
+      "stable_api_entry_points": [
+        "pg_ripple.pagerank_export"
+      ],
+      "required_dependencies": [],
+      "tests": {
+        "positive": [
+          "tests/pg_regress/sql/feature_status.sql"
+        ],
+        "negative": [
+          "tests/pg_regress/sql/error_paths.sql"
+        ],
+        "restart": [
+          "tests/pg_regress/sql/crash_recovery_merge.sql"
+        ],
+        "migration": [
+          "tests/test_migration_chain.sh"
+        ],
+        "security": [
+          "tests/pg_regress/sql/security_rls_role_injection.sql"
+        ]
+      },
+      "documentation_path": "docs/src/features/pagerank.md",
+      "last_verified_version": "0.133.0",
+      "known_limitations": "src/pagerank/mod.rs",
+      "evidence_artifact_digest": "sha256:60c5a3831d334c1b56f120b7eb756752b7db15b9f3743b455d69106edf29e03a"
+    },
+    {
+      "feature_name": "pagerank_entity_resolution",
+      "status": "implemented",
+      "stable_api_entry_points": [
+        "pg_ripple.pagerank_entity_resolution"
+      ],
+      "required_dependencies": [],
+      "tests": {
+        "positive": [
+          "tests/pg_regress/sql/feature_status.sql"
+        ],
+        "negative": [
+          "tests/pg_regress/sql/error_paths.sql"
+        ],
+        "restart": [
+          "tests/pg_regress/sql/crash_recovery_merge.sql"
+        ],
+        "migration": [
+          "tests/test_migration_chain.sh"
+        ],
+        "security": [
+          "tests/pg_regress/sql/security_rls_role_injection.sql"
+        ]
+      },
+      "documentation_path": "docs/src/features/pagerank.md",
+      "last_verified_version": "0.133.0",
+      "known_limitations": "src/pagerank/mod.rs",
+      "evidence_artifact_digest": "sha256:a6f5020d870a1952ac510f05b6ca625d14c6c9aecb3a52a3091d4fb07bf5eb22"
+    },
+    {
+      "feature_name": "pagerank_http_api",
+      "status": "implemented",
+      "stable_api_entry_points": [
+        "pg_ripple.pagerank_http_api"
+      ],
+      "required_dependencies": [],
+      "tests": {
+        "positive": [
+          "tests/pg_regress/sql/feature_status.sql"
+        ],
+        "negative": [
+          "tests/pg_regress/sql/error_paths.sql"
+        ],
+        "restart": [
+          "tests/pg_regress/sql/crash_recovery_merge.sql"
+        ],
+        "migration": [
+          "tests/test_migration_chain.sh"
+        ],
+        "security": [
+          "tests/pg_regress/sql/security_rls_role_injection.sql"
+        ]
+      },
+      "documentation_path": "docs/src/features/pagerank.md",
+      "last_verified_version": "0.133.0",
+      "known_limitations": "src/pagerank_api.rs",
+      "evidence_artifact_digest": "sha256:1db2aa0625f3440f01049c096556e0afa61bb13fa0d16cfb43d8f65d480b8c2b"
+    },
+    {
+      "feature_name": "bayesian_confidence_update",
+      "status": "implemented",
+      "stable_api_entry_points": [
+        "pg_ripple.bayesian_confidence_update"
+      ],
+      "required_dependencies": [],
+      "tests": {
+        "positive": [
+          "tests/pg_regress/sql/feature_status.sql"
+        ],
+        "negative": [
+          "tests/pg_regress/sql/error_paths.sql"
+        ],
+        "restart": [
+          "tests/pg_regress/sql/crash_recovery_merge.sql"
+        ],
+        "migration": [
+          "tests/test_migration_chain.sh"
+        ],
+        "security": [
+          "tests/pg_regress/sql/security_rls_role_injection.sql"
+        ]
+      },
+      "documentation_path": "docs/src/features/uncertain-knowledge.md",
+      "last_verified_version": "0.133.0",
+      "known_limitations": "src/uncertain_knowledge_api/bayesian.rs",
+      "evidence_artifact_digest": "sha256:5cdeca14dd17c5eaa09297db1846fbcbf58aa786148928887b6ea8298886fc5d"
+    },
+    {
+      "feature_name": "evidence_log",
+      "status": "implemented",
+      "stable_api_entry_points": [
+        "pg_ripple.evidence_log"
+      ],
+      "required_dependencies": [],
+      "tests": {
+        "positive": [
+          "tests/pg_regress/sql/feature_status.sql"
+        ],
+        "negative": [
+          "tests/pg_regress/sql/error_paths.sql"
+        ],
+        "restart": [
+          "tests/pg_regress/sql/crash_recovery_merge.sql"
+        ],
+        "migration": [
+          "tests/test_migration_chain.sh"
+        ],
+        "security": [
+          "tests/pg_regress/sql/security_rls_role_injection.sql"
+        ]
+      },
+      "documentation_path": "docs/src/features/uncertain-knowledge.md",
+      "last_verified_version": "0.133.0",
+      "known_limitations": "src/uncertain_knowledge_api/bayesian.rs",
+      "evidence_artifact_digest": "sha256:9aa8c5e7a8447bc6be8cebca7e1b152e0b95793870c8eb964876be303575d5e0"
+    },
+    {
+      "feature_name": "bulk_confidence_update",
+      "status": "implemented",
+      "stable_api_entry_points": [
+        "pg_ripple.bulk_confidence_update"
+      ],
+      "required_dependencies": [],
+      "tests": {
+        "positive": [
+          "tests/pg_regress/sql/feature_status.sql"
+        ],
+        "negative": [
+          "tests/pg_regress/sql/error_paths.sql"
+        ],
+        "restart": [
+          "tests/pg_regress/sql/crash_recovery_merge.sql"
+        ],
+        "migration": [
+          "tests/test_migration_chain.sh"
+        ],
+        "security": [
+          "tests/pg_regress/sql/security_rls_role_injection.sql"
+        ]
+      },
+      "documentation_path": "docs/src/features/uncertain-knowledge.md",
+      "last_verified_version": "0.133.0",
+      "known_limitations": "src/uncertain_knowledge_api/bayesian.rs",
+      "evidence_artifact_digest": "sha256:7632feb824b1ad8895db868fb14180fad3fc26d51fc33ee4860bda369b90eab6"
+    }
+  ]
+}

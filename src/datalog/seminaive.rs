@@ -22,6 +22,7 @@ use super::{
 /// Execute on-demand materialization using semi-naive evaluation.
 /// Returns `(total_triples_derived, iteration_count)`.
 pub fn run_inference_seminaive(rule_set_name: &str) -> (i64, i32) {
+    crate::error::fault_injection::hit("datalog_materialization_start");
     super::ensure_catalog();
 
     let parallel_workers = crate::DATALOG_PARALLEL_WORKERS.get() as usize;
@@ -740,6 +741,7 @@ pub fn run_var_pred_rule(rule: &Rule) -> i64 {
 
 /// Run semi-naive inference over a specific set of rules and materialise results.
 pub(crate) fn run_seminaive_inner(rules: &[Rule], rule_set_name: &str) -> (i64, i32) {
+    crate::error::fault_injection::hit("datalog_materialization_inner");
     let derived_pred_ids: std::collections::HashSet<i64> = rules
         .iter()
         .filter_map(|r| {

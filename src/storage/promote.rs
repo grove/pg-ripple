@@ -43,6 +43,7 @@ pub fn promote_predicate_pub(p_id: i64) {
 /// On startup, `recover_interrupted_promotions()` scans for any predicate with
 /// `promotion_status = 'promoting'` and restarts promotion from Phase 1.
 fn promote_predicate_impl(p_id: i64) {
+    crate::error::fault_injection::hit("predicate_promotion_start");
     // v0.37.0: Acquire a per-predicate advisory lock before promotion to ensure
     // exactly one backend races to promote the same predicate. CREATE TABLE IF NOT
     // EXISTS is idempotent, but the data move must not be executed twice.
@@ -80,6 +81,7 @@ fn promote_predicate_impl(p_id: i64) {
     // PROMO-01 Phase 2: Atomically move all rows for this predicate from
     // vp_rare to the dedicated delta table in a single CTE — eliminates the
     // window between SELECT and DELETE where concurrent inserts could be orphaned.
+    crate::error::fault_injection::hit("predicate_promotion_copy");
     Spi::run_with_args(
         &format!(
             "WITH moved AS ( \
@@ -130,6 +132,7 @@ fn promote_predicate_impl(p_id: i64) {
     // CACHE-INVALIDATE-01: Invalidate the plan cache after VP promotion.
     // A cached plan compiled when this predicate lived in vp_rare would still
     // scan vp_rare after promotion, missing data in the dedicated table.
+    crate::error::fault_injection::hit("predicate_promotion_complete");
     crate::sparql::plan_cache_reset();
     // M15-10 (v0.95.0): bump schema_generation so plan cache entries that
     // assumed a vp_rare layout for this predicate are invalidated.

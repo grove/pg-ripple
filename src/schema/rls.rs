@@ -733,3 +733,13 @@ INSERT INTO _pg_ripple.schema_version (version, upgraded_from, installed_at)
     name = "v098_schema_additions",
     requires = ["v097_schema_additions"]
 );
+
+// v0.133.0: keep the schema ledger current for fresh installs.  Releases
+// after v0.98.0 were Rust-only, so this stamp also repairs health()'s
+// migration status for newly created databases.
+pgrx::extension_sql!(
+    "INSERT INTO _pg_ripple.schema_version (version, upgraded_from, installed_at) \
+     VALUES ('0.133.0', '0.132.0', clock_timestamp());",
+    name = "v133_schema_version_stamp",
+    requires = ["v098_schema_additions"]
+);

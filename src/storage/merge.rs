@@ -294,6 +294,7 @@ pub fn delta_table(pred_id: i64) -> Option<String> {
 ///
 /// Returns the number of rows in the new main table.
 pub fn merge_predicate(pred_id: i64) -> i64 {
+    crate::error::fault_injection::hit("merge_phase_start");
     if !is_htap(pred_id) {
         return 0;
     }
@@ -417,6 +418,7 @@ pub fn merge_predicate(pred_id: i64) -> i64 {
     // advisory locks held by Citus, pg_partman, or other extensions.
     // The global key 0x5052_5000 itself is reserved for Citus rebalance events.
     // lock_key = 0x5052_5000 + pred_id (wrapping to stay within i64 range).
+    crate::error::fault_injection::hit("merge_phase_swap");
     const MERGE_FENCE_NAMESPACE: i64 = 0x5052_5000;
     let merge_lock_key = MERGE_FENCE_NAMESPACE.wrapping_add(pred_id);
     Spi::run_with_args(
@@ -662,6 +664,7 @@ pub fn merge_predicate(pred_id: i64) -> i64 {
             .unwrap_or(0);
     notify_merge_lifecycle(pred_id, row_count, tombs_remaining);
 
+    crate::error::fault_injection::hit("merge_phase_complete");
     row_count
 }
 

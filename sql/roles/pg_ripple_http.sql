@@ -1,4 +1,4 @@
--- Least-privilege role for the pg_ripple_http companion (v0.132.0).
+-- Least-privilege role for the pg_ripple_http companion (v0.133.0).
 -- Run as a database administrator after CREATE EXTENSION pg_ripple. Set a
 -- password or configure certificate authentication before using the role.
 -- The companion calls the stable pg_ripple SQL API; it must not receive

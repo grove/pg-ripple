@@ -16,7 +16,7 @@
 #     -e PG_RIPPLE_HTTP_BIND="0.0.0.0:7878" \
 #     -e PG_RIPPLE_HTTP_PG_URL="postgresql://user:pass@postgres:5432/mydb" \
 #     -e PG_RIPPLE_HTTP_AUTH_TOKEN="${AUTH_TOKEN:?set AUTH_TOKEN}" \
-#     ghcr.io/trickle-labs/pg-ripple-http:0.132.0
+#     ghcr.io/trickle-labs/pg-ripple-http:0.133.0
 #
 # Environment variables:
 #   PG_RIPPLE_HTTP_PG_URL              PostgreSQL connection URL (required)

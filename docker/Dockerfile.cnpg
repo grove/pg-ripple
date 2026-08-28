@@ -1,4 +1,4 @@
-# pg_ripple CloudNativePG Extension Image (v0.132.0)
+# pg_ripple CloudNativePG Extension Image (v0.133.0)
 #
 # This is a minimal "extension volume" image for use with the CloudNativePG
 # operator (CNP ≥ 1.24).  It contains only the compiled .so and SQL files
@@ -10,11 +10,11 @@
 #   spec:
 #     postgresql:
 #       extensionImages:
-#         - ghcr.io/trickle-labs/pg-ripple:0.132.0-cnpg
+#         - ghcr.io/trickle-labs/pg-ripple:0.133.0-cnpg
 #
 # See docs/src/operations/cloudnativepg.md for the full walkthrough.
 #
-# Published as: ghcr.io/trickle-labs/pg-ripple:0.132.0-cnpg
+# Published as: ghcr.io/trickle-labs/pg-ripple:0.133.0-cnpg
 
 # ── Build stage ───────────────────────────────────────────────────────────────
 FROM rust:1-bookworm@sha256:4e4a7e7939c17991ab35f2b8c2e67593980f771d28f6b1254b1850f860fd0c7f AS builder
@@ -107,7 +107,7 @@ COPY --from=builder \
 LABEL org.opencontainers.image.source="https://github.com/trickle-labs/pg-ripple"
 LABEL org.opencontainers.image.description="CloudNativePG extension volume: pg_ripple + pgvector for PostgreSQL 18"
 LABEL org.opencontainers.image.licenses="Apache-2.0"
-LABEL org.opencontainers.image.version="0.132.0-cnpg"
+LABEL org.opencontainers.image.version="0.133.0-cnpg"
 
 # The image is used purely as an init-container volume source; no entrypoint needed.
 CMD ["/bin/true"]

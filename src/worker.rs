@@ -200,6 +200,8 @@ pub extern "C-unwind" fn pg_ripple_merge_worker_main(arg: pg_sys::Datum) {
     let db_name = get_worker_database();
     BackgroundWorker::connect_worker_to_spi(Some(&db_name), None);
 
+    BackgroundWorker::transaction(|| record_worker_start(worker_idx));
+
     pgrx::log!(
         "pg_ripple {} merge worker {} starting ({} build, database: {})",
         env!("CARGO_PKG_VERSION"),
@@ -250,6 +252,7 @@ pub extern "C-unwind" fn pg_ripple_merge_worker_main(arg: pg_sys::Datum) {
     // MERGE-PRED-01 (v0.82.0): predicate ID cache.
     let mut pred_cache = PredicateCache::new();
     while BackgroundWorker::wait_latch(Some(Duration::from_secs(interval_secs))) {
+        crate::error::fault_injection::hit("background_worker_checkpoint");
         let sighup = BackgroundWorker::sighup_received();
         if sighup {
             // SIGHUP: reload configuration.  The GUC system handles this.
@@ -329,6 +332,9 @@ pub extern "C-unwind" fn pg_ripple_merge_worker_main(arg: pg_sys::Datum) {
             }
 
             let err_msg = describe_panic(&e);
+            BackgroundWorker::transaction(|| {
+                update_worker_status(worker_idx, "error", Some(&err_msg))
+            });
             pgrx::log!(
                 "pg_ripple merge worker: merge cycle panicked ({consecutive_errors}): {err_msg}"
             );
@@ -363,7 +369,9 @@ pub extern "C-unwind" fn pg_ripple_merge_worker_main(arg: pg_sys::Datum) {
         consecutive_errors = 0;
     }
 
+    BackgroundWorker::transaction(|| update_worker_status(worker_idx, "stopped", None));
     // Worker is terminating.  Only worker 0 clears the shared PID.
+    crate::error::fault_injection::hit("background_worker_exit");
     if worker_idx == 0 {
         crate::shmem::MERGE_WORKER_PID
             .get()
@@ -384,7 +392,11 @@ fn emit_merge_worker_heartbeat(worker_idx: u32) {
     )
     .unwrap_or(None)
     .unwrap_or(false);
-    if !installed {
+    if !installed
+        || !Spi::get_one::<bool>("SELECT to_regclass('_pg_ripple.merge_worker_status') IS NOT NULL")
+            .unwrap_or(None)
+            .unwrap_or(false)
+    {
         return;
     }
 
@@ -404,16 +416,65 @@ fn emit_merge_worker_heartbeat(worker_idx: u32) {
     // Update the merge_worker_status table (best-effort — non-fatal on failure).
     let _ = Spi::run_with_args(
         "INSERT INTO _pg_ripple.merge_worker_status \
-         (worker_idx, last_heartbeat_at, predicates_total, delta_rows_pending) \
-         VALUES ($1, now(), $2, $3) \
+         (worker_idx, pid, status, updated_at, last_heartbeat_at, predicates_total, delta_rows_pending) \
+         VALUES ($1, $4, 'running', now(), now(), $2, $3) \
          ON CONFLICT (worker_idx) DO UPDATE \
-             SET last_heartbeat_at    = now(), \
+             SET pid                  = EXCLUDED.pid, \
+                 status               = 'running', \
+                 updated_at           = now(), \
+                 last_error           = NULL, \
+                 last_heartbeat_at    = now(), \
                  predicates_total     = EXCLUDED.predicates_total, \
                  delta_rows_pending   = EXCLUDED.delta_rows_pending",
         &[
             pgrx::datum::DatumWithOid::from(worker_idx as i32),
             pgrx::datum::DatumWithOid::from(pred_count),
             pgrx::datum::DatumWithOid::from(total_delta_rows),
+            pgrx::datum::DatumWithOid::from(std::process::id() as i64),
+        ],
+    );
+}
+
+fn record_worker_start(worker_idx: u32) {
+    if !Spi::get_one::<bool>("SELECT to_regclass('_pg_ripple.merge_worker_status') IS NOT NULL")
+        .unwrap_or(None)
+        .unwrap_or(false)
+    {
+        return;
+    }
+
+    let _ = Spi::run_with_args(
+        "INSERT INTO _pg_ripple.merge_worker_status \
+         (worker_idx, pid, status, updated_at, restart_count, last_error) \
+         VALUES ($1, $2, 'starting', now(), 1, NULL) \
+         ON CONFLICT (worker_idx) DO UPDATE SET \
+             pid = EXCLUDED.pid, status = 'starting', updated_at = now(), \
+             restart_count = _pg_ripple.merge_worker_status.restart_count + 1, \
+             last_error = NULL",
+        &[
+            pgrx::datum::DatumWithOid::from(worker_idx as i32),
+            pgrx::datum::DatumWithOid::from(std::process::id() as i64),
+        ],
+    );
+}
+
+fn update_worker_status(worker_idx: u32, status: &str, last_error: Option<&str>) {
+    if !Spi::get_one::<bool>("SELECT to_regclass('_pg_ripple.merge_worker_status') IS NOT NULL")
+        .unwrap_or(None)
+        .unwrap_or(false)
+    {
+        return;
+    }
+
+    let _ = Spi::run_with_args(
+        "UPDATE _pg_ripple.merge_worker_status \
+         SET pid = $2, status = $3, updated_at = now(), last_error = $4 \
+         WHERE worker_idx = $1",
+        &[
+            pgrx::datum::DatumWithOid::from(worker_idx as i32),
+            pgrx::datum::DatumWithOid::from(std::process::id() as i64),
+            pgrx::datum::DatumWithOid::from(status),
+            pgrx::datum::DatumWithOid::from(last_error),
         ],
     );
 }

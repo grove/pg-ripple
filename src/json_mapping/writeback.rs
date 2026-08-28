@@ -557,6 +557,7 @@ pub fn writeback_json_row_impl(mapping: &str, subject_iri: &str) -> i64 {
         .map(|s| pgrx::datum::DatumWithOid::from(s.as_str()))
         .collect();
 
+    crate::error::fault_injection::hit("json_writeback_target_execution");
     pgrx::Spi::get_one_with_args::<i64>(&insert_select_sql, &spi_args)
         .unwrap_or_else(|e| pgrx::error!("writeback_json_row: INSERT failed: {e}"))
         .unwrap_or(0)
@@ -665,6 +666,7 @@ pub fn writeback_json_row_delete_impl(mapping: &str, subject_iri: &str) -> i64 {
         .map(|s| pgrx::datum::DatumWithOid::from(s.as_str()))
         .collect();
 
+    crate::error::fault_injection::hit("json_writeback_target_execution");
     pgrx::Spi::get_one_with_args::<i64>(&delete_sql, &spi_args)
         .unwrap_or_else(|e| pgrx::error!("writeback_json_row_delete: DELETE failed: {e}"))
         .unwrap_or(0)
@@ -1055,6 +1057,7 @@ pub fn drain_json_writeback_queue() {
 }
 
 fn mark_queue_row_processed(row_id: i64, error_msg: Option<&str>) {
+    crate::error::fault_injection::hit("json_writeback_queue_status_update");
     let update_result = pgrx::Spi::run_with_args(
         "UPDATE _pg_ripple.json_writeback_queue \
          SET processed_at = now(), error = $2 WHERE id = $1",

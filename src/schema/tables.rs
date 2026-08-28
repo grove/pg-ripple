@@ -59,6 +59,19 @@ CREATE TABLE IF NOT EXISTS _pg_ripple.predicates (
     tombstone_count       BIGINT      NOT NULL DEFAULT 0
 );
 
+-- Merge-worker lifecycle diagnostics.
+CREATE TABLE IF NOT EXISTS _pg_ripple.merge_worker_status (
+    worker_idx        INTEGER PRIMARY KEY,
+    pid               BIGINT NOT NULL DEFAULT 0,
+    status            TEXT NOT NULL DEFAULT 'starting',
+    updated_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+    restart_count     BIGINT NOT NULL DEFAULT 0,
+    last_error        TEXT,
+    last_heartbeat_at TIMESTAMPTZ,
+    predicates_total  BIGINT NOT NULL DEFAULT 0,
+    delta_rows_pending BIGINT NOT NULL DEFAULT 0
+);
+
 -- Rare-predicate consolidation table
 CREATE TABLE IF NOT EXISTS _pg_ripple.vp_rare (
     p      BIGINT   NOT NULL,

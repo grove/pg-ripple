@@ -50,7 +50,9 @@ SELECT count(*) >= 0 AS validate_ok
 FROM pg_ripple.validate();
 
 -- ── 5. schema_version contains 0.73.0 or later ───────────────────────────────
-SELECT version >= '0.73.0' AS version_correct
+SELECT string_to_array(version, '.')::int[] >= ARRAY[0, 73, 0] AS version_correct
 FROM _pg_ripple.schema_version
 ORDER BY installed_at DESC
 LIMIT 1;
+
+-- End of regression fixture.

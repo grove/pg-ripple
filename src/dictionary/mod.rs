@@ -159,6 +159,7 @@ fn encode_inner(term: &str, kind: i16) -> i64 {
     // NULL (possible during concurrent dictionary truncation or a genuine hash
     // collision), raise a PostgreSQL error rather than panicking.  The CTE also
     // returns the `inserted` flag so callers can emit a debug notice on conflict.
+    crate::error::fault_injection::hit("dictionary_insert");
     let id: i64 = Spi::get_one_with_args::<i64>(
         "WITH ins AS ( \
              INSERT INTO _pg_ripple.dictionary (hash_hi, hash_lo, value, kind) \
@@ -189,6 +190,7 @@ fn encode_inner(term: &str, kind: i16) -> i64 {
     });
 
     // Populate both caches.
+    crate::error::fault_injection::hit("dictionary_cache_publish");
     crate::shmem::encode_cache_insert(hash128, id);
     TX_SHMEM_INSERTS.with(|v| v.borrow_mut().push(hash128));
     ENCODE_CACHE.with(|c| c.borrow_mut().put(hash128, id));

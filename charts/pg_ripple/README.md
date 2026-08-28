@@ -38,7 +38,7 @@ See `values.yaml` for all available configuration options.
 | Parameter | Description | Default |
 |-----------|-------------|---------|
 | `replicaCount` | Number of PostgreSQL pods | `1` |
-| `image.tag` | pg_ripple image tag | `"0.132.0"` |
+| `image.tag` | pg_ripple image tag | `"0.133.0"` |
 | `postgres.password` | PostgreSQL superuser password; empty generates and persists one | `""` |
 | `podDisruptionBudget.enabled` | Enable PodDisruptionBudget | `true` |
 | `podDisruptionBudget.minAvailable` | Minimum available pods during disruptions | `1` |

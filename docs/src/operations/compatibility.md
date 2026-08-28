@@ -19,6 +19,7 @@ extension version is outside its known-compatible range.
 
 | pg_ripple_http version | pg_ripple extension range | Notes |
 |------------------------|---------------------------|-------|
+| 0.133.x | ≥ 0.132.0 | Resilience health API and recovery qualification (v0.133.0) |
 | 0.132.x | ≥ 0.131.0 | Conformance evidence, feature and route truth checks, bounded predicate expansion, and keyset-paginated exports |
 | 0.131.x | ≥ 0.130.0 | Secure-by-default HTTP configuration, central route authorization, PostgreSQL TLS, outbound policy, and trusted-proxy enforcement |
 | 0.130.x | ≥ 0.129.0 | Installation/migration integrity: independent migration graph, schema fingerprints, and validated JSON writeback configuration API |
@@ -66,6 +67,7 @@ extension version is outside its known-compatible range.
 | 0.10.x | 0.38.0 – 0.39.x | Module restructuring, all 27 Datalog SQL functions |
 | 0.9.x | 0.33.0 – 0.37.x | Docs site rebuild, parallel Datalog, HTAP stability |
 | ≤ 0.8.x | 0.15.0 – 0.32.x | HTTP endpoint, bulk-load, basic SPARQL |
+
 
 ## Startup version check
 

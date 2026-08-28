@@ -765,6 +765,7 @@ pub(crate) fn delete_triple_by_ids(s_id: i64, p_id: i64, o_id: i64, g_id: i64) -
             deleted += d;
         } else {
             // Add tombstone to suppress from main.
+            crate::error::fault_injection::hit("tombstone_application");
             Spi::run_with_args(
                 &format!(
                     "INSERT INTO {tombs} (s, o, g) VALUES ($1, $2, $3) \

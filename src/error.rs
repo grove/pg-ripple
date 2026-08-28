@@ -15,6 +15,116 @@
 
 use thiserror::Error;
 
+/// Deterministic, feature-gated fault points used by resilience tests.
+pub(crate) mod fault_injection {
+    #[cfg(feature = "fault_injection")]
+    use std::collections::HashMap;
+    #[cfg(feature = "fault_injection")]
+    use std::sync::{Mutex, OnceLock};
+
+    #[cfg(feature = "fault_injection")]
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    enum Action {
+        Terminate,
+        TransactionError,
+        Delay(u64),
+        SpiFailure,
+    }
+
+    #[cfg(feature = "fault_injection")]
+    static TEST_HOOKS: OnceLock<Mutex<HashMap<String, Action>>> = OnceLock::new();
+
+    /// Trigger a named fault point. This is a no-op without `fault_injection`.
+    #[inline]
+    pub(crate) fn hit(point: &str) {
+        #[cfg(not(feature = "fault_injection"))]
+        let _ = point;
+
+        #[cfg(feature = "fault_injection")]
+        if let Some(action) = configured(point) {
+            match action {
+                Action::Terminate => std::process::abort(),
+                Action::TransactionError => {
+                    pgrx::error!("fault injection at {point}: transaction error")
+                }
+                Action::Delay(ms) => std::thread::sleep(std::time::Duration::from_millis(ms)),
+                Action::SpiFailure => {
+                    pgrx::error!("fault injection at {point}: simulated SPI failure")
+                }
+            }
+        }
+    }
+
+    #[cfg(feature = "fault_injection")]
+    fn configured(point: &str) -> Option<Action> {
+        if let Some(hooks) = TEST_HOOKS.get() {
+            if let Ok(hooks) = hooks.lock() {
+                if let Some(action) = hooks.get(point).copied() {
+                    return Some(action);
+                }
+            }
+        }
+        std::env::var("PG_RIPPLE_FAULT_INJECTION")
+            .ok()
+            .and_then(|spec| {
+                spec.split(';').find_map(|entry| {
+                    let (name, action) = entry.split_once('=')?;
+                    (name.trim() == point).then(|| parse_action(action.trim()))
+                })
+            })
+            .flatten()
+    }
+
+    #[cfg(feature = "fault_injection")]
+    fn parse_action(action: &str) -> Option<Action> {
+        match action {
+            "terminate" => Some(Action::Terminate),
+            "transaction_error" | "error" => Some(Action::TransactionError),
+            "spi_failure" | "spi" => Some(Action::SpiFailure),
+            value => value
+                .strip_prefix("delay:")?
+                .parse()
+                .ok()
+                .map(Action::Delay),
+        }
+    }
+
+    /// Install one deterministic hook for a unit/integration test.
+    #[cfg(feature = "fault_injection")]
+    pub(crate) fn set_for_tests(point: &str, action: &str) -> bool {
+        let Some(action) = parse_action(action) else {
+            return false;
+        };
+        TEST_HOOKS
+            .get_or_init(|| Mutex::new(HashMap::new()))
+            .lock()
+            .map(|mut hooks| hooks.insert(point.to_owned(), action).is_none())
+            .unwrap_or(false)
+    }
+
+    /// Remove all test hooks.
+    #[cfg(feature = "fault_injection")]
+    pub(crate) fn clear_for_tests() {
+        if let Some(hooks) = TEST_HOOKS.get() {
+            if let Ok(mut hooks) = hooks.lock() {
+                hooks.clear();
+            }
+        }
+    }
+
+    #[cfg(all(test, feature = "fault_injection"))]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn test_hook_is_deterministic() {
+            assert!(set_for_tests("unit", "delay:0"));
+            assert_eq!(configured("unit"), Some(Action::Delay(0)));
+            clear_for_tests();
+        }
+    }
+}
+
 /// Uncertain knowledge engine errors (PT0301–PT0307) — v0.87.0.
 // Q15-01: internal API field; kept for public API surface or future extension consumers.
 #[derive(Debug, Error)]

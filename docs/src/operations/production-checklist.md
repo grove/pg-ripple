@@ -46,6 +46,115 @@ Use this checklist before deploying pg_ripple to production. Each item links to 
 - [ ] **WAL archiving** enabled for point-in-time recovery
 - [ ] **Backup schedule** documented and tested for restore
 
+## v0.133.0 resilience qualification runbook
+
+Run the qualification commands from the repository root. The required matrix
+uses a disposable PostgreSQL 18 instance and reuses the established
+crash-recovery tests. It is deterministic, bounded, and stops on the first
+failure.
+
+```bash
+# CI-safe: no PostgreSQL connection, cluster, or external mutation required.
+bash tests/resilience/fault_matrix.sh --validate
+find tests -type f -name '*.sh' -print0 | xargs -0 -n1 bash -n
+python3 scripts/check_docs_links.py
+python3 scripts/check_docs_summary.py
+```
+
+```bash
+# Required crash, restart, and logical-restore matrix. Use only a disposable
+# cluster because the legacy crash tests intentionally drop their test DBs.
+export PGDATA=/path/to/disposable/pgdata
+export PGHOST=/path/to/disposable/socket
+export PGPORT=28818
+export PGUSER=postgres
+export PGDATABASE=postgres
+export PG_RIPPLE_RESILIENCE_ALLOW_DESTRUCTIVE=1
+export PG_RIPPLE_RESILIENCE_RUN_ID=v0133
+bash tests/resilience/fault_matrix.sh --all
+```
+
+The driver runs these cases in this fixed order:
+
+| Scenario | Command | Recovery assertion |
+|---|---|---|
+| `load-sigkill-restart` | `bash tests/resilience/fault_matrix.sh --scenario load-sigkill-restart` | Dictionary and post-crash load remain usable |
+| `merge-sigkill-restart` | `bash tests/resilience/fault_matrix.sh --scenario merge-sigkill-restart` | Main/delta/tombstone state is queryable after restart |
+| `promotion-sigkill-restart` | `bash tests/resilience/fault_matrix.sh --scenario promotion-sigkill-restart` | Promotion recovery leaves no stuck catalog state |
+| `writeback-sigkill-restart` | `bash tests/resilience/fault_matrix.sh --scenario writeback-sigkill-restart` | A writeback view can be materialized again |
+| `inference-sigkill-restart` | `bash tests/resilience/fault_matrix.sh --scenario inference-sigkill-restart` | Inference can be rerun without a corrupt derivation state |
+| `upgrade-sigkill-restart` | `bash tests/resilience/fault_matrix.sh --scenario upgrade-sigkill-restart` | Failed upgrade rolls back; SIGKILL/restart preserves data |
+| `logical-dump-restore` | `bash tests/resilience/fault_matrix.sh --scenario logical-dump-restore` | `pg_dump`/`pg_restore` preserves triples and health |
+
+If the installed candidate was built with the test-only fault-injection
+feature, set `PG_RIPPLE_FAULT_INJECTION` before starting PostgreSQL to select a
+deterministic hook, for example
+`merge_phase_start=terminate`; a termination hook must be run only on the
+disposable instance.
+
+### Physical backup and PITR
+
+The physical script is opt-in because it starts restored PostgreSQL clusters
+and uses the configured primary as a backup source. It fails on backup,
+restore, archive, or health errors; it skips only when explicitly not enabled.
+
+```bash
+export PG_RIPPLE_RUN_PHYSICAL=1
+bash tests/resilience/fault_matrix.sh --scenario physical-backup-restore-pitr
+
+# Add these only when the primary has archive_mode=on and archive_command
+# writes to the supplied directory.
+export PG_RIPPLE_RUN_PITR=1
+export PG_RIPPLE_WAL_ARCHIVE_DIR=/path/to/wal-archive
+bash tests/resilience/fault_matrix.sh --scenario physical-backup-restore-pitr
+```
+
+### Primary/standby promotion
+
+Promotion is a topology mutation and requires fencing the old primary first.
+The harness requires local data-directory paths so it can perform that fence;
+it does not attempt to rejoin or overwrite either cluster after promotion.
+
+```bash
+export PG_RIPPLE_RUN_HA=1
+export PG_RIPPLE_RESILIENCE_ALLOW_TOPOLOGY_CHANGE=1
+export PG_RIPPLE_PRIMARY_URL='postgresql://postgres@primary/postgres'
+export PG_RIPPLE_STANDBY_URL='postgresql://postgres@standby/postgres'
+export PG_RIPPLE_PRIMARY_DATA=/path/to/primary/pgdata
+export PG_RIPPLE_STANDBY_DATA=/path/to/standby/pgdata
+bash tests/resilience/fault_matrix.sh --scenario primary-standby-promotion
+```
+
+### Read-replica write safety
+
+This check is read-only against the replica except for an intentionally
+rejected `insert_triple` call. A connection failure is a test failure, not a
+read-only pass.
+
+```bash
+export PG_RIPPLE_RUN_HA=1
+export PG_RIPPLE_READ_REPLICA_URL='postgresql://postgres@replica/postgres'
+bash tests/resilience/fault_matrix.sh --scenario read-replica-write-safety
+```
+
+### Resource pressure
+
+The pressure check changes session-local `statement_timeout`, `work_mem`, and
+`temp_file_limit`, then verifies a bounded property path and a cancellation
+diagnostic. Row count and timeout are configurable but capped by the script.
+
+```bash
+export PG_RIPPLE_RUN_RESOURCE_PRESSURE=1
+export PG_RIPPLE_RESOURCE_ROWS=2000
+export PG_RIPPLE_RESOURCE_TIMEOUT_MS=1500
+export PG_RIPPLE_RESOURCE_WORK_MEM=1MB
+bash tests/resilience/fault_matrix.sh --scenario resource-pressure
+```
+
+Required scenarios must exit zero. Physical/PITR and HA commands are
+environment-gated: `SKIP` is valid only when their opt-in variable is absent;
+once enabled, missing prerequisites or failed assertions are failures.
+
 ## Upgrade Path
 
 - [ ] **Migration scripts** verified — `ALTER EXTENSION pg_ripple UPDATE` applies sequential migration scripts ([Upgrading](upgrading.md))

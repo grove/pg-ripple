@@ -7,7 +7,7 @@ info:
   description: SPARQL 1.1 Protocol and pg_ripple REST API
   license:
     name: Apache-2.0
-  version: 0.132.0
+  version: 0.133.0
 paths:
   /admin/bench-history:
     get:
