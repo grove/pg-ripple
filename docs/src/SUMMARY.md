@@ -10,6 +10,7 @@
 - [Architecture at a Glance](evaluate/architecture-glance.md)
 - [Comparison vs Alternatives](evaluate/comparison.md)
 - [Performance & Conformance Results](evaluate/performance-results.md)
+- [v0.132.0 Soak-Test Evidence](benchmarks/soak-0.132.0.md)
 
 ---
 
