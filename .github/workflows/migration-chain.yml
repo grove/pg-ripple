@@ -71,6 +71,7 @@ jobs:
       - name: Install PostgreSQL 18 from PGDG
         run: |
           sudo apt-get install -y --no-install-recommends curl ca-certificates lsb-release
+          sudo rm -f /etc/apt/sources.list.d/azure-cli.list /etc/apt/sources.list.d/azure-cli.sources
           sudo install -d /usr/share/postgresql-common/pgdg
           curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
             | sudo tee /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc >/dev/null

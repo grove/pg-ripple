@@ -1062,7 +1062,7 @@ jobs:
       - name: Wait for PostgreSQL 18
         run: |
           for attempt in {1..60}; do
-            if psql -h /tmp -p 28818 -U runner -d pg_ripple \
+            if psql -h /tmp -p 28818 -U runner -d postgres \
               -c "SELECT 1" >/dev/null 2>&1; then
               exit 0
             fi
@@ -1070,6 +1070,12 @@ jobs:
           done
           echo "PostgreSQL 18 did not become ready" >&2
           exit 1
+
+      - name: Create entailment test database
+        run: |
+          createdb -h /tmp -p 28818 -U runner pg_ripple
+          psql -h /tmp -p 28818 -U runner -d pg_ripple \
+            -c "CREATE EXTENSION pg_ripple;"
 
       - name: Run SPARQL entailment regime suite
         run: |
