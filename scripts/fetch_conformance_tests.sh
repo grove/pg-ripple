@@ -74,14 +74,13 @@ fetch_w3c() {
 
 JENA_TEST_DIR="${JENA_TEST_DIR:-${PROJECT_ROOT}/tests/jena/data}"
 
-# Pin the release containing the manifest tree consumed by the harness.
-# Jena main now packages these fixtures in testing-2026-05.zip instead.
-JENA_URL="https://github.com/apache/jena/archive/refs/tags/jena-5.6.0.tar.gz"
-JENA_SPARQL_PATH="jena-jena-5.6.0/jena-arq/testing/ARQ"
+# Pin the fixture snapshot consumed by the harness.
+JENA_URL="https://raw.githubusercontent.com/apache/jena/790b3dc08fccb6be1ea2868b97bfcbae8f113062/jena-arq/testing/ARQ/testing-2026-05.zip"
+JENA_ZIP_PATH="testing/ARQ/*"
 
 # SHA-256 checksum of the Jena archive.
-# NOTE: This changes with each Jena HEAD commit; set JENA_SKIP_CHECKSUM=1 to skip.
-JENA_SHA256="${JENA_SHA256:-}"
+# Set JENA_SKIP_CHECKSUM=1 to skip verification when testing a new snapshot.
+JENA_SHA256="${JENA_SHA256:-cfe989a8429ca57e6a737ccc094c761ec57737ef06ed7a749257a3ad7d0f7f3e}"
 
 fetch_jena() {
     if [[ -d "${JENA_TEST_DIR}" && "${FORCE}" != "--force" ]]; then
@@ -94,9 +93,9 @@ fetch_jena() {
 
     info "Downloading Apache Jena test suite from GitHub..."
     info "URL: ${JENA_URL}"
-    info "This will extract the SPARQL test resources (~50 MB)."
+    info "This will extract the SPARQL test resources (~4 MB)."
 
-    local archive="/tmp/jena-tests-$$.tar.gz"
+    local archive="/tmp/jena-tests-$$.zip"
     trap "rm -f '${archive}'" EXIT
 
     if command -v curl >/dev/null 2>&1; then
@@ -129,12 +128,13 @@ fetch_jena() {
         info "Set JENA_SHA256 or JENA_SKIP_CHECKSUM=1 to skip verification."
     fi
 
+    if ! command -v unzip >/dev/null 2>&1; then
+        fail "unzip is not available."
+    fi
+
     info "Extracting SPARQL test resources..."
     mkdir -p "${JENA_TEST_DIR}"
-    tar -xzf "${archive}" \
-        --strip-components=3 \
-        -C "${JENA_TEST_DIR}" \
-        "${JENA_SPARQL_PATH}"
+    unzip -q "${archive}" "${JENA_ZIP_PATH}" -d "${JENA_TEST_DIR}"
 
     # Create sub-suite directories expected by the test harness.
     for suite in sparql-query sparql-update sparql-syntax algebra; do
