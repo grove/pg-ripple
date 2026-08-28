@@ -39,4 +39,4 @@ jobs:
           echo "OK: No 'latest' image tags found."
 
       - name: Helm template (dry-run)
-        run: helm template test-release charts/pg_ripple > /dev/null
+        run: helm template test-release charts/pg_ripple --set http.authTokenSecret.name=test-release-http > /dev/null

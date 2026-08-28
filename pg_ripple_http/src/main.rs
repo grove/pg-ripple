@@ -5,14 +5,13 @@
 //! and exposes a W3C-compliant SPARQL HTTP endpoint at `/sparql` plus a full
 //! Datalog REST API at `/datalog`.
 
-use std::fs::File;
-use std::io::BufReader;
 use std::net::SocketAddr;
 use std::path::Path;
 use std::sync::Arc;
 
 use axum::http::HeaderValue;
 use deadpool_postgres::{Config, Runtime};
+use rustls::pki_types::{CertificateDer, PrivateKeyDer, pem::PemObject};
 use tokio_postgres::NoTls;
 use tower_governor::GovernorLayer;
 use tower_governor::governor::GovernorConfigBuilder;
@@ -216,22 +215,14 @@ fn pg_tls_connector(
         &http_config.pg_client_key_file,
     ) {
         (Some(cert_path), Some(key_path)) => {
-            let mut cert_reader = BufReader::new(
-                File::open(cert_path)
-                    .map_err(|error| format!("could not read {cert_path}: {error}"))?,
-            );
-            let cert_chain = rustls_pemfile::certs(&mut cert_reader)
+            let cert_chain = CertificateDer::pem_file_iter(cert_path)
+                .map_err(|error| format!("could not read {cert_path}: {error}"))?
                 .collect::<Result<Vec<_>, _>>()
                 .map_err(|error| {
                     format!("could not parse PostgreSQL client certificate: {error}")
                 })?;
-            let mut key_reader = BufReader::new(
-                File::open(key_path)
-                    .map_err(|error| format!("could not read {key_path}: {error}"))?,
-            );
-            let key = rustls_pemfile::private_key(&mut key_reader)
-                .map_err(|error| format!("could not parse PostgreSQL client key: {error}"))?
-                .ok_or_else(|| "PostgreSQL client key file contains no private key".to_owned())?;
+            let key = PrivateKeyDer::from_pem_file(key_path)
+                .map_err(|error| format!("could not parse PostgreSQL client key: {error}"))?;
             builder
                 .with_client_auth_cert(cert_chain, key)
                 .map_err(|error| {
