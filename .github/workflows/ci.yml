@@ -1059,10 +1059,17 @@ jobs:
       - name: Start pgrx PostgreSQL 18
         run: cargo pgrx start pg18
 
-      - name: Create test database
+      - name: Wait for PostgreSQL 18
         run: |
-          psql -h /tmp -p 28818 -U runner -d pg_ripple \
-            -c "SET client_min_messages = warning;" || true
+          for attempt in {1..60}; do
+            if psql -h /tmp -p 28818 -U runner -d pg_ripple \
+              -c "SELECT 1" >/dev/null 2>&1; then
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "PostgreSQL 18 did not become ready" >&2
+          exit 1
 
       - name: Run SPARQL entailment regime suite
         run: |
