@@ -255,6 +255,7 @@ jobs:
           psql "host=localhost port=28818 dbname=postgres user=${USER}" \
             -c "SELECT pg_ripple.load_ntriples('<https://v0134.test/s> <https://v0134.test/p> \"hello\"@en .');"
           cargo build -p pg_ripple_http
+          PG_RIPPLE_HTTP_AUTH_TOKEN="ci-stream-smoke-token" \
           PG_RIPPLE_HTTP_PG_URL="postgresql://${USER}@localhost:28818/postgres" \
             PG_RIPPLE_HTTP_STREAM_FORMAT_SMOKE=1 \
             bash pg_ripple_http/tests/process_smoke.sh
