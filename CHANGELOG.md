@@ -11,6 +11,24 @@ Versions correspond to the milestones in [ROADMAP.md](ROADMAP.md).
 
 ---
 
+## [0.134.0] — 2026-08-29 — Performance, scale, and true streaming qualification
+
+v0.134.0 delivers the performance, scale, and true-streaming query path.
+
+### Added
+
+- Typed internal result metadata and RDF binding rows preserve term kinds,
+  datatypes, language tags, and unbound variables.
+- `/sparql` and `/sparql/stream` use direct PostgreSQL `RowStream` delivery for
+  streaming-safe JSON, CSV, TSV, and N-Triples responses with bounded chunks.
+- Read-only transactions, statement and idle timeouts, backpressure, TLS-aware
+  cancellation, connection cleanup, and stream metrics cover body lifecycles.
+- Cursor row/page counters now increment on real streamed output.
+- Streaming encoder, extension cursor, route, and qualification checks are
+  wired into CI through `scripts/check_v0134_streaming.sh`.
+
+---
+
 ## [0.133.0] — 2026-08-28 — Crash recovery, backup, failover, and operations
 
 pg_ripple now has a release-scoped resilience qualification surface for the

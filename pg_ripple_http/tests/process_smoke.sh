@@ -72,6 +72,11 @@ if [ "${READY_STATUS}" != "200" ] && [ "${READY_STATUS}" != "503" ]; then
 fi
 echo "OK: /ready responded (${READY_STATUS})"
 
+if [ "${PG_RIPPLE_HTTP_STREAM_FORMAT_SMOKE:-0}" = "1" ]; then
+  PG_RIPPLE_HTTP_URL="http://127.0.0.1:${PORT}" \
+    bash "${REPO_ROOT}/tests/http_integration/stream_format.sh"
+fi
+
 echo "==> Sending SIGTERM and waiting for clean exit..."
 kill -TERM "${PID}"
 trap - EXIT

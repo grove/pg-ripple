@@ -25,7 +25,7 @@ env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
   PGRX_VERSION: "0.18.0"
-  CONFORMANCE_VERSION: "0.133.0"
+  CONFORMANCE_VERSION: "0.134.0"
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
@@ -96,6 +96,9 @@ jobs:
 
       - name: Check pg_ripple_http compiles
         run: cargo check -p pg_ripple_http
+
+      - name: http-stream-format
+        run: cargo test -p pg_ripple_http --test streaming
 
       # v0.128.1 (http-router-construction): compiling is not enough — Axum 0.8
       # panics at router-construction time on obsolete `:capture` routes, which
@@ -249,8 +252,11 @@ jobs:
         run: |
           psql "host=localhost port=28818 dbname=postgres user=${USER}" \
             -c "CREATE EXTENSION IF NOT EXISTS pg_ripple;"
+          psql "host=localhost port=28818 dbname=postgres user=${USER}" \
+            -c "SELECT pg_ripple.load_ntriples('<https://v0134.test/s> <https://v0134.test/p> \"hello\"@en .');"
           cargo build -p pg_ripple_http
           PG_RIPPLE_HTTP_PG_URL="postgresql://${USER}@localhost:28818/postgres" \
+            PG_RIPPLE_HTTP_STREAM_FORMAT_SMOKE=1 \
             bash pg_ripple_http/tests/process_smoke.sh
 
       - name: Validate examples (live, L15-03)
@@ -527,7 +533,7 @@ jobs:
         if: always()
         run: |
           if [ -f tests/w3c/report.json ]; then
-            python3 -c 'import json, os; p="tests/w3c/report.json"; d=json.load(open(p)); d["version"]=os.environ.get("CONFORMANCE_VERSION", "0.133.0"); d["generated_at"]=__import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat().replace("+00:00", "Z"); open(p, "w").write(json.dumps(d, indent=2)+"\n")'
+            python3 -c 'import json, os; p="tests/w3c/report.json"; d=json.load(open(p)); d["version"]=os.environ.get("CONFORMANCE_VERSION", "0.134.0"); d["generated_at"]=__import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat().replace("+00:00", "Z"); open(p, "w").write(json.dumps(d, indent=2)+"\n")'
           fi
 
       - name: Upload W3C test report
@@ -631,7 +637,7 @@ jobs:
         if: always()
         run: |
           if [ -f tests/conformance/report.json ]; then
-            python3 -c 'import json, os; p="tests/conformance/report.json"; d=json.load(open(p)); d["version"]=os.environ.get("CONFORMANCE_VERSION", "0.133.0"); d["generated_at"]=__import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat().replace("+00:00", "Z"); open(p, "w").write(json.dumps(d, indent=2)+"\n")'
+            python3 -c 'import json, os; p="tests/conformance/report.json"; d=json.load(open(p)); d["version"]=os.environ.get("CONFORMANCE_VERSION", "0.134.0"); d["generated_at"]=__import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat().replace("+00:00", "Z"); open(p, "w").write(json.dumps(d, indent=2)+"\n")'
           fi
 
       - name: Upload Jena conformance report
@@ -732,7 +738,7 @@ jobs:
         if: always()
         run: |
           if [ -f tests/conformance/report.json ]; then
-            python3 -c 'import json, os; p="tests/conformance/report.json"; d=json.load(open(p)); d["version"]=os.environ.get("CONFORMANCE_VERSION", "0.133.0"); d["generated_at"]=__import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat().replace("+00:00", "Z"); open(p, "w").write(json.dumps(d, indent=2)+"\n")'
+            python3 -c 'import json, os; p="tests/conformance/report.json"; d=json.load(open(p)); d["version"]=os.environ.get("CONFORMANCE_VERSION", "0.134.0"); d["generated_at"]=__import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat().replace("+00:00", "Z"); open(p, "w").write(json.dumps(d, indent=2)+"\n")'
           fi
 
       - name: Upload WatDiv benchmark report
@@ -995,7 +1001,7 @@ jobs:
         if: always()
         run: |
           if [ -f tests/conformance/report.json ]; then
-            python3 -c 'import json, os; p="tests/conformance/report.json"; d=json.load(open(p)); d["version"]=os.environ.get("CONFORMANCE_VERSION", "0.133.0"); d["generated_at"]=__import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat().replace("+00:00", "Z"); open(p, "w").write(json.dumps(d, indent=2)+"\n")'
+            python3 -c 'import json, os; p="tests/conformance/report.json"; d=json.load(open(p)); d["version"]=os.environ.get("CONFORMANCE_VERSION", "0.134.0"); d["generated_at"]=__import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat().replace("+00:00", "Z"); open(p, "w").write(json.dumps(d, indent=2)+"\n")'
           fi
 
       - name: Upload OWL 2 RL conformance report
@@ -2055,3 +2061,11 @@ jobs:
         run: |
           bash tests/resilience/run_v0133_matrix.sh --validate
           bash scripts/check_v0133_resilience.sh
+
+  v0134-streaming-evidence-static:
+    name: v0.134.0 streaming qualification
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6
+      - name: Validate streaming implementation and release contract
+        run: bash scripts/check_v0134_streaming.sh

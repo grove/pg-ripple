@@ -698,11 +698,13 @@ pub fn is_blank_node(id: i64) -> bool {
 }
 
 /// Full decoded representation of a dictionary entry.
+#[derive(Clone)]
 pub struct TermInfo {
     pub value: String,
     pub kind: i16,
     pub datatype: Option<String>,
     pub lang: Option<String>,
+    pub quoted_triple: Option<(i64, i64, i64)>,
 }
 
 /// Decode a dictionary `id` to its full representation (value, kind, datatype, lang).
@@ -712,7 +714,7 @@ pub fn decode_full(id: i64) -> Option<TermInfo> {
     Spi::connect(|client| {
         client
             .select(
-                "SELECT value, kind, datatype, lang \
+                "SELECT value, kind, datatype, lang, qt_s, qt_p, qt_o \
                  FROM _pg_ripple.dictionary WHERE id = $1",
                 Some(1),
                 &[DatumWithOid::from(id)],
@@ -723,11 +725,20 @@ pub fn decode_full(id: i64) -> Option<TermInfo> {
                 let kind: i16 = row.get::<i16>(2).ok().flatten()?;
                 let datatype: Option<String> = row.get::<String>(3).ok().flatten();
                 let lang: Option<String> = row.get::<String>(4).ok().flatten();
+                let quoted_triple = match (
+                    row.get::<i64>(5).ok().flatten(),
+                    row.get::<i64>(6).ok().flatten(),
+                    row.get::<i64>(7).ok().flatten(),
+                ) {
+                    (Some(s), Some(p), Some(o)) => Some((s, p, o)),
+                    _ => None,
+                };
                 Some(TermInfo {
                     value,
                     kind,
                     datatype,
                     lang,
+                    quoted_triple,
                 })
             })
             .next()

@@ -25,7 +25,7 @@ No separate graph database. No data pipelines. No extra infrastructure.
 
 ---
 
-## What works today (v0.133.0)
+## What works today (v0.134.0)
 
 pg_ripple publishes immutable, versioned conformance and feature evidence for
 each release. W3C SPARQL 1.1 smoke tests and LUBM are required gates; Jena,
@@ -194,7 +194,12 @@ central route authorization, outbound request policy, and versioned conformance
 evidence. v0.132.0 added immutable corpus locks, non-skippable required
 conformance semantics, feature evidence, route/OpenAPI truth checks, bounded
 variable-predicate expansion, keyset exports, and a complete release evidence
-bundle. v0.133.0 adds deterministic crash-recovery qualification, backup/
+bundle. v0.134.0 adds direct, bounded HTTP streaming for JSON, CSV, TSV, and
+N-Triples responses, with typed RDF terms, backpressure, deadlines,
+cancellation, and connection cleanup. See
+[roadmap/v0.134.0.md](roadmap/v0.134.0.md).
+
+v0.133.0 added deterministic crash-recovery qualification, backup/
 restore and failover checks, resource-pressure diagnostics, and the
 `pg_ripple.health()` operations API. The release also keeps the independent migration-graph,
 schema-fingerprint, and upgrade recovery checks plus validated writeback

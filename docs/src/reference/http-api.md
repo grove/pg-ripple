@@ -1,6 +1,6 @@
 # HTTP API Reference
 
-`pg_ripple_http` is a standalone Rust binary that exposes the full pg_ripple feature set over HTTP. It supports the W3C SPARQL 1.1 Protocol, Server-Sent Events streaming, Datalog REST operations, PageRank, probabilistic reasoning, Arrow Flight bulk export, and administrative endpoints.
+`pg_ripple_http` is a standalone Rust binary that exposes the full pg_ripple feature set over HTTP. It supports the W3C SPARQL 1.1 Protocol, live subscription streams over Server-Sent Events, Datalog REST operations, PageRank, probabilistic reasoning, Arrow Flight bulk export, and administrative endpoints.
 
 Start the service:
 
@@ -58,6 +58,11 @@ by their access class.
 | `PG_RIPPLE_HTTP_CA_BUNDLE` | *(system roots)* | Extra CA bundle for outbound HTTPS clients |
 | `PG_RIPPLE_HTTP_PIN_FINGERPRINTS` | *(none)* | Optional pinned TLS certificate fingerprints |
 | `PG_RIPPLE_HTTP_SHUTDOWN_TIMEOUT_SECS` | `30` | Graceful shutdown timeout |
+| `PG_RIPPLE_HTTP_QUERY_TIMEOUT_MS` | `300000` | Default streaming query deadline |
+| `PG_RIPPLE_HTTP_QUERY_TIMEOUT_MAX_MS` | `900000` | Maximum streaming query deadline |
+| `PG_RIPPLE_HTTP_STREAM_IDLE_TIMEOUT_MS` | `60000` | Maximum wait between streamed rows |
+| `PG_RIPPLE_HTTP_STREAM_CHUNK_BYTES` | `65536` | Maximum coalesced response chunk |
+| `PG_RIPPLE_HTTP_STREAM_MAX_ROW_BYTES` | `1048576` | Maximum encoded row size |
 | `ARROW_FLIGHT_SECRET` | *(none)* | HMAC secret for Arrow Flight tickets |
 | `ARROW_UNSIGNED_TICKETS_ALLOWED` | `false` | Allow unsigned Arrow tickets for local development |
 | `ARROW_NONCE_CACHE_MAX` | `10000` | Replay-protection nonce cache size |
@@ -74,7 +79,7 @@ the endpoint is intentionally unauthenticated.
 |---|---|---|---|
 | `GET` | `/sparql` | Read | SPARQL 1.1 query via URL parameters |
 | `POST` | `/sparql` | Write | SPARQL 1.1 query/update via request body |
-| `POST` | `/sparql/stream` | Read | Streaming SPARQL SELECT (SSE) |
+| `POST` | `/sparql/stream` | Read | Explicit streaming SPARQL compatibility alias |
 | `POST` | `/rag` | Read | RAG retrieval / NL-to-SPARQL |
 | `GET` | `/health` | None | Liveness probe |
 | `GET` | `/ready` | None | Kubernetes readiness probe |
@@ -223,28 +228,22 @@ curl -X POST http://localhost:7878/sparql \
 
 ### `POST /sparql/stream`
 
-Streaming SPARQL SELECT using Server-Sent Events. Results are delivered as SSE `data:` events, one result row per event, as the query executes.
+Explicit streaming compatibility alias. Results are delivered from the
+PostgreSQL row stream with natural HTTP backpressure.
 
 **Request:** Same as `POST /sparql`.
 
-**Response Content-Type:** `text/event-stream`
-
-**Event format:**
-
-```
-event: row
-data: {"?name": "\"Alice\"^^xsd:string", "?age": "\"30\"^^xsd:integer"}
-
-event: done
-data: {"total_rows": 42}
-```
+**Response Content-Type:** `application/sparql-results+json`, `text/csv`,
+`text/tab-separated-values`, or `application/n-triples`, selected by `Accept`.
+JSON is a complete SPARQL Results JSON document, not JSON-Lines or SSE. XML,
+Turtle, and JSON-LD remain buffered on `/sparql`.
 
 **Example:**
 
 ```bash
 curl -X POST http://localhost:7878/sparql/stream \
   -H "Content-Type: application/sparql-query" \
-  -H "Accept: text/event-stream" \
+  -H "Accept: application/sparql-results+json" \
   -d 'SELECT ?s ?p ?o WHERE { ?s ?p ?o }' \
   --no-buffer
 ```

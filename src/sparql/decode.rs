@@ -124,3 +124,65 @@ pub(crate) fn batch_decode(ids: &[i64]) -> HashMap<i64, String> {
 
     result
 }
+
+/// Decode dictionary term metadata for one result page in a single SPI query.
+/// Inline IDs are absent because their type and lexical form are packed locally.
+pub(crate) fn batch_decode_full(ids: &[i64]) -> HashMap<i64, dictionary::TermInfo> {
+    let dict_ids: Vec<i64> = ids
+        .iter()
+        .copied()
+        .filter(|id| !dictionary::inline::is_inline(*id))
+        .collect();
+    if dict_ids.is_empty() {
+        return HashMap::new();
+    }
+
+    let ids_array: Vec<Option<i64>> = dict_ids.iter().copied().map(Some).collect();
+    let mut result = HashMap::with_capacity(dict_ids.len());
+    Spi::connect(|client| {
+        let rows = client
+            .select(
+                "SELECT id, value, kind, datatype, lang, qt_s, qt_p, qt_o \
+                 FROM _pg_ripple.dictionary \
+                 WHERE id = ANY($1::bigint[])",
+                None,
+                &[pgrx::datum::DatumWithOid::from(ids_array.as_slice())],
+            )
+            .unwrap_or_else(|e| pgrx::error!("batch_decode_full SPI error: {e}"));
+        for row in rows {
+            let id = row
+                .get::<i64>(1)
+                .unwrap_or_else(|e| pgrx::error!("batch_decode_full id: {e}"))
+                .unwrap_or(0);
+            let value = row
+                .get::<String>(2)
+                .unwrap_or_else(|e| pgrx::error!("batch_decode_full value: {e}"))
+                .unwrap_or_default();
+            let kind = row
+                .get::<i16>(3)
+                .unwrap_or_else(|e| pgrx::error!("batch_decode_full kind: {e}"))
+                .unwrap_or(0);
+            let datatype = row.get::<String>(4).ok().flatten();
+            let lang = row.get::<String>(5).ok().flatten();
+            let quoted_triple = match (
+                row.get::<i64>(6).ok().flatten(),
+                row.get::<i64>(7).ok().flatten(),
+                row.get::<i64>(8).ok().flatten(),
+            ) {
+                (Some(s), Some(p), Some(o)) => Some((s, p, o)),
+                _ => None,
+            };
+            result.insert(
+                id,
+                dictionary::TermInfo {
+                    value,
+                    kind,
+                    datatype,
+                    lang,
+                    quoted_triple,
+                },
+            );
+        }
+    });
+    result
+}

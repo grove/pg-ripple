@@ -47,7 +47,7 @@ pub(crate) mod plan;
 // ─── Re-exports for external callers ─────────────────────────────────────────
 // framing/mod.rs and other modules call these via `crate::sparql::*`.
 
-pub(crate) use decode::batch_decode;
+pub(crate) use decode::{batch_decode, batch_decode_full};
 pub(crate) use execute::{
     explain_sparql, plan_cache_reset, plan_cache_stats, sparql_construct, sparql_construct_rows,
     sparql_describe, sparql_update,

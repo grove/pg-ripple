@@ -1,6 +1,9 @@
 //! pg_ripple SQL API — SPARQL query engine, plan cache monitoring, FTS, HTAP maintenance
 
 #[pgrx::pg_schema]
+mod _pg_ripple {}
+
+#[pgrx::pg_schema]
 mod pg_ripple {
     use pgrx::prelude::*;
 
@@ -227,6 +230,38 @@ mod pg_ripple {
     #[pg_extern]
     fn sparql_cursor_jsonld(query: &str) -> TableIterator<'static, (name!(chunk, String),)> {
         TableIterator::new(crate::sparql::cursor::sparql_cursor_jsonld(query))
+    }
+
+    /// Internal v0.134 metadata used to initialize streaming formatters.
+    #[pg_extern(schema = "_pg_ripple")]
+    fn sparql_stream_metadata(query: &str) -> pgrx::JsonB {
+        let parsed = spargebra::SparqlParser::new()
+            .parse_query(query)
+            .unwrap_or_else(|e| pgrx::error!("SPARQL parse error: {e}"));
+        let (form, variables) = match parsed {
+            spargebra::Query::Select { .. } => {
+                let (_, vars, ..) = crate::sparql::prepare_select(query);
+                ("select", vars)
+            }
+            spargebra::Query::Ask { .. } => ("ask", vec!["result".to_owned()]),
+            spargebra::Query::Construct { .. } => ("construct", Vec::new()),
+            spargebra::Query::Describe { .. } => ("describe", Vec::new()),
+        };
+        pgrx::JsonB(serde_json::json!({"form": form, "variables": variables}))
+    }
+
+    /// Internal v0.134 lazy SELECT stream using SPARQL Results JSON bindings.
+    #[pg_extern(schema = "_pg_ripple")]
+    fn sparql_stream_bindings(
+        query: &str,
+    ) -> TableIterator<'static, (name!(result, pgrx::JsonB),)> {
+        TableIterator::new(crate::sparql::cursor::CursorIter::new_typed(query).map(|row| (row,)))
+    }
+
+    /// Internal v0.134 graph stream. Rows are N-Triples lines.
+    #[pg_extern(schema = "_pg_ripple")]
+    fn sparql_stream_triples(query: &str) -> TableIterator<'static, (name!(triple, String),)> {
+        TableIterator::new(crate::sparql::cursor::sparql_stream_triples(query).map(|row| (row,)))
     }
 
     // ── v0.40.0: explain_sparql returning JSONB ───────────────────────────────

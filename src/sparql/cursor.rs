@@ -21,7 +21,7 @@
 //! Peak Rust-side memory ≈ export_batch_size × avg_row_width + decode overhead.
 //! The SpiTupleTable for each page is freed at SPI session end (pgrx guarantee).
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 
 use pgrx::prelude::*;
 use serde_json::{Map, Value as Json};
@@ -59,6 +59,7 @@ pub struct CursorIter {
     rows_returned: i64,
     /// Overflow action ("warn" | "error").
     overflow_action: String,
+    typed: bool,
 }
 
 impl CursorIter {
@@ -110,7 +111,16 @@ impl CursorIter {
             max_rows,
             rows_returned: 0,
             overflow_action,
+            typed: false,
         }
+    }
+
+    /// Open the same portal-backed iterator with SPARQL Results JSON term
+    /// descriptors instead of the legacy display-string values.
+    pub fn new_typed(query: &str) -> Self {
+        let mut cursor = Self::new(query);
+        cursor.typed = true;
+        cursor
     }
 
     /// Fetch the next page from the portal.
@@ -127,6 +137,7 @@ impl CursorIter {
         let raw_text_vars = self.raw_text_vars.clone();
         let raw_iri_vars = self.raw_iri_vars.clone();
         let raw_double_vars = self.raw_double_vars.clone();
+        let typed = self.typed;
 
         // Each fetch opens its own SPI session; the SpiTupleTable is freed
         // when the session ends — this is the key to memory-bounded operation.
@@ -181,7 +192,16 @@ impl CursorIter {
             // Batch-decode all dictionary IDs for this page.
             all_ids.sort_unstable();
             all_ids.dedup();
-            let decode_map: HashMap<i64, String> = super::batch_decode(&all_ids);
+            let decode_map = if typed {
+                HashMap::new()
+            } else {
+                super::batch_decode(&all_ids)
+            };
+            let typed_decode_map = if typed {
+                super::batch_decode_full(&all_ids)
+            } else {
+                HashMap::new()
+            };
 
             // Build JSONB rows.
             let page: Vec<pgrx::JsonB> = raw_rows
@@ -192,6 +212,11 @@ impl CursorIter {
                         let raw_val = row_vals.get(i).and_then(|v| v.as_ref());
                         let v = match raw_val {
                             None => Json::Null,
+                            Some(Err(text)) if typed => typed_text_value(
+                                text,
+                                raw_iri_vars.contains(var),
+                                raw_double_vars.contains(var),
+                            ),
                             Some(Err(text)) => {
                                 if raw_iri_vars.contains(var) {
                                     Json::String(format!("<{text}>"))
@@ -203,6 +228,14 @@ impl CursorIter {
                                     Json::String(format!("\"{}\"", text.replace('"', "\\\"")))
                                 }
                             }
+                            Some(Ok(id)) if typed && raw_numeric_vars.contains(var) => {
+                                serde_json::json!({
+                                    "type": "literal",
+                                    "value": id.to_string(),
+                                    "datatype": "http://www.w3.org/2001/XMLSchema#integer"
+                                })
+                            }
+                            Some(Ok(id)) if typed => typed_dictionary_value(*id, &typed_decode_map),
                             Some(Ok(id)) => {
                                 if raw_numeric_vars.contains(var) {
                                     Json::Number(serde_json::Number::from(*id))
@@ -272,7 +305,63 @@ impl Iterator for CursorIter {
         let item = pgrx::JsonB(self.page[self.page_pos].0.clone());
         self.page_pos += 1;
         self.rows_returned += 1;
+        crate::stats::increment_cursor_rows_streamed(1);
         Some(item)
+    }
+}
+
+fn typed_text_value(text: &str, iri: bool, double: bool) -> Json {
+    if iri {
+        serde_json::json!({"type": "uri", "value": text})
+    } else if double {
+        serde_json::json!({
+            "type": "literal", "value": text,
+            "datatype": "http://www.w3.org/2001/XMLSchema#double"
+        })
+    } else {
+        serde_json::json!({"type": "literal", "value": text})
+    }
+}
+
+fn typed_dictionary_value(id: i64, terms: &HashMap<i64, crate::dictionary::TermInfo>) -> Json {
+    if crate::dictionary::inline::is_inline(id) {
+        let term = crate::dictionary::inline::format_inline(id);
+        return serde_json::json!({
+            "type": "literal",
+            "value": term.split('"').nth(1).unwrap_or(term.as_str()),
+            "datatype": term.split("<").nth(1).and_then(|s| s.strip_suffix('>'))
+        });
+    }
+    let Some(info) = terms
+        .get(&id)
+        .cloned()
+        .or_else(|| crate::dictionary::decode_full(id))
+    else {
+        return Json::Null;
+    };
+    match info.kind {
+        crate::dictionary::KIND_IRI => serde_json::json!({"type": "uri", "value": info.value}),
+        crate::dictionary::KIND_BLANK => serde_json::json!({"type": "bnode", "value": info.value}),
+        crate::dictionary::KIND_LANG_LITERAL => serde_json::json!({
+            "type": "literal", "value": info.value, "xml:lang": info.lang
+        }),
+        crate::dictionary::KIND_TYPED_LITERAL => serde_json::json!({
+            "type": "literal", "value": info.value, "datatype": info.datatype
+        }),
+        crate::dictionary::KIND_QUOTED_TRIPLE => {
+            let Some((subject, predicate, object)) = info.quoted_triple else {
+                return serde_json::json!({"type": "literal", "value": info.value});
+            };
+            serde_json::json!({
+                "type": "triple",
+                "value": {
+                    "subject": typed_dictionary_value(subject, terms),
+                    "predicate": typed_dictionary_value(predicate, terms),
+                    "object": typed_dictionary_value(object, terms),
+                }
+            })
+        }
+        _ => serde_json::json!({"type": "literal", "value": info.value}),
     }
 }
 
@@ -313,6 +402,156 @@ pub fn sparql_cursor_jsonld(query: &str) -> impl Iterator<Item = (String,)> + 's
     ConstructCursorIter::new(query, ConstructFormat::JsonLd).map(|chunk| (chunk,))
 }
 
+/// Internal v0.134 stream of graph output. Both forms are pull-oriented;
+/// DESCRIBE pages resource selection and processes one CBD resource at a time.
+pub enum TripleStreamIter {
+    Construct(ConstructCursorIter),
+    Describe(DescribeCursorIter),
+}
+
+impl Iterator for TripleStreamIter {
+    type Item = String;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self {
+            Self::Construct(iter) => iter.next(),
+            Self::Describe(iter) => iter.next(),
+        }
+    }
+}
+
+/// Stream CONSTRUCT or DESCRIBE results as N-Triples lines.
+pub fn sparql_stream_triples(query: &str) -> TripleStreamIter {
+    let parsed = spargebra::SparqlParser::new()
+        .parse_query(query)
+        .unwrap_or_else(|e| pgrx::error!("SPARQL parse error: {e}"));
+    match parsed {
+        spargebra::Query::Construct { .. } => {
+            TripleStreamIter::Construct(ConstructCursorIter::new(query, ConstructFormat::NTriples))
+        }
+        spargebra::Query::Describe { .. } => {
+            TripleStreamIter::Describe(DescribeCursorIter::new(query))
+        }
+        _ => pgrx::error!("sparql_stream_triples() requires CONSTRUCT or DESCRIBE"),
+    }
+}
+
+/// Lazy DESCRIBE iterator. The resource-selection portal is fetched in pages;
+/// the CBD helper is evaluated for one resource at a time, so the graph is
+/// never collected into a single result vector before HTTP emission.
+pub struct DescribeCursorIter {
+    resource_portal_name: String,
+    resource_variables: Vec<String>,
+    page_size: i64,
+    resources: VecDeque<(i64, usize)>,
+    resources_done: bool,
+    visited: HashSet<i64>,
+    pending: VecDeque<(i64, i64, i64)>,
+    symmetric: bool,
+    max_depth: usize,
+}
+
+impl DescribeCursorIter {
+    fn new(query: &str) -> Self {
+        let parsed = spargebra::SparqlParser::new()
+            .parse_query(query)
+            .unwrap_or_else(|e| pgrx::error!("SPARQL parse error: {e}"));
+        let (pattern, base_iri) = match parsed {
+            spargebra::Query::Describe {
+                pattern, base_iri, ..
+            } => (pattern, base_iri),
+            _ => pgrx::error!("sparql_stream_triples() requires DESCRIBE"),
+        };
+        let trans = super::sqlgen::translate_select(&pattern, base_iri.as_deref());
+        let resource_portal_name = Spi::connect_mut(|client| {
+            let cursor = client.open_cursor(trans.sql.as_str(), &[]);
+            Ok::<_, pgrx::spi::Error>(cursor.detach_into_name())
+        })
+        .unwrap_or_else(|e| pgrx::error!("DescribeCursorIter: failed to open portal: {e}"));
+        let describe_form = crate::gucs::sparql::DESCRIBE_FORM.get();
+        let strategy = describe_form
+            .as_ref()
+            .and_then(|value| value.to_str().ok())
+            .unwrap_or("cbd");
+        Self {
+            resource_portal_name,
+            resource_variables: trans.variables,
+            page_size: crate::gucs::storage::EXPORT_BATCH_SIZE.get().max(1) as i64,
+            resources: VecDeque::new(),
+            resources_done: false,
+            visited: HashSet::new(),
+            pending: VecDeque::new(),
+            symmetric: matches!(strategy, "scbd" | "symmetric"),
+            max_depth: crate::gucs::storage::DESCRIBE_MAX_DEPTH.get() as usize,
+        }
+    }
+
+    fn fetch_resources(&mut self) {
+        let name = self.resource_portal_name.clone();
+        let variables = self.resource_variables.len();
+        let page_size = self.page_size;
+        let (ids, exhausted) = Spi::connect_mut(|client| {
+            let mut cursor = client
+                .find_cursor(&name)
+                .unwrap_or_else(|e| pgrx::error!("DescribeCursorIter: find_cursor failed: {e}"));
+            let table = cursor
+                .fetch(page_size as libc::c_long)
+                .unwrap_or_else(|e| pgrx::error!("DescribeCursorIter: fetch failed: {e}"));
+            let mut ids = Vec::new();
+            for row in table {
+                for index in 1..=variables {
+                    if let Some(id) = row.get::<i64>(index).ok().flatten() {
+                        ids.push(id);
+                    }
+                }
+            }
+            if ids.is_empty() {
+                (ids, true)
+            } else {
+                cursor.detach_into_name();
+                (ids, false)
+            }
+        });
+        self.resources.extend(ids.into_iter().map(|id| (id, 0)));
+        self.resources_done = exhausted;
+    }
+}
+
+impl Iterator for DescribeCursorIter {
+    type Item = String;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            if let Some((subject, predicate, object)) = self.pending.pop_front() {
+                crate::stats::increment_cursor_rows_streamed(1);
+                return Some(format!(
+                    "{} {} {} .\n",
+                    crate::dictionary::format_ntriples(subject),
+                    crate::dictionary::format_ntriples(predicate),
+                    crate::dictionary::format_ntriples(object),
+                ));
+            }
+            if self.resources.is_empty() && !self.resources_done {
+                self.fetch_resources();
+                continue;
+            }
+            let (subject, depth) = self.resources.pop_front()?;
+            if !self.visited.insert(subject) {
+                continue;
+            }
+            if depth > self.max_depth {
+                pgrx::error!(
+                    "PT_DEPTH_LIMIT: DESCRIBE CBD traversal exceeded describe_max_depth={}; \
+                     set pg_ripple.describe_max_depth to a higher value or use DESCRIBE SIMPLE strategy",
+                    self.max_depth
+                );
+            }
+            let triples = super::execute::describe::describe_cbd(subject, self.symmetric);
+            self.pending.extend(triples);
+        }
+    }
+}
+
 // ─── CONSTRUCT portal streaming iterator (STREAM-01) ─────────────────────────
 
 /// Output format for `ConstructCursorIter`.
@@ -320,6 +559,7 @@ pub fn sparql_cursor_jsonld(query: &str) -> impl Iterator<Item = (String,)> + 's
 pub(crate) enum ConstructFormat {
     Turtle,
     JsonLd,
+    NTriples,
 }
 
 /// Lazy iterator over SPARQL CONSTRUCT results that pages through an SPI portal
@@ -452,9 +692,8 @@ impl Iterator for ConstructCursorIter {
 
         if id_triples.is_empty() {
             // Template produced nothing for this page (all variables unbound).
-            // Mark done so we don't loop forever on sparse results.
-            self.done = true;
-            return None;
+            // Keep fetching: a later page may still contain bound template rows.
+            return self.next();
         }
 
         // Batch-decode all dictionary IDs for this page.
@@ -478,13 +717,35 @@ impl Iterator for ConstructCursorIter {
             .collect();
 
         self.rows_emitted += decoded.len() as i64;
+        crate::stats::increment_cursor_rows_streamed(decoded.len() as i64);
 
         // Serialize the page.
         let chunk = match self.format {
             ConstructFormat::Turtle => export::triples_to_turtle(&decoded),
             ConstructFormat::JsonLd => export::triples_to_jsonld(&decoded).to_string(),
+            ConstructFormat::NTriples => decoded
+                .iter()
+                .map(|(s, p, o)| format!("{s} {p} {o} .\n"))
+                .collect(),
         };
 
         Some(chunk)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn typed_text_values_keep_term_shape() {
+        assert_eq!(
+            typed_text_value("https://example.test/a", true, false),
+            serde_json::json!({"type": "uri", "value": "https://example.test/a"})
+        );
+        assert_eq!(
+            typed_text_value("Alice", false, false),
+            serde_json::json!({"type": "literal", "value": "Alice"})
+        );
     }
 }

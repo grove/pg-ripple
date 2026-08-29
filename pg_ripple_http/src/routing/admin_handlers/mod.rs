@@ -469,6 +469,55 @@ pub(crate) async fn metrics_endpoint(
         m.graph_snapshots_total(),
     );
 
+    let stream_metrics = format!(
+        "# HELP pg_ripple_http_stream_requests_total Total HTTP streaming responses\n\
+         # TYPE pg_ripple_http_stream_requests_total counter\n\
+         pg_ripple_http_stream_requests_total{{form=\"all\",format=\"all\",status=\"all\"}} {}\n\
+         # HELP pg_ripple_http_stream_active Active HTTP streams\n\
+         # TYPE pg_ripple_http_stream_active gauge\n\
+         pg_ripple_http_stream_active{{form=\"all\",format=\"all\",status=\"all\"}} {}\n\
+         # HELP pg_ripple_http_stream_rows_total Rows emitted by HTTP streams\n\
+         # TYPE pg_ripple_http_stream_rows_total counter\n\
+         pg_ripple_http_stream_rows_total{{form=\"all\"}} {}\n\
+         # HELP pg_ripple_http_stream_bytes_total Bytes emitted by HTTP streams\n\
+         # TYPE pg_ripple_http_stream_bytes_total counter\n\
+         pg_ripple_http_stream_bytes_total{{format=\"all\"}} {}\n\
+         # HELP pg_ripple_http_stream_duration_seconds Cumulative HTTP stream duration\n\
+         # TYPE pg_ripple_http_stream_duration_seconds counter\n\
+         pg_ripple_http_stream_duration_seconds{{form=\"all\",format=\"all\",status=\"all\"}} {:.6}\n\
+         # HELP pg_ripple_http_stream_first_byte_seconds Cumulative time to first byte\n\
+         # TYPE pg_ripple_http_stream_first_byte_seconds counter\n\
+         pg_ripple_http_stream_first_byte_seconds{{form=\"all\",format=\"all\",status=\"all\"}} {:.6}\n\
+         # HELP pg_ripple_http_stream_cancellations_total Stream cancellations\n\
+         # TYPE pg_ripple_http_stream_cancellations_total counter\n\
+         pg_ripple_http_stream_cancellations_total{{reason=\"all\"}} {}\n\
+         pg_ripple_http_stream_cancellations_total{{reason=\"disconnect\"}} {}\n\
+         pg_ripple_http_stream_cancellations_total{{reason=\"deadline\"}} {}\n\
+         pg_ripple_http_stream_cancellations_total{{reason=\"shutdown\"}} {}\n\
+         # HELP pg_ripple_http_stream_cancel_failures_total Stream cancellation failures\n\
+         # TYPE pg_ripple_http_stream_cancel_failures_total counter\n\
+         pg_ripple_http_stream_cancel_failures_total {}\n\
+         # HELP pg_ripple_http_stream_errors_total Stream errors\n\
+         # TYPE pg_ripple_http_stream_errors_total counter\n\
+         pg_ripple_http_stream_errors_total {}\n\
+         # HELP pg_ripple_http_stream_connection_discards_total Discarded stream connections\n\
+         # TYPE pg_ripple_http_stream_connection_discards_total counter\n\
+         pg_ripple_http_stream_connection_discards_total {{reason=\"all\"}} {}\n",
+        m.stream_requests_total(),
+        m.active_streams(),
+        m.stream_rows_total(),
+        m.stream_bytes_total(),
+        m.stream_duration_secs(),
+        m.stream_first_byte_duration_secs(),
+        m.stream_cancellations_total(),
+        m.stream_disconnect_cancellations_total(),
+        m.stream_deadline_cancellations_total(),
+        m.stream_shutdown_cancellations_total(),
+        m.stream_cancel_failures_total(),
+        m.stream_errors_total(),
+        m.stream_connection_discards_total(),
+    );
+
     // Feature 6 (v0.119.0): Append per-endpoint federation circuit breaker
     // Prometheus gauge from _pg_ripple.federation_circuit_state table.
     // state: 0=closed, 1=open, 2=half_open.
@@ -509,7 +558,21 @@ pub(crate) async fn metrics_endpoint(
         String::new()
     };
 
-    let full_body = body + &circuit_gauge;
+    let stream_error_metrics = format!(
+        "# HELP pg_ripple_http_stream_db_errors_total Database errors in HTTP streams\n\
+         # TYPE pg_ripple_http_stream_db_errors_total counter\n\
+         pg_ripple_http_stream_db_errors_total{{class=\"all\"}} {}\n\
+         # HELP pg_ripple_http_stream_encoder_errors_total Encoder errors in HTTP streams\n\
+         # TYPE pg_ripple_http_stream_encoder_errors_total counter\n\
+         pg_ripple_http_stream_encoder_errors_total{{format=\"all\"}} {}\n\
+         pg_ripple_http_stream_cancellations_total{{reason=\"idle_timeout\"}} {}\n\
+         pg_ripple_http_stream_cancellations_total{{reason=\"encoder_error\"}} {}\n",
+        m.stream_db_errors_total(),
+        m.stream_encoder_errors_total(),
+        m.stream_idle_cancellations_total(),
+        m.stream_encoder_cancellations_total(),
+    );
+    let full_body = body + &stream_metrics + &stream_error_metrics + &circuit_gauge;
 
     Response::builder()
         .status(StatusCode::OK)

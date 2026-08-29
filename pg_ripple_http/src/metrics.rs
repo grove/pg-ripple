@@ -7,6 +7,16 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
+/// Why a streaming query was cancelled.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum StreamCancelReason {
+    Disconnect,
+    Deadline,
+    IdleTimeout,
+    Shutdown,
+    EncoderError,
+}
+
 /// Result-size buckets for the `result_size_bucket` Prometheus label.
 #[derive(Clone, Copy)]
 pub enum ResultSizeBucket {
@@ -157,6 +167,27 @@ pub struct Metrics {
     // FEAT-02 (v0.125.0): temporal graph snapshot gauge.
     /// Snapshot: current number of registered graph snapshots.
     graph_snapshots_total: AtomicU64,
+
+    // v0.134.0: HTTP streaming counters.  These are deliberately independent
+    // of the execution path so a body stream can update them while it owns
+    // the database connection and encoder.
+    active_streams: AtomicU64,
+    stream_requests_total: AtomicU64,
+    stream_rows_total: AtomicU64,
+    stream_bytes_total: AtomicU64,
+    stream_errors_total: AtomicU64,
+    stream_db_errors_total: AtomicU64,
+    stream_encoder_errors_total: AtomicU64,
+    stream_cancellations_total: AtomicU64,
+    stream_disconnect_cancellations_total: AtomicU64,
+    stream_deadline_cancellations_total: AtomicU64,
+    stream_shutdown_cancellations_total: AtomicU64,
+    stream_idle_cancellations_total: AtomicU64,
+    stream_encoder_cancellations_total: AtomicU64,
+    stream_cancel_failures_total: AtomicU64,
+    stream_connection_discards_total: AtomicU64,
+    stream_duration_us: AtomicU64,
+    stream_first_byte_duration_us: AtomicU64,
 }
 
 impl Default for Metrics {
@@ -230,6 +261,23 @@ impl Metrics {
             rule_library_subscribe_errors_total: AtomicU64::new(0),
             // FEAT-02 (v0.125.0)
             graph_snapshots_total: AtomicU64::new(0),
+            active_streams: AtomicU64::new(0),
+            stream_requests_total: AtomicU64::new(0),
+            stream_rows_total: AtomicU64::new(0),
+            stream_bytes_total: AtomicU64::new(0),
+            stream_errors_total: AtomicU64::new(0),
+            stream_db_errors_total: AtomicU64::new(0),
+            stream_encoder_errors_total: AtomicU64::new(0),
+            stream_cancellations_total: AtomicU64::new(0),
+            stream_disconnect_cancellations_total: AtomicU64::new(0),
+            stream_deadline_cancellations_total: AtomicU64::new(0),
+            stream_shutdown_cancellations_total: AtomicU64::new(0),
+            stream_idle_cancellations_total: AtomicU64::new(0),
+            stream_encoder_cancellations_total: AtomicU64::new(0),
+            stream_cancel_failures_total: AtomicU64::new(0),
+            stream_connection_discards_total: AtomicU64::new(0),
+            stream_duration_us: AtomicU64::new(0),
+            stream_first_byte_duration_us: AtomicU64::new(0),
         }
     }
 
@@ -722,5 +770,167 @@ impl Metrics {
 
     pub fn graph_snapshots_total(&self) -> u64 {
         self.graph_snapshots_total.load(Ordering::Relaxed)
+    }
+
+    // v0.134.0: HTTP streaming observability.
+
+    /// Mark a stream as accepted and active.
+    pub fn record_stream_started(&self) {
+        self.stream_requests_total.fetch_add(1, Ordering::Relaxed);
+        self.active_streams.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Mark a stream as no longer active.  A duplicate cleanup call is safe.
+    pub fn record_stream_finished(&self, duration: Duration) {
+        self.active_streams
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| {
+                Some(n.saturating_sub(1))
+            })
+            .ok();
+        self.stream_duration_us
+            .fetch_add(duration.as_micros() as u64, Ordering::Relaxed);
+    }
+
+    pub fn record_stream_row(&self) {
+        self.stream_rows_total.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn record_stream_bytes(&self, bytes: usize) {
+        self.stream_bytes_total
+            .fetch_add(bytes as u64, Ordering::Relaxed);
+    }
+
+    pub fn record_stream_first_byte(&self, duration: Duration) {
+        self.stream_first_byte_duration_us
+            .fetch_add(duration.as_micros() as u64, Ordering::Relaxed);
+    }
+
+    pub fn record_stream_error(&self) {
+        self.stream_errors_total.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn record_stream_db_error(&self) {
+        self.stream_db_errors_total.fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn record_stream_encoder_error(&self) {
+        self.stream_encoder_errors_total
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn record_stream_cancellation(&self, reason: StreamCancelReason, failed: bool) {
+        self.stream_cancellations_total
+            .fetch_add(1, Ordering::Relaxed);
+        match reason {
+            StreamCancelReason::Disconnect => self
+                .stream_disconnect_cancellations_total
+                .fetch_add(1, Ordering::Relaxed),
+            StreamCancelReason::Deadline => self
+                .stream_deadline_cancellations_total
+                .fetch_add(1, Ordering::Relaxed),
+            StreamCancelReason::IdleTimeout => self
+                .stream_idle_cancellations_total
+                .fetch_add(1, Ordering::Relaxed),
+            StreamCancelReason::Shutdown => self
+                .stream_shutdown_cancellations_total
+                .fetch_add(1, Ordering::Relaxed),
+            StreamCancelReason::EncoderError => self
+                .stream_encoder_cancellations_total
+                .fetch_add(1, Ordering::Relaxed),
+        };
+        if failed {
+            self.stream_cancel_failures_total
+                .fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    pub fn record_stream_connection_discard(&self) {
+        self.stream_connection_discards_total
+            .fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn active_streams(&self) -> u64 {
+        self.active_streams.load(Ordering::Relaxed)
+    }
+    pub fn stream_requests_total(&self) -> u64 {
+        self.stream_requests_total.load(Ordering::Relaxed)
+    }
+    pub fn stream_rows_total(&self) -> u64 {
+        self.stream_rows_total.load(Ordering::Relaxed)
+    }
+    pub fn stream_bytes_total(&self) -> u64 {
+        self.stream_bytes_total.load(Ordering::Relaxed)
+    }
+    pub fn stream_errors_total(&self) -> u64 {
+        self.stream_errors_total.load(Ordering::Relaxed)
+    }
+    pub fn stream_db_errors_total(&self) -> u64 {
+        self.stream_db_errors_total.load(Ordering::Relaxed)
+    }
+    pub fn stream_encoder_errors_total(&self) -> u64 {
+        self.stream_encoder_errors_total.load(Ordering::Relaxed)
+    }
+    pub fn stream_cancellations_total(&self) -> u64 {
+        self.stream_cancellations_total.load(Ordering::Relaxed)
+    }
+    pub fn stream_disconnect_cancellations_total(&self) -> u64 {
+        self.stream_disconnect_cancellations_total
+            .load(Ordering::Relaxed)
+    }
+    pub fn stream_deadline_cancellations_total(&self) -> u64 {
+        self.stream_deadline_cancellations_total
+            .load(Ordering::Relaxed)
+    }
+    pub fn stream_shutdown_cancellations_total(&self) -> u64 {
+        self.stream_shutdown_cancellations_total
+            .load(Ordering::Relaxed)
+    }
+    pub fn stream_idle_cancellations_total(&self) -> u64 {
+        self.stream_idle_cancellations_total.load(Ordering::Relaxed)
+    }
+    pub fn stream_encoder_cancellations_total(&self) -> u64 {
+        self.stream_encoder_cancellations_total
+            .load(Ordering::Relaxed)
+    }
+    pub fn stream_cancel_failures_total(&self) -> u64 {
+        self.stream_cancel_failures_total.load(Ordering::Relaxed)
+    }
+    pub fn stream_connection_discards_total(&self) -> u64 {
+        self.stream_connection_discards_total
+            .load(Ordering::Relaxed)
+    }
+    pub fn stream_duration_secs(&self) -> f64 {
+        self.stream_duration_us.load(Ordering::Relaxed) as f64 / 1_000_000.0
+    }
+    pub fn stream_first_byte_duration_secs(&self) -> f64 {
+        self.stream_first_byte_duration_us.load(Ordering::Relaxed) as f64 / 1_000_000.0
+    }
+}
+
+#[cfg(test)]
+mod streaming_metric_tests {
+    use super::{Metrics, StreamCancelReason};
+    use std::time::Duration;
+
+    #[test]
+    fn stream_counters_have_reason_specific_accessors() {
+        let metrics = Metrics::new();
+        metrics.record_stream_started();
+        metrics.record_stream_row();
+        metrics.record_stream_bytes(12);
+        metrics.record_stream_first_byte(Duration::from_micros(3));
+        metrics.record_stream_cancellation(StreamCancelReason::Deadline, true);
+        metrics.record_stream_connection_discard();
+        metrics.record_stream_finished(Duration::from_micros(9));
+
+        assert_eq!(metrics.active_streams(), 0);
+        assert_eq!(metrics.stream_requests_total(), 1);
+        assert_eq!(metrics.stream_rows_total(), 1);
+        assert_eq!(metrics.stream_bytes_total(), 12);
+        assert_eq!(metrics.stream_deadline_cancellations_total(), 1);
+        assert_eq!(metrics.stream_cancel_failures_total(), 1);
+        assert_eq!(metrics.stream_connection_discards_total(), 1);
+        assert_eq!(metrics.stream_first_byte_duration_secs(), 0.000003);
+        assert_eq!(metrics.stream_duration_secs(), 0.000009);
     }
 }

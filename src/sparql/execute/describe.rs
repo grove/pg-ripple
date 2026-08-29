@@ -95,7 +95,7 @@ pub(crate) fn sparql_describe(query_text: &str, strategy: &str) -> Vec<pgrx::Jso
 /// Recursion depth is capped by `pg_ripple.describe_max_depth` GUC (default 16).
 /// Raises a `PT_DEPTH_LIMIT` error when exceeded to prevent runaway traversal on
 /// cyclic or very deep graphs.
-fn describe_cbd(subject_id: i64, symmetric: bool) -> Vec<(i64, i64, i64)> {
+pub(crate) fn describe_cbd(subject_id: i64, symmetric: bool) -> Vec<(i64, i64, i64)> {
     let max_depth = crate::gucs::storage::DESCRIBE_MAX_DEPTH.get() as usize;
     let mut triples: Vec<(i64, i64, i64)> = Vec::new();
     let mut visited: std::collections::HashSet<i64> = std::collections::HashSet::new();

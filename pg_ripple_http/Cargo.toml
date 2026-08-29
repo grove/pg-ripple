@@ -1,6 +1,6 @@
 [package]
 name = "pg_ripple_http"
-version = "0.133.0"
+version = "0.134.0"
 edition = "2024"
 description = "SPARQL 1.1 Protocol HTTP endpoint for pg_ripple — connects PostgreSQL 18 RDF triple store to the web"
 license = "Apache-2.0"
@@ -24,6 +24,7 @@ tokio = { version = "1", features = ["full"] }
 tokio-postgres = { version = "0.7", features = ["with-serde_json-1"] }
 tokio-postgres-rustls = "0.13"
 deadpool-postgres = "0.14"
+futures-util = "0.3"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tower-http = { version = "0.6", features = ["cors", "limit"] }

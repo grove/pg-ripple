@@ -44,6 +44,15 @@ FROM pg_ripple.sparql_cursor_jsonld($$
 $$);
 ```
 
+### `sparql_stream_metadata(query TEXT)` and typed bindings (v0.134.0)
+
+The internal `_pg_ripple.sparql_stream_metadata()` and
+`_pg_ripple.sparql_stream_bindings()` functions back the HTTP streaming path.
+They expose projected variables before the first row and return SPARQL JSON
+term descriptors, preserving IRIs, blank nodes, datatypes, language tags, and
+unbound variables. They are internal implementation functions and are not part
+of the stable public SQL API.
+
 ---
 
 ## Overflow control GUCs

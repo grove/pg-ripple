@@ -4,6 +4,7 @@
 //! functions `execute_select`, `execute_ask`, `execute_construct`, and
 //! `execute_describe`. All caller-visible formatting stays in `routing`.
 
+use std::sync::Arc;
 use std::time::Instant;
 
 use axum::http::StatusCode;
@@ -37,14 +38,22 @@ fn is_sparql_parse_error(e: &tokio_postgres::Error) -> bool {
 }
 
 pub(crate) async fn execute_sparql_with_traceparent(
-    state: &AppState,
+    state: &Arc<AppState>,
     query_text: &str,
     is_update: bool,
     accept: &str,
     traceparent: Option<&str>,
 ) -> Response {
-    execute_sparql_with_traceparent_routed(state, query_text, is_update, accept, traceparent, false)
-        .await
+    execute_sparql_with_traceparent_routed(
+        state,
+        query_text,
+        is_update,
+        accept,
+        traceparent,
+        false,
+        None,
+    )
+    .await
 }
 
 /// Internal version with explicit replica-routing flag.
@@ -54,14 +63,27 @@ pub(crate) async fn execute_sparql_with_traceparent(
 /// pool instead of the primary.  Falls back to the primary when the replica is
 /// unavailable.
 pub(crate) async fn execute_sparql_with_traceparent_routed(
-    state: &AppState,
+    state: &Arc<AppState>,
     query_text: &str,
     is_update: bool,
     accept: &str,
     traceparent: Option<&str>,
     use_replica: bool,
+    timeout_override_ms: Option<u64>,
 ) -> Response {
     let start = Instant::now();
+
+    if !is_update && crate::stream::is_streamable(query_text, accept) {
+        return crate::stream::stream_sparql(
+            state,
+            query_text,
+            accept,
+            traceparent,
+            use_replica,
+            timeout_override_ms,
+        )
+        .await;
+    }
 
     // Feature 12 (v0.120.0): replica routing.
     // Only read-only queries can be sent to the replica; updates always go primary.
@@ -149,10 +171,9 @@ pub(crate) async fn execute_sparql_with_traceparent_routed(
         }
     } else {
         // Determine query type for routing.
-        let query_lower = query_text.trim().to_lowercase();
-        let is_ask = query_lower.starts_with("ask");
-        let is_construct = query_lower.starts_with("construct");
-        let is_describe = query_lower.starts_with("describe");
+        let is_ask = crate::stream::is_ask_query(query_text);
+        let is_construct = crate::stream::is_construct_query(query_text);
+        let is_describe = crate::stream::is_describe_query(query_text);
 
         if is_ask {
             execute_ask(&client, query_text, accept, state, start).await

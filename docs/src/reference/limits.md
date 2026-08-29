@@ -82,6 +82,10 @@ This page documents the hard limits, default quotas, and tunable caps in pg_ripp
 | Rate limit | unlimited | `PG_RIPPLE_HTTP_RATE_LIMIT` | Per source IP, req/s |
 | Arrow Flight ticket expiry | 3,600 s | `pg_ripple.arrow_flight_expiry_secs` | Signed HMAC tickets |
 | Connection pool size | 16 | `PG_RIPPLE_HTTP_POOL_SIZE` | Postgres connections |
+| Streaming query timeout | 300,000 ms | `PG_RIPPLE_HTTP_QUERY_TIMEOUT_MS` | Capped by `PG_RIPPLE_HTTP_QUERY_TIMEOUT_MAX_MS` |
+| Streaming idle timeout | 60,000 ms | `PG_RIPPLE_HTTP_STREAM_IDLE_TIMEOUT_MS` | Maximum wait between rows |
+| Streaming chunk size | 65,536 B | `PG_RIPPLE_HTTP_STREAM_CHUNK_BYTES` | Bounded response coalescing |
+| Streaming row size | 1 MiB | `PG_RIPPLE_HTTP_STREAM_MAX_ROW_BYTES` | Encoded row cap |
 
 ## Audit and Retention
 

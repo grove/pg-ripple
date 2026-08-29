@@ -37,7 +37,7 @@ use self::datalog_handlers as datalog;
 #[openapi(
     info(
         title = "pg_ripple_http",
-        version = "0.133.0",
+        version = "0.134.0",
         description = "SPARQL 1.1 Protocol HTTP endpoint and Datalog REST API for pg_ripple",
         license(name = "Apache-2.0")
     ),
@@ -266,6 +266,8 @@ pub(crate) struct SparqlParams {
     /// Feature 12 (v0.120.0): when present and equal to "ok", read-only queries
     /// are proxied to the read-replica DSN (if configured).
     replica: Option<String>,
+    /// Optional caller deadline in milliseconds; the server-side maximum wins.
+    timeout_ms: Option<u64>,
 }
 
 // ─── RAG request / response ───────────────────────────────────────────────────

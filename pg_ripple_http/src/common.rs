@@ -11,6 +11,25 @@ use serde::Serialize;
 use std::net::SocketAddr;
 use std::sync::atomic::AtomicBool;
 use std::time::Instant;
+use tokio_postgres::{CancelToken, NoTls};
+
+/// TLS mode used when sending an out-of-band PostgreSQL query cancellation.
+/// It must match the connection's SSL negotiation mode; `NoTls` is not valid
+/// for a pool configured with PostgreSQL TLS.
+#[derive(Clone)]
+pub enum PgCancelTls {
+    NoTls,
+    Rustls(tokio_postgres_rustls::MakeRustlsConnect),
+}
+
+impl PgCancelTls {
+    pub async fn cancel(&self, token: &CancelToken) -> Result<(), tokio_postgres::Error> {
+        match self {
+            Self::NoTls => token.cancel_query(NoTls).await,
+            Self::Rustls(connector) => token.cancel_query(connector.clone()).await,
+        }
+    }
+}
 use uuid::Uuid;
 
 use crate::metrics::Metrics;
@@ -94,6 +113,8 @@ pub struct AppState {
     /// `?replica=ok` are routed to this pool instead of the primary.
     /// Configured via `PG_RIPPLE_HTTP_REPLICA_DSN` environment variable.
     pub replica_pool: Option<Pool>,
+    /// TLS connector used for cancellation packets on checked-out streams.
+    pub cancel_tls: PgCancelTls,
 }
 
 // ─── Configuration ────────────────────────────────────────────────────────────

@@ -73,6 +73,17 @@ SET pg_ripple.max_path_depth = 64;
 
 See [Security Hardening](security.md) for additional recommendations.
 
+## HTTP streaming
+
+Streaming-safe SPARQL Results JSON, CSV, TSV, and N-Triples responses use one
+checked-out read-only PostgreSQL connection and a bounded response coalescer.
+Tune `PG_RIPPLE_HTTP_STREAM_CHUNK_BYTES` for network efficiency and keep
+`PG_RIPPLE_HTTP_STREAM_MAX_ROW_BYTES` bounded when terms are supplied by users.
+Set `PG_RIPPLE_HTTP_QUERY_TIMEOUT_MS` below its `900000` ms maximum for tenant
+workloads, and use `PG_RIPPLE_HTTP_STREAM_IDLE_TIMEOUT_MS` to release slow or
+stalled streams. Disconnects and deadline expiry cancel the PostgreSQL query;
+the connection is discarded when rollback or cancellation cannot be proven.
+
 ---
 
 ## Memory Footprint Estimation

@@ -322,6 +322,13 @@ The endpoint at `/sparql` supports all standard request forms:
 | `application/n-triples` | CONSTRUCT, DESCRIBE | N-Triples |
 | `application/ld+json` | CONSTRUCT, DESCRIBE | JSON-LD |
 
+For true incremental delivery, request `application/sparql-results+json`,
+`text/csv`, or `text/tab-separated-values` for SELECT/ASK, and
+`application/n-triples` for CONSTRUCT/DESCRIBE. The `/sparql` endpoint and its
+`POST /sparql/stream` compatibility alias use the same pipeline. Streaming
+responses preserve typed RDF terms and apply PostgreSQL backpressure; XML,
+Turtle, and JSON-LD remain buffered.
+
 ### Examples
 
 ```bash
@@ -366,4 +373,3 @@ The `/sparql` endpoint is compatible with standard SPARQL tools:
 - **Python SPARQLWrapper**: `sparql = SPARQLWrapper("http://localhost:7878/sparql")`
 - **Apache Jena**: `QueryExecutionFactory.sparqlService("http://localhost:7878/sparql", query)`
 - **Protege**: Add SPARQL tab, set endpoint to `http://localhost:7878/sparql`
-

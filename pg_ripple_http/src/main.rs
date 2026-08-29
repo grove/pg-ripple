@@ -18,22 +18,22 @@ use tower_governor::governor::GovernorConfigBuilder;
 use tower_http::cors::{AllowOrigin, CorsLayer};
 
 use pg_ripple_http::common::PgSslMode;
-use pg_ripple_http::common::{AppState, HttpConfig, redact_sensitive};
+use pg_ripple_http::common::{AppState, HttpConfig, PgCancelTls, redact_sensitive};
 use pg_ripple_http::routing::middleware::{self, TrustedProxyLayer};
 use pg_ripple_http::{metrics, routing};
 
 // ─── Compatibility constants (COMPAT-01, v0.71.0) ────────────────────────────
 
 /// Minimum pg_ripple extension version that this HTTP companion supports.
-/// Updated each release to match the previous extension version, allowing
-/// a one-version trailing window.
+/// v0.134.0 requires the internal typed streaming functions added to the
+/// extension in the same release.
 ///
 /// HTTP-COMPAT-01 (v0.89.0): bumped to 0.88.0 — requires all v0.84–v0.88 features.
 ///
 /// Connections to older extension versions log a prominent warning. The extension
 /// is still served (degraded mode) so that rolling upgrades do not hard-fail.
 /// Set `PG_RIPPLE_HTTP_STRICT_COMPAT=1` to convert the warning to a fatal startup error.
-const COMPATIBLE_EXTENSION_MIN: &str = "0.132.0";
+const COMPATIBLE_EXTENSION_MIN: &str = "0.134.0";
 
 /// Check that the installed pg_ripple extension version is within the known-compatible
 /// range for this pg_ripple_http build.  Logs a warning if it is not.
@@ -443,6 +443,19 @@ async fn main() {
         None
     };
 
+    let cancel_tls = match http_config.pg_sslmode {
+        PgSslMode::Disable => PgCancelTls::NoTls,
+        PgSslMode::Require | PgSslMode::VerifyCa | PgSslMode::VerifyFull => {
+            match pg_tls_connector(&http_config) {
+                Ok(connector) => PgCancelTls::Rustls(connector),
+                Err(error) => {
+                    tracing::error!("failed to prepare PostgreSQL cancellation TLS: {error}");
+                    std::process::exit(1);
+                }
+            }
+        }
+    };
+
     let state = Arc::new(AppState {
         pool,
         auth_token,
@@ -469,6 +482,7 @@ async fn main() {
         auth_realm,
         // Feature 12 (v0.120.0): optional read-replica pool.
         replica_pool,
+        cancel_tls,
     });
 
     // CORS layer — wildcard "*" requires explicit opt-in; empty means deny all cross-origin.

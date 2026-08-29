@@ -13,7 +13,7 @@
 #
 # The resulting image is published to ghcr.io as part of each release:
 #   docker run --rm -p 5432:5432 -e POSTGRES_PASSWORD=ripple \
-#     ghcr.io/trickle-labs/pg-ripple:0.133.0
+#     ghcr.io/trickle-labs/pg-ripple:0.134.0
 #
 # Authentication:
 #   v0.128.1: SCRAM authentication (the postgres:18 base image default) applies

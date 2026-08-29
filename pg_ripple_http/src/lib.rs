@@ -10,3 +10,4 @@ pub mod outbound_policy;
 pub mod routing;
 pub mod spi_bridge;
 pub mod stream;
+pub mod streaming;

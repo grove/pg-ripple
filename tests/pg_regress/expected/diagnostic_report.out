@@ -49,14 +49,14 @@ ORDER BY key;
  validation_queue_depth
 (11 rows)
 
--- schema_version and compiled_version are both current on a fresh v0.133.0
+-- schema_version and compiled_version are both current on a fresh v0.134.0
 -- install because the release now stamps the schema ledger at installation.
 SELECT
     (SELECT value FROM pg_ripple.diagnostic_report() WHERE key = 'schema_version') AS sv,
     (SELECT value FROM pg_ripple.diagnostic_report() WHERE key = 'compiled_version') AS cv;
    sv    |   cv    
 ---------+---------
- 0.133.0 | 0.133.0
+ 0.134.0 | 0.134.0
 (1 row)
 
 -- GUC values should be valid

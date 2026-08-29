@@ -16,7 +16,7 @@ use tokio_postgres::NoTls;
 use tower::ServiceExt;
 use tower_http::cors::CorsLayer;
 
-use pg_ripple_http::common::AppState;
+use pg_ripple_http::common::{AppState, PgCancelTls};
 use pg_ripple_http::metrics::Metrics;
 use pg_ripple_http::routing::{build_router, classify_route};
 
@@ -144,6 +144,7 @@ fn test_state_with_tokens(
         metrics_token: metrics_token.map(str::to_owned),
         auth_realm: "pg_ripple".to_owned(),
         replica_pool: None,
+        cancel_tls: PgCancelTls::NoTls,
     })
 }
 

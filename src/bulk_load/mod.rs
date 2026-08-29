@@ -168,6 +168,9 @@ fn analyze_affected_tables(touched_predicates: &[i64]) {
 
 fn post_load_cleanup(touched_predicates: Vec<i64>) {
     storage::promote_rare_predicates();
+    // A query prepared before a new predicate was loaded may have cached an
+    // empty VP source; invalidate it after the catalog and rows are updated.
+    crate::sparql::plan_cache_reset();
     analyze_affected_tables(&touched_predicates);
 }
 

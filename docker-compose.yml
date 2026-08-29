@@ -27,7 +27,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: ghcr.io/trickle-labs/pg_ripple:0.133.0
+    image: ghcr.io/trickle-labs/pg_ripple:0.134.0
     environment:
       # S13-07 (v0.86.0): use POSTGRES_PASSWORD_FILE instead of plain-text password.
       # Generate: mkdir -p secrets && openssl rand -base64 32 > secrets/pg_password.txt
@@ -50,7 +50,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: ghcr.io/trickle-labs/pg_ripple:0.133.0
+    image: ghcr.io/trickle-labs/pg_ripple:0.134.0
     entrypoint: ["/usr/local/bin/pg_ripple_http"]
     ports:
       - "7878:7878"

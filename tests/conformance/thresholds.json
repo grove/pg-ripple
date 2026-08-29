@@ -1,5 +1,5 @@
 {
-  "_comment": "Conformance policy and pass-rate thresholds for v0.133.0.",
+  "_comment": "Conformance policy and pass-rate thresholds for v0.134.0.",
   "_doc": "The policy value is authoritative: required suites fail closed; informational suites report without blocking.",
   "suites": {
     "w3c_sparql11": {

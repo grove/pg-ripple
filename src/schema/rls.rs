@@ -743,3 +743,13 @@ pgrx::extension_sql!(
     name = "v133_schema_version_stamp",
     requires = ["v098_schema_additions"]
 );
+
+// v0.134.0: keep the schema ledger current for fresh installs.
+// The release adds portal-backed streaming entry points and requires no
+// additional table changes.
+pgrx::extension_sql!(
+    "INSERT INTO _pg_ripple.schema_version (version, upgraded_from, installed_at) \
+     VALUES ('0.134.0', '0.133.0', clock_timestamp());",
+    name = "v134_schema_version_stamp",
+    requires = ["v133_schema_version_stamp"]
+);
