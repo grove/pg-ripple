@@ -1,6 +1,7 @@
 //! Storage ops: scan, query, graph management, SID API (M15-13, v0.96.0).
 //! Moved from storage/ops/mod.rs lines 492-1615.
 //! v0.122.0 H17-02: deduplication helpers extracted to `dedup.rs`.
+// @allow-large-file: scan and SID operations remain consolidated for shared query paths
 
 #[path = "dedup.rs"]
 pub(super) mod dedup;
