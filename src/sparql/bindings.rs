@@ -86,7 +86,7 @@ pub(crate) fn parse(input: &Value) -> Result<(Vec<Variable>, Vec<Option<GroundTe
     }
 
     let mut names: Vec<&str> = object.keys().map(String::as_str).collect();
-    names.sort_unstable();
+    names.sort_unstable_by_key(|name| name.strip_prefix('?').unwrap_or(name));
     let mut variables = Vec::with_capacity(names.len());
     let mut row = Vec::with_capacity(names.len());
     let mut seen = HashSet::new();
