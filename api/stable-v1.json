@@ -1,0 +1,63 @@
+{
+  "version": "1.0",
+  "release": "0.135.0",
+  "public_schema": "pg_ripple",
+  "internal_schema": "_pg_ripple",
+  "schema_decision": "docs/architecture/adr-0135-public-schema.md",
+  "migration": "sql/pg_ripple--0.134.0--0.135.0.sql",
+  "http": {
+    "POST /sparql/bindings": {
+      "access": "read",
+      "content_type": "application/json",
+      "request": {
+        "query": "string",
+        "bindings": "object",
+        "prefix_mode": "strict|registered",
+        "replica": "ok",
+        "timeout_ms": "integer"
+      }
+    }
+  },
+  "sql_overloads": [
+    {"signature": "pg_ripple.sparql(text, jsonb)", "returns": "setof jsonb", "volatility": "volatile", "access": "read"},
+    {"signature": "pg_ripple.sparql_construct(text, jsonb)", "returns": "setof jsonb", "volatility": "volatile", "access": "read"},
+    {"signature": "pg_ripple.sparql_describe(text, jsonb, text)", "returns": "setof jsonb", "volatility": "volatile", "access": "read"},
+    {"signature": "pg_ripple.sparql_cursor(text, jsonb)", "returns": "setof jsonb", "volatility": "volatile", "access": "read"},
+    {"signature": "pg_ripple.register_prefix(text, text)", "returns": "void", "volatility": "volatile", "access": "admin"},
+    {"signature": "pg_ripple.prefixes()", "returns": "table", "volatility": "volatile", "access": "read"},
+    {"signature": "pg_ripple.drop_prefix(text)", "returns": "boolean", "volatility": "volatile", "access": "admin"},
+    {"signature": "pg_ripple.prefix_registry_generation()", "returns": "bigint", "volatility": "volatile", "access": "read"},
+    {"signature": "pg_ripple.supported_surface(text)", "returns": "table", "volatility": "volatile", "access": "read"}
+  ],
+  "gucs": {
+    "pg_ripple.sparql_prefix_mode": {"type": "string", "context": "userset", "default": "strict", "values": ["strict", "registered"]},
+    "pg_ripple.sparql_max_initial_bindings": {"type": "integer", "context": "userset", "default": 64, "min": 0, "max": 1024},
+    "pg_ripple.sparql_max_binding_value_bytes": {"type": "integer", "context": "userset", "default": 1048576, "min": 1, "max": 67108864}
+  },
+  "catalogs": {
+    "_pg_ripple.prefixes": ["prefix", "expansion", "owner_oid", "created_at", "updated_at"],
+    "_pg_ripple.prefix_registry_state": ["singleton", "generation"]
+  },
+  "policy": {
+    "prefix_mode_default": "strict",
+    "parameterized_updates": false,
+    "blank_node_bindings": false,
+    "rdf_star_bindings": false,
+    "multi_row_bindings": false,
+    "query_values_are_sql_parameters": true,
+    "local_prefixes_override_registry": true,
+    "public_schema_decision": "keep_pg_ripple"
+  },
+  "errors": {
+    "PT0570": "bindings must be a JSON object",
+    "PT0571": "invalid, duplicate, or excessive binding variable",
+    "PT0572": "malformed binding term",
+    "PT0573": "invalid IRI, datatype, or language tag",
+    "PT0574": "binding value exceeds the configured byte limit",
+    "PT0575": "blank-node and RDF-star bindings are unsupported",
+    "PT0576": "binding variable is outside query scope",
+    "PT0577": "invalid registered prefix label or expansion IRI",
+    "PT0578": "prefix mutation is not authorized",
+    "PT0579": "bindings are not supported for this query form"
+  }
+}

@@ -123,6 +123,49 @@ impl CursorIter {
         cursor
     }
 
+    /// Open a typed cursor constrained by W3C Results JSON bindings.
+    pub fn new_typed_with_bindings(query: &str, bindings: &serde_json::Value) -> Self {
+        let (sql, variables, raw_numeric, raw_text, raw_iri, raw_double, wcoj_preamble, params) =
+            super::plan::prepare_select_with_bindings(query, Some(bindings));
+        let page_size = crate::gucs::storage::EXPORT_BATCH_SIZE.get().max(1) as i64;
+        let max_rows = crate::SPARQL_MAX_ROWS.get() as i64;
+        let overflow_action = crate::SPARQL_OVERFLOW_ACTION
+            .get()
+            .as_ref()
+            .and_then(|s| s.to_str().ok().map(str::to_owned))
+            .unwrap_or_else(|| "warn".to_owned());
+        let portal_name = Spi::connect_mut(|client| {
+            if wcoj_preamble {
+                let _ = client.update(crate::sparql::wcoj::wcoj_session_preamble(), None, &[]);
+            }
+            let args: Vec<pgrx::datum::DatumWithOid> = params
+                .iter()
+                .copied()
+                .map(pgrx::datum::DatumWithOid::from)
+                .collect();
+            let cursor = client.open_cursor(sql.as_str(), &args);
+            Ok::<_, pgrx::spi::Error>(cursor.detach_into_name())
+        })
+        .unwrap_or_else(|e| pgrx::error!("CursorIter: failed to open portal: {e}"));
+        crate::stats::increment_cursor_pages_opened();
+        Self {
+            portal_name,
+            variables,
+            raw_numeric_vars: raw_numeric,
+            raw_text_vars: raw_text,
+            raw_iri_vars: raw_iri,
+            raw_double_vars: raw_double,
+            page_size,
+            page: Vec::new(),
+            page_pos: 0,
+            done: false,
+            max_rows,
+            rows_returned: 0,
+            overflow_action,
+            typed: true,
+        }
+    }
+
     /// Fetch the next page from the portal.
     ///
     /// Opens a new SPI session, fetches up to `page_size` rows, decodes
@@ -422,15 +465,36 @@ impl Iterator for TripleStreamIter {
 
 /// Stream CONSTRUCT or DESCRIBE results as N-Triples lines.
 pub fn sparql_stream_triples(query: &str) -> TripleStreamIter {
+    let query = super::parse::preprocess_query(query);
     let parsed = spargebra::SparqlParser::new()
-        .parse_query(query)
+        .parse_query(&query)
         .unwrap_or_else(|e| pgrx::error!("SPARQL parse error: {e}"));
     match parsed {
         spargebra::Query::Construct { .. } => {
-            TripleStreamIter::Construct(ConstructCursorIter::new(query, ConstructFormat::NTriples))
+            TripleStreamIter::Construct(ConstructCursorIter::new(&query, ConstructFormat::NTriples))
         }
         spargebra::Query::Describe { .. } => {
-            TripleStreamIter::Describe(DescribeCursorIter::new(query))
+            TripleStreamIter::Describe(DescribeCursorIter::new(&query))
+        }
+        _ => pgrx::error!("sparql_stream_triples() requires CONSTRUCT or DESCRIBE"),
+    }
+}
+
+/// Stream parameterized CONSTRUCT or DESCRIBE results as N-Triples lines.
+pub fn sparql_stream_triples_with_bindings(
+    query: &str,
+    bindings: &serde_json::Value,
+) -> TripleStreamIter {
+    let query = super::parse::preprocess_query(query);
+    let parsed = spargebra::SparqlParser::new()
+        .parse_query(&query)
+        .unwrap_or_else(|e| pgrx::error!("SPARQL parse error: {e}"));
+    match parsed {
+        spargebra::Query::Construct { .. } => TripleStreamIter::Construct(
+            ConstructCursorIter::new_with_bindings(&query, bindings, ConstructFormat::NTriples),
+        ),
+        spargebra::Query::Describe { .. } => {
+            TripleStreamIter::Describe(DescribeCursorIter::new_with_bindings(&query, bindings))
         }
         _ => pgrx::error!("sparql_stream_triples() requires CONSTRUCT or DESCRIBE"),
     }
@@ -453,8 +517,17 @@ pub struct DescribeCursorIter {
 
 impl DescribeCursorIter {
     fn new(query: &str) -> Self {
+        Self::new_impl(query, None)
+    }
+
+    fn new_with_bindings(query: &str, bindings: &serde_json::Value) -> Self {
+        Self::new_impl(query, Some(bindings))
+    }
+
+    fn new_impl(query: &str, bindings: Option<&serde_json::Value>) -> Self {
+        let query = super::parse::preprocess_query(query);
         let parsed = spargebra::SparqlParser::new()
-            .parse_query(query)
+            .parse_query(&query)
             .unwrap_or_else(|e| pgrx::error!("SPARQL parse error: {e}"));
         let (pattern, base_iri) = match parsed {
             spargebra::Query::Describe {
@@ -462,9 +535,24 @@ impl DescribeCursorIter {
             } => (pattern, base_iri),
             _ => pgrx::error!("sparql_stream_triples() requires DESCRIBE"),
         };
-        let trans = super::sqlgen::translate_select(&pattern, base_iri.as_deref());
+        let pattern = if let Some(bindings) = bindings {
+            super::bindings::with_bindings(pattern, bindings)
+                .unwrap_or_else(|e| pgrx::error!("invalid SPARQL bindings: {e}"))
+        } else {
+            pattern
+        };
+        let trans = match bindings {
+            Some(_) => super::sqlgen::translate_select_parameterized(&pattern, base_iri.as_deref()),
+            None => super::sqlgen::translate_select(&pattern, base_iri.as_deref()),
+        };
+        let params = trans.parameters;
         let resource_portal_name = Spi::connect_mut(|client| {
-            let cursor = client.open_cursor(trans.sql.as_str(), &[]);
+            let args: Vec<pgrx::datum::DatumWithOid> = params
+                .iter()
+                .copied()
+                .map(pgrx::datum::DatumWithOid::from)
+                .collect();
+            let cursor = client.open_cursor(trans.sql.as_str(), &args);
             Ok::<_, pgrx::spi::Error>(cursor.detach_into_name())
         })
         .unwrap_or_else(|e| pgrx::error!("DescribeCursorIter: failed to open portal: {e}"));
@@ -593,7 +681,27 @@ impl ConstructCursorIter {
     /// Open a portal for the CONSTRUCT `query` and return a lazy iterator.
     pub fn new(query: &str, format: ConstructFormat) -> Self {
         let (sql, variables, template) = super::prepare_construct(query);
+        Self::open(sql, variables, template, format, &[])
+    }
 
+    /// Open a parameterized CONSTRUCT portal for HTTP streaming.
+    pub fn new_with_bindings(
+        query: &str,
+        bindings: &serde_json::Value,
+        format: ConstructFormat,
+    ) -> Self {
+        let (sql, variables, template, params) =
+            super::plan::prepare_construct_with_bindings(query, bindings);
+        Self::open(sql, variables, template, format, &params)
+    }
+
+    fn open(
+        sql: String,
+        variables: Vec<String>,
+        template: super::ConstructTemplate,
+        format: ConstructFormat,
+        params: &[i64],
+    ) -> Self {
         let page_size = crate::gucs::storage::EXPORT_BATCH_SIZE.get().max(1) as i64;
         let max_rows = crate::EXPORT_MAX_ROWS.get() as i64;
 
@@ -602,7 +710,12 @@ impl ConstructCursorIter {
                 let _ = client.update("SET LOCAL join_collapse_limit = 1", None, &[]);
                 let _ = client.update("SET LOCAL enable_mergejoin = on", None, &[]);
             }
-            let cursor = client.open_cursor(sql.as_str(), &[]);
+            let args: Vec<pgrx::datum::DatumWithOid> = params
+                .iter()
+                .copied()
+                .map(pgrx::datum::DatumWithOid::from)
+                .collect();
+            let cursor = client.open_cursor(sql.as_str(), &args);
             Ok::<_, pgrx::spi::Error>(cursor.detach_into_name())
         })
         .unwrap_or_else(|e| pgrx::error!("ConstructCursorIter: failed to open portal: {e}"));

@@ -37,7 +37,7 @@ use self::datalog_handlers as datalog;
 #[openapi(
     info(
         title = "pg_ripple_http",
-        version = "0.134.0",
+        version = "0.135.0",
         description = "SPARQL 1.1 Protocol HTTP endpoint and Datalog REST API for pg_ripple",
         license(name = "Apache-2.0")
     ),
@@ -155,6 +155,9 @@ pub fn classify_route(method: &Method, path: &str) -> Option<AccessClass> {
         } else {
             AccessClass::Write
         });
+    }
+    if path == "/sparql/bindings" {
+        return Some(AccessClass::Read);
     }
     if path == "/sparql/stream"
         || path == "/rag"
@@ -352,6 +355,10 @@ pub fn build_router(state: Arc<AppState>, max_body_bytes: usize, cors: CorsLayer
             get(sparql_handlers::sparql_get).post(sparql_handlers::sparql_post),
         )
         .route("/sparql/stream", post(sparql_handlers::sparql_stream_post))
+        .route(
+            "/sparql/bindings",
+            post(sparql_handlers::sparql_bindings_post),
+        )
         .route("/rag", post(rag_handler::rag_post))
         .route("/health", get(admin_handlers::health))
         // v0.60.0 H7-5: Kubernetes readiness probe — 503 until first PG connection.

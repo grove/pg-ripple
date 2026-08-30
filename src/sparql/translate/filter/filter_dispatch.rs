@@ -141,7 +141,13 @@ pub(crate) fn translate_values(
                 None => "NULL::bigint".to_owned(),
                 Some(gt) => {
                     let id = encode_ground_term(gt, &mut encode_ctx);
-                    id.to_string()
+                    if ctx.parameterize_values {
+                        let parameter = ctx.parameters.len() + 1;
+                        ctx.parameters.push(id);
+                        format!("${parameter}::bigint")
+                    } else {
+                        id.to_string()
+                    }
                 }
             })
             .collect();

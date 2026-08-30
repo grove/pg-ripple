@@ -8,7 +8,10 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 
 use crate::common::{AppState, check_auth, check_auth_write, json_error, redacted_error};
-use crate::spi_bridge::{execute_sparql_with_traceparent, execute_sparql_with_traceparent_routed};
+use crate::spi_bridge::{
+    execute_sparql_with_bindings, execute_sparql_with_traceparent,
+    execute_sparql_with_traceparent_routed,
+};
 // Re-use types and constants declared in parent routing module.
 use super::{
     CT_CSV, CT_FORM, CT_JSONLD, CT_NTRIPLES, CT_SPARQL_JSON, CT_SPARQL_QUERY, CT_SPARQL_UPDATE,
@@ -16,6 +19,96 @@ use super::{
 };
 // Helper functions live in admin_handlers (extracted sibling module).
 use super::admin_handlers::{csv_escape, strip_angle, xml_escape};
+
+#[derive(serde::Deserialize)]
+pub(crate) struct SparqlBindingsRequest {
+    pub(crate) query: String,
+    pub(crate) bindings: serde_json::Value,
+    #[serde(default)]
+    pub(crate) prefix_mode: Option<String>,
+    #[serde(default)]
+    pub(crate) replica: Option<String>,
+    #[serde(default)]
+    pub(crate) timeout_ms: Option<u64>,
+}
+
+/// POST /sparql/bindings — typed initial bindings for the public SQL overload.
+pub(crate) async fn sparql_bindings_post(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    body: Body,
+) -> Response {
+    if let Err(r) = check_auth(&state, &headers) {
+        return r;
+    }
+
+    let body_bytes = match axum::body::to_bytes(body, 10 * 1024 * 1024).await {
+        Ok(bytes) => bytes,
+        Err(_) => {
+            return json_error(
+                "PT413",
+                "request body too large",
+                StatusCode::PAYLOAD_TOO_LARGE,
+            );
+        }
+    };
+    let request: SparqlBindingsRequest = match serde_json::from_slice(&body_bytes) {
+        Ok(request) => request,
+        Err(error) => {
+            return json_error(
+                "PT400",
+                format!("invalid bindings request: {error}"),
+                StatusCode::BAD_REQUEST,
+            );
+        }
+    };
+    if !request.bindings.is_object() {
+        return json_error(
+            "PT0570",
+            "bindings must be a JSON object",
+            StatusCode::BAD_REQUEST,
+        );
+    }
+    if let Some(mode) = request.prefix_mode.as_deref()
+        && !matches!(mode, "strict" | "registered")
+    {
+        return json_error(
+            "PT400",
+            "prefix_mode must be 'strict' or 'registered'",
+            StatusCode::BAD_REQUEST,
+        );
+    }
+
+    let accept = negotiate_accept(&headers, &request.query);
+    let traceparent = headers
+        .get("traceparent")
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_owned);
+    if crate::stream::is_streamable(&request.query, &accept) {
+        return crate::stream::stream_sparql_with_bindings(
+            &state,
+            &request.query,
+            &request.bindings,
+            &accept,
+            traceparent.as_deref(),
+            request.replica.as_deref() == Some("ok"),
+            request.timeout_ms,
+            request.prefix_mode.as_deref(),
+        )
+        .await;
+    }
+    execute_sparql_with_bindings(
+        &state,
+        &request.query,
+        &request.bindings,
+        &accept,
+        traceparent.as_deref(),
+        request.replica.as_deref() == Some("ok"),
+        request.timeout_ms,
+        request.prefix_mode.as_deref(),
+    )
+    .await
+}
 
 // ─── SPARQL GET handler ──────────────────────────────────────────────────────
 
@@ -269,8 +362,8 @@ pub(crate) fn negotiate_accept(headers: &HeaderMap, query: &str) -> String {
         .and_then(|v| v.to_str().ok())
         .unwrap_or("");
 
-    let query_lower = query.trim().to_lowercase();
-    let is_construct = query_lower.starts_with("construct") || query_lower.starts_with("describe");
+    let is_construct =
+        crate::stream::is_construct_query(query) || crate::stream::is_describe_query(query);
 
     // Explicit accept header takes precedence.
     for candidate in accept

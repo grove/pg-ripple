@@ -3,6 +3,9 @@
 //! Provides query-complexity enforcement (algebra depth + triple-pattern count limits)
 //! and pre-processing of ARQ aggregate extensions before spargebra parsing.
 
+#[path = "prologue.rs"]
+pub(crate) mod prologue;
+
 // ─── Algebra complexity helpers ───────────────────────────────────────────────
 
 /// Count the algebra tree depth of a SPARQL `GraphPattern`.
@@ -339,17 +342,43 @@ pub const PG_FN_NAMESPACE: &str = "http://pg-ripple.org/fn/";
 /// boundary followed by a letter) and the query does not already contain a
 /// `PREFIX pg:` declaration.
 pub fn inject_pg_prefix_if_needed(query: &str) -> std::borrow::Cow<'_, str> {
-    // Fast path: if the query doesn't contain "pg:" at all, skip.
-    if !query.contains("pg:") {
-        return std::borrow::Cow::Borrowed(query);
+    let query = prologue::inject_registered_prefixes(query);
+    if !query.contains("pg:") || prologue::has_local_prefix(query.as_ref(), "pg") {
+        return query;
     }
-    // If the query already declares the pg: prefix, leave it unchanged.
-    // Case-insensitive prefix keyword check.
-    let lower = query.to_ascii_lowercase();
-    if lower.contains("prefix pg:") {
-        return std::borrow::Cow::Borrowed(query);
+    std::borrow::Cow::Owned(format!("PREFIX pg: <{PG_FN_NAMESPACE}>\n{query}"))
+}
+
+/// Apply all query-text rewrites before spargebra parses the query.
+pub(crate) fn preprocess_query(query: &str) -> String {
+    inject_pg_prefix_if_needed(&preprocess_arq_aggregates(query)).into_owned()
+}
+
+pub(crate) fn looks_like_update(query: &str) -> bool {
+    matches!(
+        prologue::first_form_keyword(query).as_deref(),
+        Some("INSERT")
+            | Some("DELETE")
+            | Some("LOAD")
+            | Some("CLEAR")
+            | Some("CREATE")
+            | Some("DROP")
+            | Some("WITH")
+            | Some("ADD")
+            | Some("MOVE")
+            | Some("COPY")
+    )
+}
+
+#[cfg(test)]
+mod update_detection_tests {
+    use super::looks_like_update;
+
+    #[test]
+    fn only_the_form_keyword_selects_updates() {
+        assert!(looks_like_update("PREFIX ex: <urn:ex:> INSERT DATA { }"));
+        assert!(!looks_like_update(
+            r#"SELECT ?s WHERE { ?s <urn:message> "INSERT DATA" }"#
+        ));
     }
-    // Prepend the PREFIX declaration.
-    let prefixed = format!("PREFIX pg: <{PG_FN_NAMESPACE}>\n{query}");
-    std::borrow::Cow::Owned(prefixed)
 }

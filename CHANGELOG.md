@@ -11,6 +11,19 @@ Versions correspond to the milestones in [ROADMAP.md](ROADMAP.md).
 
 ---
 
+## [0.135.0] — 2026-08-30 — Safe application query API
+
+### Added
+
+- Added typed one-row URI and literal bindings for SELECT, ASK, CONSTRUCT,
+  DESCRIBE, and cursor SQL overloads. Values are algebraic `VALUES` rows and
+  dictionary IDs are passed through typed SPI parameters.
+- Added authenticated `POST /sparql/bindings`, with JSON, CSV, TSV, and
+  N-Triples negotiation, replica routing, timeout handling, and prefix mode.
+- Added governed prefix ownership metadata, transactional generation state,
+  strict-by-default resolution, the v1 supported-surface profile, and the
+  0.134.0 → 0.135.0 upgrade migration.
+
 ## [0.134.0] — 2026-08-29 — Performance, scale, and true streaming qualification
 
 v0.134.0 delivers the performance, scale, and true-streaming query path.

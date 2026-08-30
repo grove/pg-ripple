@@ -23,6 +23,7 @@
 
 // ─── Sub-modules ─────────────────────────────────────────────────────────────
 
+pub(crate) mod bindings;
 pub(crate) mod cursor;
 pub(crate) mod embedding;
 pub(crate) mod explain;
@@ -50,7 +51,7 @@ pub(crate) mod plan;
 pub(crate) use decode::{batch_decode, batch_decode_full};
 pub(crate) use execute::{
     explain_sparql, plan_cache_reset, plan_cache_stats, sparql_construct, sparql_construct_rows,
-    sparql_describe, sparql_update,
+    sparql_construct_with_bindings, sparql_describe, sparql_describe_with_bindings, sparql_update,
 };
 pub(crate) use plan::{
     ConstructTemplate, apply_construct_template, prepare_construct, prepare_select,
@@ -61,11 +62,8 @@ use serde_json::{Map, Value as Json};
 use spargebra::SparqlParser;
 
 pub fn sparql(query_text: &str) -> Vec<pgrx::JsonB> {
-    // Normalize ARQ aggregate extensions (MEDIAN/MODE) before parsing.
-    let preprocessed = parse::preprocess_arq_aggregates(query_text);
-    // API-04 (v0.91.0): auto-inject `PREFIX pg: <http://pg-ripple.org/fn/>` when needed.
-    let with_prefix = parse::inject_pg_prefix_if_needed(preprocessed.as_str());
-    let query_text = with_prefix.as_ref();
+    let preprocessed = parse::preprocess_query(query_text);
+    let query_text = preprocessed.as_str();
 
     // Determine query type.
     let query = SparqlParser::new()
@@ -107,6 +105,46 @@ pub fn sparql(query_text: &str) -> Vec<pgrx::JsonB> {
     }
 }
 
+/// Execute a SELECT query with W3C SPARQL Results JSON input bindings.
+pub fn sparql_with_bindings(query_text: &str, bindings: &serde_json::Value) -> Vec<pgrx::JsonB> {
+    let query_text = parse::preprocess_query(query_text);
+    if parse::looks_like_update(&query_text) {
+        pgrx::error!("PT0579: parameterized SPARQL Update is not supported");
+    }
+    let query = SparqlParser::new()
+        .parse_query(&query_text)
+        .unwrap_or_else(|e| pgrx::error!("SPARQL parse error: {e}"));
+    let is_ask = matches!(query, spargebra::Query::Ask { .. });
+    if !matches!(
+        query,
+        spargebra::Query::Select { .. } | spargebra::Query::Ask { .. }
+    ) {
+        pgrx::error!("PT0579: SPARQL bindings require a SELECT or ASK query");
+    }
+    let (sql, vars, raw_numeric, raw_text, raw_iri, raw_double, wcoj, params) =
+        plan::prepare_select_with_bindings(&query_text, Some(bindings));
+    let rows = execute::execute_select_with_params(
+        &sql,
+        &vars,
+        &raw_numeric,
+        &raw_text,
+        &raw_iri,
+        &raw_double,
+        wcoj,
+        &params,
+    );
+    if is_ask {
+        let mut obj = Map::new();
+        obj.insert(
+            "result".to_owned(),
+            Json::String((!rows.is_empty()).to_string()),
+        );
+        vec![pgrx::JsonB(Json::Object(obj))]
+    } else {
+        rows
+    }
+}
+
 /// Convert Leapfrog Triejoin bindings (encoded i64 IDs) to JSONB rows.
 ///
 /// Each binding is decoded via the dictionary and formatted as
@@ -143,11 +181,9 @@ fn decode_lfti_bindings_to_jsonb(bindings: Vec<wcoj::LftiBinding>) -> Vec<pgrx::
 
 /// Execute a SPARQL ASK query; returns a boolean.
 pub fn sparql_ask(query_text: &str) -> bool {
-    // API-04 (v0.91.0): auto-inject `PREFIX pg: <http://pg-ripple.org/fn/>` when needed.
-    let with_prefix = parse::inject_pg_prefix_if_needed(query_text);
-    let query_text = with_prefix.as_ref();
+    let query_text = parse::preprocess_query(query_text);
     let query = SparqlParser::new()
-        .parse_query(query_text)
+        .parse_query(&query_text)
         .unwrap_or_else(|e| pgrx::error!("SPARQL parse error: {}", e));
 
     let pattern = match query {
@@ -165,8 +201,9 @@ pub fn sparql_ask(query_text: &str) -> bool {
 /// Return the generated SQL for a SPARQL SELECT query (for debugging/explain).
 /// If `analyze` is true, wraps in EXPLAIN ANALYZE.
 pub fn sparql_explain(query_text: &str, analyze: bool) -> String {
+    let query_text = parse::preprocess_query(query_text);
     let query = SparqlParser::new()
-        .parse_query(query_text)
+        .parse_query(&query_text)
         .unwrap_or_else(|e| pgrx::error!("SPARQL parse error: {}", e));
 
     // EXPLAIN-ALG-01 (v0.82.0): extract algebra + SQL in one pass.

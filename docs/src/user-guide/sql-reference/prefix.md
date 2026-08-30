@@ -1,8 +1,8 @@
 # Prefix Registry
 
-The prefix registry maps short prefixes (e.g. `ex`) to IRI expansions (e.g. `https://example.org/`). Registered prefixes are used by the export functions when serializing triples to Turtle or N-Triples.
+The prefix registry maps short prefixes (e.g. `ex`) to IRI expansions (e.g. `https://example.org/`). Registered prefixes are used by the export functions when serializing triples to Turtle or N-Triples, and by SPARQL only when `pg_ripple.sparql_prefix_mode` is set to `registered`.
 
-> **SPARQL queries do not use the prefix registry.** SPARQL queries must use either full IRIs in angle brackets (`<https://…>`) or declare prefixes inline with `PREFIX ex: <https://…>`.
+> **Strict mode is the default.** In strict mode, SPARQL queries must use full IRIs in angle brackets (`<https://…>`) or declare prefixes inline with `PREFIX ex: <https://…>`. Registered mode adds only missing declarations; local declarations always win.
 
 ## register_prefix
 
@@ -29,6 +29,19 @@ Returns all registered prefix–expansion mappings.
 ```sql
 SELECT * FROM pg_ripple.prefixes();
 ```
+
+## SPARQL prefix mode
+
+```sql
+SET pg_ripple.sparql_prefix_mode = 'registered';
+SELECT * FROM pg_ripple.sparql(
+    'SELECT ?s WHERE { ?s ex:name ?name }'
+);
+```
+
+Registered declarations are validated and injected in deterministic order.
+Changes invalidate registered-mode plans after commit; rolled-back changes do
+not change the registry generation.
 
 ## Example: prefixes in export
 

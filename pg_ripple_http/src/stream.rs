@@ -333,6 +333,53 @@ pub async fn stream_sparql(
     use_replica: bool,
     timeout_override_ms: Option<u64>,
 ) -> Response {
+    stream_sparql_inner(
+        app,
+        query,
+        accept,
+        traceparent,
+        use_replica,
+        timeout_override_ms,
+        None,
+        None,
+    )
+    .await
+}
+
+/// Stream a typed-binding query through the same portal-backed pipeline.
+pub async fn stream_sparql_with_bindings(
+    app: &Arc<AppState>,
+    query: &str,
+    bindings: &serde_json::Value,
+    accept: &str,
+    traceparent: Option<&str>,
+    use_replica: bool,
+    timeout_override_ms: Option<u64>,
+    prefix_mode: Option<&str>,
+) -> Response {
+    stream_sparql_inner(
+        app,
+        query,
+        accept,
+        traceparent,
+        use_replica,
+        timeout_override_ms,
+        Some(bindings),
+        prefix_mode,
+    )
+    .await
+}
+
+async fn stream_sparql_inner(
+    app: &Arc<AppState>,
+    query: &str,
+    accept: &str,
+    traceparent: Option<&str>,
+    use_replica: bool,
+    timeout_override_ms: Option<u64>,
+    bindings: Option<&serde_json::Value>,
+    prefix_mode: Option<&str>,
+) -> Response {
     let (source, form) = match query_form(query) {
         Some(value) => value,
         None => {
@@ -428,6 +475,21 @@ pub async fn stream_sparql(
             StatusCode::SERVICE_UNAVAILABLE,
         );
     }
+    let prefix_mode = prefix_mode.unwrap_or("strict");
+    if let Err(error) = client
+        .execute(
+            "SELECT set_config('pg_ripple.sparql_prefix_mode', $1, true)",
+            &[&prefix_mode],
+        )
+        .await
+    {
+        rollback_before_response(client).await;
+        return redacted_error(
+            "stream_configuration",
+            &error.to_string(),
+            StatusCode::SERVICE_UNAVAILABLE,
+        );
+    }
     if let Some(traceparent) = traceparent
         && let Err(error) = client
             .execute(
@@ -461,12 +523,29 @@ pub async fn stream_sparql(
         }
     };
     let cancel_token = client.cancel_token();
-    let sql = match source {
-        Source::Select => "SELECT result FROM _pg_ripple.sparql_stream_bindings($1)",
-        Source::Ask => "SELECT pg_ripple.sparql_ask($1)",
-        Source::Graph => "SELECT triple FROM _pg_ripple.sparql_stream_triples($1)",
+    let sql = match (source, bindings.is_some()) {
+        (Source::Select, false) => "SELECT result FROM _pg_ripple.sparql_stream_bindings($1)",
+        (Source::Select, true) => {
+            "SELECT result FROM _pg_ripple.sparql_stream_bindings_with_bindings($1, $2)"
+        }
+        (Source::Ask, false) => "SELECT pg_ripple.sparql_ask($1)",
+        (Source::Ask, true) => "SELECT (result->>'result')::boolean FROM pg_ripple.sparql($1, $2)",
+        (Source::Graph, false) => "SELECT triple FROM _pg_ripple.sparql_stream_triples($1)",
+        (Source::Graph, true) => {
+            "SELECT triple FROM _pg_ripple.sparql_stream_triples_with_bindings($1, $2)"
+        }
     };
-    let rows = match client.query_raw(sql, std::iter::once(query)).await {
+    let rows_result = match bindings {
+        Some(bindings) => {
+            let args = [
+                &query as &(dyn tokio_postgres::types::ToSql + Sync),
+                bindings,
+            ];
+            client.query_raw(sql, args).await
+        }
+        None => client.query_raw(sql, std::iter::once(query)).await,
+    };
+    let rows = match rows_result {
         Ok(rows) => Box::pin(rows),
         Err(error) => {
             rollback_before_response(client).await;
@@ -543,6 +622,10 @@ pub(crate) fn is_graph_query(query: &str) -> bool {
 
 pub(crate) fn is_ask_query(query: &str) -> bool {
     query_form(query).is_some_and(|(source, _)| matches!(source, Source::Ask))
+}
+
+pub(crate) fn is_select_query(query: &str) -> bool {
+    query_form(query).is_some_and(|(source, _)| matches!(source, Source::Select))
 }
 
 pub(crate) fn is_construct_query(query: &str) -> bool {

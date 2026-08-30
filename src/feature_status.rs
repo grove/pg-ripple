@@ -824,6 +824,44 @@ mod pg_ripple {
 
         TableIterator::new(rows)
     }
+
+    /// Return the frozen v1 query interface and its explicit limits.
+    #[pg_extern]
+    pub fn supported_surface(
+        profile: &str,
+    ) -> TableIterator<
+        'static,
+        (
+            name!(feature_name, String),
+            name!(optional_dependency, Option<String>),
+            name!(unsupported_combination, Option<String>),
+            name!(evidence_artifact, String),
+        ),
+    > {
+        if profile != "v1" {
+            pgrx::error!("unknown supported surface profile '{profile}'; expected 'v1'");
+        }
+        TableIterator::new(vec![
+            (
+                "typed_initial_bindings".to_owned(),
+                None,
+                Some("SPARQL UPDATE, blank-node, and RDF-star bindings".to_owned()),
+                "api/stable-v1.json".to_owned(),
+            ),
+            (
+                "registered_prefix_mode".to_owned(),
+                None,
+                Some("strict mode does not resolve undeclared prefixes".to_owned()),
+                "api/stable-v1.json".to_owned(),
+            ),
+            (
+                "http_bindings".to_owned(),
+                Some("pg_ripple_http".to_owned()),
+                Some("requires pg_ripple_http >= 0.135.0".to_owned()),
+                "api/stable-v1.json".to_owned(),
+            ),
+        ])
+    }
 }
 
 #[cfg(any(test, feature = "pg_test"))]

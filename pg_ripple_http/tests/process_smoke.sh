@@ -77,6 +77,11 @@ if [ "${PG_RIPPLE_HTTP_STREAM_FORMAT_SMOKE:-0}" = "1" ]; then
     bash "${REPO_ROOT}/tests/http_integration/stream_format.sh"
 fi
 
+if [ "${PG_RIPPLE_HTTP_BINDINGS_SMOKE:-0}" = "1" ]; then
+  PG_RIPPLE_HTTP_URL="http://127.0.0.1:${PORT}" \
+    bash "${REPO_ROOT}/tests/http_integration/bindings.sh"
+fi
+
 echo "==> Sending SIGTERM and waiting for clean exit..."
 kill -TERM "${PID}"
 trap - EXIT

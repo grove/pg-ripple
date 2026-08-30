@@ -7,7 +7,7 @@ info:
   description: SPARQL 1.1 Protocol and pg_ripple REST API
   license:
     name: Apache-2.0
-  version: 0.134.0
+  version: 0.135.0
 paths:
   /admin/bench-history:
     get:
@@ -648,6 +648,18 @@ paths:
       responses:
         "200":
           description: request completed
+  /sparql/bindings:
+    post:
+      operationId: post_sparql_bindings
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SparqlBindingsRequest'
+      responses:
+        "200":
+          description: SPARQL results in the negotiated format
   /sparql/stream:
     post:
       operationId: post_sparql_stream
@@ -778,6 +790,27 @@ paths:
         "200":
           description: request completed
 components:
+  schemas:
+    SparqlBindingsRequest:
+      type: object
+      required: [query, bindings]
+      properties:
+        query:
+          type: string
+        bindings:
+          type: object
+          additionalProperties:
+            type: object
+        prefix_mode:
+          type: string
+          enum: [strict, registered]
+          default: strict
+        replica:
+          type: string
+          enum: [ok]
+        timeout_ms:
+          type: integer
+          minimum: 1
   securitySchemes:
     bearerAuth:
       type: http

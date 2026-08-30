@@ -27,7 +27,7 @@ WHERE key IN (
 )
 ORDER BY key;
 
--- schema_version and compiled_version are both current on a fresh v0.134.0
+-- schema_version and compiled_version are both current on a fresh v0.135.0
 -- install because the release now stamps the schema ledger at installation.
 SELECT
     (SELECT value FROM pg_ripple.diagnostic_report() WHERE key = 'schema_version') AS sv,

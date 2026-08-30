@@ -108,3 +108,14 @@ pub static FUZZY_MAX_INPUT_LENGTH: pgrx::GucSetting<i32> = pgrx::GucSetting::<i3
 /// `(?s p1 ?o1 . ?s p2 ?o2 . …)` into a single subject-seeded CTE rather than
 /// emitting N independent VP-table joins.  Disable for debugging.  (M15-06, v0.96.0)
 pub static STAR_JOIN_COLLAPSE: pgrx::GucSetting<bool> = pgrx::GucSetting::<bool>::new(true);
+
+/// GUC: whether SPARQL may resolve undeclared prefixes from the governed registry.
+pub static SPARQL_PREFIX_MODE: pgrx::GucSetting<Option<std::ffi::CString>> =
+    pgrx::GucSetting::<Option<std::ffi::CString>>::new(Some(c"strict"));
+
+/// Maximum number of variables accepted in one application binding object.
+pub static SPARQL_MAX_INITIAL_BINDINGS: pgrx::GucSetting<i32> = pgrx::GucSetting::<i32>::new(64);
+
+/// Maximum UTF-8 byte length of one URI or literal binding value.
+pub static SPARQL_MAX_BINDING_VALUE_BYTES: pgrx::GucSetting<i32> =
+    pgrx::GucSetting::<i32>::new(1_048_576);

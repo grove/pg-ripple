@@ -25,7 +25,7 @@ No separate graph database. No data pipelines. No extra infrastructure.
 
 ---
 
-## What works today (v0.134.0)
+## What works today (v0.135.0)
 
 pg_ripple publishes immutable, versioned conformance and feature evidence for
 each release. W3C SPARQL 1.1 smoke tests and LUBM are required gates; Jena,
@@ -35,7 +35,7 @@ meet the release thresholds.
 | What you can do | How it works |
 |---|---|
 | **Import knowledge** | Load data in standard formats: Turtle, N-Triples, N-Quads, TriG, or RDF/XML — from files, inline text, or remote URLs. Named graphs let you organize facts into logical groups (e.g. one graph per data source or topic). |
-| **Query with SPARQL** | Ask complex questions using SPARQL 1.1 — the W3C standard query language for linked data (similar to SQL, but designed for graphs). Follow chains of relationships, apply filters, aggregate results, and query across multiple graphs. Fully W3C conformant. Configurable DoS limits (`pg_ripple.sparql_max_algebra_depth`, `pg_ripple.sparql_max_triple_patterns`) reject malformed deep queries at parse time. |
+| **Query with SPARQL** | Ask complex questions using SPARQL 1.1 — the W3C standard query language for linked data (similar to SQL, but designed for graphs). Follow chains of relationships, apply filters, aggregate results, and query across multiple graphs. Typed application bindings are available on SELECT, ASK, CONSTRUCT, DESCRIBE, and cursor overloads. Prefix lookup stays strict by default; `pg_ripple.sparql_prefix_mode = 'registered'` enables the governed registry. |
 | **AI and LLM integration** | Store vector embeddings alongside graph facts. Combine semantic similarity search (*"find things similar to X"*) with SPARQL graph traversal in one query. Built-in RAG pipeline retrieves graph-contextualized context for language model prompts. Use `sparql_construct_jsonld()` with a JSON-LD frame to generate structured, token-efficient system prompts directly from a SPARQL CONSTRUCT query. |
 | **Microsoft GraphRAG** | Export entities and relationships in GraphRAG's BYOG (Bring Your Own Graph) Parquet format. Enrich the graph with Datalog rules. Validate export quality with SHACL. Connect your knowledge graph to Microsoft's GraphRAG pipeline with a single SQL call. |
 | **Validate data quality** | Define quality rules with SHACL: *"every Person must have exactly one name"*, *"age must be a positive integer"*. Violations are caught on insert (immediate feedback) or checked in the background. Full SHACL Core conformance, including `sh:equals`, `sh:disjoint`, and complex property path traversal (inverse, alternative, sequence, zero-or-more, one-or-more). Violation reports include decoded focus-node IRIs for easy debugging. |
@@ -43,7 +43,7 @@ meet the release thresholds.
 | **Stream and inspect queries** | Use `sparql_cursor()` to stream large result sets page-by-page via the PostgreSQL portal API — peak memory is bounded by `pg_ripple.export_batch_size`, not the full result set. Export results as W3C CSV or TSV via `sparql_csv()` / `sparql_tsv()`. Use `explain_sparql()` and `explain_datalog()` to introspect query plans and rule compilation. Pass `citus := true` to `explain_sparql()` for a Citus shard-pruning section showing which shard the query was pruned to and how many rows were avoided. `streaming_metrics()` returns live atomic counters for cursor pages, Arrow batches, and ticket rejections. OpenTelemetry span tracing is available, with a configurable OTLP endpoint (`pg_ripple.tracing_otlp_endpoint`). |
 | **Live change notifications** | Subscribe to graph changes via PostgreSQL NOTIFY or Server-Sent Events (SSE). `create_subscription(name, filter_sparql)` fires `pg_notify` on the `pg_ripple_cdc_{name}` channel when matching triples change. `subscribe_sparql(id, query, graph_iri)` registers a SPARQL-query subscription that re-executes after each graph write and streams results as SSE via `GET /subscribe/{id}` in `pg_ripple_http`. `unsubscribe_sparql(id)` removes a subscription; `list_sparql_subscriptions()` enumerates active ones. CDC lifecycle events (`pg_ripple.cdc_lifecycle_events`) record subscription activity. |
 | **Export and share** | Export your graph as Turtle, N-Triples, JSON-LD, or RDF/XML. Use JSON-LD framing to produce nested documents shaped for REST APIs or LLM prompts. `export_jsonld_node(iri)` returns all triples for a given subject as a JSON-LD document. `json_ld_load(document, default_graph)` ingests multi-graph JSON-LD documents in one call. `COPY rdf FROM` loads bulk RDF files directly via PostgreSQL's COPY protocol. Arrow IPC bulk export via `pg_ripple_http`: HMAC-SHA256 signed tickets with nonce replay protection, binary IPC stream over `POST /flight/do_get`. |
-| **Standard HTTP endpoint** | The companion `pg_ripple_http` service exposes a W3C SPARQL Protocol endpoint over HTTP/HTTPS. Supports JSON, XML, CSV, Turtle, and JSON-LD responses; authentication; Prometheus metrics (`/metrics`); extension-level metrics via `/metrics/extension` (triple count, active graphs, GUC settings); Docker Compose for easy deployment; full OpenAPI 3.1 specification; and an Arrow/Flight bulk-export endpoint. |
+| **Standard HTTP endpoint** | The companion `pg_ripple_http` service exposes a W3C SPARQL Protocol endpoint over HTTP/HTTPS. Supports JSON, XML, CSV, Turtle, and JSON-LD responses; typed initial bindings at `POST /sparql/bindings`; authentication; Prometheus metrics (`/metrics`); extension-level metrics via `/metrics/extension` (triple count, active graphs, GUC settings); Docker Compose for easy deployment; full OpenAPI 3.1 specification; and an Arrow/Flight bulk-export endpoint. |
 | **Query remote graph services** | Use the SPARQL `SERVICE` keyword to query external SPARQL endpoints as part of a single query — your local data and a remote public dataset in one request. Includes connection pooling, result caching, safe timeouts, and a circuit breaker (`pg_ripple.federation_circuit_breaker_threshold`) that stops retrying failed endpoints. |
 | **Horizontal scaling with Citus** | Enable `pg_ripple.citus_sharding_enabled` to distribute VP tables across Citus worker nodes. Bound-subject SPARQL patterns are automatically pruned to the correct shard (10–100× speedup). `citus_rebalance()` emits NOTIFY signals so pg-trickle can pause CDC during rebalancing. `citus_rebalance_progress()` reports live shard-move status. |
 | **Temporal RDF queries** | `point_in_time(ts TIMESTAMPTZ)` restricts all SPARQL queries in the current session to facts that existed at the given timestamp — enabling as-of queries, audit trails, and temporal joins without schema changes. |
@@ -198,6 +198,10 @@ bundle. v0.134.0 adds direct, bounded HTTP streaming for JSON, CSV, TSV, and
 N-Triples responses, with typed RDF terms, backpressure, deadlines,
 cancellation, and connection cleanup. See
 [roadmap/v0.134.0.md](roadmap/v0.134.0.md).
+
+v0.135.0 adds typed initial bindings for the SQL and HTTP query APIs, governed
+prefix resolution with strict defaults, and the stable v1 query manifest. See
+[roadmap/v0.135.0.md](roadmap/v0.135.0.md).
 
 v0.133.0 added deterministic crash-recovery qualification, backup/
 restore and failover checks, resource-pressure diagnostics, and the

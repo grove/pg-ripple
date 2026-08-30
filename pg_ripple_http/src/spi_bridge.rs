@@ -56,6 +56,168 @@ pub(crate) async fn execute_sparql_with_traceparent(
     .await
 }
 
+/// Execute a read query through the v0.135 public binding overloads.
+pub(crate) async fn execute_sparql_with_bindings(
+    state: &Arc<AppState>,
+    query_text: &str,
+    bindings: &serde_json::Value,
+    accept: &str,
+    traceparent: Option<&str>,
+    use_replica: bool,
+    timeout_override_ms: Option<u64>,
+    prefix_mode: Option<&str>,
+) -> Response {
+    let client = if use_replica {
+        match state.replica_pool.as_ref() {
+            Some(pool) => match pool.get().await {
+                Ok(client) => Ok(client),
+                Err(_) => state.pool.get().await,
+            },
+            None => state.pool.get().await,
+        }
+    } else {
+        state.pool.get().await
+    };
+    let client = match client {
+        Ok(client) => client,
+        Err(error) => {
+            return redacted_error(
+                "service_unavailable",
+                &error.to_string(),
+                StatusCode::SERVICE_UNAVAILABLE,
+            );
+        }
+    };
+    let query_kind = if crate::stream::is_ask_query(query_text) {
+        "ASK"
+    } else if crate::stream::is_construct_query(query_text) {
+        "CONSTRUCT"
+    } else if crate::stream::is_describe_query(query_text) {
+        "DESCRIBE"
+    } else if crate::stream::is_select_query(query_text) {
+        "SELECT"
+    } else {
+        return json_error(
+            "PT0579",
+            "bindings require a SELECT, ASK, CONSTRUCT, or DESCRIBE query",
+            StatusCode::BAD_REQUEST,
+        );
+    };
+
+    let start = Instant::now();
+    if client.batch_execute("BEGIN").await.is_err() {
+        return redacted_error(
+            "service_unavailable",
+            "could not start query transaction",
+            StatusCode::SERVICE_UNAVAILABLE,
+        );
+    }
+    let mode = prefix_mode.unwrap_or("strict");
+    let _ = client
+        .execute(
+            "SELECT set_config('pg_ripple.sparql_prefix_mode', $1, true)",
+            &[&mode],
+        )
+        .await;
+    if let Some(traceparent) = traceparent.filter(|value| is_valid_traceparent(value)) {
+        let _ = client
+            .execute(
+                "SELECT set_config('pg_ripple.tracing_traceparent', $1, true)",
+                &[&traceparent],
+            )
+            .await;
+    }
+    if let Some(timeout_ms) = timeout_override_ms.filter(|value| *value > 0) {
+        let _ = client
+            .execute(
+                "SELECT set_config('statement_timeout', $1, true)",
+                &[&format!("{timeout_ms}ms")],
+            )
+            .await;
+    }
+
+    let query_rows = match query_kind {
+        "SELECT" | "ASK" => {
+            client
+                .query(
+                    "SELECT result FROM pg_ripple.sparql($1, $2)",
+                    &[&query_text, bindings],
+                )
+                .await
+        }
+        "CONSTRUCT" => {
+            client
+                .query(
+                    "SELECT result FROM pg_ripple.sparql_construct($1, $2)",
+                    &[&query_text, bindings],
+                )
+                .await
+        }
+        _ => {
+            client
+                .query(
+                    "SELECT result FROM pg_ripple.sparql_describe($1, $2, $3)",
+                    &[&query_text, bindings, &"cbd"],
+                )
+                .await
+        }
+    };
+    let rows = match query_rows {
+        Ok(rows) => rows,
+        Err(error) => {
+            let _ = client.batch_execute("ROLLBACK").await;
+            return redacted_error(
+                "sparql_query_error",
+                &error.to_string(),
+                StatusCode::BAD_REQUEST,
+            );
+        }
+    };
+    let _ = client.batch_execute("COMMIT").await;
+    let results = rows
+        .iter()
+        .map(|row| row.get(0))
+        .collect::<Vec<serde_json::Value>>();
+    match query_kind {
+        "SELECT" => {
+            state
+                .metrics
+                .record_query_typed(start.elapsed(), query_kind, results.len());
+            format_select_results(&results, accept)
+        }
+        "ASK" => {
+            let result = results
+                .first()
+                .and_then(|value| value.get("result"))
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(|value| value == "true");
+            state.metrics.record_query_typed(
+                start.elapsed(),
+                query_kind,
+                if result { 1 } else { 0 },
+            );
+            format_ask_result(result, accept)
+        }
+        _ => {
+            let triples = results
+                .iter()
+                .filter_map(|value| {
+                    let object = value.as_object()?;
+                    Some((
+                        object.get("s")?.as_str()?.to_owned(),
+                        object.get("p")?.as_str()?.to_owned(),
+                        object.get("o")?.as_str()?.to_owned(),
+                    ))
+                })
+                .collect::<Vec<_>>();
+            state
+                .metrics
+                .record_query_typed(start.elapsed(), query_kind, triples.len());
+            format_graph_results(&triples, accept)
+        }
+    }
+}
+
 /// Internal version with explicit replica-routing flag.
 ///
 /// Feature 12 (v0.120.0): when `use_replica` is `true` AND `state.replica_pool`

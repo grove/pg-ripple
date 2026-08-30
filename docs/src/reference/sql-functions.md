@@ -979,6 +979,35 @@ pg_ripple.prefixes() RETURNS TABLE(prefix TEXT, iri TEXT)
 SELECT * FROM pg_ripple.prefixes();
 ```
 
+### `drop_prefix`
+
+Remove a registered prefix. The database owner, a superuser, or the
+`pg_ripple_admin` role may mutate the registry.
+
+```sql
+pg_ripple.drop_prefix(prefix TEXT) RETURNS BOOLEAN
+```
+
+### `prefix_registry_generation`
+
+Return the committed generation of the governed prefix registry.
+
+```sql
+pg_ripple.prefix_registry_generation() RETURNS BIGINT
+```
+
+### `supported_surface`
+
+Return the stable feature profile for the requested API version.
+
+```sql
+pg_ripple.supported_surface(profile TEXT)
+RETURNS TABLE(feature_name TEXT, optional_dependency TEXT,
+              unsupported_combination TEXT, evidence_artifact TEXT)
+```
+
+The current stable profile is `v1`.
+
 ---
 
 ## Validating

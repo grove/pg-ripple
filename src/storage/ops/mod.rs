@@ -17,9 +17,10 @@ pub mod scan;
 
 pub use scan::{
     all_graph_ids, clear_graph_by_id, create_graph, current_load_generation, deduplicate_all,
-    deduplicate_predicate, drop_graph, find_triples, for_each_encoded_triple_batch,
-    get_statement_by_sid, list_graphs, list_prefixes, register_prefix, statement_id_for_triple,
-    total_triple_count, triple_count_in_graph, triples_for_object, triples_for_subject,
+    deduplicate_predicate, drop_graph, drop_prefix, find_triples, for_each_encoded_triple_batch,
+    get_statement_by_sid, list_graphs, list_prefixes, prefix_registry_generation, register_prefix,
+    statement_id_for_triple, total_triple_count, triple_count_in_graph, triples_for_object,
+    triples_for_subject,
 };
 
 pub(crate) use scan::{delete_triple_by_ids, insert_triple_by_ids};

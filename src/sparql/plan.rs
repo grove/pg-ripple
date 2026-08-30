@@ -10,6 +10,90 @@ use super::plan_cache;
 use super::sqlgen;
 use crate::dictionary;
 
+/// Prepare a SELECT plan with optional W3C Results JSON input bindings.
+pub(crate) fn prepare_select_with_bindings(
+    query_text: &str,
+    input: Option<&serde_json::Value>,
+) -> (
+    String,
+    Vec<String>,
+    std::collections::HashSet<String>,
+    std::collections::HashSet<String>,
+    std::collections::HashSet<String>,
+    std::collections::HashSet<String>,
+    bool,
+    Vec<i64>,
+) {
+    if let Some(input) = input {
+        let query_text = super::parse::preprocess_query(query_text);
+        let (binding_variables, binding_row) = super::bindings::parse(input)
+            .unwrap_or_else(|e| pgrx::error!("invalid SPARQL bindings: {e}"));
+        let query = SparqlParser::new()
+            .parse_query(&query_text)
+            .unwrap_or_else(|e| pgrx::error!("SPARQL parse error: {e}"));
+        let canonical_query = format!("{query}");
+        let base_iri = query.base_iri().map(|iri| iri.as_str().to_owned());
+        let pattern = match query {
+            spargebra::Query::Select { pattern, .. } | spargebra::Query::Ask { pattern, .. } => {
+                pattern
+            }
+            _ => pgrx::error!("PT0579: SPARQL bindings require a SELECT or ASK query"),
+        };
+        let pattern = super::bindings::attach_parsed_bindings(
+            pattern,
+            binding_variables,
+            binding_row.clone(),
+        )
+        .unwrap_or_else(|e| pgrx::error!("invalid SPARQL bindings: {e}"));
+        super::parse::check_query_complexity(&pattern);
+        let shape = super::bindings::shape(input);
+        let canonical = format!("{canonical_query}\0bindings={shape}");
+        if let Some(cached) = plan_cache::get_canonical(&canonical) {
+            return (
+                cached.0,
+                cached.1,
+                cached.2,
+                cached.3,
+                cached.4,
+                cached.5,
+                cached.6,
+                // Re-encode all VALUES terms in translator order. This keeps
+                // cached templates correct when the query also has explicit
+                // VALUES or SERVICE-generated VALUES nodes.
+                sqlgen::translate_select_parameterized(&pattern, base_iri.as_deref()).parameters,
+            );
+        }
+        let trans = sqlgen::translate_select_parameterized(&pattern, base_iri.as_deref());
+        let params = trans.parameters.clone();
+        let entry = (
+            trans.sql,
+            trans.variables,
+            trans.raw_numeric_vars,
+            trans.raw_text_vars,
+            trans.raw_iri_vars,
+            trans.raw_double_vars,
+            trans.wcoj_preamble,
+        );
+        if !canonical_query.to_ascii_uppercase().contains("SERVICE") {
+            plan_cache::put_canonical(&canonical, entry.clone());
+        }
+        return (
+            entry.0, entry.1, entry.2, entry.3, entry.4, entry.5, entry.6, params,
+        );
+    }
+    let (sql, vars, raw_numeric, raw_text, raw_iri, raw_double, wcoj) = prepare_select(query_text);
+    (
+        sql,
+        vars,
+        raw_numeric,
+        raw_text,
+        raw_iri,
+        raw_double,
+        wcoj,
+        Vec::new(),
+    )
+}
+
 // ─── CONSTRUCT template types ─────────────────────────────────────────────────
 
 /// One slot in a CONSTRUCT template triple: either a constant encoded ID
@@ -93,8 +177,24 @@ pub(crate) fn prepare_select(
 /// - `template`: the CONSTRUCT template expressed as (TemplateSlot, TemplateSlot,
 ///   TemplateSlot) triples.
 pub(crate) fn prepare_construct(query_text: &str) -> (String, Vec<String>, ConstructTemplate) {
+    let (sql, variables, template, _) = prepare_construct_impl(query_text, None);
+    (sql, variables, template)
+}
+
+pub(crate) fn prepare_construct_with_bindings(
+    query_text: &str,
+    bindings: &serde_json::Value,
+) -> (String, Vec<String>, ConstructTemplate, Vec<i64>) {
+    prepare_construct_impl(query_text, Some(bindings))
+}
+
+fn prepare_construct_impl(
+    query_text: &str,
+    bindings: Option<&serde_json::Value>,
+) -> (String, Vec<String>, ConstructTemplate, Vec<i64>) {
+    let query_text = super::parse::preprocess_query(query_text);
     let query = SparqlParser::new()
-        .parse_query(query_text)
+        .parse_query(&query_text)
         .unwrap_or_else(|e| pgrx::error!("SPARQL parse error: {}", e));
 
     let (template, pattern) = match query {
@@ -104,9 +204,18 @@ pub(crate) fn prepare_construct(query_text: &str) -> (String, Vec<String>, Const
         _ => pgrx::error!("prepare_construct() requires a CONSTRUCT query"),
     };
 
+    let pattern = if let Some(bindings) = bindings {
+        super::bindings::with_bindings(pattern, bindings)
+            .unwrap_or_else(|e| pgrx::error!("invalid SPARQL bindings: {e}"))
+    } else {
+        pattern
+    };
     check_query_complexity(&pattern);
 
-    let trans = sqlgen::translate_select(&pattern, None);
+    let trans = match bindings {
+        Some(_) => sqlgen::translate_select_parameterized(&pattern, None),
+        None => sqlgen::translate_select(&pattern, None),
+    };
     let sql = trans.sql;
     let variables = trans.variables;
 
@@ -166,7 +275,7 @@ pub(crate) fn prepare_construct(query_text: &str) -> (String, Vec<String>, Const
         })
         .collect();
 
-    (sql, variables, ct)
+    (sql, variables, ct, trans.parameters)
 }
 
 /// Apply a CONSTRUCT template to a row of variable bindings, returning

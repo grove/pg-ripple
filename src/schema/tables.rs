@@ -101,8 +101,18 @@ CREATE TABLE IF NOT EXISTS _pg_ripple.statements (
 -- IRI prefix registry
 CREATE TABLE IF NOT EXISTS _pg_ripple.prefixes (
     prefix    TEXT NOT NULL PRIMARY KEY,
-    expansion TEXT NOT NULL
+    expansion TEXT NOT NULL,
+    owner_oid OID NOT NULL DEFAULT (current_user::regrole)::oid,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+CREATE TABLE IF NOT EXISTS _pg_ripple.prefix_registry_state (
+    singleton  BOOLEAN NOT NULL PRIMARY KEY DEFAULT true CHECK (singleton),
+    generation BIGINT NOT NULL DEFAULT 1
+);
+INSERT INTO _pg_ripple.prefix_registry_state (singleton, generation)
+VALUES (true, 1) ON CONFLICT (singleton) DO NOTHING;
+REVOKE INSERT, UPDATE, DELETE ON _pg_ripple.prefixes FROM PUBLIC;
 
 -- Named-graph registry (v0.43.0)
 -- Tracks named graph IRIs that have been explicitly loaded, even if the

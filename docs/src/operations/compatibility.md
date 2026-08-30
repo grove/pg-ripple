@@ -19,6 +19,7 @@ extension version is outside its known-compatible range.
 
 | pg_ripple_http version | pg_ripple extension range | Notes |
 |------------------------|---------------------------|-------|
+| 0.135.x | ≥ 0.135.0 | Typed query bindings, governed prefix mode, and stable v1 query manifest |
 | 0.133.x | ≥ 0.132.0 | Resilience health API and recovery qualification (v0.133.0) |
 | 0.134.x | ≥ 0.134.0 | Performance, scale, and true streaming qualification (v0.134.0) |
 | 0.132.x | ≥ 0.131.0 | Conformance evidence, feature and route truth checks, bounded predicate expansion, and keyset-paginated exports |

@@ -25,15 +25,14 @@ use pg_ripple_http::{metrics, routing};
 // ─── Compatibility constants (COMPAT-01, v0.71.0) ────────────────────────────
 
 /// Minimum pg_ripple extension version that this HTTP companion supports.
-/// v0.134.0 requires the internal typed streaming functions added to the
-/// extension in the same release.
+/// v0.135.0 requires the typed binding overloads and prefix-policy GUC.
 ///
 /// HTTP-COMPAT-01 (v0.89.0): bumped to 0.88.0 — requires all v0.84–v0.88 features.
 ///
 /// Connections to older extension versions log a prominent warning. The extension
 /// is still served (degraded mode) so that rolling upgrades do not hard-fail.
 /// Set `PG_RIPPLE_HTTP_STRICT_COMPAT=1` to convert the warning to a fatal startup error.
-const COMPATIBLE_EXTENSION_MIN: &str = "0.134.0";
+const COMPATIBLE_EXTENSION_MIN: &str = "0.135.0";
 
 /// Check that the installed pg_ripple extension version is within the known-compatible
 /// range for this pg_ripple_http build.  Logs a warning if it is not.

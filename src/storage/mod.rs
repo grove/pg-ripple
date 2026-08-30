@@ -225,11 +225,54 @@ pub fn initialize_schema() {
     Spi::run_with_args(
         "CREATE TABLE IF NOT EXISTS _pg_ripple.prefixes ( \
              prefix     TEXT NOT NULL PRIMARY KEY, \
-             expansion  TEXT NOT NULL \
+             expansion  TEXT NOT NULL, \
+             owner_oid  OID NOT NULL DEFAULT (current_user::regrole)::oid, \
+             created_at TIMESTAMPTZ NOT NULL DEFAULT now(), \
+             updated_at TIMESTAMPTZ NOT NULL DEFAULT now() \
          )",
         &[],
     )
     .unwrap_or_else(|e| pgrx::error!("prefixes table creation error: {e}"));
+    Spi::run_with_args(
+        "ALTER TABLE _pg_ripple.prefixes \
+         ADD COLUMN IF NOT EXISTS owner_oid OID, \
+         ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ, \
+         ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ",
+        &[],
+    )
+    .unwrap_or_else(|e| pgrx::error!("prefixes metadata migration error: {e}"));
+    Spi::run_with_args(
+        "UPDATE _pg_ripple.prefixes SET owner_oid = COALESCE(owner_oid, (current_user::regrole)::oid), \
+         created_at = COALESCE(created_at, now()), updated_at = COALESCE(updated_at, now()) \
+         WHERE owner_oid IS NULL OR created_at IS NULL OR updated_at IS NULL",
+        &[],
+    )
+    .unwrap_or_else(|e| pgrx::error!("prefixes metadata backfill error: {e}"));
+    Spi::run_with_args(
+        "ALTER TABLE _pg_ripple.prefixes ALTER COLUMN owner_oid SET NOT NULL, \
+         ALTER COLUMN created_at SET NOT NULL, ALTER COLUMN updated_at SET NOT NULL",
+        &[],
+    )
+    .unwrap_or_else(|e| pgrx::error!("prefixes metadata constraints error: {e}"));
+    Spi::run_with_args(
+        "CREATE TABLE IF NOT EXISTS _pg_ripple.prefix_registry_state ( \
+             singleton BOOLEAN NOT NULL PRIMARY KEY DEFAULT true CHECK (singleton), \
+             generation BIGINT NOT NULL DEFAULT 1 \
+         )",
+        &[],
+    )
+    .unwrap_or_else(|e| pgrx::error!("prefix registry state creation error: {e}"));
+    Spi::run_with_args(
+        "INSERT INTO _pg_ripple.prefix_registry_state (singleton, generation) \
+         VALUES (true, 1) ON CONFLICT (singleton) DO NOTHING",
+        &[],
+    )
+    .unwrap_or_else(|e| pgrx::error!("prefix registry state seed error: {e}"));
+    Spi::run_with_args(
+        "REVOKE INSERT, UPDATE, DELETE ON _pg_ripple.prefixes FROM PUBLIC",
+        &[],
+    )
+    .unwrap_or_else(|e| pgrx::error!("prefix registry privilege error: {e}"));
 
     // v0.6.0: HTAP pattern tables + CDC schema + predicates.htap column.
     merge::initialize_pattern_tables();

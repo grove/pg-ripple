@@ -273,6 +273,9 @@ pub(crate) struct Ctx {
     /// WCOJ optimisation is activated (v0.62.0).  When set, the query executor
     /// runs the WCOJ SET LOCAL preamble before the main query.
     pub(crate) wcoj_preamble: bool,
+    /// Emit `$n::bigint` for VALUES cells and collect dictionary IDs for SPI.
+    pub(crate) parameterize_values: bool,
+    pub(crate) parameters: Vec<i64>,
     /// BN-SCOPE-01 (v0.81.0): per-query blank-node scope prefix.
     ///
     /// Blank-node variable names (e.g. `_:b0`) are prefixed with this short
@@ -319,6 +322,8 @@ impl Ctx {
             base_iri: None,
             service_graph_exclude: federation::get_service_graph_ids(),
             wcoj_preamble: false,
+            parameterize_values: false,
+            parameters: Vec::new(),
             bn_scope_prefix: prefix,
         }
     }
@@ -689,12 +694,31 @@ pub struct Translation {
     /// activated the Leapfrog-Triejoin execution path.  The query executor
     /// must run `wcoj_session_preamble()` before executing the SQL.
     pub wcoj_preamble: bool,
+    /// Dictionary IDs corresponding to `$n` placeholders in `sql`.
+    pub parameters: Vec<i64>,
 }
 
 /// Translate a SPARQL SELECT query pattern to SQL.
 pub fn translate_select(pattern: &GraphPattern, base_iri: Option<&str>) -> Translation {
+    translate_select_mode(pattern, base_iri, false)
+}
+
+/// Translate a pattern while keeping VALUES terms out of generated SQL text.
+pub fn translate_select_parameterized(
+    pattern: &GraphPattern,
+    base_iri: Option<&str>,
+) -> Translation {
+    translate_select_mode(pattern, base_iri, true)
+}
+
+fn translate_select_mode(
+    pattern: &GraphPattern,
+    base_iri: Option<&str>,
+    parameterize_values: bool,
+) -> Translation {
     let mut mods = extract_modifiers(pattern);
     let mut ctx = Ctx::new();
+    ctx.parameterize_values = parameterize_values;
     ctx.base_iri = base_iri.map(|s| s.to_owned());
     let frag = translate_pattern(mods.pattern, &mut ctx);
 
@@ -819,6 +843,7 @@ pub fn translate_select(pattern: &GraphPattern, base_iri: Option<&str>) -> Trans
         raw_double_vars: ctx.raw_double_vars,
         topn_applied,
         wcoj_preamble,
+        parameters: ctx.parameters,
     }
 }
 

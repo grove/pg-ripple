@@ -80,6 +80,21 @@ Errors from the SPARQL parser, algebra optimizer, and SQL code generator.
 | PT218 | SPARQL UPDATE: CREATE GRAPH already exists | The graph already exists | Use `CREATE SILENT GRAPH` to suppress this error |
 | PT219 | SPARQL UPDATE: DROP GRAPH not found | The graph does not exist | Use `DROP SILENT GRAPH` to suppress this error |
 
+### Typed bindings and prefix governance (v0.135.0)
+
+| Code | Message | Cause | Fix |
+|---|---|---|---|
+| PT0570 | bindings must be a JSON object | The initial binding payload is not an object | Send one JSON object keyed by variable name |
+| PT0571 | invalid, duplicate, or excessive binding variable | A variable name is invalid, repeated after normalization, or exceeds the configured limit | Use valid unique variables and adjust `pg_ripple.sparql_max_initial_bindings` if needed |
+| PT0572 | malformed binding term | A term descriptor is null, missing fields, or has unknown fields | Use the W3C `type` and `value` fields |
+| PT0573 | invalid IRI, datatype, or language tag | An IRI, datatype, or language tag is invalid | Supply an absolute IRI and valid language tag |
+| PT0574 | binding value exceeds the configured byte limit | A URI or literal is too large | Reduce the value or adjust `pg_ripple.sparql_max_binding_value_bytes` |
+| PT0575 | blank-node and RDF-star bindings are unsupported | The binding uses an unsupported RDF term type | Use a URI or literal |
+| PT0576 | binding variable is outside query scope | The query does not expose the requested variable | Bind a variable in the query pattern or projection |
+| PT0577 | invalid registered prefix expansion | A prefix label or expansion is malformed | Register a valid prefix and absolute IRI |
+| PT0578 | prefix mutation is not authorized | The caller is not an allowed registry administrator | Use the database owner, superuser, or `pg_ripple_admin` |
+| PT0579 | bindings are not supported for this query form | The request is an Update or unsupported query form | Use SELECT, ASK, CONSTRUCT, or DESCRIBE without Update bindings |
+
 ---
 
 ## PT300–PT399: SHACL

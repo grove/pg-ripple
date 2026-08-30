@@ -123,8 +123,23 @@ pub(crate) fn sparql_construct_rows(query_text: &str) -> Vec<(i64, i64, i64)> {
 ///
 /// Each row is `{"s": "<iri>", "p": "<iri>", "o": "..."}`.
 pub(crate) fn sparql_construct(query_text: &str) -> Vec<pgrx::JsonB> {
+    sparql_construct_impl(query_text, None)
+}
+
+pub(crate) fn sparql_construct_with_bindings(
+    query_text: &str,
+    bindings: &serde_json::Value,
+) -> Vec<pgrx::JsonB> {
+    sparql_construct_impl(query_text, Some(bindings))
+}
+
+fn sparql_construct_impl(
+    query_text: &str,
+    bindings: Option<&serde_json::Value>,
+) -> Vec<pgrx::JsonB> {
+    let query_text = super::super::parse::preprocess_query(query_text);
     let query = SparqlParser::new()
-        .parse_query(query_text)
+        .parse_query(&query_text)
         .unwrap_or_else(|e| pgrx::error!("SPARQL parse error: {}", e));
 
     let (template, pattern) = match query {
@@ -134,17 +149,34 @@ pub(crate) fn sparql_construct(query_text: &str) -> Vec<pgrx::JsonB> {
         _ => pgrx::error!("sparql_construct() requires a CONSTRUCT query"),
     };
 
+    let pattern = if let Some(bindings) = bindings {
+        super::super::bindings::with_bindings(pattern, bindings)
+            .unwrap_or_else(|e| pgrx::error!("invalid SPARQL bindings: {e}"))
+    } else {
+        pattern
+    };
+
     // Translate the WHERE clause as a SELECT over all template variables.
-    let trans = sqlgen::translate_select(&pattern, None);
+    let trans = if bindings.is_some() {
+        sqlgen::translate_select_parameterized(&pattern, None)
+    } else {
+        sqlgen::translate_select(&pattern, None)
+    };
     let (sql, variables) = (trans.sql, trans.variables);
+    let params = trans.parameters;
     let var_set: std::collections::HashSet<&str> = variables.iter().map(|s| s.as_str()).collect();
 
     // Execute and collect raw rows.
     let mut all_ids: Vec<i64> = Vec::new();
     let mut raw_rows: Vec<Vec<Option<i64>>> = Vec::new();
     Spi::connect(|client| {
+        let args: Vec<pgrx::datum::DatumWithOid> = params
+            .iter()
+            .copied()
+            .map(pgrx::datum::DatumWithOid::from)
+            .collect();
         let rows = client
-            .select(&sql, None, &[])
+            .select(&sql, None, &args)
             .unwrap_or_else(|e| pgrx::error!("SPARQL CONSTRUCT SPI error: {e}"));
         for row in rows {
             let mut row_vals: Vec<Option<i64>> = Vec::with_capacity(variables.len());

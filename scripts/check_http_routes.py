@@ -49,6 +49,8 @@ def classify(method: str, path: str) -> str | None:
         return "Read" if method == "GET" else "Write"
     if path.startswith("/datalog/query/") or path in {"/datalog/constraints", "/datalog/constraints/"} or path.startswith("/datalog/constraints/"):
         return "Read"
+    if path == "/sparql/bindings":
+        return "Read"
     if path == "/sparql":
         return "Read" if method == "GET" else "Write"
     if path in {"/sparql/stream", "/rag", "/explain", "/hypothetical", "/void", "/service", "/openapi.yaml", "/flight/do_get"} or path.startswith("/subscribe/") or path.startswith("/rules/") or path in {"/rules/draft", "/rules/validate"}:

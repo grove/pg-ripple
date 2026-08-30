@@ -37,6 +37,8 @@ jobs:
           - llm_prompt_builder
           - sparql_update
           - url_host_parser
+          - sparql_bindings_json
+          - sparql_prefix_prologue
 
     steps:
       - name: Checkout repository

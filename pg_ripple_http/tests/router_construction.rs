@@ -24,6 +24,7 @@ use pg_ripple_http::routing::{build_router, classify_route};
 /// segments replaced by a literal `x`. Kept in sync with that route table.
 const ROUTES: &[&str] = &[
     "/sparql",
+    "/sparql/bindings",
     "/sparql/stream",
     "/rag",
     "/health",

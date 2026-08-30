@@ -166,6 +166,15 @@ fn cache_key_inner(canonical: &str) -> String {
         .unwrap_or_else(|| "error".to_string());
     let federation_timeout = crate::FEDERATION_TIMEOUT.get();
     let pgvector_enabled = crate::PGVECTOR_ENABLED.get();
+    let prefix_mode = crate::SPARQL_PREFIX_MODE
+        .get()
+        .and_then(|value| value.to_str().ok().map(|value| value.trim().to_lowercase()))
+        .unwrap_or_else(|| "strict".to_owned());
+    let prefix_generation = if prefix_mode == "registered" {
+        crate::storage::prefix_registry_generation()
+    } else {
+        0
+    };
     // M15-10 (v0.95.0): include schema_generation in the key so any VP
     // table creation or predicate promotion automatically invalidates
     // cached plans that assumed the old vp_rare layout.
@@ -177,6 +186,7 @@ fn cache_key_inner(canonical: &str) -> String {
          \x00wcoj_enabled={wcoj_enabled}\x00wcoj_min={wcoj_min}\
          \x00topn_pushdown={topn_pushdown}\x00sparql_max_rows={sparql_max_rows}\
          \x00sparql_overflow={sparql_overflow}\x00federation_timeout={federation_timeout}\
-         \x00pgvector_enabled={pgvector_enabled}\x00schema_gen={schema_gen}"
+         \x00pgvector_enabled={pgvector_enabled}\x00schema_gen={schema_gen}\
+         \x00prefix_mode={prefix_mode}\x00prefix_generation={prefix_generation}"
     )
 }

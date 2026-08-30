@@ -178,3 +178,16 @@ name = "rule_library_ssrf"
 path = "fuzz_targets/rule_library_ssrf.rs"
 test = false
 doc = false
+
+# v0.135.0: typed binding and formal-prologue safety contracts.
+[[bin]]
+name = "sparql_bindings_json"
+path = "fuzz_targets/sparql_bindings_json.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "sparql_prefix_prologue"
+path = "fuzz_targets/sparql_prefix_prologue.rs"
+test = false
+doc = false

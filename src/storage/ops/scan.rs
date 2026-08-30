@@ -586,12 +586,32 @@ pub fn list_graphs() -> Vec<String> {
 
 /// Register (or update) an IRI prefix abbreviation.
 pub fn register_prefix(prefix: &str, expansion: &str) {
+    validate_prefix(prefix, expansion);
+    ensure_prefix_mutation_authorized();
     Spi::run_with_args(
-        "INSERT INTO _pg_ripple.prefixes (prefix, expansion) VALUES ($1, $2) \
-         ON CONFLICT (prefix) DO UPDATE SET expansion = EXCLUDED.expansion",
+        "INSERT INTO _pg_ripple.prefixes (prefix, expansion, owner_oid) VALUES ($1, $2, (current_user::regrole)::oid) \
+         ON CONFLICT (prefix) DO UPDATE SET expansion = EXCLUDED.expansion, updated_at = now()",
         &[DatumWithOid::from(prefix), DatumWithOid::from(expansion)],
     )
     .unwrap_or_else(|e| pgrx::error!("register_prefix SPI error: {e}"));
+    bump_prefix_generation();
+}
+
+/// Drop a registered prefix, returning whether a row was removed.
+pub fn drop_prefix(prefix: &str) -> bool {
+    validate_prefix_label(prefix);
+    ensure_prefix_mutation_authorized();
+    let removed = Spi::get_one_with_args::<bool>(
+        "WITH deleted AS (DELETE FROM _pg_ripple.prefixes WHERE prefix = $1 RETURNING 1) \
+         SELECT EXISTS (SELECT 1 FROM deleted)",
+        &[DatumWithOid::from(prefix)],
+    )
+    .unwrap_or_else(|e| pgrx::error!("drop_prefix SPI error: {e}"))
+    .unwrap_or(false);
+    if removed {
+        bump_prefix_generation();
+    }
+    removed
 }
 
 /// Return all registered prefix → expansion pairs.
@@ -613,6 +633,78 @@ pub fn list_prefixes() -> Vec<(String, String)> {
         })
         .collect()
     })
+}
+
+/// Return the committed registry generation visible to this transaction.
+pub fn prefix_registry_generation() -> i64 {
+    Spi::get_one::<i64>("SELECT generation FROM _pg_ripple.prefix_registry_state WHERE singleton")
+        .unwrap_or_else(|e| pgrx::error!("prefix registry generation SPI error: {e}"))
+        .unwrap_or(1)
+}
+
+fn bump_prefix_generation() {
+    Spi::run(
+        "UPDATE _pg_ripple.prefix_registry_state SET generation = generation + 1 WHERE singleton",
+    )
+    .unwrap_or_else(|e| pgrx::error!("prefix registry generation update error: {e}"));
+}
+
+fn validate_prefix(prefix: &str, expansion: &str) {
+    validate_prefix_label(prefix);
+    let bytes = expansion.as_bytes();
+    let scheme_end = expansion.find(':').unwrap_or(0);
+    if scheme_end == 0
+        || !expansion[..scheme_end].chars().enumerate().all(|(i, c)| {
+            if i == 0 {
+                c.is_ascii_alphabetic()
+            } else {
+                c.is_ascii_alphanumeric() || matches!(c, '+' | '-' | '.')
+            }
+        })
+        || expansion.chars().any(|c| {
+            c.is_whitespace() || c.is_control() || matches!(c, '<' | '>' | '"' | '\'' | ';')
+        })
+    {
+        pgrx::error!("PT0577: invalid prefix expansion IRI");
+    }
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%'
+            && (i + 2 >= bytes.len()
+                || !bytes[i + 1].is_ascii_hexdigit()
+                || !bytes[i + 2].is_ascii_hexdigit())
+        {
+            pgrx::error!("PT0577: invalid prefix expansion IRI");
+        }
+        i += 1;
+    }
+}
+
+fn validate_prefix_label(prefix: &str) {
+    let mut chars = prefix.chars();
+    let valid = match chars.next() {
+        Some(c) if c.is_ascii_alphabetic() => {
+            !prefix.ends_with('.')
+                && chars.all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.'))
+        }
+        _ => false,
+    };
+    if !valid {
+        pgrx::error!("PT0577: invalid prefix label");
+    }
+}
+
+fn ensure_prefix_mutation_authorized() {
+    let allowed = Spi::get_one::<bool>(
+        "SELECT r.rolsuper OR current_user = r.rolname OR \
+         EXISTS (SELECT 1 FROM pg_roles admin WHERE admin.rolname = 'pg_ripple_admin' AND pg_has_role(current_user, admin.oid, 'member')) \
+         FROM pg_database d JOIN pg_roles r ON r.oid = d.datdba WHERE d.datname = current_database()",
+    )
+    .unwrap_or_else(|e| pgrx::error!("prefix authorization SPI error: {e}"))
+    .unwrap_or(false);
+    if !allowed {
+        pgrx::error!("PT0578: prefix mutation is not authorized");
+    }
 }
 
 // ─── Statement Identifier API (v0.4.0) ────────────────────────────────────────

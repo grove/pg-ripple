@@ -34,6 +34,7 @@ This chapter covers:
 |---|---|---|---|
 | GET | `/sparql?query=...` | Accept header | SPARQL query via URL parameter |
 | POST | `/sparql` | `application/sparql-query` | SPARQL query in request body |
+| POST | `/sparql/bindings` | `application/json` | Read-only SPARQL query with typed initial bindings |
 | POST | `/sparql` | `application/x-www-form-urlencoded` | SPARQL query as form parameter |
 | POST | `/sparql` | `application/sparql-update` | SPARQL Update in request body |
 | POST | `/rag` | `application/json` | RAG retrieval endpoint |

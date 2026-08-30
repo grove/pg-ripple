@@ -12,8 +12,10 @@ pub mod exec_core;
 pub mod explain;
 pub mod update;
 
-pub(crate) use construct::{sparql_construct, sparql_construct_rows};
-pub(crate) use describe::sparql_describe;
+pub(crate) use construct::{
+    sparql_construct, sparql_construct_rows, sparql_construct_with_bindings,
+};
+pub(crate) use describe::{sparql_describe, sparql_describe_with_bindings};
 pub(crate) use explain::{explain_sparql, plan_cache_reset, plan_cache_stats};
 pub(crate) use update::sparql_update;
 
@@ -36,6 +38,28 @@ pub(super) fn execute_select(
     raw_iri_vars: &std::collections::HashSet<String>,
     raw_double_vars: &std::collections::HashSet<String>,
     wcoj_preamble: bool,
+) -> Vec<pgrx::JsonB> {
+    execute_select_with_params(
+        sql,
+        variables,
+        raw_numeric_vars,
+        raw_text_vars,
+        raw_iri_vars,
+        raw_double_vars,
+        wcoj_preamble,
+        &[],
+    )
+}
+
+pub(super) fn execute_select_with_params(
+    sql: &str,
+    variables: &[String],
+    raw_numeric_vars: &std::collections::HashSet<String>,
+    raw_text_vars: &std::collections::HashSet<String>,
+    raw_iri_vars: &std::collections::HashSet<String>,
+    raw_double_vars: &std::collections::HashSet<String>,
+    wcoj_preamble: bool,
+    params: &[i64],
 ) -> Vec<pgrx::JsonB> {
     let mut all_ids: Vec<i64> = Vec::new();
     // First pass: collect result rows.
@@ -71,8 +95,13 @@ pub(super) fn execute_select(
             let batched = set_stmts.join("; ");
             let _ = client.update(&batched, None, &[]);
         }
+        let args: Vec<pgrx::datum::DatumWithOid> = params
+            .iter()
+            .copied()
+            .map(pgrx::datum::DatumWithOid::from)
+            .collect();
         let rows = client
-            .select(sql, None, &[])
+            .select(sql, None, &args)
             .unwrap_or_else(|e| pgrx::error!("SPARQL execute SPI error: {e}"));
         for row in rows {
             let mut row_vals: Vec<Option<Result<i64, String>>> =

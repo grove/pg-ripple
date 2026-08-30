@@ -79,6 +79,7 @@ the endpoint is intentionally unauthenticated.
 |---|---|---|---|
 | `GET` | `/sparql` | Read | SPARQL 1.1 query via URL parameters |
 | `POST` | `/sparql` | Write | SPARQL 1.1 query/update via request body |
+| `POST` | `/sparql/bindings` | Read | SPARQL query with typed initial bindings |
 | `POST` | `/sparql/stream` | Read | Explicit streaming SPARQL compatibility alias |
 | `POST` | `/rag` | Read | RAG retrieval / NL-to-SPARQL |
 | `GET` | `/health` | None | Liveness probe |
@@ -223,6 +224,33 @@ curl -X POST http://localhost:7878/sparql \
   -H "Authorization: Bearer $TOKEN" \
   -d 'INSERT DATA { <:Alice> rdfs:label "Alice" }'
 ```
+
+---
+
+### `POST /sparql/bindings`
+
+Execute a read-only SELECT, ASK, CONSTRUCT, or DESCRIBE query with one-row
+typed initial bindings. The request body is JSON; binding values use the W3C
+SPARQL Results JSON term shape and support `uri` and `literal` terms.
+
+```json
+{
+  "query": "SELECT ?s WHERE { ?s <https://example.org/email> ?email }",
+  "bindings": {
+    "email": {"type": "literal", "value": "alice@example.test"}
+  },
+  "prefix_mode": "strict",
+  "timeout_ms": 1000
+}
+```
+
+Use `prefix_mode: "registered"` to resolve undeclared prefixes from the
+governed registry. Query-local declarations take precedence. Binding payloads
+are validated before streaming begins; SPARQL Update, blank-node, RDF-star,
+and multi-row bindings are rejected.
+
+The response uses the same content negotiation and streaming formats as
+`POST /sparql/stream`.
 
 ---
 

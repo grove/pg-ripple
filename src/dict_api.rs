@@ -477,11 +477,23 @@ mod pg_ripple {
         crate::storage::register_prefix(prefix, expansion);
     }
 
+    /// Drop a registered IRI prefix. Returns true when it existed.
+    #[pg_extern]
+    fn drop_prefix(prefix: &str) -> bool {
+        crate::storage::drop_prefix(prefix)
+    }
+
     /// Return all registered prefix → expansion mappings.
     #[pg_extern]
     fn prefixes() -> TableIterator<'static, (name!(prefix, String), name!(expansion, String))> {
         let pfxs = crate::storage::list_prefixes();
         TableIterator::new(pfxs)
+    }
+
+    /// Return the transactional prefix-registry generation.
+    #[pg_extern]
+    fn prefix_registry_generation() -> i64 {
+        crate::storage::prefix_registry_generation()
     }
 
     // ── XSD numeric formatting ─────────────────────────────────────────────────
