@@ -15,12 +15,14 @@ Versions correspond to the milestones in [ROADMAP.md](ROADMAP.md).
 
 ### Added
 
-- Added typed one-row URI and literal bindings for SELECT, ASK, CONSTRUCT,
-  DESCRIBE, and cursor SQL overloads. Values are algebraic `VALUES` rows and
+- Added typed one-row URI and literal bindings (`tests/pg_regress/sql/v0135_bindings.sql`)
+  for SELECT, ASK, CONSTRUCT, DESCRIBE, and cursor SQL overloads.
+  Values are algebraic `VALUES` rows and
   dictionary IDs are passed through typed SPI parameters.
 - Added authenticated `POST /sparql/bindings`, with JSON, CSV, TSV, and
   N-Triples negotiation, replica routing, timeout handling, and prefix mode.
-- Added governed prefix ownership metadata, transactional generation state,
+- Added governed prefix ownership metadata (`tests/pg_regress/sql/v0135_prefix_mode.sql`),
+  transactional generation state,
   strict-by-default resolution, the v1 supported-surface profile, and the
   0.134.0 → 0.135.0 upgrade migration.
 
