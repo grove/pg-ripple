@@ -25,7 +25,7 @@ No separate graph database. No data pipelines. No extra infrastructure.
 
 ---
 
-## What works today (v0.135.0)
+## What works today (v0.136.0)
 
 pg_ripple publishes immutable, versioned conformance and feature evidence for
 each release. W3C SPARQL 1.1 smoke tests and LUBM are required gates; Jena,
@@ -202,6 +202,10 @@ cancellation, and connection cleanup. See
 v0.135.0 adds typed initial bindings for the SQL and HTTP query APIs, governed
 prefix resolution with strict defaults, and the stable v1 query manifest. See
 [roadmap/v0.135.0.md](roadmap/v0.135.0.md).
+
+v0.136.0 carries the hardened candidate release metadata, migration path,
+compatibility correction, and audit-readiness checks for the frozen v1 query
+contract. See [roadmap/v0.136.0.md](roadmap/v0.136.0.md).
 
 v0.133.0 added deterministic crash-recovery qualification, backup/
 restore and failover checks, resource-pressure diagnostics, and the

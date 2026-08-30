@@ -25,7 +25,7 @@ env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
   PGRX_VERSION: "0.18.0"
-  CONFORMANCE_VERSION: "0.135.0"
+  CONFORMANCE_VERSION: "0.136.0"
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
@@ -535,7 +535,7 @@ jobs:
         if: always()
         run: |
           if [ -f tests/w3c/report.json ]; then
-            python3 -c 'import json, os; p="tests/w3c/report.json"; d=json.load(open(p)); d["version"]=os.environ.get("CONFORMANCE_VERSION", "0.135.0"); d["generated_at"]=__import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat().replace("+00:00", "Z"); open(p, "w").write(json.dumps(d, indent=2)+"\n")'
+            python3 -c 'import json, os; p="tests/w3c/report.json"; d=json.load(open(p)); d["version"]=os.environ.get("CONFORMANCE_VERSION", "0.136.0"); d["generated_at"]=__import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat().replace("+00:00", "Z"); open(p, "w").write(json.dumps(d, indent=2)+"\n")'
           fi
 
       - name: Upload W3C test report
@@ -639,7 +639,7 @@ jobs:
         if: always()
         run: |
           if [ -f tests/conformance/report.json ]; then
-            python3 -c 'import json, os; p="tests/conformance/report.json"; d=json.load(open(p)); d["version"]=os.environ.get("CONFORMANCE_VERSION", "0.135.0"); d["generated_at"]=__import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat().replace("+00:00", "Z"); open(p, "w").write(json.dumps(d, indent=2)+"\n")'
+            python3 -c 'import json, os; p="tests/conformance/report.json"; d=json.load(open(p)); d["version"]=os.environ.get("CONFORMANCE_VERSION", "0.136.0"); d["generated_at"]=__import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat().replace("+00:00", "Z"); open(p, "w").write(json.dumps(d, indent=2)+"\n")'
           fi
 
       - name: Upload Jena conformance report
@@ -740,7 +740,7 @@ jobs:
         if: always()
         run: |
           if [ -f tests/conformance/report.json ]; then
-            python3 -c 'import json, os; p="tests/conformance/report.json"; d=json.load(open(p)); d["version"]=os.environ.get("CONFORMANCE_VERSION", "0.135.0"); d["generated_at"]=__import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat().replace("+00:00", "Z"); open(p, "w").write(json.dumps(d, indent=2)+"\n")'
+            python3 -c 'import json, os; p="tests/conformance/report.json"; d=json.load(open(p)); d["version"]=os.environ.get("CONFORMANCE_VERSION", "0.136.0"); d["generated_at"]=__import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat().replace("+00:00", "Z"); open(p, "w").write(json.dumps(d, indent=2)+"\n")'
           fi
 
       - name: Upload WatDiv benchmark report
@@ -1003,7 +1003,7 @@ jobs:
         if: always()
         run: |
           if [ -f tests/conformance/report.json ]; then
-            python3 -c 'import json, os; p="tests/conformance/report.json"; d=json.load(open(p)); d["version"]=os.environ.get("CONFORMANCE_VERSION", "0.135.0"); d["generated_at"]=__import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat().replace("+00:00", "Z"); open(p, "w").write(json.dumps(d, indent=2)+"\n")'
+            python3 -c 'import json, os; p="tests/conformance/report.json"; d=json.load(open(p)); d["version"]=os.environ.get("CONFORMANCE_VERSION", "0.136.0"); d["generated_at"]=__import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat().replace("+00:00", "Z"); open(p, "w").write(json.dumps(d, indent=2)+"\n")'
           fi
 
       - name: Upload OWL 2 RL conformance report
@@ -2071,3 +2071,11 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6
       - name: Validate streaming implementation and release contract
         run: bash scripts/check_v0134_streaming.sh
+
+  v0136-audit-readiness-static:
+    name: v0.136.0 audit readiness
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6
+      - name: Validate hardened-candidate contract
+        run: bash scripts/check_v0136_audit.sh

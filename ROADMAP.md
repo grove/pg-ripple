@@ -311,7 +311,7 @@
 | [v0.133.0](plans/pg-ripple-production-readiness-plan.md#v01330--crash-recovery-backup-failover-and-operations) | Crash recovery, backup, failover, and operations | ✅ Released | Resilience release | Fault-injection and recovery matrix passes |
 | [v0.134.0](roadmap/v0.134.0.md) | Performance, scale, and true streaming qualification | ✅ Released | Performance release | Large results use bounded memory and backpressure; disconnects and deadlines cancel PostgreSQL work; current raw evidence passes |
 | [v0.135.0](roadmap/v0.135.0.md) | Safe application query API and compatibility freeze | ✅ Released | RC0 | Typed bindings cannot alter syntax; registered prefixes are opt-in, governed, transactional, and cache-safe; the v1 manifest is frozen |
-| [v0.136.0](plans/pg-ripple-production-readiness-plan.md#v01360--external-audit-remediation-and-hardened-candidate) | External audit remediation and hardened candidate | Planned | RC1 | External audit covers streaming, bindings, prefix privileges, and cache invalidation with no unresolved Critical or High findings |
+| [v0.136.0](roadmap/v0.136.0.md) | External audit readiness and hardened candidate | ✅ Released | RC1 | Versioned candidate, local security gates, and audit evidence ledger; external report remains a pre-tag gate |
 | [v0.137.0](plans/pg-ripple-production-readiness-plan.md#v01370--final-ga-qualification) | Final GA qualification | Planned | RC2 | Exact candidate passes the 72-hour streaming/binding/prefix workload and two zero-High readiness assessments |
 
 <!-- Superseded A18 allocation retained below for assessment traceability.

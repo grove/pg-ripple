@@ -1,0 +1,25 @@
+-- v0.136.0: hardened-candidate version and compatibility contract.
+
+SET client_min_messages = error;
+\pset format unaligned
+\pset tuples_only on
+
+SELECT (pg_ripple.compat_check())::jsonb ->> 'extension_version' = '0.136.0'
+    AS audit01_extension_version;
+SELECT (pg_ripple.compat_check())::jsonb ->> 'http_min_version' = '0.135.0'
+    AS audit02_http_min_version;
+SELECT current_setting('pg_ripple.sparql_prefix_mode') = 'strict'
+    AS audit03_strict_prefix_default;
+SELECT count(*) = 1 AS audit04_schema_stamp
+FROM _pg_ripple.schema_version
+WHERE version = '0.136.0' AND upgraded_from = '0.135.0';
+SELECT EXISTS (
+    SELECT 1
+    FROM pg_proc
+    JOIN pg_namespace ON pg_namespace.oid = pg_proc.pronamespace
+    WHERE pg_namespace.nspname = 'pg_ripple'
+      AND pg_proc.proname = 'sparql'
+      AND pg_proc.pronargs = 2
+) AS audit05_binding_overload_preserved;
+
+SET client_min_messages = DEFAULT;

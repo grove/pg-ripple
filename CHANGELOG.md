@@ -11,6 +11,41 @@ Versions correspond to the milestones in [ROADMAP.md](ROADMAP.md).
 
 ---
 
+## [0.136.0] — 2026-08-30 — External audit readiness and hardened candidate
+
+v0.136.0 packages the hardened candidate for the frozen v1 query contract.
+
+### What you can do
+
+- Verify the release version, migration path (`sql/pg_ripple--0.135.0--0.136.0.sql`), HTTP metadata, image tags, and
+  stable API manifest (`api/stable-v1.json`) agree on `0.136.0`.
+- Run the audit-readiness preflight before handing the exact candidate commit
+  and build artifacts to an external auditor.
+- Upgrade from v0.135.0 through the new migration without changing the public
+  SQL or HTTP query API.
+
+### What happens behind the scenes
+
+- Fresh installs and upgrades advance the schema ledger to `0.136.0`.
+- `compat_check()` now reports that the frozen query contract requires
+  `pg_ripple_http >= 0.135.0`.
+- The audit brief and findings ledger record the required audit scope and keep
+  the external completion gate explicit.
+
+### Technical details
+
+<details>
+<summary>Implementation details</summary>
+
+- `scripts/check_v0136_audit.sh` checks the release artifacts, prior streaming
+  and binding evidence, retained fuzz targets, and audit ledger.
+- `tests/pg_regress/sql/v0136_audit_readiness.sql` checks version metadata,
+  schema stamping, strict prefix defaults, and binding overload preservation.
+- No new stable API was added (`api/stable-v1.json`). The external audit report and remediation
+  attestation must be attached before the v0.136.0 tag is created.
+
+</details>
+
 ## [0.135.0] — 2026-08-30 — Safe application query API
 
 ### Added

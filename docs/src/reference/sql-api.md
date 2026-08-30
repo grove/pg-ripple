@@ -21,16 +21,16 @@ pg_ripple.compat_check() → TEXT
 
 | Key | Type | Description |
 |-----|------|-------------|
-| `extension_version` | `STRING` | Installed pg_ripple extension version, e.g. `"0.123.0"` |
-| `http_min_version` | `STRING` | Minimum pg_ripple_http version required by this extension, e.g. `"0.122.0"` |
+| `extension_version` | `STRING` | Installed pg_ripple extension version, e.g. `"0.136.0"` |
+| `http_min_version` | `STRING` | Minimum pg_ripple_http version required by this extension, e.g. `"0.135.0"` |
 | `compatible` | `BOOL` | `true` when the running HTTP companion satisfies `http_min_version` |
 
 **Example return value:**
 
 ```json
 {
-  "extension_version": "0.123.0",
-  "http_min_version": "0.122.0",
+  "extension_version": "0.136.0",
+  "http_min_version": "0.135.0",
   "compatible": true
 }
 ```
@@ -39,7 +39,7 @@ pg_ripple.compat_check() → TEXT
 
 ```sql
 SELECT pg_ripple.compat_check();
--- {"extension_version":"0.123.0","http_min_version":"0.122.0","compatible":true}
+-- {"extension_version":"0.136.0","http_min_version":"0.135.0","compatible":true}
 
 -- Parse as JSON:
 SELECT

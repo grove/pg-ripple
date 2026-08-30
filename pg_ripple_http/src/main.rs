@@ -25,7 +25,7 @@ use pg_ripple_http::{metrics, routing};
 // ─── Compatibility constants (COMPAT-01, v0.71.0) ────────────────────────────
 
 /// Minimum pg_ripple extension version that this HTTP companion supports.
-/// v0.135.0 requires the typed binding overloads and prefix-policy GUC.
+/// v0.136.0 carries the hardened v0.135.0 query contract.
 ///
 /// HTTP-COMPAT-01 (v0.89.0): bumped to 0.88.0 — requires all v0.84–v0.88 features.
 ///

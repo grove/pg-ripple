@@ -1,10 +1,10 @@
 {
   "version": "1.0",
-  "release": "0.135.0",
+  "release": "0.136.0",
   "public_schema": "pg_ripple",
   "internal_schema": "_pg_ripple",
   "schema_decision": "docs/architecture/adr-0135-public-schema.md",
-  "migration": "sql/pg_ripple--0.134.0--0.135.0.sql",
+  "migration": "sql/pg_ripple--0.135.0--0.136.0.sql",
   "http": {
     "POST /sparql/bindings": {
       "access": "read",
