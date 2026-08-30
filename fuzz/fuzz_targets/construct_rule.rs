@@ -29,7 +29,7 @@ fuzz_target!(|data: &[u8]| {
     // Additionally, exercise the construct_rules scheduler source-graph parse helper
     // which uses a simplified regex-based parser for SPARQL CONSTRUCT templates.
     // We call it through the public SPARQL parser to stay within safe Rust.
-    let _ = spargebra::algebra::Expression::from(spargebra::term::GroundTerm::NamedNode(
-        spargebra::term::NamedNode::new_unchecked("http://example.org/test"),
+    let _ = spargebra::algebra::Expression::from(spargebra::term::NamedNode::new_unchecked(
+        "http://example.org/test",
     ));
 });

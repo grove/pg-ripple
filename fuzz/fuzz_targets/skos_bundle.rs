@@ -22,23 +22,23 @@
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;
+use rio_api::parser::TriplesParser;
 
 fuzz_target!(|data: &[u8]| {
     // Attempt to parse as Turtle (the primary SKOS serialization format).
     // rio_turtle's TurtleParser is used by the pg_ripple bulk loader.
     // Any byte sequence must not panic — only produce a parse error.
     let cursor = std::io::Cursor::new(data);
-    let parser = rio_turtle::TurtleParser::new(cursor, None);
+    let mut parser = rio_turtle::TurtleParser::new(cursor, None);
     // Consume all triples (or errors) — assert no panic.
-    for _triple_result in parser {
-        // Each triple or error is silently discarded.
-        // The invariant is that iteration never panics.
-    }
+    let _ = parser.parse_all(&mut |_| Ok::<(), rio_turtle::TurtleError>(()));
 
     // Also attempt to parse as N-Triples (subset of Turtle used in tests).
     let cursor2 = std::io::Cursor::new(data);
     let nt_parser = rio_turtle::NTriplesParser::new(cursor2);
-    for _triple_result in nt_parser {
-        // Same: consume and discard.
+    for _triple_result in
+        nt_parser.into_iter(|_triple| Ok::<_, rio_turtle::TurtleError>(()))
+    {
+        // Consume and discard; the invariant is no panic.
     }
 });
