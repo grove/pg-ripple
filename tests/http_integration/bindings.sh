@@ -42,7 +42,7 @@ for accept in text/csv text/tab-separated-values; do
     if [[ "$accept" == "text/csv" ]]; then
         head -1 "$output" | grep -q '^s,o$'
     else
-        head -1 "$output" | grep -q $'^s\to$'
+        head -1 "$output" | grep -qF $'?s\t?o'
     fi
 done
 

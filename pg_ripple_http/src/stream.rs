@@ -462,9 +462,14 @@ async fn stream_sparql_inner(
         DEFAULT_MAX_ROW_BYTES,
         MAX_ROW_BYTES,
     );
+    let transaction = if bindings.is_some() {
+        "BEGIN"
+    } else {
+        "BEGIN READ ONLY"
+    };
     if let Err(error) = client
         .batch_execute(&format!(
-            "BEGIN READ ONLY; SET LOCAL statement_timeout = '{timeout_ms}ms'; SET LOCAL idle_in_transaction_session_timeout = '{idle_ms}ms';"
+            "{transaction}; SET LOCAL statement_timeout = '{timeout_ms}ms'; SET LOCAL idle_in_transaction_session_timeout = '{idle_ms}ms';"
         ))
         .await
     {
