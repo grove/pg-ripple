@@ -51,6 +51,7 @@ pub(super) fn execute_select(
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(super) fn execute_select_with_params(
     sql: &str,
     variables: &[String],

@@ -11,6 +11,7 @@ use super::sqlgen;
 use crate::dictionary;
 
 /// Prepare a SELECT plan with optional W3C Results JSON input bindings.
+#[allow(clippy::type_complexity)]
 pub(crate) fn prepare_select_with_bindings(
     query_text: &str,
     input: Option<&serde_json::Value>,

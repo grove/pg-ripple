@@ -136,6 +136,7 @@ pub fn register() {
         GucFlags::default(),
     );
 
+    // SAFETY: pgrx exposes this hook registration through an unsafe FFI boundary.
     unsafe {
         pgrx::GucRegistry::define_string_guc_with_hooks(
             c"pg_ripple.sparql_prefix_mode",
