@@ -19,7 +19,7 @@ pg-ripple should add only two tightly scoped query-interface milestones before v
 
 A stored/prepared-query registry should be delivered in **v1.1.0**, after the v1 API is frozen and released.
 
-This plan does **not** create another pre-GA version. It expands v0.134.0 and v0.135.0 while leaving v0.136.0, v0.137.0, and v1.0.0 focused on audit, qualification, and promotion.
+This plan does **not** create another pre-GA version. It expands v0.134.0 and v0.135.0 while leaving v0.136.0–v0.143.0 focused on audit, qualification, and promotion.
 
 The additions qualify for pre-1.0 inclusion because they close existing core-interface gaps:
 
@@ -115,7 +115,7 @@ v0.135.0 parameterized queries use the same streaming pipeline
         ↓
 v0.136.0 external audit covers both additions
         ↓
-v0.137.0 72-hour qualification exercises both additions
+v0.137.0–v0.143.0 fail-closed qualification sequence exercises both additions
         ↓
 v1.0.0 promotes the exact qualified candidate
 ```
@@ -1298,10 +1298,10 @@ The feature program is complete only when all of the following are true:
 - [ ] Fresh installs and upgrades are equivalent.
 - [ ] Every public addition appears in `api/stable-v1.json`.
 
-## v0.136.0 and v0.137.0
+## v0.136.0 through v0.143.0
 
 - [ ] External audit includes streaming cancellation, binding parsing, generated SQL parameters, prefix privilege boundaries, and cache invalidation.
-- [ ] The 72-hour candidate workload includes large streams, slow clients, deliberate disconnects, varying bound values, prefix changes, and concurrent registry reads.
+- [ ] The v0.143.0 candidate workload includes large streams, slow clients, deliberate disconnects, varying bound values, prefix changes, and concurrent registry reads.
 - [ ] No new Critical or High finding remains.
 - [ ] v1.0.0 promotes the exact qualified artifacts.
 

@@ -864,6 +864,27 @@ long-run profile.
 Keep pull requests small enough for focused review. Do not combine Citus
 storage changes with HTTP queue changes.
 
+## Roadmap allocation
+
+These seven roadmap versions group the fifteen pull requests by risk boundary.
+The exit condition is the release gate for that group.
+
+| Version | Outcome | Plan items and pull requests | Exit condition |
+|---|---|---|---|
+| v0.137.0 | Qualification foundation and PITR | PITR-01–05; PRs 1–2 | PITR reaches the named target and meets the clean promotion set |
+| v0.138.0 | Establish the supported Citus storage model | CITUS-01 and CITUS-03; PRs 3–4 | Distributed merge works safely, or explicit no-merge mode is supported and tested |
+| v0.139.0 | Qualify multi-node Citus | CITUS-02, 04–08; PRs 5–8 | The required multi-node Citus gate meets the clean promotion set |
+| v0.140.0 | Qualify HTTP resilience | HTTP-01–03; PRs 9–10 | Bounded traffic, cancellation, readiness, pool, and shutdown behavior meet the gate |
+| v0.141.0 | Establish durable queue processing guarantees | QUEUE-01–02 and HTTP-04–05; PRs 11–12 | JSON writeback and SHACL queues conserve counts and every qualification ID through restart |
+| v0.142.0 | Qualify injected faults and queue delivery | NET-01 and embedding and bidi remediation; PRs 13–14 | Packet faults and embedding and bidi delivery guarantees meet the gate |
+| v0.143.0 | Complete sustained qualification | SOAK-01; PR 15 | Nightly, 6-hour, 24-hour, and 72-hour profiles meet repeated-qualification criteria and produce release evidence |
+
+With two engineers, assign a primary owner and a reviewer for each workstream.
+Start with PITR and evidence validation for one engineer and the Citus topology
+checkpoint for the other. Rotate implementation and evidence ownership for the
+HTTP and queue work. Run the PITR and Citus checkpoints in parallel with the
+HTTP lifecycle fixes.
+
 | Pull request | Scope | Exit condition |
 |---|---|---|
 | 1 | PITR script corrections and exact RDF oracle | Local disposable run passes |

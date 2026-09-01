@@ -297,9 +297,9 @@
 | [v0.127.0](roadmap/v0.127.0.md) | **pg_tide relay migration cleanup** — move CDC bridge relay gating from `has_pg_trickle()` to `has_pg_tide()`; add `pg_ripple.relay_available()` while retaining deprecated `trickle_available()` as a compatibility alias; change `_pg_ripple.cdc_bridge_trigger_fn()` from dynamic table inserts into pg-trickle-style outbox tables to `tide.outbox_publish(outbox_name, payload, headers)` with stable `ripple:{statement_id}` dedup metadata; add `_pg_ripple.cdc_bridge_triggers.outbox_name` while retaining `outbox_table` as a compatibility alias; update operations guides, BIDI runbooks, examples, and Docker snippets to use pg_tide's `pg-tide` command, `ghcr.io/trickle-labs/pg-tide` image, `PG_TIDE_POSTGRES_URL`, and stable `tide.relay_set_outbox_v2` / `tide.relay_set_inbox_v2` configuration APIs; bump bundled/tested pg_tide to 0.33.0; add detailed research plan `pg-tide-relay-fixes.md`; add migration script `sql/pg_ripple--0.126.0--0.127.0.sql` | ✅ Released | Medium | [Full details](roadmap/v0.127.0.md) |
 | [v0.128.0](roadmap/v0.128.0.md) | **JSON mapping relational writeback — JSON-LD reverse mapping (RDF → Relational)** — completes the `register_json_mapping` round-trip; schema: five new writeback columns on `_pg_ripple.json_mappings` + `_pg_ripple.json_writeback_queue` table; SQL API: `writeback_json_row()`, `writeback_json_row_delete()`, `enable_json_writeback()`, `disable_json_writeback()`, `json_writeback_status()`; trigger-based async queueing via VP delta triggers; `pg_ripple.json_writeback_batch_size` GUC (default 100); HTTP: `POST /json-mapping/{name}/writeback`, `GET /json-mapping/{name}/writeback/status`; 21 pg_regress tests; blog post + docs | ✅ Released | Large | [Full details](roadmap/v0.128.0.md) |
 
-### Production Readiness & GA Qualification (v0.128.1 – v0.137.0)
+### Production Readiness & GA Qualification (v0.128.1 – v0.143.0)
 
-> **Feature freeze:** [The production-readiness plan](plans/pg-ripple-production-readiness-plan.md) replaces the compressed A18 schedule. The [pre-1.0 query-interface amendment](plans/pg-ripple-pre-1.0-query-features-plan.md) closes two existing core-interface gaps in v0.134.0 and v0.135.0 without adding a product family. Each milestone is evidence-gated; no other experimental feature work enters the stable surface before v1.0.0.
+> **Feature freeze:** [The production-readiness plan](plans/pg-ripple-production-readiness-plan.md) replaces the compressed A18 schedule. The [pre-1.0 query-interface amendment](plans/pg-ripple-pre-1.0-query-features-plan.md) closes two existing core-interface gaps in v0.134.0 and v0.135.0 without adding a product family. The [fail-closed CI coverage plan](plan-failed-closed-ci-coverage.md) further divides the post-v0.136.0 qualification work into v0.137.0–v0.143.0. Each milestone is evidence-gated; no other experimental feature work enters the stable surface before v1.0.0.
 
 | Version | Theme | Status | Release type | Primary gate |
 |---------|-------|--------|--------------|--------------|
@@ -312,7 +312,13 @@
 | [v0.134.0](roadmap/v0.134.0.md) | Performance, scale, and true streaming qualification | ✅ Released | Performance release | Large results use bounded memory and backpressure; disconnects and deadlines cancel PostgreSQL work; current raw evidence passes |
 | [v0.135.0](roadmap/v0.135.0.md) | Safe application query API and compatibility freeze | ✅ Released | RC0 | Typed bindings cannot alter syntax; registered prefixes are opt-in, governed, transactional, and cache-safe; the v1 manifest is frozen |
 | [v0.136.0](roadmap/v0.136.0.md) | External audit readiness and hardened candidate | ✅ Released | RC1 | Versioned candidate, local security gates, and audit evidence ledger; external report remains a pre-tag gate |
-| [v0.137.0](plans/pg-ripple-production-readiness-plan.md#v01370--final-ga-qualification) | Final GA qualification | Planned | RC2 | Exact candidate passes the 72-hour streaming/binding/prefix workload and two zero-High readiness assessments |
+| [v0.137.0](plan-failed-closed-ci-coverage.md#roadmap-allocation) | Qualification foundation and PITR | Planned | Qualification release | PITR reaches the named target and meets the clean promotion set |
+| [v0.138.0](plan-failed-closed-ci-coverage.md#roadmap-allocation) | Establish the supported Citus storage model | Planned | Architecture checkpoint | Distributed merge works safely, or explicit no-merge mode is supported and tested |
+| [v0.139.0](plan-failed-closed-ci-coverage.md#roadmap-allocation) | Qualify multi-node Citus | Planned | Qualification release | The required multi-node Citus gate meets the clean promotion set |
+| [v0.140.0](plan-failed-closed-ci-coverage.md#roadmap-allocation) | Qualify HTTP resilience | Planned | Resilience release | Bounded traffic, cancellation, readiness, pool, and shutdown behavior meet the gate |
+| [v0.141.0](plan-failed-closed-ci-coverage.md#roadmap-allocation) | Establish durable queue processing guarantees | Planned | Correctness release | JSON writeback and SHACL queues conserve counts and every qualification ID through restart |
+| [v0.142.0](plan-failed-closed-ci-coverage.md#roadmap-allocation) | Qualify injected faults and queue delivery | Planned | Fault qualification | Packet faults and embedding and bidi delivery guarantees meet the gate |
+| [v0.143.0](plan-failed-closed-ci-coverage.md#roadmap-allocation) | Complete sustained qualification | Planned | RC2 | Nightly, 6-hour, 24-hour, and 72-hour profiles meet repeated-qualification criteria and produce release evidence |
 
 <!-- Superseded A18 allocation retained below for assessment traceability.
 
@@ -349,7 +355,7 @@ Progress against these criteria is tracked in each assessment report and confirm
 
 | Version | Theme | Status | Scope | Full details |
 |---------|-------|--------|-------|-------------- |
-| [v1.0.0](plans/pg-ripple-production-readiness-plan.md#v100--general-availability) | **General Availability** — promote the exact v0.137.0 candidate without behavior changes after correctness, migration, security, conformance, resilience, performance, compatibility, external-audit, and 72-hour qualification gates pass; publish immutable artifacts, provenance, signed SBOMs, support policies, and the complete release-evidence bundle | Planned | Medium | [Full details](plans/pg-ripple-production-readiness-plan.md#v100--general-availability) |
+| [v1.0.0](plans/pg-ripple-production-readiness-plan.md#v100--general-availability) | **General Availability** — promote the exact v0.143.0 candidate without behavior changes after correctness, migration, security, conformance, resilience, performance, compatibility, external-audit, and sustained qualification gates pass; publish immutable artifacts, provenance, signed SBOMs, support policies, and the complete release-evidence bundle | Planned | Medium | [Full details](plans/pg-ripple-production-readiness-plan.md#v100--general-availability) |
 | [v1.1.0](roadmap/v1.1.0.md) | **Prepared SPARQL query registry and client conveniences** — build on the v1 typed-binding contract with `prepare_sparql()`, `execute_sparql()`, `drop_prepared_sparql()`, and `list_prepared_sparql()` for read query forms; validate typed parameter schemas and query forms at prepare time; enforce owner and explicit execute privileges; pin strict/registered prefix policy; invalidate compiled plans on schema, prefix, or extension generation changes; execute through the v1 streaming pipeline; exclude automatic HTTP route generation, scheduling, stored credentials, and SPARQL Update; move Jupyter, LangChain/LlamaIndex, dbt, Kafka, Cypher/GQL, and other ecosystem work to separate packages or later roadmap versions | Planned | Large | [Full details](roadmap/v1.1.0-full.md) |
 | [v1.2.0](roadmap/v1.2.0.md) | **Custom IndexAM & declarative partitioning** — **(WC-01)** native PostgreSQL index access method for `(s, p, o, g)` quad patterns enabling parallel index-only scans for SPARQL BGPs and 2–5× faster large-graph scans; **(WC-03)** declarative VP table partitioning: `PARTITION BY LIST (g)` for large multi-tenant deployments with per-tenant partition pruning; **(FEAT-09)** Knowledge Graph Diff/Delta Export: `pg_ripple.kg_diff(graph_iri, from_version, to_version) → TABLE` and `GET /graphs/{iri}/delta?from=&to=` HTTP endpoint exporting added/removed quads as N-Quads or JSON-LD patches for external consumers (event sourcing, CDC, audit compliance); **(FEAT-07)** SPARQL endpoint federation mTLS client-certificate support and JWKS endpoint verification for RS256/ES256 JWTs | Planned | Very Large | [Full details](roadmap/v1.2.0-full.md) |
 | [v1.3.0](roadmap/v1.3.0.md) | **OWL 2 EL/QL profiles, columnar cold-tier storage, and GNN integration** — **(FEAT-05)** OWL 2 EL profile full rule-set in Datalog: OWL 2 EL is widely used in biomedical ontologies (SNOMED CT, Gene Ontology, NCIt) and has tractable reasoning; implement the normative rule tables for EL (`cls-oo`, `prp-ap`, `cax-sco`, `scm-cls`, `scm-op`, `scm-dp` and EL-specific rules) with a dedicated fixpoint strategy optimised for the EL complexity class; add OWL 2 QL profile targeting large ABox instances with efficient first-order-rewritable queries; extend `_pg_ripple.owl_profiles` catalog with `'EL'` and `'QL'` entries; add 50 OWL 2 EL pg_regress tests using SNOMED-subset fixture; **(FEAT-06)** columnar cold-tier storage via Parquet — VP tables with billions of triples exceeding the HTAP hot-tier threshold can be archived to a Parquet cold tier using `pg_parquet` FDW or DuckDB FDW; `pg_ripple.tier_threshold_triples` GUC (default 100M) controls automatic cold-tiering; SPARQL query router transparently unions hot VP table with cold Parquet scan; 5–20× storage compression and 5–20× scan throughput improvement for analytical SPARQL; **(FEAT-08)** Graph Neural Network integration — in-database GNN training bridge: `pg_ripple.gnn_encode(model_name TEXT, graph_iri TEXT) → TABLE(entity BIGINT, embedding FLOAT4[])` exporting entity embeddings from a trained PyG/DGL model via a Python extension bridge; `pg_ripple.gnn_predict_links(model_name TEXT, subject BIGINT, k INT) → TABLE(object BIGINT, score FLOAT4)` for link prediction queries over trained embeddings, replacing the TransE/RotatE-only approach from v0.57.0 with full GNN model support; requires `pg_python` or `plpython3u` bridge | Planned | Very Large | [Full details](roadmap/v1.3.0.md) |
@@ -703,9 +709,26 @@ v0.136.0       ─── RC1 external-audit remediation: frozen artifacts, strea
                │   lifecycle, bindings, prefix privileges, and cache invalidation
                │   assessed; all Critical and High findings closed with tests
        │
-v0.137.0       ─── RC2 final qualification: exact signed candidate passes 72 hours
-               │   of large/slow/disconnected streams, varying bindings, prefix
-               │   changes, and the existing mixed workload; two zero-High reviews
+v0.137.0       ─── Qualification foundation and PITR: evidence schema and validator;
+               │   exact named-target restore and RDF-state verification
+               │
+v0.138.0       ─── Supported Citus storage model: topology checkpoint and HTAP
+               │   merge decision, with an explicit supported no-merge mode if needed
+               │
+v0.139.0       ─── Multi-node Citus qualification: distribution, query oracle, RLS,
+               │   rebalance, worker restart, and retained evidence
+               │
+v0.140.0       ─── HTTP resilience: bounded traffic, stream cancellation, readiness,
+               │   pool timeouts, and graceful shutdown
+               │
+v0.141.0       ─── Durable queue guarantees: JSON writeback and SHACL identity and
+               │   count conservation through a database restart
+               │
+v0.142.0       ─── Fault qualification: packet faults, embedding delivery, and bidi
+               │   relay conservation and recovery
+               │
+v0.143.0       ─── Sustained qualification: nightly, 6-hour, 24-hour, and 72-hour
+               │   profiles with release evidence and repeated clean runs
        │
 v1.0.0         ─── General Availability: promote the qualified candidate unchanged;
                │   publish immutable artifacts and the complete evidence bundle
@@ -955,9 +978,13 @@ by default; v0.132.0 makes conformance and feature claims artifact-backed; v0.13
 crash recovery, backup, and failover; v0.134.0 qualifies performance, scale, true HTTP
 streaming, backpressure, timeout, and cancellation; v0.135.0 adds typed SPARQL bindings,
 governed opt-in registered prefixes, and freezes the stable compatibility surface;
-v0.136.0 audits those additions and closes external-audit findings; and v0.137.0 qualifies
-one exact candidate under the 72-hour mixed workload. v1.0.0 promotes that candidate
-unchanged and publishes the complete signed evidence bundle. v1.1.0 adds a governed
+v0.136.0 audits those additions and closes external-audit findings; v0.137.0 establishes
+the qualification foundation and proves PITR; v0.138.0 resolves the supported Citus
+storage model; v0.139.0 qualifies multi-node Citus; v0.140.0 qualifies HTTP resilience;
+v0.141.0 proves durable JSON writeback and SHACL queue processing; v0.142.0 qualifies
+injected faults and additional queue delivery; and v0.143.0 completes the sustained
+qualification profiles. v1.0.0 promotes the exact v0.143.0 candidate unchanged and
+publishes the complete signed evidence bundle. v1.1.0 adds a governed
 prepared SPARQL registry with typed parameter schemas, owner and execute privileges,
 generation-based invalidation, and execution through the v1 binding and streaming paths.
 The broader ecosystem proposals move to separate packages or later versions. v1.2.0 delivers the Custom IndexAM for triple

@@ -39,7 +39,7 @@ The production-readiness program should follow five rules:
 | Scale evidence is stale, important scans are unbounded or quadratic, and HTTP result paths buffer or do not emit rows | Performance and streaming claims are not release-grade | v0.134.0 |
 | Applications lack typed initial bindings, SPARQL cannot opt into the existing prefix registry, and public contracts remain fluid | Callers interpolate query text and there is no defensible compatibility promise | v0.135.0 |
 | No external security audit report is on file | Native superuser extension and HTTP attack surface lack independent assurance | v0.136.0 |
-| No exact-candidate 72-hour mixed-workload qualification artifact is on file | Long-running stability remains unproven | v0.137.0 |
+| No exact-candidate 72-hour mixed-workload qualification artifact is on file | Long-running stability remains unproven | v0.137.0–v0.143.0 |
 
 ---
 
@@ -145,8 +145,16 @@ No beta or experimental feature may block the stable core from shipping, but it 
 | **v0.134.0** | Performance, scale, and true streaming qualification | Performance release | Large results use bounded memory and backpressure; disconnects and deadlines cancel PostgreSQL work; current evidence passes |
 | **v0.135.0** | Safe application query API and compatibility freeze | RC0 | Typed bindings and registered-prefix mode pass security/cache gates; stable manifest and breaking-change gate are active |
 | **v0.136.0** | External audit remediation and hardened candidate | RC1 | Audit covers streaming, bindings, prefix privileges, and invalidation with no unresolved Critical or High findings |
-| **v0.137.0** | Final GA qualification | RC2 | Exact candidate passes the 72-hour streaming/binding/prefix workload and two zero-High readiness assessments |
+| **v0.137.0** | Qualification foundation and PITR | Qualification release | PITR reaches the named target and meets the clean promotion set |
+| **v0.138.0** | Establish the supported Citus storage model | Architecture checkpoint | Distributed merge works safely, or explicit no-merge mode is supported and tested |
+| **v0.139.0** | Qualify multi-node Citus | Qualification release | The required multi-node Citus gate meets the clean promotion set |
+| **v0.140.0** | Qualify HTTP resilience | Resilience release | Bounded traffic, cancellation, readiness, pool, and shutdown behavior meet the gate |
+| **v0.141.0** | Establish durable queue processing guarantees | Correctness release | JSON writeback and SHACL queues conserve counts and every qualification ID through restart |
+| **v0.142.0** | Qualify injected faults and queue delivery | Fault qualification | Packet faults and embedding and bidi delivery guarantees meet the gate |
+| **v0.143.0** | Complete sustained qualification | RC2 | Nightly, 6-hour, 24-hour, and 72-hour profiles meet repeated-qualification criteria and produce release evidence |
 | **v1.0.0** | General Availability | GA | Exact qualified candidate promoted with complete evidence bundle |
+
+The v0.137.0–v0.143.0 sequence is detailed in the [fail-closed CI coverage plan](../plan-failed-closed-ci-coverage.md), which retains the fifteen-pull-request delivery sequence.
 
 ---
 
@@ -1068,7 +1076,7 @@ The external assessment should include:
 
 ---
 
-## v0.137.0 — Final GA qualification
+## v0.143.0 — Final GA qualification
 
 ### Objective
 
