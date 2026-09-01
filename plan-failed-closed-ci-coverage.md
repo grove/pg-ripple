@@ -1,9 +1,13 @@
 # Plan: fail-closed CI coverage
 
-Status: planned  
-Baseline: pg_ripple 0.136.0  
-Initial delivery estimate: 17 to 27 person-days  
-Full repeated qualification estimate: 47 to 78 person-days
+- Status: planned
+- Baseline: pg_ripple 0.136.0
+- Initial qualification implementation: 8 to 12 person-days
+- Initial product remediation: 9 to 15 person-days
+- Initial delivery estimate: 17 to 27 person-days
+- Full repeated qualification implementation, including initial gates: 30 to 49 person-days
+- Full repeated product remediation reserve: 17 to 29 person-days
+- Full repeated qualification estimate: 47 to 78 person-days
 
 ## Objective
 
@@ -19,6 +23,18 @@ GitHub runners will not enforce tight latency or capacity thresholds.
 
 This plan does not make pg_ripple production-proven by itself. It produces
 repeatable evidence for specific topologies, workloads, and failure cases.
+It includes both the qualification work and the product remediation required
+to make that evidence meaningful.
+
+## Three meanings of fail closed
+
+Use these terms separately throughout the work:
+
+| Meaning | Required behavior |
+|---|---|
+| Test harness | Missing prerequisites, evidence, or assertions fail CI. |
+| Application | A failed operation cannot report a successful state. |
+| Service | The HTTP process stays live during a database outage while readiness reports failure. |
 
 ## Current baseline
 
@@ -44,25 +60,31 @@ full qualification described in this plan.
 
 ### Initial fail-closed gates
 
-| Workstream | Initial scope | Estimate |
-|---|---|---:|
-| PITR | Archive WAL, restore to a named target, verify exact RDF state, and retain evidence | 2 to 3 days |
-| Citus | Build a coordinator and three workers, prove distribution and query correctness, rebalance, restart a worker, and verify row-level security (RLS) | 10 to 16 days |
-| HTTP and queues | Run bounded mixed traffic, cancel a stream, stop and restart PostgreSQL, drain JSON writeback and SHACL queues, and bound shutdown | 5 to 8 days |
-| Total | Three useful required gates | 17 to 27 days |
+| Workstream | Qualification scope | Qualification estimate | Product remediation scope | Remediation estimate | Combined |
+|---|---|---:|---|---:|---:|
+| PITR | Archive WAL, restore to a named target, verify exact RDF state, and retain evidence | 1 to 2 days | Correct recovery configuration and startup checks | 1 to 2 days | 2 to 3 days |
+| Citus | Build a coordinator and three workers, prove distribution and query correctness, rebalance, restart a worker, and verify row-level security (RLS) | 4 to 6 days | Distribution errors, distributed HTAP merge behavior, and rebalance synchronization | 6 to 10 days | 10 to 16 days |
+| HTTP and queues | Run bounded mixed traffic, cancel a stream, stop and restart PostgreSQL, drain JSON writeback and SHACL queues, and retain evidence | 3 to 4 days | Shutdown, pool, readiness, and queue acknowledgement changes | 2 to 4 days | 5 to 8 days |
+| Total | | 8 to 12 days | | 9 to 15 days | 17 to 27 days |
+
+The qualification estimate covers runners, fixtures, assertions, and evidence.
+The remediation estimate covers known code changes and the architecture work
+that those assertions may require. The Citus merge checkpoint can exceed the
+remediation reserve if the pinned Citus release cannot support a safe swap.
 
 ### Repeated qualification
 
-| Workstream | Added scope | Total estimate for the workstream |
-|---|---|---:|
-| PITR | Separate restore host, production-like data, corrupt and delayed WAL cases, and recovery point objective and recovery time objective measurements | 7 to 12 days |
-| Citus | Concurrent writes during rebalance, interrupted rebalance, network partitions, replicated placements, longer load, and repeated seeds | 22 to 36 days |
-| HTTP and queues | Packet faults, embedding and bidi queues, Server-Sent Events (SSE) delivery, nightly load, and 6-hour, 24-hour, and 72-hour runs | 18 to 30 days |
-| Total | Full repeated program | 47 to 78 days |
+| Workstream | Qualification scope | Qualification estimate | Product remediation reserve | Remediation estimate | Combined total |
+|---|---|---:|---|---:|---:|
+| PITR | Separate restore host, production-like data, corrupt and delayed WAL cases, and recovery point objective and recovery time objective measurements | 5 to 8 days | Recovery-path fixes found by those profiles | 2 to 4 days | 7 to 12 days |
+| Citus | Concurrent writes during rebalance, interrupted rebalance, network partitions, replicated placements, longer load, and repeated seeds | 13 to 21 days | Distributed merge and failure-recovery fixes | 9 to 15 days | 22 to 36 days |
+| HTTP and queues | Packet faults, embedding and bidi queues, Server-Sent Events (SSE) delivery, nightly load, and 6-hour, 24-hour, and 72-hour runs | 12 to 20 days | Delivery, overload, and lifecycle fixes found by those profiles | 6 to 10 days | 18 to 30 days |
+| Total | | 30 to 49 days | | 17 to 29 days | 47 to 78 days |
 
-The estimates include the known fixes in this plan. They do not include every
-defect that the new tests might find. Reserve 30 to 50 percent contingency for
-Citus merge behavior and queue delivery guarantees.
+These ranges include the initial gate work. In the repeated table, the
+qualification scope lists work added after the initial gate. The estimates do
+not include every defect that the new tests might find. Treat the product
+remediation columns as reserves, not commitments.
 
 ### Non-goals
 
@@ -111,14 +133,25 @@ Use a versioned summary format with these required fields:
 | Field | Meaning |
 |---|---|
 | `schema_version` | Evidence schema version, starting at `1` |
+| `run_id` | Unique run identifier for the database, containers, ports, and evidence |
 | `scenario` | Stable scenario name |
+| `scenario_version` | Version of the fixture and assertion contract |
 | `status` | `pass` or `fail` |
 | `git_sha` | Full tested commit SHA |
 | `extension_version` | Installed pg_ripple version |
 | `postgres_version` | Full PostgreSQL version |
+| `seed` | Deterministic seed, or `null` when the scenario is not seeded |
 | `started_at` and `finished_at` | UTC timestamps |
-| `assertions` | Named assertions with expected and actual values |
+| `assertions` | Named assertions with status, expected, actual, and UTC start and finish timestamps |
+| `failure_class` | `none` for a pass, or the stable class of the first failure |
 | `faults` | Ordered fault events, or an empty array |
+
+Validate `summary.json` with the checked-in standard-library validator
+`tests/qualification/validate_summary.py`. For schema version `1`, reject
+missing or wrongly typed fields, duplicate assertion names, invalid statuses,
+invalid timestamps, and unknown top-level fields. Every assertion must contain
+`name`, `status`, `expected`, `actual`, `started_at`, and `finished_at`.
+Every runner invokes the validator before it reports success.
 
 Upload evidence with `if: always()`, `if-no-files-found: error`, and a 90-day
 retention period. A job failure must still upload the files that exist.
@@ -129,10 +162,25 @@ retention period. A job failure must still upload the files that exist.
   resource behavior on shared runners.
 - Record latency and throughput on shared runners. Do not gate on them.
 - Run capacity thresholds only on named hardware with a pinned configuration.
-- Promote a new job to required status after five consecutive clean runs on
-  its intended trigger set.
+- Define a clean promotion set as five consecutive clean runs on the intended
+  trigger set plus at least 20 clean executions across multiple runner
+  allocations and, where supported, deterministic seeds. An unexplained rerun
+  after a failure does not count.
+- Promote a new job to required status only after it meets the clean promotion
+  set on its intended trigger set.
 - Add each required job name to branch protection after promotion. This is a
   repository setting and cannot be enforced by a workflow file alone.
+
+### Queue identity and conservation
+
+Assign every test item a unique durable qualification ID before enqueue. Carry
+that ID through processing and into its terminal state or pending state. If a
+queue lacks a durable item ID, add the smallest queue or test-audit field linked
+to the queue row that can carry it.
+
+Validate both the count equation and the ID sets. Every qualification ID must
+appear exactly once in one terminal or pending category. A duplicate item and a
+missing item must fail the gate even when aggregate counts still balance.
 
 ## Workstream 1: CI-backed PITR
 
@@ -227,7 +275,7 @@ Extend the existing migration qualification job in
 5. Set `PG_RIPPLE_WAL_ARCHIVE_DIR` to the unique archive directory.
 6. Pass a workspace evidence directory to the restore runner.
 7. Run the script under `pipefail`.
-8. Validate `summary.json` with Python's standard `json` module.
+8. Validate `summary.json` with `tests/qualification/validate_summary.py`.
 9. Upload the summary, raw output, source log, restore log, PITR log, and
    environment record.
 
@@ -257,7 +305,7 @@ The initial PITR work is complete when:
 - the job waits for the exact WAL segment;
 - restored servers load pg_ripple at startup;
 - all evidence files upload on success and failure;
-- five consecutive CI runs pass.
+- the job meets the clean promotion set.
 
 ## Workstream 2: real multi-node Citus qualification
 
@@ -298,6 +346,9 @@ Checkpoint acceptance criteria:
 
 ### CITUS-02: make distribution fail closed
 
+Implement this after CITUS-03 chooses a supported distributed merge or an
+explicit no-merge mode.
+
 Current distribution helpers log warnings and continue. Change them so that a
 failed distribution cannot return a `distributed` status.
 
@@ -321,6 +372,10 @@ Add a negative integration case that makes one worker unavailable during
 distribution. The SQL call must fail and the result must not claim success.
 
 ### CITUS-03: resolve the hybrid transactional and analytical main-table model
+
+Run this checkpoint immediately after CITUS-01 and before the full Citus query
+oracle or distribution hardening. Its result controls the remaining Citus
+scope.
 
 This is the main architectural checkpoint. The hybrid transactional and
 analytical processing (HTAP) layout currently distributes the delta and
@@ -461,8 +516,9 @@ Retain these Citus-specific evidence files:
 - the worker fault timeline;
 - coordinator and worker logs.
 
-Run the job manually during development. After five clean runs, remove the
-workflow path filters and make the job a required check on every pull request.
+Run the job manually during development. After the job meets the clean
+promotion set, remove the workflow path filters and make the job a required
+check on every pull request.
 This avoids a required check that stays pending because its workflow did not
 start. Add a nightly run with three deterministic seeds after the pull request
 gate is stable.
@@ -481,7 +537,7 @@ The initial Citus work is complete when:
 - worker loss fails loudly instead of returning partial results;
 - RLS policies exist on the physical worker shards;
 - all evidence files upload on success and failure;
-- five consecutive CI runs pass.
+- the job meets the clean promotion set.
 
 ## Workstream 3: sustained HTTP, queue, and network qualification
 
@@ -586,6 +642,7 @@ background worker drains it.
 Record these counts before and after each fault:
 
 - rows enqueued;
+- durable qualification IDs enqueued;
 - rows processed successfully;
 - rows processed with an error;
 - rows still pending;
@@ -596,6 +653,10 @@ Record these counts before and after each fault:
 Enforce this conservation rule:
 
 `enqueued = processed_success + processed_error + pending`
+
+Also require exact ID-set conservation. Each enqueued qualification ID must be
+in exactly one of the successful, error, or pending sets. Target-key
+duplicates remain a separate assertion.
 
 Also require:
 
@@ -614,9 +675,13 @@ operation commits.
 Create one conforming item, one violating item, and one poison item that must
 reach the dead-letter path.
 
-The runner must track enough state to prove this equation:
+Carry each item's durable qualification ID through the queue and track enough
+state to prove this equation:
 
 `enqueued = accepted + violations + dead_letter + pending`
+
+Require exact set conservation as well. Every enqueued ID must occur once in
+one of those four sets, and no ID may occur in two terminal categories.
 
 Add a durable counter or audit row if the current schema cannot distinguish a
 successfully processed item from a lost item.
@@ -672,8 +737,8 @@ The job must:
   snapshots, queue snapshots, and the environment record;
 - fail when any evidence file is absent.
 
-After five clean runs, require this job for HTTP, queue, worker, schema, and
-workflow changes.
+After the job meets the clean promotion set, require this job for HTTP, queue,
+worker, schema, and workflow changes.
 
 ### NET-01: add packet-level fault injection
 
@@ -788,7 +853,7 @@ The initial work is complete when:
 - JSON writeback and SHACL queues satisfy their conservation equations;
 - shutdown finishes within the configured bound;
 - all evidence files upload on success and failure;
-- five consecutive CI runs pass.
+- the job meets the clean promotion set.
 
 Full qualification also requires embedding and bidi conservation, packet
 faults, live SSE delivery if supported, and three clean repetitions of each
@@ -802,23 +867,26 @@ storage changes with HTTP queue changes.
 | Pull request | Scope | Exit condition |
 |---|---|---|
 | 1 | PITR script corrections and exact RDF oracle | Local disposable run passes |
-| 2 | PITR workflow, summary, and retained logs | Five clean Actions runs |
-| 3 | Citus image and topology checkpoint | Rows exist on two workers |
-| 4 | Fail-closed Citus distribution and HTAP decision | Negative distribution case fails correctly |
-| 5 | Citus query oracle and distributed merge | Canonical hashes remain equal |
-| 6 | Citus RLS, rebalance, and worker restart | All worker assertions pass |
-| 7 | Citus workflow and evidence | Five clean Actions runs |
-| 8 | HTTP shutdown, pool timeout, and readiness fixes | Focused process tests pass |
-| 9 | Bounded traffic and stream cancellation | Request and cancellation summary passes |
-| 10 | JSON writeback and SHACL conservation | Both equations hold through restart |
-| 11 | HTTP workflow and evidence | Five clean Actions runs |
-| 12 | Packet fault topology | Seeded network scenarios pass |
-| 13 | Embedding and bidi delivery fixes | Conservation tests pass |
-| 14 | Active nightly and candidate soak profiles | Three clean runs per promoted profile |
+| 2 | PITR workflow, summary validator, and retained logs | Summary validator and local workflow pass |
+| 3 | Citus image, topology, and minimal merge reproducer | Rows exist on two workers and the merge case records a result |
+| 4 | Citus HTAP architecture decision and supported failure path | Distributed merge works safely, or no-merge mode fails explicitly |
+| 5 | Fail-closed Citus distribution and any merge changes | Negative distribution case fails correctly |
+| 6 | Citus query oracle | Canonical hashes remain equal |
+| 7 | Citus RLS, rebalance, and worker restart | All worker assertions pass |
+| 8 | Citus workflow and evidence | Job meets the clean promotion set |
+| 9 | HTTP shutdown, pool timeout, and readiness fixes | Focused process tests pass |
+| 10 | Bounded traffic and stream cancellation | Request and cancellation summary passes |
+| 11 | JSON writeback and SHACL identity conservation | Both equations and ID sets hold through restart |
+| 12 | HTTP workflow and evidence | Job meets the clean promotion set |
+| 13 | Packet fault topology | Seeded network scenarios pass |
+| 14 | Embedding and bidi delivery fixes | Conservation tests pass |
+| 15 | Active nightly and candidate soak profiles | Three clean runs per promoted profile |
 
-With two engineers, run PITR and the Citus topology checkpoint in parallel
-with the HTTP lifecycle fixes. Keep one owner for each workstream's evidence
-format and acceptance assertions.
+Do not start the full Citus query oracle until the HTAP checkpoint has chosen a
+safe distributed merge or an explicit no-merge support level. With two
+engineers, run PITR and the Citus topology checkpoint in parallel with the HTTP
+lifecycle fixes. Keep one owner for each workstream's evidence format and
+acceptance assertions.
 
 ## Expected file changes
 
@@ -857,6 +925,7 @@ format and acceptance assertions.
 - `tests/integration/citus/citus_multinode.sh`
 - `tests/integration/citus/fixture.sql`
 - `tests/integration/citus/assertions.sql`
+- `tests/qualification/validate_summary.py`
 - `tests/http_resilience/run.sh`
 - `tests/http_resilience/load.py`
 - `tests/http_resilience/validate.py`
@@ -874,7 +943,7 @@ sufficient for the initial gates.
 | A worker failure returns partial results | Select a query that requires the stopped worker and require a clear failure. |
 | Timing checks make CI flaky | Gate on state transitions with generous deadlines, not exact elapsed time. |
 | Shared-runner performance varies | Record performance and gate only correctness and recovery. |
-| Queue tests count completed work but miss lost work | Enforce conservation equations from durable input and terminal states. |
+| Queue tests count completed work but miss lost or duplicated items | Enforce conservation equations and exact qualification ID sets from durable input and terminal states. |
 | A fault-injection setting weakens production security | Compile private-address exceptions only into an explicit test build. |
 | Cleanup removes developer data | Require opt-in outside CI and use unique validated names. |
 | Evidence disappears after the Actions retention period | Copy candidate evidence to release storage before the artifact expires. |
@@ -894,11 +963,13 @@ The initial program is complete only when all of these statements are true:
 5. HTTP CI runs sustained mixed traffic against a real PostgreSQL process.
 6. The HTTP service reports current readiness, recovers its pool, and exits
    within a hard shutdown bound.
-7. JSON writeback and SHACL tests prove that every enqueued item reaches one
-   durable terminal state or remains pending.
+7. JSON writeback and SHACL tests prove count conservation and exact
+   qualification ID-set conservation. Every enqueued item reaches one durable
+   terminal state or remains pending.
 8. Every job fails on a missing fixture, missing assertion, missing artifact,
    SQL error, timeout, or skipped prerequisite.
-9. Every job retains enough raw evidence to reproduce and audit its verdict.
+9. Every job validates its summary and retains enough raw evidence to reproduce
+   and audit its verdict.
 10. Documentation states only the support level that the required gates prove.
 
 The full program is complete after packet faults, embedding and bidi delivery,
